@@ -12,27 +12,35 @@ If you've been curious about Claude and wondered whether you could build somethi
 
 ---
 
-## What this is
+## What you could build
 
-A Claude Code agent team is a small workforce of AI specialists that runs on your computer, handles ongoing work on your behalf, and gets more capable over time as you calibrate it. It can manage recurring tasks without your constant attention — monitoring things, processing information, drafting outputs, flagging what needs you — or it can coordinate something more complex: a multi-function operation that would otherwise require real human infrastructure. The system runs locally, on your machine. You are in charge of it. It works for you.
+It doesn't have to be for work. It doesn't have to be sophisticated or serious.
+
+It could be something that manages your family calendar — pulling together everyone's schedules, flagging conflicts, keeping things from falling through the cracks. It could connect to Instacart or Amazon and handle your grocery or household ordering, with you just texting or messaging it the things you want to add. It could monitor things you care about and tell you when something worth knowing happens. It could handle research you do over and over again so the answer is waiting for you instead of something you have to go find.
+
+The common thread is: things you do repeatedly, where you're either consuming a lot of information or managing a lot of moving pieces, and where you find yourself thinking *I need help staying on top of this.* Work, personal, business, family — any of it.
+
+You describe what you need. The system gets built around that.
 
 ---
 
-## Whether it's right for you
+## Why this is harder than it looks — and why that matters
 
-There are two kinds of systems people tend to build with this, and they feel quite different.
+If you've already tried building something complex with Claude on your own, you probably hit some version of the same problems I did. The further you get into it, the more things start to drift. Instructions get forgotten. Outputs become inconsistent. The thing that worked in the first session stops working in the third. And then there are the problems you might not even notice until something goes wrong — security gaps, no version history, no way to recover if a file gets overwritten.
 
-**The first kind is about recurring work that consumes your attention.** Monitoring, processing, summarizing, flagging, drafting — tasks that happen on a schedule or a trigger, where the value is volume handled so you only touch the exceptions. A system that monitors competitor websites daily and sends you a summary of anything that changed. A system that processes invoices as they arrive and flags anything outside normal ranges. A student system that tracks deadlines, surfaces what's due next, and drafts outlines from class notes. A household system that organizes schedules, shopping, and reminders in one place instead of scattered across five apps.
+These aren't signs that you did something wrong. They're the predictable result of trying to build something complex without a development framework underneath it. Most people who know how to build software professionally wouldn't attempt this without one. The difference is they know what they're missing. Most people who are new to this don't.
 
-**The second kind is about building capability you couldn't otherwise have.** A content operation — research, drafting, editing, publishing — with you approving before anything goes out. A business operation coordinated across multiple functions as an integrated system rather than a collection of separate tools. A system that tracks and synthesizes medical records, test results, and appointment notes into a running summary that's always current.
+That's what I've spent the time figuring out, and that's what's built into the wizard.
 
-Both are valid. Both are what this is designed for.
+---
 
-A note on that last example: any time your system is working with personal information — health records, financial data, household details — the question of safety is fair to ask. The answer is that the system runs on your own computer. Your data does not leave your machine unless you explicitly connect it to an external service, and the wizard is designed from the start with security as a non-negotiable. That's not a promise I make lightly — it's structural, built into how the thing works.
+## What the wizard actually does
 
-Both profiles work when: the inputs can be made accessible (files, exports, transcripts, anything that can be captured); the work can be described in rules and processes Claude can follow; and human judgment is needed occasionally rather than constantly.
+When you run the wizard, it has a conversation with you. It asks you specific questions — not open-ended "what do you want to build" questions, but targeted ones designed to pull out the information that actually matters for how the system gets built. It proposes options based on what you've told it. You confirm, adjust, or redirect. By the end, it has everything it needs.
 
-Neither works well when the work lives entirely in real-time conversations that never get captured, or when every instance requires judgment with no pattern underneath. If you're genuinely unsure which side of that line you're on, that uncertainty is worth sitting with before you start.
+Then it builds your system. The agents, the structure, the configuration, the safeguards — all of it assembled based on what you described, with the best practices and guardrails I've developed built in automatically. You don't have to know what those are. They're just there.
+
+When the system is running, it works on a schedule. It does its tasks, writes down what it did, and sends you a regular summary — what happened, what it found, what needs your attention. You review it, handle the handful of things that genuinely need you, and let the rest go.
 
 ---
 
@@ -48,7 +56,7 @@ There are four stages, and they feel different from each other.
 
 **Stage four: mature operation.** You're steering direction, not running the machine. The system does its work. You set priorities and handle decisions that require you. The rest is automatic.
 
-How long does each stage take? Setup is measured in hours. Early operation is weeks. Getting to mature operation depends on what you're building and how much calibration it needs — for a focused routine operation, a few weeks; for something more complex, longer. The arc is real, and the early stages require genuine effort. That's worth knowing before you begin.
+How long does each stage take? Setup is measured in hours. Early operation is weeks. Getting to mature operation depends on what you're building and how much calibration it needs — for a focused routine operation, a few weeks; for something more complex, longer.
 
 ---
 
@@ -66,11 +74,13 @@ The division of labor is simple: you know what needs to be done and what a good 
 
 The wizard isn't just about getting something built. It's about getting something built that keeps working, that you can trust, and that doesn't surprise you.
 
-**The context and quality problems.** The way the system is structured — how agents are scoped, how they hand off to each other, how they store their work — is designed specifically to avoid the degradation and drift that happens when you try to do too much in a single unstructured session. If you've ever watched a Claude conversation start sharp and gradually fall apart over time, you've seen this problem. It's solved at the design level here.
+A few specific things I've protected you from:
 
-**The security and versioning gaps.** The things a software developer would know to do automatically — protecting credentials, keeping version history, building in recovery points — are built in from the start, not bolted on later if you happen to think of them.
+**The context and quality problems.** The way the system is structured — how agents are scoped, how they hand off to each other, how they store their work — is designed specifically to avoid the degradation and drift that happens when you try to do too much in a single unstructured session.
 
-**Spending money you didn't approve.** The system has hard limits. It won't spend beyond what you've authorized, and you'll know when it's approaching a threshold before it gets there.
+**The security and versioning gaps.** The things a software developer would know to do automatically — protecting credentials, keeping version history, building in recovery points — are built in from the start, not bolted on later if you happen to think of them. The system runs on your computer. Your data doesn't leave your machine unless you explicitly connect it to something external.
+
+**Spending money you didn't approve.** The system has hard limits. It won't spend beyond what you've authorized. You'll know when it's approaching a threshold before it gets there.
 
 **Not knowing when something broke.** If something goes wrong, you'll hear about it in plain language, with specific guidance on what to do. You won't be left staring at an error message wondering what happened.
 
@@ -88,9 +98,7 @@ In early operation, working means the outputs are improving. You're correcting l
 
 When the system is maturing, working means the digest is useful. The items that need your attention actually need your attention. The rest is handled.
 
-When it's fully mature, working is often visible in what you stop doing — the task you used to do every morning that just isn't there anymore, the thing you used to forget that now gets caught before you think to look. For complex systems especially, the value shows up in what disappears from your plate, not just what gets done.
-
-One honest note: the early stages feel slow before they feel fast. The people who get the most out of this are the ones who go in knowing that, with a use case they genuinely care about and a clear sense of what a working version would be worth to them.
+When it's fully mature, working is often visible in what you stop doing — the task you used to do every morning that just isn't there anymore, the thing you used to forget that now gets caught before you think to look. That's the clearest signal. Not what gets done, but what disappears from your plate.
 
 ---
 
@@ -98,11 +106,11 @@ One honest note: the early stages feel slow before they feel fast. The people wh
 
 Before you go further, I want to be honest with you about what you're signing up for. This is not a "tell it what you want and it builds it in ten minutes" situation. Think of it less like ordering something and more like being the owner of a small software development project — where you are also the client, the project manager, and the person who has to show up every day, at least at the start.
 
-The initial wizard process alone could take a few hours. Getting through the full build — all your agents designed, built, tested, and running — could take days or weeks depending on what you're building and how much iteration it needs. And the early weeks require daily attention: reviewing what it did, evaluating whether the outputs are actually good, correcting things that are off, and gradually calibrating it to the standard you actually want.
+The initial wizard process alone could take hours. Getting through the full build — all your agents designed, built, tested, and running — could take days or weeks depending on what you're building and how much iteration it needs. And even once it's running, the early weeks require daily attention: reviewing what it did, evaluating whether the outputs are actually good, correcting things that are off, and gradually getting it calibrated to the standard you actually want.
 
-That investment lightens over time. A mature, well-calibrated system needs much less from you than a new one. But it earns that autonomy — it doesn't start with it.
+That investment does lighten over time. A mature, well-calibrated system needs much less from you than a new one. But it earns that autonomy — it doesn't start with it.
 
-This means the most important question to ask yourself before you begin is whether the juice is worth the squeeze. What you're asking the system to do needs to genuinely return that investment — in time you get back, in money earned, in quality improved, in something you couldn't do at all without it. If the use case is real and the value is real, that equation works. If you're not sure it's worth it, that uncertainty is worth sitting with before you start.
+This means the most important question to ask yourself before you begin is whether the juice is worth the squeeze. What you're asking the system to do needs to genuinely return that investment to you — in time you get back, in money earned, in quality improved, in something you couldn't do at all without it. If the use case is real and the value is real, that equation works. If you're not sure it's worth it, that uncertainty is worth sitting with before you start.
 
 I'm not saying this to discourage you. I'm saying it because the people who get the most out of this are the ones who go in clear-eyed, with a use case they genuinely care about and a real sense of what a working version would be worth to them. That clarity is what carries you through the setup phase and into the part where the system starts paying for itself.
 
