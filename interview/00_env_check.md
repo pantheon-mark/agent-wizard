@@ -11,6 +11,24 @@ None. This is the first step.
 
 ---
 
+## Step 0 — Permission prompts orientation [user-facing, run first]
+
+Before running any checks, say this to the user:
+
+> Before we start, one thing to know about how this works:
+>
+> As I set up your project, I'll need to create files, run commands, and make changes on your computer. Claude Code will occasionally ask for your permission before I do something — you'll see a prompt that says something like "Claude wants to edit a file" or "Claude wants to run a command."
+>
+> **When you see these prompts: click "Allow" or "Yes."** These are expected — they're just me doing the work of setting up your system. You will not be asked about anything unexpected or outside of what we're doing together.
+>
+> If you'd like to allow all operations for this session without being asked each time, you can type `/accept-all` — but reviewing each one is fine too.
+>
+> Any questions about this before we begin?
+
+Wait for acknowledgment. If the user has questions, answer them in plain language. Once they're ready, proceed to the check sequence.
+
+---
+
 ## Check sequence
 
 Run all four checks in order. For each check: if it passes, move silently to the next. If it fails, show the failure message and fix command to the user, wait for confirmation that the fix was applied, re-run that specific check, and do not advance to the next check until the current one passes. The loop for a failing check is: show message → show fix command → wait for confirmation → re-run → if still failing, repeat.

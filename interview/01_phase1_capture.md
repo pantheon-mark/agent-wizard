@@ -33,6 +33,8 @@ Before P1-1, check whether a prior wizard session exists:
 
 **If user says "start fresh":** Delete the existing draft file. Proceed to P1-1 normally.
 
+**Note on staging location:** The staging directory `~/claude-wizard-draft/` is at the home directory level (not inside Documents) to avoid slow startup indexing caused by Claude Code scanning large document folders.
+
 ---
 
 ## P1-1 — Project name
@@ -43,7 +45,12 @@ Before P1-1, check whether a prior wizard session exists:
 
 Accept any name the user gives. No validation needed — there are no wrong answers here. Short names, long names, names with spaces are all fine. The name will be used to create the project folder, so note that spaces will become hyphens in the folder name (e.g. "My Business System" → `my-business-system`). Mention this only if the name contains spaces.
 
-**Store:** PROJECT_NAME = the user's answer (for folder name: lowercase, spaces replaced with hyphens, special characters removed)
+The project folder will be created at `~/[folder-name]` — directly in the home directory. This keeps the project isolated so Claude Code starts up quickly. Do not use `~/Documents/` as the default location.
+
+**Store:**
+- PROJECT_NAME = the user's answer (display name)
+- PROJECT_FOLDER_NAME = lowercase version with spaces replaced by hyphens and special characters removed
+- PROJECT_PATH = `~/` + PROJECT_FOLDER_NAME (e.g. `~/my-business-system`)
 
 ---
 
@@ -65,9 +72,9 @@ Do not ask the user anything. Perform these steps silently, then show one confir
 
 **Steps:**
 
-1. Create the directory `~/Documents/claude-wizard-draft/` if it does not already exist.
+1. Create the directory `~/claude-wizard-draft/` if it does not already exist.
 
-2. Write `~/Documents/claude-wizard-draft/wizard_session_draft.md` with the following content:
+2. Write `~/claude-wizard-draft/wizard_session_draft.md` with the following content:
 
 ```
 # Wizard Session Draft
