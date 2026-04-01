@@ -9,7 +9,7 @@ Templates for the seven foundation documents generated in the root of the user's
 | `vision.md` | `vision.md` | V-1 through V-8 interview answers | ✅ Complete (2026-04-01) |
 | `approach.md` | `approach.md` | Vision interview approach buffer + ARCH-1 through ARCH-5 | ✅ Complete (2026-04-01) |
 | `technical_architecture.md` | `technical_architecture.md` | ARCH answers + SCALE-4 + CRED-2 + Item 16 | ✅ Complete (2026-04-01) |
-| `execution_plan.md` | `execution_plan.md` | ARCH + configuration block answers | Pending |
-| `roadmap.md` | `roadmap.md` | ARCH answers + vision goals | Pending |
-| `test_cases.md` | `test_cases.md` | Full test suite — all accumulator 6 entries applicable to this user's system | Pending |
-| `audit_framework.md` | `audit_framework.md` | Audit cadences from DRIFT-1 and architectural review settings | Pending |
+| `execution_plan.md` | `execution_plan.md` | Vision goals (MVP), ARCH orchestration + agent roster (build phases), ARCH-4 (human-in-the-loop map) | ✅ Complete (2026-04-01) |
+| ~~`roadmap.md`~~ | ~~`roadmap.md`~~ | Merged into `execution_plan.md` per Item 14 — no separate template | ✅ No file needed |
+| `test_cases.md` | `test_cases.md` | Full test suite — all accumulator 6 entries; agent-specific tests added during build phase | ✅ Complete (2026-04-01) |
+| `audit_framework.md` | `audit_framework.md` | Audit cadences from DRIFT-1 and architectural review settings | ✅ Complete (2026-04-01) |

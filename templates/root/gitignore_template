@@ -1,0 +1,22 @@
+# Secrets — never committed
+.env
+
+# Logs — operational data, stays local (permanent exclusion per security policy)
+/logs/
+
+# Session cookies — ephemeral credentials, never committed
+/security/session_cookies/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor artifacts
+.DS_Store
+*.swp
+*~
+
+# Node.js
+node_modules/
+
+{{ADDITIONAL_GITIGNORE_ENTRIES}}
