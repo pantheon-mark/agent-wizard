@@ -11,6 +11,20 @@ None. This is the first step.
 
 ---
 
+## Context check
+
+This is the very start of the wizard — context usage is minimal here. No project files exist to save.
+
+If context is somehow near the autocompaction threshold before this step begins, do not attempt to continue. Tell the user:
+
+> Something is off with this session's context. Please run `/clear` in Claude Code, then paste this prompt to begin:
+>
+> "Start the wizard. Run the environment check in `00_env_check.md`."
+
+Under normal conditions this check will always pass — proceed directly to Step 0.
+
+---
+
 ## Step 0 — Permission prompts orientation [user-facing, run first]
 
 Before running any checks, say this to the user:

@@ -11,6 +11,20 @@ NTFY_CONFIRMED = true and EMAIL_CONFIRMED = true in the staging file.
 
 ---
 
+## Context check
+
+Before beginning this phase, assess whether your context window is near the autocompaction threshold.
+
+If it is: write the current staging file to disk, give the user the following instruction, and stop:
+
+> Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
+>
+> "Resume wizard from 05_vision.md. NTFY_CONFIRMED = true and EMAIL_CONFIRMED = true. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then begin the vision document interview."
+
+**Important:** The vision interview is the most open-ended phase of the wizard. Do not begin it unless you are confident the full interview — including draft, revision round, and disk write — will complete before compaction risk. If there is any doubt, clear context first.
+
+---
+
 ## How to run this interview
 
 The six questions are conversational — not a form. The user may answer in any order, blend categories, or volunteer information across multiple categories in a single answer. Accept everything. Do not redirect the user or ask them to stay on topic.

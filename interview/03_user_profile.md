@@ -11,6 +11,20 @@ FIN-1 and FIN-2 answered and stored in the staging file.
 
 ---
 
+## Context check
+
+Before beginning this phase, assess whether your context window is near the autocompaction threshold.
+
+If it is: write the current staging file to disk, give the user the following instruction, and stop:
+
+> Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
+>
+> "Resume wizard from 03_user_profile.md. FIN-1 and FIN-2 are complete. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then begin UP-1."
+
+Do not begin UP-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
 ## How to conduct this section
 
 These are five conversational questions, not a form. Ask them in order, but let the user's answers flow naturally — they may volunteer information that covers multiple dimensions in one response. If that happens, note what was captured and confirm before moving on.

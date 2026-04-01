@@ -11,6 +11,20 @@ All four environment checks in `00_env_check.md` have passed.
 
 ---
 
+## Context check
+
+Before beginning this phase, assess whether your context window is near the autocompaction threshold.
+
+If it is: no project files exist yet to save. Tell the user:
+
+> Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
+>
+> "Start the wizard from phase 1 capture. The environment check has passed. Run `01_phase1_capture.md`."
+
+Do not begin P1-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
 ## Step 0 — Resume check (run before asking any questions)
 
 Before P1-1, check whether a prior wizard session exists:

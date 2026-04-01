@@ -11,6 +11,20 @@ VISION_CONFIRMED = true in the staging file. Approach-level content buffer activ
 
 ---
 
+## Context check
+
+Before beginning this phase, assess whether your context window is near the autocompaction threshold.
+
+If it is: write the current staging file to disk, give the user the following instruction, and stop:
+
+> Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
+>
+> "Resume wizard from 06_approach.md. VISION_CONFIRMED = true. Read the vision document on disk and the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then derive the approach document."
+
+Do not begin AP-1 until you are confident the full phase — including draft, revision round, and disk write — will complete before compaction risk.
+
+---
+
 ## What the approach document is
 
 The approach document is the solution brief — how the system described in the vision document will actually work. It bridges vision ("what and why") and architecture ("what agents, what structure"). It is derived entirely from what the user has already said; nothing new is requested here.

@@ -11,6 +11,20 @@ APPROACH_CONFIRMED = true and ADVISORS_SEEDED = true in the staging file. Vision
 
 ---
 
+## Context check
+
+Before beginning this phase, assess whether your context window is near the autocompaction threshold.
+
+If it is: write the current staging file to disk, give the user the following instruction, and stop:
+
+> Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
+>
+> "Resume wizard from 08_architecture.md. APPROACH_CONFIRMED = true and ADVISORS_SEEDED = true. Read the vision document, approach document, advisor knowledge base, and staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then begin ARCH-1."
+
+**Important:** The architecture phase involves reading multiple documents and producing a substantial confirmation artifact. Do not begin it unless you are confident the full phase — all five ARCH steps and the disk write — will complete before compaction risk.
+
+---
+
 ## How to run this phase
 
 All five steps in this phase follow the same pattern: Claude derives and presents, the user confirms or adjusts. The user is not asked to make architectural decisions — only to confirm that Claude's understanding of their work matches reality. When the user corrects something, update the model and continue.

@@ -11,6 +11,20 @@ User profile (UP-1 through UP-5) confirmed and stored in the staging file.
 
 ---
 
+## Context check
+
+Before beginning this phase, assess whether your context window is near the autocompaction threshold.
+
+If it is: write the current staging file to disk, give the user the following instruction, and stop:
+
+> Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
+>
+> "Resume wizard from 04_notifications.md. The user profile is complete. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then begin NOTIF-1."
+
+Do not begin NOTIF-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
 ## NOTIF-1 — Digest cadence
 
 **Ask the user:**

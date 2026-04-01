@@ -11,6 +11,20 @@ Staging file at `~/Documents/claude-wizard-draft/wizard_session_draft.md` has be
 
 ---
 
+## Context check
+
+Before beginning this phase, assess whether your context window is near the autocompaction threshold.
+
+If it is: write the current staging file to disk, give the user the following instruction, and stop:
+
+> Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
+>
+> "Resume wizard from 02_financial.md. The staging file is at `~/claude-wizard-draft/wizard_session_draft.md` — read it, then begin FIN-1."
+
+Do not begin FIN-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
 ## FIN-1 — Overage plan confirmation
 
 **Ask the user:**

@@ -11,6 +11,20 @@ APPROACH_CONFIRMED = true in the staging file. Vision document on disk at `[PROJ
 
 ---
 
+## Context check
+
+Before beginning this phase, assess whether your context window is near the autocompaction threshold.
+
+If it is: write the current staging file to disk, give the user the following instruction, and stop:
+
+> Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
+>
+> "Resume wizard from 07_advisors.md. APPROACH_CONFIRMED = true. Read the vision document, approach document, and staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then begin ADV-1."
+
+Do not begin ADV-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
 ## ADV-1 — Propose advisor types [DYNAMIC]
 
 Before speaking, read the confirmed vision document. Identify the domain, industry, data sources, and business activities the system will handle. Use this to generate a list of advisor types most likely to come up as the system makes decisions. Always include financial and legal advisors unless the vision document explicitly rules them out. Add one or two domain-specific advisors based on what the system is actually doing.
