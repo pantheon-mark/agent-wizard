@@ -1,7 +1,7 @@
 # 15 — Closing Sequence
 
 ## What this file does
-Complete the wizard interview. Deliver plain-language explanations of system behaviors (CLOSE-1 through CLOSE-12), make the initial git commit (CLOSE-4), set up the GitHub remote backup (GH-1), present the mandatory closing orientation moment (CLOSE-13), and hand off the first agent build prompt (CLOSE-14). This is the final interview file.
+Complete the wizard interview. Deliver plain-language behavior briefings (CLOSE-1 through CLOSE-3), assemble all project files from templates and staging data (CLOSE-ASSEMBLY), initialize git and make the initial commit (CLOSE-4), set up the GitHub remote backup (GH-1), deliver system management explanations (CLOSE-5 through CLOSE-12), present the mandatory closing orientation moment (CLOSE-13), and hand off the first agent build prompt (CLOSE-14). This is the final interview file.
 
 ## When this file runs
 After `14_document_review.md` completes. All configuration is confirmed. All documents are written to disk.
@@ -27,13 +27,14 @@ Do not begin CLOSE-1 until you are confident the full phase will complete before
 
 ## How to run this phase
 
-The closing sequence has five parts:
+The closing sequence has six parts:
 
 1. **Behavior briefings** (CLOSE-1, CLOSE-2, CLOSE-3) — brief the user on what the system does when things go wrong.
-2. **Initial commit** (CLOSE-4, internal) — commit the completed wizard setup to git.
-3. **GitHub remote setup** (GH-1) — optional backup to a private GitHub repository.
-4. **How the system keeps itself current** (CLOSE-5 through CLOSE-12) — eight brief explanations delivered as a single block.
-5. **Orientation and handoff** (CLOSE-13, CLOSE-14) — the mandatory orientation moment and the first build prompt.
+2. **Project assembly** (CLOSE-ASSEMBLY, internal) — read the staging file and all templates, write every output file to the project directory.
+3. **Initial commit** (CLOSE-4, internal) — initialize git and commit the completed wizard setup.
+4. **GitHub remote setup** (GH-1) — optional backup to a private GitHub repository.
+5. **How the system keeps itself current** (CLOSE-5 through CLOSE-12) — eight brief explanations delivered as a single block.
+6. **Orientation and handoff** (CLOSE-13, CLOSE-14) — the mandatory orientation moment and the first build prompt.
 
 Work through these in order without skipping.
 
@@ -74,11 +75,223 @@ After CLOSE-3, pause briefly.
 > Any questions on any of that before we move on?
 
 - If the user has questions: answer in plain language, drawing on examples specific to their system.
-- If they're ready to continue: proceed to CLOSE-4.
+- If they're ready to continue: proceed to CLOSE-ASSEMBLY.
 
 ---
 
-## Part 2 — Initial commit (CLOSE-4) [INTERNAL]
+## Part 2 — Project assembly (CLOSE-ASSEMBLY) [INTERNAL]
+
+This step is internal. The user does not need to see the assembly process — they see one plain-language progress message. This is where every wizard-gathered value becomes a real file on disk.
+
+**Say:**
+
+> I'm now setting up your project files. This takes a moment.
+
+### What this step does
+
+Read the staging file (`session_bootstrap.md` in the project directory). Read every template in `wizard/templates/`. For each template, substitute the gathered values from the staging file and write the output file to the correct location in the project directory. Create all required directories first, then write files.
+
+### Directory creation
+
+Create the following directories in the project directory if they do not already exist:
+
+```
+agents/
+agents/prompts/
+agents/scripts/
+agents/cron/
+agents/handoffs/
+agents/failed_queue/
+agents/checkpoints/
+quality/
+work/
+logs/
+docs/
+security/
+archive/
+archive/advisor-guides/
+archive/logs/
+digests/
+wizard/
+wizard/build_prompts/
+wizard/review_prompts/
+advisor/
+advisor/interview-guides/
+```
+
+**Conditional directory:** Create `security/session_cookies/` only if the staging file indicates any username/password credentials were configured (path 09b — `SESSION_COOKIES_NEEDED = true`).
+
+### File assembly — complete manifest
+
+For each file below: read the template, substitute values from the staging file, and write to the target path. If a template field has no value in the staging file (e.g., the user skipped an optional section), write the template default or leave the placeholder with a note that it will be populated at runtime.
+
+**Root-level files:**
+
+| Template | Target | Value source |
+|----------|--------|-------------|
+| `wizard/templates/root/CLAUDE.md` | `CLAUDE.md` | P1-1, P1-2, autonomy level (Level 2) |
+| `wizard/templates/root/project_instructions.md` | `project_instructions.md` | UP-1–5, FIN-1–2, NOTIF-1–5, ERR-1–2, QA-1–4, CONC-1–2, START-1–2, DRIFT-1, SCALE-1–4, CRED-1–5, GATE-1–2, model tier mapping |
+| `wizard/templates/root/session_bootstrap.md` | `session_bootstrap.md` | All phases — initial state populated, queues at zero |
+| `wizard/templates/root/pending_decisions.md` | `pending_decisions.md` | Empty structure |
+| `wizard/templates/root/manual.md` | `manual.md` | Static content — copy as-is |
+| `wizard/templates/root/gitignore_template` | `.gitignore` | Static baseline + CRED-2 entries |
+
+**`.env`** — not from a template. Create an empty `.env` file. If credentials were configured during step 09, write the environment variable names as comments (no values — values were entered during CRED-2 and should already be in the file if the credential onboarding step wrote them). Verify `.gitignore` includes `.env` before this file is created.
+
+**`start-session.sh`** — copied from `wizard/scripts/start-session.sh`. Ensure it is executable (`chmod +x`).
+
+**Foundation documents:**
+
+| Template | Target | Value source |
+|----------|--------|-------------|
+| `wizard/templates/documents/vision.md` | `vision.md` | V-1 through V-8 — already written to disk during step 05; verify it exists, do not overwrite |
+| `wizard/templates/documents/approach.md` | `approach.md` | Already written to disk during step 06; verify it exists, do not overwrite |
+| `wizard/templates/documents/technical_architecture.md` | `technical_architecture.md` | ARCH-1–5, SCALE-4, CRED registry, model tier mapping |
+| `wizard/templates/documents/execution_plan.md` | `execution_plan.md` | Vision goals, ARCH orchestration model, agent roster, build phases |
+| `wizard/templates/documents/test_cases.md` | `test_cases.md` | Accumulator 6 entries; agent-specific tests added during build |
+| `wizard/templates/documents/audit_framework.md` | `audit_framework.md` | DRIFT-1 cadence, architectural review settings |
+
+**Note on vision.md and approach.md:** These documents are written to disk during their respective interview steps (05 and 06). Do not regenerate them from templates — verify they exist on disk and are intact. If either is missing (should not happen), regenerate from staging file answers using the template.
+
+**Agent files:**
+
+| Template | Target | Value source |
+|----------|--------|-------------|
+| `wizard/templates/agents/roster.md` | `agents/roster.md` | ARCH-2, ARCH-3 — agent names, roles, criticality tiers |
+| `wizard/templates/agents/cron_config.md` | `agents/cron/cron_config.md` | Empty structure — entries added during agent build phase |
+
+**Per-agent prompt and script files** are not generated at assembly time. They are produced during the agent build phase (after the wizard completes). The assembly step only creates the directory structure they will live in.
+
+**Quality files:**
+
+| Template | Target | Value source |
+|----------|--------|-------------|
+| `wizard/templates/quality/rules_library.md` | `quality/rules_library.md` | Empty structure |
+| `wizard/templates/quality/human_review_queue.md` | `quality/human_review_queue.md` | Empty structure |
+| `wizard/templates/quality/source_registry.md` | `quality/source_registry.md` | QA-3 confirmed sources |
+| `wizard/templates/quality/validation_gate_config.md` | `quality/validation_gate_config.md` | GATE-1, GATE-2 answers |
+| `wizard/templates/quality/co-protected-workflows.md` | `quality/co-protected-workflows.md` | Pre-populated from Tier 1 categories |
+| `wizard/templates/quality/advisor_knowledge_base.md` | `quality/advisor_knowledge_base.md` | ADV-1 confirmed advisors (header entries) |
+
+**Conditional — zero-advisors branch:** If the staging file shows zero confirmed advisors (`ADVISOR_COUNT = 0`), still create `quality/advisor_knowledge_base.md` with the empty structure from the template (advisors can be added later). Do not populate advisor header entries.
+
+**Work files:**
+
+| Template | Target | Value source |
+|----------|--------|-------------|
+| `wizard/templates/work/work_queue.md` | `work/work_queue.md` | Empty structure |
+| `wizard/templates/work/issues_log.md` | `work/issues_log.md` | Empty structure |
+| `wizard/templates/work/stub_tracker.md` | `work/stub_tracker.md` | Any stubs identified during interview (credentials pending, sources TBD) |
+| `wizard/templates/work/execution_plan_state.md` | `work/execution_plan_state.md` | Empty structure |
+
+**Log files:**
+
+| Template | Target | Value source |
+|----------|--------|-------------|
+| `wizard/templates/logs/audit_log.md` | `logs/audit_log.md` | Header and structure |
+| `wizard/templates/logs/session_log.md` | `logs/session_log.md` | Header and structure |
+| `wizard/templates/logs/error_log.md` | `logs/error_log.md` | Header and structure |
+| `wizard/templates/logs/qa_log.md` | `logs/qa_log.md` | Header and structure |
+| `wizard/templates/logs/source_health_log.md` | `logs/source_health_log.md` | Header and structure |
+| `wizard/templates/logs/drift_log.md` | `logs/drift_log.md` | Header and structure |
+| `wizard/templates/logs/advisor_log.md` | `logs/advisor_log.md` | Header and structure |
+| `wizard/templates/logs/notification_log.md` | `logs/notification_log.md` | Header and structure |
+| `wizard/templates/logs/validation_log.md` | `logs/validation_log.md` | Header and structure |
+| `wizard/templates/logs/cost_efficiency_log.md` | `logs/cost_efficiency_log.md` | Header and structure |
+
+**Docs files:**
+
+| Template | Target | Value source |
+|----------|--------|-------------|
+| `wizard/templates/docs/document_impact_map.md` | `docs/document_impact_map.md` | Standard change event taxonomy + project-specific categories from agent roster |
+| `wizard/templates/docs/architectural_review_staging.md` | `docs/architectural_review_staging.md` | Empty structure |
+| `wizard/templates/docs/future_items.md` | `docs/future_items.md` | Monitoring cadence from wizard answers; deferred items from staging file (see WI-013 below) |
+| `wizard/templates/docs/voice_and_style.md` | `docs/voice_and_style.md` | Seeded from UP-1–5, ERR-1, QA-1, vision document voice (see below) |
+
+**Security files:**
+
+| Template | Target | Value source |
+|----------|--------|-------------|
+| `wizard/templates/security/credentials_registry.md` | `security/credentials_registry.md` | CRED-1, CRED-2 confirmed credentials |
+| `wizard/templates/security/gitignore_manifest.md` | `security/gitignore_manifest.md` | Baseline .gitignore entries |
+
+**Conditional — zero-credentials branch:** If the staging file shows zero confirmed credentials (`CREDENTIAL_COUNT = 0`), still create `security/credentials_registry.md` with the empty structure (credentials can be added later). Skip credential reference rows in `project_instructions.md`.
+
+**Archive files:**
+
+| Template | Target | Value source |
+|----------|--------|-------------|
+| `wizard/templates/archive/decisions_archive.md` | `archive/decisions_archive.md` | Empty structure |
+| `wizard/templates/archive/work_archive.md` | `archive/work_archive.md` | Empty structure |
+| `wizard/templates/archive/review_queue_archive.md` | `archive/review_queue_archive.md` | Empty structure |
+| `wizard/templates/archive/notification_archive.md` | `archive/notification_archive.md` | Empty structure |
+
+**Review prompts:** Copy the three review prompt files from `wizard/review_prompts/` to the project's `wizard/review_prompts/` directory:
+- `post_wizard_review.md`
+- `per_agent_review.md`
+- `phase_gate_review.md`
+
+### WI-011 — Constraint elevation to project_instructions.md
+
+During assembly, before writing `project_instructions.md`, scan the vision document answers in the staging file for critical constraints. Look for:
+
+- **Privacy constraints** — statements like "nothing leaves my computer," "no external sharing," "data stays local"
+- **Data locality constraints** — restrictions on where data can be stored or processed
+- **External communication prohibitions** — rules about what the system must never send, post, or share externally
+- **Absolute prohibitions** — "never" statements about actions the system must not take
+
+For each critical constraint found, write it as an enforced rule in `project_instructions.md` under the "What the system always asks first — User additions to Tier 1" section. Format each as a plain-language rule:
+
+> - [Constraint from vision document] — elevated from vision document, enforced as Tier 1
+
+This ensures that constraints the user stated during the vision interview become system-level enforcement rules, not just documentation.
+
+### WI-013 — Populate future_items.md with deferred items
+
+During assembly, before writing `docs/future_items.md`, scan the staging file for deferred items. These are requests the user made during the interview that the wizard noted for later rather than acting on immediately. Common patterns:
+
+- "We'll revisit that after the first agents are running"
+- Items flagged as `DEFERRED` or `FUTURE` in the staging file
+- Agent capabilities the user requested that were scoped out of the initial build
+- Features or integrations noted as "not yet" or "later"
+
+For each deferred item found:
+- If it has a natural trigger date (e.g., "after the first month"): write it as a **date-triggered item**
+- If it has a natural condition (e.g., "when the first agent is running"): write it as a **condition-triggered item**
+- If it is an ongoing concern: add it to the **monitoring cadence register**
+
+This ensures that nothing the user asked for is silently dropped — every deferred request has a structured home that the system will check at every session close.
+
+### Voice and style seeding
+
+When writing `docs/voice_and_style.md`, derive initial values from existing wizard answers — do not ask new questions:
+
+- **Explanation depth:** derived from UP-1 (technical literacy) — higher literacy → more concise; lower literacy → more explanatory
+- **Tone:** derived from UP-2 (information preference) — "just the bottom line" → direct; "understand the reasoning" → conversational
+- **Technical level:** derived from UP-1 — maps directly
+- **Notification verbosity:** use ERR-1 answer (Minimal/Standard/Detailed)
+- **QA reporting style:** use QA-1 answer (funneled/direct)
+- **Vision document voice:** read the user's own words from the vision document answers in the staging file — note their natural writing style (formal vs. casual, brief vs. detailed, direct vs. explanatory) and use it as the basis for approved examples
+
+### Assembly verification
+
+After all files are written, run a quick verification:
+
+1. **Count check:** verify the number of files created matches the expected count from the manifest above (adjust for conditional branches).
+2. **Critical file check:** verify these files exist and are non-empty: `CLAUDE.md`, `project_instructions.md`, `session_bootstrap.md`, `vision.md`, `approach.md`, `technical_architecture.md`, `.gitignore`, `.env`.
+3. **Conditional check:** if `SESSION_COOKIES_NEEDED = true`, verify `security/session_cookies/` directory exists. If `CREDENTIAL_COUNT = 0`, verify `security/credentials_registry.md` exists but has no credential rows.
+
+If any verification fails: stop, identify what is missing, and fix it before proceeding to CLOSE-4.
+
+**Say:**
+
+> Your project files are set up. Everything from the interview has been written to your project directory. Let me save a snapshot.
+
+Proceed to Part 3 (CLOSE-4).
+
+---
+
+## Part 3 — Initial commit (CLOSE-4) [INTERNAL]
 
 This step is internal. Do not narrate it to the user in technical terms. One plain-language confirmation line is sufficient.
 
@@ -90,6 +303,7 @@ This step is internal. Do not narrate it to the user in technical terms. One pla
 Run the following commands in the project directory:
 
 ```bash
+git init -b main
 git add .
 git commit -m "Wizard setup complete — [PROJECT_NAME] initial commit"
 ```
@@ -100,7 +314,7 @@ git commit -m "Wizard setup complete — [PROJECT_NAME] initial commit"
 
 ---
 
-## Part 3 — GitHub remote setup (GH-1) [FIXED — topic]
+## Part 4 — GitHub remote setup (GH-1) [FIXED — topic]
 
 GH-1 is optional but strongly recommended. It protects the user's work against hardware failure. A private GitHub repository is the default recommendation.
 
@@ -116,7 +330,7 @@ GH-1 is optional but strongly recommended. It protects the user's work against h
 
 > That's fine — your work is saved locally and every change is tracked in version control. You can connect to GitHub any time in the future by telling me "set up GitHub backup" at the start of a session.
 
-Record in staging file: `GITHUB_REMOTE = false`. Proceed to Part 4.
+Record in staging file: `GITHUB_REMOTE = false`. Proceed to Part 5.
 
 ---
 
@@ -182,7 +396,7 @@ Write `GITHUB_REMOTE_URL` to `project_instructions.md` under the system configur
 
 ---
 
-## Part 4 — How the system keeps itself current (CLOSE-5 through CLOSE-12)
+## Part 5 — How the system keeps itself current (CLOSE-5 through CLOSE-12)
 
 Deliver these eight explanations as a single flowing briefing. Present them together, not as eight separate statements. Group them naturally:
 
@@ -247,11 +461,11 @@ After the full block:
 > Any questions on any of that?
 
 - If the user has questions: answer in plain language.
-- If they're ready: proceed to Part 5.
+- If they're ready: proceed to Part 6.
 
 ---
 
-## Part 5 — Orientation moment and first build prompt
+## Part 6 — Orientation moment and first build prompt
 
 ### CLOSE-13 — Orientation moment [EXPLANATION]
 
@@ -398,7 +612,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-All 14 CLOSE entries delivered. CLOSE-4 initial commit made. GH-1 complete (remote connected or user opted out, preference recorded). CLOSE-13 orientation moment delivered in full — all five parts present. First build prompt written to `/wizard/build_prompts/agent_01_build_prompt.md` and handed off to user. Audit trail entry written.
+All CLOSE entries delivered. CLOSE-ASSEMBLY project assembly complete — all files written to disk, verification passed. CLOSE-4 git initialized and initial commit made. GH-1 complete (remote connected or user opted out, preference recorded). CLOSE-5 through CLOSE-12 system management briefings delivered. CLOSE-13 orientation moment delivered in full — all five parts present. First build prompt written to `/wizard/build_prompts/agent_01_build_prompt.md` and handed off to user. Audit trail entry written.
 
 Update staging file: `WIZARD_COMPLETE = true`
 
