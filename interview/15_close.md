@@ -82,7 +82,10 @@ After CLOSE-3, pause briefly.
 
 This step is internal. Do not narrate it to the user in technical terms. One plain-language confirmation line is sufficient.
 
-**Before committing:** Verify that `.gitignore` is in place and excludes `.env`. Do not proceed if `.gitignore` is absent — generate it now if missing (see `09_credentials.md`).
+**Before committing:**
+
+1. Verify that `.gitignore` is in place and excludes `.env`. Do not proceed if `.gitignore` is absent — generate it now if missing (see `09_credentials.md`).
+2. Create `wizard_feedback.md` in the project root from `wizard/templates/root/wizard_feedback.md`. This file is the bridge from system runtime back to wizard improvement — it stays in the user's project for agents to write to when they encounter wizard-related issues.
 
 Run the following commands in the project directory:
 
@@ -370,6 +373,26 @@ Then deliver CLOSE-14 immediately below.
 **Write this prompt to disk:** `[PROJECT_DIR]/wizard/build_prompts/agent_01_build_prompt.md`
 
 Write an audit trail entry: `Wizard setup complete. First build prompt written for [AGENT NAME]. Closing sequence delivered.`
+
+---
+
+## Step-boundary capture (testing mode only)
+
+*This section runs only during test sessions. In normal wizard operation, skip directly to the success condition.*
+
+**If Mark stated "this is a test run" at session start (Mode 2):**
+
+> Notes on this step before continuing? (or skip)
+
+Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 15.
+
+**If a `test_mode_active` file exists in the wizard directory (Mode 3):**
+
+> Testing note: anything unclear or confusing about this step? (Enter to skip)
+
+Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 15.
+
+**If neither condition is true:** Skip this section entirely — do not show any prompt.
 
 ---
 

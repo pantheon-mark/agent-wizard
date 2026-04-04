@@ -205,6 +205,26 @@ Also update `[PROJECT_DIR]/approach.md` — replace the preliminary agent roster
 
 ---
 
+## Step-boundary capture (testing mode only)
+
+*This section runs only during test sessions. In normal wizard operation, skip directly to the success condition.*
+
+**If Mark stated "this is a test run" at session start (Mode 2):**
+
+> Notes on this step before continuing? (or skip)
+
+Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 08.
+
+**If a `test_mode_active` file exists in the wizard directory (Mode 3):**
+
+> Testing note: anything unclear or confusing about this step? (Enter to skip)
+
+Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 08.
+
+**If neither condition is true:** Skip this section entirely — do not show any prompt.
+
+---
+
 ## Success condition
 
 ARCH-1 through ARCH-5 complete. Technical architecture document confirmed and written to `[PROJECT_DIR]/technical_architecture.md`. Approach document updated with confirmed agent roster. ARCHITECTURE_CONFIRMED = true in the staging file. Proceed to `09_credentials.md`.

@@ -263,6 +263,26 @@ Update staging file: `OPERATIONS_CONFIGURED = true`
 
 ---
 
+## Step-boundary capture (testing mode only)
+
+*This section runs only during test sessions. In normal wizard operation, skip directly to the success condition.*
+
+**If Mark stated "this is a test run" at session start (Mode 2):**
+
+> Notes on this step before continuing? (or skip)
+
+Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 13.
+
+**If a `test_mode_active` file exists in the wizard directory (Mode 3):**
+
+> Testing note: anything unclear or confusing about this step? (Enter to skip)
+
+Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 13.
+
+**If neither condition is true:** Skip this section entirely — do not show any prompt.
+
+---
+
 ## Success condition
 
 CONC-1, CONC-2, START-1, START-2, DRIFT-1, and SCALE-1 through SCALE-4 complete. Scale tier written to `technical_architecture.md` and `project_instructions.md`. All configured values written to the staging file. `OPERATIONS_CONFIGURED = true` in the staging file. Proceed to `14_document_review.md`.

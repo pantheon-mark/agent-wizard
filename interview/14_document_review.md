@@ -58,6 +58,26 @@ No response required. Proceed directly to the success condition.
 
 ---
 
+## Step-boundary capture (testing mode only)
+
+*This section runs only during test sessions. In normal wizard operation, skip directly to the success condition.*
+
+**If Mark stated "this is a test run" at session start (Mode 2):**
+
+> Notes on this step before continuing? (or skip)
+
+Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 14.
+
+**If a `test_mode_active` file exists in the wizard directory (Mode 3):**
+
+> Testing note: anything unclear or confusing about this step? (Enter to skip)
+
+Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 14.
+
+**If neither condition is true:** Skip this section entirely — do not show any prompt.
+
+---
+
 ## Success condition
 
 DOC-1 and DOC-2 delivered. No staging file values to write — this phase is informational only. Proceed to `15_close.md`.

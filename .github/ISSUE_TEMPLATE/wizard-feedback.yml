@@ -1,0 +1,48 @@
+name: Wizard Feedback
+description: Report an issue with a wizard step — something unclear, broken, or unexpected
+title: "[Feedback] "
+labels: ["wizard-feedback"]
+body:
+  - type: dropdown
+    id: step
+    attributes:
+      label: Which step were you on?
+      description: Select the wizard step where the issue occurred
+      options:
+        - 00 — Environment check
+        - 01 — Project name and purpose
+        - 02 — Financial setup
+        - 03 — User profile
+        - 04 — Notifications
+        - 05 — Vision document
+        - 06 — Approach document
+        - 07 — Advisors
+        - 08 — Architecture
+        - 09 — Credentials
+        - 10 — Validation
+        - 11 — Error handling
+        - 12 — QA settings
+        - 13 — Operations
+        - 14 — Document review
+        - 15 — Closing sequence
+        - Manual (manual.md)
+        - About (about.md)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe what the wizard did or said
+      placeholder: Tell us what happened...
+    validations:
+      required: true
+  - type: textarea
+    id: what-expected
+    attributes:
+      label: What did you expect to happen?
+      description: Describe what you thought should happen instead
+      placeholder: Tell us what you expected...
+    validations:
+      required: true

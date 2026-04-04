@@ -170,6 +170,26 @@ Update staging file: ADVISORS_SEEDED = true
 
 ---
 
+## Step-boundary capture (testing mode only)
+
+*This section runs only during test sessions. In normal wizard operation, skip directly to the success condition.*
+
+**If Mark stated "this is a test run" at session start (Mode 2):**
+
+> Notes on this step before continuing? (or skip)
+
+Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 07.
+
+**If a `test_mode_active` file exists in the wizard directory (Mode 3):**
+
+> Testing note: anything unclear or confusing about this step? (Enter to skip)
+
+Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 07.
+
+**If neither condition is true:** Skip this section entirely — do not show any prompt.
+
+---
+
 ## Success condition
 
 ADV-1 through ADV-4 complete. All confirmed advisors recorded in the staging file. Advisor knowledge base seeded with a header entry for each advisor at `[PROJECT_DIR]/quality/advisor_knowledge_base.md`. First interview guide written for each advisor at `[PROJECT_DIR]/advisor/interview-guides/`. ADVISORS_SEEDED = true in the staging file. Proceed to `08_architecture.md`.
