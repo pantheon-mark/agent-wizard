@@ -31,6 +31,8 @@ These are five conversational questions, not a form. Ask them in order, but let 
 
 The goal is a genuine sense of this person: how they think, what they need, where they want to be hands-on vs. hands-off. Listen for signals beyond the literal answer — someone who describes a complex multi-stakeholder operation probably has high domain expertise even if they say they're "not technical."
 
+**If the user says "I don't know" or gives a vague/uncertain answer to any question:** propose a reasonable default based on what you know so far — their project purpose, their answers to earlier questions, and the context from Phase 1. Say: "Based on what you've told me so far, I'd suggest [proposed characterization]. Does that sound about right, or would you describe it differently?" This follows the wizard question design principle: Claude proposes, user confirms. No question should stall because the user can't articulate a preference from scratch.
+
 ---
 
 ## UP-1 — Technical literacy

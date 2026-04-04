@@ -33,7 +33,7 @@ QA-1, QA-3, and QA-4 require specific user choices. QA-2 is a brief preference c
 
 ## QA-1 — Investigation workflow reporting style [FIXED — topic]
 
-Present the same quality issue handled two ways. The user chooses by reading both — not by interpreting labels.
+Present the same quality issue handled two ways. **Use the user's actual system context** — pick one agent and a realistic quality issue from the user's domain, grounded in the vision and approach documents. The user makes a better choice when they see how QA notifications will actually look in their system. The examples below are fallback structure — replace with the user's real system context.
 
 **Say:**
 
@@ -46,7 +46,7 @@ Present the same quality issue handled two ways. The user chooses by reading bot
 > You get one message when the investigation is complete:
 >
 > > **QA finding resolved**
-> > I investigated why the weekly report was showing inconsistent figures. The source data had a formatting change that caused two fields to be read out of order. I've flagged the pattern as a rule so it won't happen again. No action needed — I'll include this in your next digest.
+> > I investigated why [specific output from user's system] was [specific quality issue]. [Root cause in plain language]. I've flagged the pattern as a rule so it won't happen again. No action needed — I'll include this in your next digest.
 > > Run `./start-session.sh --resume` if you'd like to review the details.
 
 ---
@@ -56,10 +56,10 @@ Present the same quality issue handled two ways. The user chooses by reading bot
 > You get a message at each step of the investigation:
 >
 > > **QA — investigation started**
-> > I noticed inconsistent figures in the weekly report. Starting investigation now.
+> > I noticed [specific quality issue] in [specific output]. Starting investigation now.
 >
 > > **QA — finding identified**
-> > The source data has a formatting change. Two fields are being read out of order. Checking whether this is a one-time issue or a pattern.
+> > [Root cause in plain language]. Checking whether this is a one-time issue or a pattern.
 >
 > > **QA — resolved**
 > > Confirmed it's a pattern. I've added a rule to catch it. No action needed — I'll include this in your next digest.
@@ -121,6 +121,7 @@ Read the vision document and approach document. Identify every external data dep
 - If the user removes a source: note the implication and update the list.
 - If the user adds a source: add it with a proposed name, description, and dependency statement. Confirm before proceeding.
 - If a source is uncertain: mark it as pending.
+- **If your analysis produces zero external sources** (the system has no external data dependencies — it processes only local or internally generated data): present this to the user: "Based on your vision and architecture, your system doesn't rely on any external data sources — it works with internal data only. Is that right?" If confirmed, write the source registry with a note "No external sources configured — sources can be added later when integrations are expanded." Set `SOURCE_COUNT = 0` in the staging file. Proceed to QA-4.
 
 Write `/quality/source_registry.md` after the list is confirmed (see disk write section below).
 

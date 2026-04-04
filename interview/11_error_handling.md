@@ -33,7 +33,7 @@ This phase has no dynamic derivation from the project documents. ERR-1 and ERR-2
 
 ## ERR-1 — Notification verbosity [FIXED — topic]
 
-Present three rendered examples of the same hypothetical error at each verbosity level. The user chooses by comparing the examples side by side — not by interpreting abstract labels.
+Present three rendered examples of the same hypothetical error at each verbosity level. **Use the user's actual system context** — pick one of the agents from the confirmed roster and create a realistic error scenario grounded in the user's domain from the vision and approach documents. Do not use generic examples. The user makes a better choice when they see how notifications will actually look in their system.
 
 **Say:**
 
@@ -41,15 +41,17 @@ Present three rendered examples of the same hypothetical error at each verbosity
 
 ---
 
+Then present three rendered examples. **Build these from the user's actual system** — pick one agent from the confirmed roster and create a realistic error for that agent's domain. The examples below are fallback structure only — replace the agent name, error scenario, and domain details with the user's real system context.
+
 > **Option 1 — Minimal**
 >
-> > Data sync failed. Run `./start-session.sh --resume --alert` to address.
+> > [Agent name] failed. Run `./start-session.sh --resume --alert` to address.
 
 ---
 
 > **Option 2 — Standard**
 >
-> > Your data agent couldn't reach the source it was reading from (connection refused). It tried 3 times and stopped. No data was changed.
+> > Your [agent name] couldn't [what it was trying to do] ([plain-language reason]). It tried [N] times and stopped. [What was or wasn't affected].
 > >
 > > Run `./start-session.sh --resume --alert` to address.
 
@@ -57,13 +59,13 @@ Present three rendered examples of the same hypothetical error at each verbosity
 
 > **Option 3 — Detailed**
 >
-> > **Data agent — connection failure**
+> > **[Agent name] — [failure type]**
 > >
-> > Your data agent tried to connect to its data source at 2:14 PM and was refused. It retried twice more and stopped after 3 attempts. No records were read, written, or changed.
+> > Your [agent name] tried to [specific action] at [time] and [what went wrong]. It retried [N] more times and stopped after [total] attempts. [Specific scope of impact].
 > >
-> > **What stopped:** The scheduled sync for today's records.
-> > **What's unaffected:** All other agents are running normally. No data was lost.
-> > **What to check:** The data source may be temporarily unavailable — it could be down, your credentials may have expired, or your network connection may have changed.
+> > **What stopped:** [The specific task that was interrupted.]
+> > **What's unaffected:** [What's still running normally.]
+> > **What to check:** [Plain-language suggestions for what might be wrong.]
 > >
 > > Run `./start-session.sh --resume --alert` to address.
 

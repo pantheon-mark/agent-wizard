@@ -94,6 +94,7 @@ On task completion (success or failure), write a handoff envelope to `/agents/ha
   "task_id": "[task_id]",
   "agent": "{{AGENT_NAME}}",
   "status": "COMPLETE | FAILED | ESCALATED",
+  "stop_reason": "[completed | budget_exceeded | error | timeout | user_cancelled | deferred]",
   "output_location": "[path to primary output file]",
   "inputs_consumed": ["[list of input files read]"],
   "outputs_produced": ["[list of output files written]"],
@@ -101,6 +102,14 @@ On task completion (success or failure), write a handoff envelope to `/agents/ha
   "audit_trail_ref": "[timestamp of session_log entry]"
 }
 ```
+
+**Stop reason** is a required field — every session must log exactly one. The six stop reasons:
+- `completed` — task finished successfully
+- `budget_exceeded` — session hit token budget cap; wrap up gracefully, persist state, report what remains
+- `error` — unrecoverable error after three-strikes escalation
+- `timeout` — time limit exceeded
+- `user_cancelled` — user or orchestrator cancelled the session
+- `deferred` — agent identified work that should be deferred (this is a stop reason, not just a task status — the session ended because the agent chose to stop)
 
 ## Model tier
 

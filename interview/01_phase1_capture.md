@@ -29,7 +29,7 @@ Do not begin P1-1 until you are confident the full phase will complete before co
 
 Before P1-1, check whether a prior wizard session exists:
 
-**Run:** Check if `~/Documents/claude-wizard-draft/wizard_session_draft.md` exists.
+**Run:** Check if `~/claude-wizard-draft/wizard_session_draft.md` exists.
 
 **If the file does NOT exist:** Proceed to P1-1 normally.
 

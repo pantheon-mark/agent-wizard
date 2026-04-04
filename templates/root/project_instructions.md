@@ -137,6 +137,16 @@
 
 ---
 
+## Per-Agent Directory Permissions
+
+*Centralized permission registry. Each agent's prompt file also contains its own permission boundary — this table is the single-view audit reference. Updated when agents are added, modified, or removed.*
+
+| Agent | Permitted write directories | Criticality tier |
+|-------|---------------------------|------------------|
+{{AGENT_PERMISSION_ROWS}}
+
+---
+
 ## Input Type Inventory
 
 *Confirmed during wizard input validation phase. Updated when new input types are identified or existing ones change.*

@@ -44,6 +44,16 @@
 
 ---
 
+## Upcoming scheduled tasks
+
+*Cron-triggered agent runs. Updated at session close from `/agents/cron/cron_config.md`.*
+
+| Agent | Next trigger | Frequency | Notes |
+|-------|-------------|-----------|-------|
+{{CRON_SCHEDULE_ROWS}}
+
+---
+
 ## Quick reference
 
 *Frequently needed values. Full configuration in `project_instructions.md`.*

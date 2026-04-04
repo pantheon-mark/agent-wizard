@@ -25,8 +25,14 @@ At every invocation, read all of the following before acting:
 1. Check for `maintenance_mode.md` in the project root. If it exists, a session is already active. Do not run. Log the skip to `/logs/session_log.md` and exit.
 2. Create `maintenance_mode.md` to claim the session gate.
 3. Read `session_bootstrap.md`, `project_instructions.md`, `vision.md`.
-4. Read `/logs/notification_log.md`. If any unacknowledged Critical or High alerts exist, adjudicate them before working the queue. Critical alerts are resolved first, in order of severity.
-5. Read `/work/work_queue.md` and identify the next work item.
+4. **Runtime health check (Doctor Pattern).** Run all four checks before proceeding to any work:
+   - **Credentials:** Read `/security/credentials_registry.md`. For each credential, verify the ENV variable is set and not empty. For credentials with expiry dates, check if any are within the configured rotation lead time window.
+   - **External services:** For each integration configured in step 09 (listed in `technical_architecture.md`), verify the service is reachable. If a service fails, note which tasks depend on it.
+   - **Agent files:** Verify all agent prompt files listed in `/agents/roster.md` exist at their expected paths and are non-empty.
+   - **Configuration drift:** Verify `project_instructions.md` contains all required sections (autonomy level, model tier mapping, spend ceiling, scale tier). Verify `CLAUDE.md` exists and is non-empty.
+   - **Results:** Log health check results as a standing section in `/logs/session_log.md`. If all checks pass, proceed. If any check fails: state what is wrong and what the user needs to do in plain language. Work that depends on the failed component is blocked — independent tasks may continue. Send a High severity real-time alert for any failure.
+5. Read `/logs/notification_log.md`. If any unacknowledged Critical or High alerts exist, adjudicate them before working the queue. Critical alerts are resolved first, in order of severity.
+6. Read `/work/work_queue.md` and identify the next work item.
 
 ## Permission boundary
 
@@ -91,6 +97,7 @@ If a task fails on consecutive attempts:
   "task_id": "[task_id]",
   "agent": "[agent_name]",
   "status": "COMPLETE | FAILED | ESCALATED",
+  "stop_reason": "[completed | budget_exceeded | error | timeout | user_cancelled | deferred]",
   "output_location": "[path to primary output file]",
   "inputs_consumed": ["[list of input files read]"],
   "outputs_produced": ["[list of output files written]"],
@@ -98,6 +105,8 @@ If a task fails on consecutive attempts:
   "audit_trail_ref": "[timestamp of session_log entry]"
 }
 ```
+
+**Stop reason** is a required field — every agent session must log exactly one. The six stop reasons: `completed` (task finished), `budget_exceeded` (token cap hit), `error` (unrecoverable), `timeout` (time limit), `user_cancelled` (cancelled by user or orchestrator), `deferred` (agent chose to stop — work should be deferred). When reading agent handoff envelopes, use the stop reason to decide next actions: `budget_exceeded` → consider continuing in a new session or escalating (two-strike rule — first hit auto-continues, second hit on the same task escalates to user); `error` → investigate before retrying; `deferred` → the agent made a judgment call, review the reasoning.
 
 ## Model tier
 
@@ -111,10 +120,14 @@ Tier-to-model mapping is in `project_instructions.md`. Do not use specific model
 
 ## Session end
 
-At every session end, in order:
+The session close sequence is mandatory — it runs even if the session is ending due to a problem (error, budget exceeded, user abort). Stop work with enough budget and context remaining to complete this sequence. State persistence is higher priority than any in-progress task.
 
-1. Update `session_bootstrap.md` with current system state, open items, and any alerts requiring attention next session.
-2. Update `/work/work_queue.md` — mark completed items as done, archive resolved items to `/archive/work_archive.md`.
-3. Clear `maintenance_mode.md`.
-4. Write a session summary entry to `/logs/session_log.md`.
-5. Auto-commit: `git add -A && git commit -m "Session {{DATE}}: [brief plain-language summary of what was done]"`. If GitHub remote is configured, push: `git push origin main`.
+At every session end, in this order:
+
+1. **Check future items register.** Read `/docs/future_items.md`. For any date-triggered item that is due (on or before today's date), pull it into the next session's context via the session bootstrap update in step 3. Mark triggered one-time items as triggered. Reschedule recurring items to their next occurrence.
+2. **Update `SESSION_STATE.md`** — current task state: what was in progress, what completed, what remains.
+3. **Update `session_bootstrap.md`** — current system state, carry-forwards from step 1, next priorities, upcoming cron jobs (from `/agents/cron/cron_config.md`), and any alerts requiring attention next session.
+4. **Update `/work/work_queue.md`** — mark completed items as done, archive resolved items to `/archive/work_archive.md`.
+5. **Write a session close entry to `/logs/session_log.md`** — include stop reason and summary.
+6. Clear `maintenance_mode.md`.
+7. Auto-commit: `git add -A && git commit -m "Session {{DATE}}: [brief plain-language summary of what was done]"`. If GitHub remote is configured, push: `git push origin main`.

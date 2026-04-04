@@ -58,6 +58,7 @@ Present the proposed input type inventory. For each input: what it is, why it ne
 - If the user removes an input type: note the implication briefly ("Understood — that source won't be checked on the way in") and update the list.
 - If the user adds an input type: add it with a proposed name, description, and check rationale. Confirm before proceeding.
 - If an input source is uncertain: mark it as pending. Note it clearly. It must be resolved before the system runs fully.
+- **If your analysis produces zero external input types** (the system processes only internally generated data with no external sources or user inputs at the system boundary): present this to the user: "Based on your vision and architecture, your system receives all data internally — no external sources or user-provided inputs cross the system boundary. Is that right?" If confirmed, write `VALIDATION_CONFIGURED = true` and `INPUT_TYPE_COUNT = 0` to the staging file. Skip GATE-2 (no domain areas to configure sensitivity for). Proceed to GATE-3 and GATE-4 (the override and pushback explanations still apply to internal validation). Note that input types can be added later when integrations are expanded.
 
 ---
 

@@ -106,6 +106,12 @@ The autonomy level governs what Claude may do independently versus what requires
 
 **Exact prompts always.** Every significant recommendation includes an exact prompt or command, which model to use, and whether to run it in Claude.ai or Claude Code.
 
+**Session close enforcement.** Every session must update four files before ending, in this order: (1) `SESSION_STATE.md` — current task state, (2) `session_bootstrap.md` — carry-forwards, next priorities, upcoming cron jobs, (3) `/work/work_queue.md` — status updates, (4) `/logs/session_log.md` — close entry with stop reason and summary. This sequence runs even if the session is ending due to a problem. The orchestrator stops work with enough budget and context remaining to complete this sequence. State persistence is higher priority than any in-progress task.
+
+**Idempotency for external operations.** For any operation that modifies external state (API calls, message sends, file writes to external services), persist a record of the operation before or immediately after execution. On retry or session resume, check whether the operation has already been completed before executing it again. This prevents duplicate external actions when sessions crash and resume.
+
+**Foundational document integrity.** Before making any decision or producing any output, read the relevant foundational documents from disk in this session. Do not operate from a recalled or summarized version. If a foundational document has not been read in this session, read it before proceeding.
+
 ---
 
 ## Permission scope
