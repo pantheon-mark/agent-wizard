@@ -209,4 +209,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-QA-1 through QA-4 complete. `/quality/source_registry.md` written to disk. QA_REPORTING_STYLE, FUTURE_ALERT_CHANNEL, and CONFIDENCE_FLAGGING_THRESHOLD written to staging file. QA_CONFIGURED = true in the staging file. Proceed to `13_operations.md`.
+QA-1 through QA-4 complete. `/quality/source_registry.md` written to disk. QA_REPORTING_STYLE, FUTURE_ALERT_CHANNEL, and CONFIDENCE_FLAGGING_THRESHOLD written to staging file. QA_CONFIGURED = true in the staging file.
+
+**Write completion marker:** Append `step_12: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `13_operations.md`.

@@ -118,4 +118,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-AP-1 through AP-3 complete. Approach document confirmed by the user and written to `[PROJECT_DIR]/approach.md`. APPROACH_CONFIRMED = true in the staging file. Proceed to `07_advisors.md`.
+AP-1 through AP-3 complete. Approach document confirmed by the user and written to `[PROJECT_DIR]/approach.md`. APPROACH_CONFIRMED = true in the staging file.
+
+**Write completion marker:** Append `step_06: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `07_advisors.md`.

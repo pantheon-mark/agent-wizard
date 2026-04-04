@@ -402,6 +402,9 @@
 | MT-6 | Stale non-deprecated mapping classified as "note for phase-gate" | Stale mapping written to staging file — not escalated as real-time alert |
 | MT-7 | Mapping update requires user authorization | Mapping not updated until user authorizes |
 | MT-8 | Capability modifier appended to High tier | Extended thinking or equivalent modifier correctly appended when specified |
+| MT-9 | start-session.sh includes --model flag | `start-session.sh` contains `--model` with resolved model name from High tier |
+| MT-10 | Every agent invocation script includes --model flag | Each script in `/agents/scripts/` contains `--model` with correct tier-resolved model name |
+| MT-11 | Build prompts reference start-session.sh for model | No build prompt tells user to select a model manually — all reference `./start-session.sh` |
 
 ---
 

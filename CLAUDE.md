@@ -18,11 +18,15 @@ The wizard runs entirely in Claude Code. Do not suggest moving to Claude.ai at a
 
 The very first thing you do in every wizard session is check for a prior incomplete session:
 
-1. Check for `~/claude-wizard-draft/wizard_session_draft.md` — if it exists, the user was in Phase 1 (before the project directory was created). Read it and offer to resume.
-2. Check for a project directory with a `session_bootstrap.md` file. If one exists, offer to resume from where the wizard left off.
-3. If neither exists: this is a fresh start. Proceed to `wizard/interview/00_env_check.md`.
+1. **Check the progress file:** Read `~/claude-wizard-draft/wizard_progress.md`. If it exists, it contains explicit step-completion markers (e.g., `step_08: complete | <timestamp>`). Find the highest completed step number. The next interview file to run is the step after that. This is the authoritative cold-resume mechanism — no inference from content, no guessing. Either the marker exists or it doesn't.
+2. **If no progress file exists:** Check for `~/claude-wizard-draft/wizard_session_draft.md` — if it exists, the user was in Phase 1 (before step 00 completed). Read it and offer to resume.
+3. **If neither exists:** This is a fresh start. Proceed to `wizard/interview/00_env_check.md`.
 
-If resuming: read the staging file or `session_bootstrap.md` to determine which interview file was last active, then open that file and begin from its resume point.
+**Cold resume procedure:** When resuming from the progress file, read the staging file (`~/claude-wizard-draft/wizard_session_draft.md` or the project directory's `session_bootstrap.md` depending on how far the wizard got) to reload all gathered answers. Then open the next interview file and begin from its start — the step that crashed has no completion marker, so it runs from the beginning. Tell the user:
+
+> I found your previous wizard session. You completed through step [N] ([step name]). Let's pick up from step [N+1] ([next step name]).
+
+Wait for acknowledgment before proceeding.
 
 ---
 

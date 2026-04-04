@@ -20,6 +20,7 @@ set -euo pipefail
 
 # --- Configuration ---
 AGENT_NAME="{{AGENT_NAME}}"
+AGENT_MODEL="{{AGENT_MODEL}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TASK_ID="${1:-$(date +%Y%m%d_%H%M%S)}"
@@ -120,6 +121,7 @@ echo "| ${TIMESTAMP} | ${AGENT_NAME} | STARTED | task:${TASK_ID} |" >> "$SESSION
 
 EXIT_CODE=0
 claude \
+  --model "$AGENT_MODEL" \
   "${CONTEXT_ARGS[@]}" \
   --print \
   "You are ${AGENT_NAME}. Your prompt file, foundational documents, and task context have been loaded above.

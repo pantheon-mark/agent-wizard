@@ -47,7 +47,9 @@ Update staging file.
 
 **Ask the user:**
 
-> If you've sent something to an advisor — a question that needs their input — and you haven't heard back, how many days should pass before the system reminds you to follow up?
+> Sometimes a decision needs your attention — a question from an advisor, an issue your system flagged, or a choice that's been sitting in the queue. If you haven't gotten to it after a while, the system will remind you.
+>
+> **How many days should pass before the system nudges you about an unresolved decision?**
 >
 > The default is 7 days. Most people find that works well. You can adjust it anytime.
 
@@ -155,9 +157,9 @@ Update staging file.
 
 ---
 
-## NOTIF-5 — Email setup [HARD GATE]
+## NOTIF-5 — Email address verification
 
-Do not proceed past this step until the user has confirmed receipt of a test email.
+Do not proceed past this step until the user has confirmed the email address is correct.
 
 **Say:**
 
@@ -189,7 +191,7 @@ Wait for the user to confirm the address matches. If they correct it, update DIG
 
 Update staging file with DIGEST_EMAIL and a note that email delivery setup is deferred to the build phase.
 
-**HARD GATE: Do not proceed until the email address is confirmed correct.**
+**Do not proceed until the email address is confirmed correct.** Email delivery setup is deferred to the build phase — this step verifies the address only.
 
 ---
 
@@ -225,4 +227,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-NOTIF-1 through NOTIF-6 complete. NTFY channel confirmed (test notification received). Email address confirmed. Proceed to `05_vision.md`.
+NOTIF-1 through NOTIF-6 complete. NTFY channel confirmed (test notification received). Email address confirmed.
+
+**Write completion marker:** Append `step_04: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `05_vision.md`.

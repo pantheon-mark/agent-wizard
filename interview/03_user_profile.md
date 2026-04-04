@@ -153,4 +153,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-All five dimensions answered and confirmed. Profile summary stored. Proceed to `04_notifications.md`.
+All five dimensions answered and confirmed. Profile summary stored.
+
+**Write completion marker:** Append `step_03: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `04_notifications.md`.

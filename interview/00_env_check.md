@@ -171,7 +171,11 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-All four checks have passed. Do not show any message to the user. Proceed immediately to `01_phase1_capture.md`.
+All four checks have passed. Do not show any message to the user.
+
+**Write completion marker:** Append `step_00: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md` (create the file if it does not exist). This marker is written only on successful completion — if the session crashes mid-step, no marker exists and cold resume knows to restart this step.
+
+Proceed immediately to `01_phase1_capture.md`.
 
 ## Log note
 

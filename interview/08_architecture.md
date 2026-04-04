@@ -33,6 +33,34 @@ Maintain a running architecture document internally as each step is confirmed. W
 
 ---
 
+## Pre-ARCH — Cross-step conflict detection [INTERNAL]
+
+Before presenting any architecture, compare the user's answers across steps 05 (vision), 06 (approach), and the current architecture context. Look for scope drift or contradictions — for example, a user whose vision describes a full-lifecycle system, whose approach focused on one narrow area, and whose architecture questions suggest yet another direction.
+
+**If the vision scope, approach focus, and implied architecture are aligned:** proceed to ARCH-1 without comment.
+
+**If they suggest different systems:** name the discrepancy in plain language before proceeding. Do not ask the user to reconcile the contradiction themselves — propose the most coherent starting point.
+
+**Say:**
+
+> Before we set up the architecture, I want to flag something I noticed across your earlier answers.
+>
+> Your vision described [summary of vision scope]. Your approach focused on [summary of approach focus]. And the direction we're heading architecturally would build [summary of implied system].
+>
+> These aren't necessarily in conflict — but they suggest we should start with [proposed starting point] because [one-sentence rationale]. The other directions aren't lost — they become future agents once the core system is running.
+>
+> Does that starting point make sense to you?
+
+**Wait for answer.**
+
+- If the user confirms: proceed to ARCH-1 with the confirmed scope as the basis for the agent roster.
+- If the user redirects: update your understanding to match their preference and proceed.
+- If the user asks what the difference means: explain in plain terms which system each direction would produce and what would be deferred.
+
+This check ensures the architecture is built from a coherent foundation rather than silently inheriting unresolved contradictions from earlier steps.
+
+---
+
 ## ARCH-1 — Orchestration model [DYNAMIC]
 
 Before speaking, read the vision document and approach document. Identify:
@@ -227,4 +255,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-ARCH-1 through ARCH-5 complete. Technical architecture document confirmed and written to `[PROJECT_DIR]/technical_architecture.md`. Approach document updated with confirmed agent roster. ARCHITECTURE_CONFIRMED = true in the staging file. Proceed to `09_credentials.md`.
+ARCH-1 through ARCH-5 complete. Technical architecture document confirmed and written to `[PROJECT_DIR]/technical_architecture.md`. Approach document updated with confirmed agent roster. ARCHITECTURE_CONFIRMED = true in the staging file.
+
+**Write completion marker:** Append `step_08: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `09_credentials.md`.

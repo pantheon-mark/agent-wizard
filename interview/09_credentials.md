@@ -59,6 +59,14 @@ Present the proposed credential inventory. For each credential: what it is, what
 - If the user adds a credential: add it with a proposed name, function, and impact statement. Confirm before proceeding.
 - If the user doesn't have a credential yet: mark it as pending. It must be obtained before the system can run fully. Note it clearly.
 
+Store: CREDENTIAL_COUNT = number of confirmed credentials (including pending ones).
+
+**If zero credentials confirmed (user removed all proposed credentials or no credentials were needed):** Skip CRED-2 through CRED-5 entirely. Still run CRED-1a to create `.gitignore` and `.env` (these are needed regardless). Store CREDENTIAL_COUNT = 0 and CREDENTIALS_CONFIRMED = true in the staging file. Say:
+
+> No credentials needed right now — that's fine. Your protection files are still in place in case you add credentials later. You can add them at any time by telling the system "add a credential."
+
+After running CRED-1a, proceed directly to the success condition.
+
 ---
 
 ## CRED-1a — Create .gitignore and .env [INTERNAL]
@@ -76,12 +84,18 @@ Write `[PROJECT_DIR]/.gitignore`. Include at minimum:
 # Logs — operational data, stays local
 /logs/
 
-# Session cookies — ephemeral, never committed
-/security/session_cookies/
-
 # OS artifacts
 .DS_Store
 ```
+
+**Conditional — session cookies entry:** If the confirmed credential inventory includes any username/password credentials (credentials that require session cookie management), also add:
+
+```
+# Session cookies — ephemeral, never committed
+/security/session_cookies/
+```
+
+If no username/password credentials exist, do not add this entry. It can be added later if credentials of this type are introduced.
 
 **Step 2 — Create `/security/gitignore_manifest.md`**
 
@@ -94,8 +108,13 @@ Write a plain-language record of every entry in `.gitignore`:
 |-------|-----------------|-----|----------|
 | `.env` | All credential values | Secrets must never leave the local machine via git | Secrets |
 | `/logs/` | All operational logs | Logs may contain PII; they are local-only data | Logs |
-| `/security/session_cookies/` | Session cookies for username/password sites | Ephemeral credentials; never committed | Secrets |
 | `.DS_Store` | macOS folder metadata | Not project content | OS artifacts |
+```
+
+If the session cookies gitignore entry was added above, also include:
+
+```markdown
+| `/security/session_cookies/` | Session cookies for username/password sites | Ephemeral credentials; never committed | Secrets |
 ```
 
 **Step 3 — Create `.env`**
@@ -274,4 +293,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-CRED-1 through CRED-5 complete. `.gitignore` and `.env` on disk. `/security/credentials_registry.md` initialized with all confirmed credentials. `/security/gitignore_manifest.md` current. ROTATION_LEAD_TIME_DAYS and NO_EXPIRY_CADENCE written to staging file. CREDENTIALS_CONFIRMED = true in the staging file. Proceed to `10_validation.md`.
+CRED-1 through CRED-5 complete. `.gitignore` and `.env` on disk. `/security/credentials_registry.md` initialized with all confirmed credentials. `/security/gitignore_manifest.md` current. ROTATION_LEAD_TIME_DAYS and NO_EXPIRY_CADENCE written to staging file. CREDENTIALS_CONFIRMED = true in the staging file.
+
+**Write completion marker:** Append `step_09: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `10_validation.md`.

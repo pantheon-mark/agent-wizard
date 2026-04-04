@@ -92,6 +92,8 @@ Write the configured value to the staging file: `GATE_CONFLICT_TIMEOUT = [value 
 >
 > **How many times should you be able to defer an alert before it gets escalated?**
 >
+> This works alongside the stale decision threshold you set earlier ({{STALE_DECISION_THRESHOLD_DAYS}} days) — that one watches the clock on pending decisions, this one counts how many times you've actively postponed an alert. Between the two, nothing slips through the cracks quietly.
+>
 > I'd recommend **three deferrals**. That gives you a few sessions to get to it naturally, but stops an unresolved issue from quietly sitting in the queue indefinitely.
 
 **Wait for answer.**
@@ -163,13 +165,13 @@ Write the configured value to the staging file: `DRIFT_CADENCE = [Weekly / Biwee
 
 **Say:**
 
-> Last set of questions before we wrap up. These help me understand the scale your system will need to operate at — not technical details, just how your business actually works.
+> Last set of questions before we wrap up. These help me understand the scale your system will need to operate at — not technical details, just how your day-to-day actually works.
 
 Ask each question in sequence. Wait for the answer before moving to the next.
 
 **SCALE-1:**
 
-> How many clients, customers, or records does your business actively work with?
+> How many people, records, or items will your system need to keep track of? This could be clients, patients, properties, cases, family members — whatever applies to your situation.
 
 **Wait for answer.**
 
@@ -285,4 +287,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-CONC-1, CONC-2, START-1, START-2, DRIFT-1, and SCALE-1 through SCALE-4 complete. Scale tier written to `technical_architecture.md` and `project_instructions.md`. All configured values written to the staging file. `OPERATIONS_CONFIGURED = true` in the staging file. Proceed to `14_document_review.md`.
+CONC-1, CONC-2, START-1, START-2, DRIFT-1, and SCALE-1 through SCALE-4 complete. Scale tier written to `technical_architecture.md` and `project_instructions.md`. All configured values written to the staging file. `OPERATIONS_CONFIGURED = true` in the staging file.
+
+**Write completion marker:** Append `step_13: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `14_document_review.md`.

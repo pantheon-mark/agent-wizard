@@ -9,6 +9,9 @@
 
 set -euo pipefail
 
+# Model — resolved by the wizard from the tier mapping at setup time
+MODEL="{{MODEL_HIGH}}"
+
 # Resolve project directory from the script's own location
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
@@ -90,4 +93,4 @@ echo ""
 
 # ── Launch Claude Code ────────────────────────────────────────────────────────
 
-claude
+claude --model "$MODEL"

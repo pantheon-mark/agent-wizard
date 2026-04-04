@@ -7,7 +7,7 @@ Establish the financial guardrails that govern all autonomous spending by the sy
 After `01_phase1_capture.md` completes. The staging file exists and is being updated after each answer.
 
 ## Prerequisites
-Staging file at `~/Documents/claude-wizard-draft/wizard_session_draft.md` has been created and contains the P1-1 and P1-2 answers.
+Staging file at `~/claude-wizard-draft/wizard_session_draft.md` has been created and contains the P1-1 and P1-2 answers.
 
 ---
 
@@ -85,6 +85,42 @@ Store:
 
 Update staging file with both values.
 
+### Calibration guidance (after FIN-2, before proceeding)
+
+After storing the ceiling, provide calibration guidance based on the user's plan type (FIN-1) and ceiling amount. This helps the user understand what their budget can support — framed in terms of what the system can do, not in technical terms like tokens or agent sessions.
+
+**If OVERAGE_PLAN_TYPE = "hard-stop":**
+
+> A few things worth knowing about that ceiling:
+>
+> - **Under $20/month:** Your system can handle light, focused work — checking a few things regularly and alerting you when something needs attention. You'll want to keep your agent team small (1–2 agents) and run them on a schedule rather than continuously.
+> - **$20–$50/month:** Comfortable range for a small team of agents handling regular tasks — monitoring, summarizing, and flagging things for your review. Enough headroom for occasional intensive operations without hitting the ceiling unexpectedly.
+> - **$50–$100/month:** Room for a more active system — multiple agents running frequently, handling more complex work, with budget to spare for the occasional large task.
+> - **Over $100/month:** Your ceiling gives plenty of room. The system can operate at full capacity without budget being a constraint in normal operation.
+>
+> Since your plan stops at the limit, your ceiling also protects your remaining balance for any personal use of Claude you do outside this system. If you find the system is bumping against the ceiling regularly, that's a signal to either raise it or streamline what your agents are doing.
+
+**If OVERAGE_PLAN_TYPE = "overage-charges":**
+
+> A few things worth knowing about that ceiling:
+>
+> - **Under $20/month:** Your system can handle light, focused work — checking a few things regularly and alerting you when something needs attention. You'll want to keep your agent team small (1–2 agents) and run them on a schedule rather than continuously.
+> - **$20–$50/month:** Comfortable range for a small team of agents handling regular tasks — monitoring, summarizing, and flagging things for your review.
+> - **$50–$100/month:** Room for a more active system — multiple agents running frequently, handling more complex work.
+> - **Over $100/month:** Your ceiling gives plenty of room. The system can operate at full capacity.
+>
+> Since your plan charges for overages, hitting the ceiling is a real spending boundary — the system stops all autonomous work the moment it's reached and waits for you to say "continue." It will never spend past this amount on its own.
+
+**If OVERAGE_PLAN_TYPE = "unknown":**
+
+Use the "hard-stop" guidance above. Add:
+
+> Once you've confirmed your plan type, you can adjust these settings at any time.
+
+**Note for step 13 cross-reference:** When SCALE-1 through SCALE-4 are answered in step 13 (operations), the wizard should compare the declared scale/velocity against the FIN-2 ceiling. If the scale suggests higher usage than the ceiling comfortably supports (e.g., Large scale tier with a $10 ceiling), surface the discrepancy to the user in plain language and ask if they'd like to adjust either the ceiling or the scale expectation. This check happens in step 13, not here — record `FIN_CALIBRATION_DELIVERED = true` in the staging file so step 13 knows to run the cross-reference.
+
+Store: FIN_CALIBRATION_DELIVERED = true in staging file.
+
 ---
 
 ## Step-boundary capture (testing mode only)
@@ -109,4 +145,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-Both FIN-1 and FIN-2 answered and stored. Proceed to `03_user_profile.md`.
+Both FIN-1 and FIN-2 answered and stored.
+
+**Write completion marker:** Append `step_02: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `03_user_profile.md`.

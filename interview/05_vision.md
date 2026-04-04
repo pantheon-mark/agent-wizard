@@ -119,7 +119,28 @@ For each genuinely absent category, ask one targeted follow-up question. Maximum
 - Constraints: *"Are there rules you'd want the system to always follow — or things it should never do without asking first?"*
 - Success criteria: *"How would you know in six months whether this was worth it?"*
 
-If all six categories are present (even thinly), skip V-7 entirely and proceed to drafting.
+If all six categories are present (even thinly), skip V-7 entirely and proceed to the vague-answer check below.
+
+---
+
+## V-7b — Vague-answer detection [DYNAMIC]
+
+**This is distinct from V-7.** V-7 catches absent categories. V-7b catches categories that are *present but too vague to build from* — answers like "be more efficient" or "help me stay organized" that technically address a category but give the wizard nothing concrete to derive agent work from.
+
+After V-7 follow-ups (or after skipping V-7), scan the user's answers for purpose and goals categories specifically. If either answer is so vague that you could not propose a specific agent task from it, ask one concrete anchoring question:
+
+> You've given me a good sense of direction. To make sure I build the right thing, let me ask one more question:
+>
+> **If you could hand off one specific task starting tomorrow — something you actually do right now that takes time or attention — what would it be?**
+
+**Wait for answer.**
+
+This question is designed to produce a concrete, actionable anchor even when the user can't articulate a grand vision. One real task is enough to derive the first agent from.
+
+- If the answer gives a concrete task: note it as the primary anchor for the agent roster. Proceed to drafting.
+- If the answer is still vague ("just general help"): accept it and proceed to drafting. The approach document (step 06) and architecture (step 08) will provide additional opportunities to ground the system. Do not press further here.
+
+**If purpose and goals are already concrete enough to derive agent work from:** skip V-7b entirely and proceed to drafting.
 
 ---
 
@@ -214,4 +235,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-V-1 through V-8 complete. Vision document confirmed by the user and written to `[PROJECT_DIR]/vision.md`. VISION_CONFIRMED = true in the staging file. Approach content buffer active and ready to carry forward. Proceed to `06_approach.md`.
+V-1 through V-8 complete. Vision document confirmed by the user and written to `[PROJECT_DIR]/vision.md`. VISION_CONFIRMED = true in the staging file. Approach content buffer active and ready to carry forward.
+
+**Write completion marker:** Append `step_05: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `06_approach.md`.

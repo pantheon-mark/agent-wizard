@@ -158,4 +158,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-ERR-1 through ERR-3 complete. NOTIFICATION_VERBOSITY and THREE_STRIKES_THRESHOLD written to staging file. ERROR_HANDLING_CONFIGURED = true in the staging file. Proceed to `12_qa_settings.md`.
+ERR-1 through ERR-3 complete. NOTIFICATION_VERBOSITY and THREE_STRIKES_THRESHOLD written to staging file. ERROR_HANDLING_CONFIGURED = true in the staging file.
+
+**Write completion marker:** Append `step_11: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `12_qa_settings.md`.

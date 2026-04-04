@@ -280,6 +280,7 @@ After all files are written, run a quick verification:
 1. **Count check:** verify the number of files created matches the expected count from the manifest above (adjust for conditional branches).
 2. **Critical file check:** verify these files exist and are non-empty: `CLAUDE.md`, `project_instructions.md`, `session_bootstrap.md`, `vision.md`, `approach.md`, `technical_architecture.md`, `.gitignore`, `.env`.
 3. **Conditional check:** if `SESSION_COOKIES_NEEDED = true`, verify `security/session_cookies/` directory exists. If `CREDENTIAL_COUNT = 0`, verify `security/credentials_registry.md` exists but has no credential rows.
+4. **Model flag check:** verify `start-session.sh` contains `--model` with a resolved model name (not a placeholder). Verify the model name matches the High tier value in `project_instructions.md`.
 
 If any verification fails: stop, identify what is missing, and fix it before proceeding to CLOSE-4.
 
@@ -534,11 +535,19 @@ Show the literal project path.
 
 > **Here's the full arc of what happens next:**
 >
-> From here, we build your agent team one agent at a time. Each agent is its own build session — I'll walk you through it step by step. After each agent is built, you'll review what it can do before we start the next one. Nothing runs automatically until you've confirmed it's ready.
+> Your agent roster has **[n] agents** planned. Here's the build order:
 >
-> Once all your agents are built and tested, the system moves into regular operation and you'll start receiving your digests.
+> 1. **[First agent name]** — [one-sentence role]
+> 2. **[Second agent name]** — [one-sentence role]
+> 3. [Continue for all agents in the roster]
 >
-> That's the full journey — one agent at a time, each one reviewed, building toward a complete running team.
+> We build them one at a time. Each agent is its own build session — I'll walk you through it step by step. After each agent is built, you'll review what it can do before we start the next one. Nothing runs automatically until you've confirmed it's ready.
+>
+> This plan is saved in your project at `technical_architecture.md` — the agent roster section has the full list. If you ever want to check what's next or adjust the order, that's where to look.
+>
+> Once all [n] agents are built and tested, the system moves into regular operation and you'll start receiving your digests.
+
+Derive the agent count and names from the confirmed agent roster in `technical_architecture.md` on disk. Use the roster order as the build order unless the orchestration model specifies a different starting point.
 
 ---
 
@@ -580,7 +589,7 @@ Then deliver CLOSE-14 immediately below.
 > 3. Verify the agent file is complete and internally consistent with the technical architecture.
 > 4. Confirm completion and tell me what to review before the next agent is built.
 >
-> Use the **High** tier model for this session. Do not build any other agents in this session — one agent at a time.
+> **To start this session:** Run `./start-session.sh` from your project directory — it is already configured to use the correct model. Do not build any other agents in this session — one agent at a time.
 
 ---
 
@@ -615,5 +624,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 All CLOSE entries delivered. CLOSE-ASSEMBLY project assembly complete — all files written to disk, verification passed. CLOSE-4 git initialized and initial commit made. GH-1 complete (remote connected or user opted out, preference recorded). CLOSE-5 through CLOSE-12 system management briefings delivered. CLOSE-13 orientation moment delivered in full — all five parts present. First build prompt written to `/wizard/build_prompts/agent_01_build_prompt.md` and handed off to user. Audit trail entry written.
 
 Update staging file: `WIZARD_COMPLETE = true`
+
+**Write completion marker:** Append `step_15: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 The interview sequence is complete. The wizard has produced a running project directory, a configured system, and the user's first build prompt. The user's next action is to paste the first build prompt into Claude Code.

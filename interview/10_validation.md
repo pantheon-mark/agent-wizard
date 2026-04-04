@@ -189,4 +189,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-GATE-1 through GATE-4 complete. `/quality/validation_gate_config.md` written to disk with confirmed input type inventory and domain sensitivity settings. VALIDATION_CONFIGURED = true in the staging file. Proceed to `11_error_handling.md`.
+GATE-1 through GATE-4 complete. `/quality/validation_gate_config.md` written to disk with confirmed input type inventory and domain sensitivity settings. VALIDATION_CONFIGURED = true in the staging file.
+
+**Write completion marker:** Append `step_10: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `11_error_handling.md`.

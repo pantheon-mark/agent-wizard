@@ -80,4 +80,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-DOC-1 and DOC-2 delivered. No staging file values to write — this phase is informational only. Proceed to `15_close.md`.
+DOC-1 and DOC-2 delivered. No staging file values to write — this phase is informational only.
+
+**Write completion marker:** Append `step_14: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `15_close.md`.

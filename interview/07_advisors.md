@@ -27,16 +27,15 @@ Do not begin ADV-1 until you are confident the full phase will complete before c
 
 ## ADV-1 — Propose advisor types [DYNAMIC]
 
-Before speaking, read the confirmed vision document. Identify the domain, industry, data sources, and business activities the system will handle. Use this to generate a list of advisor types most likely to come up as the system makes decisions. Always include financial and legal advisors unless the vision document explicitly rules them out. Add one or two domain-specific advisors based on what the system is actually doing.
+Before speaking, read the confirmed vision document and approach document. Identify the domain, industry, data sources, and business activities the system will handle. Derive the advisor list from the user's actual use case — propose advisors whose expertise matches the decisions this specific system will face. Do not default to financial and legal advisors unless the vision document describes financial or legal work. A personal/caregiving system may need a medical professional or care coordinator; a real estate system may need a property manager or tax advisor; a creative project may need no traditional advisors at all.
 
 **Say:**
 
 > Based on what you've described, here are the types of advisors who are likely to come up as your system makes decisions:
 >
-> - **Accountant or bookkeeper** — financial decisions, tax treatment, expense categorization
-> - **Lawyer** — contracts, compliance, anything with legal exposure
-> - **[Domain-specific advisor 1]** — [domain and decision type]
-> - **[Domain-specific advisor 2, if applicable]** — [domain and decision type]
+> - **[Advisor type 1]** — [domain and decision type, derived from vision]
+> - **[Advisor type 2]** — [domain and decision type, derived from vision]
+> - **[Advisor type 3, if applicable]** — [domain and decision type]
 >
 > Do any of these not apply? Is there anyone missing? You can also say "not sure" for any of them.
 
@@ -52,9 +51,15 @@ For each confirmed or unconfirmed advisor, collect:
 - **Role or name** — the user may know the actual person ("my accountant Sarah") or just the role ("accountant"). Either is fine. Record whichever they provide.
 - **Domain** — what kinds of decisions this advisor weighs in on
 
-Store: ADVISORS = list of confirmed advisors, each with role/name and domain
+Store: ADVISORS = list of confirmed advisors, each with role/name and domain. Store: ADVISOR_COUNT = number of confirmed advisors.
 
 Update staging file.
+
+**If zero advisors confirmed (user removed all proposed advisors):** Skip ADV-2 through ADV-4 entirely. Store ADVISOR_COUNT = 0 and ADVISORS_SEEDED = true in the staging file. Say:
+
+> No advisors for now — that's fine. If you identify someone later whose expertise would be useful, you can add them at any time by telling the system "add an advisor." The system will walk you through the same setup.
+
+Proceed directly to the success condition.
 
 ---
 
@@ -192,4 +197,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-ADV-1 through ADV-4 complete. All confirmed advisors recorded in the staging file. Advisor knowledge base seeded with a header entry for each advisor at `[PROJECT_DIR]/quality/advisor_knowledge_base.md`. First interview guide written for each advisor at `[PROJECT_DIR]/advisor/interview-guides/`. ADVISORS_SEEDED = true in the staging file. Proceed to `08_architecture.md`.
+ADV-1 through ADV-4 complete. All confirmed advisors recorded in the staging file. Advisor knowledge base seeded with a header entry for each advisor at `[PROJECT_DIR]/quality/advisor_knowledge_base.md`. First interview guide written for each advisor at `[PROJECT_DIR]/advisor/interview-guides/`. ADVISORS_SEEDED = true in the staging file.
+
+**Write completion marker:** Append `step_07: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `08_architecture.md`.

@@ -153,4 +153,8 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-P1-3 completed, staging file written, confirmation shown to user. Proceed to `02_financial.md`.
+P1-3 completed, staging file written, confirmation shown to user.
+
+**Write completion marker:** Append `step_01: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `02_financial.md`.
