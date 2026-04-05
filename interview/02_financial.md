@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 02_financial.md. The staging file is at `~/claude-wizard-draft/wizard_session_draft.md` — read it, then begin FIN-1."
+> "Resume wizard from 02_financial.md. The staging file is at `~/claude-wizard-draft/wizard_session_draft.md` — read it, then continue from where you left off."
 
 Do not begin FIN-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_02_*` (e.g., `step_02_FIN-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_02: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -119,6 +127,8 @@ Store: OVERAGE_PLAN_TYPE = "unknown"
 
 Update staging file with all stored values.
 
+Write sub-step marker: Append `step_02_FIN-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## FIN-2 — Monthly spend ceiling
@@ -203,6 +213,8 @@ Use the Pro guidance above. Add:
 **Note for step 13 cross-reference:** When SCALE-1 through SCALE-4 are answered in step 13 (operations), the wizard should compare the declared scale/velocity against the FIN-2 ceiling. If the scale suggests higher usage than the ceiling comfortably supports (e.g., Large scale tier with a $10 ceiling), surface the discrepancy to the user in plain language and ask if they'd like to adjust either the ceiling or the scale expectation. This check happens in step 13, not here — record `FIN_CALIBRATION_DELIVERED = true` in the staging file so step 13 knows to run the cross-reference.
 
 Store: FIN_CALIBRATION_DELIVERED = true in staging file.
+
+Write sub-step marker: Append `step_02_FIN-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 12_qa_settings.md. ERROR_HANDLING_CONFIGURED = true. Read the staging file, then begin the quality preferences phase."
+> "Resume wizard from 12_qa_settings.md. ERROR_HANDLING_CONFIGURED = true. Read the staging file, then continue from where you left off."
 
 Do not begin QA-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_12_*` (e.g., `step_12_QA-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_12: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -85,6 +93,8 @@ Present the same quality issue handled two ways. **Use the user's actual system 
 
 Write the configured value to the staging file: `QA_REPORTING_STYLE = [Summary / Live]`.
 
+Write sub-step marker: Append `step_12_QA-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## QA-2 — Future feedback channel [FIXED — topic]
@@ -102,6 +112,8 @@ Write the configured value to the staging file: `QA_REPORTING_STYLE = [Summary /
 **Wait for answer.** Record the preference. If the user is unsure, note "undecided — revisit at Phase 3."
 
 Write the configured value to the staging file: `FUTURE_ALERT_CHANNEL = [SMS / Slack / Teams / Email / Undecided]`.
+
+Write sub-step marker: Append `step_12_QA-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -134,6 +146,8 @@ Read the vision document and approach document. Identify every external data dep
 
 Write `/quality/source_registry.md` after the list is confirmed (see disk write section below).
 
+Write sub-step marker: Append `step_12_QA-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## QA-4 — Confidence flagging threshold [FIXED — topic]
@@ -161,6 +175,8 @@ Then:
 - If the user wants to discuss what counts as "significant" uncertainty: explain that the system uses its own calibration based on domain sensitivity settings from the validation gate, and that it can be adjusted as patterns emerge.
 
 Write the configured value to the staging file: `CONFIDENCE_FLAGGING_THRESHOLD = [Most cautious / Balanced / Least cautious]`.
+
+Write sub-step marker: Append `step_12_QA-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -194,6 +210,8 @@ Write an audit trail entry: `Source registry initialized during wizard setup —
 > Next we'll set up the operational behavior settings — how the system handles retries, conflicts, startup, and drift.
 
 Update staging file: QA_CONFIGURED = true
+
+Write sub-step marker: Append `step_12_WRITE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

@@ -19,9 +19,17 @@ If it is: no project files exist yet to save. Tell the user:
 
 > Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Start the wizard from phase 1 capture. The environment check has passed. Run `01_phase1_capture.md`."
+> "Start the wizard from phase 1 capture. The environment check has passed. Run `01_phase1_capture.md`, then continue from where you left off."
 
 Do not begin P1-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_01_*` (e.g., `step_01_P1-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_01: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -75,6 +83,8 @@ The project folder will be created at `~/[folder-name]` — directly in the home
 - PROJECT_FOLDER_NAME = lowercase version with spaces replaced by hyphens and special characters removed
 - PROJECT_PATH = `~/` + PROJECT_FOLDER_NAME (e.g. `~/my-business-system`)
 
+Write sub-step marker: Append `step_01_P1-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## P1-2 — Core purpose
@@ -86,6 +96,8 @@ The project folder will be created at `~/[folder-name]` — directly in the home
 Accept any answer. One sentence is the goal but do not push back if they give more. If they give significantly more than one sentence, accept it gracefully and use the most purpose-focused sentence for the core purpose field. The full answer is preserved in the staging file.
 
 **Store:** CORE_PURPOSE = the user's answer
+
+Write sub-step marker: Append `step_01_P1-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -123,6 +135,8 @@ All four prerequisite checks passed.
 3. After writing the file successfully, **say this to the user:**
 
 > I've created your project draft. Everything you tell me from here is saved as we go — if this session ever ends unexpectedly, we can pick up exactly where we left off.
+
+Write sub-step marker: Append `step_01_P1-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

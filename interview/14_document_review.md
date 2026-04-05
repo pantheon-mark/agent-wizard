@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 14_document_review.md. OPERATIONS_CONFIGURED = true. Read the staging file, then deliver the document artifacts explanations."
+> "Resume wizard from 14_document_review.md. OPERATIONS_CONFIGURED = true. Read the staging file, then continue from where you left off."
 
 Do not begin DOC-1 until you are confident the full phase will complete before compaction risk. (This phase is brief — compaction risk here is low.)
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_14_*` (e.g., `step_14_DOC-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_14: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -53,6 +61,8 @@ Do not begin DOC-1 until you are confident the full phase will complete before c
 - If the user wants more detail on any part: provide a plain-language explanation. Keep it grounded in examples specific to their system (from the vision document).
 - If the user is ready to move on: proceed to DOC-2.
 
+Write sub-step marker: Append `step_14_DOC-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## DOC-2 — Change summary [EXPLANATION]
@@ -64,6 +74,8 @@ Do not begin DOC-1 until you are confident the full phase will complete before c
 > You'll never open a document and wonder why it looks different from the last time you saw it. The system always explains itself.
 
 No response required. Proceed directly to the success condition.
+
+Write sub-step marker: Append `step_14_DOC-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

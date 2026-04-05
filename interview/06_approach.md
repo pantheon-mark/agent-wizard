@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 06_approach.md. VISION_CONFIRMED = true. Read the vision document on disk and the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then derive the approach document."
+> "Resume wizard from 06_approach.md. VISION_CONFIRMED = true. Read the vision document on disk and the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then continue from where you left off."
 
 Do not begin AP-1 until you are confident the full phase — including draft, revision round, and disk write — will complete before compaction risk.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_06_*` (e.g., `step_06_AP-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_06: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -74,6 +82,8 @@ and detailed during the architecture phase.]
 
 Write in plain language. No jargon. If a section is thin, write what can be derived — even one sentence is valid. Do not pad or invent specifics not grounded in what the user said or what the vision implies.
 
+Write sub-step marker: Append `step_06_AP-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## AP-2 — Present and confirm [DYNAMIC]
@@ -86,6 +96,8 @@ Present the draft and say:
 
 - If the user makes no changes: confirm and proceed to AP-3.
 - If the user requests changes: incorporate them now. Do not open another round. Confirm the updated draft and proceed to AP-3.
+
+Write sub-step marker: Append `step_06_AP-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -102,6 +114,8 @@ Write the confirmed approach document to:
 > Approach document saved. In the next step, we'll work through the architecture in detail — confirming how the agents are organized, what each one does, and what the system can and can't do on its own.
 
 Update the staging file: APPROACH_CONFIRMED = true
+
+Write sub-step marker: Append `step_06_AP-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

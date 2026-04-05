@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 05_vision.md. NTFY_CONFIRMED = true and EMAIL_CONFIRMED = true. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then begin the vision document interview."
+> "Resume wizard from 05_vision.md. NTFY_CONFIRMED = true and EMAIL_CONFIRMED = true. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then continue from where you left off."
 
 **Important:** The vision interview is the most open-ended phase of the wizard. Do not begin it unless you are confident the full interview — including draft, revision round, and disk write — will complete before compaction risk. If there is any doubt, clear context first.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_05_*` (e.g., `step_05_V-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_05: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -52,6 +60,8 @@ The six questions are conversational — not a form. The user may answer in any 
 
 Note internally which of the six categories have been addressed as the user speaks.
 
+Write sub-step marker: Append `step_05_V-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## V-2 — Goals, objectives, and priorities [DYNAMIC]
@@ -72,6 +82,8 @@ Note internally which of the six categories have been addressed as the user spea
 - If the user redirects to a different picture entirely: accept the redirect — their version replaces the proposal.
 - If the user can't react meaningfully: that's fine — note what they did say and proceed. V-7b will catch vague answers later.
 
+Write sub-step marker: Append `step_05_V-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## V-3 — Audience and outputs [FIXED]
@@ -81,6 +93,8 @@ Note internally which of the six categories have been addressed as the user spea
 > Who will use or benefit from what this system produces — just you, or others? What form do you expect its outputs to take — reports, alerts, processed data, decisions made on your behalf?
 
 **Wait for answer.**
+
+Write sub-step marker: Append `step_05_V-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -96,6 +110,8 @@ Note internally which of the six categories have been addressed as the user spea
 
 - If the user names boundaries: capture them as initial scope constraints.
 - If the user says "not yet" or "I'm not sure": acknowledge that's expected at this stage. Note scope boundary as "to be refined during architecture and build" and proceed. Do not press for an answer.
+
+Write sub-step marker: Append `step_05_V-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -117,6 +133,8 @@ Note internally which of the six categories have been addressed as the user spea
 - If the user says the Tier 1 list covers it: acknowledge and proceed. Note V-5 constraints as "covered by Tier 1 rules" in the staging file.
 - Do not re-present or re-confirm the Tier 1 items themselves — they were already confirmed in step 04.
 
+Write sub-step marker: Append `step_05_V-5: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## V-6 — Success criteria [FIXED]
@@ -126,6 +144,8 @@ Note internally which of the six categories have been addressed as the user spea
 > How will you know in six months whether this system was worth building?
 
 **Wait for answer.**
+
+Write sub-step marker: Append `step_05_V-6: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -155,6 +175,8 @@ For each genuinely absent category, ask one targeted follow-up question. Maximum
 
 If all six categories are present (even thinly), skip V-7 entirely and proceed to the vague-answer check below.
 
+Write sub-step marker: Append `step_05_V-7: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## V-7b — Vague-answer detection [DYNAMIC]
@@ -175,6 +197,8 @@ This question is designed to produce a concrete, actionable anchor even when the
 - If the answer is still vague ("just general help"): accept it and proceed to drafting. The approach document (step 06) and architecture (step 08) will provide additional opportunities to ground the system. Do not press further here.
 
 **If purpose and goals are already concrete enough to derive agent work from:** skip V-7b entirely and proceed to drafting.
+
+Write sub-step marker: Append `step_05_V-7b: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -238,6 +262,8 @@ Where `PROJECT_DIR` is the system project directory established in Phase 1 (`01_
 > Vision document saved. This is the anchor your system will build from — everything else references it. It's a living document, so when your goals evolve, we update it.
 
 Update the staging file: VISION_CONFIRMED = true
+
+Write sub-step marker: Append `step_05_V-8: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ### Step 4 — Carry forward approach content
 

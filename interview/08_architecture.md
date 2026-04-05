@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 08_architecture.md. APPROACH_CONFIRMED = true and ADVISORS_SEEDED = true. Read the vision document, approach document, advisor knowledge base, and staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then begin ARCH-1."
+> "Resume wizard from 08_architecture.md. APPROACH_CONFIRMED = true and ADVISORS_SEEDED = true. Read the vision document, approach document, advisor knowledge base, and staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then continue from where you left off."
 
 **Important:** The architecture phase involves reading multiple documents and producing a substantial confirmation artifact. Do not begin it unless you are confident the full phase — all five ARCH steps and the disk write — will complete before compaction risk.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_08_*` (e.g., `step_08_ARCH-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_08: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -68,6 +76,8 @@ Before presenting any architecture, compare the user's answers across steps 05 (
 
 This check ensures the architecture is built from a coherent foundation rather than silently inheriting unresolved contradictions from earlier steps.
 
+Write sub-step marker: Append `step_08_Pre-ARCH: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## ARCH-1 — Orchestration model [DYNAMIC]
@@ -98,6 +108,8 @@ Before speaking, read the vision document and approach document. Identify:
 
 The architectural conclusion (whether a scoped orchestrator is needed, which workflows it manages) follows from the confirmed workflow description. Do not present this conclusion to the user — it is an internal implementation detail. The user only confirms the workflow description.
 
+Write sub-step marker: Append `step_08_ARCH-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## ARCH-2 — Agent roster [DYNAMIC]
@@ -124,6 +136,8 @@ Present the proposed agent roster derived from the vision document, approach doc
 - If the user asks a question about how an agent works: answer in plain language. Do not go into implementation detail unless asked.
 
 Update the internal roster before proceeding to ARCH-3.
+
+Write sub-step marker: Append `step_08_ARCH-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -154,6 +168,8 @@ Assign each confirmed agent a criticality tier. Present the assignments with a p
 - If the user confirms: proceed.
 - If the user disagrees with a tier: discuss the implication (e.g., moving an agent to Critical means the system halts if it fails), update the assignment, confirm.
 
+Write sub-step marker: Append `step_08_ARCH-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## ARCH-4 — Permission summary [FIXED — topic]
@@ -178,6 +194,8 @@ Present what the system will and will not be able to do on its own, in plain lan
 - If the user wants to add something to the "always ask" list: note it as an additional Tier 1 item. Update the staging file.
 - If the user wants to remove a "always ask" item: the baseline Tier 1 items (spending, external messaging, irreversible actions, guardrail violations, legal/compliance, contradictions) cannot be removed. Explain this clearly and move on.
 
+Write sub-step marker: Append `step_08_ARCH-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## ARCH-5 — Task completion checklists [DYNAMIC]
@@ -196,6 +214,8 @@ For each agent:
 
 - If the user confirms: note the checklist as confirmed.
 - If the user adjusts a completion condition: update it and confirm.
+
+Write sub-step marker: Append `step_08_ARCH-5: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -239,6 +259,8 @@ Tier 1 items confirmed during setup, including any user additions.]
 Update staging file: ARCHITECTURE_CONFIRMED = true
 
 Also update `[PROJECT_DIR]/approach.md` — replace the preliminary agent roster section with the confirmed roster from ARCH-2 and ARCH-3 (agents, functions, criticality tiers).
+
+Write sub-step marker: Append `step_08_WRITE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

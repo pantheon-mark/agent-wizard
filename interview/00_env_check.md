@@ -25,6 +25,14 @@ Under normal conditions this check will always pass — proceed directly to Step
 
 ---
 
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_00_*` (e.g., `step_00_CHECK-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_00: complete`) is not, proceed directly to the success condition.
+
+---
+
 ## Step opening — progress and preview
 
 **Say:**
@@ -49,6 +57,8 @@ Before running any checks, say this to the user:
 > Any questions about this before we begin?
 
 Wait for acknowledgment. If the user has questions, answer them in plain language. Once they're ready, proceed to the check sequence.
+
+Write sub-step marker: Append `step_00_PERM: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -75,6 +85,8 @@ Run all four checks in order. For each check: if it passes, move silently to the
 > Open a new Terminal window, paste the command, and press Enter. It will walk you through the installation — follow any prompts it shows. When it's done, come back here and tell me.
 
 Wait for the user to confirm the fix is done. Re-run `brew --version`. If it still fails, show the same message again. Do not proceed to Check 2 until this check passes.
+
+Write sub-step marker: Append `step_00_CHECK-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -106,6 +118,8 @@ Wait for the user to confirm the fix is done. Re-run `brew --version`. If it sti
 
 Wait for confirmation. Re-run `git --version`. Do not proceed to Check 3 until this check passes.
 
+Write sub-step marker: Append `step_00_CHECK-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ### Check 3 — Node.js
@@ -136,6 +150,8 @@ Wait for confirmation. Re-run `git --version`. Do not proceed to Check 3 until t
 
 Wait for confirmation. Re-run `node --version`. Do not proceed to Check 4 until this check passes.
 
+Write sub-step marker: Append `step_00_CHECK-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ### Check 4 — Claude Code
@@ -155,6 +171,8 @@ Wait for confirmation. Re-run `node --version`. Do not proceed to Check 4 until 
 > Open a Terminal window, paste the command, and press Enter. When it finishes, come back and tell me.
 
 Wait for confirmation. Re-run `claude --version`. Do not proceed to `01_phase1_capture.md` until this check passes.
+
+Write sub-step marker: Append `step_00_CHECK-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

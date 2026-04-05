@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 09_credentials.md. ARCHITECTURE_CONFIRMED = true. Read the staging file and technical architecture document, then begin the credentials phase."
+> "Resume wizard from 09_credentials.md. ARCHITECTURE_CONFIRMED = true. Read the staging file and technical architecture document, then continue from where you left off."
 
 Do not begin CRED-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_09_*` (e.g., `step_09_CRED-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_09: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -69,6 +77,8 @@ Present the proposed credential inventory. For each credential: what it is, what
 - If the user doesn't have a credential yet: mark it as pending. It must be obtained before the system can run fully. Note it clearly.
 
 Store: CREDENTIAL_COUNT = number of confirmed credentials (including pending ones).
+
+Write sub-step marker: Append `step_09_CRED-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 **If zero credentials confirmed (user removed all proposed credentials or no credentials were needed):** Skip CRED-2 through CRED-5 entirely. Still run CRED-1a to create `.gitignore` and `.env` (these are needed regardless). Store CREDENTIAL_COUNT = 0 and CREDENTIALS_CONFIRMED = true in the staging file. Say:
 
@@ -145,6 +155,8 @@ Write an audit trail entry: `.gitignore created before .env — sequence confirm
 
 **Wait for confirmation, then proceed to CRED-2.**
 
+Write sub-step marker: Append `step_09_CRED-1a: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## CRED-2 — Provider-specific onboarding [DYNAMIC]
@@ -192,6 +204,8 @@ Do not proceed to the next credential until the current one is verified or expli
 
 After all credentials are verified (or pending status confirmed), proceed to CRED-3.
 
+Write sub-step marker: Append `step_09_CRED-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## CRED-3 — Rotation lead time [FIXED — topic]
@@ -210,6 +224,8 @@ After all credentials are verified (or pending status confirmed), proceed to CRE
 - If the user chooses a different value: confirm the chosen value, note the rationale briefly if they gave one, and proceed.
 
 Write the configured value to the staging file: `ROTATION_LEAD_TIME_DAYS = [n]`.
+
+Write sub-step marker: Append `step_09_CRED-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -232,6 +248,8 @@ Write the configured value to the staging file: `ROTATION_LEAD_TIME_DAYS = [n]`.
 
 Write the configured value to the staging file: `NO_EXPIRY_CADENCE = [monthly / quarterly / biannual]`.
 
+Write sub-step marker: Append `step_09_CRED-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## CRED-5 — Session lifetime [EXPLANATION]
@@ -249,6 +267,8 @@ Write the configured value to the staging file: `NO_EXPIRY_CADENCE = [monthly / 
 > Does that make sense?
 
 **Wait for confirmation.** If the user has questions, answer them in plain language. Then proceed.
+
+Write sub-step marker: Append `step_09_CRED-5: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -277,6 +297,8 @@ Write an audit trail entry: `Credentials registry initialized — [n] credential
 > Next we'll set up the input validation layer — the guardrails that check what goes into your system.
 
 Update staging file: CREDENTIALS_CONFIRMED = true
+
+Write sub-step marker: Append `step_09_WRITE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

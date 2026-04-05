@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 04_notifications.md. The user profile is complete. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then begin NOTIF-7."
+> "Resume wizard from 04_notifications.md. The user profile is complete. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then continue from where you left off."
 
 Do not begin NOTIF-7 until you are confident the full phase will complete before compaction risk.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_04_*` (e.g., `step_04_NOTIF-7: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_04: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -70,6 +78,8 @@ Store: STAKEHOLDERS = list of all stakeholders with their notification types
 
 Update staging file.
 
+Write sub-step marker: Append `step_04_NOTIF-7: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## NOTIF-1 — Tiered digest cadence
@@ -99,6 +109,8 @@ Store:
 
 Update staging file.
 
+Write sub-step marker: Append `step_04_NOTIF-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## NOTIF-2 — Stale decision threshold
@@ -116,6 +128,8 @@ Update staging file.
 Store: STALE_DECISION_THRESHOLD_DAYS = the confirmed number (default: 7)
 
 Update staging file.
+
+Write sub-step marker: Append `step_04_NOTIF-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -147,6 +161,8 @@ Update staging file.
 Store: TIER_1_ADDITIONS = any items the user added (empty list if none)
 
 Update staging file.
+
+Write sub-step marker: Append `step_04_NOTIF-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -215,6 +231,8 @@ Store: NTFY_CONFIRMED = true (only set after user confirms receipt)
 
 Update staging file.
 
+Write sub-step marker: Append `step_04_NOTIF-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## NOTIF-5 — Email address verification
@@ -253,6 +271,8 @@ Update staging file with DIGEST_EMAIL and a note that email delivery setup is de
 
 **Do not proceed until the email address is confirmed correct.** Email delivery setup is deferred to the build phase — this step verifies the address only.
 
+Write sub-step marker: Append `step_04_NOTIF-5: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## NOTIF-6 — Production path note
@@ -262,6 +282,8 @@ Update staging file with DIGEST_EMAIL and a note that email delivery setup is de
 > One thing to know for later: when your system is ready for full production, there's an option to add SMS text alerts for the most critical notifications. That's a future upgrade — nothing you need to think about now. I'll remind you when the time comes.
 
 No answer required. This is informational only.
+
+Write sub-step marker: Append `step_04_NOTIF-6: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

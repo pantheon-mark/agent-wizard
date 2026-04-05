@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 03_user_profile.md. FIN-1 and FIN-2 are complete. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then begin UP-1."
+> "Resume wizard from 03_user_profile.md. FIN-1 and FIN-2 are complete. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then continue from where you left off."
 
 Do not begin UP-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_03_*` (e.g., `step_03_UP-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_03: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -64,6 +72,8 @@ Store: UP_TECHNICAL_LITERACY = brief characterization (e.g. "plain language only
 
 Update staging file.
 
+Write sub-step marker: Append `step_03_UP-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## UP-2 — Information preference
@@ -77,6 +87,8 @@ Update staging file.
 Store: UP_INFORMATION_PREFERENCE = brief characterization (e.g. "bottom-line-up-front", "context-first", "situational — detail for decisions, summary for routine")
 
 Update staging file.
+
+Write sub-step marker: Append `step_03_UP-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -94,6 +106,8 @@ Store: UP_DECISION_PREFERENCE = brief characterization (e.g. "ask-first for sign
 
 Update staging file.
 
+Write sub-step marker: Append `step_03_UP-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## UP-4 — Domain expertise
@@ -110,6 +124,8 @@ Store: UP_DOMAIN_EXPERTISE = list of strong-expertise areas and uncertain/adviso
 
 Update staging file.
 
+Write sub-step marker: Append `step_03_UP-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## UP-5 — Involvement appetite
@@ -125,6 +141,8 @@ Update staging file.
 Store: UP_INVOLVEMENT_APPETITE = brief characterization (e.g. "review-everything initially", "high-level oversight", "hands-off except for decisions")
 
 Update staging file.
+
+Write sub-step marker: Append `step_03_UP-5: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

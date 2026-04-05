@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 15_close.md. All configuration is complete. All documents are on disk. Read the staging file and the project directory, then begin the closing sequence."
+> "Resume wizard from 15_close.md. All configuration is complete. All documents are on disk. Read the staging file and the project directory, then continue from where you left off."
 
 Do not begin CLOSE-ASSEMBLY until you are confident the full phase will complete before compaction risk.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_15_*` (e.g., `step_15_CLOSE-ASSEMBLY: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_15: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -285,6 +293,8 @@ If any verification fails: stop, identify what is missing, and fix it before pro
 
 Proceed to Part 2 (CLOSE-4).
 
+Write sub-step marker: Append `step_15_CLOSE-ASSEMBLY: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## Part 2 — Initial commit (CLOSE-4) [INTERNAL]
@@ -307,6 +317,8 @@ git commit -m "Wizard setup complete — [PROJECT_NAME] initial commit"
 **Say:**
 
 > I've saved a snapshot of everything we've set up. Your project is now under version control — every change from here will be tracked.
+
+Write sub-step marker: Append `step_15_CLOSE-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -389,6 +401,8 @@ Show the user their repository URL.
 Record in staging file: `GITHUB_REMOTE = true` and `GITHUB_REMOTE_URL = [URL]`.
 
 Write `GITHUB_REMOTE_URL` to `project_instructions.md` under the system configuration section.
+
+Write sub-step marker: Append `step_15_GH-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -478,6 +492,8 @@ There is no Layer 3 delivery. The system guide (`docs/how_your_system_works.md`)
 ---
 
 Write an audit trail entry: `Wizard setup complete. First build prompt written for [AGENT NAME]. System guide written to docs/how_your_system_works.md. Closing sequence delivered.`
+
+Write sub-step marker: Append `step_15_CLOSE-14: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

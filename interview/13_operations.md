@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 13_operations.md. QA_CONFIGURED = true. Read the staging file, then begin the operations settings phase."
+> "Resume wizard from 13_operations.md. QA_CONFIGURED = true. Read the staging file, then continue from where you left off."
 
 Do not begin CONC-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_13_*` (e.g., `step_13_AUTO-DEFAULTS: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_13: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -70,6 +78,8 @@ Write all three values to the staging file:
 
 Do not wait for a response. Proceed to START-2.
 
+Write sub-step marker: Append `step_13_AUTO-DEFAULTS: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## START-2 — Chunk confirmation preference [FIXED — topic]
@@ -93,6 +103,8 @@ Do not wait for a response. Proceed to START-2.
 - If the user asks what counts as "important": "Anything that affects a document your other processes depend on, that communicates externally, that involves money, or that's hard to reverse. The system applies the same Tier 1 rules you confirmed earlier."
 
 Write the configured value to the staging file: `CHUNK_CONFIRMATION = [Confirm each / Confirm important only]`.
+
+Write sub-step marker: Append `step_13_START-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -125,6 +137,8 @@ Write the configured value to the staging file: `CHUNK_CONFIRMATION = [Confirm e
 
 Write the configured value to the staging file: `DRIFT_CADENCE = [Weekly / Biweekly / Monthly]`.
 
+Write sub-step marker: Append `step_13_DRIFT-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## Scale tier — SCALE-1, SCALE-2, SCALE-3 [FIXED]
@@ -153,6 +167,8 @@ Ask each question in sequence. Wait for the answer before moving to the next.
 
 **Wait for answer.**
 
+Write sub-step marker: Append `step_13_SCALE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## SCALE-4 — Tier confirmation [DYNAMIC]
@@ -180,6 +196,8 @@ When answers span tiers, round to the higher tier if two or more indicators poin
 - If the user is uncertain: "That's fine — I'll start with [tier] and watch how the system actually behaves. If what I observe is consistently different, I'll flag it and we'll revisit."
 
 Write the configured value to the staging file: `SCALE_TIER = [S / M / L] (provisional)`.
+
+Write sub-step marker: Append `step_13_SCALE-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -228,6 +246,8 @@ Write an audit trail entry: `Scale tier set to [S/M/L] (provisional) during wiza
 > Next we'll review the documents your system has produced so far and set up your GitHub backup.
 
 Update staging file: `OPERATIONS_CONFIGURED = true`
+
+Write sub-step marker: Append `step_13_WRITE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

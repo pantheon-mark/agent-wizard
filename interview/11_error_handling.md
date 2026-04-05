@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 11_error_handling.md. VALIDATION_CONFIGURED = true. Read the staging file, then begin the error handling configuration phase."
+> "Resume wizard from 11_error_handling.md. VALIDATION_CONFIGURED = true. Read the staging file, then continue from where you left off."
 
 Do not begin ERR-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_11_*` (e.g., `step_11_ERR-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_11: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -92,6 +100,8 @@ One note: critical alerts always use full detail regardless of your preference. 
 
 Write the configured value to the staging file: `NOTIFICATION_VERBOSITY = [Minimal / Standard / Detailed]`.
 
+Write sub-step marker: Append `step_11_ERR-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## ERR-2 — Three-strikes threshold [SILENT DEFAULT]
@@ -105,6 +115,8 @@ Write to the staging file: `THREE_STRIKES_THRESHOLD = 3`
 > I've also configured your system's retry threshold — when something goes wrong, the system will try to fix it automatically up to **3 attempts** before stopping and asking you. That's enough to handle brief glitches without spinning on a real problem. You can adjust this anytime.
 
 Do not wait for a response. Proceed to ERR-3.
+
+Write sub-step marker: Append `step_11_ERR-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -123,6 +135,8 @@ Do not wait for a response. Proceed to ERR-3.
 > Does that distinction make sense?
 
 **Wait for answer.** If the user has questions, answer them in plain language. Then proceed.
+
+Write sub-step marker: Append `step_11_ERR-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

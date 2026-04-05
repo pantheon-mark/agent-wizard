@@ -26,6 +26,8 @@ The very first thing you do in every wizard session is check for a prior incompl
 
 > I found your previous wizard session. You completed through step [N] ([step name]). Let's pick up from step [N+1] ([next step name]).
 
+**Sub-step markers:** The progress file may also contain sub-step markers (e.g., `step_04_NOTIF-2: complete`). These indicate a step was partially completed before the session ended. When you open the next interview file, its sub-step resume check will automatically skip to the first incomplete question — you do not need to parse sub-step markers yourself here.
+
 Wait for acknowledgment before proceeding.
 
 ---
@@ -110,6 +112,10 @@ When the user mentions something during any step that maps to a future wizard st
 3. When the tagged step arrives, read the early mentions for that step number and use them as a starting point: "You mentioned earlier that [X] — let me build on that" rather than asking the question from scratch.
 
 This prevents the user from having to repeat themselves across steps and makes the wizard feel like it is actually listening — not just processing one step at a time.
+
+### 10. Per-question disk checkpointing
+
+Every interview file writes a sub-step marker to `~/claude-wizard-draft/wizard_progress.md` after each question is answered or each section completes (e.g., `step_04_NOTIF-2: complete | <timestamp>`). This extends the step-level completion markers to sub-step granularity. If a session ends mid-step, the next session's sub-step resume check in each file reads these markers and skips to the first incomplete question rather than restarting the entire step. This ensures no answered question is re-asked after a crash or autocompaction event.
 
 ---
 

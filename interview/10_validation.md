@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 10_validation.md. CREDENTIALS_CONFIRMED = true. Read the staging file and technical architecture document, then begin the input validation phase."
+> "Resume wizard from 10_validation.md. CREDENTIALS_CONFIRMED = true. Read the staging file and technical architecture document, then continue from where you left off."
 
 Do not begin GATE-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_10_*` (e.g., `step_10_GATE-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_10: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -69,6 +77,8 @@ Present the proposed input type inventory. For each input: what it is, why it ne
 - If an input source is uncertain: mark it as pending. Note it clearly. It must be resolved before the system runs fully.
 - **If your analysis produces zero external input types** (the system processes only internally generated data with no external sources or user inputs at the system boundary): present this to the user: "Based on your vision and architecture, your system receives all data internally — no external sources or user-provided inputs cross the system boundary. Is that right?" If confirmed, write `VALIDATION_CONFIGURED = true` and `INPUT_TYPE_COUNT = 0` to the staging file. Skip GATE-2 (no domain areas to configure sensitivity for). Proceed to GATE-3 and GATE-4 (the override and pushback explanations still apply to internal validation). Note that input types can be added later when integrations are expanded.
 
+Write sub-step marker: Append `step_10_GATE-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## GATE-2 — Domain sensitivity configuration [DYNAMIC]
@@ -101,6 +111,8 @@ For each domain area in the confirmed vision, approach, and agent roster: propos
 
 Write all confirmed settings to `/quality/validation_gate_config.md` after GATE-2 is complete (see disk write section below).
 
+Write sub-step marker: Append `step_10_GATE-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 ---
 
 ## GATE-3 — Override behavior [EXPLANATION]
@@ -114,6 +126,8 @@ Write all confirmed settings to `/quality/validation_gate_config.md` after GATE-
 > Over time, the system learns what you normally accept in each area and gets better at telling the difference between a real problem and a pattern you've already signed off on.
 
 **Wait for any questions, then proceed.**
+
+Write sub-step marker: Append `step_10_GATE-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -130,6 +144,8 @@ Write all confirmed settings to `/quality/validation_gate_config.md` after GATE-
 > The first kind protects you from silent failures. The second keeps you in control without stopping work unnecessarily.
 
 **Wait for any questions, then proceed.**
+
+Write sub-step marker: Append `step_10_GATE-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -174,6 +190,8 @@ Write an audit trail entry: `Input type inventory confirmed during wizard setup 
 > Next we'll configure how the system handles errors and quality issues.
 
 Update staging file: VALIDATION_CONFIGURED = true
+
+Write sub-step marker: Append `step_10_WRITE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

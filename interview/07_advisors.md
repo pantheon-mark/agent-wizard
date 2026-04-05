@@ -19,9 +19,17 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 07_advisors.md. APPROACH_CONFIRMED = true. Read the vision document, approach document, and staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then begin ADV-1."
+> "Resume wizard from 07_advisors.md. APPROACH_CONFIRMED = true. Read the vision document, approach document, and staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then continue from where you left off."
 
 Do not begin ADV-1 until you are confident the full phase will complete before compaction risk.
+
+---
+
+## Sub-step resume check
+
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_07_*` (e.g., `step_07_ADV-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+
+If all sub-step markers for this step are present but the step-level marker (`step_07: complete`) is not, proceed directly to the success condition.
 
 ---
 
@@ -64,6 +72,8 @@ Store: ADVISORS = list of confirmed advisors, each with role/name and domain. St
 
 Update staging file.
 
+Write sub-step marker: Append `step_07_ADV-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
 **If zero advisors confirmed (user removed all proposed advisors):** Skip ADV-2 through ADV-4 entirely. Store ADVISOR_COUNT = 0 and ADVISORS_SEEDED = true in the staging file. Say:
 
 > No advisors for now — that's fine. If you identify someone later whose expertise would be useful, you can add them at any time by telling the system "add an advisor." The system will walk you through the same setup.
@@ -87,6 +97,8 @@ After the advisor list is confirmed, explain how the system will work with those
 > I'll always tell you which approach I'm recommending for each decision.
 
 No answer required. This is informational only. If the user has questions, answer them and move on.
+
+Write sub-step marker: Append `step_07_ADV-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -125,6 +137,8 @@ and apply these entries at Level 3 and above.
 Then write the header entries below the separator.
 
 Update the staging file with the number of advisors seeded.
+
+Write sub-step marker: Append `step_07_ADV-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -181,6 +195,8 @@ Write an audit log entry for each advisor identified:
 > Advisor identified during wizard setup — role/name: [role or name], domain: [domain], knowledge base header entry seeded, interview guide written to [file path]
 
 Update staging file: ADVISORS_SEEDED = true
+
+Write sub-step marker: Append `step_07_ADV-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
