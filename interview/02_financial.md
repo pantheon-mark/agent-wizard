@@ -25,6 +25,15 @@ Do not begin FIN-1 until you are confident the full phase will complete before c
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 3 of 16 — Financial setup**
+> We'll set spending limits so your system knows its boundaries.
+
+---
+
 ## FIN-1 — Plan type identification
 
 **Ask the user:**

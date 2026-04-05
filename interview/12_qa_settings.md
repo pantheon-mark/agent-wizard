@@ -25,6 +25,15 @@ Do not begin QA-1 until you are confident the full phase will complete before co
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 13 of 16 — Quality settings**
+> We'll set up your system's quality controls and how it monitors its own work.
+
+---
+
 ## How to run this phase
 
 QA-1, QA-3, and QA-4 require specific user choices. QA-2 is a brief preference capture — no action is taken on it now. Work through them in order.

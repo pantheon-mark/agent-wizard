@@ -25,6 +25,15 @@ Do not begin NOTIF-7 until you are confident the full phase will complete before
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 5 of 16 — Notifications**
+> We'll set up how your system reaches you — alerts for urgent things, digests for everything else.
+
+---
+
 ## NOTIF-7 — Stakeholder identification
 
 **Ask the user:**

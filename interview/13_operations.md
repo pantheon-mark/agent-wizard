@@ -25,6 +25,15 @@ Do not begin CONC-1 until you are confident the full phase will complete before 
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 14 of 16 — Operations**
+> Last set of preferences — how the system behaves day to day.
+
+---
+
 ## How to run this phase
 
 This phase sets operational behavior. Three technical thresholds (CONC-1 retry threshold, CONC-2 gate conflict timeout, START-1 deferred alert limit) are **silent defaults** — the user has no basis for choosing these values and the recommendations are accepted >90% of the time. They are derived from the system profile and presented as a summary, not asked as questions.

@@ -25,6 +25,15 @@ Do not begin AP-1 until you are confident the full phase — including draft, re
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 7 of 16 — Approach**
+> I'll draft how your system will work based on everything you've told me so far. No new questions — just review and confirm.
+
+---
+
 ## What the approach document is
 
 The approach document is the solution brief — how the system described in the vision document will actually work. It bridges vision ("what and why") and architecture ("what agents, what structure"). It is derived entirely from what the user has already said; nothing new is requested here.

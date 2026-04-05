@@ -25,6 +25,15 @@ If it is: write the current staging file to disk, give the user the following in
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 9 of 16 — System architecture**
+> I'll show you how the pieces fit together — agents, workflows, and permissions.
+
+---
+
 ## How to run this phase
 
 All five steps in this phase follow the same pattern: Claude derives and presents, the user confirms or adjusts. The user is not asked to make architectural decisions — only to confirm that Claude's understanding of their work matches reality. When the user corrects something, update the model and continue.

@@ -25,6 +25,15 @@ Do not begin DOC-1 until you are confident the full phase will complete before c
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 15 of 16 — Document management**
+> A quick overview of how your system keeps its own documentation current. Almost there.
+
+---
+
 ## DOC-1 — Impact map [EXPLANATION]
 
 **Say:**

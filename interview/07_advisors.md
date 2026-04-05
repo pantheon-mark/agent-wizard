@@ -25,6 +25,15 @@ Do not begin ADV-1 until you are confident the full phase will complete before c
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 8 of 16 — Advisors**
+> We'll identify the people whose expertise your system should draw on.
+
+---
+
 ## ADV-1 — Propose advisor types [DYNAMIC]
 
 Before speaking, read the confirmed vision document and approach document. Identify the domain, industry, data sources, and business activities the system will handle. Derive the advisor list from the user's actual use case — propose advisors whose expertise matches the decisions this specific system will face. Do not default to financial and legal advisors unless the vision document describes financial or legal work. A personal/caregiving system may need a medical professional or care coordinator; a real estate system may need a property manager or tax advisor; a creative project may need no traditional advisors at all.

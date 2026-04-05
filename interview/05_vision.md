@@ -25,6 +25,15 @@ If it is: write the current staging file to disk, give the user the following in
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 6 of 16 — Your vision**
+> This is the heart of the interview — we'll define what your system is going to do and why. Take your time here.
+
+---
+
 ## How to run this interview
 
 The six questions are conversational — not a form. The user may answer in any order, blend categories, or volunteer information across multiple categories in a single answer. Accept everything. Do not redirect the user or ask them to stay on topic.

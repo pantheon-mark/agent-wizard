@@ -25,6 +25,15 @@ Do not begin CLOSE-ASSEMBLY until you are confident the full phase will complete
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 16 of 16 — Wrapping up**
+> We'll assemble your project, set up your backup, and hand you the keys to start building.
+
+---
+
 ## How to run this phase
 
 The closing sequence has four parts:

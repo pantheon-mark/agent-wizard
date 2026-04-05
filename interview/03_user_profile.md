@@ -25,6 +25,21 @@ Do not begin UP-1 until you are confident the full phase will complete before co
 
 ---
 
+## Step opening — progress, preview, and orientation
+
+**Say:**
+
+> **Step 4 of 16 — Getting to know you**
+> I'll learn how you like to work so the system matches your style.
+>
+> Before we dive in — two things to know:
+>
+> This whole process takes about an hour, though it can vary. The wizard saves everything as we go — you can close it and come back anytime without losing your progress. Feel free to take a break whenever you need one.
+>
+> Also — these are conversation starters, not a form. Feel free to ask me to clarify anything, push back on something, or share more than what I asked. We'll work through it together.
+
+---
+
 ## How to conduct this section
 
 These are five conversational questions, not a form. Ask them in order, but let the user's answers flow naturally — they may volunteer information that covers multiple dimensions in one response. If that happens, note what was captured and confirm before moving on.

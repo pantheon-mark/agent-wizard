@@ -25,6 +25,15 @@ Do not begin P1-1 until you are confident the full phase will complete before co
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 2 of 16 — Project basics**
+> Two quick questions — your project name and what it's going to do for you.
+
+---
+
 ## Step 0 — Resume check (run before asking any questions)
 
 Before P1-1, check whether a prior wizard session exists:

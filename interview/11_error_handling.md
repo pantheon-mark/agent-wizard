@@ -25,6 +25,15 @@ Do not begin ERR-1 until you are confident the full phase will complete before c
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 12 of 16 — Error handling**
+> We'll decide how the system tells you when something goes wrong.
+
+---
+
 ## How to run this phase
 
 ERR-1 is a genuine personal preference — the user chooses notification verbosity from rendered examples. ERR-2 (retry threshold) is a **silent default** — the recommendation is accepted >90% of the time and the user has no basis for choosing a different value. It is set automatically and presented as an informational note, not a question. ERR-3 is an explanation the user confirms they understand. Work through them in order.

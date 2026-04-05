@@ -25,6 +25,15 @@ Do not begin GATE-1 until you are confident the full phase will complete before 
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 11 of 16 — Input validation**
+> We'll configure how carefully the system checks incoming data before acting on it.
+
+---
+
 ## How to run this phase
 
 Read the vision document, approach document, and technical architecture document before speaking. Build a complete candidate list of input types and domain areas from everything you find — every source of data, every user action, every external feed the agents will receive.

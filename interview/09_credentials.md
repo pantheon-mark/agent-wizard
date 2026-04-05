@@ -25,6 +25,15 @@ Do not begin CRED-1 until you are confident the full phase will complete before 
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 10 of 16 — Credentials**
+> We'll set up the keys and logins your system needs to connect to external services.
+
+---
+
 ## How to run this phase
 
 Read the vision document, approach document, and technical architecture document before speaking. Build a complete candidate credential list from everything you find — data sources, APIs, integrations, external services, any system the agents will connect to.

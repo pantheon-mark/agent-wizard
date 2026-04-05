@@ -25,6 +25,15 @@ Under normal conditions this check will always pass — proceed directly to Step
 
 ---
 
+## Step opening — progress and preview
+
+**Say:**
+
+> **Step 1 of 16 — Environment check**
+> First, I'll make sure everything your system needs is installed. This is quick.
+
+---
+
 ## Step 0 — Permission prompts orientation [user-facing, run first]
 
 Before running any checks, say this to the user:

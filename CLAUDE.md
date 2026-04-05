@@ -101,6 +101,16 @@ Every agent prompt file the wizard produces must include this constraint verbati
 
 Every agent invocation script must pass foundational document paths as explicit context inputs. An agent missing either the constraint or the invocation path is incomplete.
 
+### 9. Forward-offered information capture
+
+When the user mentions something during any step that maps to a future wizard step — for example, mentioning external systems during the user profile (step 03) that are relevant to credentials (step 09) or architecture (step 08) — capture it immediately:
+
+1. Write the information to the staging file under an `## Early mentions` section, tagged with the step number it relates to (e.g., `[→ step 09] User mentioned using Salesforce API for client data`).
+2. Do not interrupt the current conversation to acknowledge or discuss it — note it silently.
+3. When the tagged step arrives, read the early mentions for that step number and use them as a starting point: "You mentioned earlier that [X] — let me build on that" rather than asking the question from scratch.
+
+This prevents the user from having to repeat themselves across steps and makes the wizard feel like it is actually listening — not just processing one step at a time.
+
 ---
 
 ## What the wizard produces
