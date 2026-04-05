@@ -4,6 +4,8 @@
 
 *Tests run automatically on the triggers listed below. Results are written to `/logs/qa_log.md`.*
 
+*Note: Wizard testing framework entries (Gates 1–4, mode sequencing, exit criteria) are build-time entries that govern wizard development — they do not apply to the running system and are maintained in the build project's testing framework, not here.*
+
 ---
 
 ## Test Triggers
@@ -146,6 +148,11 @@
 | A-45 | Failed/incomplete checkpoints never auto-pruned | Failed or incomplete checkpoints retained until manually resolved |
 | A-46 | Step idempotency enforced even with partial checkpoint | Re-running a COMPLETE step produces the same output as the original |
 | A-47 | SG-1 and SG-3 stacking behavior | When both context threshold (SG-1) and complexity signals (SG-3) trigger, SG-1 pre-flight runs first and splits into sub-tasks; each sub-task then runs SG-3 complexity assessment independently |
+| A-48 | Every agent session logs a stop reason on termination | No session ends without a `stop_reason` field in the session log |
+| A-49 | Stop reason correctly assigned per taxonomy | `completed` for task finished, `budget_exceeded` for budget cap, `error` for unrecoverable error, `timeout` for time limit, `user_cancelled` for cancellation, `deferred` for agent-chosen deferral |
+| A-50 | Deferred stop reason distinct from completed | `deferred` means agent stopped before finishing; `completed` means agent finished |
+| A-51 | QA agent reads stop reasons as first-pass signal | `budget_exceeded` and `error` stop reasons trigger investigation check by QA agent |
+| A-52 | Orchestrator responds appropriately to stop reasons | `budget_exceeded` triggers continuation or escalation; `error` triggers investigation before retry |
 
 ---
 
@@ -213,7 +220,7 @@
 
 | # | Test | Pass condition |
 |---|------|---------------|
-| S-1 | Startup reads correct files in order | All five startup files read in correct order before status is presented |
+| S-1 | Startup reads correct files in order | All six startup files read in correct order before status is presented |
 | S-2 | Working files contain only active items | No resolved items in working files at startup |
 | S-3 | Critical alert tight loop enforces no-proceed | User cannot skip to briefing while Critical alert is unresolved |
 | S-4 | Blocked critical alert resurfaces at next startup | Unresolved Critical alert leads next session |
@@ -227,6 +234,15 @@
 | S-12 | Items archived immediately on resolution | Resolved items moved to archive immediately — not batched to session end |
 | S-13 | Notification log rolling archive runs daily | 7-day rolling window enforced; older entries moved to archive |
 | S-14 | Full status briefing only after adjudication | Full briefing not presented until all Critical and deferred alerts are adjudicated |
+| S-15 | Runtime health check runs every session | Health check runs after orientation and before work begins — not skipped |
+| S-16 | Health check validates all credentials | All credentials in `credentials_registry.md` validated — expired or invalid detected |
+| S-17 | Health check validates external service integrations | All external integrations checked for reachability — unreachable services detected |
+| S-18 | Health check validates agent prompt files | All agent prompt files confirmed present and intact — missing or corrupted detected |
+| S-19 | Health check validates no configuration drift | System files match expected state — drift detected |
+| S-20 | Health check partial failure blocks dependent tasks only | Independent tasks proceed; only dependent tasks blocked |
+| S-21 | Health check full failure blocks all work | All work blocked with plain-language explanation of all failures |
+| S-22 | Health check results recorded in session log | Results recorded as standing section in session log — not a separate file |
+| S-23 | Health check failure message includes plain-language action instructions | No raw error output — user sees actionable instructions |
 
 ---
 
@@ -251,14 +267,15 @@
 | V-15 | External source failure logged and registry updated | External source validation failure logged at High severity and source registry updated |
 | V-16 | Repeated failures trigger source health investigation | Repeated external source failures trigger investigation workflow |
 | V-17 | Advisor interview guide written to disk | Generated interview guide written to `/advisor/interview-guides/` |
-| V-18 | Advisor knowledge base entry written with required fields | Entry contains advisor, date, context, rule, conditions, review flag, and source decision |
-| V-19 | Advisor knowledge base entry applied correctly | Agent applies rule when situation matches, writes audit log entry |
-| V-20 | Review-flagged entry surfaces on correct date | Entry appears in digest on configured review date — not before, not silently missed |
-| V-21 | Simple path closes pending decision correctly | Simple path closes with user summary input — no interview guide required |
-| V-22 | No-rule semantic input routes to human review | Input with no applicable rules library match routes to human review queue |
-| V-23 | Validation gate config written to disk | `validation_gate_config.md` present and correct after wizard completes |
-| V-24 | All validation events written to validation log | Every gate event written to `/logs/validation_log.md` |
-| V-25 | Gate silent at Level 3+ for calibrated domains | Structural passes and calibrated-domain soft pushbacks operate silently at Level 3 and above |
+| V-18 | Transcript extraction produces structured knowledge base entries | Structured entries produced with speaker labels and timestamps for `advisor_knowledge_base.md` |
+| V-19 | Advisor knowledge base entry written with required fields | Entry contains advisor, date, context, rule, conditions, review flag, and source decision |
+| V-20 | Advisor knowledge base entry applied correctly | Agent applies rule when situation matches, writes audit log entry |
+| V-21 | Review-flagged entry surfaces on correct date | Entry appears in digest on configured review date — not before, not silently missed |
+| V-22 | Simple path closes pending decision correctly | Simple path closes with user summary input — no interview guide required |
+| V-23 | No-rule semantic input routes to human review | Input with no applicable rules library match routes to human review queue |
+| V-24 | Validation gate config written to disk | `validation_gate_config.md` present and correct after wizard completes |
+| V-25 | All validation events written to validation log | Every gate event written to `/logs/validation_log.md` |
+| V-26 | Gate silent at Level 3+ for calibrated domains | Structural passes and calibrated-domain soft pushbacks operate silently at Level 3 and above |
 
 ---
 
@@ -344,6 +361,7 @@
 | G-15 | Log rotation commits archive and new file atomically | Rotation produces a single atomic commit with both the archive and the new file |
 | G-16 | Rotated logs land in /archive/logs/ with timestamp | Rotated file appears at `/archive/logs/` with correct timestamp suffix |
 | G-17 | Archived log cleanup requires user approval | Archived log deletion surfaced in digest and requires explicit user approval |
+| G-18 | Daily scheduled commit fires when no session occurs | Log files committed by daily scheduled commit when no session has occurred that day |
 
 ---
 
@@ -381,12 +399,15 @@
 | W-2 | Orientation moment cannot be skipped | First build prompt not presented until all five components delivered |
 | W-3 | Every build prompt written to disk before display | Build prompt file present at `/wizard/build_prompts/` before prompt is shown to user |
 | W-4 | Build prompt files named descriptively | Files named consistently (e.g., `agent_01_build_prompt.md`) — no unnamed files |
-| W-5 | co-protected-workflows.md present after wizard | File present in `/quality/` and pre-populated with all Tier 1 action-type patterns |
-| W-6 | QA agent reads co-protected-workflows.md at every security audit | Read confirmed in agent invocation script |
-| W-7 | co-protected-workflows.md write-protected from agents | No agent at any level can modify this file |
-| W-8 | GitHub remote correctly set if configured | `git remote -v` confirms remote origin set to user's private repo |
-| W-9 | Initial push to remote completed at wizard close | Remote repo contains initial commit if GitHub was configured |
-| W-10 | System project created at ~/[project-folder-name] | Project not inside ~/Documents/ or other large parent directory |
+| W-5 | Superpowers plugin installed and active after wizard build | Methodology enforcement layer confirmed present before first agent build begins |
+| W-6 | co-protected-workflows.md present after wizard | File present in `/quality/` and pre-populated with all Tier 1 action-type patterns |
+| W-7 | QA agent reads co-protected-workflows.md at every security audit | Read confirmed in agent invocation script |
+| W-8 | Artifact matching co-protected pattern flagged for irreversible action gate | Agent-produced artifact matching a pattern in `co-protected-workflows.md` flagged regardless of originating skill's classification |
+| W-9 | co-protected-workflows.md write-protected from agents | No agent at any level can modify this file |
+| W-10 | GitHub remote correctly set if configured | `git remote -v` confirms remote origin set to user's private repo |
+| W-11 | Initial push to remote completed at wizard close | Remote repo contains initial commit if GitHub was configured |
+| W-12 | System project created at ~/[project-folder-name] | Project not inside ~/Documents/ or other large parent directory |
+| W-13 | Wizard staging file at correct location | Staging file created at `~/claude-wizard-draft/wizard_session_draft.md` — not inside `~/Documents/` |
 
 ---
 
@@ -422,7 +443,7 @@
 | F-8 | Soft gate at Levels 3-4 above threshold | Intensive operations above threshold surface for approval at Levels 3-4 |
 | F-9 | Cost/efficiency log written after every agent run | Agent, tokens, and cumulative total updated after each run |
 | F-10 | Phase-gate review runs before phase advancement proposal | Review not skippable |
-| F-11 | Phase-gate covers all foundation documents | All five foundation documents checked for currency and correctness |
+| F-11 | Phase-gate covers all 7 documents | All 7 documents checked for currency and correctness |
 | F-12 | Phase advancement blocked until findings cleared | Advancement blocked until all must-resolve findings are confirmed resolved |
 | F-13 | Event-triggered review fires on correct triggers | Review fires for significant error cluster, major integration, security incident, cost deviation |
 | F-14 | "Act now" findings route to advisor queue | Act-now findings trigger Tier 1 decision and real-time High alert |
@@ -431,6 +452,13 @@
 | F-17 | Phase-gate retrospective runs | Calibration signal captured as part of every phase-gate |
 | F-18 | Calibration feedback writes rules library entry | Rules library entry written for affected finding type after feedback |
 | F-19 | Semi-annual backstop review fires at cadence | Review fires at correct six-month interval — not skipped |
+| F-20 | Per-agent session budget set at invocation | Budget amount derived from spend ceiling and agent workload fraction |
+| F-21 | Agent approaching budget initiates wrap-up mode | Progress summarized, state persisted, remaining work reported |
+| F-22 | Agent exceeding budget terminates gracefully | Not a crash or silent stop — graceful termination with state preserved |
+| F-23 | First budget-exceeded triggers auto-continue | New session started automatically — informational notification sent, no user action required |
+| F-24 | Second budget-exceeded on same task triggers escalation | Orchestrator stops, user receives progress summary and options |
+| F-25 | Budget-exceeded stop reason logged correctly | Session log `stop_reason` field set to `budget_exceeded` per stop reason taxonomy |
+| F-26 | Per-agent-build review can flag misaligned budget fractions | Budget too high or too low for agent's expected workload flagged in review |
 
 ---
 
@@ -509,6 +537,95 @@
 | O-4 | Monthly review reads all three log sources | Error log, QA log, and cost/efficiency log all read — none skipped |
 | O-5 | Monthly review produces digest entry | Plain-language summary of top failure types, cost drivers, and friction patterns |
 | O-6 | Monthly review does not trigger real-time alert | Review digest entry only — no real-time alert unless patterns warrant escalation through normal severity rules |
+
+---
+
+### Model-as-reviewer quality reviews
+
+| # | Test | Pass condition |
+|---|------|---------------|
+| REV-1 | Post-wizard review runs as INTERNAL step before CLOSE-13 | Review runs after last CLOSE explanation and before closing orientation — not skipped, not user-optional |
+| REV-2 | Post-wizard review uses High tier model | Model resolved from tier mapping in `project_instructions.md` |
+| REV-3 | Post-wizard review sub-agent receives fresh context | No carry-over from wizard interview conversation |
+| REV-4 | Post-wizard review reads all required inputs | All 5 foundation documents, system config files, agent roster, skill files, invocation scripts, cron config, CLAUDE.md, and session_bootstrap.md user answers |
+| REV-5 | Post-wizard review checks all 9 criteria | Foundation document quality, architecture soundness, technical feasibility, vision-to-output alignment, agent roster/skill fitness, configuration consistency, security posture, completeness, non-technical readiness |
+| REV-6 | Post-wizard review produces structured findings | Each finding includes: what the issue is, why it matters, which criterion, and whether mechanical or judgment |
+| REV-7 | Post-wizard review mechanical findings auto-fixed | Fixed with plain-language explanation — no user input required |
+| REV-8 | Post-wizard review judgment findings presented one at a time | User resolves conversationally in plain language |
+| REV-9 | Post-wizard review is a soft gate | User can say "that's fine, move on" — finding logged but does not block wizard completion |
+| REV-10 | Post-wizard review technical feasibility check | Anything infeasible within stated constraints flagged — spend ceiling, available integrations, model capabilities, scale tier |
+| REV-11 | Post-wizard review token budget checked before spawning | If input exceeds threshold, inputs prioritized by value-per-token ranking (foundation docs first), scoped review logged |
+| REV-12 | Post-wizard review input assembled as structured manifest | Provenance labels: file identity, what produced it, what to focus on |
+| REV-13 | Post-wizard review is idempotent | Read-only — can be safely re-run on session resume without side effects |
+| REV-14 | Post-wizard review failure triggers one retry | Second failure: wizard logs failure, informs user, proceeds to CLOSE-13 without review |
+| REV-15 | Post-wizard review runs after Gate 2 health check | Health check first (structural, faster, cheaper), model review second (semantic) |
+| REV-16 | Per-agent review runs after each agent build | Runs after build completes and before agent goes live — not skipped, not user-optional |
+| REV-17 | Per-agent review uses High tier model with fresh context | Adversarial prompt, fresh context, High tier |
+| REV-18 | Per-agent review checks all 4 criteria | Agent-readiness (routing phrase, output format, error codes, composable output), permission/scope alignment, integration correctness, skill quality |
+| REV-19 | Per-agent review includes upstream/downstream agent specs | Integration correctness check has information needed to verify format matching |
+| REV-20 | Per-agent review scoped to agent implementation | Does not re-review system design or foundation documents |
+| REV-21 | Per-agent review mechanical findings auto-fixed with consequence language | Judgment findings include concrete consequence (e.g., "downstream agent will likely fail") |
+| REV-22 | Per-agent review is a soft gate | Same user-has-final-say principle as post-wizard review |
+| REV-23 | Per-agent review same failure/retry/idempotency behavior | Same patterns as post-wizard review — one retry, proceed on second failure |
+| REV-24 | Phase-gate review specifies High tier model | Fresh-context adversarial review added to existing phase-gate process |
+| REV-25 | Phase-gate review checks 5 criteria | System health trajectory, agent performance, configuration drift, security posture, readiness for next level |
+| REV-26 | Phase-gate review reads all required inputs | All 7 documents, agent roster, recent logs (error, QA, cost), and rules library |
+| REV-27 | Phase-gate review finding routing uses existing categories | "Act now" routes to advisor queue as Tier 1; "note for phase-gate" stages in `architectural_review_staging.md` |
+| REV-28 | Phase-gate review same failure/retry behavior | One retry; proceed without High tier review on failure (existing system self-review still runs) |
+| REV-29 | All three review prompts are first-class wizard artifacts | Written and tested in `/wizard/review_prompts/` with same rigor as interview files |
+
+---
+
+### Idempotency guidance (external integrations)
+
+| # | Test | Pass condition |
+|---|------|---------------|
+| ID-1 | System CLAUDE.md includes idempotency principle | "Log what you did, check before repeating" for external state-modifying operations |
+| ID-2 | Agent build prompts include idempotency guidance | Builder guided to consider idempotency for each external integration |
+| ID-3 | Per-agent review checks idempotency for external integrations | Integration correctness criterion includes: "does the implementation handle retry safely?" |
+| ID-4 | Agents with external integrations log operations with retry-check detail | Sufficient detail logged to determine on retry whether operation already completed |
+| ID-5 | Tier 1 co-protected workflows flags high-stakes external operations | Payments, irreversible actions flagged independently of idempotency guidance |
+
+---
+
+### Future items register
+
+| # | Test | Pass condition |
+|---|------|---------------|
+| FI-1 | future_items.md present after wizard build | Three sections present: date-triggered, condition-triggered, monitoring cadence |
+| FI-2 | Orchestrator checks future_items.md at every session close | Check not skipped |
+| FI-3 | Date-triggered items surfaced when date reached or passed | Not missed if system was offline on the exact date |
+| FI-4 | Condition-triggered items surfaced when condition becomes true | Checked against current system state |
+| FI-5 | One-time triggered items not re-surfaced | Marked as triggered after first surfacing |
+| FI-6 | Recurring monitoring cadence items rescheduled | Next due date updated after surfacing |
+| FI-7 | Due items pulled into next session context | Session bootstrap updated with due items |
+| FI-8 | System CLAUDE.md includes future items operating rule | Rule: add to `future_items.md` when work reveals time-gated follow-up, condition-triggered dependency, or monitoring cadence |
+
+---
+
+### Session close enforcement
+
+| # | Test | Pass condition |
+|---|------|---------------|
+| SCE-1 | Session close updates all four files in order | SESSION_STATE.md, session_bootstrap.md, work queue, session log — in order |
+| SCE-2 | Session close runs on abnormal termination | Close runs for error, budget exceeded, or user abort — not skipped |
+| SCE-3 | Orchestrator reserves budget/context for close | Task work stops before exhaustion to ensure close completes |
+| SCE-4 | SESSION_STATE.md set to CLEAR when no task in progress | Correct state written at close |
+| SCE-5 | Session log close entry includes stop reason | Stop reason from taxonomy included in close entry |
+| SCE-6 | Incomplete close logged at High severity | Which files were not updated and why — logged |
+
+---
+
+### Voice and style preferences
+
+| # | Test | Pass condition |
+|---|------|---------------|
+| VS-1 | voice_and_style.md present after wizard build | Seeded from user profile, notification verbosity, QA reporting style, and vision document voice |
+| VS-2 | Wizard seeds voice_and_style.md without new questions | Derived from existing wizard answers — no additional interview questions |
+| VS-3 | User-facing agents consult voice_and_style.md | Confirmed in invocation scripts for agents producing user-facing or external-facing output |
+| VS-4 | Internal-only agents do not receive voice_and_style.md | Context scoping principle applied — internal agents excluded |
+| VS-5 | User style preference updates voice_and_style.md | Orchestrator captures formatting or style preferences progressively |
+| VS-6 | voice_and_style.md includes starter note | Note reads: "These are starting defaults... tell it when you like or don't like how something looks" |
 
 ---
 

@@ -115,6 +115,7 @@ digests/
 wizard/
 wizard/build_prompts/
 wizard/review_prompts/
+wizard/skills/
 advisor/
 advisor/interview-guides/
 ```
@@ -135,6 +136,16 @@ For each file below: read the template, substitute values from the staging file,
 | `wizard/templates/root/pending_decisions.md` | `pending_decisions.md` | Empty structure |
 | `wizard/templates/root/manual.md` | `manual.md` | Static content — copy as-is |
 | `wizard/templates/root/gitignore_template` | `.gitignore` | Static baseline + CRED-2 entries |
+
+**`SESSION_STATE.md`** — not from a template. Create this file directly in the project root with the following content:
+
+```
+# Session State
+
+CLEAR
+```
+
+This file is required by Addition 7 (session close enforcement). The orchestrator updates it at every session close with current task state. Initial state is "CLEAR" — no task in progress. The health check (Check 2) verifies this file exists.
 
 **`.env`** — not from a template. Create an empty `.env` file. If credentials were configured during step 09, write the environment variable names as comments (no values — values were entered during CRED-2 and should already be in the file if the credential onboarding step wrote them). Verify `.gitignore` includes `.env` before this file is created.
 
@@ -231,6 +242,21 @@ For each file below: read the template, substitute values from the staging file,
 - `per_agent_review.md`
 - `phase_gate_review.md`
 
+**Skill templates:** Copy the three skill template files from `wizard/skills/` to the project's `wizard/skills/` directory (create the directory first):
+- `_index.md`
+- `skill_template_external.md`
+- `skill_template_internal.md`
+
+These templates are referenced by the system CLAUDE.md and used during agent build sessions to create skills. The `_index.md` file serves as the skill registry; the two template files define the structure for external-facing and internal skills respectively.
+
+### Name consistency — all personal names from staging data
+
+**This rule applies to every file written during assembly.** All personal names — the user's name, family member names, team member names, advisor names, any name that appears in any output file — must be read from the confirmed values in the staging file. Never generate or infer a name independently for any individual file. If a name appears in the vision document answers, the user profile, the advisor list, or any other staging data section, use that exact spelling everywhere.
+
+Before writing each file: read the relevant name values from the staging file. After writing each file: verify that every personal name in the file matches the staging data exactly. If a template contains a placeholder like `{{USER_NAME}}` or `{{FAMILY_MEMBER_1}}`, the substituted value must come from one source — the staging file — never from the model's own generation.
+
+This prevents the systematic name inconsistency where foundation documents get correct names but derived/operational documents get hallucinated alternatives (e.g., "Matt" instead of "Mark", "Sarah" instead of "Lauren").
+
 ### WI-011 — Constraint elevation to project_instructions.md
 
 During assembly, before writing `project_instructions.md`, scan the vision document answers in the staging file for critical constraints. Look for:
@@ -278,7 +304,7 @@ When writing `docs/voice_and_style.md`, derive initial values from existing wiza
 After all files are written, run a quick verification:
 
 1. **Count check:** verify the number of files created matches the expected count from the manifest above (adjust for conditional branches).
-2. **Critical file check:** verify these files exist and are non-empty: `CLAUDE.md`, `project_instructions.md`, `session_bootstrap.md`, `vision.md`, `approach.md`, `technical_architecture.md`, `.gitignore`, `.env`.
+2. **Critical file check:** verify these files exist and are non-empty: `CLAUDE.md`, `project_instructions.md`, `session_bootstrap.md`, `SESSION_STATE.md`, `vision.md`, `approach.md`, `technical_architecture.md`, `.gitignore`, `.env`.
 3. **Conditional check:** if `SESSION_COOKIES_NEEDED = true`, verify `security/session_cookies/` directory exists. If `CREDENTIAL_COUNT = 0`, verify `security/credentials_registry.md` exists but has no credential rows.
 4. **Model flag check:** verify `start-session.sh` contains `--model` with a resolved model name (not a placeholder). Verify the model name matches the High tier value in `project_instructions.md`.
 
