@@ -1,7 +1,7 @@
 # 15 — Closing Sequence
 
 ## What this file does
-Complete the wizard interview. Deliver plain-language behavior briefings (CLOSE-1 through CLOSE-3), assemble all project files from templates and staging data (CLOSE-ASSEMBLY), initialize git and make the initial commit (CLOSE-4), set up the GitHub remote backup (GH-1), deliver system management explanations (CLOSE-5 through CLOSE-12), present the mandatory closing orientation moment (CLOSE-13), and hand off the first agent build prompt (CLOSE-14). This is the final interview file.
+Complete the wizard interview. Assemble all project files from templates and staging data (CLOSE-ASSEMBLY), including the system guide written to disk. Initialize git and make the initial commit (CLOSE-4). Set up the GitHub remote backup (GH-1). Deliver a tight, action-oriented closing (CLOSE-13) with the first build prompt front and center (CLOSE-14), and point the user to the system guide and manual for reference. This is the final interview file.
 
 ## When this file runs
 After `14_document_review.md` completes. All configuration is confirmed. All documents are written to disk.
@@ -21,65 +21,24 @@ If it is: write the current staging file to disk, give the user the following in
 >
 > "Resume wizard from 15_close.md. All configuration is complete. All documents are on disk. Read the staging file and the project directory, then begin the closing sequence."
 
-Do not begin CLOSE-1 until you are confident the full phase will complete before compaction risk. **This is the longest file in the sequence — assess carefully.** If context is at all uncertain, clear and resume in clean context rather than risk compaction mid-orientation.
+Do not begin CLOSE-ASSEMBLY until you are confident the full phase will complete before compaction risk.
 
 ---
 
 ## How to run this phase
 
-The closing sequence has six parts:
+The closing sequence has four parts:
 
-1. **Behavior briefings** (CLOSE-1, CLOSE-2, CLOSE-3) — brief the user on what the system does when things go wrong.
-2. **Project assembly** (CLOSE-ASSEMBLY, internal) — read the staging file and all templates, write every output file to the project directory.
-3. **Initial commit** (CLOSE-4, internal) — initialize git and commit the completed wizard setup.
-4. **GitHub remote setup** (GH-1) — optional backup to a private GitHub repository.
-5. **How the system keeps itself current** (CLOSE-5 through CLOSE-12) — eight brief explanations delivered as a single block.
-6. **Orientation and handoff** (CLOSE-13, CLOSE-14) — the mandatory orientation moment and the first build prompt.
+1. **Project assembly** (CLOSE-ASSEMBLY, internal) — read the staging file and all templates, write every output file to the project directory, including the system guide.
+2. **Initial commit** (CLOSE-4, internal) — initialize git and commit the completed wizard setup.
+3. **GitHub remote setup** (GH-1) — optional backup to a private GitHub repository.
+4. **Closing and handoff** (CLOSE-13, CLOSE-14) — tight action-oriented closing with the first build prompt front and center.
 
 Work through these in order without skipping.
 
 ---
 
-## Part 1 — Behavior briefings
-
-**Say:**
-
-> Before we finish the setup, I want to walk you through a few things your system will do on its own — so nothing surprises you when it starts running.
-
-Then deliver CLOSE-1, CLOSE-2, and CLOSE-3 in sequence as a flowing briefing. Do not pause for responses between them unless the user interrupts.
-
----
-
-### CLOSE-1 — Auto-correct behavior [EXPLANATION]
-
-> **When the system finds a problem**, it will fix it if it safely can, ask for your approval if the fix touches something important, or ask you one specific question if it needs your judgment. It will never just tell you something is broken and leave you to figure out what to do.
-
----
-
-### CLOSE-2 — Log management [EXPLANATION]
-
-> **Your system keeps detailed logs** of everything it does. It will automatically manage those files — keeping them from getting too large and cleaning up old ones periodically. It will always ask you before permanently deleting anything. You'll see a note in your digest when any of this happens.
-
----
-
-### CLOSE-3 — Rollback [EXPLANATION]
-
-> **If something goes wrong and a previous state needs to be restored**, the system will identify what needs to change and walk you through it. For anything significant, it will always ask for approval before making changes.
-
----
-
-After CLOSE-3, pause briefly.
-
-**Say:**
-
-> Any questions on any of that before we move on?
-
-- If the user has questions: answer in plain language, drawing on examples specific to their system.
-- If they're ready to continue: proceed to CLOSE-ASSEMBLY.
-
----
-
-## Part 2 — Project assembly (CLOSE-ASSEMBLY) [INTERNAL]
+## Part 1 — Project assembly (CLOSE-ASSEMBLY) [INTERNAL]
 
 This step is internal. The user does not need to see the assembly process — they see one plain-language progress message. This is where every wizard-gathered value becomes a real file on disk.
 
@@ -218,6 +177,7 @@ This file is required by Addition 7 (session close enforcement). The orchestrato
 | `wizard/templates/docs/architectural_review_staging.md` | `docs/architectural_review_staging.md` | Empty structure |
 | `wizard/templates/docs/future_items.md` | `docs/future_items.md` | Monitoring cadence from wizard answers; deferred items from staging file (see WI-013 below) |
 | `wizard/templates/docs/voice_and_style.md` | `docs/voice_and_style.md` | Seeded from UP-1–5, ERR-1, QA-1, vision document voice (see below) |
+| `wizard/templates/docs/how_your_system_works.md` | `docs/how_your_system_works.md` | Static content — copy as-is |
 
 **Security files:**
 
@@ -304,7 +264,7 @@ When writing `docs/voice_and_style.md`, derive initial values from existing wiza
 After all files are written, run a quick verification:
 
 1. **Count check:** verify the number of files created matches the expected count from the manifest above (adjust for conditional branches).
-2. **Critical file check:** verify these files exist and are non-empty: `CLAUDE.md`, `project_instructions.md`, `session_bootstrap.md`, `SESSION_STATE.md`, `vision.md`, `approach.md`, `technical_architecture.md`, `.gitignore`, `.env`.
+2. **Critical file check:** verify these files exist and are non-empty: `CLAUDE.md`, `project_instructions.md`, `session_bootstrap.md`, `SESSION_STATE.md`, `vision.md`, `approach.md`, `technical_architecture.md`, `.gitignore`, `.env`, `docs/how_your_system_works.md`.
 3. **Conditional check:** if `SESSION_COOKIES_NEEDED = true`, verify `security/session_cookies/` directory exists. If `CREDENTIAL_COUNT = 0`, verify `security/credentials_registry.md` exists but has no credential rows.
 4. **Model flag check:** verify `start-session.sh` contains `--model` with a resolved model name (not a placeholder). Verify the model name matches the High tier value in `project_instructions.md`.
 
@@ -314,11 +274,11 @@ If any verification fails: stop, identify what is missing, and fix it before pro
 
 > Your project files are set up. Everything from the interview has been written to your project directory. Let me save a snapshot.
 
-Proceed to Part 3 (CLOSE-4).
+Proceed to Part 2 (CLOSE-4).
 
 ---
 
-## Part 3 — Initial commit (CLOSE-4) [INTERNAL]
+## Part 2 — Initial commit (CLOSE-4) [INTERNAL]
 
 This step is internal. Do not narrate it to the user in technical terms. One plain-language confirmation line is sufficient.
 
@@ -341,7 +301,7 @@ git commit -m "Wizard setup complete — [PROJECT_NAME] initial commit"
 
 ---
 
-## Part 4 — GitHub remote setup (GH-1) [FIXED — topic]
+## Part 3 — GitHub remote setup (GH-1) [FIXED — topic]
 
 GH-1 is optional but strongly recommended. It protects the user's work against hardware failure. A private GitHub repository is the default recommendation.
 
@@ -357,7 +317,7 @@ GH-1 is optional but strongly recommended. It protects the user's work against h
 
 > That's fine — your work is saved locally and every change is tracked in version control. You can connect to GitHub any time in the future by telling me "set up GitHub backup" at the start of a session.
 
-Record in staging file: `GITHUB_REMOTE = false`. Proceed to Part 5.
+Record in staging file: `GITHUB_REMOTE = false`. Proceed to Part 4.
 
 ---
 
@@ -423,169 +383,28 @@ Write `GITHUB_REMOTE_URL` to `project_instructions.md` under the system configur
 
 ---
 
-## Part 5 — How the system keeps itself current (CLOSE-5 through CLOSE-12)
+## Part 4 — Closing and handoff (CLOSE-13, CLOSE-14)
 
-Deliver these eight explanations as a single flowing briefing. Present them together, not as eight separate statements. Group them naturally:
-
-**Say:**
-
-> A few more things your system handles on its own:
-
----
-
-### CLOSE-5 — Session management [EXPLANATION]
-
-> **If you ever need to start a new session**, the system will tell you exactly what to do — it keeps everything needed to pick up right where you left off.
-
----
-
-### CLOSE-6 — Model tier management [EXPLANATION]
-
-> **The AI models your agents use** are kept current automatically — you don't need to manage this.
-
----
-
-### CLOSE-7 — Dependency updates [EXPLANATION]
-
-> **The tools your system depends on** are kept up to date automatically. If anything needs your attention, you'll hear about it in your digest.
-
----
-
-### CLOSE-8 — Document updates [EXPLANATION]
-
-> **Every time the system updates your documents**, your digest will explain what happened, why it changed, and what's different — so you always know what your documents say and why.
-
----
-
-### CLOSE-9 — QA behavior [EXPLANATION]
-
-> **Your QA agent automatically checks** the work your other agents produce. If it flags something, it will tell you in plain language what it found and wait for your decision before anything moves forward.
-
----
-
-### CLOSE-10 — Security audit [EXPLANATION]
-
-> **Your QA agent also checks** whether integrations and connections your agents build are set up safely — that they only access what they need to, and that they handle any personal information carefully.
-
----
-
-### CLOSE-11 — PII and log protection [EXPLANATION]
-
-> **Your agents keep detailed logs** of everything they do — but they're instructed never to write personal information into those logs. If they're working with customer records, they log something like "processed record [ID:4782]" — not the person's name or email.
-
----
-
-### CLOSE-12 — Blast radius pre-flight [EXPLANATION]
-
-> **Before your agents do anything**, they first declare exactly what they're planning to change. If the plan looks unusually broad for that agent, the system pauses and asks you to confirm before a single file is touched.
-
----
-
-After the full block:
-
-**Say:**
-
-> Any questions on any of that?
-
-- If the user has questions: answer in plain language.
-- If they're ready: proceed to Part 6.
-
----
-
-## Part 6 — Orientation moment and first build prompt
-
-### CLOSE-13 — Orientation moment [EXPLANATION]
+### CLOSE-13 — Layered closing [EXPLANATION]
 
 **This step is mandatory. It cannot be skipped or abbreviated.**
 
-Present the five-part orientation in order. Do not rush it. For a user finishing a 30–60 minute interview, this is the bridge to the next phase — they need to understand where they are and what happens next.
+The closing has three layers. Deliver them in order. The first layer is what matters most — the user's immediate next action. Keep it tight.
 
 ---
 
-**Part 1 — What we built in this session**
+**Layer 1 — Immediate: what to do next**
 
 **Say:**
 
-> Before we hand off the first build prompt, let me show you where things stand.
+> **Your wizard setup is complete.**
 >
-> **Here's what we built in this session:**
-
-Then list every artifact produced in plain language, no jargon. Derive the list from the actual staging file and project directory. Standard set:
-
-> - Your **vision document** — what this system is for and what it must never do
-> - Your **approach document** — how the system will achieve those goals
-> - Your **agent roster** — the [n] agents that will form your team, their roles, and how they're organized
-> - Your **project configuration** — notification settings, quality thresholds, credential inventory, validation rules, and all operational preferences
-> - Your **project directory** — set up and under version control[, backed up to GitHub] at this path:
->   `~/[PROJECT_FOLDER_NAME]/`
-
----
-
-**Part 2 — What's in your project folder right now**
-
-**Say:**
-
-> **Here's what's on disk right now:**
-
-List the actual files present in the project directory at this moment. Present them as a readable list without explaining every file — just name them simply. Example format:
-
-> - `vision.md` — your vision document
-> - `approach.md` — your approach document
-> - `technical_architecture.md` — agent roster and system design
-> - `project_instructions.md` — system configuration and settings
-> - `session_bootstrap.md` — how every session starts
-> - `.env` — your credentials (protected, never shared)
-> - `.gitignore` — prevents credentials from being committed
-> - `/quality/` — QA configuration and source registry
-> - `/logs/` — system activity logs
-
-Show the literal project path.
-
----
-
-**Part 3 — Where to find your prompts**
-
-**Say:**
-
-> **Every prompt I produce for you is saved here:**
+> Your project is at:
+> `~/[PROJECT_FOLDER_NAME]/`
 >
-> `~/[PROJECT_FOLDER_NAME]/wizard/build_prompts/`
->
-> If you ever close this window before copying a prompt, open that folder and you'll find it. Nothing is lost if a session ends unexpectedly.
+> **Here is the prompt to start your first agent build.** It's also saved at `wizard/build_prompts/agent_01_build_prompt.md` — so if you close this window, you won't lose it.
 
----
-
-**Part 4 — How the build process works from here**
-
-**Say:**
-
-> **Here's the full arc of what happens next:**
->
-> Your agent roster has **[n] agents** planned. Here's the build order:
->
-> 1. **[First agent name]** — [one-sentence role]
-> 2. **[Second agent name]** — [one-sentence role]
-> 3. [Continue for all agents in the roster]
->
-> We build them one at a time. Each agent is its own build session — I'll walk you through it step by step. After each agent is built, you'll review what it can do before we start the next one. Nothing runs automatically until you've confirmed it's ready.
->
-> This plan is saved in your project at `technical_architecture.md` — the agent roster section has the full list. If you ever want to check what's next or adjust the order, that's where to look.
->
-> Once all [n] agents are built and tested, the system moves into regular operation and you'll start receiving your digests.
-
-Derive the agent count and names from the confirmed agent roster in `technical_architecture.md` on disk. Use the roster order as the build order unless the orchestration model specifies a different starting point.
-
----
-
-**Part 5 — Preview of the first build prompt**
-
-**Say:**
-
-> **Here is the prompt to start your first agent build.** Paste this into Claude Code to begin.
->
-> *(The prompt is also saved to `wizard/build_prompts/agent_01_build_prompt.md` — open that file any time if you need it again.)*
-
-Then deliver CLOSE-14 immediately below.
+Then deliver CLOSE-14 immediately (the build prompt).
 
 ---
 
@@ -621,7 +440,35 @@ Then deliver CLOSE-14 immediately below.
 
 **Write this prompt to disk:** `[PROJECT_DIR]/wizard/build_prompts/agent_01_build_prompt.md`
 
-Write an audit trail entry: `Wizard setup complete. First build prompt written for [AGENT NAME]. Closing sequence delivered.`
+---
+
+**After the build prompt, continue with Layer 2.**
+
+---
+
+**Layer 2 — Reference: the build arc and where to look**
+
+**Say:**
+
+> **Here's the road ahead:** Your agent roster has **[n] agents** planned. We build them one at a time — each agent is its own session, and you'll review each one before the next begins. Once all [n] are built and tested, the system moves into regular operation and you'll start receiving your digests.
+>
+> **Three things to know:**
+>
+> - All your build prompts are saved at `wizard/build_prompts/` — if you ever close a session before copying a prompt, you'll find it there.
+> - Your project's `manual.md` covers setup basics and troubleshooting if you need them later.
+> - `docs/how_your_system_works.md` explains everything your system does automatically — how it handles errors, updates, security, and more. Read it whenever you're curious.
+>
+> You're ready to go. Paste the prompt above into a new session to start building your first agent.
+
+---
+
+**Layer 3 — Deep dive: on disk, not verbal**
+
+There is no Layer 3 delivery. The system guide (`docs/how_your_system_works.md`) is already on disk from the assembly step. The user reads it at their own pace. The wizard does not deliver behavior briefings verbally — they are written to disk where they can be referenced any time, rather than delivered in a moment when the user has just finished a long interview and is ready to act.
+
+---
+
+Write an audit trail entry: `Wizard setup complete. First build prompt written for [AGENT NAME]. System guide written to docs/how_your_system_works.md. Closing sequence delivered.`
 
 ---
 
@@ -647,7 +494,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-All CLOSE entries delivered. CLOSE-ASSEMBLY project assembly complete — all files written to disk, verification passed. CLOSE-4 git initialized and initial commit made. GH-1 complete (remote connected or user opted out, preference recorded). CLOSE-5 through CLOSE-12 system management briefings delivered. CLOSE-13 orientation moment delivered in full — all five parts present. First build prompt written to `/wizard/build_prompts/agent_01_build_prompt.md` and handed off to user. Audit trail entry written.
+CLOSE-ASSEMBLY project assembly complete — all files written to disk, verification passed, system guide written to `docs/how_your_system_works.md`. CLOSE-4 git initialized and initial commit made. GH-1 complete (remote connected or user opted out, preference recorded). CLOSE-13 layered closing delivered — build prompt front and center, reference pointers provided, briefings on disk. First build prompt written to `/wizard/build_prompts/agent_01_build_prompt.md` and handed off to user. Audit trail entry written.
 
 Update staging file: `WIZARD_COMPLETE = true`
 

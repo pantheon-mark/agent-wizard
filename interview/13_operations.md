@@ -1,7 +1,7 @@
 # 13 — Operations Settings
 
 ## What this file does
-Configure how the system behaves during operation: agent retry behavior, resource conflict handling, session startup preferences, drift analysis cadence, and scale tier. Claude recommends defaults based on the vision document and confirmed agent roster. Produces the scale tier entry in `technical_architecture.md` and `project_instructions.md`. Writes all configured values to the staging file.
+Configure how the system behaves during operation. Three technical thresholds (retry threshold, gate conflict timeout, deferred alert limit) are set as **silent defaults** from the system profile — the user has no basis for choosing these values. User-facing questions cover chunk confirmation preference, drift analysis cadence, and scale tier. Produces the scale tier entry in `technical_architecture.md` and `project_instructions.md`. Writes all configured values to the staging file.
 
 ## When this file runs
 After `12_qa_settings.md` completes and QA_CONFIGURED = true in the staging file.
@@ -27,82 +27,39 @@ Do not begin CONC-1 until you are confident the full phase will complete before 
 
 ## How to run this phase
 
-This phase covers four topic groups in order: concurrency and recovery (CONC-1, CONC-2), session startup behavior (START-1, START-2), drift and review cadences (DRIFT-1), and scale tier (SCALE-1 through SCALE-4). Work through them in sequence. All are configuration preferences — no disk artifacts are written until SCALE-4 is confirmed.
+This phase sets operational behavior. Three technical thresholds (CONC-1 retry threshold, CONC-2 gate conflict timeout, START-1 deferred alert limit) are **silent defaults** — the user has no basis for choosing these values and the recommendations are accepted >90% of the time. They are derived from the system profile and presented as a summary, not asked as questions.
 
-**Before starting:** Read the vision document and confirmed agent roster so you can tailor defaults and rationale to this specific system.
+The remaining topics require genuine user input: chunk confirmation preference (START-2), drift analysis cadence (DRIFT-1), and scale tier (SCALE-1 through SCALE-4). Work through them in sequence after presenting the auto-configured defaults. No disk artifacts are written until SCALE-4 is confirmed.
 
----
-
-## CONC-1 — Retry threshold [FIXED — topic]
-
-**Say:**
-
-> If one of your agents runs into a problem — a connection fails, a step doesn't complete — the system will try to fix it automatically before asking you.
->
-> **How many automatic attempts should it make before stopping and getting your attention?**
->
-> I'd recommend starting with **three attempts**. That's enough to handle brief interruptions like a slow API or a momentary network issue, without spinning for a long time before you find out something is wrong.
->
-> You can change this at any time.
-
-**Wait for answer.**
-
-- If the user accepts three: confirm "Three attempts — I'll escalate to you if it hasn't resolved by then."
-- If the user chooses a different number: confirm their choice and note that lower numbers mean earlier escalation and higher numbers mean more autonomous recovery attempts.
-- If the user asks what "fix it automatically" means: "The system diagnoses the failure, picks the most likely resolution, applies it, and checks whether the problem is gone. Each attempt follows that same cycle."
-
-Write the configured value to the staging file: `RETRY_THRESHOLD = [number]`.
+**Before starting:** Read the vision document, confirmed agent roster, and system profile (domain sensitivity from step 10, involvement level from step 03) to derive the silent defaults and tailor rationale to this specific system.
 
 ---
 
-## CONC-2 — Gate conflict timeout [FIXED — topic]
+## Auto-configured defaults — CONC-1, CONC-2, START-1 [SILENT DEFAULTS]
 
-**Before asking:** Read the vision document and agent roster. Assess workflow complexity:
-- **Simple:** Few agents, mostly sequential handoffs, low concurrency — propose **30 seconds**.
-- **Moderate:** Several agents, some parallel activity, shared resources — propose **2 minutes**.
-- **Complex:** Many agents, high concurrency, shared databases or external APIs accessed by multiple agents simultaneously — propose **5 minutes**.
+*These values are set automatically from the system profile. Do not ask the user — a non-technical user has no basis for choosing between these technical thresholds, and the recommendations are accepted >90% of the time.*
 
-**Say:**
+**Before presenting:** Read the vision document and confirmed agent roster. Assess workflow complexity for CONC-2:
+- **Simple** (few agents, mostly sequential handoffs, low concurrency): set `GATE_CONFLICT_TIMEOUT = 30 seconds`
+- **Moderate** (several agents, some parallel activity, shared resources): set `GATE_CONFLICT_TIMEOUT = 2 minutes`
+- **Complex** (many agents, high concurrency, shared databases or external APIs): set `GATE_CONFLICT_TIMEOUT = 5 minutes`
 
-> Your agents sometimes need to access the same resource — a file, a database, or an external service — at the same time. The system uses a queuing mechanism to coordinate this safely, so two agents aren't making conflicting changes simultaneously.
->
-> If one agent is waiting for access and it's taking longer than expected, how long should the system wait before flagging it for your attention?
->
-> Based on how your system is designed, I'd suggest **[recommended timeout]**. [One-sentence rationale — e.g., "Your agents mostly work in sequence, so a 30-second wait is long enough to catch a real problem without false alarms" or "With several agents running in parallel, 2 minutes gives the system room to work through normal queue wait times before escalating."]
->
-> Does that work for you, or would you prefer a different threshold?
-
-**Wait for answer.**
-
-- If the user accepts the recommendation: confirm the value and proceed.
-- If the user chooses differently: accept it without pushback and record the preference.
-- If the user is unsure: "Start with my recommendation — you can adjust it once the system is running and you can see how often conflicts come up."
-
-Write the configured value to the staging file: `GATE_CONFLICT_TIMEOUT = [value in seconds or minutes]`.
-
----
-
-## START-1 — Deferred alert threshold [FIXED — topic]
+Write all three values to the staging file:
+- `RETRY_THRESHOLD = 3`
+- `GATE_CONFLICT_TIMEOUT = [derived value from assessment above]`
+- `DEFERRED_ALERT_THRESHOLD = 3`
 
 **Say:**
 
-> When the system sends you an alert and you're not ready to deal with it right away, you can defer it — it stays in the queue and comes back at your next session.
+> Before we get into the questions that need your input, here's how I've configured the technical settings based on your system's design:
 >
-> If you keep deferring the same alert without resolving it, at some point the system should flag that it needs a real decision rather than another postpone.
+> - **Retry threshold:** 3 automatic attempts before escalating to you — enough to handle brief glitches without spinning on a real problem
+> - **Resource conflict timeout:** **[derived value]** — [one-sentence rationale from workflow complexity assessment, e.g., "your agents mostly work in sequence, so a 30-second wait catches real problems without false alarms"]
+> - **Deferred alert limit:** 3 deferrals before an alert is escalated as overdue — stops unresolved issues from sitting quietly in the queue
 >
-> **How many times should you be able to defer an alert before it gets escalated?**
->
-> This works alongside the stale decision threshold you set earlier ({{STALE_DECISION_THRESHOLD_DAYS}} days) — that one watches the clock on pending decisions, this one counts how many times you've actively postponed an alert. Between the two, nothing slips through the cracks quietly.
->
-> I'd recommend **three deferrals**. That gives you a few sessions to get to it naturally, but stops an unresolved issue from quietly sitting in the queue indefinitely.
+> These are tuned for your setup and adjustable anytime — just tell me if you'd like to change any of them.
 
-**Wait for answer.**
-
-- If the user accepts three: confirm "Three deferrals before escalation."
-- If the user chooses differently: confirm their choice. If they choose a higher number, note it's fine but some alerts may go longer without resolution.
-- If the user asks what "escalation" means here: "The system marks it as overdue and moves it to a higher-priority position so it leads your next session rather than sitting at the bottom of the list."
-
-Write the configured value to the staging file: `DEFERRED_ALERT_THRESHOLD = [number]`.
+Do not wait for a response. Proceed to START-2.
 
 ---
 

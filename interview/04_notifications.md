@@ -1,7 +1,7 @@
 # 04 — Notification Channels
 
 ## What this file does
-Set up the two notification channels — NTFY for real-time alerts and email for the operations digest — and configure the digest cadence and decision-aging thresholds. Both channels are verified with test notifications before proceeding. Neither channel is optional.
+Determine who should receive notifications, set up the notification channels — NTFY for real-time alerts and email for the operations digest — configure the tiered digest cadence and decision-aging thresholds. Both channels are verified with test notifications before proceeding. Neither channel is optional.
 
 ## When this file runs
 After `03_user_profile.md` completes and the user profile is confirmed.
@@ -19,25 +19,74 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 04_notifications.md. The user profile is complete. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then begin NOTIF-1."
+> "Resume wizard from 04_notifications.md. The user profile is complete. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then begin NOTIF-7."
 
-Do not begin NOTIF-1 until you are confident the full phase will complete before compaction risk.
+Do not begin NOTIF-7 until you are confident the full phase will complete before compaction risk.
 
 ---
 
-## NOTIF-1 — Digest cadence
+## NOTIF-7 — Stakeholder identification
 
 **Ask the user:**
 
-> How often would you like a summary of what the system has been doing and what needs your attention?
+> Before we set up notifications, a quick question: is anyone else involved in this project who should receive updates — a family member, a teammate, a business partner?
 >
-> Most people starting out find a daily digest useful — it takes about two minutes to read and keeps you in the loop without requiring you to log in and check. Once the system is running smoothly, many people switch to every few days or weekly.
+> It's fine if it's just you. But if other people need to stay informed, I want to know now so we set things up correctly.
+
+**Wait for answer.**
+
+**If just the user (single stakeholder):**
+
+> Got it — just you. I'll set everything up for a single recipient.
+
+Store: NOTIFICATION_MODE = "single"
+Store: STAKEHOLDERS = [primary user only]
+
+**If others are involved:**
+
+For each person mentioned, ask:
+
+> What kind of updates does [name/role] need? For example:
 >
-> Daily is my recommendation to start. What works for you?
+> - **Operational** — errors, system problems, things that need fixing (typically for whoever manages the system)
+> - **Content** — decisions needed, deadlines, deliverables, progress (for people who use what the system produces)
+> - **Both** — they want the full picture
 
-**Wait for answer.** Accept "daily," "every X days," "weekly," or similar. If they ask for something less frequent than weekly for a new system, note gently that they may miss things that need attention early on — but accept their preference.
+**Wait for answer.** Capture for each stakeholder: name or role, notification type (operational / content / both), preferred channel if mentioned.
 
-Store: DIGEST_CADENCE = the confirmed cadence (e.g. "daily", "every 2 days", "weekly")
+> I'll keep track of who gets what. For now, we'll set up your channels first — the primary operator always gets everything. We can add other people's channels during the build phase once the system is running.
+
+Store: NOTIFICATION_MODE = "multi"
+Store: STAKEHOLDERS = list of all stakeholders with their notification types
+
+Update staging file.
+
+---
+
+## NOTIF-1 — Tiered digest cadence
+
+**Propose the tiered digest structure:**
+
+> Your system will send you regular summaries at three different levels. Here's what I recommend:
+>
+> - **Daily digest** — Actions needed: decisions waiting for you, errors that happened, anything blocked. This is your "what do I need to do today" summary. Takes about two minutes to read.
+> - **Weekly digest** — Progress report: what your agents accomplished this week, what's planned for next week, any patterns worth noting. This is your "how's the system doing" summary.
+> - **Monthly digest** — Big picture: system health trends, goal progress, whether the system is still aligned with what you set out to build. This is your "is this still working for me" summary.
+>
+> The daily digest is the most important one early on — it keeps you in the loop while you're learning how the system operates. As things settle in, you might find you only need the weekly and monthly.
+>
+> Does this structure work for you, or would you like to adjust any of the cadences?
+
+**Wait for answer.**
+
+- If they confirm the structure as-is: store all three defaults.
+- If they want to adjust (e.g., "make the daily one every other day"): accept the adjustment and confirm.
+- If they want fewer tiers (e.g., "just weekly is fine"): accept, but note gently that daily action items will still arrive as real-time alerts if they're urgent — the daily digest catches the non-urgent ones. Confirm they're comfortable with that.
+
+Store:
+- DIGEST_CADENCE_ACTIONS = the confirmed cadence for action items (default: "daily")
+- DIGEST_CADENCE_PROGRESS = the confirmed cadence for progress summaries (default: "weekly")
+- DIGEST_CADENCE_BIG_PICTURE = the confirmed cadence for big-picture review (default: "monthly")
 
 Update staging file.
 
@@ -104,11 +153,13 @@ Do not proceed past this step until the user has confirmed receipt of a test not
 
 **Generate a unique topic string:**
 
-Run: `openssl rand -hex 12`
+Derive the project name slug from P1-1 (stored in staging file): lowercase the project name, replace spaces and special characters with hyphens, strip leading/trailing hyphens, truncate to 30 characters if needed.
 
-This produces a 24-character random hex string (e.g. `a3f8c21d09e74b6f52a1cd83`). This is the user's private NTFY topic.
+Run: `openssl rand -hex 4`
 
-**Store:** NTFY_TOPIC = the generated string
+This produces an 8-character random hex string. Combine with the slug: `[project-name-slug]-[hex]` (e.g., `jacobs-college-adventure-a3f8c21d`). This format is easy to recognize in the NTFY app and distinguishable across projects.
+
+**Store:** NTFY_TOPIC = the generated slug-hex string
 
 **Say:**
 
@@ -227,7 +278,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-NOTIF-1 through NOTIF-6 complete. NTFY channel confirmed (test notification received). Email address confirmed.
+NOTIF-7 (stakeholder identification), NOTIF-1 through NOTIF-6 complete. NTFY channel confirmed (test notification received). Email address confirmed.
 
 **Write completion marker:** Append `step_04: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

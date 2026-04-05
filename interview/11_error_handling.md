@@ -1,7 +1,7 @@
 # 11 — Error Handling
 
 ## What this file does
-Configure how the system communicates when something goes wrong: notification verbosity, the three-strikes threshold before the system stops and asks for help, and a plain-language explanation of the difference between build-time and runtime errors. Writes configured values to the staging file for use in `project_instructions.md`.
+Configure how the system communicates when something goes wrong: notification verbosity (user choice) and the three-strikes threshold (silent default — auto-configured at 3 attempts). Includes a plain-language explanation of the difference between build-time and runtime errors. Writes configured values to the staging file for use in `project_instructions.md`.
 
 ## When this file runs
 After `10_validation.md` completes and VALIDATION_CONFIGURED = true in the staging file.
@@ -27,7 +27,7 @@ Do not begin ERR-1 until you are confident the full phase will complete before c
 
 ## How to run this phase
 
-This phase has no dynamic derivation from the project documents. ERR-1 and ERR-2 are configuration choices the user makes. ERR-3 is an explanation the user confirms they understand. Work through them in order.
+ERR-1 is a genuine personal preference — the user chooses notification verbosity from rendered examples. ERR-2 (retry threshold) is a **silent default** — the recommendation is accepted >90% of the time and the user has no basis for choosing a different value. It is set automatically and presented as an informational note, not a question. ERR-3 is an explanation the user confirms they understand. Work through them in order.
 
 ---
 
@@ -85,24 +85,17 @@ Write the configured value to the staging file: `NOTIFICATION_VERBOSITY = [Minim
 
 ---
 
-## ERR-2 — Three-strikes threshold [FIXED — topic]
+## ERR-2 — Three-strikes threshold [SILENT DEFAULT]
 
-**Say:**
+*This value is set automatically. Do not ask the user — a non-technical user has no basis for choosing between 2, 3, or 5 retries, and the default is accepted >90% of the time.*
 
-> When the system hits a problem, it tries to fix it automatically. But if it keeps failing at the same step, there's a point where guessing doesn't help anymore — you need a person to look at it.
->
-> How many attempts should the system make before it stops and asks you?
->
-> I'd suggest **3 attempts** — enough to rule out a transient glitch, not so many that a real problem wastes time before reaching you. But if you want more or fewer, tell me.
+Write to the staging file: `THREE_STRIKES_THRESHOLD = 3`
 
-**Wait for answer.**
+**After confirming the user's ERR-1 verbosity choice, add:**
 
-- If the user accepts the default: confirm "3 attempts before escalating to you" and proceed.
-- If the user chooses a different value: confirm the choice and proceed.
+> I've also configured your system's retry threshold — when something goes wrong, the system will try to fix it automatically up to **3 attempts** before stopping and asking you. That's enough to handle brief glitches without spinning on a real problem. You can adjust this anytime.
 
-Note: the count applies per step — not per task. If step 2 of a task fails three times, the system escalates on step 2. Steps 1 and 3 aren't affected, and the work completed before the failure is preserved.
-
-Write the configured value to the staging file: `THREE_STRIKES_THRESHOLD = [n]`.
+Do not wait for a response. Proceed to ERR-3.
 
 ---
 

@@ -45,13 +45,23 @@ Note internally which of the six categories have been addressed as the user spea
 
 ---
 
-## V-2 — Goals, objectives, and priorities [FIXED]
+## V-2 — Goals, objectives, and priorities [DYNAMIC]
 
-**Ask:**
+**Before asking:** Read the staging file to retrieve the user's project purpose (P1-2) and user profile (step 03 answers — role, availability, domain, involvement level). Use these to construct a concrete day-to-day scenario.
 
-> When this system is working well, what does that look like for you day-to-day? If you had to name the one or two most important outcomes, what would they be?
+**Propose a scenario, then ask the user to react:**
+
+> Based on what you've told me so far, here's what I think a typical day might look like once this system is running:
+>
+> [Draft a 2–3 sentence scenario grounded in the user's stated purpose and profile. Example for a parent managing college planning: "You check your phone over coffee and see a digest — your system monitored three scholarship deadlines overnight and flagged one that closes this week. There's a draft email to the guidance counselor ready for your review. The research agent found two new programs that match your criteria and added them to the list." Example for a small business owner: "You start your morning with a summary — two client deliverables were completed overnight, one is blocked waiting for a vendor response, and there's a draft follow-up ready for your approval."]
+>
+> Does that feel right? What would you change about that picture — and if you had to name the one or two most important outcomes, what would they be?
 
 **Wait for answer.**
+
+- If the user confirms the scenario with adjustments: note adjustments and capture as goals.
+- If the user redirects to a different picture entirely: accept the redirect — their version replaces the proposal.
+- If the user can't react meaningfully: that's fine — note what they did say and proceed. V-7b will catch vague answers later.
 
 ---
 
@@ -69,19 +79,34 @@ Note internally which of the six categories have been addressed as the user spea
 
 **Ask:**
 
-> What is this system explicitly not responsible for? Are there things that are clearly out of scope — work that belongs elsewhere, decisions it should never make, areas it should stay out of?
+> We're still early — you haven't seen what the system can do yet, so you don't need a complete boundary map. But are there any areas you already know are out of bounds? Things you're sure you don't want this system involved in, or decisions it should never touch?
+>
+> It's fine if the answer is "not yet" — these boundaries naturally refine once you see the system taking shape.
 
 **Wait for answer.**
+
+- If the user names boundaries: capture them as initial scope constraints.
+- If the user says "not yet" or "I'm not sure": acknowledge that's expected at this stage. Note scope boundary as "to be refined during architecture and build" and proceed. Do not press for an answer.
 
 ---
 
-## V-5 — Constraints [FIXED]
+## V-5 — Constraints [DYNAMIC]
 
-**Ask:**
+**Before asking:** Read the staging file to retrieve the user's Tier 1 decision confirmations from step 04 (NOTIF-3) and any Tier 1 additions (TIER_1_ADDITIONS). These are rules the user has already confirmed — do not re-ask them.
 
-> Are there things this system must always do or rules it must always follow? And are there things it should never do — data it should never touch, actions it should never take without asking you first?
+**Present what's already captured, then ask for additions:**
+
+> You've already locked in some rules for this system in the notification step. Here's what you told me it must always stop and ask about:
+>
+> [Read back the confirmed Tier 1 baseline items and any TIER_1_ADDITIONS from the staging file. Present as a bulleted list — e.g., "Spending money," "Sending messages on your behalf," "Irreversible actions," plus any user additions.]
+>
+> Beyond those — are there other rules this system should always follow, or other things it should never do? For example, data it should never access, topics it should stay away from, or actions specific to your situation that should always require your approval.
 
 **Wait for answer.**
+
+- If the user adds new constraints: capture them. These are vision-level constraints, distinct from but complementary to the Tier 1 operational rules.
+- If the user says the Tier 1 list covers it: acknowledge and proceed. Note V-5 constraints as "covered by Tier 1 rules" in the staging file.
+- Do not re-present or re-confirm the Tier 1 items themselves — they were already confirmed in step 04.
 
 ---
 
@@ -115,8 +140,8 @@ For each genuinely absent category, ask one targeted follow-up question. Maximum
 - Purpose: *"Before I draft this, I want to make sure I have the right anchor — what's the main thing you're hoping this system will do for you?"*
 - Goals: *"What would a win look like for you once this is running?"*
 - Audience/outputs: *"Who else, if anyone, will see what this system produces?"*
-- Scope boundary: *"Is there anything you'd want to make sure this system stays out of — decisions it shouldn't make, areas it shouldn't touch?"*
-- Constraints: *"Are there rules you'd want the system to always follow — or things it should never do without asking first?"*
+- Scope boundary: *"Are there any areas you already know you don't want this system involved in?"*
+- Constraints: *"Beyond the rules you already set in the notification step — any other things this system should always or never do?"*
 - Success criteria: *"How would you know in six months whether this was worth it?"*
 
 If all six categories are present (even thinly), skip V-7 entirely and proceed to the vague-answer check below.
