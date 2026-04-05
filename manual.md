@@ -65,6 +65,16 @@ You should see a version number like `git version 2.x.x`. That means it worked.
 
 ---
 
+## A note about GitHub
+
+You just installed Git, which tracks your project's history on your computer. **GitHub** is a separate online service that stores a copy of that history in the cloud — think of it as a backup that protects you if anything happens to your Mac.
+
+The wizard will offer to set up GitHub backup for your project during the interview. You do not need a GitHub account right now, but if you would like to get one ahead of time, you can create a free account at github.com.
+
+This is optional. Your project works perfectly fine without it — GitHub just adds an extra layer of protection.
+
+---
+
 ## Step 3 — Install Node.js
 
 Node.js allows your agent team to run scheduled tasks and operate in the background.
@@ -157,7 +167,7 @@ As the wizard sets up your project, Claude Code will occasionally ask for your p
 
 **When you see these: click Allow.** These are expected — they are the wizard doing its work. You will not be asked about anything outside of what you are doing together.
 
-If you would prefer not to be asked each time, type `/accept-all` in Claude Code at the start of the session.
+Over time, you will see fewer of these prompts. When you click "Always allow" on a specific type of operation, Claude Code remembers that choice and will not ask again for that same action. The prompts taper off naturally as you go.
 
 ---
 
@@ -173,14 +183,18 @@ You do not need to install this before running the wizard. It is useful once you
 
 ## Keeping the wizard up to date
 
-When updates to the wizard are available, run these two commands in Terminal:
+The wizard checks for updates automatically. When you launch the wizard and an update is available, it will tell you — you do not need to check on your own.
+
+When the wizard tells you an update is available, run these two commands in Terminal:
 
 ```
 cd ~/agent-wizard
 git pull
 ```
 
-That's it — the wizard updates in place. No reinstallation needed.
+This downloads the latest version. The wizard updates in place — no reinstallation needed. The next time you launch it, you will be running the updated version.
+
+**What updates affect:** Wizard updates improve the setup experience for new projects. If you have already completed the wizard and have a running system, the update applies to future wizard runs. Your existing system continues to work as-is — the wizard does not modify projects it has already built.
 
 ---
 

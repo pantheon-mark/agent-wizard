@@ -1,7 +1,7 @@
 # 01 — Phase 1: Immediate Capture
 
 ## What this file does
-Capture the project name and core purpose — the two pieces of information the user knows immediately. Then create the staging file that persists through the entire wizard interview. Fast, zero-friction, no wrong answers.
+Capture the project name and core purpose — the two pieces of information the user knows immediately. Then create the project draft file that persists through the entire wizard interview. Fast, zero-friction, no wrong answers.
 
 ## When this file runs
 Immediately after `00_env_check.md` passes. No project directory exists yet.
@@ -27,7 +27,7 @@ Do not begin P1-1 until you are confident the full phase will complete before co
 
 ## Sub-step resume check
 
-Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_01_*` (e.g., `step_01_P1-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_01_*` (e.g., `step_01_P1-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the project draft file.
 
 If all sub-step markers for this step are present but the step-level marker (`step_01: complete`) is not, proceed directly to the success condition.
 
@@ -48,7 +48,7 @@ Before P1-1, check whether a prior wizard session exists:
 
 **Run:** Check if `~/claude-wizard-draft/wizard_session_draft.md` exists.
 
-**If the file does NOT exist:** Proceed to P1-1 normally.
+**If the file does NOT exist:** Say "No previous session found — starting fresh." Then proceed to P1-1.
 
 **If the file EXISTS — say this to the user:**
 
@@ -64,7 +64,7 @@ Before P1-1, check whether a prior wizard session exists:
 
 **If user says "start fresh":** Delete the existing draft file. Proceed to P1-1 normally.
 
-**Note on staging location:** The staging directory `~/claude-wizard-draft/` is at the home directory level (not inside Documents) to avoid slow startup indexing caused by Claude Code scanning large document folders.
+**Note on draft location:** The draft directory `~/claude-wizard-draft/` is at the home directory level (not inside Documents) to avoid slow startup indexing caused by Claude Code scanning large document folders.
 
 ---
 
@@ -93,7 +93,7 @@ Write sub-step marker: Append `step_01_P1-1: complete | <timestamp>` to `~/claud
 
 > In one sentence — what is this system going to do for you?
 
-Accept any answer. One sentence is the goal but do not push back if they give more. If they give significantly more than one sentence, accept it gracefully and use the most purpose-focused sentence for the core purpose field. The full answer is preserved in the staging file.
+Accept any answer. One sentence is the goal but do not push back if they give more. If they give significantly more than one sentence, accept it gracefully and use the most purpose-focused sentence for the core purpose field. The full answer is preserved in the project draft file.
 
 **Store:** CORE_PURPOSE = the user's answer
 
@@ -101,7 +101,7 @@ Write sub-step marker: Append `step_01_P1-2: complete | <timestamp>` to `~/claud
 
 ---
 
-## P1-3 — Create staging file [INTERNAL]
+## P1-3 — Create project draft file [INTERNAL]
 
 Do not ask the user anything. Perform these steps silently, then show one confirmation line.
 
@@ -176,7 +176,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-P1-3 completed, staging file written, confirmation shown to user.
+P1-3 completed, project draft file written, confirmation shown to user.
 
 **Write completion marker:** Append `step_01: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

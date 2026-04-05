@@ -12,6 +12,9 @@ set -euo pipefail
 # Model — resolved by the wizard from the tier mapping at setup time
 MODEL="{{MODEL_HIGH}}"
 
+# Thinking budget — tokens allocated for extended thinking, resolved from tier mapping
+THINKING_BUDGET="{{THINKING_BUDGET_HIGH}}"
+
 # Resolve project directory from the script's own location
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
@@ -93,4 +96,4 @@ echo ""
 
 # ── Launch Claude Code ────────────────────────────────────────────────────────
 
-claude --model "$MODEL"
+claude --model "$MODEL" --thinking-budget "$THINKING_BUDGET"

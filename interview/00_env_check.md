@@ -52,7 +52,7 @@ Before running any checks, say this to the user:
 >
 > **When you see these prompts: click "Allow" or "Yes."** These are expected — they're just me doing the work of setting up your system. You will not be asked about anything unexpected or outside of what we're doing together.
 >
-> If you'd like to allow all operations for this session without being asked each time, you can type `/accept-all` — but reviewing each one is fine too.
+> Over time, you'll see fewer of these prompts. When you click "Always allow" on a specific type of operation, Claude Code remembers that choice and won't ask again for that same action. The prompts taper off naturally as you go.
 >
 > Any questions about this before we begin?
 

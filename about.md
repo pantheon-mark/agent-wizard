@@ -14,9 +14,11 @@ If you've been curious about Claude and wondered whether you could build somethi
 
 ## What you could build
 
-It doesn't have to be for work. It doesn't have to be sophisticated or serious.
+It doesn't have to be for work. It doesn't have to be sophisticated or serious. And it doesn't have to be personal — it can absolutely be a business tool.
 
 It could be something that manages your family calendar — pulling together everyone's schedules, flagging conflicts, keeping things from falling through the cracks. It could connect to Instacart or Amazon and handle your grocery or household ordering, with you just texting or messaging it the things you want to add. It could monitor things you care about and tell you when something worth knowing happens. It could handle research you do over and over again so the answer is waiting for you instead of something you have to go find.
+
+On the work side, it could track client deliverables and flag when something is overdue before the client notices. It could monitor your industry — news, regulatory changes, competitor moves — and surface what actually matters to your business. It could coordinate contractors or vendors, keeping track of who is doing what and what needs follow-up. It could manage a small team's workflow, routing tasks and catching things that stall. It could handle the recurring operational work that eats your morning every day — the reports, the status checks, the data gathering — and have it done before you sit down.
 
 The common thread is: things you do repeatedly, where you're either consuming a lot of information or managing a lot of moving pieces, and where you find yourself thinking *I need help staying on top of this.* Work, personal, business, family — any of it.
 

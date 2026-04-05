@@ -92,7 +92,7 @@ After the advisor list is confirmed, explain how the system will work with those
 >
 > **The quick way:** you ask your advisor, get their answer, and just tell me what they said. I'll record it and move on. This works fine for simple questions with clear answers.
 >
-> **The better way** — and the one I'll suggest for anything significant: before you talk to them, I'll prepare a set of questions so the conversation covers everything relevant. You have the meeting, bring me the transcript, and I'll pull out not just the answers but the reasoning behind them — the rules your advisor is actually applying — and save those so your system can use that judgment automatically in the future. Over time, this means you need to consult advisors less often because the system already knows how they think.
+> **The better way** — and the one I'll suggest for anything significant: before you talk to them, I'll prepare a set of questions so the conversation covers everything relevant. You have the meeting, bring me the transcript or your notes from the conversation, and I'll pull out not just the answers but the reasoning behind them — the rules your advisor is actually applying — and save those so your system can use that judgment automatically in the future. Over time, this means you need to consult advisors less often because the system already knows how they think.
 >
 > I'll always tell you which approach I'm recommending for each decision.
 
@@ -160,7 +160,7 @@ guidance on the decisions it will face in their domain.
 
 **How to use this guide:** Share the relevant sections with your
 advisor before or during your meeting. Bring back their answers —
-or a transcript if possible — and Claude will extract the rules
+or a transcript or notes from the conversation — and Claude will extract the rules
 and record them in the advisor knowledge base.
 
 ---
