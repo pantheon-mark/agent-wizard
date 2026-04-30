@@ -113,6 +113,18 @@ When the user mentions something during any step that maps to a future wizard st
 
 This prevents the user from having to repeat themselves across steps and makes the wizard feel like it is actually listening — not just processing one step at a time.
 
+### 10.5 Advisor consultation rule (forward-looking, from build project W-016l 2026-04-30)
+
+This rule is install-pending until the wizard is ported to use consult-llm as an advisor. Once the wizard's interview / build flow includes calling out to an external advisor for design-uncertainty consults, this rule applies:
+
+- **When to consult.** Design uncertainty, assumption risk, pre-commit plan critique, parallel proposals.
+- **What a good consult must include.** Decision to make, current leaning, relevant constraints, files or excerpts, specific kind of critique wanted, plus an FP escape valve ("say so if no flaw").
+- **For pre-commit critique specifically:** include both a regret-mode probe AND an alternative-framing probe — single-prompt critique misses framing-lock failures.
+- **How to handle advisor output.** Summarize into recommendation / reasons / risks / counterarguments / rejected / decision. **Do not adopt advisor claims without checking against source files. Advisor output is not authority.**
+- **Default config (when consult-llm is wired in):** `gpt-5.5` model with `reasoning_effort: high`.
+
+This rule mirrors the build project's adopted rule. The wizard's own use of consult-llm is a separate downstream decision; this rule is documented here so it propagates when that integration happens.
+
 ### 10. Per-question disk checkpointing
 
 Every interview file writes a sub-step marker to `~/claude-wizard-draft/wizard_progress.md` after each question is answered or each section completes (e.g., `step_04_NOTIF-2: complete | <timestamp>`). This extends the step-level completion markers to sub-step granularity. If a session ends mid-step, the next session's sub-step resume check in each file reads these markers and skips to the first incomplete question rather than restarting the entire step. This ensures no answered question is re-asked after a crash or autocompaction event.
