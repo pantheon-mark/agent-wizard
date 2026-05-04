@@ -16,8 +16,8 @@ Entries appear newest-first.
 
 **Public-facing change:** added `LICENSE` (MIT, copyright 2026 Mark Tobias), `GENERATED_OUTPUTS.md` (operator's free-use grant for wizard-generated project content), and this `CHANGES.md` (canonical public release-notes + provenance manifest). Closes the prior "all rights reserved" default state for the public repository.
 
-- Source-Meta-Commit: `<filled at subtree push>`
-- Public repo commit: `<filled after publication>`
+- Source-Meta-Commit: `7703dd7`
+- Public repo commit: `bfc327e`
 
 ---
 
