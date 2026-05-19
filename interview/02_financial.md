@@ -218,6 +218,178 @@ Write sub-step marker: Append `step_02_FIN-2: complete | <timestamp>` to `~/clau
 
 ---
 
+## P02-end — Shape-detection fallback probes (CONDITIONAL)
+
+Per `wizard/shape_detection.md` § 2.2 + § 3 promotion logic. Read the `## Shape detection` section in `~/claude-wizard-draft/wizard_session_draft.md`:
+
+- **If `shape_hypothesis.status == emitted` with `detected_at_step: 01`:** step 01 emitted at HIGH confidence (finalized). Fallback probes do NOT fire. Skip directly to the success condition.
+- **If `shape_hypothesis.status == pending_step_02_fallback`:** step 01 deferred emit (MEDIUM or LOW confidence). Fallback probes 5-8 fire now.
+- **If `shape_hypothesis.status` is unset OR shape_hypothesis block missing:** internal wizard state error (P1-8 didn't write the status field). Halt with internal-error message per the same pattern as `_pre_step_05_recheck.md` prerequisites; foundation state preserved.
+
+### Lead-in to operator (only if fallback fires)
+
+**Say:**
+
+> Quick check — your project's a little harder to categorize from the first four questions, so I have a few more to nail it down. Same yes/no/unsure pattern.
+
+---
+
+### P02-FB-1 — State-memory probe (probe-5)
+
+**Ask the user:**
+
+> Should the system remember things between times you use it?
+
+**Accept:** yes / no / unsure. Same one-follow-up resolution pattern as step-01 probes.
+
+**Store:** `probe_5_state_memory = yes | no | unsure`
+
+Write sub-step marker: Append `step_02_P02-FB-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
+### P02-FB-2 — Regular-pattern probe (probe-6)
+
+**Ask the user:**
+
+> Does it need to do something automatically, on a regular pattern — like every day, every Monday morning, every hour?
+
+**Accept:** yes / no / unsure.
+
+**Store:** `probe_6_regular_pattern = yes | no | unsure`
+
+Write sub-step marker: Append `step_02_P02-FB-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
+### P02-FB-3 — Operator-confirm probe (probe-7)
+
+**Ask the user:**
+
+> Should the system ask you before doing anything important — like making a booking, sending money, or contacting someone?
+
+**Accept:** yes / no / unsure.
+
+**Store:** `probe_7_operator_confirm = yes | no | unsure`
+
+Write sub-step marker: Append `step_02_P02-FB-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
+### P02-FB-4 — Document-output probe (probe-8)
+
+**Ask the user:**
+
+> Does it produce a document, packet, or report that you'll review or share?
+
+**Accept:** yes / no / unsure.
+
+**Store:** `probe_8_document_output = yes | no | unsure`
+
+Write sub-step marker: Append `step_02_P02-FB-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
+### P02-FB-5 — Classifier final emit [INTERNAL]
+
+Do not ask the operator anything. Apply the classifier per `wizard/shape_detection.md` § 2.3 + § 3 across ALL 8 probes (step 01 + step 02 fallback):
+
+1. Re-tally strong-positive and strong-negative signals per shape using all 8 probe values
+2. Recompute confidence (HIGH / MEDIUM / LOW)
+3. Emit final hypothesis (per advisor R2 C-008 + C-009 + C-010 dispositions: include status:emitted + schema_versions + handoff_phase + mixed_component_basis):
+
+```yaml
+## Shape detection
+
+schema_versions:
+  schema_major: 0
+  schema_minor: 0
+  shape_taxonomy_version: 0
+  stop_condition_set_version: 0
+  control_matrix_schema_version: 0
+
+handoff_phase: provisional_shape_emit
+
+shape_hypothesis:
+  status: emitted
+  shape: <classified shape per § 2.3 table>
+  confidence: <final confidence>
+  detected_at_step: 02
+  v1_supported: <true if shape == markdown-agents else false>
+  rechecks_due: [05, 08]
+  forced_recheck_at_step_05: <true if confidence == low else false>
+  operator_signals:
+    probe_1_continuous_runtime: <stored value>
+    probe_2_multi_user: <stored value>
+    probe_3_thinking_partner: <stored value>
+    probe_4_external_software: <stored value>
+    probe_5_state_memory: <stored value>
+    probe_6_regular_pattern: <stored value>
+    probe_7_operator_confirm: <stored value>
+    probe_8_document_output: <stored value>
+  forward_offered_signals_at_step_01: <preserved from step 01 placeholder>
+  mixed_component_basis: <empty list unless shape == mixed; if shape == mixed, list constituent component shapes detected from probe signals + free-text signals>
+  fallback_mode_offered: not_offered
+  emit_timestamp: <ISO 8601 timestamp>
+  recheck_log: []
+```
+
+If final emit is `shape: unknown` + `confidence: low`: set `forced_recheck_at_step_05: true` per § 3 promotion logic.
+
+Write sub-step marker: Append `step_02_P02-FB-5: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
+## P02-FB-6 — Unsupported-shape transition (CONDITIONAL; fires only when step 02 final emit is HIGH-or-MEDIUM-confidence non-markdown)
+
+**Trigger condition (per advisor R1 C-003 + R2 C-008 dispositions — comply with PRD § 4.3 honest-disclosure-at-step-02 mandate; trigger uses unambiguous field combination):**
+
+- `shape_hypothesis.status == emitted` (P02-FB-5 wrote the field for finalized step-02 emit) AND `shape_hypothesis.detected_at_step == 02` AND `shape_hypothesis.v1_supported == false` AND `shape_hypothesis.confidence in [high, medium]`
+
+If trigger does NOT match (markdown-agents final emit; OR LOW-confidence `unknown` emit with forced_recheck_at_step_05 = true; OR P02-FB-5 not fired because step 01 already emitted HIGH-confidence markdown-agents): SKIP P02-FB-6. Proceed to step-02 success condition.
+
+**Special case:** if `shape_hypothesis.fallback_mode_offered` is already set (operator hit P1-9 at step 01 and chose foundation-only): SKIP P02-FB-6 (transition already happened at step 01).
+
+**If trigger matches:** fire the unsupported-shape transition per `wizard/shape_detection.md` § 6 NOW (do not defer to pre-step-05).
+
+Behavior is identical to step 01's P1-9 — same operator-facing message, same two-choice path, same staging-file updates. Substitute the classified shape in plain language per the same pattern.
+
+Say to operator (verbatim per PRD § 4.3; same template as step 01 P1-9):
+
+> Your project looks like a [shape description in plain language]. v1 of the wizard generates complete systems for one specific shape (markdown agents that you work with through Claude Code on your own machine).
+>
+> Two options:
+>
+> **(a) Stop here — wait for v2 / future versions.** Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. When the wizard adds support for your shape, we can pick up. The roadmap for what triggers that addition lives in this project's PRD § 4.5.
+>
+> **(b) Foundation-only mode.** I can produce a foundation-doc set for your project — the planning documents (vision, approach, technical architecture, etc.) abstracted from implementation shape. You'd take those docs to Claude Code directly to build the implementation yourself, OR wait for v2 shape support. I won't generate the system implementation itself (no agents, scripts, or run files).
+>
+> Which would you like? (Say "a" or "b".)
+
+**If (a) scope-out:**
+
+```yaml
+shape_hypothesis:
+  fallback_mode_offered: scope-out
+  scope_out_timestamp: <ISO 8601>
+```
+
+Say exit message; exit cleanly. Do NOT proceed to step 03.
+
+**If (b) foundation-only:**
+
+```yaml
+shape_hypothesis:
+  fallback_mode_offered: foundation-only
+  foundation_only_offered_timestamp: <ISO 8601>
+```
+
+Say confirmation message; proceed to step 03.
+
+Write sub-step marker: Append `step_02_P02-FB-6: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
 ## Step-boundary capture (testing mode only)
 
 *This section runs only during test sessions. In normal wizard operation, skip directly to the success condition.*

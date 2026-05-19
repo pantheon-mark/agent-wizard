@@ -33,6 +33,18 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 ---
 
+## Pre-step-05 re-check (shape-detection re-evaluation + 4 stop conditions)
+
+Before any step-05 user-facing question fires, run `wizard/interview/_pre_step_05_recheck.md`. This module re-evaluates the provisional `shape_hypothesis` against accumulated context (steps 02-04 answers + step 03 UP-6 regulatory exposure), evaluates the 4 stop conditions, and triggers the unsupported-shape transition if shape revises to non-v1-supported.
+
+**The re-check is mandatory per PRD § 5.2 F-1.** Hard stop before vision generation — shape and stop conditions must be resolved here.
+
+If `step_05_pre_recheck: complete` is already in `~/claude-wizard-draft/wizard_progress.md` (e.g., resuming a partial step 05), skip the pre-recheck and proceed to the step opening. Otherwise, run the pre-recheck module first.
+
+After pre-recheck completes successfully (no halt; no scope-out): proceed to step opening.
+
+---
+
 ## Step opening — progress and preview
 
 **Say:**

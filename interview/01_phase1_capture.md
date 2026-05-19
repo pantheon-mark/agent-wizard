@@ -140,6 +140,205 @@ Write sub-step marker: Append `step_01_P1-3: complete | <timestamp>` to `~/claud
 
 ---
 
+## Shape-detection probes — P1-4 through P1-7
+
+The next four questions establish what kind of system you're building, in behavior-based terms. These are NOT about technology choices — they're about what the system needs to *do*. The wizard uses these answers (plus context from later steps) to decide which kind of system to generate.
+
+The probes follow the canonical spec at `wizard/shape_detection.md` § 2.1.
+
+**Internal note (per `wizard/shape_detection.md` § 9):** scan the operator's P1-2 core-purpose answer for shape-signal phrases (e.g., "automated newsletter every Monday" / "thinking partner for X" / "customer portal where my team logs in"). Capture any matched phrases verbatim under `shape_hypothesis.forward_offered_signals_at_step_01:` in the staging file. Probes still fire — forward-offered signals are interpretive prior only, not authoritative answers (per S2.1 decision E).
+
+**Lead-in to operator:**
+
+> Four quick yes/no/unsure questions about what your system needs to do. There are no wrong answers — this is just helping me understand what to build.
+
+---
+
+### P1-4 — Continuous-runtime probe
+
+**Ask the user:**
+
+> Does the system need to keep running on its own, even when you're not using Claude?
+
+**Accept:** yes / no / unsure. If operator gives a qualified answer ("only sometimes" / "ideally yes but not required"), ask one follow-up to resolve to yes/no/unsure: "So is that more of a yes or a no?" If genuinely uncertain after one follow-up, store as `unsure`.
+
+**Store:** `probe_1_continuous_runtime = yes | no | unsure`
+
+Write sub-step marker: Append `step_01_P1-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
+### P1-5 — Multi-user probe
+
+**Ask the user:**
+
+> Will other people use this system — and need their own logins or different views?
+
+**Accept:** yes / no / unsure. Same one-follow-up resolution pattern as P1-4.
+
+**Store:** `probe_2_multi_user = yes | no | unsure`
+
+Write sub-step marker: Append `step_01_P1-5: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
+### P1-6 — Thinking-partner probe
+
+**Ask the user:**
+
+> Is it mainly something you'll work on WITH Claude — like a thinking partner you bring questions to?
+
+**Accept:** yes / no / unsure. Same one-follow-up resolution pattern.
+
+**Store:** `probe_3_thinking_partner = yes | no | unsure`
+
+Write sub-step marker: Append `step_01_P1-6: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
+### P1-7 — External-software probe
+
+**Ask the user:**
+
+> Does it need to talk to other software automatically — like getting prices, sending emails, checking accounts?
+
+**Accept:** yes / no / unsure. Same one-follow-up resolution pattern.
+
+**Store:** `probe_4_external_software = yes | no | unsure`
+
+Write sub-step marker: Append `step_01_P1-7: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
+### P1-8 — Classifier emit [INTERNAL]
+
+Do not ask the operator anything in this sub-step. Apply the classifier per `wizard/shape_detection.md` § 2.3 + § 3:
+
+1. Tally strong-positive and strong-negative signals per shape across Probes 1-4 using the signal-to-shape decision table at § 2.3
+2. Compute confidence (HIGH / MEDIUM / LOW) per § 3 rubric
+3. If confidence is HIGH: emit shape hypothesis NOW (write `## Shape detection` section to staging file with `detected_at_step: 01`)
+4. If confidence is MEDIUM or LOW: defer emit; the staging file gets a placeholder entry `shape_hypothesis.status: pending_step_02_fallback`; fallback probes 5-8 fire at end of step 02
+
+**Emit format** (HIGH-confidence case at step 01 — append to staging file after `## Captured answers` section). Per advisor R2 C-008 + C-009 dispositions, finalized emits MUST include `schema_versions`, `handoff_phase`, AND `shape_hypothesis.status: emitted`:
+
+```yaml
+## Shape detection
+
+schema_versions:
+  schema_major: 0
+  schema_minor: 0
+  shape_taxonomy_version: 0
+  stop_condition_set_version: 0
+  control_matrix_schema_version: 0
+
+handoff_phase: provisional_shape_emit
+
+shape_hypothesis:
+  status: emitted
+  shape: <classified shape per § 2.3 table>
+  confidence: high
+  detected_at_step: 01
+  v1_supported: <true if shape == markdown-agents else false>
+  rechecks_due: [05, 08]
+  forced_recheck_at_step_05: false
+  operator_signals:
+    probe_1_continuous_runtime: <stored value>
+    probe_2_multi_user: <stored value>
+    probe_3_thinking_partner: <stored value>
+    probe_4_external_software: <stored value>
+    probe_5_state_memory: not_asked
+    probe_6_regular_pattern: not_asked
+    probe_7_operator_confirm: not_asked
+    probe_8_document_output: not_asked
+  forward_offered_signals_at_step_01: <list of verbatim phrases captured at P1-2 scan; may be empty list>
+  mixed_component_basis: <empty list unless shape == mixed; per advisor R2 C-010; if shape == mixed, list constituent component shapes detected>
+  fallback_mode_offered: not_offered
+  emit_timestamp: <ISO 8601 timestamp>
+  recheck_log: []
+```
+
+**Deferred-emit format** (MEDIUM or LOW at step 01 — write placeholder; step 02 finalizes). Schema versions + handoff phase included even in the deferred state so consumers reading a partially-emitted staging file at this point can identify the contract version:
+
+```yaml
+## Shape detection
+
+schema_versions:
+  schema_major: 0
+  schema_minor: 0
+  shape_taxonomy_version: 0
+  stop_condition_set_version: 0
+  control_matrix_schema_version: 0
+
+handoff_phase: provisional_shape_emit
+
+shape_hypothesis:
+  status: pending_step_02_fallback
+  step_01_signals:
+    probe_1_continuous_runtime: <stored value>
+    probe_2_multi_user: <stored value>
+    probe_3_thinking_partner: <stored value>
+    probe_4_external_software: <stored value>
+  step_01_provisional_confidence: <medium | low>
+  forward_offered_signals_at_step_01: <list>
+  step_01_completed_timestamp: <ISO 8601>
+```
+
+Write sub-step marker: Append `step_01_P1-8: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
+## P1-9 — Unsupported-shape transition (CONDITIONAL; fires only when classifier emits HIGH-confidence non-markdown at step 01)
+
+**Trigger condition (per advisor R1 C-003 + R2 C-008 dispositions — comply with PRD § 4.3 honest-disclosure-at-step-02-or-earlier mandate; trigger uses unambiguous field combination):**
+
+- `shape_hypothesis.status == emitted` (P1-8 wrote the field for HIGH-confidence finalized emit) AND `shape_hypothesis.detected_at_step == 01` AND `shape_hypothesis.v1_supported == false` AND `shape_hypothesis.confidence == high`
+
+If trigger does NOT match (markdown-agents emit, OR step 01 deferred to step 02 fallback): SKIP P1-9. Proceed to step 02.
+
+**If trigger matches:** fire the unsupported-shape transition per `wizard/shape_detection.md` § 6 NOW (do not defer to pre-step-05).
+
+Say to operator (verbatim per PRD § 4.3; substitute `<shape X>` with the classified shape in plain language):
+
+> Your project looks like a [shape description in plain language — e.g., "system that needs to keep running on its own and talk to other software automatically" for python-service-operator-facing; "system multiple people will use with their own logins" for node-ui]. v1 of the wizard generates complete systems for one specific shape (markdown agents that you work with through Claude Code on your own machine).
+>
+> Two options:
+>
+> **(a) Stop here — wait for v2 / future versions.** Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. When the wizard adds support for your shape, we can pick up. The roadmap for what triggers that addition lives in this project's PRD § 4.5.
+>
+> **(b) Foundation-only mode.** I can produce a foundation-doc set for your project — the planning documents (vision, approach, technical architecture, etc.) abstracted from implementation shape. You'd take those docs to Claude Code directly to build the implementation yourself, OR wait for v2 shape support. I won't generate the system implementation itself (no agents, scripts, or run files).
+>
+> Which would you like? (Say "a" or "b".)
+
+**If operator picks (a) — scope-out:**
+
+Append to staging file:
+
+```yaml
+shape_hypothesis:
+  fallback_mode_offered: scope-out
+  scope_out_timestamp: <ISO 8601>
+```
+
+Say: "Saved. Re-run the wizard later when you're ready or when [shape] support is added." Exit cleanly. Do NOT proceed to step 02.
+
+**If operator picks (b) — foundation-only:**
+
+Append to staging file:
+
+```yaml
+shape_hypothesis:
+  fallback_mode_offered: foundation-only
+  foundation_only_offered_timestamp: <ISO 8601>
+```
+
+Say: "Foundation-only mode confirmed. I'll continue through the interview to gather what's needed for the foundation documents, but I won't generate the system implementation at the end. Your downstream Claude Code build conversation will use the foundation docs we produce." Proceed to step 02.
+
+Downstream: pre-step-05 re-check evaluates stop conditions in DOCUMENT-path (not HALT-path) per `wizard/shape_detection.md` § 8.5; the foundation-doc-insertion of compliance-mismatch text is OUT of S2.1 scope per decision F.
+
+Write sub-step marker: Append `step_01_P1-9: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
 ## Update rule — applies for the rest of the wizard
 
 After every question answer from this point forward, append a new line to the `## Captured answers` section of `wizard_session_draft.md` in the format:

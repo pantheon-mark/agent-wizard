@@ -33,6 +33,16 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 ---
 
+## Pre-step-08 re-check (final shape-detection confirmation)
+
+Before any step-08 user-facing question fires, run `wizard/interview/_pre_step_08_recheck.md`. This module re-evaluates the `shape_hypothesis` against accumulated step 05-07 content (vision + approach + advisors). Especially important for emergent-architecture projects (PRD § 5.13; J6 anchored) — the architecture phase frequently reveals shape signals that earlier steps did not surface.
+
+If `step_08_pre_recheck: complete` is already in `~/claude-wizard-draft/wizard_progress.md` (resuming a partial step 08), skip the pre-recheck. Otherwise, run the pre-recheck module first.
+
+After pre-recheck completes successfully (no halt; no scope-out): proceed to step opening.
+
+---
+
 ## Step opening — progress and preview
 
 **Say:**

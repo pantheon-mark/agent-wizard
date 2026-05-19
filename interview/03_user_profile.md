@@ -146,6 +146,138 @@ Write sub-step marker: Append `step_03_UP-5: complete | <timestamp>` to `~/claud
 
 ---
 
+## UP-6 — Regulatory-applicability probe
+
+Per `wizard/shape_detection.md` § 8.1 + `governance/generated_system_data_defaults.md` § 6.1 two-step probe pattern. The probe captures whether the operator's project has regulatory exposure (GDPR / HIPAA / PCI-DSS / SOX / COPPA-or-GDPR-K / sector-specific) and which framework specifically applies. Used by pre-step-05 re-check to evaluate the 4 stop conditions per D1 § 6.3.
+
+### UP-6.1 — Data-type question (lead-in + propositional list)
+
+**Say:**
+
+> Two more questions about the data your system will handle. These help me check whether your project's regulatory exposure is compatible with the system shape we've detected — so I don't generate something that won't work for your actual needs.
+>
+> Will the system handle any of the following on a regular basis?
+>
+> 1. **Health information about identifiable people** — patient records, medical histories, insurance claims
+> 2. **Personal data of people in the EU/EEA** — names, contact info, behavioral data, etc.
+> 3. **Credit card or payment card numbers**
+> 4. **Financial reporting data subject to audit** — for publicly-traded companies or their auditors
+> 5. **Data from children under 13** (or under 16 in the EU)
+> 6. **Other regulated data** — government records, education records, sector-specific (energy, telecoms, etc.)
+> 7. **None of the above** — no regulated data
+>
+> Which of these apply? (You can say "none," one item, or multiple items.)
+
+**Wait for answer.**
+
+**If operator says "none" / "#7" / equivalent:**
+
+Store:
+```yaml
+regulatory_exposure:
+  gdpr_applicable: no
+  hipaa_applicable: no
+  pci_dss_applicable: no
+  sox_applicable: no
+  coppa_or_gdpr_k_applicable: no
+  other_sector_specific: []
+  no_compliance_claim: yes
+  no_compliance_claim_framework_identification: no
+  probed_at_step: 03_up6
+  probed_timestamp: <ISO 8601>
+```
+
+Append the `## Regulatory exposure` section to staging file with the above content. Skip UP-6.2 (no follow-up needed). Proceed to synthesis step.
+
+**If operator says any of #1-#6 apply:** continue to UP-6.2.
+
+**If operator's answer is unclear / "I don't know" / "maybe":**
+
+Propose a default per the conversation context (per the wizard's question-design principle: propose, user confirms). If their project description and step 02-03 answers give no signal of regulated data: propose "I'll assume none of these apply unless you correct me." If signals point to potential regulation (e.g., they mentioned customers / payments / health context during P1-2): propose specific candidates and ask them to confirm or remove items.
+
+### UP-6.2 — Role/scope question (per matched framework)
+
+For EACH framework operator marked applicable in UP-6.1, ask the corresponding role/scope question per D1 § 6.1:
+
+**If #1 (health information):**
+
+> Are you (or the system) acting as a healthcare provider, insurance plan, clearinghouse, OR a business associate processing health data on their behalf? Or is this more like your own personal notes or a tool for your own use?
+
+If operator-role = covered entity / business associate: `hipaa_applicable: yes`. If personal use only: `hipaa_applicable: no` (no covered entity status → HIPAA doesn't apply to personal data of self).
+
+**If #2 (EU/EEA personal data):**
+
+> Are you (or your organization) acting as a data controller or data processor of that personal data? Or are you handling only your own personal data?
+
+If controller/processor: `gdpr_applicable: yes`. If only own data: `gdpr_applicable: no`.
+
+**If #3 (payment card numbers):**
+
+> Are you (or the system) subject to a card brand's PCI-DSS contractual scope — for example, accepting card payments as a merchant or processor?
+
+If yes: `pci_dss_applicable: yes`. If no (e.g., reading card numbers from operator's own statements for personal budget tracking, not processing payments): `pci_dss_applicable: no`.
+
+**If #4 (financial reporting subject to audit):**
+
+> Are you a publicly-traded company OR an auditor with internal-control-over-financial-reporting (ICFR) responsibility?
+
+If yes: `sox_applicable: yes`. If no: `sox_applicable: no`.
+
+**If #5 (children's data):**
+
+> Does the system specifically collect data FROM the children (not data about minors collected through parents/guardians)? AND does the system fall within the regulation's directed-to-children scope?
+
+If both yes: `coppa_or_gdpr_k_applicable: yes`. If no: `coppa_or_gdpr_k_applicable: no`.
+
+**If #6 (other regulated data):**
+
+> Which framework applies? Common ones: FERPA (education records), GLBA (financial institutions), FedRAMP (US federal cloud), NIS2 (EU critical infrastructure), sector-specific regulations.
+
+If operator names a specific framework: store under `other_sector_specific`:
+```yaml
+other_sector_specific:
+  - framework: <named framework>
+    applicable: yes
+```
+
+If operator says "I know it's regulated but I don't know which framework": store `no_compliance_claim_framework_identification: unknown` — this is the trigger for stop condition #4 at pre-step-05 re-check.
+
+### UP-6.3 — Final emit
+
+After UP-6.1 + UP-6.2 complete, write the full `## Regulatory exposure` section to staging file. **Per advisor R2 C-009 disposition: also update `handoff_phase` from `provisional_shape_emit` to `regulatory_exposure_populated`** so downstream consumers know the regulatory data is now available.
+
+Example for an operator who marked #1 (health) + #6 (sector-specific):
+
+```yaml
+## Regulatory exposure
+
+regulatory_exposure:
+  gdpr_applicable: no
+  hipaa_applicable: yes
+  pci_dss_applicable: no
+  sox_applicable: no
+  coppa_or_gdpr_k_applicable: no
+  other_sector_specific:
+    - framework: HIPAA Privacy Rule (same as #1; redundant unless operator named a different sector-specific framework)
+      applicable: yes
+  no_compliance_claim: no
+  no_compliance_claim_framework_identification: no
+  probed_at_step: 03_up6
+  probed_timestamp: <ISO 8601>
+```
+
+**Then update `handoff_phase` field** (locate the existing line in the staging file's `## Shape detection` section — it currently reads `handoff_phase: provisional_shape_emit`; rewrite to):
+
+```yaml
+handoff_phase: regulatory_exposure_populated
+```
+
+Write sub-step marker: Append `step_03_UP-6: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+**Note on stop-condition surfacing:** The 4 stop conditions are evaluated at pre-step-05 re-check (`wizard/interview/_pre_step_05_recheck.md`), NOT here. UP-6 captures the data; the stop conditions consume it. This separation keeps step 03 focused on data capture and avoids surfacing "your shape is incompatible with HIPAA" as a step-03 surprise before the shape itself has been re-checked against accumulated context.
+
+---
+
 ## Synthesis step [INTERNAL]
 
 After all five answers are recorded, synthesize a one-paragraph user profile and confirm it with the user before proceeding.
