@@ -20,7 +20,8 @@ expected_post_iteration_fired_conditions: []
 expected_terminal_outcome: continued
 expected_terminal_reason: regulatory_exposure_revised_clears_conditions
 expected_fallback_mode_offered: not_offered
-notes: Condition-4 halt at pre-step-05 → operator picks (c) → realizes initial UP-6.1 markers were over-cautious → revises `no_compliance_claim: no → yes` (no actual regulated data) + `no_compliance_claim_framework_identification: unknown → no` → conditions clear → continued. Exercises the regulated-flag-revision sub-case of (c) under condition-4. Uses `reason: operator_clarification` (NOT `framework_identification`) per sub-module § 4.3 distinction. Mirrors scrl03 GDPR-revise pattern's reason value but applied to condition-4 regulated-flag-revision rather than named-framework-applicability-revise.
+notes: |
+  Condition-4 halt at pre-step-05 → operator picks (c) → realizes initial UP-6.1 markers were over-cautious → revises `no_compliance_claim: no → yes` (no actual regulated data) + `no_compliance_claim_framework_identification: unknown → no` → conditions clear → continued. Exercises the regulated-flag-revision sub-case of (c) under condition-4. Uses `reason: operator_clarification` (NOT `framework_identification`) per sub-module § 4.3 distinction. Mirrors scrl03 GDPR-revise pattern's reason value but applied to condition-4 regulated-flag-revision rather than named-framework-applicability-revise.
 ---
 
 # Fixture scrl07 — Condition-4 revise-regulated-flag-to-continue

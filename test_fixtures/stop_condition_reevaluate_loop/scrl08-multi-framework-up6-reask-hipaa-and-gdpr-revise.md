@@ -22,7 +22,8 @@ expected_post_iteration_fired_conditions: []
 expected_terminal_outcome: continued
 expected_terminal_reason: regulatory_exposure_revised_clears_conditions
 expected_fallback_mode_offered: not_offered
-notes: Condition-1 halt at pre-step-05 (HIPAA + markdown-agents) with HIPAA + GDPR both active in regulatory_exposure → operator picks (c) → § 4.3 multi-field UP-6 re-ask iterates per-framework → operator revises BOTH `hipaa_applicable: yes → no` (not actually a business associate in the data flow) AND `gdpr_applicable: yes → no` (clients exited EU operations last year; thought they were still applicable) → condition 1 + condition 2 BOTH clear post-revision → continued. NOT a condition-4 case; this is the "+ UP-6 re-ask testing" half of S2.4 binding. Exercises § 4.3 step 1-3 per-framework loop with 2+ compliance-class frameworks active. Both frameworks are compliance-class (no ADR-0015 honesty gap per S2.4 R1 C-002 disposition — previously used FERPA which was insufficient-control sector-specific; restructured at R1).
+notes: |
+  Condition-1 halt at pre-step-05 (HIPAA + markdown-agents) with HIPAA + GDPR both active in regulatory_exposure → operator picks (c) → § 4.3 multi-field UP-6 re-ask iterates per-framework → operator revises BOTH `hipaa_applicable: yes → no` (not actually a business associate in the data flow) AND `gdpr_applicable: yes → no` (clients exited EU operations last year; thought they were still applicable) → condition 1 + condition 2 BOTH clear post-revision → continued. NOT a condition-4 case; this is the "+ UP-6 re-ask testing" half of S2.4 binding. Exercises § 4.3 step 1-3 per-framework loop with 2+ compliance-class frameworks active. Both frameworks are compliance-class (no ADR-0015 honesty gap per S2.4 R1 C-002 disposition — previously used FERPA which was insufficient-control sector-specific; restructured at R1).
 ---
 
 # Fixture scrl08 — Multi-framework UP-6 re-ask (HIPAA + GDPR both revised)

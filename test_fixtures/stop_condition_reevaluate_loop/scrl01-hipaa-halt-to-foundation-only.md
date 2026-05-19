@@ -12,7 +12,8 @@ expected_terminal_reason: iteration_cap_reached
 expected_operator_choice_at_forced_disclosure: foundation-only
 expected_fallback_mode_offered: foundation-only
 expected_stop_conditions_mutation: {halted: false, documented_in_foundation: [1], resolved_via: stop_condition_reevaluate_loop_foundation_only}
-notes: HIPAA halt at pre-step-05 → operator picks (b) → step 02 fallback probes re-asked → operator gives same answers (project really does need to be markdown-agents) → classifier re-emits same shape → conditions still fire → operator picks (b) again → iteration 2 same trace → iteration cap reached → operator forced to choose foundation-only OR exit → picks foundation-only. Module mutates stop_conditions block per R1 C-002: rolls fired conditions into documented_in_foundation + flips halted to false + records resolved_via provenance.
+notes: |
+  HIPAA halt at pre-step-05 → operator picks (b) → step 02 fallback probes re-asked → operator gives same answers (project really does need to be markdown-agents) → classifier re-emits same shape → conditions still fire → operator picks (b) again → iteration 2 same trace → iteration cap reached → operator forced to choose foundation-only OR exit → picks foundation-only. Module mutates stop_conditions block per R1 C-002: rolls fired conditions into documented_in_foundation + flips halted to false + records resolved_via provenance.
 ---
 
 # Fixture scrl01 — HIPAA halt → (b) loop → foundation-only converged

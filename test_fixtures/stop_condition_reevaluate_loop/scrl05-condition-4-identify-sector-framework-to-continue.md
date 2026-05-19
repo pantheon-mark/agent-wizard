@@ -20,7 +20,8 @@ expected_post_iteration_fired_conditions: []
 expected_terminal_outcome: continued
 expected_terminal_reason: regulatory_exposure_revised_clears_conditions
 expected_fallback_mode_offered: not_offered
-notes: Condition-4 halt at pre-step-05 → operator picks (c) → identifies a sector-specific framework that is advisory-only (no enforced compliance controls) → mutation populates `other_sector_specific[]` array + flips `no_compliance_claim_framework_identification: unknown → no` → re-evaluation finds no conditions fire (the identified framework is advisory; does not trigger conditions 1/2/3 against markdown-agents) → continued. Exercises the rare-but-possible happy path of condition-4 framework-identification. Demonstrates `other_sector_specific[]` array-append per UP-6 line 236-241 + the `unknown → no` mutation per sub-module § 4.3.
+notes: |
+  Condition-4 halt at pre-step-05 → operator picks (c) → identifies a sector-specific framework that is advisory-only (no enforced compliance controls) → mutation populates `other_sector_specific[]` array + flips `no_compliance_claim_framework_identification: unknown → no` → re-evaluation finds no conditions fire (the identified framework is advisory; does not trigger conditions 1/2/3 against markdown-agents) → continued. Exercises the rare-but-possible happy path of condition-4 framework-identification. Demonstrates `other_sector_specific[]` array-append per UP-6 line 236-241 + the `unknown → no` mutation per sub-module § 4.3.
 ---
 
 # Fixture scrl05 — Condition-4 identify-sector-framework-to-continue

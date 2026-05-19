@@ -4,10 +4,14 @@ fixture_class: foundation-only-mode
 source_shape: markdown-agents
 source_fixture: sc01-hipaa-markdown-halt
 mode: foundation-only-DOCUMENT-path
-expected_unsupported_shape_transition: none (shape is markdown; transition not fired at step 01 or 02)
-expected_halt_initial: true (HIPAA stop condition fires HALT at pre-step-05 with `fallback_mode_offered: not_offered`)
-expected_halt_after_choice: false (operator picks (b) foundation-only at HALT recovery; re-evaluation triggers DOCUMENT path; no halt)
-notes: Markdown-agents shape + HIPAA regulatory exposure. Operator initially on `not_offered` path (no transition fired since shape is markdown). Stop-condition HALT fires at pre-step-05; operator picks (b) foundation-only at the halt recovery prompt; capability-based stop conditions now evaluate under foundation-only mode and fire DOCUMENT path (not HALT) for conditions 1-3. Compliance gap entry lands in `technical_architecture.md` at step 15.
+expected_unsupported_shape_transition: |
+  none (shape is markdown; transition not fired at step 01 or 02)
+expected_halt_initial: |
+  true (HIPAA stop condition fires HALT at pre-step-05 with `fallback_mode_offered: not_offered`)
+expected_halt_after_choice: |
+  false (operator picks (b) foundation-only at HALT recovery; re-evaluation triggers DOCUMENT path; no halt)
+notes: |
+  Markdown-agents shape + HIPAA regulatory exposure. Operator initially on `not_offered` path (no transition fired since shape is markdown). Stop-condition HALT fires at pre-step-05; operator picks (b) foundation-only at the halt recovery prompt; capability-based stop conditions now evaluate under foundation-only mode and fire DOCUMENT path (not HALT) for conditions 1-3. Compliance gap entry lands in `technical_architecture.md` at step 15.
 ---
 
 # Fixture fom04 — markdown-agents + HIPAA + foundation-only DOCUMENT path

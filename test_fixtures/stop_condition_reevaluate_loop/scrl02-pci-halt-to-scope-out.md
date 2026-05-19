@@ -11,8 +11,10 @@ expected_terminal_outcome: scope_out
 expected_terminal_reason: iteration_cap_reached
 expected_operator_choice_at_forced_disclosure: scope-out
 expected_fallback_mode_offered: scope-out
-expected_stop_conditions_mutation: none (terminal scope_out does NOT trigger cross-slice mutation — only terminal foundation_only does per R1 C-002)
-notes: PCI-DSS halt at pre-step-05 → operator picks (b) → loop iterations 1 + 2 → cap reached → operator picks scope-out at forced-terminal final-choice prompt. Exercises clean-exit path through the loop. Producer-visible outcome is scope_out (NOT forced_terminal) per R1 C-001 disposition; terminal_reason: iteration_cap_reached captures how operator reached terminal.
+expected_stop_conditions_mutation: |
+  none (terminal scope_out does NOT trigger cross-slice mutation — only terminal foundation_only does per R1 C-002)
+notes: |
+  PCI-DSS halt at pre-step-05 → operator picks (b) → loop iterations 1 + 2 → cap reached → operator picks scope-out at forced-terminal final-choice prompt. Exercises clean-exit path through the loop. Producer-visible outcome is scope_out (NOT forced_terminal) per R1 C-001 disposition; terminal_reason: iteration_cap_reached captures how operator reached terminal.
 ---
 
 # Fixture scrl02 — PCI-DSS halt → (b) loop → cap → scope-out

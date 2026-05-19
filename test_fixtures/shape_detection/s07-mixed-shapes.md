@@ -7,7 +7,8 @@ expected_emit_step: 02
 expected_halt: false   # Fixture expected path: operator picks foundation-only at P02-FB-6 → DOCUMENT path, not HALT
 expected_stop_conditions_fired: [1]   # Per R3 advisor C-011 cleanup; distinguishes "condition fires" from "wizard halts"
 expected_documented_in_foundation: [1]
-notes: Mixed shapes — operator wants both a thinking partner AND a background automation. Genuinely two-shape signal. Post-R1+R2 dispositions: capability-based condition 1 fires for mixed shapes with weakest-path audit_trail_crud == advisory; on foundation-only path, condition is DOCUMENTED not HALTED. IDQ-057 candidate CLOSED.
+notes: |
+  Mixed shapes — operator wants both a thinking partner AND a background automation. Genuinely two-shape signal. Post-R1+R2 dispositions: capability-based condition 1 fires for mixed shapes with weakest-path audit_trail_crud == advisory; on foundation-only path, condition is DOCUMENTED not HALTED. IDQ-057 candidate CLOSED.
 ---
 
 # Fixture s07 — mixed (genuine multi-shape signal)
