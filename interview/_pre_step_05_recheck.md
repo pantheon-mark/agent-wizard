@@ -56,7 +56,9 @@ Evaluate the 4 stop conditions from `wizard/shape_detection.md` § 8.3 against s
 
 **Condition 3 (PCI-DSS):** `regulatory_exposure.pci_dss_applicable == yes` AND `control_matrix_active.encryption_at_rest != enforced` (status is anything other than `enforced`)
 
-**Condition 4 (regulated + no framework):** ANY of (`regulatory_exposure.hipaa_applicable == yes` / `gdpr_applicable == yes` / `pci_dss_applicable == yes` / `sox_applicable == yes` / `coppa_or_gdpr_k_applicable == yes` / `other_sector_specific` non-empty with `applicable == yes`) AND `regulatory_exposure.no_compliance_claim_framework_identification == unknown`
+**Condition 4 (regulated + no framework):** `regulatory_exposure.no_compliance_claim == no` AND `regulatory_exposure.no_compliance_claim_framework_identification == unknown`
+
+(Per S2.4 advisor R1 C-001 disposition 2026-05-19: the prior framework-applicable-yes-required predicate was internally inconsistent — if a specific framework were `applicable: yes`, framework identification would NOT be `unknown` per UP-6 source semantics at `03_user_profile.md` line 243. The corrected predicate uses `no_compliance_claim == no` to mean "operator marked at least one regulated bucket at UP-6.1" — combined with framework_identification `unknown` this matches the canonical case UP-6 line 243 specifies as the condition-4 trigger.)
 
 **Outcome path branches on `shape_hypothesis.fallback_mode_offered`:**
 

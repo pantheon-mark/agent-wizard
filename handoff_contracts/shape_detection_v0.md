@@ -23,7 +23,7 @@ Versioning was previously a single `schema_version` field; this caused internal 
 ```yaml
 schema_versions:
   schema_major: 0
-  schema_minor: 1                 # bumped 0 → 1 at S2.3 2026-05-19 (additive: optional `shape_revision` block per § 9 added)
+  schema_minor: 2                 # bumped 1 → 2 at S2.4 2026-05-19 (additive: optional `stop_conditions.resolved_during_loop` field per S2.4 R1 C-003 active-vs-transitional distinction); prior bump 0 → 1 at S2.3 for `shape_revision` block
   shape_taxonomy_version: 0       # closed taxonomy; extension = major bump
   stop_condition_set_version: 0   # closed taxonomy; extension = major bump
   control_matrix_schema_version: 0  # closed status-value taxonomy per D1 § 2.1
@@ -66,7 +66,7 @@ Two terminal states do NOT advance to `pre_step_05_evaluated` or later:
 # shape_detection_handoff_v0
 schema_versions:
   schema_major: 0
-  schema_minor: 1                 # bumped 0 → 1 at S2.3 2026-05-19 (additive: optional `shape_revision` block per § 9)
+  schema_minor: 2                 # bumped 0 → 1 at S2.3 2026-05-19 (additive: optional `shape_revision` block per § 9) + bumped 1 → 2 at S2.4 2026-05-19 (additive: optional `stop_conditions.resolved_during_loop` field per S2.4 R1 C-003)
   shape_taxonomy_version: 0
   stop_condition_set_version: 0
   control_matrix_schema_version: 0
@@ -117,9 +117,11 @@ regulatory_exposure:
 
 stop_conditions:
   evaluated_at: 05_pre_vision | 08_pre_architecture | none
-  fired: [<list of condition numbers from `wizard/shape_detection.md` § 8.3>]
+  fired: [<list of condition numbers from `wizard/shape_detection.md` § 8.3; at terminal foundation_only post-loop: ACTIVE terminal-state fired conditions only per S2.4 R1 C-003>]
   halted: true | false
-  documented_in_foundation: [<list; populated when DOCUMENT path fires; subset of fired>]
+  documented_in_foundation: [<list; populated when DOCUMENT path fires OR at terminal foundation_only post-loop; equals `fired` at terminal foundation_only; subset of fired in DOCUMENT-path>]
+  resolved_during_loop: [<optional list; populated only when terminal foundation_only reached via loop AND conditions were resolved during loop iterations; audit-trail; introduced at schema_minor: 2 per S2.4 R1 C-003; absent at schema_minor: 0 / 1>]
+  resolved_via: <provenance string; populated when terminal foundation_only reached via loop — value `stop_condition_reevaluate_loop_foundation_only`; absent otherwise>
   halt_message: <verbatim if halted; with `<actual status>` substituted from control_matrix_active>
 
 control_matrix_active:
@@ -169,10 +171,13 @@ shape_revision:
       terminal_at: <ISO 8601>            # only if outcome is terminal
 
 # When loop terminal outcome is `foundation_only`, the sub-module ALSO mutates `stop_conditions` block (cross-slice integration with S2.2 gate module § 6):
+#   stop_conditions.fired: [<ACTIVE terminal conditions only; post-loop revisions>]   # per S2.4 R1 C-003 active-vs-transitional distinction
 #   stop_conditions.halted: true → false
-#   stop_conditions.documented_in_foundation: [<previously-fired conditions>]
+#   stop_conditions.documented_in_foundation: [<same as `fired` at terminal>]
+#   stop_conditions.resolved_during_loop: [<conditions that fired during loop iterations but were resolved before terminal>]   # optional audit-trail; introduced at schema_minor: 2
 #   stop_conditions.resolved_via: stop_condition_reevaluate_loop_foundation_only
 # Required so S2.2 gate module § 6 surfaces compliance-gap entries in technical_architecture.md at step 15 close.
+# S2.2 gate module § 6 reads `documented_in_foundation` only; `resolved_during_loop` is audit-only (not consumed by gate per S2.4 R2 verification).
 ```
 
 ## 4. Stability contract
@@ -188,6 +193,7 @@ Downstream slices may RELY on the following holding at v0 (all listed under `sch
 - HALT vs DOCUMENT path semantics: stable across v0 per `wizard/shape_detection.md` § 8.4 + § 8.5.
 - `shape_revision.iteration_cap` value (2 at v0; introduced at `schema_minor: 1`) is stable; revising the cap requires `schema_minor` bump and consumer notification.
 - `shape_revision` block being absent from a staging file means operator never entered the loop. Consumers MUST default-handle absent block as `{ pending: false, iteration: 0, iteration_cap: 2, history: [] }` per § 9.
+- `stop_conditions.resolved_during_loop` field (introduced at `schema_minor: 2` per S2.4 R1 C-003): consumers reading `documented_in_foundation` for compliance-gap emission MUST NOT also read `resolved_during_loop` as gaps to emit — the field is audit-trail only, recording transitional conditions resolved during the loop (e.g., condition 4 resolved when operator identified framework). Consumers at `schema_minor: 0 / 1` default-handle absent as `[]`. Consumers at `schema_minor: 2+` MAY read for diagnostic provenance only.
 
 ## 5. What is NOT in v0 (reserved for v1+)
 

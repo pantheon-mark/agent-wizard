@@ -58,14 +58,14 @@ Module **outputs** (via staging-file mutation):
 | New `shape_hypothesis` (if (b) path led to new shape) | `shape_hypothesis.*` | Updated by classifier re-emit |
 | New `regulatory_exposure` (if (c) path revised) | `regulatory_exposure.*` | Updated by UP-6 re-ask |
 | Re-evaluated `stop_conditions` | `stop_conditions.*` | Re-populated against post-iteration shape + regulatory state |
-| `stop_conditions.documented_in_foundation` + `halted: false` mutation | `stop_conditions.*` | At terminal `foundation_only`: previously-fired conditions roll into DOCUMENT-path block so S2.2 gate module § 6 surfaces them; `halted: true → false` (operator-elected foundation-only resolved the halt) |
+| `stop_conditions.fired` + `documented_in_foundation` + `resolved_during_loop` + `halted: false` mutation | `stop_conditions.*` | At terminal `foundation_only`: **active terminal conditions** (those still firing at terminal evaluation, after all loop revisions) roll into `documented_in_foundation` so S2.2 gate module § 6 surfaces them as compliance gaps; **transitional conditions resolved during loop iterations** (e.g., condition 4 resolved by framework-identification) go to `resolved_during_loop` audit-trail field, NOT to `documented_in_foundation`; `halted: true → false` (operator-elected foundation-only resolved the halt) per S2.4 R1 C-003 active-vs-transitional distinction |
 | Terminal-state outcome | `shape_revision.history[<last>].outcome` | `continued` / `foundation_only` / `scope_out` / `next_iteration` (producer-visible; closed enum) |
 | Terminal reason metadata | `shape_revision.history[<last>].terminal_reason` | Disambiguates HOW the terminal outcome was reached. Optional field; populated at terminal entries only. Values: `passing_shape_re_emit` / `regulatory_exposure_revised_clears_conditions` / `unsupported_shape_transition` / `iteration_cap_reached` / `operator_chose_save_and_exit` |
 
 After this module returns, the producer reads `shape_revision.history[<last>].outcome` and acts on **one of four producer-visible terminal outcomes**:
 
 - `continued` → producer proceeds to its next step (pre_step_05 → step 05 vision; pre_step_08 → step 08 architecture)
-- `foundation_only` → producer sets `shape_hypothesis.fallback_mode_offered: foundation-only` AND proceeds (downstream foundation-only-mode entry guards per `_foundation_only_mode_gate.md` handle the path); compliance gaps from previously-fired conditions are already rolled into `stop_conditions.documented_in_foundation` by the module
+- `foundation_only` → producer sets `shape_hypothesis.fallback_mode_offered: foundation-only` AND proceeds (downstream foundation-only-mode entry guards per `_foundation_only_mode_gate.md` handle the path); compliance gaps from **active terminal conditions** are rolled into `stop_conditions.documented_in_foundation` by the module; **transitional conditions resolved during the loop** go to `stop_conditions.resolved_during_loop` audit-trail field per § 7 active-vs-transitional distinction (S2.4 R1 C-003)
 - `scope_out` → producer exits cleanly (foundation state preserved)
 - `next_iteration` → producer re-offers (a)/(b)/(c) at the halt; module is re-invoked with new `operator_choice`
 
@@ -259,7 +259,22 @@ Return to producer with `outcome: continued`. Producer proceeds.
 
 State: operator picked foundation-only at unsupported-shape transition OR at forced-terminal final-choice prompt (§ 7 Terminal: forced).
 
-**Cross-slice mutation: roll fired stop conditions into DOCUMENT-path block.** When loop terminal foundation-only is reached, the previously-fired stop conditions (from the original HALT that entered the loop) must be rolled into `stop_conditions.documented_in_foundation` so the S2.2 gate module's § 6 surfaces them as compliance-gap entries in `technical_architecture.md`. WITHOUT this mutation, the foundation-only mode's gate module would see `documented_in_foundation: []` (or absent) and omit the compliance-gaps section entirely — that would be a silent loss of the operator's regulatory-mismatch documentation (violating ADR-0015 § 2.3 honest characterization rule).
+**Cross-slice mutation: roll ACTIVE terminal stop conditions into DOCUMENT-path block.** When loop terminal foundation-only is reached, the **active terminal-state fired stop conditions** (those firing at the terminal evaluation, after operator revisions during the loop) must be rolled into `stop_conditions.documented_in_foundation` so the S2.2 gate module's § 6 surfaces them as compliance-gap entries in `technical_architecture.md`. WITHOUT this mutation, the foundation-only mode's gate module would see `documented_in_foundation: []` (or absent) and omit the compliance-gaps section entirely — that would be a silent loss of the operator's regulatory-mismatch documentation (violating ADR-0015 § 2.3 honest characterization rule).
+
+**Active vs transitional distinction (S2.4 advisor R1 C-003).** When the loop transitions through conditions (e.g., condition 4 fires at entry → operator identifies HIPAA via (c) path → condition 4 resolved + condition 1 fires post-revision → terminal foundation-only), only conditions firing **at terminal evaluation** are active compliance gaps; transitional conditions resolved during the loop (e.g., condition 4 resolved by framework-identification) are NOT active gaps and MUST NOT appear in `documented_in_foundation`. Including a resolved condition would emit a false "regulated-but-unnamed-framework" gap in technical_architecture.md, contradicting the actual loop outcome (framework was identified; the gap is HIPAA-on-markdown-agents, not regulation-without-framework).
+
+Use the optional `resolved_during_loop` array to preserve audit-trail of conditions that fired during the loop but were resolved before terminal:
+
+```yaml
+stop_conditions:
+  fired: [<active terminal conditions only>]            # at terminal: snapshot of conditions still firing post-loop
+  halted: false                                          # flipped true → false at terminal foundation_only
+  documented_in_foundation: [<active terminal conditions only>]
+  resolved_during_loop: [<conditions that fired during loop iterations but were resolved>]
+  resolved_via: stop_condition_reevaluate_loop_foundation_only
+```
+
+For audit: `shape_revision.history[].pre_iteration_fired_conditions` already preserves the per-iteration firing history; `resolved_during_loop` is an aggregate of which of those were resolved before terminal (i.e., conditions that fired at iteration N but did NOT fire at iteration N+1).
 
 ```yaml
 shape_revision:
@@ -275,9 +290,10 @@ shape_hypothesis:
   foundation_only_offered_timestamp: <ISO 8601>
 stop_conditions:
   evaluated_at: <05_pre_vision | 08_pre_architecture>   # preserved from original halt
-  fired: [<original list>]                              # preserved from original halt
+  fired: [<active terminal conditions only>]            # those still firing at terminal evaluation (post all loop revisions); NOT historical fired list
   halted: false                                          # FLIPPED true → false at terminal foundation-only (loop resolved the halt to foundation-only path)
-  documented_in_foundation: [<original fired list>]      # POPULATED from `fired` so S2.2 gate module § 6 emits gaps
+  documented_in_foundation: [<active terminal conditions only>]   # equals `fired` at terminal; S2.2 gate module § 6 emits gaps for these
+  resolved_during_loop: [<conditions that fired during loop iterations but were resolved before terminal>]   # optional audit-trail (S2.4 R1 C-003); empty if loop had no transitional resolution
   resolved_via: stop_condition_reevaluate_loop_foundation_only   # provenance of how documented_in_foundation came to be populated
   halt_message: <preserved verbatim from original halt — operator already saw it; record retained>
 ```
@@ -379,7 +395,15 @@ shape_revision:
       terminal_at: <ISO 8601>   # only if outcome is terminal
 ```
 
-**Cross-slice mutation companion (terminal foundation_only only).** When `outcome: foundation_only` is recorded, the module also mutates the staging file's `stop_conditions` block per § 7 Terminal: foundation-only — rolls fired conditions into `documented_in_foundation` + flips `halted: false` + adds `resolved_via: stop_condition_reevaluate_loop_foundation_only` provenance field. This is NOT in the `shape_revision` block; it's an out-of-block mutation required for cross-slice integration with S2.2's gate module § 6.
+**Cross-slice mutation companion (terminal foundation_only only).** When `outcome: foundation_only` is recorded, the module also mutates the staging file's `stop_conditions` block per § 7 Terminal: foundation-only:
+
+- `fired: [<active terminal conditions only>]` — those still firing at terminal evaluation, post-all-loop-revisions (NOT historical fired list across all iterations; per S2.4 R1 C-003 active-vs-transitional distinction)
+- `documented_in_foundation: [<same as fired>]` — POPULATED so S2.2 gate module § 6 emits gaps for these
+- `resolved_during_loop: [<conditions that fired during loop but were resolved before terminal>]` — OPTIONAL audit-trail field (S2.4 R1 C-003); records transitional resolutions for diagnostic provenance; empty if no transitional resolution occurred
+- `halted: true → false` — flipped at terminal foundation-only
+- `resolved_via: stop_condition_reevaluate_loop_foundation_only` — provenance
+
+This is NOT in the `shape_revision` block; it's an out-of-block mutation required for cross-slice integration with S2.2's gate module § 6. S2.2 gate module § 6 reads `documented_in_foundation` only; `resolved_during_loop` is audit-only and NOT consumed by the gate module (verified at S2.4 R2).
 
 **Cleanup discipline (Decision I/J).** At terminal state, `pending: false` is set; `history[]` array is **preserved** (not cleared) for diagnostic / audit-trail value. Subsequent producers reading the staging file see full loop history. The cross-slice `stop_conditions` mutation (when applicable) is also preserved.
 
@@ -414,17 +438,19 @@ detection_recovery_mechanisms:
   - Honest-characterization disclosure at iteration entry — operator knows the likely outcomes; no surprise foundation-only landing
 rationale: S2.1 specified the contract surface ("(b) Change the shape and re-evaluate") at pre_step_05 + pre_step_08 + shape_detection.md § 8.4 step 4 but deferred implementation ("Implementation of the loop-back path is OUT of S2.1 scope per decision G"). S2.3 implements the real loop. The loop's value in v1 is operator-agency: even when the loop converges to foundation-only OR exit (the dominant v1 outcome given v1-shape-set constraints — markdown-agents only), running it transparently lets the operator discover their options vs. silently dropping them into foundation-only. The (c) regulatory-exposure path adds a third axis of operator agency — operator can realize they over-stated regulatory exposure at step 03 and revise without committing to shape revision. The iteration cap (Decision A) prevents loop-fatigue. The shared sub-module pattern (Decision D) earns its keep through substantive state-machine logic + propagation-fragility of inlining (different reason than S2.2's shared-module justification per validate-the-WHY discipline).
 validation_method: manual paper-replay walkthrough of loop state machine + iteration cap + probe re-ask + terminal-state branching against synthetic fixtures (4 stop-condition-reevaluate-loop fixtures + S2.1 + S2.2 regression check). Per AR-004 F-2.8 + D2 § 5 validation evidence storage convention.
-validation_evidence: governance/validation/mech-stop-condition-reevaluate-loop-v0/2026-05-19_s2.3_initial_fixture_replay.md
+validation_evidence: governance/validation/mech-stop-condition-reevaluate-loop-v0/2026-05-19_s2.4_condition_4_fixture_extension.md (extends governance/validation/mech-stop-condition-reevaluate-loop-v0/2026-05-19_s2.3_initial_fixture_replay.md)
 known_coverage_limits:
   - Synthetic fixtures only; no real-operator data
   - Paper-replay only (markdown-driven interview agent; no executable run)
   - Iteration cap calibration (2) is hypothesis-only; first-real-operator-data may revise
   - Probe re-ask path (step 02 fallback probes only; P-5/P-6/P-7) is Decision B v0 default; first-real-operator-data may revise to Alt A (re-ask all 7 probes) or Alt B (free-text describe-changes)
-  - (c) regulatory-exposure re-evaluation tested for GDPR-revise case only (scrl03); HIPAA / PCI-DSS / regulated-no-framework revise cases assumed to follow same pattern per § 4.2 framework-specific disclosure variants
-  - Pre-step-08 loop with vision+approach already on disk tested for HIPAA late-emergence only (one fixture); other framework late-emergence cases assumed to follow same pattern
+  - PCI-DSS / SOX / COPPA (c) revise paths not separately fixtured at v0 (HIPAA + GDPR + sector-specific covered via scrl03 + scrl05 + scrl06 + scrl08 + scrl09; remaining named frameworks assumed symmetric per § 4.2 Variant A framework-specific disclosure variants)
+  - Pre-step-08 loop with vision+approach already on disk tested for HIPAA late-emergence only (scrl04); pre-step-08 condition-4 late-emergence NOT separately fixtured (S2.4 Decision E pre_step_05 only; structurally same as scrl04 with different trigger framework); other framework late-emergence cases assumed to follow same pattern
   - Mixed-shape per-component capability loop interaction not exercised (reserved for v1+ per S2.1 handoff contract § 5)
   - Concurrent loop-then-late-emergence-at-pre-step-08 case tested with fresh iteration counter at pre_step_08 (Decision E); inherit-counter alternative not exercised
-reverify_trigger: first real-operator-input loop iteration; OR iteration cap calibration revised; OR probe re-ask path Decision B revised; OR shape-detection contract major-version bump (would change shape_revision block schema semantics); OR foundation-only-mode mechanism revised (S2.2 mech-foundation-only-mode-v0 revision); OR new v1-supported shape added (would change loop convergence behavior)
+  - Sector-specific compliance-class frameworks (FERPA / GLBA / similar with enforceable controls) NOT exercised on continuing paths because v0 has no 5th stop condition for sector-specific compliance frameworks beyond the named ones (HIPAA / GDPR / PCI-DSS / SOX / COPPA). Demonstrating active compliance-class sector framework on continuing path would violate ADR-0015 § 2.3 honest-characterization rule. IDQ-056 reserves the design space for the 5th stop condition; v0 fixtures use named-compliance frameworks (HIPAA + GDPR in scrl08) for multi-framework re-ask coverage. Forward-looking gap; not a demonstrated-working surface. Per S2.4 R1 C-002 disposition: scrl08 restructured from HIPAA + FERPA to HIPAA + GDPR to avoid demonstrating an ADR-0015 violation.
+  - Active-vs-transitional distinction at cross-slice mutation (S2.4 R1 C-003): `documented_in_foundation` records active terminal-state fired conditions only; transitional conditions resolved during loop iterations (e.g., condition 4 resolved when operator identifies framework) are recorded in optional `resolved_during_loop` audit-trail field, NOT in `documented_in_foundation`. Without this distinction, foundation docs would emit false stale gaps (e.g., "regulated-but-unnamed-framework" gap when framework was actually identified). scrl06 fixture demonstrates correct behavior.
+reverify_trigger: first real-operator-input loop iteration; OR iteration cap calibration revised; OR probe re-ask path Decision B revised; OR shape-detection contract major-version bump (would change shape_revision block schema semantics); OR foundation-only-mode mechanism revised (S2.2 mech-foundation-only-mode-v0 revision); OR new v1-supported shape added (would change loop convergence behavior); OR 5th stop condition added (IDQ-056); OR sector-specific framework treatment policy revised
 mvp_lifecycle: foundation-tier per AR-002 F-1.6 (gates operator-recovery path from regulatory-constraint halt; load-bearing for full-system-generation path completion when stop conditions fire)
 ```
 
