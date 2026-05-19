@@ -87,7 +87,7 @@ At classifier emit, write the following structure to `~/claude-wizard-draft/wiza
 
 schema_versions:
   schema_major: 0
-  schema_minor: 0
+  schema_minor: 1                 # bumped 0 → 1 at S2.3 2026-05-19 (additive: optional `shape_revision` block per handoff contract § 9)
   shape_taxonomy_version: 0
   stop_condition_set_version: 0
   control_matrix_schema_version: 0
@@ -184,7 +184,7 @@ Before step 05's first user-facing question, classifier re-reads:
 | `confirmed` | Append recheck entry `outcome: confirmed`; proceed to step 05 |
 | `revised` (still v1-supported) | Update `shape_hypothesis.shape` + `confidence`; append recheck entry `outcome: revised` + `revised_shape:` + `revised_confidence:`; proceed to step 05 |
 | `revised` (no longer v1-supported) | § 6 unsupported-shape transition fires (operator chooses scope-out vs foundation-only) |
-| `halted` (stop condition fired) | § 7 halt fires; foundation state preserved; operator offered re-evaluate-shape OR exit |
+| `halted` (stop condition fired) | § 7 halt fires; foundation state preserved; operator offered three paths per S2.3 — (a) save-and-exit / (b) change shape and re-evaluate / (c) re-evaluate regulatory exposure |
 
 ### 5.2 Pre-step-08 re-check
 
@@ -349,11 +349,13 @@ When a stop condition fires AND `shape_hypothesis.fallback_mode_offered == not_o
          halt_message: <verbatim message; with `<actual status>` substituted from control_matrix_active>
    ```
 2. Wizard says the halt message verbatim to operator (with capability status substituted).
-3. Wizard offers two paths:
-   > Two choices:
+3. Wizard offers three paths (S2.3 added (c)):
+   > Three choices:
    > **(a) Save progress and exit** — your project file is saved; you can complete a compliance review and resume.
-   > **(b) Change the shape and re-evaluate** — I'll loop back to the shape probes with this regulatory exposure in mind.
-4. If operator picks (b): wizard returns to step 02 fallback probes with a marker `shape_revision_pending: true`; classifier re-emits; pre-step-05 re-check fires again. **Implementation of the loop-back path is OUT of S2.1 scope per decision G**; S2.1 specifies the contract; downstream slice implements the loop.
+   > **(b) Change the shape and re-evaluate** — I'll re-run the shape probes with this regulatory exposure in mind.
+   > **(c) Re-evaluate regulatory exposure** — I'll re-ask the step 03 regulatory questions with the stop condition surfaced; if your project actually doesn't fall under [framework] scope, the stop condition won't fire on re-evaluation.
+4. If operator picks (b): invoke `wizard/interview/_stop_condition_reevaluate_loop.md` § 2 loop entry; loop sub-module runs probe re-ask + classifier re-emit + stop-condition re-evaluation per S2.3 implementation. **Loop semantics canonical at `_stop_condition_reevaluate_loop.md`** — see that file for state machine + iteration cap (default 2 per S2.3 Decision A) + terminal-state branching. Producer-visible terminal outcomes are the CLOSED 4-value enum: `continued` / `foundation_only` / `scope_out` / `next_iteration` (per R1 C-001 disposition; `forced_terminal` is internal-only branch state at sub-module § 6 — module handles final-choice prompt internally and maps to foundation_only or scope_out with `terminal_reason: iteration_cap_reached`). § 8.4 stays a summary; the canonical implementation lives in the sub-module.
+5. If operator picks (c) "Re-evaluate regulatory exposure" (added at S2.3 per Decision C): invoke `wizard/interview/_stop_condition_reevaluate_loop.md` § 4 regulatory-exposure entry; loop sub-module re-asks step 03 UP-6 probes + mutates `regulatory_exposure` if operator clarifies + re-evaluates stop conditions against unchanged shape.
 
 Foundation state IS preserved through halt (staging file unchanged except for halt-log entries).
 

@@ -86,24 +86,33 @@ Say the halt message verbatim to operator. Substitute the actual capability stat
 
 Then say:
 
-> Two choices:
+> Three choices:
 >
 > **(a) Save progress and exit** — your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Complete an operator-side compliance review, then resume the wizard.
 >
-> **(b) Change the shape and re-evaluate** — I'll loop back to the shape probes with this regulatory exposure in mind. Note: v1 of the wizard supports only the markdown-agents shape for complete system generation — alternative shapes are deferred. The re-evaluation may end with foundation-only mode or scope-out.
+> **(b) Change the shape and re-evaluate** — I'll re-run the shape probes with this regulatory exposure in mind. v1 of the wizard supports only the markdown-agents shape for complete system generation — alternative shapes are deferred. The re-evaluation may end with foundation-only mode, scope-out, or (rarely) a passing path.
+>
+> **(c) Re-evaluate regulatory exposure** — I'll re-ask the step 03 regulatory questions with the stop condition surfaced. If your project actually doesn't fall under [<framework>] scope, the stop condition won't fire on re-evaluation.
 
 **If operator picks (a):** Append `scope_out_at_halt: <timestamp>`. Say: "Saved. Re-run the wizard when you're ready." Exit cleanly.
 
-**If operator picks (b):** Loop-back implementation is OUT of S2.1 scope per decision G. For now, say:
+**If operator picks (b):** Invoke `wizard/interview/_stop_condition_reevaluate_loop.md` § 2 loop entry with:
+- `entered_from: pre_step_05`
+- `pre_iteration_fired_conditions: [<list from Step 2 evaluation>]`
+- `operator_choice: (b) change_shape`
 
-> Loop-back-to-shape-probes is on the roadmap (a separate slice will implement it). For now, your options are:
->
-> - Exit and re-run the wizard with revised understanding of regulatory exposure
-> - Choose foundation-only mode (I generate planning documents; you implement separately) — note that this produces docs that EXPLICITLY state the regulatory exposure mismatch
->
-> Which would you like?
+Loop sub-module runs iteration + classifier re-emit + stop-condition re-evaluation; returns control with `outcome` set in `shape_revision.history[<last>].outcome`. The outcome enum is CLOSED to 4 producer-visible values (per `_stop_condition_reevaluate_loop.md` § 1 output contract; `forced_terminal` is internal-only branch state, NEVER producer-visible). Act per outcome:
+- `continued` → proceed to Step 3 (re-check trigger evaluation)
+- `foundation_only` → wizard's `shape_hypothesis.fallback_mode_offered` is already set to `foundation-only` by the module (with `stop_conditions` mutated per R1 C-002 cross-slice rule: `halted: false`, `documented_in_foundation` populated, `resolved_via: stop_condition_reevaluate_loop_foundation_only`); foundation-only-mode behavior fires at step 05 entry guard per `_foundation_only_mode_gate.md`; proceed to step 05
+- `scope_out` → wizard's `shape_hypothesis.fallback_mode_offered` is already set to `scope-out` by the module; exit cleanly per Terminal: scope_out handling
+- `next_iteration` → re-offer (a)/(b)/(c) at this Step 2a; operator's next pick (or (a) save-and-exit) re-invokes the module
 
-If operator picks foundation-only: update `shape_hypothesis.fallback_mode_offered: foundation-only`; restart Step 2 (now in 2b path); evaluate conditions again with DOCUMENT-path semantics.
+**If operator picks (c):** Invoke `wizard/interview/_stop_condition_reevaluate_loop.md` § 4 regulatory-exposure entry with:
+- `entered_from: pre_step_05`
+- `pre_iteration_fired_conditions: [<list>]`
+- `operator_choice: (c) regulatory_exposure_revise`
+
+Loop sub-module runs UP-6 re-ask + regulatory-exposure mutation (if operator revises) + stop-condition re-evaluation; returns with outcome. Act per same outcomes as (b).
 
 ### 2b — DOCUMENT path (operator on foundation-only-mode path)
 
@@ -127,7 +136,7 @@ shape_hypothesis:
 
 Downstream foundation-only-mode implementation slice (per decision F) will insert honest compliance-mismatch text into generated foundation docs. At S2.1, the recording is the deliverable; the foundation-doc-insertion is downstream.
 
-**Exception — condition 4 (regulated + no framework) DOES HALT in foundation-only mode:** foundation docs cannot be written honestly without framework identification. If condition 4 fires regardless of `fallback_mode_offered`, fall through to 2a HALT path (a/b two-choice path) with the condition-4-specific halt message.
+**Exception — condition 4 (regulated + no framework) DOES HALT in foundation-only mode:** foundation docs cannot be written honestly without framework identification. If condition 4 fires regardless of `fallback_mode_offered`, fall through to 2a HALT path (a/b/c three-choice path per S2.3) with the condition-4-specific halt message; the (c) regulatory-exposure path is particularly load-bearing for condition 4 since framework identification is the canonical exit (per `_stop_condition_reevaluate_loop.md` § 4.2 Variant B disclosure).
 
 ### 2c — No condition fires
 
@@ -267,7 +276,7 @@ shape_hypothesis:
 
 Say: "Foundation-only mode confirmed. I'll generate the planning documents for your project — vision, approach, technical architecture, and so on — abstracted from the implementation shape. You'll take those docs to Claude Code directly to build the implementation. We won't generate the actual agents, scripts, or run files."
 
-**Note for downstream slices:** the steps-05-15 foundation-only-mode behavior (skip implementation generation; only produce foundation docs) is OUT of S2.1 scope per decision F. At S2.1, the wizard proceeds to step 05 with `fallback_mode_offered: foundation-only` set; downstream interview-steps-rebuild slice implements the actual foundation-only path. For S2.1's purposes, marking the state is the deliverable.
+**Downstream behavior:** steps-05-15 foundation-only-mode behavior (skip implementation generation; only produce foundation docs) is implemented at S2.2 per `wizard/interview/_foundation_only_mode_gate.md` (per-step entry guards + adapted paths + step 15 close ceremony adaptation). At pre-step-05, the wizard proceeds to step 05 with `fallback_mode_offered: foundation-only` set; downstream foundation-only-mode entry guards in each interview file fire per the gate module's § 3 entry-guard pattern.
 
 Proceed to step 05 (with foundation-only flag set; downstream slices will branch behavior).
 

@@ -62,8 +62,18 @@ shape_hypothesis:
 Surface late-emergence to operator with extra care — they may feel "you should have asked earlier." Acknowledge:
 
 > Looking at what we've built so far — the vision and approach documents — I see [specific text]. That suggests [framework] applies, which I didn't pick up on at step 03. Before we generate the architecture, we need to handle this.
+>
+> Note: vision and approach documents are already on disk — they're abstracted from implementation shape (they describe what your system does, not how), so they stay valid through any shape revision or regulatory revision. We won't lose them.
 
-Then offer the same two-choice path from pre-step-05 § 5 (save-and-exit OR change-shape-and-re-evaluate).
+Then offer the three-choice path (a / b / c) per `_pre_step_05_recheck.md` Step 2a — same operator-facing language; same `_stop_condition_reevaluate_loop.md` invocation pattern; **fresh iteration counter** per S2.3 Decision E (pre_step_08 does NOT inherit pre_step_05's iteration count; see `_stop_condition_reevaluate_loop.md` § 3 counter-reset rule).
+
+**If operator picks (b) or (c):** Invoke `wizard/interview/_stop_condition_reevaluate_loop.md` with:
+- `entered_from: pre_step_08`
+- `late_emergence_source: vision | approach | advisors`
+- `pre_iteration_fired_conditions: [<list>]`
+- `operator_choice: (b) change_shape` OR `(c) regulatory_exposure_revise`
+
+Loop sub-module runs + returns outcome. Foundation state preservation through loop iterations: vision.md + approach.md remain on disk; loop does NOT touch them. Act per outcome as in pre_step_05 Step 2a; on `foundation_only` outcome, vision + approach roll forward into the foundation doc set per S2.2 `_foundation_only_mode_gate.md` § 5.
 
 **If NO new regulatory exposure:** proceed to Step 3.
 

@@ -333,7 +333,7 @@ shape_hypothesis:
 
 Say: "Foundation-only mode confirmed. I'll continue through the interview to gather what's needed for the foundation documents, but I won't generate the system implementation at the end. Your downstream Claude Code build conversation will use the foundation docs we produce." Proceed to step 02.
 
-Downstream: pre-step-05 re-check evaluates stop conditions in DOCUMENT-path (not HALT-path) per `wizard/shape_detection.md` § 8.5; the foundation-doc-insertion of compliance-mismatch text is OUT of S2.1 scope per decision F.
+Downstream: pre-step-05 re-check evaluates stop conditions in DOCUMENT-path (not HALT-path) per `wizard/shape_detection.md` § 8.5; foundation-doc-insertion of compliance-mismatch text is implemented at S2.2 per `wizard/interview/_foundation_only_mode_gate.md` § 6 (gaps land in `technical_architecture.md` § "Regulatory & compliance gaps (foundation-only mode)" at step 15 close).
 
 Write sub-step marker: Append `step_01_P1-9: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
