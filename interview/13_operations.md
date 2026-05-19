@@ -33,6 +33,29 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 ---
 
+## Foundation-only-mode entry guard
+
+Before doing anything else in this step:
+
+1. **Schema-version check (per handoff contract consumer rule).** Read `~/claude-wizard-draft/wizard_session_draft.md`; locate the `schema_versions` block under shape_hypothesis. Verify `schema_major == 0`. If `schema_major` mismatches the consumer expected major (currently `0` at v0), abort with operator-facing internal-state error: "I hit a wizard-internal version mismatch — the staging file's shape-detection schema major is `<actual>`, but this version of the wizard expects major `0`. Your project file is saved. Please update the wizard OR resume with the matching wizard version." Exit cleanly; do NOT proceed.
+
+2. Locate the `shape_hypothesis.fallback_mode_offered` field.
+
+3. Consult `wizard/interview/_foundation_only_mode_gate.md` § 2 derivation rule. Determine:
+   - `produce_foundation_docs` (boolean)
+   - `produce_system_implementation` (boolean)
+   - `capture_implementation_inputs` (boolean)
+   - `honest_characterization_disclosure` (enum value)
+
+4. Branch:
+   - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
+   - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
+   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
+
+5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error. Halt with internal-error message; foundation state preserved. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
+
+---
+
 ## Step opening — progress and preview
 
 **Say:**
@@ -274,6 +297,32 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 ## Success condition
 
 CONC-1, CONC-2, START-1, START-2, DRIFT-1, and SCALE-1 through SCALE-4 complete. Scale tier written to `technical_architecture.md` and `project_instructions.md`. All configured values written to the staging file. `OPERATIONS_CONFIGURED = true` in the staging file.
+
+**Write completion marker:** Append `step_13: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `14_document_review.md`.
+
+---
+
+## Foundation-only adapted path
+
+**Disposition (per S2.2 spec § A.3): ADAPT — capture operational requirements as foundation section; skip runtime config writes.**
+
+Conduct the operations interview from the existing step content above (CONC-1, CONC-2, START-1, START-2, DRIFT-1, SCALE-1 through SCALE-4 — chunk confirmation preference + drift analysis cadence + scale tier + silent default thresholds for retry / gate-conflict-timeout / deferred-alert-limit).
+
+**Difference from normal behavior:**
+
+DO NOT:
+
+- Write scale tier entry to `technical_architecture.md` in implementation-runtime-config voice. In foundation-only mode, `technical_architecture.md` is a foundation doc; scale tier is captured as a foundation-level operational requirement, not a runtime config knob.
+- Write operations values to `project_instructions.md` as wizard-runtime config (`project_instructions.md` in foundation-only mode is a foundation-doc).
+
+DO:
+
+- Conduct the operations questions and capture answers
+- Append captured operations data to the staging file under `## Foundation-only-mode captures > Operational requirements (cadence, scale, drift)` (chunk confirmation + drift cadence + scale tier + silent default thresholds for inheritance reference)
+
+At step 15 close, the captured operations data extracts to `technical_architecture.md` § "Operational requirements" > "Operational requirements (cadence, scale, drift)" per `_foundation_only_mode_gate.md` § 5. The scale tier is included as a foundation-level note (e.g., "Designed for scale tier: small / medium / large") in the architecture content.
 
 **Write completion marker:** Append `step_13: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

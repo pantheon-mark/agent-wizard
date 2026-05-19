@@ -33,6 +33,29 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 ---
 
+## Foundation-only-mode entry guard
+
+Before doing anything else in this step:
+
+1. **Schema-version check (per handoff contract consumer rule).** Read `~/claude-wizard-draft/wizard_session_draft.md`; locate the `schema_versions` block under shape_hypothesis. Verify `schema_major == 0`. If `schema_major` mismatches the consumer expected major (currently `0` at v0), abort with operator-facing internal-state error: "I hit a wizard-internal version mismatch — the staging file's shape-detection schema major is `<actual>`, but this version of the wizard expects major `0`. Your project file is saved. Please update the wizard OR resume with the matching wizard version." Exit cleanly; do NOT proceed.
+
+2. Locate the `shape_hypothesis.fallback_mode_offered` field.
+
+3. Consult `wizard/interview/_foundation_only_mode_gate.md` § 2 derivation rule. Determine:
+   - `produce_foundation_docs` (boolean)
+   - `produce_system_implementation` (boolean)
+   - `capture_implementation_inputs` (boolean)
+   - `honest_characterization_disclosure` (enum value)
+
+4. Branch:
+   - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
+   - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
+   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
+
+5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error. Halt with internal-error message; foundation state preserved. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
+
+---
+
 ## Step opening — progress and preview
 
 **Say:**
@@ -526,3 +549,106 @@ Update staging file: `WIZARD_COMPLETE = true`
 **Write completion marker:** Append `step_15: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 The interview sequence is complete. The wizard has produced a running project directory, a configured system, and the user's first build prompt. The user's next action is to paste the first build prompt into Claude Code.
+
+---
+
+## Foundation-only adapted path
+
+**Disposition (per S2.2 spec § A.3): ADAPT — large close-ceremony rebuild.**
+
+In foundation-only mode, step 15 close does NOT execute the full normal close path (no git init, no first build prompt, no implementation files). Instead, follow the foundation-only close ceremony below.
+
+### CLOSE-ASSEMBLY (foundation-only)
+
+Assemble and write ONLY the foundation doc set + adapted close-ceremony docs to the operator project directory:
+
+| File | Source | Voice / content |
+|---|---|---|
+| `vision.md` | Step 05 draft (already on disk) | Confirm presence at `[PROJECT_DIR]/vision.md`; no re-write |
+| `approach.md` | Step 06 draft (already on disk) | Confirm presence at `[PROJECT_DIR]/approach.md`; no re-write |
+| `technical_architecture.md` | Step 08 draft + captured-input sections from steps 07/09/10/11/12/13 + DOCUMENT-path stop-condition gaps if any | ASSEMBLE now per `_foundation_only_mode_gate.md` § 5 + § 6 (read all `## Foundation-only-mode captures > *` sections from staging file; integrate into `technical_architecture.md` § "Operational requirements") |
+| `execution_plan.md` | Foundation-level execution sequencing from staging data + captured operations data from step 13 | ASSEMBLE now; shape-agnostic execution sequencing for the foundation docs (what to build first, dependencies, decision points) |
+| `project_instructions.md` | Foundation-only voice template | ASSEMBLE now per `_foundation_only_mode_gate.md` § 4; opening section MUST surface verbatim: "These foundation docs describe your project at the system-blueprint level. They are implementation-agnostic. Implementation NOT included in this output." |
+| `manual.md` | Pointer doc | ASSEMBLE now; MUST surface pointer to `next_steps.md`; no claim of "operating manual" semantics implying a running system |
+| `next_steps.md` | NEW per S2.2 § A.4 | ASSEMBLE now; structure per "next_steps.md content (template)" below |
+
+### next_steps.md content (template)
+
+Write `[PROJECT_DIR]/next_steps.md` with the structure below. Substitute `[SHAPE]` with the detected shape from `shape_hypothesis.shape` and `[PROJECT_DIR]` with the operator's actual project directory.
+
+```markdown
+# Next steps — Foundation-only mode
+
+## What was produced
+
+This wizard run produced foundation documents describing your project at the system-blueprint level. They are implementation-agnostic.
+
+Documents written to this directory:
+
+- `vision.md` — project vision
+- `approach.md` — project approach / methodology
+- `technical_architecture.md` — shape-agnostic technical architecture (including operational requirements + any regulatory/compliance gaps identified at pre-step-05 re-check)
+- `execution_plan.md` — foundation-level execution sequencing
+- `project_instructions.md` — foundation-doc voice; describes what these docs are and are not
+- `manual.md` — pointer to this file (`next_steps.md`)
+- `next_steps.md` — this file
+
+## What was NOT produced (and why)
+
+Foundation-only mode does NOT generate system implementation. The wizard makes this distinction explicit because your project's system shape ([SHAPE]) is not yet supported by v1 of the wizard for full system generation.
+
+NOT produced:
+
+- Agent prompt files, scripts, or runtime configuration
+- `.env`, `.gitignore`, `start-session.sh`, `session_bootstrap.md`
+- Directory structure for agents, quality, work, logs, security
+- Git repository initialization or GitHub remote setup
+- First-build prompt for executing in Claude Code
+
+## Two paths forward
+
+**(a) Direct Claude Code build.** Take these foundation docs to Claude Code directly. Open Claude Code in this project directory and ask it to read the foundation docs and help you build the implementation in your chosen shape ([SHAPE]). The foundation docs are designed to be sufficient for an experienced operator (or Claude Code) to build from.
+
+**(b) Wait for v2 wizard shape support.** The wizard's roadmap for adding [SHAPE] support lives in the build project at `prd.md` § 4.5 "Deferred shapes + un-defer triggers." Your staging file at `~/claude-wizard-draft/wizard_session_draft.md` is preserved on disk. **Concrete resume-to-full-build tooling is NOT implemented in this wizard version** — per S2.2 § A.10 Decision D, only the data is preserved. A future wizard version may implement automated resume (PRD F-12 re-open path); when that version ships, the preserved staging file should be readable by it. Until then, path (a) direct Claude Code build is the available path; path (b) is "wait and re-evaluate when v2 ships."
+
+## Honest characterization
+
+> Foundation-only mode. Implementation deferred. Take these docs to Claude Code directly OR wait for v2 wizard shape support.
+
+This output reflects the wizard's intentional implementation-agnostic stance. The foundation docs are designed to outlive any single implementation shape; what you build from them is your choice.
+```
+
+### Steps SKIPPED in foundation-only mode
+
+- CLOSE-4 (git init): SKIP. Foundation docs are portable; operator decides repo strategy.
+- GH-1 (GitHub remote): SKIP. Same reason.
+- CLOSE-14 (first build prompt): SKIP. No markdown-agents to build; path forward lives in `next_steps.md`.
+- Implementation file writes — agent prompts, scripts, `.env`, `.gitignore`, `start-session.sh`, `session_bootstrap.md`, `/agents/`, `/quality/`, `/work/`, `/logs/`, `/security/`, `/docs/`, `/archive/`: all SKIP.
+
+### CLOSE-13 (closing message) adaptation
+
+Tell operator (verbatim):
+
+> Foundation-only mode complete. I've written 7 foundation documents to your project directory at `[PROJECT_DIR]/`. The key file to read next is `next_steps.md` — it walks you through what was produced, what was NOT produced (and why), and your two paths forward (direct Claude Code build OR wait for v2 wizard shape support).
+>
+> **Foundation-only mode. Implementation deferred. Take these docs to Claude Code directly OR wait for v2 wizard shape support.**
+>
+> Your project file at `~/claude-wizard-draft/wizard_session_draft.md` is preserved. We are NOT implementing resume tooling in this version of the wizard — concrete resume-to-full-build support is deferred (per S2.2 § A.10 Decision D). What this means: your staging-file inputs are preserved on disk for a future implementation, but you cannot today re-run this wizard and have it pick up automatically. The available path today is direct Claude Code build using the foundation docs.
+
+### Step 15 close write progression (foundation-only)
+
+1. Read staging file fully + read all foundation-doc captures (`## Foundation-only-mode captures > *` sections)
+2. Assemble `technical_architecture.md` per `_foundation_only_mode_gate.md` § 5 + § 6 (write to `[PROJECT_DIR]/technical_architecture.md`)
+3. Assemble `execution_plan.md` from foundation-level execution sequencing (write to `[PROJECT_DIR]/execution_plan.md`)
+4. Assemble `project_instructions.md` in foundation-only voice (write to `[PROJECT_DIR]/project_instructions.md`)
+5. Assemble `manual.md` as pointer doc (write to `[PROJECT_DIR]/manual.md`)
+6. Write `next_steps.md` per content template above (write to `[PROJECT_DIR]/next_steps.md`)
+7. Verify `vision.md` + `approach.md` already on disk (written at step 05 + step 06)
+8. Update staging file: `WIZARD_COMPLETE = true`
+9. Append step-marker to `~/claude-wizard-draft/wizard_progress.md`:
+   ```
+   step_15: complete | <timestamp>
+   ```
+10. Deliver CLOSE-13 closing message
+
+The wizard exits cleanly after the closing message. NO first-build-prompt; NO git init; NO GitHub remote.

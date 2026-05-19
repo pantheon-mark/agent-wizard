@@ -41,7 +41,32 @@ Before any step-05 user-facing question fires, run `wizard/interview/_pre_step_0
 
 If `step_05_pre_recheck: complete` is already in `~/claude-wizard-draft/wizard_progress.md` (e.g., resuming a partial step 05), skip the pre-recheck and proceed to the step opening. Otherwise, run the pre-recheck module first.
 
-After pre-recheck completes successfully (no halt; no scope-out): proceed to step opening.
+After pre-recheck completes successfully (no halt; no scope-out): proceed to the foundation-only-mode entry guard below.
+
+---
+
+## Foundation-only-mode entry guard
+
+*(Placement note — per `_foundation_only_mode_gate.md` § 3 + advisor R1 C-001 disposition: this entry guard MUST run AFTER the pre-step-05 re-check above, because the re-check can mutate `shape_hypothesis.fallback_mode_offered` via the unsupported-shape transition. An entry guard run BEFORE the re-check would branch on stale state.)*
+
+Before any step-05 user-facing question fires:
+
+1. **Schema-version check (per handoff contract consumer rule).** Read `~/claude-wizard-draft/wizard_session_draft.md`; locate the `schema_versions` block under shape_hypothesis. Verify `schema_major == 0`. If `schema_major` mismatches the consumer expected major (currently `0` at v0), abort with operator-facing internal-state error: "I hit a wizard-internal version mismatch — the staging file's shape-detection schema major is `<actual>`, but this version of the wizard expects major `0`. Your project file is saved. Please update the wizard OR resume with the matching wizard version." Exit cleanly; do NOT proceed.
+
+2. Locate the `shape_hypothesis.fallback_mode_offered` field.
+
+3. Consult `wizard/interview/_foundation_only_mode_gate.md` § 2 derivation rule. Determine:
+   - `produce_foundation_docs` (boolean)
+   - `produce_system_implementation` (boolean)
+   - `capture_implementation_inputs` (boolean)
+   - `honest_characterization_disclosure` (enum value)
+
+4. Branch:
+   - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
+   - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
+   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
+
+5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error. Halt with internal-error message; foundation state preserved. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
 
 ---
 
@@ -312,3 +337,17 @@ V-1 through V-8 complete. Vision document confirmed by the user and written to `
 **Write completion marker:** Append `step_05: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 Proceed to `06_approach.md`.
+
+---
+
+## Foundation-only adapted path
+
+**Disposition (per S2.2 spec § A.3): PRODUCE.**
+
+In foundation-only mode, this step's behavior is identical to the normal path. Vision is a foundation-level artifact; shape-agnostic; the same questions (V-1 through V-8), draft / revision round, and disk write apply.
+
+Follow the existing step content above. The vision document is one of the four foundation docs per `_foundation_only_mode_gate.md` § 5.
+
+The honest-characterization disclosure that distinguishes foundation-only mode is delivered at step 15 close (per `_foundation_only_mode_gate.md` § 4); no per-step disclosure required here.
+
+**Write completion marker + proceed:** same as normal path (`step_05: complete | <timestamp>`; proceed to `06_approach.md`).

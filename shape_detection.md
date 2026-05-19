@@ -224,7 +224,7 @@ Stop conditions are NOT re-evaluated at pre-step-08 (already evaluated at pre-st
 **Per-path behavior:**
 
 - **(a) scope-out:** wizard appends `scope_out: <timestamp>` marker to staging file under the shape_hypothesis section; says: "Saved. Re-run the wizard later when you're ready or when [shape X] support is added." Exits cleanly.
-- **(b) foundation-only:** wizard proceeds with steps 05-15 in foundation-doc-only mode (NO system implementation generated). **Implementation of foundation-only-mode behavior across steps 05-15 is OUT of S2.1 scope per decision F**; S2.1 specifies the contract here; downstream slice implements the steps-05-15 foundation-only path.
+- **(b) foundation-only:** wizard proceeds with steps 05-15 in foundation-doc-only mode (NO system implementation generated). **Implementation landed at S2.2** — see `wizard/interview/_foundation_only_mode_gate.md` for the capability-field derivation rule + per-step entry-guard pattern + close-ceremony adaptation pointer. Each of `wizard/interview/05_vision.md` through `15_close.md` has a `## Foundation-only adapted path` section at file end implementing the steps-05-15 foundation-only-mode behavior per `_foundation_only_mode_gate.md` § 5 four-file foundation doc set + § 6 DOCUMENT-path gap integration + § 7 close-ceremony adaptation pointer.
 
 Per PRD § 4.3 / advisor R2 F-2.3: foundation-only mode is NOT counted as "system implementation served"; disclosure is explicit at shape-diagnosis moment. NOT silent fallback.
 
@@ -377,7 +377,7 @@ For conditions 1-3 (capability mismatches that operator already accepted by choo
          stop_conditions_recorded: [<list>]
    ```
 2. No halt fires. Wizard proceeds to step 05.
-3. **Downstream foundation-only-mode implementation slice (per decision F) is responsible for inserting honest compliance-mismatch text into generated foundation docs.** Example downstream behavior: the generated `vision.md` includes a section "Regulatory exposure + shape limitations" listing the documented stop conditions verbatim, so the operator's downstream Claude Code build conversation has the compliance context.
+3. **Foundation-only-mode implementation landed at S2.2 (per `wizard/interview/_foundation_only_mode_gate.md` § 6).** Documented stop-condition gaps land in `technical_architecture.md` § "Regulatory & compliance gaps (foundation-only mode)" at step 15 close, with one section per gap (framework name + capability gap + recommended resolution path; read from staging `stop_conditions.documented_in_foundation` + `control_matrix_active`). If `stop_conditions.documented_in_foundation` is empty, the section is omitted entirely (no empty header).
 
 For condition 4 (regulated + no framework identified): **HALT fires even in foundation-only mode** — foundation docs cannot be written honestly without framework identification. Operator must complete operator-side compliance review and resume. Halt behavior per § 8.4 (a/b paths).
 

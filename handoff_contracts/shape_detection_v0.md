@@ -193,7 +193,9 @@ Downstream slices that consume this handoff MUST:
 ## 8. Cross-references
 
 - `wizard/shape_detection.md` — the canonical implementation spec; this contract reflects its emit shape
+- `wizard/interview/_foundation_only_mode_gate.md` — **consumer for `fallback_mode_offered: foundation-only`** (S2.2 implementation). The gate module's § 2 derivation rule maps the `fallback_mode_offered` enum label in this contract to a derived mode profile (`produce_foundation_docs` / `produce_system_implementation` / `capture_implementation_inputs` / `honest_characterization_disclosure`) that gates per-step behavior in steps 05-15. **No contract-shape change at v0** — derived mode profile is downstream of this contract, derived at use, NOT persisted to staging; no schema bump.
 - `governance/generated_system_data_defaults.md` § 2.2 (control matrix) + § 6.3 (stop conditions) — D1 sources
 - PRD v1 § 5.2 (F-1) — requirements source
 - ADR-0018 — slice authority
-- S2.1 slice spec — design provenance
+- S2.1 slice spec — design provenance (handoff contract origin)
+- S2.2 slice spec — consumer-side implementation (`product_evidence/_slices/S2.2_foundation_only_mode_2026-05-19.md`)

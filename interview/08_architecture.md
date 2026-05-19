@@ -39,7 +39,32 @@ Before any step-08 user-facing question fires, run `wizard/interview/_pre_step_0
 
 If `step_08_pre_recheck: complete` is already in `~/claude-wizard-draft/wizard_progress.md` (resuming a partial step 08), skip the pre-recheck. Otherwise, run the pre-recheck module first.
 
-After pre-recheck completes successfully (no halt; no scope-out): proceed to step opening.
+After pre-recheck completes successfully (no halt; no scope-out): proceed to the foundation-only-mode entry guard below.
+
+---
+
+## Foundation-only-mode entry guard
+
+*(Placement note — per `_foundation_only_mode_gate.md` § 3 + advisor R1 C-001 disposition: this entry guard MUST run AFTER the pre-step-08 re-check above, because the re-check can mutate `shape_hypothesis.fallback_mode_offered` via the unsupported-shape transition. An entry guard run BEFORE the re-check would branch on stale state.)*
+
+Before any step-08 user-facing question fires:
+
+1. **Schema-version check (per handoff contract consumer rule).** Read `~/claude-wizard-draft/wizard_session_draft.md`; locate the `schema_versions` block under shape_hypothesis. Verify `schema_major == 0`. If `schema_major` mismatches the consumer expected major (currently `0` at v0), abort with operator-facing internal-state error: "I hit a wizard-internal version mismatch — the staging file's shape-detection schema major is `<actual>`, but this version of the wizard expects major `0`. Your project file is saved. Please update the wizard OR resume with the matching wizard version." Exit cleanly; do NOT proceed.
+
+2. Locate the `shape_hypothesis.fallback_mode_offered` field.
+
+3. Consult `wizard/interview/_foundation_only_mode_gate.md` § 2 derivation rule. Determine:
+   - `produce_foundation_docs` (boolean)
+   - `produce_system_implementation` (boolean)
+   - `capture_implementation_inputs` (boolean)
+   - `honest_characterization_disclosure` (enum value)
+
+4. Branch:
+   - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
+   - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
+   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
+
+5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error. Halt with internal-error message; foundation state preserved. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
 
 ---
 
@@ -297,6 +322,37 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 ## Success condition
 
 ARCH-1 through ARCH-5 complete. Technical architecture document confirmed and written to `[PROJECT_DIR]/technical_architecture.md`. Approach document updated with confirmed agent roster. ARCHITECTURE_CONFIRMED = true in the staging file.
+
+**Write completion marker:** Append `step_08: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `09_credentials.md`.
+
+---
+
+## Foundation-only adapted path
+
+**Disposition (per S2.2 spec § A.3): ADAPT — split foundation-level technical architecture (PRODUCE) from implementation outputs (SKIP).**
+
+Conduct the architecture interview from the existing step content above (ARCH-1 through ARCH-5) to capture the operator's understanding of how their system works.
+
+**Difference from normal behavior:**
+
+PRODUCE (foundation-level; survives in foundation-only mode):
+
+- `technical_architecture.md` written to disk at `[PROJECT_DIR]/technical_architecture.md`. CONTENT is the SHAPE-AGNOSTIC architecture: orchestration model abstracted from markdown-agents specifics; system-component decomposition; data flows; external dependencies. Markdown-agents-specific implementation details (skill mappings, Claude Code permission tiers, agent-roster-as-files) are OMITTED.
+
+SKIP (implementation-level; not produced in foundation-only mode):
+
+- Agent roster as separate files (markdown-agents-specific)
+- Permission tier files (markdown-agents-specific)
+- Task completion checklists for agents (markdown-agents-specific)
+- Approach document update with "confirmed agent roster" (approach.md stays shape-agnostic in foundation-only mode)
+
+DO:
+
+- Append any additional operational requirements surfaced during the architecture interview to the staging file under `## Foundation-only-mode captures > Architecture notes`. These feed into `technical_architecture.md` § "Operational requirements" at step 15 close.
+
+**Stop-condition DOCUMENT-path integration:** if `_pre_step_05_recheck.md` Step 2b recorded entries in `stop_conditions.documented_in_foundation`, append a placeholder header for § "Regulatory & compliance gaps (foundation-only mode)" to the `technical_architecture.md` draft. The full gap-section content is assembled at step 15 close per `_foundation_only_mode_gate.md` § 6 (read from staging `stop_conditions.documented_in_foundation` + `control_matrix_active`).
 
 **Write completion marker:** Append `step_08: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

@@ -33,6 +33,29 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 ---
 
+## Foundation-only-mode entry guard
+
+Before doing anything else in this step:
+
+1. **Schema-version check (per handoff contract consumer rule).** Read `~/claude-wizard-draft/wizard_session_draft.md`; locate the `schema_versions` block under shape_hypothesis. Verify `schema_major == 0`. If `schema_major` mismatches the consumer expected major (currently `0` at v0), abort with operator-facing internal-state error: "I hit a wizard-internal version mismatch — the staging file's shape-detection schema major is `<actual>`, but this version of the wizard expects major `0`. Your project file is saved. Please update the wizard OR resume with the matching wizard version." Exit cleanly; do NOT proceed.
+
+2. Locate the `shape_hypothesis.fallback_mode_offered` field.
+
+3. Consult `wizard/interview/_foundation_only_mode_gate.md` § 2 derivation rule. Determine:
+   - `produce_foundation_docs` (boolean)
+   - `produce_system_implementation` (boolean)
+   - `capture_implementation_inputs` (boolean)
+   - `honest_characterization_disclosure` (enum value)
+
+4. Branch:
+   - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
+   - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
+   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
+
+5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error. Halt with internal-error message; foundation state preserved. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
+
+---
+
 ## Step opening — progress and preview
 
 **Say:**
@@ -177,6 +200,31 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 ## Success condition
 
 ERR-1 through ERR-3 complete. NOTIFICATION_VERBOSITY and THREE_STRIKES_THRESHOLD written to staging file. ERROR_HANDLING_CONFIGURED = true in the staging file.
+
+**Write completion marker:** Append `step_11: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+Proceed to `12_qa_settings.md`.
+
+---
+
+## Foundation-only adapted path
+
+**Disposition (per S2.2 spec § A.3): ADAPT — capture error-handling approach as foundation section; skip runtime config writes.**
+
+Conduct the error-handling interview from the existing step content above (ERR-1 through ERR-3; notification verbosity + three-strikes threshold).
+
+**Difference from normal behavior:**
+
+DO NOT:
+
+- Write NOTIFICATION_VERBOSITY or THREE_STRIKES_THRESHOLD to `project_instructions.md` as wizard-runtime config (`project_instructions.md` in foundation-only mode is a foundation-doc per `_foundation_only_mode_gate.md` § 4; see step 15 close for foundation-doc voice)
+
+DO:
+
+- Conduct the error-handling questions and capture answers
+- Append captured error-handling approach to the staging file under `## Foundation-only-mode captures > Error-handling approach` (verbosity preference + three-strikes default + plain-language description of error-handling intent)
+
+At step 15 close, the captured error-handling approach extracts to `technical_architecture.md` § "Operational requirements" > "Error-handling approach" per `_foundation_only_mode_gate.md` § 5.
 
 **Write completion marker:** Append `step_11: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
