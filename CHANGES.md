@@ -17,7 +17,7 @@ Entries appear newest-first.
 **Public-facing change:** two `_index.md` template-inventory files brought current. Specifically: `wizard/templates/root/_index.md` now lists `wizard_feedback.md` (template was already in the directory; the inventory pointer was just stale); `wizard/templates/docs/_index.md` now lists `how_your_system_works.md` (same shape — template existed, inventory was stale). No template content changed; no behavior change for operators running the wizard. This release accompanies build-side standup of operating-doc template variant/readiness policy (build-side governance work; not exposed in this distribution beyond the inventory fixes named above).
 
 - Source-Meta-Commit: `ef84afd`
-- Public repo commit: <to be filled in after subtree push>
+- Public repo commit: `c919e8a`
 
 ---
 
