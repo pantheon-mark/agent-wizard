@@ -1,0 +1,66 @@
+{
+  "contract_id": "foundation-manifest-hash-baseline",
+  "contract_version": "manifest-v1",
+  "schema_authorities": [
+    "foundation_bundle_public_api.required_foundation_docs",
+    "foundation_manifest_hash_baseline.file_fields",
+    "foundation_manifest_hash_baseline.merge_strategy_enum"
+  ],
+  "description": "Wizard-distributed machine-readable contract for the foundation-bundle hash-baseline manifest. Consumed by wizard/scripts/bundle_hash.py at authoring time. This JSON file is the machine-readable instance; the canonical prose specification lives outside the wizard distribution (build-side authority mapping recorded in build-project documentation, not in this artifact).",
+  "required_foundation_docs": [
+    {
+      "path": "foundation/vision.md",
+      "managed_by": "shared",
+      "local_modifications": "expected",
+      "merge_strategy": "three_way"
+    },
+    {
+      "path": "foundation/prd.md",
+      "managed_by": "operator",
+      "local_modifications": "expected",
+      "merge_strategy": "operator_review"
+    },
+    {
+      "path": "foundation/approach.md",
+      "managed_by": "shared",
+      "local_modifications": "allowed",
+      "merge_strategy": "three_way"
+    },
+    {
+      "path": "foundation/execution_plan.md",
+      "managed_by": "operator",
+      "local_modifications": "expected",
+      "merge_strategy": "operator_review"
+    },
+    {
+      "path": "foundation/technical_architecture.md",
+      "managed_by": "shared",
+      "local_modifications": "allowed",
+      "merge_strategy": "three_way"
+    },
+    {
+      "path": "foundation/test_cases.md",
+      "managed_by": "operator",
+      "local_modifications": "expected",
+      "merge_strategy": "operator_review"
+    },
+    {
+      "path": "foundation/audit_framework.md",
+      "managed_by": "wizard",
+      "local_modifications": "not_recommended",
+      "merge_strategy": "warn_on_drift"
+    }
+  ],
+  "enums": {
+    "managed_by": ["shared", "operator", "wizard"],
+    "local_modifications": ["expected", "allowed", "not_recommended"],
+    "merge_strategy": ["three_way", "operator_review", "warn_on_drift", "frozen"]
+  },
+  "manifest_file_fields": [
+    "managed",
+    "base_hash",
+    "current_hash_last_seen",
+    "local_modifications",
+    "merge_strategy"
+  ]
+}

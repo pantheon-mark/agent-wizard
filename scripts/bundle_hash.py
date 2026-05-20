@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
 """Foundation bundle hash-baseline manifest writer.
 
-Per S2.5 spec § 2 + Decision G (Option 1 — CLI + library function).
-Per governance/foundation_versioning.md (D3) § 4.1 hash-based drift detection.
-Mechanism: mech-hash-baseline-v0.
-
-At v0 this tool produces base-hash manifest snippets for a foundation bundle
-at AUTHORING TIME (per stage_2_planning.md § 2.4 sequencing clarification —
-manifest-time hash-baselining is separate from runtime drift detection;
-runtime `wizard upgrade-check` engine is deferred to E-β-firing slice or
-subsequent slice).
-
+Produces base-hash manifest snippets for a foundation bundle at authoring time.
 Stdlib-only — no PyYAML dependency. YAML manifest snippet emitted as
 deterministic text. Keeps wizard distribution pip-install-free for
 operator-projects.
+
+Required filenames + per-file defaults + closed enums + manifest field list
+are loaded from the wizard-distributed JSON manifest contract at
+`wizard/foundation-bundles/v0/contracts/foundation-manifest-hash-baseline-v1.json`
+via the loader at `wizard/scripts/lib/manifest_contract.py`.
+
+Library function `hash_bundle()` raises `BundleHashError` on
+missing-required-file (NOT `sys.exit`); CLI `main()` translates exception to
+exit code 1.
 
 Usage as CLI:
     wizard/scripts/bundle_hash.py <bundle-dir>           # emit manifest snippet to stdout
     wizard/scripts/bundle_hash.py <bundle-dir> -o <out>  # write to file
 
 Usage as library:
-    from bundle_hash import hash_bundle, format_manifest_snippet
-    files = hash_bundle(Path("path/to/bundle"))
+    from bundle_hash import hash_bundle, format_manifest_snippet, BundleHashError
+    files = hash_bundle(Path("path/to/bundle"))           # may raise BundleHashError
     snippet = format_manifest_snippet(files)
 
-Bundle directory layout (per D3 § 1.1 + § 5):
+Bundle directory layout:
     bundle-dir/
     ├── foundation/
     │   ├── vision.md
@@ -36,59 +36,37 @@ Bundle directory layout (per D3 § 1.1 + § 5):
     │   └── audit_framework.md
     └── ...
 
-Each foundation/*.md file gets a base_hash entry per D3 § 4.1 schema.
-
-Exit codes:
+Exit codes (CLI):
     0 — success
-    1 — bundle directory has missing required files (per D3 § 1.1)
-    2 — tooling error (path doesn't exist, etc.)
+    1 — bundle has missing required files OR contract load fails
+    2 — tooling error (bundle path doesn't exist, etc.)
 """
 
 import argparse
 import hashlib
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
-# Per D3 § 1.1 required filenames + default merge_strategy per file
-# (merge_strategy defaults reflect typical wizard-vs-operator authority per D3 § 4.1)
-REQUIRED_FOUNDATION_DOCS = {
-    "foundation/vision.md": {
-        "managed_by": "shared",
-        "local_modifications": "expected",
-        "merge_strategy": "three_way",
-    },
-    "foundation/prd.md": {
-        "managed_by": "operator",
-        "local_modifications": "expected",
-        "merge_strategy": "operator_review",
-    },
-    "foundation/approach.md": {
-        "managed_by": "shared",
-        "local_modifications": "allowed",
-        "merge_strategy": "three_way",
-    },
-    "foundation/execution_plan.md": {
-        "managed_by": "operator",
-        "local_modifications": "expected",
-        "merge_strategy": "operator_review",
-    },
-    "foundation/technical_architecture.md": {
-        "managed_by": "shared",
-        "local_modifications": "allowed",
-        "merge_strategy": "three_way",
-    },
-    "foundation/test_cases.md": {
-        "managed_by": "operator",
-        "local_modifications": "expected",
-        "merge_strategy": "operator_review",
-    },
-    "foundation/audit_framework.md": {
-        "managed_by": "wizard",
-        "local_modifications": "not_recommended",
-        "merge_strategy": "warn_on_drift",
-    },
-}
+# Resolve sibling-package import without requiring PYTHONPATH gymnastics.
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+from lib.manifest_contract import (  # noqa: E402
+    ManifestContractError,
+    default_contract_path,
+    load_manifest_contract,
+)
+
+
+class BundleHashError(Exception):
+    """Raised when bundle hashing fails (e.g., missing required files).
+
+    Library functions raise this exception; the CLI shim catches it and
+    translates to exit code 1. Library callers must handle the exception
+    directly — sys.exit is reserved for the CLI boundary.
+    """
 
 
 def sha256_file(path: Path) -> str:
@@ -100,51 +78,74 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def hash_bundle(bundle_dir: Path) -> Dict[str, Dict[str, str]]:
-    """Walk bundle dir; return per-file hash + metadata dict.
+def hash_bundle(
+    bundle_dir: Path,
+    contract: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, str]]:
+    """Walk bundle dir; return per-file hash + metadata as ordered list.
 
-    Returns a dict keyed by relative file path (e.g. 'foundation/vision.md') with values:
+    Returns a list of dicts (ordering preserved from manifest contract) — each
+    entry contains:
         {
+            "path": "foundation/vision.md",
             "managed": "true",
             "base_hash": "sha256:<hex>",
             "current_hash_last_seen": "sha256:<hex>",
             "local_modifications": "<allowed|expected|not_recommended>",
             "merge_strategy": "<three_way|operator_review|warn_on_drift|frozen>",
         }
+
+    Args:
+        bundle_dir: foundation bundle root directory.
+        contract: pre-loaded manifest contract; if None, loaded from default path.
+
+    Raises:
+        BundleHashError: if any required foundation-doc file is missing.
+        ManifestContractError: if contract path provided is invalid (load failure).
     """
-    result: Dict[str, Dict[str, str]] = {}
+    if contract is None:
+        contract = load_manifest_contract(default_contract_path())
+
+    result: List[Dict[str, str]] = []
     missing = []
-    for rel_path, defaults in REQUIRED_FOUNDATION_DOCS.items():
+    invalid = []
+    for record in contract["required_foundation_docs"]:
+        rel_path = record["path"]
         abs_path = bundle_dir / rel_path
         if not abs_path.exists():
             missing.append(rel_path)
             continue
+        if not abs_path.is_file():
+            invalid.append(rel_path)
+            continue
         h = sha256_file(abs_path)
-        result[rel_path] = {
+        result.append({
+            "path": rel_path,
             "managed": "true",
             "base_hash": f"sha256:{h}",
             "current_hash_last_seen": f"sha256:{h}",
-            "local_modifications": defaults["local_modifications"],
-            "merge_strategy": defaults["merge_strategy"],
-        }
-    if missing:
-        print(
-            f"ERROR: bundle is missing required foundation-doc files per D3 § 1.1: {missing}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+            "local_modifications": record["local_modifications"],
+            "merge_strategy": record["merge_strategy"],
+        })
+    if missing or invalid:
+        problems = []
+        if missing:
+            problems.append(f"missing required foundation-doc files: {missing}")
+        if invalid:
+            problems.append(f"required foundation-doc paths are not regular files: {invalid}")
+        raise BundleHashError("; ".join(problems))
     return result
 
 
-def format_manifest_snippet(files: Dict[str, Dict[str, str]]) -> str:
-    """Format the `files:` block of a `.wizard/manifest.yaml` per D3 § 4.1 schema.
+def format_manifest_snippet(files: List[Dict[str, str]]) -> str:
+    """Format the `files:` block of a `.wizard/manifest.yaml` per the manifest contract.
 
-    Emits deterministic YAML text — no PyYAML dependency.
+    Emits deterministic YAML text — no PyYAML dependency. Iterates entries in
+    the order the manifest contract supplied (no incidental sort).
     """
     lines = ["files:"]
-    for rel_path in sorted(files.keys()):
-        entry = files[rel_path]
-        lines.append(f"  {rel_path}:")
+    for entry in files:
+        lines.append(f"  {entry['path']}:")
         lines.append(f"    managed: {entry['managed']}")
         lines.append(f"    base_hash: {entry['base_hash']}")
         lines.append(f"    current_hash_last_seen: {entry['current_hash_last_seen']}")
@@ -182,6 +183,15 @@ def main() -> int:
         default="UNSET",
         help="source_commit field (used with --with-frontmatter)",
     )
+    parser.add_argument(
+        "--contract",
+        type=Path,
+        default=None,
+        help=(
+            "Optional override path to manifest contract JSON. Default: "
+            "wizard/foundation-bundles/v0/contracts/foundation-manifest-hash-baseline-v1.json"
+        ),
+    )
     args = parser.parse_args()
 
     if not args.bundle_dir.exists() or not args.bundle_dir.is_dir():
@@ -191,7 +201,19 @@ def main() -> int:
         )
         return 2
 
-    files = hash_bundle(args.bundle_dir)
+    try:
+        contract_path = args.contract if args.contract else default_contract_path()
+        contract = load_manifest_contract(contract_path)
+    except ManifestContractError as e:
+        print(f"ERROR: manifest contract load failed: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        files = hash_bundle(args.bundle_dir, contract=contract)
+    except BundleHashError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
     snippet = format_manifest_snippet(files)
 
     if args.with_frontmatter:

@@ -1,0 +1,17 @@
+{
+  "contract_id": "foundation-manifest-hash-baseline",
+  "contract_version": "manifest-v1",
+  "schema_authorities": [
+    "foundation_manifest_hash_baseline.file_fields"
+  ],
+  "description": "Negative fixture: required_foundation_docs[0] missing the 'merge_strategy' field; loader gate 3 FAIL expected",
+  "required_foundation_docs": [
+    {"path": "foundation/vision.md", "managed_by": "shared", "local_modifications": "expected"}
+  ],
+  "enums": {
+    "managed_by": ["shared", "operator", "wizard"],
+    "local_modifications": ["expected", "allowed", "not_recommended"],
+    "merge_strategy": ["three_way", "operator_review", "warn_on_drift", "frozen"]
+  },
+  "manifest_file_fields": ["managed", "base_hash", "current_hash_last_seen", "local_modifications", "merge_strategy"]
+}
