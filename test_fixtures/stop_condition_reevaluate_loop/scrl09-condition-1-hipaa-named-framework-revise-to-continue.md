@@ -1,5 +1,6 @@
 ---
 fixture_id: scrl09-condition-1-hipaa-named-framework-revise-to-continue
+schema_version: fixture-replay-v1
 fixture_class: stop-condition-reevaluate-loop
 source_scenario: scrl03-pattern-parallel-for-hipaa
 entry_path: pre_step_05_Step_2a_halt_path

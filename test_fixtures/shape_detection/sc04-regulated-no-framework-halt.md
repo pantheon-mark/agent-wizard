@@ -1,5 +1,6 @@
 ---
 fixture_id: sc04-regulated-no-framework-halt
+schema_version: fixture-replay-v1
 fixture_class: stop-condition
 target_stop_condition: 4
 expected_shape: markdown-agents

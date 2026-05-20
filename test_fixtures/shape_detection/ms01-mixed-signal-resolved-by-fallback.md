@@ -1,5 +1,6 @@
 ---
 fixture_id: ms01-mixed-signal-resolved-by-fallback
+schema_version: fixture-replay-v1
 fixture_class: mixed-signal
 target_shape: markdown-agents
 expected_confidence: medium → high (after step 02 fallback)

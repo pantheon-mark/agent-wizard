@@ -1,5 +1,6 @@
 ---
 fixture_id: fo01-forward-offered-newsletter
+schema_version: fixture-replay-v1
 fixture_class: forward-offered
 target_shape: python-service-operator-facing
 expected_confidence: high

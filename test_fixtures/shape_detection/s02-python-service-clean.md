@@ -1,5 +1,6 @@
 ---
 fixture_id: s02-python-service-clean
+schema_version: fixture-replay-v1
 fixture_class: shape
 target_shape: python-service-operator-facing
 expected_confidence: high

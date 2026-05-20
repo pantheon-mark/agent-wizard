@@ -1,5 +1,6 @@
 ---
 fixture_id: scrl01-hipaa-halt-to-foundation-only
+schema_version: fixture-replay-v1
 fixture_class: stop-condition-reevaluate-loop
 source_scenario: sc01-hipaa-markdown-halt
 entry_path: pre_step_05_Step_2a_halt_path

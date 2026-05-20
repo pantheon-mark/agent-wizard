@@ -1,5 +1,6 @@
 ---
 fixture_id: s03-claude-skills-clean
+schema_version: fixture-replay-v1
 fixture_class: shape
 target_shape: claude-skills
 expected_confidence: high

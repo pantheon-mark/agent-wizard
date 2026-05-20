@@ -1,5 +1,6 @@
 ---
 fixture_id: s06-hosted-cloud-clean
+schema_version: fixture-replay-v1
 fixture_class: shape
 target_shape: hosted-cloud
 expected_confidence: high

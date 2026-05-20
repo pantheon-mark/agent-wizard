@@ -1,5 +1,6 @@
 ---
 fixture_id: fom02-claude-skills-foundation-only
+schema_version: fixture-replay-v1
 fixture_class: foundation-only-mode
 source_shape: claude-skills
 source_fixture: s03-claude-skills-clean

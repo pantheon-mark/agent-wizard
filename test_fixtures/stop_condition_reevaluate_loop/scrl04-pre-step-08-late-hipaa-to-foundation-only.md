@@ -1,5 +1,6 @@
 ---
 fixture_id: scrl04-pre-step-08-late-hipaa-to-foundation-only
+schema_version: fixture-replay-v1
 fixture_class: stop-condition-reevaluate-loop
 source_scenario: markdown-agents shape with no step 03 HIPAA exposure; late-emergence HIPAA implication in vision content
 entry_path: pre_step_08_Step_2_late_emergence_halt_path

@@ -1,5 +1,6 @@
 ---
 fixture_id: fom05-mixed-shape-foundation-only
+schema_version: fixture-replay-v1
 fixture_class: foundation-only-mode
 source_shape: mixed
 source_fixture: s07-mixed-shapes

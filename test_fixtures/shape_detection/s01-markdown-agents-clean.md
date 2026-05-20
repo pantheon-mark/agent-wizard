@@ -1,5 +1,6 @@
 ---
 fixture_id: s01-markdown-agents-clean
+schema_version: fixture-replay-v1
 fixture_class: shape
 target_shape: markdown-agents
 expected_confidence: high

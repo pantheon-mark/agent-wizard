@@ -1,5 +1,6 @@
 ---
 fixture_id: s07-mixed-shapes
+schema_version: fixture-replay-v1
 fixture_class: shape
 target_shape: mixed
 expected_confidence: medium

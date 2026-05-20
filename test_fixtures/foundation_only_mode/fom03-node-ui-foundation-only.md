@@ -1,5 +1,6 @@
 ---
 fixture_id: fom03-node-ui-foundation-only
+schema_version: fixture-replay-v1
 fixture_class: foundation-only-mode
 source_shape: node-ui
 source_fixture: s04-node-ui-clean

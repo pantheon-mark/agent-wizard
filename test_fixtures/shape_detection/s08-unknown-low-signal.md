@@ -1,5 +1,6 @@
 ---
 fixture_id: s08-unknown-low-signal
+schema_version: fixture-replay-v1
 fixture_class: shape
 target_shape: unknown
 expected_confidence: low

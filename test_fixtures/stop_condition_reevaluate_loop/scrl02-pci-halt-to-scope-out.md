@@ -1,5 +1,6 @@
 ---
 fixture_id: scrl02-pci-halt-to-scope-out
+schema_version: fixture-replay-v1
 fixture_class: stop-condition-reevaluate-loop
 source_scenario: sc03-pci-markdown-halt
 entry_path: pre_step_05_Step_2a_halt_path

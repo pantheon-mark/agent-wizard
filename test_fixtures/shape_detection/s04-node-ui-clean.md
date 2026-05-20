@@ -1,5 +1,6 @@
 ---
 fixture_id: s04-node-ui-clean
+schema_version: fixture-replay-v1
 fixture_class: shape
 target_shape: node-ui
 expected_confidence: high

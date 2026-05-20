@@ -1,5 +1,6 @@
 ---
 fixture_id: fom04-markdown-document-path
+schema_version: fixture-replay-v1
 fixture_class: foundation-only-mode
 source_shape: markdown-agents
 source_fixture: sc01-hipaa-markdown-halt

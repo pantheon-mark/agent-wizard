@@ -1,5 +1,6 @@
 ---
 fixture_id: scrl03-gdpr-halt-to-c-revise-to-continue
+schema_version: fixture-replay-v1
 fixture_class: stop-condition-reevaluate-loop
 source_scenario: sc02-gdpr-markdown-halt
 entry_path: pre_step_05_Step_2a_halt_path

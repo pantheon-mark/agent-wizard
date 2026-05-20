@@ -1,5 +1,6 @@
 ---
 fixture_id: s05-multi-user-datastore-clean
+schema_version: fixture-replay-v1
 fixture_class: shape
 target_shape: multi-user-datastore
 expected_confidence: medium

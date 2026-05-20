@@ -1,5 +1,6 @@
 ---
 fixture_id: scrl06-condition-4-identify-hipaa-to-foundation-only
+schema_version: fixture-replay-v1
 fixture_class: stop-condition-reevaluate-loop
 source_scenario: synthetic-no-direct-ancestor
 entry_path: pre_step_05_Step_2a_halt_path

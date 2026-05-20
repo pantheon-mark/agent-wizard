@@ -1,5 +1,6 @@
 ---
 fixture_id: sc02-gdpr-markdown-halt
+schema_version: fixture-replay-v1
 fixture_class: stop-condition
 target_stop_condition: 2
 expected_shape: markdown-agents

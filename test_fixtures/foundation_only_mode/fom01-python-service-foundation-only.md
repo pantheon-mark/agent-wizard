@@ -1,5 +1,6 @@
 ---
 fixture_id: fom01-python-service-foundation-only
+schema_version: fixture-replay-v1
 fixture_class: foundation-only-mode
 source_shape: python-service-operator-facing
 source_fixture: s02-python-service-clean
