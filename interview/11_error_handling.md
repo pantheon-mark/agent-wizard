@@ -209,7 +209,7 @@ Proceed to `12_qa_settings.md`.
 
 ## Foundation-only adapted path
 
-**Disposition (per S2.2 spec § A.3): ADAPT — capture error-handling approach as foundation section; skip runtime config writes.**
+**Disposition: ADAPT — capture error-handling approach as foundation section; skip runtime config writes.**
 
 Conduct the error-handling interview from the existing step content above (ERR-1 through ERR-3; notification verbosity + three-strikes threshold).
 

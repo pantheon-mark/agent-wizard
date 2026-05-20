@@ -2,11 +2,11 @@
 
 ## What this file does
 
-Final re-check of the provisional `shape_hypothesis` against accumulated context (steps 05-07 vision + approach + advisors content). Especially important for emergent-architecture projects (PRD § 5.13; J6 anchored) where the architecture phase reveals shape signals that earlier steps did not surface.
+Final re-check of the provisional `shape_hypothesis` against accumulated context (steps 05-07 vision + approach + advisors content). Especially important for emergent-architecture projects (the relevant product spec section; J6 anchored) where the architecture phase reveals shape signals that earlier steps did not surface.
 
 ## When this file runs
 
-Reached from `wizard/interview/08_architecture.md` opening, BEFORE any step-08 user-facing question fires. This is the second re-check point per PRD § 5.2 F-1.
+Reached from `wizard/interview/08_architecture.md` opening, BEFORE any step-08 user-facing question fires. This is the second re-check point F-1.
 
 ## Prerequisites
 
@@ -51,12 +51,12 @@ Append:
 ```yaml
 shape_hypothesis:
   recheck_log:
-    - step: 08
-      timestamp: <current ISO 8601>
-      outcome: halted
-      stop_condition_fired: <number>
-      halt_message: <verbatim>
-      late_emergence_source: vision | approach | advisors
+  - step: 08
+  timestamp: <current ISO 8601>
+  outcome: halted
+  stop_condition_fired: <number>
+  halt_message: <verbatim>
+  late_emergence_source: vision | approach | advisors
 ```
 
 Surface late-emergence to operator with extra care — they may feel "you should have asked earlier." Acknowledge:
@@ -65,7 +65,7 @@ Surface late-emergence to operator with extra care — they may feel "you should
 >
 > Note: vision and approach documents are already on disk — they're abstracted from implementation shape (they describe what your system does, not how), so they stay valid through any shape revision or regulatory revision. We won't lose them.
 
-Then offer the three-choice path (a / b / c) per `_pre_step_05_recheck.md` Step 2a — same operator-facing language; same `_stop_condition_reevaluate_loop.md` invocation pattern; **fresh iteration counter** per S2.3 Decision E (pre_step_08 does NOT inherit pre_step_05's iteration count; see `_stop_condition_reevaluate_loop.md` § 3 counter-reset rule).
+Then offer the three-choice path (a / b / c) per `_pre_step_05_recheck.md` Step 2a — same operator-facing language; same `_stop_condition_reevaluate_loop.md` invocation pattern; **fresh iteration counter** per the relevant slice decision (pre_step_08 does NOT inherit pre_step_05's iteration count; see `_stop_condition_reevaluate_loop.md` § 3 counter-reset rule).
 
 **If operator picks (b) or (c):** Invoke `wizard/interview/_stop_condition_reevaluate_loop.md` with:
 - `entered_from: pre_step_08`
@@ -73,7 +73,7 @@ Then offer the three-choice path (a / b / c) per `_pre_step_05_recheck.md` Step 
 - `pre_iteration_fired_conditions: [<list>]`
 - `operator_choice: (b) change_shape` OR `(c) regulatory_exposure_revise`
 
-Loop sub-module runs + returns outcome. Foundation state preservation through loop iterations: vision.md + approach.md remain on disk; loop does NOT touch them. Act per outcome as in pre_step_05 Step 2a; on `foundation_only` outcome, vision + approach roll forward into the foundation doc set per S2.2 `_foundation_only_mode_gate.md` § 5.
+Loop sub-module runs + returns outcome. Foundation state preservation through loop iterations: vision.md + approach.md remain on disk; loop does NOT touch them. Act per outcome as in pre_step_05 Step 2a; on `foundation_only` outcome, vision + approach roll forward into the foundation doc set `_foundation_only_mode_gate.md` § 5.
 
 **If NO new regulatory exposure:** proceed to Step 3.
 
@@ -85,11 +85,11 @@ Evaluate whether re-check is warranted:
 
 1. Pre-step-05 re-check outcome was `revised` (revised shapes warrant another confirmation at step 08; the deeper architecture context may reveal whether the revision was correct)
 2. Vision document content contains shape-contradicting signal — examples:
-   - Vision mentions "platform" / "service" / "users sign in" + initial `markdown-agents` shape → contradicts
-   - Vision mentions "thinking partner" / "review with me" + initial non-markdown shape → contradicts
+ - Vision mentions "platform" / "service" / "users sign in" + initial `markdown-agents` shape → contradicts
+ - Vision mentions "thinking partner" / "review with me" + initial non-markdown shape → contradicts
 3. Approach document content contains shape-contradicting signal — examples:
-   - Approach references frontend framework / SQL database / cloud deployment + initial `markdown-agents` shape → contradicts
-   - Approach references "single-file markdown" / "Claude Code as runtime" + initial non-markdown shape → contradicts
+ - Approach references frontend framework / SQL database / cloud deployment + initial `markdown-agents` shape → contradicts
+ - Approach references "single-file markdown" / "Claude Code as runtime" + initial non-markdown shape → contradicts
 4. Initial emit confidence was LOW and the step-05 re-check did NOT raise it to HIGH (continuous LOW through to step 08 warrants final confirmation)
 
 **If NO re-check triggered:** append confirmed-recheck entry; proceed to step 08.
@@ -97,9 +97,9 @@ Evaluate whether re-check is warranted:
 ```yaml
 shape_hypothesis:
   recheck_log:
-    - step: 08
-      timestamp: <current ISO 8601>
-      outcome: confirmed
+  - step: 08
+  timestamp: <current ISO 8601>
+  outcome: confirmed
 ```
 
 Proceed to step 08.
@@ -123,10 +123,10 @@ Classify outcome:
 ```yaml
 shape_hypothesis:
   recheck_log:
-    - step: 08
-      timestamp: <current ISO 8601>
-      outcome: confirmed
-      notes: signal_reconsidered_at_architecture_boundary
+  - step: 08
+  timestamp: <current ISO 8601>
+  outcome: confirmed
+  notes: signal_reconsidered_at_architecture_boundary
 ```
 
 Proceed to step 08.
@@ -138,11 +138,11 @@ shape_hypothesis:
   shape: markdown-agents
   confidence: high
   recheck_log:
-    - step: 08
-      timestamp: <current ISO 8601>
-      outcome: revised
-      revised_shape: markdown-agents
-      revised_confidence: high
+  - step: 08
+  timestamp: <current ISO 8601>
+  outcome: revised
+  revised_shape: markdown-agents
+  revised_confidence: high
 ```
 
 Proceed to step 08.
@@ -161,12 +161,12 @@ shape_hypothesis:
   confidence: <revised confidence>
   v1_supported: false
   recheck_log:
-    - step: 08
-      timestamp: <current ISO 8601>
-      outcome: revised
-      revised_shape: <non-markdown shape>
-      revised_confidence: <confidence>
-      late_revision_at_architecture_boundary: true
+  - step: 08
+  timestamp: <current ISO 8601>
+  outcome: revised
+  revised_shape: <non-markdown shape>
+  revised_confidence: <confidence>
+  late_revision_at_architecture_boundary: true
 ```
 
 Proceed to unsupported-shape transition.
@@ -216,5 +216,5 @@ Proceed to `wizard/interview/08_architecture.md`.
 - `wizard/shape_detection.md` § 5.2 + § 6 — canonical spec
 - `wizard/handoff_contracts/shape_detection_v0.md` — handoff schema
 - `wizard/interview/_pre_step_05_recheck.md` — sibling re-check module
-- PRD v1 § 5.2 F-1 / § 5.13 F-12 — requirements
-- S2.1 slice spec § A.4 + § A.5 — design provenance
+- the relevant product spec section F-1 / § 5.13 F-12 — requirements
+- The originating slice spec (build-side; not distributed) — design provenance.

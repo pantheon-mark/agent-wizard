@@ -1,6 +1,6 @@
 # Hash baseline for technical_architecture.md
-# Per S2.6 Decision G § A.7 — enforced-path drift detection mechanism
-# Regeneration rationale: S2.6 R1 F2 disposition: added 'Regulatory & compliance gaps (foundation-only mode)' H2 section per S2.2 Decision H integration; 2026-05-19
+# Enforced-path drift detection mechanism for foundation bundle v0.1.
+# Regeneration rationale: regulatory & compliance gaps section added per foundation-only-mode integration (2026-05-19).
 template: technical_architecture.md
 schema_revision: v0.1
 sections_hash:

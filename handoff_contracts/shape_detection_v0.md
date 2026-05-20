@@ -1,10 +1,10 @@
 # Handoff contract — Shape detection v0
 
 **Produced by:** the wizard's shape-detection module (`wizard/shape_detection.md`) across steps 01-08
-**Consumed by:** downstream Stage 2 rebuild slices — interview-steps scaffolding / agent-prompt-build / validation-drift / `test_cases.md` replacement
-**Schema:** see explicit version fields under § 2.1 (per advisor R1 C-006 disposition; single schema_version replaced with per-sub-surface versioning)
-**Authority:** This file is canonical for the handoff structure downstream slices may rely on.
-**Cross-references:** ADR-0018 / PRD v1 § 5.2 F-1 / `wizard/shape_detection.md`
+**Consumed by:** downstream wizard rebuild surfaces — interview-step scaffolding / agent-prompt-build / validation-drift detection / shape-aware testing
+**Schema:** see explicit version fields under § 2.1 (single `schema_version` replaced with per-sub-surface versioning to keep closed-taxonomy extensions distinct from additive minor bumps).
+**Authority:** This file is canonical for the handoff structure downstream consumers may rely on.
+**Cross-references:** `wizard/shape_detection.md`
 
 ---
 
@@ -12,21 +12,21 @@
 
 When the wizard's shape-detection module advances through its lifecycle phases (provisional emit at step 01 or step 02; regulatory exposure populated at step 03 UP-6; full evaluation at pre-step-05; final confirmation at pre-step-08), it produces the structure below. Downstream rebuild slices that branch behavior on shape (per-shape control matrix; agent-prompt selection; etc.) read this structure from the staging file as their entry condition.
 
-## 2. Lifecycle phases (per advisor R1 C-004 disposition)
+## 2. Lifecycle phases
 
 The handoff is **emitted progressively** across the interview, NOT in a single shot. Consumers must check the `handoff_phase` field to know which top-level keys are populated. v0 defines four phases; consumers consuming at a given phase may rely on all fields required at that phase.
 
-### 2.1 Schema version fields (per advisor R1 C-006 disposition)
+### 2.1 Schema version fields
 
 Versioning was previously a single `schema_version` field; this caused internal inconsistency (e.g., a 5th stop condition "bumps schema to v1" contradicted the closed-taxonomy-extension rule that says additions need major bumps). Replaced with explicit per-sub-surface versioning. ALL handoff phases include:
 
 ```yaml
 schema_versions:
   schema_major: 0
-  schema_minor: 2                 # bumped 1 → 2 at S2.4 2026-05-19 (additive: optional `stop_conditions.resolved_during_loop` field per S2.4 R1 C-003 active-vs-transitional distinction); prior bump 0 → 1 at S2.3 for `shape_revision` block
-  shape_taxonomy_version: 0       # closed taxonomy; extension = major bump
-  stop_condition_set_version: 0   # closed taxonomy; extension = major bump
-  control_matrix_schema_version: 0  # closed status-value taxonomy per D1 § 2.1
+  schema_minor: 2 # bumped 1 → 2 (additive: optional `stop_conditions.resolved_during_loop` field for active-vs-transitional distinction); prior bump 0 → 1 added `shape_revision` block
+  shape_taxonomy_version: 0 # closed taxonomy; extension = major bump
+  stop_condition_set_version: 0 # closed taxonomy; extension = major bump
+  control_matrix_schema_version: 0 # closed status-value taxonomy
 ```
 
 **Consumer contract on versions:**
@@ -66,7 +66,7 @@ Two terminal states do NOT advance to `pre_step_05_evaluated` or later:
 # shape_detection_handoff_v0
 schema_versions:
   schema_major: 0
-  schema_minor: 2                 # bumped 0 → 1 at S2.3 2026-05-19 (additive: optional `shape_revision` block per § 9) + bumped 1 → 2 at S2.4 2026-05-19 (additive: optional `stop_conditions.resolved_during_loop` field per S2.4 R1 C-003)
+  schema_minor: 2 # bumped 0 → 1 (additive: optional `shape_revision` block per § 9) and 1 → 2 (additive: optional `stop_conditions.resolved_during_loop` field)
   shape_taxonomy_version: 0
   stop_condition_set_version: 0
   control_matrix_schema_version: 0
@@ -77,30 +77,30 @@ shape_hypothesis:
   shape: markdown-agents | python-service-operator-facing | claude-skills | node-ui | multi-user-datastore | hosted-cloud | mixed | unknown
   confidence: high | medium | low
   detected_at_step: 01 | 02
-  v1_supported: true | false   # markdown-agents only = true at v1 ship region per PRD § 4.1
+  v1_supported: true | false # markdown-agents only = true at v1 ship region
   rechecks_due: [05, 08]
   forced_recheck_at_step_05: true | false
   operator_signals:
-    probe_1_continuous_runtime: yes | no | unsure
-    probe_2_multi_user: yes | no | unsure
-    probe_3_thinking_partner: yes | no | unsure
-    probe_4_external_software: yes | no | unsure
-    probe_5_state_memory: yes | no | unsure | not_asked
-    probe_6_regular_pattern: yes | no | unsure | not_asked
-    probe_7_operator_confirm: yes | no | unsure | not_asked
-    probe_8_document_output: yes | no | unsure | not_asked
+  probe_1_continuous_runtime: yes | no | unsure
+  probe_2_multi_user: yes | no | unsure
+  probe_3_thinking_partner: yes | no | unsure
+  probe_4_external_software: yes | no | unsure
+  probe_5_state_memory: yes | no | unsure | not_asked
+  probe_6_regular_pattern: yes | no | unsure | not_asked
+  probe_7_operator_confirm: yes | no | unsure | not_asked
+  probe_8_document_output: yes | no | unsure | not_asked
   forward_offered_signals_at_step_01:
-    - "<verbatim phrase from operator's P1-2 core-purpose answer>"
+  - "<verbatim phrase from operator's P1-2 core-purpose answer>"
   fallback_mode_offered: complete | foundation-only | scope-out | not_offered
   emit_timestamp: <ISO 8601>
   recheck_log:
-    - step: 05 | 08
-      timestamp: <ISO 8601>
-      outcome: confirmed | revised | halted | documented_in_foundation
-      revised_shape: <if outcome == revised>
-      revised_confidence: <if outcome == revised>
-      stop_condition_fired: <if outcome == halted>
-      stop_conditions_recorded: <if outcome == documented_in_foundation; list>
+  - step: 05 | 08
+  timestamp: <ISO 8601>
+  outcome: confirmed | revised | halted | documented_in_foundation
+  revised_shape: <if outcome == revised>
+  revised_confidence: <if outcome == revised>
+  stop_condition_fired: <if outcome == halted>
+  stop_conditions_recorded: <if outcome == documented_in_foundation; list>
 
 regulatory_exposure:
   gdpr_applicable: yes | no | unknown
@@ -109,7 +109,7 @@ regulatory_exposure:
   sox_applicable: yes | no | unknown
   coppa_or_gdpr_k_applicable: yes | no | unknown
   other_sector_specific:
-    - { framework: <name>, applicable: yes | no | unknown }
+  - { framework: <name>, applicable: yes | no | unknown }
   no_compliance_claim: yes | no | unknown
   no_compliance_claim_framework_identification: yes | no | unknown
   probed_at_step: 03_up6
@@ -117,10 +117,10 @@ regulatory_exposure:
 
 stop_conditions:
   evaluated_at: 05_pre_vision | 08_pre_architecture | none
-  fired: [<list of condition numbers from `wizard/shape_detection.md` § 8.3; at terminal foundation_only post-loop: ACTIVE terminal-state fired conditions only per S2.4 R1 C-003>]
+  fired: [<list of condition numbers from `wizard/shape_detection.md` § 8.3; at terminal foundation_only post-loop: ACTIVE terminal-state fired conditions only per active-vs-transitional distinction>]
   halted: true | false
   documented_in_foundation: [<list; populated when DOCUMENT path fires OR at terminal foundation_only post-loop; equals `fired` at terminal foundation_only; subset of fired in DOCUMENT-path>]
-  resolved_during_loop: [<optional list; populated only when terminal foundation_only reached via loop AND conditions were resolved during loop iterations; audit-trail; introduced at schema_minor: 2 per S2.4 R1 C-003; absent at schema_minor: 0 / 1>]
+  resolved_during_loop: [<optional list; populated only when terminal foundation_only reached via loop AND conditions were resolved during loop iterations; audit-trail; introduced at schema_minor: 2; absent at schema_minor: 0 / 1>]
   resolved_via: <provenance string; populated when terminal foundation_only reached via loop — value `stop_condition_reevaluate_loop_foundation_only`; absent otherwise>
   halt_message: <verbatim if halted; with `<actual status>` substituted from control_matrix_active>
 
@@ -145,39 +145,40 @@ foundation_state:
 
 # Optional block — populated only if operator entered the stop-condition halt → re-evaluate-shape loop
 # (picked "(b) Change the shape and re-evaluate" OR "(c) Re-evaluate regulatory exposure" at pre_step_05 Step 2a OR pre_step_08 Step 2 late-emergence)
-# Added at S2.3 (schema_minor: 1) per `wizard/interview/_stop_condition_reevaluate_loop.md`
+# Added at schema_minor: 1 by `wizard/interview/_stop_condition_reevaluate_loop.md`
 shape_revision:
-  pending: false                # boolean — true during active loop iteration; flipped to false at terminal state
-  iteration: 0                  # integer — current loop iteration count; 0 before first entry; increments at each (b)/(c) entry
-  iteration_cap: 2              # integer — stable at v0 per S2.3 Decision A; means "two loop iterations permitted; on entering a third, force terminal"
-  history:                      # append-only array — preserved at terminal per S2.3 Decision I/J
-    - iteration: 1
-      entered_at: <ISO 8601>
-      entered_from: pre_step_05 | pre_step_08
-      pre_iteration_shape: <shape value>
-      pre_iteration_fired_conditions: [<condition numbers>]
-      operator_choice: (b) change_shape | (c) regulatory_exposure_revise
-      probes_re_asked: [P-5, P-6, P-7]   # or UP-6 field names for (c)
-      classifier_re_emit: <shape value>  # only for (b) path
-      regulatory_exposure_revised:       # only for (c) path
-        - field: <field name>
-          old: <old value>
-          new: <new value>
-          reason: operator_clarification | framework_identification
-      post_iteration_shape: <shape value>
-      post_iteration_fired_conditions: [<condition numbers>]
-      outcome: continued | foundation_only | scope_out | next_iteration   # producer-visible enum; CLOSED — forced_terminal is internal-only branch state at sub-module § 6 per R1 C-001 disposition; never recorded here
-      terminal_reason: passing_shape_re_emit | regulatory_exposure_revised_clears_conditions | unsupported_shape_transition | iteration_cap_reached | operator_chose_save_and_exit   # optional; populated only at terminal entries; disambiguates HOW outcome was reached
-      terminal_at: <ISO 8601>            # only if outcome is terminal
+  pending: false # boolean — true during active loop iteration; flipped to false at terminal state
+  iteration: 0 # integer — current loop iteration count; 0 before first entry; increments at each (b)/(c) entry
+  iteration_cap: 2 # integer — stable at v0; means "two loop iterations permitted; on entering a third, force terminal"
+  history: # append-only array — preserved at terminal
+  - iteration: 1
+  entered_at: <ISO 8601>
+  entered_from: pre_step_05 | pre_step_08
+  pre_iteration_shape: <shape value>
+  pre_iteration_fired_conditions: [<condition numbers>]
+  operator_choice: (b) change_shape | (c) regulatory_exposure_revise
+  probes_re_asked: [P-5, P-6, P-7] # or UP-6 field names for (c)
+  classifier_re_emit: <shape value> # only for (b) path
+  regulatory_exposure_revised: # only for (c) path
+  - field: <field name>
+  old: <old value>
+  new: <new value>
+  reason: operator_clarification | framework_identification
+  post_iteration_shape: <shape value>
+  post_iteration_fired_conditions: [<condition numbers>]
+  outcome: continued | foundation_only | scope_out | next_iteration # producer-visible enum; CLOSED — internal-only branch states (e.g., forced-terminal) are never recorded here
+  terminal_reason: passing_shape_re_emit | regulatory_exposure_revised_clears_conditions | unsupported_shape_transition | iteration_cap_reached | operator_chose_save_and_exit # optional; populated only at terminal entries; disambiguates HOW outcome was reached
+  terminal_at: <ISO 8601> # only if outcome is terminal
 
-# When loop terminal outcome is `foundation_only`, the sub-module ALSO mutates `stop_conditions` block (cross-slice integration with S2.2 gate module § 6):
-#   stop_conditions.fired: [<ACTIVE terminal conditions only; post-loop revisions>]   # per S2.4 R1 C-003 active-vs-transitional distinction
-#   stop_conditions.halted: true → false
-#   stop_conditions.documented_in_foundation: [<same as `fired` at terminal>]
-#   stop_conditions.resolved_during_loop: [<conditions that fired during loop iterations but were resolved before terminal>]   # optional audit-trail; introduced at schema_minor: 2
-#   stop_conditions.resolved_via: stop_condition_reevaluate_loop_foundation_only
-# Required so S2.2 gate module § 6 surfaces compliance-gap entries in technical_architecture.md at step 15 close.
-# S2.2 gate module § 6 reads `documented_in_foundation` only; `resolved_during_loop` is audit-only (not consumed by gate per S2.4 R2 verification).
+# When loop terminal outcome is `foundation_only`, the sub-module ALSO mutates `stop_conditions` block
+# (cross-module integration with the foundation-only-mode gate module's compliance-gap emission):
+# stop_conditions.fired: [<ACTIVE terminal conditions only; post-loop revisions>] # active-vs-transitional distinction
+# stop_conditions.halted: true → false
+# stop_conditions.documented_in_foundation: [<same as `fired` at terminal>]
+# stop_conditions.resolved_during_loop: [<conditions that fired during loop iterations but were resolved before terminal>] # optional audit-trail; introduced at schema_minor: 2
+# stop_conditions.resolved_via: stop_condition_reevaluate_loop_foundation_only
+# Required so the gate module surfaces compliance-gap entries in technical_architecture.md at step 15 close.
+# The gate module reads `documented_in_foundation` only; `resolved_during_loop` is audit-only (not consumed by the gate).
 ```
 
 ## 4. Stability contract
@@ -193,20 +194,20 @@ Downstream slices may RELY on the following holding at v0 (all listed under `sch
 - HALT vs DOCUMENT path semantics: stable across v0 per `wizard/shape_detection.md` § 8.4 + § 8.5.
 - `shape_revision.iteration_cap` value (2 at v0; introduced at `schema_minor: 1`) is stable; revising the cap requires `schema_minor` bump and consumer notification.
 - `shape_revision` block being absent from a staging file means operator never entered the loop. Consumers MUST default-handle absent block as `{ pending: false, iteration: 0, iteration_cap: 2, history: [] }` per § 9.
-- `stop_conditions.resolved_during_loop` field (introduced at `schema_minor: 2` per S2.4 R1 C-003): consumers reading `documented_in_foundation` for compliance-gap emission MUST NOT also read `resolved_during_loop` as gaps to emit — the field is audit-trail only, recording transitional conditions resolved during the loop (e.g., condition 4 resolved when operator identified framework). Consumers at `schema_minor: 0 / 1` default-handle absent as `[]`. Consumers at `schema_minor: 2+` MAY read for diagnostic provenance only.
+- `stop_conditions.resolved_during_loop` field (introduced at `schema_minor: 2`): consumers reading `documented_in_foundation` for compliance-gap emission MUST NOT also read `resolved_during_loop` as gaps to emit — the field is audit-trail only, recording transitional conditions resolved during the loop (e.g., condition 4 resolved when operator identified framework). Consumers at `schema_minor: 0 / 1` default-handle absent as `[]`. Consumers at `schema_minor: 2+` MAY read for diagnostic provenance only.
 
 ## 5. What is NOT in v0 (reserved for v1+)
 
 These additions will bump the relevant version field. v0 consumers can ignore them safely IF the version field they consume increments only.
 
-- **Generator-version identity field** (per Stage 2 planning F-9 cross-vendor finding): when E-β fires at a future Stage 2 slice, the handoff gains `generator_version` field. Will bump `schema_minor` if added as optional; `schema_major` if made required.
+- **Generator-version identity field**: when the first wizard-driven foundation-bundle generation event fires, the handoff gains `generator_version` field. Will bump `schema_minor` if added as optional; `schema_major` if made required.
 - **Per-component control matrix wiring** (mixed-shape native support): `control_matrix_active.components[<id>]` block addition. Bumps `schema_minor` (additive).
-- **Operator-authority-profile fields** (IDQ-050; E-γ-bound): operator-profile block addition. Bumps `schema_minor` (additive).
-- **Hash-based drift signals** (D3 / ADR-0017): drift signal block for foundation-bundle update path. Bumps `schema_minor` (additive).
-- **5th stop condition** (IDQ-056 — regulated + insufficient operator authority): closed-taxonomy extension. Bumps `stop_condition_set_version` to 1; consumers checking this field will catch the change.
+- **Operator-authority-profile fields**: operator-profile block addition for downstream slices that gate behavior on operator authority. Bumps `schema_minor` (additive).
+- **Hash-based drift signals**: drift signal block for foundation-bundle update path. Bumps `schema_minor` (additive).
+- **5th stop condition** (regulated + insufficient operator authority): closed-taxonomy extension. Bumps `stop_condition_set_version` to 1; consumers checking this field will catch the change.
 - **9th shape category** or extended shape enumeration: closed-taxonomy extension. Bumps `shape_taxonomy_version`.
 - **7th control-matrix status value** (e.g., adding `enforced-conditionally` or `auditable-only`): closed-taxonomy extension. Bumps `control_matrix_schema_version`.
-- **`discovery_in_progress` field** (IDQ-055): handoff field for slices interacting with operators still resolving shape. Bumps `schema_minor` (additive).
+- **`discovery_in_progress` field**: handoff field for downstream surfaces interacting with operators still resolving shape. Bumps `schema_minor` (additive).
 
 ## 6. Versioning rules
 
@@ -231,7 +232,7 @@ Downstream slices that consume this handoff MUST:
 - NOT mutate the staging file's `shape_hypothesis` fields directly; re-check updates use the append-only `recheck_log:` pattern
 - Treat foundation-state-preserved as a hard invariant — never delete the staging file based on this handoff
 
-## 9. `shape_revision` block (added 2026-05-19 per S2.3; schema_minor: 1)
+## 9. `shape_revision` block (added at schema_minor: 1)
 
 Tracks state of stop-condition halt → re-evaluate-shape loop iterations per `wizard/interview/_stop_condition_reevaluate_loop.md`. Optional top-level block; populated only when operator enters the loop (picks "(b) Change the shape and re-evaluate" OR "(c) Re-evaluate regulatory exposure" at pre_step_05 Step 2a OR pre_step_08 Step 2 late-emergence halt).
 
@@ -247,12 +248,6 @@ Full schema lives in § 3 above (after `foundation_state` block). Loop semantics
 
 ## 10. Cross-references
 
-- `wizard/shape_detection.md` — the canonical implementation spec; this contract reflects its emit shape
-- `wizard/interview/_foundation_only_mode_gate.md` — **consumer for `fallback_mode_offered: foundation-only`** (S2.2 implementation). The gate module's § 2 derivation rule maps the `fallback_mode_offered` enum label in this contract to a derived mode profile (`produce_foundation_docs` / `produce_system_implementation` / `capture_implementation_inputs` / `honest_characterization_disclosure`) that gates per-step behavior in steps 05-15. **No contract-shape change at v0** — derived mode profile is downstream of this contract, derived at use, NOT persisted to staging; no schema bump.
-- `wizard/interview/_stop_condition_reevaluate_loop.md` — **producer for `shape_revision` block** (S2.3 implementation; added at `schema_minor: 1`). Loop sub-module appends iteration entries to `shape_revision.history[]` + mutates `shape_revision.pending` / `shape_revision.iteration` during loop execution. Invoked from `_pre_step_05_recheck.md` Step 2a + `_pre_step_08_recheck.md` Step 2 late-emergence.
-- `governance/generated_system_data_defaults.md` § 2.2 (control matrix) + § 6.3 (stop conditions) — D1 sources
-- PRD v1 § 5.2 (F-1) — requirements source
-- ADR-0018 — slice authority
-- S2.1 slice spec — design provenance (handoff contract origin)
-- S2.2 slice spec — consumer-side implementation (`product_evidence/_slices/S2.2_foundation_only_mode_2026-05-19.md`)
-- S2.3 slice spec — `shape_revision` block + loop sub-module (`product_evidence/_slices/S2.3_stop_condition_reevaluate_loop_2026-05-19.md`)
+- `wizard/shape_detection.md` — the canonical implementation spec; this contract reflects its emit shape.
+- `wizard/interview/_foundation_only_mode_gate.md` — **consumer for `fallback_mode_offered: foundation-only`**. The gate module's § 2 derivation rule maps the `fallback_mode_offered` enum label in this contract to a derived mode profile (`produce_foundation_docs` / `produce_system_implementation` / `capture_implementation_inputs` / `honest_characterization_disclosure`) that gates per-step behavior in steps 05-15. **No contract-shape change at v0** — derived mode profile is downstream of this contract, derived at use, NOT persisted to staging; no schema bump.
+- `wizard/interview/_stop_condition_reevaluate_loop.md` — **producer for `shape_revision` block** (added at `schema_minor: 1`). The loop sub-module appends iteration entries to `shape_revision.history[]` + mutates `shape_revision.pending` / `shape_revision.iteration` during loop execution. Invoked from `_pre_step_05_recheck.md` Step 2a + `_pre_step_08_recheck.md` Step 2 late-emergence.

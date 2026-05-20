@@ -44,6 +44,6 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 
 ## Regulatory & compliance gaps (foundation-only mode)
 
-*Populated when DOCUMENT-path stop conditions are documented during shape-detection loop iteration per S2.2 Decision H + § A.6. This section renders in `foundation_only` mode only (schema `render_modes: [foundation_only]`); in `complete` render mode it does not appear. If no compliance gaps were documented during the loop, the wizard may omit this section or emit "No compliance gaps documented during shape-detection."*
+*Populated when DOCUMENT-path stop conditions are documented during the shape-detection reevaluate loop. This section renders in `foundation_only` mode only (schema `render_modes: [foundation_only]`); in `complete` render mode it does not appear. If no compliance gaps were documented during the loop, the wizard may omit this section or emit "No compliance gaps documented during shape-detection."*
 
 {{COMPLIANCE_GAPS_CONTENT}}

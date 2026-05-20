@@ -42,15 +42,15 @@ Before doing anything else in this step:
 2. Locate the `shape_hypothesis.fallback_mode_offered` field.
 
 3. Consult `wizard/interview/_foundation_only_mode_gate.md` § 2 derivation rule. Determine:
-   - `produce_foundation_docs` (boolean)
-   - `produce_system_implementation` (boolean)
-   - `capture_implementation_inputs` (boolean)
-   - `honest_characterization_disclosure` (enum value)
+ - `produce_foundation_docs` (boolean)
+ - `produce_system_implementation` (boolean)
+ - `capture_implementation_inputs` (boolean)
+ - `honest_characterization_disclosure` (enum value)
 
 4. Branch:
-   - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
-   - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
-   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
+ - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
+ - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
+ - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
 
 5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error. Halt with internal-error message; foundation state preserved. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
 
@@ -373,10 +373,10 @@ Run: `gh --version`
 
 - If installed: proceed to Step 2.
 - If not installed: **Say:** *"We need one more tool to connect to GitHub. Run this command:"*
-  ```
-  brew install gh
-  ```
-  Wait for confirmation that it completed. Re-run `gh --version` to verify. Then proceed to Step 2.
+ ```
+ brew install gh
+ ```
+ Wait for confirmation that it completed. Re-run `gh --version` to verify. Then proceed to Step 2.
 
 **Step 2 — Check authentication:**
 
@@ -384,17 +384,17 @@ Run: `gh auth status`
 
 - If authenticated: proceed to Step 3.
 - If not authenticated: **Say:** *"Now we need to connect Claude Code to your GitHub account. Run this command:"*
-  ```
-  gh auth login
-  ```
-  Walk the user through the prompts in plain language:
-  1. Select **GitHub.com**
-  2. Select **HTTPS**
-  3. Select **Login with a web browser**
-  4. The terminal will show a one-time code and a URL. Open the URL in your browser, sign in to GitHub if prompted, and paste the code when asked.
-  5. Authorize the application.
+ ```
+ gh auth login
+ ```
+ Walk the user through the prompts in plain language:
+ 1. Select **GitHub.com**
+ 2. Select **HTTPS**
+ 3. Select **Login with a web browser**
+ 4. The terminal will show a one-time code and a URL. Open the URL in your browser, sign in to GitHub if prompted, and paste the code when asked.
+ 5. Authorize the application.
 
-  Wait for *"Logged in to github.com"* to appear in the terminal. Then proceed to Step 3.
+ Wait for *"Logged in to github.com"* to appear in the terminal. Then proceed to Step 3.
 
 **Step 3 — Check for a GitHub account:**
 
@@ -554,7 +554,7 @@ The interview sequence is complete. The wizard has produced a running project di
 
 ## Foundation-only adapted path
 
-**Disposition (per S2.2 spec § A.3): ADAPT — large close-ceremony rebuild.**
+**Disposition: ADAPT — large close-ceremony rebuild.**
 
 In foundation-only mode, step 15 close does NOT execute the full normal close path (no git init, no first build prompt, no implementation files). Instead, follow the foundation-only close ceremony below.
 
@@ -570,7 +570,7 @@ Assemble and write ONLY the foundation doc set + adapted close-ceremony docs to 
 | `execution_plan.md` | Foundation-level execution sequencing from staging data + captured operations data from step 13 | ASSEMBLE now; shape-agnostic execution sequencing for the foundation docs (what to build first, dependencies, decision points) |
 | `project_instructions.md` | Foundation-only voice template | ASSEMBLE now per `_foundation_only_mode_gate.md` § 4; opening section MUST surface verbatim: "These foundation docs describe your project at the system-blueprint level. They are implementation-agnostic. Implementation NOT included in this output." |
 | `manual.md` | Pointer doc | ASSEMBLE now; MUST surface pointer to `next_steps.md`; no claim of "operating manual" semantics implying a running system |
-| `next_steps.md` | NEW per S2.2 § A.4 | ASSEMBLE now; structure per "next_steps.md content (template)" below |
+| `next_steps.md` | NEW | ASSEMBLE now; structure per "next_steps.md content (template)" below |
 
 ### next_steps.md content (template)
 
@@ -609,7 +609,7 @@ NOT produced:
 
 **(a) Direct Claude Code build.** Take these foundation docs to Claude Code directly. Open Claude Code in this project directory and ask it to read the foundation docs and help you build the implementation in your chosen shape ([SHAPE]). The foundation docs are designed to be sufficient for an experienced operator (or Claude Code) to build from.
 
-**(b) Wait for v2 wizard shape support.** The wizard's roadmap for adding [SHAPE] support lives in the build project at `prd.md` § 4.5 "Deferred shapes + un-defer triggers." Your staging file at `~/claude-wizard-draft/wizard_session_draft.md` is preserved on disk. **Concrete resume-to-full-build tooling is NOT implemented in this wizard version** — per S2.2 § A.10 Decision D, only the data is preserved. A future wizard version may implement automated resume (PRD F-12 re-open path); when that version ships, the preserved staging file should be readable by it. Until then, path (a) direct Claude Code build is the available path; path (b) is "wait and re-evaluate when v2 ships."
+**(b) Wait for a future wizard release.** The wizard's roadmap for adding [SHAPE] support is on the build side; it is not bundled in the public wizard distribution today. Your staging file at `~/claude-wizard-draft/wizard_session_draft.md` is preserved on disk. **Concrete resume-to-full-build tooling is NOT implemented in this wizard version** — only the data is preserved. A future wizard version may implement automated resume; when that version ships, the preserved staging file should be readable by it. Until then, path (a) direct Claude Code build is the available path; path (b) is "wait and re-evaluate when a future release ships."
 
 ## Honest characterization
 
@@ -633,7 +633,7 @@ Tell operator (verbatim):
 >
 > **Foundation-only mode. Implementation deferred. Take these docs to Claude Code directly OR wait for v2 wizard shape support.**
 >
-> Your project file at `~/claude-wizard-draft/wizard_session_draft.md` is preserved. We are NOT implementing resume tooling in this version of the wizard — concrete resume-to-full-build support is deferred (per S2.2 § A.10 Decision D). What this means: your staging-file inputs are preserved on disk for a future implementation, but you cannot today re-run this wizard and have it pick up automatically. The available path today is direct Claude Code build using the foundation docs.
+> Your project file at `~/claude-wizard-draft/wizard_session_draft.md` is preserved. We are NOT implementing resume tooling in this version of the wizard — concrete resume-to-full-build support is deferred. What this means: your staging-file inputs are preserved on disk for a future implementation, but you cannot today re-run this wizard and have it pick up automatically. The available path today is direct Claude Code build using the foundation docs.
 
 ### Step 15 close write progression (foundation-only)
 
@@ -646,9 +646,9 @@ Tell operator (verbatim):
 7. Verify `vision.md` + `approach.md` already on disk (written at step 05 + step 06)
 8. Update staging file: `WIZARD_COMPLETE = true`
 9. Append step-marker to `~/claude-wizard-draft/wizard_progress.md`:
-   ```
-   step_15: complete | <timestamp>
-   ```
+ ```
+ step_15: complete | <timestamp>
+ ```
 10. Deliver CLOSE-13 closing message
 
 The wizard exits cleanly after the closing message. NO first-build-prompt; NO git init; NO GitHub remote.

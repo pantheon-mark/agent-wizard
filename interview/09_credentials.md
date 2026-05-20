@@ -357,7 +357,7 @@ Proceed to `10_validation.md`.
 
 ## Foundation-only adapted path
 
-**Disposition (per S2.2 spec § A.3): ADAPT — capture credential inventory as foundation section; skip implementation file writes.**
+**Disposition: ADAPT — capture credential inventory as foundation section; skip implementation file writes.**
 
 Conduct the credential identification interview from the existing step content above (CRED-1 through CRED-5; Claude proposes credential inventory from vision + approach + architecture; operator confirms / adjusts).
 

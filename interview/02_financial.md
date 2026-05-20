@@ -319,14 +319,14 @@ shape_hypothesis:
   rechecks_due: [05, 08]
   forced_recheck_at_step_05: <true if confidence == low else false>
   operator_signals:
-    probe_1_continuous_runtime: <stored value>
-    probe_2_multi_user: <stored value>
-    probe_3_thinking_partner: <stored value>
-    probe_4_external_software: <stored value>
-    probe_5_state_memory: <stored value>
-    probe_6_regular_pattern: <stored value>
-    probe_7_operator_confirm: <stored value>
-    probe_8_document_output: <stored value>
+  probe_1_continuous_runtime: <stored value>
+  probe_2_multi_user: <stored value>
+  probe_3_thinking_partner: <stored value>
+  probe_4_external_software: <stored value>
+  probe_5_state_memory: <stored value>
+  probe_6_regular_pattern: <stored value>
+  probe_7_operator_confirm: <stored value>
+  probe_8_document_output: <stored value>
   forward_offered_signals_at_step_01: <preserved from step 01 placeholder>
   mixed_component_basis: <empty list unless shape == mixed; if shape == mixed, list constituent component shapes detected from probe signals + free-text signals>
   fallback_mode_offered: not_offered
@@ -342,7 +342,7 @@ Write sub-step marker: Append `step_02_P02-FB-5: complete | <timestamp>` to `~/c
 
 ## P02-FB-6 — Unsupported-shape transition (CONDITIONAL; fires only when step 02 final emit is HIGH-or-MEDIUM-confidence non-markdown)
 
-**Trigger condition (per advisor R1 C-003 + R2 C-008 dispositions — comply with PRD § 4.3 honest-disclosure-at-step-02 mandate; trigger uses unambiguous field combination):**
+**Trigger condition (per advisor R1 C-003 + R2 C-008 dispositions — comply with the relevant product spec section honest-disclosure-at-step-02 mandate; trigger uses unambiguous field combination):**
 
 - `shape_hypothesis.status == emitted` (P02-FB-5 wrote the field for finalized step-02 emit) AND `shape_hypothesis.detected_at_step == 02` AND `shape_hypothesis.v1_supported == false` AND `shape_hypothesis.confidence in [high, medium]`
 
@@ -354,13 +354,13 @@ If trigger does NOT match (markdown-agents final emit; OR LOW-confidence `unknow
 
 Behavior is identical to step 01's P1-9 — same operator-facing message, same two-choice path, same staging-file updates. Substitute the classified shape in plain language per the same pattern.
 
-Say to operator (verbatim per PRD § 4.3; same template as step 01 P1-9):
+Say to operator (verbatim; same template as step 01 P1-9):
 
 > Your project looks like a [shape description in plain language]. v1 of the wizard generates complete systems for one specific shape (markdown agents that you work with through Claude Code on your own machine).
 >
 > Two options:
 >
-> **(a) Stop here — wait for v2 / future versions.** Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. When the wizard adds support for your shape, we can pick up. The roadmap for what triggers that addition lives in this project's PRD § 4.5.
+> **(a) Stop here — wait for a future wizard release.** Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. When the wizard adds support for your shape, we can pick up.
 >
 > **(b) Foundation-only mode.** I can produce a foundation-doc set for your project — the planning documents (vision, approach, technical architecture, etc.) abstracted from implementation shape. You'd take those docs to Claude Code directly to build the implementation yourself, OR wait for v2 shape support. I won't generate the system implementation itself (no agents, scripts, or run files).
 >

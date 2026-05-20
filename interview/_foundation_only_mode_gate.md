@@ -26,18 +26,18 @@ If the entry guard fires AND the label is missing from staging file, that is a w
 
 ## Reference spec
 
-- S2.2 slice spec § A.1 + § A.2 — design provenance (`product_evidence/_slices/S2.2_foundation_only_mode_2026-05-19.md`)
-- S2.1 slice spec § A.5 — unsupported-shape transition (sets `fallback_mode_offered`)
-- PRD v1 § 4.3 + § 4.4 — operator-facing contract
+- The originating slice spec (build-side; not distributed) is the design provenance for this module.
+- `wizard/shape_detection.md` § 6 — unsupported-shape transition (sets `fallback_mode_offered`)
+- the relevant product spec section + § 4.4 — operator-facing contract
 - ADR-0015 § 2.3 — honest characterization rule (FD-W4-D1)
 
 ---
 
 ## Section 1 — Mode profile (centralized projection; not independent capabilities)
 
-Foundation-only-mode behavior gates on a **mode profile** — four fields that are a **deterministic projection** of the single `shape_hypothesis.fallback_mode_offered` enum label. They are NOT independent capabilities (unlike `control_matrix_active` capability fields in S2.1, which are independent per shape × control combination). They are NOT persisted to the staging file at v0; per-step entry guards re-derive from the label at use.
+Foundation-only-mode behavior gates on a **mode profile** — four fields that are a **deterministic projection** of the single `shape_hypothesis.fallback_mode_offered` enum label. They are NOT independent capabilities (unlike `control_matrix_active` capability fields in the shape detection contract, which are independent per shape × control combination). They are NOT persisted to the staging file at v0; per-step entry guards re-derive from the label at use.
 
-*(Naming honesty per advisor R1 C-006 disposition: this is centralized mode projection, not a peer of S2.1 capability contracts. The projection earns its keep ONLY through (a) version-checking the handoff contract before reading the label, AND (b) being transition-order-safe in step 05 + step 08 where pre-step re-checks can mutate the label.)*
+*(Naming honesty per advisor R1 C-006 disposition: this is centralized mode projection, not a peer of capability contracts. The projection earns its keep ONLY through (a) version-checking the handoff contract before reading the label, AND (b) being transition-order-safe in step 05 + step 08 where pre-step re-checks can mutate the label.)*
 
 | Mode profile field | Type | Meaning |
 |---|---|---|
@@ -48,7 +48,7 @@ Foundation-only-mode behavior gates on a **mode profile** — four fields that a
 
 **No staging-file persistence at v0.** The label `shape_hypothesis.fallback_mode_offered` is the persisted source-of-truth. Per-step entry guards read the label from staging, consult the Section 2 derivation rule, and act on the derived values without writing them back. This avoids stale-label-vs-stale-projection divergence risk (single write point = label; no shadow copy).
 
-Future v1 may persist projection fields for debugging or contract-observability; out of scope per S2.2 § 2 Deferred.
+Future v1 may persist projection fields for debugging or contract-observability; out of scope per the slice spec Deferred.
 
 ---
 
@@ -65,7 +65,7 @@ Per-step entry guards consult this table to determine behavior:
 
 **Derivation invariants:**
 
-1. The dominant branch S2.2 adds behavior for is `produce_system_implementation == false` AND `produce_foundation_docs == true` — i.e., the `foundation-only` row.
+1. The dominant branch adds behavior for is `produce_system_implementation == false` AND `produce_foundation_docs == true` — i.e., the `foundation-only` row.
 2. `complete` and `not_offered` both yield `produce_system_implementation == true`; per-step entry guards treat them identically (normal-behavior path). The label distinction is preserved upstream for shape-detection diagnostic value but does not branch behavior at steps 05-15.
 3. `scope-out` yields `produce_foundation_docs == false`. The wizard does NOT reach steps 05-15 in scope-out path (exit fired at unsupported-shape transition per `wizard/shape_detection.md` § 6). The row is included for completeness; per-step entry guards never fire under scope-out. If an entry guard fires WITH `fallback_mode_offered == scope-out`, that is an internal-state error (see Section 3).
 
@@ -75,7 +75,7 @@ Per-step entry guards consult this table to determine behavior:
 
 ## Section 3 — Per-step entry-guard pattern
 
-Each of `05_vision.md` through `15_close.md` includes a foundation-only-mode entry-guard sub-step. **Placement depends on whether the step contains a pre-step shape-detection re-check** (per advisor R1 C-001 disposition):
+Each of `05_vision.md` through `15_close.md` includes a foundation-only-mode entry-guard sub-step. **Placement depends on whether the step contains a pre-step shape-detection re-check**:
 
 - **Steps 05 + 08 (contain pre-step-05 / pre-step-08 re-checks):** the entry guard MUST be placed **AFTER** the re-check invocation (after the existing `## Pre-step-NN re-check` section in each file). Reason: `_pre_step_05_recheck.md` Step 5 + `_pre_step_08_recheck.md` Step 5 can mutate `shape_hypothesis.fallback_mode_offered` via the unsupported-shape transition; an entry guard running before the re-check would branch on stale state.
 - **Steps 06, 07, 09, 10, 11, 12, 13, 14, 15 (no pre-step re-check):** the entry guard is placed at file start, immediately after the `## Sub-step resume check` section. No mutation of `fallback_mode_offered` happens within these files, so file-start placement is safe.
@@ -92,38 +92,38 @@ Before doing anything else in this step (or, for steps 05 + 08, before any step-
 2. Locate the `shape_hypothesis.fallback_mode_offered` field.
 
 3. Consult `wizard/interview/_foundation_only_mode_gate.md` § 2 derivation rule. Determine:
-   - `produce_foundation_docs` (boolean)
-   - `produce_system_implementation` (boolean)
-   - `capture_implementation_inputs` (boolean)
-   - `honest_characterization_disclosure` (enum value)
+ - `produce_foundation_docs` (boolean)
+ - `produce_system_implementation` (boolean)
+ - `capture_implementation_inputs` (boolean)
+ - `honest_characterization_disclosure` (enum value)
 
 4. Branch:
-   - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
-   - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled **`## Foundation-only adapted path`** at the end of this file.
-   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
+ - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
+ - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled **`## Foundation-only adapted path`** at the end of this file.
+ - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
 
 5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error per `_pre_step_05_recheck.md` prerequisite check pattern. Halt; do NOT proceed. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
 ```
 
-The entry-guard sub-step is **verbatim across all 11 step files** (steps 05 through 15) — only the placement differs (post-recheck for 05 + 08; file-start for the other 9). Consistency is load-bearing per S2.1 retrospective lesson #2 (spec-update-must-propagate-to-producers): if this pattern needs revision, it must be revised here AND in all 11 step files in the same revision; never in only one.
+The entry-guard sub-step is **verbatim across all 11 step files** (steps 05 through 15) — only the placement differs (post-recheck for 05 + 08; file-start for the other 9). Consistency is load-bearing per the prior retrospective lesson #2 (spec-update-must-propagate-to-producers): if this pattern needs revision, it must be revised here AND in all 11 step files in the same revision; never in only one.
 
 Each step file has two behavior paths after the entry guard:
 
 1. **Normal behavior path** — the step's existing content (immediately below the entry guard); followed when `produce_system_implementation == true`
-2. **Foundation-only adapted path** — a new section titled `## Foundation-only adapted path` appended at the end of each step file in S2.2; followed when `produce_system_implementation == false`; disposition per S2.2 spec § A.3 table (PRODUCE / ADAPT-capture / ADAPT-split / ADAPT-rebuild)
+2. **Foundation-only adapted path** — a new section titled `## Foundation-only adapted path` appended at the end of each step file; followed when `produce_system_implementation == false`; disposition spec § A.3 table (PRODUCE / ADAPT-capture / ADAPT-split / ADAPT-rebuild)
 
 ---
 
 ## Section 4 — Honest-characterization disclosure rules
 
-Per FD-W4-D1 (ADR-0015 § 2.3) + S2.1 § A.5 + S2.2 spec § A.9.
+Per FD-W4-D1 (ADR-0015 § 2.3) + § A.5 + spec § A.9.
 
 **When `honest_characterization_disclosure == foundation_only`:**
 
 - Step 15 close: closing message + `next_steps.md` MUST surface verbatim:
-  > "Foundation-only mode. Implementation deferred. Take these docs to Claude Code directly OR wait for v2 wizard shape support."
+ > "Foundation-only mode. Implementation deferred. Take these docs to Claude Code directly OR wait for v2 wizard shape support."
 - `project_instructions.md` opening section MUST surface:
-  > "These foundation docs describe your project at the system-blueprint level. They are implementation-agnostic. Implementation NOT included in this output."
+ > "These foundation docs describe your project at the system-blueprint level. They are implementation-agnostic. Implementation NOT included in this output."
 - `manual.md` MUST surface: pointer to `next_steps.md`; no claim of "operating manual" semantics implying a running system.
 
 **When `honest_characterization_disclosure == complete`:**
@@ -170,7 +170,7 @@ In foundation-only mode (`produce_system_implementation == false` AND `produce_f
 | 13 (operations) | § "Operational requirements" > "Operational requirements (cadence, scale, drift)" |
 | 14 (document review) | (not captured here; produces simpler document review of the 4-doc foundation set) |
 
-**Operator project directory structure in foundation-only mode** (per S2.2 spec § A.10 Decision J):
+**Operator project directory structure in foundation-only mode** (spec § A.10 Decision J):
 
 ```
 ~/[project-name]/
@@ -178,9 +178,9 @@ In foundation-only mode (`produce_system_implementation == false` AND `produce_f
 ├── approach.md
 ├── technical_architecture.md
 ├── execution_plan.md
-├── project_instructions.md       # ADAPT: foundation-only voice
-├── manual.md                     # ADAPT: pointer doc only
-└── next_steps.md                 # NEW: path-forward guidance
+├── project_instructions.md # ADAPT: foundation-only voice
+├── manual.md # ADAPT: pointer doc only
+└── next_steps.md # NEW: path-forward guidance
 ```
 
 NO subdirectories (no `/agents/`, `/quality/`, `/work/`, `/logs/`, `/security/`, `/docs/`, `/archive/`).
@@ -217,7 +217,7 @@ Per `wizard/shape_detection.md` § 8.5 + `_pre_step_05_recheck.md` Step 2b: stop
 
 ## Section 7 — Close ceremony adaptation pointer
 
-Step 15 close (`15_close.md`) implements the foundation-only-mode close ceremony per S2.2 spec § A.4. Full per-sub-step disposition lives at `15_close.md` § "Foundation-only adapted path"; this section is a summary cross-reference only.
+Step 15 close (`15_close.md`) implements the foundation-only-mode close ceremony spec § A.4. Full per-sub-step disposition lives at `15_close.md` § "Foundation-only adapted path"; this section is a summary cross-reference only.
 
 **Summary of step 15 adaptation:**
 
@@ -232,7 +232,7 @@ Step 15 close (`15_close.md`) implements the foundation-only-mode close ceremony
 
 ## Section 8 — Mechanism stack record (D2 § mechanism-stack-template)
 
-Per `governance/operational_change_safety.md` v0 § 4 mechanism-stack-template.
+Per the operational change safety spec mechanism-stack-template.
 
 ```yaml
 mechanism_id: mech-foundation-only-mode-v0
@@ -245,24 +245,24 @@ primary_mechanism: this gate module (derived mode-profile schema + label-to-mode
 reinforcing_mechanisms:
   - shape_hypothesis.fallback_mode_offered label in staging file (set at unsupported-shape transition per wizard/shape_detection.md § 6) — persisted source-of-truth for derivation
   - wizard/handoff_contracts/shape_detection_v0.md § 8 cross-reference to this module
-  - Derived mode-profile gating per S2.1 retrospective lesson feedback_capability_vs_label_contract_surfaces.md, applied with R1 C-006 framing correction (centralized projection of the single enum label, NOT a peer of S2.1 control-matrix capability contracts; extends cleanly to new enum values)
+  - Derived mode-profile gating per the prior retrospective lesson record, applied with R1 C-006 framing correction (centralized projection of the single enum label, NOT a peer of control-matrix capability contracts; extends cleanly to new enum values)
   - Honest-characterization rule (ADR-0015 § 2.3) — disclosure surfaces at step 15 close + project_instructions.md + next_steps.md
 detection_recovery_mechanisms:
   - Per-step entry-guard internal-state-error halt (when fallback_mode_offered missing OR scope-out reaches steps 05-15; foundation state preserved)
   - Stop-condition DOCUMENT-path integration (compliance gaps surfaced honestly in foundation docs rather than silenced)
-  - Operator-resume optionality preserved via `capture_implementation_inputs: true` + staging file preservation (contract specified at S2.2 § A.10 Decision D; concrete resume tooling deferred)
-rationale: Foundation-only mode is a behavior-shape mode that gates implementation-emit decisions across 11 interview steps. A shared gate module + derived mode profile + per-step entry-guard pattern provides single-source-of-truth and reduces propagation surface (per S2.1 retrospective lesson #2 spec-update-must-propagate-to-producers). The mode is deterministic; the derived projection extends cleanly if v2 adds more enum values to `fallback_mode_offered` (e.g., `partial-implementation` for a future hybrid mode). Per R1 C-006 disposition: this is centralized mode projection, NOT a peer of S2.1 control-matrix capability contracts; label persisted in staging, mode profile NOT persisted. Stop-condition DOCUMENT-path integration ensures honest characterization without silent fallback (per FD-W4-D1 + S2.1 § A.5 last paragraph).
-validation_method: manual paper-replay walkthrough of entry-guard branching + adapted-path execution against synthetic fixtures (5 foundation-only-mode fixtures + S2.1 regression check). Per AR-004 F-2.8 + D2 § 5 validation evidence storage convention.
-validation_evidence: governance/validation/mech-foundation-only-mode-v0/2026-05-19_s2.2_initial_fixture_replay.md
+  - Operator-resume optionality preserved via `capture_implementation_inputs: true` + staging file preservation (contract specified § A.10 Decision D; concrete resume tooling deferred)
+rationale: Foundation-only mode is a behavior-shape mode that gates implementation-emit decisions across 11 interview steps. A shared gate module + derived mode profile + per-step entry-guard pattern provides single-source-of-truth and reduces propagation surface (per the prior retrospective lesson #2 spec-update-must-propagate-to-producers). The mode is deterministic; the derived projection extends cleanly if v2 adds more enum values to `fallback_mode_offered` (e.g., `partial-implementation` for a future hybrid mode). Per R1 C-006 disposition: this is centralized mode projection, NOT a peer of control-matrix capability contracts; label persisted in staging, mode profile NOT persisted. Stop-condition DOCUMENT-path integration ensures honest characterization without silent fallback (per FD-W4-D1 + § A.5 last paragraph).
+validation_method: manual paper-replay walkthrough of entry-guard branching + adapted-path execution against synthetic fixtures (5 foundation-only-mode fixtures + regression check). Per AR-004 F-2.8 + D2 § 5 validation evidence storage convention.
+validation_evidence: validation/mech-foundation-only-mode-v0/2026-05-19_s2.2_initial_fixture_replay.md
 known_coverage_limits:
   - Synthetic fixtures only; no real-operator data
   - Paper-replay only (markdown-driven interview agent; no executable run)
   - Foundation-doc TEMPLATES still markdown-shape-tinted (cross-shape neutralization deferred)
-  - Operator-resume-to-full-build tooling (PRD F-12 re-open path) NOT exercised at v0
+  - Operator-resume-to-full-build tooling (the relevant product spec requirement re-open path) NOT exercised at v0
   - DOCUMENT-path integration tested for HIPAA condition only (one fixture); GDPR/PCI-DSS/regulated-no-framework conditions assumed to follow same pattern
-  - Mixed-shape per-component capability blocks not tested (reserved for v1+ per S2.1 handoff contract § 5)
+  - Mixed-shape per-component capability blocks not tested (reserved for v1+ handoff contract § 5)
   - Sub-step resume in foundation-only mode not exercised
-reverify_trigger: first real-operator-input foundation-only mode session; OR foundation-doc template cross-shape neutralization slice completes; OR PRD F-12 re-open path implementation slice completes; OR shape-detection contract major-version bump (would change fallback_mode_offered field semantics).
+reverify_trigger: first real-operator-input foundation-only mode session; OR foundation-doc template cross-shape neutralization slice completes; OR the relevant product spec requirement re-open path implementation slice completes; OR shape-detection contract major-version bump (would change fallback_mode_offered field semantics).
 mvp_lifecycle: foundation-tier per AR-002 F-1.6 (gates behavior across 11 interview steps; load-bearing for honest characterization of unsupported-shape path)
 ```
 
@@ -270,11 +270,11 @@ mvp_lifecycle: foundation-tier per AR-002 F-1.6 (gates behavior across 11 interv
 
 ## Cross-references
 
-- S2.2 slice spec — design provenance (`product_evidence/_slices/S2.2_foundation_only_mode_2026-05-19.md`)
-- S2.1 slice spec § A.5 — unsupported-shape transition + foundation-only-mode contract origin
+- The originating slice spec (build-side; not distributed) is the design provenance for this module.
+- The originating slice spec (build-side; not distributed) — unsupported-shape transition + foundation-only-mode contract origin.
 - `wizard/shape_detection.md` § A.5 + § 8.5 — DOCUMENT-path semantics
 - `wizard/handoff_contracts/shape_detection_v0.md` — `fallback_mode_offered` field source
-- `governance/generated_system_data_defaults.md` § 2.3 (ADR-0015) — honest characterization rule (FD-W4-D1)
-- `governance/operational_change_safety.md` § mechanism-stack-template (ADR-0016) — mechanism stack record format for `mech-foundation-only-mode-v0`
-- PRD v1 § 4.3 + § 4.4 — operator-facing contract
+- the per-shape control matrix (ADR-0015) — honest characterization rule (FD-W4-D1)
+- the operational change safety spec § mechanism-stack-template (ADR-0016) — mechanism stack record format for `mech-foundation-only-mode-v0`
+- the relevant product spec section + § 4.4 — operator-facing contract
 - `_pre_step_05_recheck.md` Step 2b — DOCUMENT-path source for stop-condition gap entries

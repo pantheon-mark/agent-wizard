@@ -37,7 +37,7 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 Before any step-05 user-facing question fires, run `wizard/interview/_pre_step_05_recheck.md`. This module re-evaluates the provisional `shape_hypothesis` against accumulated context (steps 02-04 answers + step 03 UP-6 regulatory exposure), evaluates the 4 stop conditions, and triggers the unsupported-shape transition if shape revises to non-v1-supported.
 
-**The re-check is mandatory per PRD § 5.2 F-1.** Hard stop before vision generation — shape and stop conditions must be resolved here.
+**The re-check is mandatory F-1.** Hard stop before vision generation — shape and stop conditions must be resolved here.
 
 If `step_05_pre_recheck: complete` is already in `~/claude-wizard-draft/wizard_progress.md` (e.g., resuming a partial step 05), skip the pre-recheck and proceed to the step opening. Otherwise, run the pre-recheck module first.
 
@@ -56,15 +56,15 @@ Before any step-05 user-facing question fires:
 2. Locate the `shape_hypothesis.fallback_mode_offered` field.
 
 3. Consult `wizard/interview/_foundation_only_mode_gate.md` § 2 derivation rule. Determine:
-   - `produce_foundation_docs` (boolean)
-   - `produce_system_implementation` (boolean)
-   - `capture_implementation_inputs` (boolean)
-   - `honest_characterization_disclosure` (enum value)
+ - `produce_foundation_docs` (boolean)
+ - `produce_system_implementation` (boolean)
+ - `capture_implementation_inputs` (boolean)
+ - `honest_characterization_disclosure` (enum value)
 
 4. Branch:
-   - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
-   - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
-   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
+ - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
+ - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
+ - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
 
 5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error. Halt with internal-error message; foundation state preserved. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
 
@@ -342,7 +342,7 @@ Proceed to `06_approach.md`.
 
 ## Foundation-only adapted path
 
-**Disposition (per S2.2 spec § A.3): PRODUCE.**
+**Disposition: PRODUCE.**
 
 In foundation-only mode, this step's behavior is identical to the normal path. Vision is a foundation-level artifact; shape-agnostic; the same questions (V-1 through V-8), draft / revision round, and disk write apply.
 

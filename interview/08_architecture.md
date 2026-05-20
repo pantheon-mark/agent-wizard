@@ -35,7 +35,7 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 ## Pre-step-08 re-check (final shape-detection confirmation)
 
-Before any step-08 user-facing question fires, run `wizard/interview/_pre_step_08_recheck.md`. This module re-evaluates the `shape_hypothesis` against accumulated step 05-07 content (vision + approach + advisors). Especially important for emergent-architecture projects (PRD § 5.13; J6 anchored) — the architecture phase frequently reveals shape signals that earlier steps did not surface.
+Before any step-08 user-facing question fires, run `wizard/interview/_pre_step_08_recheck.md`. This module re-evaluates the `shape_hypothesis` against accumulated step 05-07 content (vision + approach + advisors). Especially important for emergent-architecture projects (the relevant product spec section; J6 anchored) — the architecture phase frequently reveals shape signals that earlier steps did not surface.
 
 If `step_08_pre_recheck: complete` is already in `~/claude-wizard-draft/wizard_progress.md` (resuming a partial step 08), skip the pre-recheck. Otherwise, run the pre-recheck module first.
 
@@ -54,15 +54,15 @@ Before any step-08 user-facing question fires:
 2. Locate the `shape_hypothesis.fallback_mode_offered` field.
 
 3. Consult `wizard/interview/_foundation_only_mode_gate.md` § 2 derivation rule. Determine:
-   - `produce_foundation_docs` (boolean)
-   - `produce_system_implementation` (boolean)
-   - `capture_implementation_inputs` (boolean)
-   - `honest_characterization_disclosure` (enum value)
+ - `produce_foundation_docs` (boolean)
+ - `produce_system_implementation` (boolean)
+ - `capture_implementation_inputs` (boolean)
+ - `honest_characterization_disclosure` (enum value)
 
 4. Branch:
-   - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
-   - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
-   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
+ - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
+ - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
+ - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
 
 5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error. Halt with internal-error message; foundation state preserved. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
 
@@ -331,7 +331,7 @@ Proceed to `09_credentials.md`.
 
 ## Foundation-only adapted path
 
-**Disposition (per S2.2 spec § A.3): ADAPT — split foundation-level technical architecture (PRODUCE) from implementation outputs (SKIP).**
+**Disposition: ADAPT — split foundation-level technical architecture (PRODUCE) from implementation outputs (SKIP).**
 
 Conduct the architecture interview from the existing step content above (ARCH-1 through ARCH-5) to capture the operator's understanding of how their system works.
 

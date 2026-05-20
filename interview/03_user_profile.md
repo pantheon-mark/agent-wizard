@@ -148,7 +148,7 @@ Write sub-step marker: Append `step_03_UP-5: complete | <timestamp>` to `~/claud
 
 ## UP-6 — Regulatory-applicability probe
 
-Per `wizard/shape_detection.md` § 8.1 + `governance/generated_system_data_defaults.md` § 6.1 two-step probe pattern. The probe captures whether the operator's project has regulatory exposure (GDPR / HIPAA / PCI-DSS / SOX / COPPA-or-GDPR-K / sector-specific) and which framework specifically applies. Used by pre-step-05 re-check to evaluate the 4 stop conditions per D1 § 6.3.
+Per `wizard/shape_detection.md` § 8.1 (canonical two-step probe pattern) two-step probe pattern. The probe captures whether the operator's project has regulatory exposure (GDPR / HIPAA / PCI-DSS / SOX / COPPA-or-GDPR-K / sector-specific) and which framework specifically applies. Used by pre-step-05 re-check to evaluate the 4 stop conditions per D1 § 6.3.
 
 ### UP-6.1 — Data-type question (lead-in + propositional list)
 

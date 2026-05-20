@@ -1,12 +1,10 @@
 # Shape Detection — canonical implementation spec
 
-**Source:** S2.1 slice spec (`product_evidence/_slices/S2.1_shape_detection_handoff_scaffolding_2026-05-19.md` § A) — extracted verbatim at S2.1 implementation per slice § 1 + § A.
-
 **Mechanism ID:** `mech-shape-detection-v0`
-**Mechanism class:** AR-004 family A — Skill, pure markdown (advisory or guided)
-**Status:** v0 active (S2.1 OPEN 2026-05-19)
+**Mechanism class:** Skill, pure markdown (advisory or guided).
+**Status:** v0 active.
 **Authority:** This file is canonical for the wizard's shape-detection logic. Interview files (`wizard/interview/*.md`) reference this file as the spec for the probes they fire and the emit they produce.
-**Cross-references:** PRD § 4.2 + § 4.3 + § 5.2 F-1 + § 5.13 F-12 / `governance/generated_system_data_defaults.md` § 2.2 + § 6.1 + § 6.3 / `wizard/handoff_contracts/shape_detection_v0.md` / `wizard/CLAUDE.md` § 9 (Forward-offered information capture)
+**Cross-references:** `wizard/handoff_contracts/shape_detection_v0.md` / `wizard/CLAUDE.md` § 9 (Forward-offered information capture).
 
 ---
 
@@ -14,9 +12,9 @@
 
 The wizard's shape-detection logic emits a **provisional shape hypothesis with confidence** at step 01 (target) or step 02 (latest acceptable) of the operator interview. It re-checks the hypothesis before step 05 (vision generation) and before step 08 (architecture generation). It evaluates 4 stop conditions (regulation × shape mismatch) at pre-step-05 and halts the wizard with a foundation-state-preserved message if a stop condition fires. It produces a handoff contract artifact that downstream rebuild slices consume.
 
-Shape categories per PRD § 4 Sub-option E: `markdown-agents` (v1 supported) / `python-service-operator-facing` (deferred) / `claude-skills` (deferred) / `node-ui` (deferred) / `multi-user-datastore` (deferred) / `hosted-cloud` (deferred) / `mixed` (deferred) / `unknown` (classifier output for insufficient signal).
+Shape categories: `markdown-agents` (v1 supported) / `python-service-operator-facing` (deferred) / `claude-skills` (deferred) / `node-ui` (deferred) / `multi-user-datastore` (deferred) / `hosted-cloud` (deferred) / `mixed` (deferred) / `unknown` (classifier output for insufficient signal).
 
-The logic is **behavior-based** per PRD § 4.2 — operators are NOT asked "do you want Python service or markdown agents?" That recreates the technical-knob-mismatch failure (Stage 1 anchor #1; J2 anchored). Probes use plain-English business-side vocabulary; wizard-internal signal classifications are routing hints only, never surfaced to the operator.
+The logic is **behavior-based** — operators are NOT asked "do you want Python service or markdown agents?" That would recreate the technical-knob-mismatch failure. Probes use plain-English business-side vocabulary; wizard-internal signal classifications are routing hints only, never surfaced to the operator.
 
 ## 2. Probe inventory + signal-to-shape mapping
 
@@ -35,7 +33,7 @@ Operator answers are stored as `yes | no | unsure`. `unsure` is treated as neutr
 
 ### 2.2 Step 02 — conditional fallback probes (fire only if step 01 yields MEDIUM or LOW confidence)
 
-Up to 4 additional probes from PRD § 4.2 candidate set. Fire at end of step 02 (after FIN-1 + FIN-2 complete; before step-02 success condition).
+Up to 4 additional probes from the relevant product spec section candidate set. Fire at end of step 02 (after FIN-1 + FIN-2 complete; before step-02 success condition).
 
 | Probe | Operator-facing text | Signal classification |
 |---|---|---|
@@ -43,6 +41,8 @@ Up to 4 additional probes from PRD § 4.2 candidate set. Fire at end of step 02 
 | **Probe-6 (regular-pattern)** | "Does it need to do something automatically, on a regular pattern — like every day, every Monday morning, every hour?" | yes → service signal (scheduled); no → on-demand-friendly |
 | **Probe-7 (operator-confirm)** | "Should the system ask you before doing anything important — like making a booking, sending money, or contacting someone?" | yes → markdown-agents-friendly (human-gate aligns); no → autonomous-action implies stronger guardrails |
 | **Probe-8 (document-output)** | "Does it produce a document, packet, or report that you'll review or share?" | yes → markdown-agents OR Claude-skills; no → service-output-friendly |
+
+Fallback probes are drawn from a wizard-internal candidate set; not all fire on every operator session. The wizard chooses which fallback probes to fire based on which signals from step 01 are weakest.
 
 ### 2.3 Signal-to-shape decision table
 
@@ -69,7 +69,7 @@ Computed after each probe-set fires.
 | **MEDIUM** | Top shape has 2 strong-positives AND 0-1 strong-negatives AND HIGH branch (b) does not apply (no subsumption). OR HIGH-like signal density but with 1 conflicting strong-negative. |
 | **LOW** | Top shape has 1 strong-positive AND signals scattered. OR ≥2 shapes tied with strong-positives. OR insufficient signal density (`mixed` / `unknown` emit). |
 
-**Rubric note (per S2.1 advisor R1 C-005 disposition).** Branch (b) of HIGH captures the "2 strong-positives + clean discrimination via strong-negatives ruling out alternatives" case — e.g., s02 fixture where `python-service-operator-facing` has 2 strong-positives (Probes 1+4) AND the same answers produce strong-negatives for `markdown-agents`/`claude-skills` (Probes 1 yes / 3 no / 4 yes). Without (b), s02 would emit MEDIUM and fire step-02 fallback unnecessarily; with (b), HIGH at step 01 is honest.
+**Rubric note.** Branch (b) of HIGH captures the "2 strong-positives + clean discrimination via strong-negatives ruling out alternatives" case — e.g., a fixture where `python-service-operator-facing` has 2 strong-positives (Probes 1+4) AND the same answers produce strong-negatives for `markdown-agents`/`claude-skills` (Probes 1 yes / 3 no / 4 yes). Without (b), that fixture would emit MEDIUM and fire step-02 fallback unnecessarily; with (b), HIGH at step 01 is honest.
 
 **Promotion logic:**
 
@@ -80,14 +80,14 @@ Computed after each probe-set fires.
 
 ## 4. Provisional hypothesis emission contract
 
-At classifier emit, write the following structure to `~/claude-wizard-draft/wizard_session_draft.md` under a new `## Shape detection` section (after the `## Captured answers` section). Per advisor R2 C-008 + C-009 dispositions: every finalized emit MUST include `status: emitted` (to disambiguate from deferred-emit placeholder), `schema_versions` block, AND `handoff_phase: provisional_shape_emit` field. These are the consumer-visible markers required by `wizard/handoff_contracts/shape_detection_v0.md`.
+At classifier emit, write the following structure to `~/claude-wizard-draft/wizard_session_draft.md` under a new `## Shape detection` section (after the `## Captured answers` section). Every finalized emit MUST include `status: emitted` (to disambiguate from deferred-emit placeholder), `schema_versions` block, AND `handoff_phase: provisional_shape_emit` field. These are the consumer-visible markers required by `wizard/handoff_contracts/shape_detection_v0.md`.
 
 ```yaml
 ## Shape detection
 
 schema_versions:
   schema_major: 0
-  schema_minor: 2                 # bumped 0 → 1 at S2.3 2026-05-19 (additive: optional `shape_revision` block per handoff contract § 9) + bumped 1 → 2 at S2.4 2026-05-19 (additive: optional `stop_conditions.resolved_during_loop` field per S2.4 R1 C-003)
+  schema_minor: 2 # bumped 0 → 1 (additive: optional `shape_revision` block per handoff contract § 9) and 1 → 2 (additive: optional `stop_conditions.resolved_during_loop` field)
   shape_taxonomy_version: 0
   stop_condition_set_version: 0
   control_matrix_schema_version: 0
@@ -95,42 +95,42 @@ schema_versions:
 handoff_phase: provisional_shape_emit
 
 shape_hypothesis:
-  status: emitted   # 'emitted' for finalized; 'pending_step_02_fallback' for deferred at step 01
+  status: emitted # 'emitted' for finalized; 'pending_step_02_fallback' for deferred at step 01
   shape: markdown-agents | python-service-operator-facing | claude-skills | node-ui | multi-user-datastore | hosted-cloud | mixed | unknown
   confidence: high | medium | low
   detected_at_step: 01 | 02
-  v1_supported: true | false   # markdown-agents only = true at v1 ship region per PRD § 4.1
+  v1_supported: true | false # markdown-agents only = true at v1
   rechecks_due: [05, 08]
-  forced_recheck_at_step_05: true | false   # true when emit was LOW
+  forced_recheck_at_step_05: true | false # true when emit was LOW
   operator_signals:
-    probe_1_continuous_runtime: yes | no | unsure
-    probe_2_multi_user: yes | no | unsure
-    probe_3_thinking_partner: yes | no | unsure
-    probe_4_external_software: yes | no | unsure
-    probe_5_state_memory: yes | no | unsure | not_asked
-    probe_6_regular_pattern: yes | no | unsure | not_asked
-    probe_7_operator_confirm: yes | no | unsure | not_asked
-    probe_8_document_output: yes | no | unsure | not_asked
+  probe_1_continuous_runtime: yes | no | unsure
+  probe_2_multi_user: yes | no | unsure
+  probe_3_thinking_partner: yes | no | unsure
+  probe_4_external_software: yes | no | unsure
+  probe_5_state_memory: yes | no | unsure | not_asked
+  probe_6_regular_pattern: yes | no | unsure | not_asked
+  probe_7_operator_confirm: yes | no | unsure | not_asked
+  probe_8_document_output: yes | no | unsure | not_asked
   forward_offered_signals_at_step_01:
-    - "<verbatim phrase from operator's P1-2 core-purpose answer per wizard/CLAUDE.md § 9>"
-  mixed_component_basis: []   # ONLY populated when shape == mixed; per advisor R2 C-010 disposition; lists component shapes detected in the operator's input
+  - "<verbatim phrase from operator's P1-2 core-purpose answer per wizard/CLAUDE.md § 9>"
+  mixed_component_basis: [] # ONLY populated when shape == mixed; lists component shapes detected in the operator's input
   fallback_mode_offered: complete | foundation-only | scope-out | not_offered
   emit_timestamp: <ISO 8601>
 ```
 
-**`status` field semantics (per advisor R2 C-008 disposition):**
+**`status` field semantics:**
 
-- `status: emitted` — classifier has produced a finalized hypothesis at this step; downstream triggers (P1-9, P02-FB-6, pre-step-05 re-check) read this as the entry condition
-- `status: pending_step_02_fallback` — classifier deferred emit at step 01 because confidence was MEDIUM or LOW; step 02 fallback will finalize
+- `status: emitted` — classifier has produced a finalized hypothesis at this step; downstream triggers (P1-9, P02-FB-6, pre-step-05 re-check) read this as the entry condition.
+- `status: pending_step_02_fallback` — classifier deferred emit at step 01 because confidence was MEDIUM or LOW; step 02 fallback will finalize.
 
-**`mixed_component_basis` field semantics (per advisor R2 C-010 disposition):**
+**`mixed_component_basis` field semantics:**
 
-- ONLY populated when `shape == mixed`
-- Lists the component shapes detected in the operator's inputs (e.g., `["markdown-agents", "python-service-operator-facing"]` for a mixed system with markdown thinking-partner component AND python automation component)
-- Downstream consumers reading `control_matrix_active` for a mixed shape can audit the basis: the weakest-path-across-components computation in § 8.3 takes its input from this list
-- For v0, `mixed_component_basis` is the LLM agent's classification of which constituent shapes are present; precision is limited but the field provides an auditable record. Component-level capability tracking (per-component matrix blocks) is reserved for v1+.
+- ONLY populated when `shape == mixed`.
+- Lists the component shapes detected in the operator's inputs (e.g., `["markdown-agents", "python-service-operator-facing"]` for a mixed system with a markdown thinking-partner component AND a python automation component).
+- Downstream consumers reading `control_matrix_active` for a mixed shape can audit the basis: the weakest-path-across-components computation in § 8.3 takes its input from this list.
+- For v0, `mixed_component_basis` is the wizard's classification of which constituent shapes are present; precision is limited but the field provides an auditable record. Component-level capability tracking (per-component matrix blocks) is reserved for v1+.
 
-**Lifecycle-phase update rule (per advisor R2 C-009 disposition):**
+**Lifecycle-phase update rule:**
 
 When downstream interview steps advance the handoff to a later lifecycle phase, they MUST update the `handoff_phase` field. Specifically:
 
@@ -146,16 +146,16 @@ Terminal states retain their pre-terminal `handoff_phase` value (scope-out at st
 shape_hypothesis:
   # ... emit fields ...
   recheck_log:
-    - step: 05
-      timestamp: <ISO 8601>
-      outcome: confirmed | revised | halted
-      revised_shape: <if outcome == revised>
-      revised_confidence: <if outcome == revised>
-      stop_condition_fired: <if outcome == halted>
-    - step: 08
-      timestamp: <ISO 8601>
-      outcome: confirmed | revised | halted
-      # ... etc
+  - step: 05
+  timestamp: <ISO 8601>
+  outcome: confirmed | revised | halted
+  revised_shape: <if outcome == revised>
+  revised_confidence: <if outcome == revised>
+  stop_condition_fired: <if outcome == halted>
+  - step: 08
+  timestamp: <ISO 8601>
+  outcome: confirmed | revised | halted
+  # ... etc
 ```
 
 ## 5. Re-check protocol
@@ -184,34 +184,34 @@ Before step 05's first user-facing question, classifier re-reads:
 | `confirmed` | Append recheck entry `outcome: confirmed`; proceed to step 05 |
 | `revised` (still v1-supported) | Update `shape_hypothesis.shape` + `confidence`; append recheck entry `outcome: revised` + `revised_shape:` + `revised_confidence:`; proceed to step 05 |
 | `revised` (no longer v1-supported) | § 6 unsupported-shape transition fires (operator chooses scope-out vs foundation-only) |
-| `halted` (stop condition fired) | § 7 halt fires; foundation state preserved; operator offered three paths per S2.3 — (a) save-and-exit / (b) change shape and re-evaluate / (c) re-evaluate regulatory exposure |
+| `halted` (stop condition fired) | § 7 halt fires; foundation state preserved; operator offered three paths — (a) save-and-exit / (b) change shape and re-evaluate / (c) re-evaluate regulatory exposure |
 
 ### 5.2 Pre-step-08 re-check
 
 Reachable from `wizard/interview/08_architecture.md` opening. Implementation lives at `wizard/interview/_pre_step_08_recheck.md`.
 
-Same structural pattern as pre-step-05 but reads accumulated steps 05 (vision) + 06 (approach) + 07 (advisors). Especially important for emergent-architecture projects (PRD § 5.13; J6 anchored).
+Same structural pattern as pre-step-05 but reads accumulated steps 05 (vision) + 06 (approach) + 07 (advisors). Especially important for emergent-architecture projects (the relevant product spec section; J6 anchored).
 
 Stop conditions are NOT re-evaluated at pre-step-08 (already evaluated at pre-step-05; regulatory exposure does not change between steps 03 and 08 under normal conditions). However, if pre-step-05 was `confirmed` but pre-step-08 reads emerging-architecture content that newly implicates a stop condition (rare; flagged for v1 monitoring), the re-check halts and the wizard surfaces the new evidence to the operator.
 
 ## 6. Unsupported-shape transition (foundation state preserved)
 
-**Triggered when (per advisor R1 C-003 disposition; surface at the EARLIEST detection point to comply with PRD § 4.3):**
+**Triggered when** (surface at the EARLIEST detection point):
 
-- Initial detection at step 01 (P1-8) emits a non-markdown shape with HIGH confidence → transition fires NOW at end of step 01; operator chooses scope-out OR foundation-only BEFORE step 02
-- OR initial detection at step 02 fallback (P02-FB-5) emits a non-markdown shape with HIGH or MEDIUM confidence → transition fires NOW at end of step 02; operator chooses scope-out OR foundation-only BEFORE step 03
-- OR pre-step-05 re-check revises shape to non-markdown → transition fires at pre-step-05 (revision case; previously confirmed markdown but accumulated context contradicts)
-- OR pre-step-08 re-check revises shape to non-markdown → transition fires at pre-step-08 (late revision case)
+- Initial detection at step 01 (P1-8) emits a non-markdown shape with HIGH confidence → transition fires NOW at end of step 01; operator chooses scope-out OR foundation-only BEFORE step 02.
+- OR initial detection at step 02 fallback (P02-FB-5) emits a non-markdown shape with HIGH or MEDIUM confidence → transition fires NOW at end of step 02; operator chooses scope-out OR foundation-only BEFORE step 03.
+- OR pre-step-05 re-check revises shape to non-markdown → transition fires at pre-step-05 (revision case; previously confirmed markdown but accumulated context contradicts).
+- OR pre-step-08 re-check revises shape to non-markdown → transition fires at pre-step-08 (late revision case).
 
-**Step-01-or-02 transition is the canonical PRD § 4.3 surface.** Pre-step-05 and pre-step-08 transitions are revision-case backstops — they fire only when shape revises AFTER step 02 emit.
+**Step-01-or-02 transition is the canonical operator-facing surface.** Pre-step-05 and pre-step-08 transitions are revision-case backstops — they fire only when shape revises AFTER step 02 emit.
 
-**Operator-facing text (verbatim per PRD § 4.3):**
+**Operator-facing text (verbatim):**
 
 > Your project looks like [shape X — Python service / Node+UI / etc.]. v1 of the wizard generates complete systems for markdown-agents-on-Claude-Code only.
 >
 > Two options:
 >
-> **(a) Stop here — wait for v2 / future versions.** Your project file is saved. When the wizard adds [shape X] support, we can pick up. For now, here's the roadmap for what triggers that addition: [pointer to PRD § 4.5 deferred shapes + un-defer triggers].
+> **(a) Stop here — wait for a future wizard release.** Your project file is saved. When the wizard adds [shape X] support, we can pick up.
 >
 > **(b) Foundation-only mode.** I can produce a foundation-doc set for your project — the planning documents abstracted from implementation shape. You'd take those docs to Claude Code directly to build the implementation, OR wait for v2 shape support. We won't generate the system implementation itself.
 >
@@ -224,13 +224,13 @@ Stop conditions are NOT re-evaluated at pre-step-08 (already evaluated at pre-st
 **Per-path behavior:**
 
 - **(a) scope-out:** wizard appends `scope_out: <timestamp>` marker to staging file under the shape_hypothesis section; says: "Saved. Re-run the wizard later when you're ready or when [shape X] support is added." Exits cleanly.
-- **(b) foundation-only:** wizard proceeds with steps 05-15 in foundation-doc-only mode (NO system implementation generated). **Implementation landed at S2.2** — see `wizard/interview/_foundation_only_mode_gate.md` for the capability-field derivation rule + per-step entry-guard pattern + close-ceremony adaptation pointer. Each of `wizard/interview/05_vision.md` through `15_close.md` has a `## Foundation-only adapted path` section at file end implementing the steps-05-15 foundation-only-mode behavior per `_foundation_only_mode_gate.md` § 5 four-file foundation doc set + § 6 DOCUMENT-path gap integration + § 7 close-ceremony adaptation pointer.
+- **(b) foundation-only:** wizard proceeds with steps 05-15 in foundation-doc-only mode (NO system implementation generated). See `wizard/interview/_foundation_only_mode_gate.md` for the capability-field derivation rule + per-step entry-guard pattern + close-ceremony adaptation pointer. Each of `wizard/interview/05_vision.md` through `15_close.md` has a `## Foundation-only adapted path` section at file end implementing the steps-05-15 foundation-only-mode behavior per `_foundation_only_mode_gate.md` § 5 four-file foundation doc set + § 6 DOCUMENT-path gap integration + § 7 close-ceremony adaptation pointer.
 
-Per PRD § 4.3 / advisor R2 F-2.3: foundation-only mode is NOT counted as "system implementation served"; disclosure is explicit at shape-diagnosis moment. NOT silent fallback.
+Foundation-only mode is NOT counted as "system implementation served"; the disclosure is explicit at shape-diagnosis moment. NOT silent fallback.
 
 ## 7. Per-shape control matrix wiring
 
-The classifier reads `governance/generated_system_data_defaults.md` § 2.2 control matrix at startup. On hypothesis emit, populate `control_matrix_active` for the detected shape:
+The classifier reads the per-shape control matrix at startup (the matrix is defined as a wizard-internal data structure; see § 7.x below). On hypothesis emit, populate `control_matrix_active` for the detected shape:
 
 **For `markdown-agents` (v1 supported):**
 
@@ -256,16 +256,16 @@ control_matrix_active:
   shape: python-service-operator-facing
   encryption_in_transit: deferred-until-shape
   encryption_at_rest: deferred-until-shape
-  # ... etc per D1 § 2.2 column
+  # ... etc per the control matrix column for this shape
 ```
 
-**Honest characterization rule wired (D1 § 2.3):** when shape detection emits `markdown-agents`, the wizard's eventual README + foundation-doc output must include a "Controls applied per chosen shape" section listing the matrix status values for operator transparency. Implementation of this output is downstream of S2.1; the contract surface here defines what downstream slices consume.
+**Honest characterization rule wired:** when shape detection emits `markdown-agents`, the wizard's eventual README + foundation-doc output must include a "Controls applied per chosen shape" section listing the matrix status values for operator transparency. Implementation of this output is downstream of shape detection; the contract surface here defines what downstream consumers receive.
 
 ## 8. 4 stop conditions implementation
 
 ### 8.1 Regulatory-applicability probe placement
 
-Per S2.1 decision A: **step 03 (user profile)** as sub-step UP-6, after UP-5 (involvement appetite) and before the synthesis step. Two-step probe pattern per D1 § 6.1, abbreviated for step-03 conversational fit.
+**Step 03 (user profile)** as sub-step UP-6, after UP-5 (involvement appetite) and before the synthesis step. The probe uses a two-step pattern (data-type question, then operator-role question), abbreviated for step-03 conversational fit.
 
 The probe is asked with this lead-in:
 
@@ -285,11 +285,11 @@ To minimize friction with non-technical operators, the wizard asks the framework
 > 6. **Other regulated data** — government records, education records, sector-specific (energy, telecoms, etc.)
 > 7. **None of the above** — no regulated data
 
-For any "yes" answer, wizard asks the follow-up role question (D1 § 6.1 step (b)) to determine actual applicability. Example for #1: "Are you (or the system) acting as a healthcare provider, insurance plan, clearinghouse, OR a business associate processing health data on their behalf?"
+For any "yes" answer, wizard asks the follow-up role question (the operator-role step (b)) to determine actual applicability. Example for #1: "Are you (or the system) acting as a healthcare provider, insurance plan, clearinghouse, OR a business associate processing health data on their behalf?"
 
 If operator says "regulated" (any yes) but cannot identify which specific framework, store `no_compliance_claim_framework_identification: unknown` — this fires stop condition #4 at pre-step-05 re-check.
 
-If operator says "none of the above," store `no_compliance_claim: yes` and proceed; wizard's eventual foundation-doc set will EXPLICITLY state "this system makes NO compliance claim under GDPR / HIPAA / PCI / SOX / etc." per D1 § 6.2.
+If operator says "none of the above," store `no_compliance_claim: yes` and proceed; the wizard's eventual foundation-doc set will EXPLICITLY state "this system makes NO compliance claim under GDPR / HIPAA / PCI / SOX / etc."
 
 ### 8.2 regulatory_exposure schema
 
@@ -305,18 +305,18 @@ regulatory_exposure:
   sox_applicable: yes | no | unknown
   coppa_or_gdpr_k_applicable: yes | no | unknown
   other_sector_specific:
-    - { framework: <name>, applicable: yes | no | unknown }
+  - { framework: <name>, applicable: yes | no | unknown }
   no_compliance_claim: yes | no | unknown
   no_compliance_claim_framework_identification: yes | no | unknown
   probed_at_step: 03_up6
   probed_timestamp: <ISO 8601>
 ```
 
-### 8.3 Stop conditions lookup (CAPABILITY-BASED per advisor R1 C-002 disposition)
+### 8.3 Stop conditions lookup (CAPABILITY-BASED)
 
 Evaluated at pre-step-05 re-check (per § 5.1). Conditions are evaluated against shape **capabilities** (the per-shape control matrix `control_matrix_active` block values) rather than shape labels. This handles `mixed` shapes correctly (mixed includes markdown-agents component providing certain controls at advisory-only) and is robust to future shape additions.
 
-**Outcome split per advisor R1 C-003 disposition.** When a stop condition matches:
+**Outcome split.** When a stop condition matches:
 
 - If `shape_hypothesis.fallback_mode_offered == not_offered` (operator is on full-system-generation path; shape == markdown-agents): **HALT** per § 8.4
 - If `shape_hypothesis.fallback_mode_offered == foundation-only` (operator chose foundation-only-mode at step 01/02 unsupported-shape transition): **DOCUMENT** per § 8.5 — record the matched condition; downstream foundation-only slice inserts honest text into generated foundation docs. Condition 4 is an EXCEPTION (see footnote).
@@ -330,9 +330,9 @@ Evaluated at pre-step-05 re-check (per § 5.1). Conditions are evaluated against
 
 **Footnote on condition 4 + foundation-only path:** condition 4 fires HALT even in foundation-only-mode because foundation docs cannot be written honestly without framework identification — "regulated data but unknown which framework" is an operator-side resolution gap, not a documentation gap. Operator must complete compliance review and resume.
 
-**Footnote on condition 4 predicate corrected at S2.4 advisor R1 C-001 (2026-05-19):** the predicate above uses `no_compliance_claim == no AND framework_identification == unknown`. The prior predicate (any framework-applicable yes OR `other_sector_specific` non-empty AND framework_identification unknown) was internally inconsistent — if a specific framework were `applicable: yes` OR `other_sector_specific[].applicable: yes`, framework identification would NOT be `unknown` per UP-6 source semantics at `03_user_profile.md` line 243 ("operator says I know it's regulated but I don't know which framework"). The corrected predicate matches the canonical case UP-6 line 243 specifies as the condition-4 trigger ("operator marked regulated bucket at UP-6.1 AND can't name specific framework"). See `external_review/s2.4_condition_4_c_path_fixtures_advisor_2026-05-19.md` R1 C-001.
+**Footnote on condition 4 predicate:** the predicate above uses `no_compliance_claim == no AND framework_identification == unknown`. The condition fires when the operator marks the regulated bucket at UP-6.1 but can't name a specific framework. If a specific framework were `applicable: yes` (or `other_sector_specific[].applicable: yes`), framework identification would NOT be `unknown` per UP-6 source semantics at `03_user_profile.md`.
 
-**Mixed-shape handling (per advisor R1 C-002 disposition; closes IDQ-057 candidate):** when `shape_hypothesis.shape == mixed`, the `control_matrix_active` block reflects the **union of components' capabilities** — for each control row, the LEAST-restrictive status across constituent components wins. Concretely: if the mixed system has a markdown-agents component (audit trail `advisory`) AND a python-service component (audit trail `enforced`), the matrix records `audit_trail_crud: advisory` because the markdown component's path can carry regulated data with only advisory audit trail. Condition 1 fires on the weakest path. This is the conservative correct behavior — regulated data MUST be handled by the enforced-audit-trail path; if any component fails, the system fails.
+**Mixed-shape handling:** when `shape_hypothesis.shape == mixed`, the `control_matrix_active` block reflects the **union of components' capabilities** — for each control row, the LEAST-restrictive status across constituent components wins. Concretely: if the mixed system has a markdown-agents component (audit trail `advisory`) AND a python-service component (audit trail `enforced`), the matrix records `audit_trail_crud: advisory` because the markdown component's path can carry regulated data with only advisory audit trail. Condition 1 fires on the weakest path. This is the conservative correct behavior — regulated data MUST be handled by the enforced-audit-trail path; if any component fails, the system fails.
 
 For future revisions: when downstream slices implement component-level capability tracking, the matrix evolves to per-component blocks (`control_matrix_active.components[<id>].audit_trail_crud: <status>`). v0 records the weakest-path conservatively in the single block. Component-level surface is reserved for v1+ per `wizard/handoff_contracts/shape_detection_v0.md` § 4.
 
@@ -341,51 +341,51 @@ For future revisions: when downstream slices implement component-level capabilit
 When a stop condition fires AND `shape_hypothesis.fallback_mode_offered == not_offered` (operator is on full-system-generation path):
 
 1. Wizard appends to staging file:
-   ```yaml
-   shape_hypothesis:
-     recheck_log:
-       - step: 05
-         outcome: halted
-         stop_condition_fired: <# from § 8.3>
-         halt_timestamp: <ISO 8601>
-         halt_message: <verbatim message; with `<actual status>` substituted from control_matrix_active>
-   ```
+ ```yaml
+ shape_hypothesis:
+ recheck_log:
+ - step: 05
+ outcome: halted
+ stop_condition_fired: <# from § 8.3>
+ halt_timestamp: <ISO 8601>
+ halt_message: <verbatim message; with `<actual status>` substituted from control_matrix_active>
+ ```
 2. Wizard says the halt message verbatim to operator (with capability status substituted).
-3. Wizard offers three paths (S2.3 added (c)):
-   > Three choices:
-   > **(a) Save progress and exit** — your project file is saved; you can complete a compliance review and resume.
-   > **(b) Change the shape and re-evaluate** — I'll re-run the shape probes with this regulatory exposure in mind.
-   > **(c) Re-evaluate regulatory exposure** — I'll re-ask the step 03 regulatory questions with the stop condition surfaced; if your project actually doesn't fall under [framework] scope, the stop condition won't fire on re-evaluation.
-4. If operator picks (b): invoke `wizard/interview/_stop_condition_reevaluate_loop.md` § 2 loop entry; loop sub-module runs probe re-ask + classifier re-emit + stop-condition re-evaluation per S2.3 implementation. **Loop semantics canonical at `_stop_condition_reevaluate_loop.md`** — see that file for state machine + iteration cap (default 2 per S2.3 Decision A) + terminal-state branching. Producer-visible terminal outcomes are the CLOSED 4-value enum: `continued` / `foundation_only` / `scope_out` / `next_iteration` (per R1 C-001 disposition; `forced_terminal` is internal-only branch state at sub-module § 6 — module handles final-choice prompt internally and maps to foundation_only or scope_out with `terminal_reason: iteration_cap_reached`). § 8.4 stays a summary; the canonical implementation lives in the sub-module.
-5. If operator picks (c) "Re-evaluate regulatory exposure" (added at S2.3 per Decision C): invoke `wizard/interview/_stop_condition_reevaluate_loop.md` § 4 regulatory-exposure entry; loop sub-module re-asks step 03 UP-6 probes + mutates `regulatory_exposure` if operator clarifies + re-evaluates stop conditions against unchanged shape.
+3. Wizard offers three paths:
+ > Three choices:
+ > **(a) Save progress and exit** — your project file is saved; you can complete a compliance review and resume.
+ > **(b) Change the shape and re-evaluate** — I'll re-run the shape probes with this regulatory exposure in mind.
+ > **(c) Re-evaluate regulatory exposure** — I'll re-ask the step 03 regulatory questions with the stop condition surfaced; if your project actually doesn't fall under [framework] scope, the stop condition won't fire on re-evaluation.
+4. If operator picks (b): invoke `wizard/interview/_stop_condition_reevaluate_loop.md` § 2 loop entry; loop sub-module runs probe re-ask + classifier re-emit + stop-condition re-evaluation. **Loop semantics canonical at `_stop_condition_reevaluate_loop.md`** — see that file for state machine + iteration cap (default 2) + terminal-state branching. Producer-visible terminal outcomes are the CLOSED 4-value enum: `continued` / `foundation_only` / `scope_out` / `next_iteration` (internal-only branch states like `forced_terminal` are never recorded in the producer-visible outcome; the module maps them to `foundation_only` or `scope_out` with `terminal_reason: iteration_cap_reached`). § 8.4 stays a summary; the canonical implementation lives in the sub-module.
+5. If operator picks (c) "Re-evaluate regulatory exposure": invoke `wizard/interview/_stop_condition_reevaluate_loop.md` § 4 regulatory-exposure entry; loop sub-module re-asks step 03 UP-6 probes + mutates `regulatory_exposure` if operator clarifies + re-evaluates stop conditions against unchanged shape.
 
 Foundation state IS preserved through halt (staging file unchanged except for halt-log entries).
 
 ### 8.5 Documentation behavior (DOCUMENT path; foundation-only mode)
 
-When a stop condition fires AND `shape_hypothesis.fallback_mode_offered == foundation-only` (operator chose foundation-only-mode at step 01/02 unsupported-shape transition; per advisor R1 C-003 disposition):
+When a stop condition fires AND `shape_hypothesis.fallback_mode_offered == foundation-only` (operator chose foundation-only-mode at step 01/02 unsupported-shape transition):
 
 For conditions 1-3 (capability mismatches that operator already accepted by choosing foundation-only):
 
 1. Wizard appends to staging file:
-   ```yaml
-   stop_conditions:
-     evaluated_at: 05_pre_vision
-     fired: [<list of fired condition numbers>]
-     halted: false
-     documented_in_foundation: [<same list>]
-   shape_hypothesis:
-     recheck_log:
-       - step: 05
-         outcome: documented_in_foundation
-         stop_conditions_recorded: [<list>]
-   ```
+ ```yaml
+ stop_conditions:
+ evaluated_at: 05_pre_vision
+ fired: [<list of fired condition numbers>]
+ halted: false
+ documented_in_foundation: [<same list>]
+ shape_hypothesis:
+ recheck_log:
+ - step: 05
+ outcome: documented_in_foundation
+ stop_conditions_recorded: [<list>]
+ ```
 2. No halt fires. Wizard proceeds to step 05.
-3. **Foundation-only-mode implementation landed at S2.2 (per `wizard/interview/_foundation_only_mode_gate.md` § 6).** Documented stop-condition gaps land in `technical_architecture.md` § "Regulatory & compliance gaps (foundation-only mode)" at step 15 close, with one section per gap (framework name + capability gap + recommended resolution path; read from staging `stop_conditions.documented_in_foundation` + `control_matrix_active`). If `stop_conditions.documented_in_foundation` is empty, the section is omitted entirely (no empty header).
+3. **Foundation-only-mode implementation** (per `wizard/interview/_foundation_only_mode_gate.md` § 6). Documented stop-condition gaps land in `technical_architecture.md` § "Regulatory & compliance gaps (foundation-only mode)" at step 15 close, with one section per gap (framework name + capability gap + recommended resolution path; read from staging `stop_conditions.documented_in_foundation` + `control_matrix_active`). If `stop_conditions.documented_in_foundation` is empty, the section is omitted entirely (no empty header).
 
 For condition 4 (regulated + no framework identified): **HALT fires even in foundation-only mode** — foundation docs cannot be written honestly without framework identification. Operator must complete operator-side compliance review and resume. Halt behavior per § 8.4 (a/b paths).
 
-This split (HALT for full-system, DOCUMENT for foundation-only with condition 4 exception) is the structural resolution of "operator chose foundation-only knowingly; don't re-halt them; do faithfully record" without compromising honest characterization (D1 § 2.3).
+This split (HALT for full-system, DOCUMENT for foundation-only with condition 4 exception) is the structural resolution of "operator chose foundation-only knowingly; don't re-halt them; do faithfully record" without compromising honest characterization.
 
 ## 9. Forward-offered information capture integration
 
@@ -404,45 +404,37 @@ Per wizard CLAUDE.md § 9. At P1-2 (core purpose), operators frequently voluntee
 
 **Anti-pattern to avoid:** treating forward-offered signals as authoritative answers without explicit probe confirmation. Probes are the canonical signal source.
 
-## 10. Mechanism stack record (D2 § mechanism-stack-template)
-
-Per `governance/operational_change_safety.md` v0 § 3 mechanism stack template:
+## 10. Mechanism stack record
 
 | Field | Value |
 |---|---|
 | **mechanism_id** | `mech-shape-detection-v0` |
 | **mechanism_name** | Shape-detection classifier |
-| **mechanism_class** | AR-004 family A — Skill, pure markdown (advisory or guided) per S2.1 decision I |
+| **mechanism_class** | Skill, pure markdown (advisory or guided) |
 | **primary** | Step 01 P1-4 through P1-7 probes + (conditional) step 02 fallback probes + classifier emit logic in `wizard/shape_detection.md` |
 | **reinforcing** | Pre-step-05 re-check + pre-step-08 re-check; forward-offered signal capture at P1-2 (interpretive prior) |
 | **detection-recovery** | Pre-step-05 stop-condition evaluation → halt with foundation state preserved; unsupported-shape transition → scope-out OR foundation-only; pre-step-05/08 re-check revise path |
-| **rationale** | Behavior-based detection (not shape-name probing) prevents the technical-knob-mismatch failure (Stage 1 anchor #1). Pre-step-05 + pre-step-08 re-check catches signal drift from accumulated interview context. Stop conditions prevent silently generating a system the operator's regulatory exposure can't accept. Unsupported-shape transition preserves operator's foundation state so v2 support can resume without restart. Forward-offered signal capture acts as interpretive prior only — probes remain canonical. |
+| **rationale** | Behavior-based detection (not shape-name probing) prevents the technical-knob-mismatch failure. Pre-step-05 + pre-step-08 re-check catches signal drift from accumulated interview context. Stop conditions prevent silently generating a system the operator's regulatory exposure can't accept. Unsupported-shape transition preserves operator's foundation state so a future wizard release can resume without restart. Forward-offered signal capture acts as interpretive prior only — probes remain canonical. |
 | **hybrid_contract_status** | n/a (not skill-calls-script) |
 | **contract_fields_complete** | n/a |
-| **health_check_last_run** | 2026-05-19 (S2.1 fixture-replay first-use) |
-| **fallback_verified** | yes (synthetic-fixture replay; real-operator validation bound to next operator-facing slice OR E-α tester) |
+| **health_check_last_run** | 2026-05-19 (initial fixture-replay) |
+| **fallback_verified** | yes (synthetic-fixture replay; real-operator validation bound to a future operator-facing wizard exercise) |
 
 ## 11. Versioning
 
 This is v0. The mechanism evolves through:
 
-- **Probes refined** (calibration) — small revision per `governance/methodology.md` § 5.1; v0 → v0.1 amend
-- **Stop conditions added** (e.g., 5th condition per IDQ-056) — substantive revision; v0 → v1
-- **Schema field added to handoff contract** — substantive revision; coordinate with `wizard/handoff_contracts/shape_detection_v0.md` → v1
-- **Foundation-shaping change** (e.g., shape taxonomy revised; classifier rewritten as non-markdown mechanism) — foundation-shaping; new ADR + new mechanism_id
+- **Probes refined** (calibration) — small revision; v0 → v0.1 amend.
+- **Stop conditions added** (e.g., a 5th condition) — substantive revision; v0 → v1.
+- **Schema field added to handoff contract** — substantive revision; coordinate with `wizard/handoff_contracts/shape_detection_v0.md` → v1.
+- **Foundation-shaping change** (e.g., shape taxonomy revised; classifier rewritten as non-markdown mechanism) — foundation-shaping; new mechanism_id.
 
 ## 12. Cross-references
 
-- `wizard/handoff_contracts/shape_detection_v0.md` — handoff contract for downstream rebuild slices
-- `wizard/interview/01_phase1_capture.md` — P1-4 through P1-7 probe sub-steps
-- `wizard/interview/02_financial.md` — P02-end fallback hook
-- `wizard/interview/03_user_profile.md` — UP-6 regulatory-applicability probe
-- `wizard/interview/_pre_step_05_recheck.md` — pre-step-05 re-check module
-- `wizard/interview/_pre_step_08_recheck.md` — pre-step-08 re-check module
-- `governance/generated_system_data_defaults.md` § 2.2 / § 6.1 / § 6.3 — D1 control matrix + regulatory triage + 4 stop conditions
-- `governance/operational_change_safety.md` v0 § 3 / § 5 — D2 mechanism stack template + validation evidence storage
-- `governance/validation/mech-shape-detection-v0/2026-05-19_s2.1_initial_fixture_replay.md` — fixture-replay evidence (v0 first-use)
-- PRD v1 § 4.1 (Sub-option E) / § 4.2 (early shape detection) / § 4.3 (foundation-only mode) / § 4.5 (deferred shapes + un-defer) / § 5.2 (F-1) / § 5.13 (F-12 re-open path) — requirements
-- ADR-0018 (Stage 2 framework v0) — slice authority
-- `wizard/CLAUDE.md` § 9 (Forward-offered information capture) — integration source
-- S2.1 slice spec at `product_evidence/_slices/S2.1_shape_detection_handoff_scaffolding_2026-05-19.md` — design provenance
+- `wizard/handoff_contracts/shape_detection_v0.md` — handoff contract for downstream consumers.
+- `wizard/interview/01_phase1_capture.md` — P1-4 through P1-7 probe sub-steps.
+- `wizard/interview/02_financial.md` — P02-end fallback hook.
+- `wizard/interview/03_user_profile.md` — UP-6 regulatory-applicability probe.
+- `wizard/interview/_pre_step_05_recheck.md` — pre-step-05 re-check module.
+- `wizard/interview/_pre_step_08_recheck.md` — pre-step-08 re-check module.
+- `wizard/CLAUDE.md` § 9 (Forward-offered information capture) — integration source.

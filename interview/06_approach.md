@@ -174,7 +174,7 @@ Proceed to `07_advisors.md`.
 
 ## Foundation-only adapted path
 
-**Disposition (per S2.2 spec § A.3): PRODUCE.**
+**Disposition: PRODUCE.**
 
 In foundation-only mode, this step's behavior is identical to the normal path. Approach is a foundation-level artifact; shape-agnostic; the same draft / revision round / disk write applies.
 

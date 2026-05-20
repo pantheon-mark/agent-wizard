@@ -255,7 +255,7 @@ Proceed to `08_architecture.md`.
 
 ## Foundation-only adapted path
 
-**Disposition (per S2.2 spec § A.3): ADAPT — capture advisor list as foundation-doc section; skip implementation-emit.**
+**Disposition: ADAPT — capture advisor list as foundation-doc section; skip implementation-emit.**
 
 Conduct the advisor identification interview from the existing step content above (Claude proposes advisor list; operator confirms / adjusts; each advisor recorded with domain).
 

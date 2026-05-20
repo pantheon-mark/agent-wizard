@@ -306,7 +306,7 @@ Proceed to `14_document_review.md`.
 
 ## Foundation-only adapted path
 
-**Disposition (per S2.2 spec § A.3): ADAPT — capture operational requirements as foundation section; skip runtime config writes.**
+**Disposition: ADAPT — capture operational requirements as foundation section; skip runtime config writes.**
 
 Conduct the operations interview from the existing step content above (CONC-1, CONC-2, START-1, START-2, DRIFT-1, SCALE-1 through SCALE-4 — chunk confirmation preference + drift analysis cadence + scale tier + silent default thresholds for retry / gate-conflict-timeout / deferred-alert-limit).
 

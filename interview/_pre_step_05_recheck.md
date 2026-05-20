@@ -6,14 +6,14 @@ Re-evaluates the provisional `shape_hypothesis` produced at step 01 or step 02 a
 
 ## When this file runs
 
-Reached from `wizard/interview/05_vision.md` opening, BEFORE any step-05 user-facing question fires. This is the **hard stop point** per PRD § 5.2 F-1 — shape detection must be resolved here before vision generation begins.
+Reached from `wizard/interview/05_vision.md` opening, BEFORE any step-05 user-facing question fires. This is the **hard stop point** F-1 — shape detection must be resolved here before vision generation begins.
 
 ## Prerequisites
 
 - `~/claude-wizard-draft/wizard_session_draft.md` contains `shape_hypothesis` (emitted at end of step 01 or step 02) AND `regulatory_exposure` (populated at step 03 UP-6)
 - Steps 02 (financial) + 03 (user profile) + 04 (notifications) all marked `complete` in `~/claude-wizard-draft/wizard_progress.md`
 
-**If prerequisites are NOT met (per advisor R1 C-001 disposition):** this is a wizard-internal state error, NOT a recoverable condition. PRD § 5.2 F-1 mandates a hard stop before step 05 vision generation; silently defaulting to markdown-agents would violate that contract. Halt with internal-error message; foundation state preserved:
+**If prerequisites are NOT met:** this is a wizard-internal state error, NOT a recoverable condition. the relevant product spec section F-1 mandates a hard stop before step 05 vision generation; silently defaulting to markdown-agents would violate that contract. Halt with internal-error message; foundation state preserved:
 
 ```yaml
 internal_error:
@@ -58,7 +58,7 @@ Evaluate the 4 stop conditions from `wizard/shape_detection.md` § 8.3 against s
 
 **Condition 4 (regulated + no framework):** `regulatory_exposure.no_compliance_claim == no` AND `regulatory_exposure.no_compliance_claim_framework_identification == unknown`
 
-(Per S2.4 advisor R1 C-001 disposition 2026-05-19: the prior framework-applicable-yes-required predicate was internally inconsistent — if a specific framework were `applicable: yes`, framework identification would NOT be `unknown` per UP-6 source semantics at `03_user_profile.md` line 243. The corrected predicate uses `no_compliance_claim == no` to mean "operator marked at least one regulated bucket at UP-6.1" — combined with framework_identification `unknown` this matches the canonical case UP-6 line 243 specifies as the condition-4 trigger.)
+(Per advisor R1 C-001 disposition 2026-05-19: the prior framework-applicable-yes-required predicate was internally inconsistent — if a specific framework were `applicable: yes`, framework identification would NOT be `unknown` per UP-6 source semantics at `03_user_profile.md` line 243. The corrected predicate uses `no_compliance_claim == no` to mean "operator marked at least one regulated bucket at UP-6.1" — combined with framework_identification `unknown` this matches the canonical case UP-6 line 243 specifies as the condition-4 trigger.)
 
 **Outcome path branches on `shape_hypothesis.fallback_mode_offered`:**
 
@@ -71,11 +71,11 @@ Append to staging file:
 ```yaml
 shape_hypothesis:
   recheck_log:
-    - step: 05
-      timestamp: <current ISO 8601>
-      outcome: halted
-      stop_condition_fired: <condition number 1-4>
-      halt_message: <verbatim from § 8.3 table; substitute `<actual status>` from control_matrix_active>
+  - step: 05
+  timestamp: <current ISO 8601>
+  outcome: halted
+  stop_condition_fired: <condition number 1-4>
+  halt_message: <verbatim from § 8.3 table; substitute `<actual status>` from control_matrix_active>
 
 stop_conditions:
   evaluated_at: 05_pre_vision
@@ -130,15 +130,15 @@ stop_conditions:
   documented_in_foundation: [<list of 1-3 conditions>]
 shape_hypothesis:
   recheck_log:
-    - step: 05
-      timestamp: <current ISO 8601>
-      outcome: documented_in_foundation
-      stop_conditions_recorded: [<list>]
+  - step: 05
+  timestamp: <current ISO 8601>
+  outcome: documented_in_foundation
+  stop_conditions_recorded: [<list>]
 ```
 
-Downstream foundation-only-mode implementation slice (per decision F) will insert honest compliance-mismatch text into generated foundation docs. At S2.1, the recording is the deliverable; the foundation-doc-insertion is downstream.
+Downstream foundation-only-mode implementation slice (per decision F) will insert honest compliance-mismatch text into generated foundation docs. At, the recording is the deliverable; the foundation-doc-insertion is downstream.
 
-**Exception — condition 4 (regulated + no framework) DOES HALT in foundation-only mode:** foundation docs cannot be written honestly without framework identification. If condition 4 fires regardless of `fallback_mode_offered`, fall through to 2a HALT path (a/b/c three-choice path per S2.3) with the condition-4-specific halt message; the (c) regulatory-exposure path is particularly load-bearing for condition 4 since framework identification is the canonical exit (per `_stop_condition_reevaluate_loop.md` § 4.2 Variant B disclosure).
+**Exception — condition 4 (regulated + no framework) DOES HALT in foundation-only mode:** foundation docs cannot be written honestly without framework identification. If condition 4 fires regardless of `fallback_mode_offered`, fall through to 2a HALT path (a/b/c three-choice path) with the condition-4-specific halt message; the (c) regulatory-exposure path is particularly load-bearing for condition 4 since framework identification is the canonical exit (per `_stop_condition_reevaluate_loop.md` § 4.2 Variant B disclosure).
 
 ### 2c — No condition fires
 
@@ -152,9 +152,9 @@ Evaluate whether re-check is warranted (any single condition triggers re-check):
 
 1. `shape_hypothesis.forced_recheck_at_step_05 == true` (always re-check)
 2. Step 03 UP-1 through UP-5 answer contains signal contradicting initial shape — examples:
-   - "I need this running 24/7" + initial shape `markdown-agents` → contradicts (Probe-1 implication)
-   - "Our team uses it" + initial shape NOT `node-ui` / `multi-user-datastore` → may contradict (Probe-2 implication)
-   - "It needs to call our CRM automatically" + initial shape `markdown-agents` → contradicts (Probe-4 implication)
+ - "I need this running 24/7" + initial shape `markdown-agents` → contradicts (Probe-1 implication)
+ - "Our team uses it" + initial shape NOT `node-ui` / `multi-user-datastore` → may contradict (Probe-2 implication)
+ - "It needs to call our CRM automatically" + initial shape `markdown-agents` → contradicts (Probe-4 implication)
 3. Step 04 NTFY notification choices include cron-pattern triggers (e.g., daily/weekly cron) + initial shape `markdown-agents` → may contradict (Probe-6 implication)
 4. Initial emit confidence was MEDIUM or LOW (`shape_hypothesis.confidence in [medium, low]`)
 
@@ -163,9 +163,9 @@ Evaluate whether re-check is warranted (any single condition triggers re-check):
 ```yaml
 shape_hypothesis:
   recheck_log:
-    - step: 05
-      timestamp: <current ISO 8601>
-      outcome: confirmed
+  - step: 05
+  timestamp: <current ISO 8601>
+  outcome: confirmed
 ```
 
 Proceed to step 05.
@@ -193,10 +193,10 @@ Based on operator's answers, classify outcome:
 ```yaml
 shape_hypothesis:
   recheck_log:
-    - step: 05
-      timestamp: <current ISO 8601>
-      outcome: confirmed
-      notes: signal_reconsidered_via_targeted_question
+  - step: 05
+  timestamp: <current ISO 8601>
+  outcome: confirmed
+  notes: signal_reconsidered_via_targeted_question
 ```
 
 Proceed to step 05.
@@ -207,14 +207,14 @@ This is rare because v1 supports only markdown-agents. Most revisions move AWAY 
 
 ```yaml
 shape_hypothesis:
-  shape: markdown-agents  # unchanged
-  confidence: high  # upgrade from medium/low
+  shape: markdown-agents # unchanged
+  confidence: high # upgrade from medium/low
   recheck_log:
-    - step: 05
-      timestamp: <current ISO 8601>
-      outcome: revised
-      revised_shape: markdown-agents
-      revised_confidence: high
+  - step: 05
+  timestamp: <current ISO 8601>
+  outcome: revised
+  revised_shape: markdown-agents
+  revised_confidence: high
 ```
 
 Proceed to step 05.
@@ -229,11 +229,11 @@ shape_hypothesis:
   confidence: <revised confidence>
   v1_supported: false
   recheck_log:
-    - step: 05
-      timestamp: <current ISO 8601>
-      outcome: revised
-      revised_shape: <non-markdown shape>
-      revised_confidence: <confidence>
+  - step: 05
+  timestamp: <current ISO 8601>
+  outcome: revised
+  revised_shape: <non-markdown shape>
+  revised_confidence: <confidence>
 ```
 
 Proceed to unsupported-shape transition.
@@ -248,7 +248,7 @@ Say the operator-facing text verbatim:
 >
 > Two options:
 >
-> **(a) Stop here — wait for v2 / future versions.** Your project file is saved. When the wizard adds [revised shape] support, we can pick up. The roadmap for what triggers that addition lives in `prd.md` § 4.5.
+> **(a) Stop here — wait for a future wizard release.** Your project file is saved. When the wizard adds [revised shape] support, we can pick up.
 >
 > **(b) Foundation-only mode.** I can produce a foundation-doc set for your project — the planning documents (vision, approach, technical architecture, etc.) abstracted from implementation shape. You'd take those docs to Claude Code directly to build the implementation, OR wait for v2 shape support. We won't generate the system implementation itself.
 >
@@ -278,7 +278,7 @@ shape_hypothesis:
 
 Say: "Foundation-only mode confirmed. I'll generate the planning documents for your project — vision, approach, technical architecture, and so on — abstracted from the implementation shape. You'll take those docs to Claude Code directly to build the implementation. We won't generate the actual agents, scripts, or run files."
 
-**Downstream behavior:** steps-05-15 foundation-only-mode behavior (skip implementation generation; only produce foundation docs) is implemented at S2.2 per `wizard/interview/_foundation_only_mode_gate.md` (per-step entry guards + adapted paths + step 15 close ceremony adaptation). At pre-step-05, the wizard proceeds to step 05 with `fallback_mode_offered: foundation-only` set; downstream foundation-only-mode entry guards in each interview file fire per the gate module's § 3 entry-guard pattern.
+**Downstream behavior:** steps-05-15 foundation-only-mode behavior (skip implementation generation; only produce foundation docs) is implemented per `wizard/interview/_foundation_only_mode_gate.md` (per-step entry guards + adapted paths + step 15 close ceremony adaptation). At pre-step-05, the wizard proceeds to step 05 with `fallback_mode_offered: foundation-only` set; downstream foundation-only-mode entry guards in each interview file fire per the gate module's § 3 entry-guard pattern.
 
 Proceed to step 05 (with foundation-only flag set; downstream slices will branch behavior).
 
@@ -310,6 +310,6 @@ Proceed to `wizard/interview/05_vision.md`.
 
 - `wizard/shape_detection.md` § 5.1 + § 8.3 + § 8.4 + § 6 — canonical spec
 - `wizard/handoff_contracts/shape_detection_v0.md` — handoff schema
-- `governance/generated_system_data_defaults.md` § 6.3 — 4 stop conditions canonical
-- PRD v1 § 5.2 F-1 / § 4.3 — requirements
-- S2.1 slice spec § A.4 + § A.5 + § A.7 — design provenance
+- the per-shape control matrix — 4 stop conditions canonical
+- the relevant product spec section F-1 / § 4.3 — requirements
+- The originating slice spec (build-side; not distributed) — design provenance.

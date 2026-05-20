@@ -270,7 +270,7 @@ Proceed to `13_operations.md`.
 
 ## Foundation-only adapted path
 
-**Disposition (per S2.2 spec § A.3): ADAPT — capture QA approach as foundation section; skip implementation config files.**
+**Disposition: ADAPT — capture QA approach as foundation section; skip implementation config files.**
 
 Conduct the QA interview from the existing step content above (QA-1 through QA-4; investigation reporting style + future alert channel + source registry + confidence flagging cadence).
 

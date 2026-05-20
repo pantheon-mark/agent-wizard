@@ -134,7 +134,7 @@ Proceed to `15_close.md`.
 
 ## Foundation-only adapted path
 
-**Disposition (per S2.2 spec § A.3): ADAPT — adapt document review to the 4-file foundation doc set; skip system-level document review.**
+**Disposition: ADAPT — adapt document review to the 4-file foundation doc set; skip system-level document review.**
 
 Deliver the document review explanations adapted for the foundation-only mode document set per `_foundation_only_mode_gate.md` § 5:
 

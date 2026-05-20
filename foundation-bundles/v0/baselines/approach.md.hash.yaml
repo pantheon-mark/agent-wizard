@@ -1,6 +1,6 @@
 # Hash baseline for approach.md
-# Per S2.6 Decision G § A.7 — enforced-path drift detection mechanism
-# Regeneration rationale: S2.6 initial baseline at slice OPEN per Decision G § A.7
+# Enforced-path drift detection mechanism for foundation bundle v0.1.
+# Regeneration rationale: initial baseline at foundation-bundle v0.1 release.
 template: approach.md
 schema_revision: v0.1
 sections_hash:

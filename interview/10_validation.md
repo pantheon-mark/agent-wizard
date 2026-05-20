@@ -250,7 +250,7 @@ Proceed to `11_error_handling.md`.
 
 ## Foundation-only adapted path
 
-**Disposition (per S2.2 spec § A.3): ADAPT — capture validation rules as foundation section; skip implementation config file.**
+**Disposition: ADAPT — capture validation rules as foundation section; skip implementation config file.**
 
 Conduct the validation interview from the existing step content above (GATE-1 through GATE-4; Claude proposes input types + domain sensitivity from vision + approach + architecture).
 

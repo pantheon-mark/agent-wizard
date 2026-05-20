@@ -146,7 +146,7 @@ The next four questions establish what kind of system you're building, in behavi
 
 The probes follow the canonical spec at `wizard/shape_detection.md` § 2.1.
 
-**Internal note (per `wizard/shape_detection.md` § 9):** scan the operator's P1-2 core-purpose answer for shape-signal phrases (e.g., "automated newsletter every Monday" / "thinking partner for X" / "customer portal where my team logs in"). Capture any matched phrases verbatim under `shape_hypothesis.forward_offered_signals_at_step_01:` in the staging file. Probes still fire — forward-offered signals are interpretive prior only, not authoritative answers (per S2.1 decision E).
+**Internal note (per `wizard/shape_detection.md` § 9):** scan the operator's P1-2 core-purpose answer for shape-signal phrases (e.g., "automated newsletter every Monday" / "thinking partner for X" / "customer portal where my team logs in"). Capture any matched phrases verbatim under `shape_hypothesis.forward_offered_signals_at_step_01:` in the staging file. Probes still fire — forward-offered signals are interpretive prior only, not authoritative answers.
 
 **Lead-in to operator:**
 
@@ -242,14 +242,14 @@ shape_hypothesis:
   rechecks_due: [05, 08]
   forced_recheck_at_step_05: false
   operator_signals:
-    probe_1_continuous_runtime: <stored value>
-    probe_2_multi_user: <stored value>
-    probe_3_thinking_partner: <stored value>
-    probe_4_external_software: <stored value>
-    probe_5_state_memory: not_asked
-    probe_6_regular_pattern: not_asked
-    probe_7_operator_confirm: not_asked
-    probe_8_document_output: not_asked
+  probe_1_continuous_runtime: <stored value>
+  probe_2_multi_user: <stored value>
+  probe_3_thinking_partner: <stored value>
+  probe_4_external_software: <stored value>
+  probe_5_state_memory: not_asked
+  probe_6_regular_pattern: not_asked
+  probe_7_operator_confirm: not_asked
+  probe_8_document_output: not_asked
   forward_offered_signals_at_step_01: <list of verbatim phrases captured at P1-2 scan; may be empty list>
   mixed_component_basis: <empty list unless shape == mixed; per advisor R2 C-010; if shape == mixed, list constituent component shapes detected>
   fallback_mode_offered: not_offered
@@ -274,10 +274,10 @@ handoff_phase: provisional_shape_emit
 shape_hypothesis:
   status: pending_step_02_fallback
   step_01_signals:
-    probe_1_continuous_runtime: <stored value>
-    probe_2_multi_user: <stored value>
-    probe_3_thinking_partner: <stored value>
-    probe_4_external_software: <stored value>
+  probe_1_continuous_runtime: <stored value>
+  probe_2_multi_user: <stored value>
+  probe_3_thinking_partner: <stored value>
+  probe_4_external_software: <stored value>
   step_01_provisional_confidence: <medium | low>
   forward_offered_signals_at_step_01: <list>
   step_01_completed_timestamp: <ISO 8601>
@@ -289,7 +289,7 @@ Write sub-step marker: Append `step_01_P1-8: complete | <timestamp>` to `~/claud
 
 ## P1-9 — Unsupported-shape transition (CONDITIONAL; fires only when classifier emits HIGH-confidence non-markdown at step 01)
 
-**Trigger condition (per advisor R1 C-003 + R2 C-008 dispositions — comply with PRD § 4.3 honest-disclosure-at-step-02-or-earlier mandate; trigger uses unambiguous field combination):**
+**Trigger condition (per advisor R1 C-003 + R2 C-008 dispositions — comply with the relevant product spec section honest-disclosure-at-step-02-or-earlier mandate; trigger uses unambiguous field combination):**
 
 - `shape_hypothesis.status == emitted` (P1-8 wrote the field for HIGH-confidence finalized emit) AND `shape_hypothesis.detected_at_step == 01` AND `shape_hypothesis.v1_supported == false` AND `shape_hypothesis.confidence == high`
 
@@ -297,13 +297,13 @@ If trigger does NOT match (markdown-agents emit, OR step 01 deferred to step 02 
 
 **If trigger matches:** fire the unsupported-shape transition per `wizard/shape_detection.md` § 6 NOW (do not defer to pre-step-05).
 
-Say to operator (verbatim per PRD § 4.3; substitute `<shape X>` with the classified shape in plain language):
+Say to operator (verbatim; substitute `<shape X>` with the classified shape in plain language):
 
 > Your project looks like a [shape description in plain language — e.g., "system that needs to keep running on its own and talk to other software automatically" for python-service-operator-facing; "system multiple people will use with their own logins" for node-ui]. v1 of the wizard generates complete systems for one specific shape (markdown agents that you work with through Claude Code on your own machine).
 >
 > Two options:
 >
-> **(a) Stop here — wait for v2 / future versions.** Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. When the wizard adds support for your shape, we can pick up. The roadmap for what triggers that addition lives in this project's PRD § 4.5.
+> **(a) Stop here — wait for a future wizard release.** Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. When the wizard adds support for your shape, we can pick up.
 >
 > **(b) Foundation-only mode.** I can produce a foundation-doc set for your project — the planning documents (vision, approach, technical architecture, etc.) abstracted from implementation shape. You'd take those docs to Claude Code directly to build the implementation yourself, OR wait for v2 shape support. I won't generate the system implementation itself (no agents, scripts, or run files).
 >
@@ -333,7 +333,7 @@ shape_hypothesis:
 
 Say: "Foundation-only mode confirmed. I'll continue through the interview to gather what's needed for the foundation documents, but I won't generate the system implementation at the end. Your downstream Claude Code build conversation will use the foundation docs we produce." Proceed to step 02.
 
-Downstream: pre-step-05 re-check evaluates stop conditions in DOCUMENT-path (not HALT-path) per `wizard/shape_detection.md` § 8.5; foundation-doc-insertion of compliance-mismatch text is implemented at S2.2 per `wizard/interview/_foundation_only_mode_gate.md` § 6 (gaps land in `technical_architecture.md` § "Regulatory & compliance gaps (foundation-only mode)" at step 15 close).
+Downstream: pre-step-05 re-check evaluates stop conditions in DOCUMENT-path (not HALT-path) per `wizard/shape_detection.md` § 8.5; foundation-doc-insertion of compliance-mismatch text via foundation-only-mode (see `wizard/interview/_foundation_only_mode_gate.md` § 6) (gaps land in `technical_architecture.md` § "Regulatory & compliance gaps (foundation-only mode)" at step 15 close).
 
 Write sub-step marker: Append `step_01_P1-9: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

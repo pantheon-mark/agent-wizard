@@ -1,53 +1,48 @@
 # Foundation bundle v0 migration manifest
-# Target-owned migration declaration per governance/foundation_versioning.md § 3.1
-# Per S2.6 slice spec § A.8 Decision H — target-owned discipline practice ahead of E-β fire
+# Target-owned migration declaration for foundation bundle releases.
 #
-# Classification: pre_e_beta_baseline_normalization
-# Rationale: No formal v1 foundation bundle has shipped per S2.2 line 51 (Foundation-bundle
-# generation — E-β NOT triggered by S2.2 per ADR-0018 § 2.3). S2.6 section schema extension
-# is additive minor (v0 → v0.1); no operator-project migration required because no formal
-# bundle release exists yet. Manifest authored anyway as discipline practice for E-β.
-#
-# Inventory check (P-006) per S2.6 spec § 6: pre-S2.6 grep across known operator-project
-# locations confirms zero v1 foundation bundles generated. See `inventory_check_result:` below.
+# Classification: pre_first_generated_bundle_baseline_normalization
+# Rationale: No formal v1 foundation bundle has shipped yet; the section schema extension
+# from v0 to v0.1 is additive minor; no operator-project migration is required because no
+# formal bundle release exists yet. The manifest is authored anyway as target-owned-discipline
+# practice ahead of the first wizard-driven foundation-bundle generation event.
 
 target_version: v0.1
 release_date: 2026-05-19
-schema_version: v0  # this manifest's schema version per § 3.1
-release_classification: pre_e_beta_baseline_normalization
-generated_by_slice: S2.6
+schema_version: v0  # this manifest's schema version
+release_classification: pre_first_generated_bundle_baseline_normalization
+generated_by_release: foundation-bundle-v0.1
 
 migrations:
   - from: "pre_release"
-    class: pre-release-normalization  # custom class outside standard 4-tier per § 2.3
+    class: pre-release-normalization  # custom class outside the standard 4-tier
     requires_operator_approval: false
     preflight: not_required
     rollback: not_applicable
     migration_steps: not_applicable
     breaking_changes_summary: ""
     notes: |
-      No formal v1 bundle shipped before S2.6; section schema extension is additive minor
-      (v0 → v0.1); v0 schema entries remain backward-compatible under v0.1 schema; no
-      operator-project migration required at this release. Manifest entry authored as
-      target-owned-discipline practice ahead of E-β fire.
+      No formal v1 bundle shipped before this release; the section schema extension is
+      additive minor (v0 → v0.1); v0 schema entries remain backward-compatible under v0.1;
+      no operator-project migration required at this release. Manifest entry authored as
+      target-owned-discipline practice ahead of the first wizard-driven foundation-bundle
+      generation event.
 
 inventory_check_result:
   date: 2026-05-19
   scope: |
-    Pre-S2.6 grep across known operator-project locations and wizard distribution paths
+    Inventory check across known operator-project locations and wizard distribution paths
     looking for foundation_schema_version frontmatter OR .wizard/manifest.yaml files OR
     foundation bundle artifacts indicating a v1 generated bundle.
   locations_checked:
-    - "~/agent-wizard/" (wizard distribution copy)
-    - "~/Documents/agent-wizard-build/wizard/templates/documents/" (build-time templates; not generated bundles)
-    - "~/Documents/" (Mark's local project areas containing potential wizard-generated projects)
+    - wizard distribution copy
+    - build-time templates directory (not generated bundles)
+    - local project areas containing potential wizard-generated projects
   result: zero_v1_bundles_found
-  evidence: |
-    See P-006 probe outcome in product_evidence/_slices/S2.6_foundation_doc_render_contract_2026-05-19.md
   classification_confirmed: |
-    pre_e_beta_baseline_normalization stands; no operator-project migration debt accruing
-    silently; H-4 (no formal v1 bundle has shipped) confirmed by inventory.
+    pre_first_generated_bundle_baseline_normalization stands; no operator-project migration
+    debt accruing silently; confirmed: no formal v1 bundle has shipped.
 
-# Future migrations append below per target-owned discipline (§ 3.3): each target release
-# declares what it migrates FROM. Source projects do not predict future compatibility.
-# Per-migration step files (migrations/<from>-to-<target>.md) authored at first real migration event.
+# Future migrations append below per target-owned discipline: each target release declares
+# what it migrates FROM. Source projects do not predict future compatibility. Per-migration
+# step files (migrations/<from>-to-<target>.md) are authored at the first real migration event.
