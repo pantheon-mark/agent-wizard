@@ -24,8 +24,8 @@ Entries appear newest-first.
 - A new `scripts/` directory with `bundle_hash.py` (hash-baseline tool for foundation-bundle drift detection) + supporting library.
 - A new `templates/documents/` directory with the foundation-doc templates the wizard uses to generate operator-project artifacts.
 - A new `test_fixtures/` directory with synthetic fixtures the wizard's internal validation surfaces exercise (operator-relevant for understanding the foundation-only-mode behavior + stop-condition reevaluate loop).
-- Source-Meta-Commit: `2e7d099`
-- Public repo commit: (filled in after subtree push)
+- Source-Meta-Commit: `9d6299f`
+- Public repo commit: `247a264`
 
 This release covers cumulative changes since the prior subtree publication at `2d28da0` (2026-05-19). The intervening build-side work that materialized in this distribution was substantial; the operator-facing summary above focuses on what changes for someone running the wizard.
 
