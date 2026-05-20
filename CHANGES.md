@@ -12,6 +12,25 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-20 — Distribution boundary v1 + cumulative interview content updates (since 2026-05-04)
+
+**Public-facing change:** the wizard distribution now ships with cleaner internal language across the interview flow and supporting modules. Build-side provenance references (slice IDs, issue identifiers, internal governance paths) have been removed from operator-facing content; where references were load-bearing for semantic clarity, neutral version IDs (e.g., `foundation-bundle-v0.1`) replace them. This release also adds:
+
+- A new `foundation-bundles/v0/` directory with the canonical `schemas/section-schema.yaml` (machine-readable section schema for the seven foundation doc types, with shape-extension metadata), `migration_manifest.yaml` (target-owned migration manifest stub), `baselines/<template>.hash.yaml` (per-template drift-detection hashes), and `README.md` describing the directory.
+- A new `handoff_contracts/shape_detection_v0.md` defining the shape-detection handoff structure that downstream wizard surfaces consume.
+- A new `shape_detection.md` canonical implementation spec for the shape-detection module (probe inventory, confidence rubric, lifecycle phases, stop conditions, control matrix).
+- New interview helper modules: `_foundation_only_mode_gate.md`, `_pre_step_05_recheck.md`, `_pre_step_08_recheck.md`, `_stop_condition_reevaluate_loop.md`.
+- A new `registry/` directory with `foundation-bundles.json` (version index) + README.
+- A new `scripts/` directory with `bundle_hash.py` (hash-baseline tool for foundation-bundle drift detection) + supporting library.
+- A new `templates/documents/` directory with the foundation-doc templates the wizard uses to generate operator-project artifacts.
+- A new `test_fixtures/` directory with synthetic fixtures the wizard's internal validation surfaces exercise (operator-relevant for understanding the foundation-only-mode behavior + stop-condition reevaluate loop).
+- Source-Meta-Commit: `2e7d099`
+- Public repo commit: (filled in after subtree push)
+
+This release covers cumulative changes since the prior subtree publication at `2d28da0` (2026-05-19). The intervening build-side work that materialized in this distribution was substantial; the operator-facing summary above focuses on what changes for someone running the wizard.
+
+---
+
 ## 2026-05-04 — v0 license + IP posture ratified
 
 **Public-facing change:** added `LICENSE` (MIT, copyright 2026 Mark Tobias), `GENERATED_OUTPUTS.md` (operator's free-use grant for wizard-generated project content), and this `CHANGES.md` (canonical public release-notes + provenance manifest). Closes the prior "all rights reserved" default state for the public repository.
