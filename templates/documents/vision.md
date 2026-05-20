@@ -1,3 +1,12 @@
+---
+foundation_doc_type: vision
+foundation_schema_version: v0.1
+wizard_version_compatible: "{{WIZARD_VERSION}}"
+managed_by: wizard
+system_shape: "{{SYSTEM_SHAPE}}"
+foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
+---
+
 # Vision
 
 ## Purpose

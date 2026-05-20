@@ -1,0 +1,98 @@
+# Fixture: frc02-unsupported-shape-foundation-only-four-doc-render
+# Class: foundation-render-contract (S2.6 Decision F § A.6)
+# Target mechanism: mech-foundation-render-contract-v0
+# Purpose: validate 4-doc foundation-only bundle render preserves S2.2 mech-foundation-only-mode-v0 contract
+# Per S2.6 slice spec § A.6 fixture frc02 (cross-slice mutation guard) + § 4 success criterion items 6, 7
+#
+# NAMING NOTE per advisor R2 cleanup: "unsupported-shape foundation-only four-doc render" (NOT
+# "foundation-only-mode bundle render") — avoids implying S2.6 emits a formal seven-file bundle
+# or mutates S2.2.
+
+fixture_id: frc02-unsupported-shape-foundation-only-four-doc-render
+fixture_class: foundation-render-contract
+target_mechanism: mech-foundation-render-contract-v0
+generated_by_slice: S2.6
+date: 2026-05-19
+
+input:
+  system_shape: foundation-only  # shape detection produced unsupported-shape stop-condition-3
+  render_mode: foundation_only
+  foundation_only_mode: true
+
+expected_outcome:
+  expected_result: pass
+  bundle_docs_emitted:
+    - vision.md
+    - approach.md
+    - technical_architecture.md
+    - execution_plan.md
+  bundle_docs_skipped:
+    - test_cases.md       # per S2.2 Decision G + S2.6 Decision A foundation_only_render: SKIP
+    - audit_framework.md  # per S2.2 Decision G (all sections render_modes: [complete] only)
+    - prd.md              # deferred until wizard supports PRD authoring
+  per_doc_sections:
+    vision.md:
+      sections_present: [purpose, goals_objectives_priorities, audience_and_outputs, scope_boundary, constraints, success_criteria]
+      sections_skipped: []
+      notes: "All universal sections render in foundation_only mode"
+    approach.md:
+      sections_present: [solution_brief]
+      sections_skipped: [agent_roster, component_roster]
+      notes: |
+        solution_brief is universal (applies_to: [all]); render_modes includes foundation_only.
+        agent_roster + component_roster are shape-specific (applies_to_shapes); SKIP in foundation_only.
+    technical_architecture.md:
+      sections_present: [regulatory_compliance_gaps_foundation_only]
+      sections_skipped:
+        - orchestration_model
+        - agent_roster
+        - permission_boundaries
+        - task_completion_checklists
+        - integrations
+        - scale_tier
+        - deployment_topology
+        - data_model
+      notes: |
+        Only regulatory_compliance_gaps_foundation_only has render_modes: [foundation_only].
+        All other sections are render_modes: [complete] only OR shape-specific (applies_to_shapes).
+        This matches S2.2 § A.6 Decision H — compliance gaps section is where DOCUMENT-path stop
+        conditions flow into foundation-only output (populated_when_documented_during_loop).
+    execution_plan.md:
+      sections_present: [mvp_definition]
+      sections_skipped:
+        - build_phases
+        - execution_sequence
+        - human_in_the_loop_map
+        - sprint_planning
+        - work_plans
+        - deployment_pipeline
+      notes: |
+        mvp_definition is universal (applies_to: [all]) with render_modes: [complete, foundation_only].
+        All other sections are markdown-agents-shape-specific OR deferred-shape; SKIP in foundation_only.
+
+cross_slice_contract_check:
+  s2_2_decision_g_compliance: |
+    Foundation-only-mode emits exactly 4 docs (vision + approach + technical_architecture + execution_plan).
+    test_cases.md + audit_framework.md SKIP per S2.2 § A.5 lines 70/351-355/450 + Decision G + § 451.
+  s2_2_mech_foundation_only_mode_v0_preserved: |
+    S2.6 does NOT modify mech-foundation-only-mode-v0. This fixture verifies preservation by
+    structural emission-set check. Per S2.6 spec § A.6 + Concern 6 (advisor R1 F2 cross-slice
+    mutation catch — corrected before spec authoring).
+  validator_structural_guard: |
+    Validator function validate_foundation_only_render_filter() enforces:
+    - vision + approach + technical_architecture + execution_plan MUST emit ≥1 section in foundation_only
+    - test_cases + audit_framework + prd MUST NOT emit any section in foundation_only
+    Schema-level invariant; not just fixture-level.
+
+coverage_intent:
+  - "Validates S2.2 Decision G 4-doc foundation-only emission contract preserved by S2.6"
+  - "Validates render_modes: [foundation_only] filter correctly identifies foundation-only-only sections"
+  - "Validates shape-specific sections (applies_to_shapes) correctly suppress in foundation_only mode"
+  - "Validates deferred-shape sections (population_status: deferred) correctly suppressed"
+  - "Validates test_cases.md + audit_framework.md SKIP entirely in foundation_only mode"
+
+known_coverage_limits:
+  - "Does not exercise stop-condition-DOCUMENT-path actually-populating regulatory_compliance_gaps_foundation_only — that's S2.2/S2.3/S2.4 work; this fixture validates SCHEMA permits it"
+  - "Does not exercise actual template content rendering — schema-level emission set verification only"
+  - "Does not exercise markdown-agents complete mode — frc01 covers that"
+  - "Does not exercise other unsupported-shape paths (HIPAA-blocked / compliance-class) — those are S2.3/S2.4 stop-condition-reevaluate-loop scope"

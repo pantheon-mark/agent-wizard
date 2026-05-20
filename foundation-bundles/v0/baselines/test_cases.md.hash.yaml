@@ -1,0 +1,16 @@
+# Hash baseline for test_cases.md
+# Per S2.6 Decision G § A.7 — enforced-path drift detection mechanism
+# Regeneration rationale: S2.6 initial baseline at slice OPEN per Decision G § A.7
+template: test_cases.md
+schema_revision: v0.1
+sections_hash:
+- id: test_triggers
+  heading: Test Triggers
+  heading_hash: fa8587b1f16925c85bae8922248a74d170f57fc3
+- id: test_coverage_requirements
+  heading: Test Coverage Requirements
+  heading_hash: 1a9d4c434c9e5b2d111f0996710b577e2ae2b560
+- id: agent_specific_tests
+  heading: Agent-Specific Tests
+  heading_hash: 02cb4118844fc72f7e47a1d4af93e4da5f16bcc4
+base_hash: 874011b3d06dfbc5052b7d4c70c98f6f95eb72fd

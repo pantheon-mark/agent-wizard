@@ -1,0 +1,28 @@
+# Hash baseline for technical_architecture.md
+# Per S2.6 Decision G § A.7 — enforced-path drift detection mechanism
+# Regeneration rationale: S2.6 R1 F2 disposition: added 'Regulatory & compliance gaps (foundation-only mode)' H2 section per S2.2 Decision H integration; 2026-05-19
+template: technical_architecture.md
+schema_revision: v0.1
+sections_hash:
+- id: orchestration_model
+  heading: Orchestration Model
+  heading_hash: 497c7e52e078f04ebe2c66f57f48529fa0c0c27a
+- id: agent_roster
+  heading: Agent Roster
+  heading_hash: f8632f44266b34fe006bfac5cc83fa51dd7e557e
+- id: permission_boundaries
+  heading: Permission Boundaries
+  heading_hash: f46252412fbb9fe6800a1b3f45302ee8f483905b
+- id: task_completion_checklists
+  heading: Task Completion Checklists
+  heading_hash: 86637060d32b3b9ca1c32bcac78a149504d6cfa2
+- id: integrations
+  heading: Integrations
+  heading_hash: a7881cac6e64abca5eafd172df6eb31fe0b84c88
+- id: scale_tier
+  heading: Scale Tier
+  heading_hash: 776fea16cdae17f5ce29dc3b6dba9aa21c697fda
+- id: regulatory_compliance_gaps_foundation_only
+  heading: Regulatory & compliance gaps (foundation-only mode)
+  heading_hash: 80ba689601c37b9189b2980056777eaeade1fa95
+base_hash: a1e8283728b91ced0691691ba38a70138a42ee5a

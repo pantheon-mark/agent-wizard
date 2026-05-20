@@ -1,3 +1,12 @@
+---
+foundation_doc_type: audit_framework
+foundation_schema_version: v0.1
+wizard_version_compatible: "{{WIZARD_VERSION}}"
+managed_by: wizard
+system_shape: "{{SYSTEM_SHAPE}}"
+foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
+---
+
 # Audit Framework
 
 *Operational document — managed by the system. Defines the four audit types, their triggers, cadences, and processes. Agents reference this document before conducting audits.*

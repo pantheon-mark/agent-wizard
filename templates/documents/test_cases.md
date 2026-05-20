@@ -1,6 +1,17 @@
+---
+foundation_doc_type: test_cases
+foundation_schema_version: v0.1
+wizard_version_compatible: "{{WIZARD_VERSION}}"
+managed_by: wizard
+system_shape: "{{SYSTEM_SHAPE}}"
+foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
+---
+
 # Test Cases
 
 *System test suite — generated from the framework test suite accumulator at wizard setup. All entries that apply universally to every system are included. Agent-specific tests are added during the build phase.*
+
+*Note: shape-specific content. Currently populated for `markdown-agents-on-claude-code` shape only. For other shapes (python-service, node-ui, hosted-cloud, mixed), replacement is pending the dedicated "test_cases replacement investigation" slice; non-markdown shape bundles are blocked at the render-contract validator until that slice closes. Per S2.6 Decision A § A.1 + wizard/foundation-bundles/v0/schemas/section-schema.yaml `test_cases.coverage_by_shape:`.*
 
 *Tests run automatically on the triggers listed below. Results are written to `/logs/qa_log.md`.*
 

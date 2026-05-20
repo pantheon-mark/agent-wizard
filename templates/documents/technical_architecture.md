@@ -1,3 +1,12 @@
+---
+foundation_doc_type: technical_architecture
+foundation_schema_version: v0.1
+wizard_version_compatible: "{{WIZARD_VERSION}}"
+managed_by: wizard
+system_shape: "{{SYSTEM_SHAPE}}"
+foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
+---
+
 # Technical Architecture
 
 ## Orchestration Model
@@ -32,3 +41,9 @@
 **Rationale:** {{SCALE_TIER_RATIONALE}}
 **Basis:** {{SCALE_TIER_BASIS}}
 **Status:** Provisional — set during wizard setup. Will be reviewed after first production run and checked weekly from that point. Requires explicit user confirmation to change.
+
+## Regulatory & compliance gaps (foundation-only mode)
+
+*Populated when DOCUMENT-path stop conditions are documented during shape-detection loop iteration per S2.2 Decision H + § A.6. This section renders in `foundation_only` mode only (schema `render_modes: [foundation_only]`); in `complete` render mode it does not appear. If no compliance gaps were documented during the loop, the wizard may omit this section or emit "No compliance gaps documented during shape-detection."*
+
+{{COMPLIANCE_GAPS_CONTENT}}

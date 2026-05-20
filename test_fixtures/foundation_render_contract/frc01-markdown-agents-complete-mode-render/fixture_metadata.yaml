@@ -1,0 +1,71 @@
+# Fixture: frc01-markdown-agents-complete-mode-render
+# Class: foundation-render-contract (S2.6 Decision F § A.6)
+# Target mechanism: mech-foundation-render-contract-v0
+# Purpose: validate 6-doc v0 bundle render in markdown-agents-on-claude-code complete mode
+#          (prd.md deferred at v0 per schema population_status; un-defer trigger = wizard supports PRD authoring)
+# Per S2.6 slice spec § A.6 fixture frc01 + § 4 success criterion item 8
+
+fixture_id: frc01-markdown-agents-complete-mode-render
+fixture_class: foundation-render-contract
+target_mechanism: mech-foundation-render-contract-v0
+generated_by_slice: S2.6
+date: 2026-05-19
+
+input:
+  system_shape: markdown-agents-on-claude-code
+  render_mode: complete
+  foundation_only_mode: false
+
+expected_outcome:
+  expected_result: pass
+  bundle_docs_emitted:
+    - vision.md
+    - approach.md
+    - technical_architecture.md
+    - execution_plan.md
+    - test_cases.md
+    - audit_framework.md
+  bundle_docs_skipped:
+    - prd.md  # deferred until wizard supports PRD authoring; not in foundation_only either; absent at v1
+  per_doc_sections:
+    vision.md:
+      sections_present: [purpose, goals_objectives_priorities, audience_and_outputs, scope_boundary, constraints, success_criteria]
+      sections_skipped: []
+      notes: "All universal sections; render in complete mode"
+    approach.md:
+      sections_present: [solution_brief, agent_roster]
+      sections_skipped: [component_roster]
+      notes: "agent_roster renders for markdown-agents-on-claude-code; component_roster deferred for other shapes"
+    technical_architecture.md:
+      sections_present: [orchestration_model, agent_roster, permission_boundaries, task_completion_checklists, integrations, scale_tier]
+      sections_skipped: [regulatory_compliance_gaps_foundation_only, deployment_topology, data_model]
+      notes: |
+        markdown-agents sections render; regulatory_compliance_gaps_foundation_only only renders in
+        foundation_only mode; deployment_topology + data_model deferred for other shapes
+    execution_plan.md:
+      sections_present: [mvp_definition, build_phases, execution_sequence, human_in_the_loop_map, sprint_planning, work_plans]
+      sections_skipped: [deployment_pipeline]
+      notes: "All markdown-agents + universal sections render; deployment_pipeline deferred"
+    test_cases.md:
+      sections_present: [test_triggers, test_coverage_requirements, agent_specific_tests]
+      sections_skipped: []
+      notes: |
+        coverage_by_shape.markdown-agents-on-claude-code: populated; all sections render in complete mode
+        for markdown-agents shape. For non-markdown shapes, validator would FAIL per Decision A § A.1
+        hard downstream gate (coverage_by_shape: blocked_pending_replacement).
+    audit_framework.md:
+      sections_present: [security_audits, log_audits, architecture_audits, drift_audits]
+      sections_skipped: []
+      notes: "All sections markdown-agents or universal; render in complete mode"
+
+coverage_intent:
+  - "Validates v1 ship path: markdown-agents-on-claude-code shape; complete render mode"
+  - "Validates schema's applies_to_shapes filter correctly emits shape-specific sections"
+  - "Validates render_modes: [complete] filter correctly suppresses foundation_only-only sections"
+  - "Validates population_status: deferred sections correctly suppressed"
+  - "Validates test_cases coverage_by_shape: populated correctly renders test_cases for markdown-agents"
+
+known_coverage_limits:
+  - "Does not exercise non-markdown shape complete-mode (those are blocked_pending_replacement for test_cases.md)"
+  - "Does not exercise actual template content rendering — schema-level emission set verification only"
+  - "Does not exercise foundation_only render mode — frc02 covers that"

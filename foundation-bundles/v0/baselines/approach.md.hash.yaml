@@ -1,0 +1,13 @@
+# Hash baseline for approach.md
+# Per S2.6 Decision G § A.7 — enforced-path drift detection mechanism
+# Regeneration rationale: S2.6 initial baseline at slice OPEN per Decision G § A.7
+template: approach.md
+schema_revision: v0.1
+sections_hash:
+- id: solution_brief
+  heading: Solution Brief
+  heading_hash: 5a7e8488cad8679d0300dad661a92ca8184f610b
+- id: agent_roster
+  heading: Agent Roster
+  heading_hash: f8632f44266b34fe006bfac5cc83fa51dd7e557e
+base_hash: b41716f42317d9701bce587a16454917d25dee66

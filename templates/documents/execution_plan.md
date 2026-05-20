@@ -1,3 +1,12 @@
+---
+foundation_doc_type: execution_plan
+foundation_schema_version: v0.1
+wizard_version_compatible: "{{WIZARD_VERSION}}"
+managed_by: wizard
+system_shape: "{{SYSTEM_SHAPE}}"
+foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
+---
+
 # Execution Plan
 
 *Living document — updated as the system is built and evolves. Read this document before any sprint planning or work sequencing decision.*

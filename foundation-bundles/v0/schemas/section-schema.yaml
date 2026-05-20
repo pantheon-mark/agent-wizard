@@ -1,0 +1,388 @@
+# Foundation bundle v0.1 section schema
+# Canonical instance for foundation-doc-type section schemas + shape-extension metadata.
+# Authority: governance/foundation_versioning.md § 1.4 (canonical prose + field semantics)
+# Per S2.6 slice spec § A.4 Decision D — v0 → v0.1 minor-additive extension.
+# Per S2.6 R1 advisor dispositions 2026-05-19 — `source` field added per F2; governance_prose_hash added per F8.
+#
+# Schema discipline (per IDQ-057 + feedback_validation_tooling_must_reference_canonical_authority.md):
+# - This YAML is the canonical machine-readable instance
+# - governance/foundation_versioning.md § 1.4 is the canonical human-readable prose specification
+# - Validator (tools/validate_foundation_render_contract.py) reads this YAML; does NOT embed schema
+# - Drift between this YAML and § 1.4 prose detected via governance_prose_section_1_4_hash (F8)
+#
+# Field semantics per governance/foundation_versioning.md § 1.4 + S2.6 R1 dispositions:
+#   id: stable section ID (string; never changes across schema revisions)
+#   title: operator-visible heading text (string)
+#   required: section presence required for valid bundle (bool; preserves v0 semantics)
+#   applies_to: [all]                                  XOR with applies_to_shapes
+#   applies_to_shapes: [<shape-list>]                  XOR with applies_to; values must be in shape_vocabulary
+#   render_modes: [complete | foundation_only | both]  list enum
+#   operator_visible: bool (default true)
+#   population_status: populated | deferred | blocked_pending_replacement (default populated)
+#   undefer_trigger: prose (required when population_status != populated)
+#   source: template | runtime | schema_only           # F2 — distinguishes template-backed vs runtime-generated vs forward-declared sections
+
+section_schema_version: v0.1
+schema_authority: governance/foundation_versioning.md#14-section-schema-per-foundation-doc-type
+governance_prose_section_1_4_hash: a450615ff0a6334643f0546781e082b00b08ccd0  # F8 drift detection; bump explicitly when § 1.4 prose changes
+generated_by: S2.6
+generated_date: 2026-05-19
+shape_vocabulary:
+  - markdown-agents-on-claude-code
+  - python-service
+  - node-ui
+  - hosted-cloud
+  - mixed
+
+section_schema:
+
+  # ============================================================
+  # vision.md — fully shape-neutral foundation doc
+  # ============================================================
+  vision:
+    sections:
+      - id: purpose
+        title: Purpose
+        required: true
+        applies_to: [all]
+        render_modes: [complete, foundation_only]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: goals_objectives_priorities
+        title: Goals, Objectives, and Priorities
+        required: true
+        applies_to: [all]
+        render_modes: [complete, foundation_only]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: audience_and_outputs
+        title: Audience and Outputs
+        required: true
+        applies_to: [all]
+        render_modes: [complete, foundation_only]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: scope_boundary
+        title: Scope Boundary
+        required: true
+        applies_to: [all]
+        render_modes: [complete, foundation_only]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: constraints
+        title: Constraints
+        required: true
+        applies_to: [all]
+        render_modes: [complete, foundation_only]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: success_criteria
+        title: Success Criteria
+        required: true
+        applies_to: [all]
+        render_modes: [complete, foundation_only]
+        operator_visible: true
+        population_status: populated
+        source: template
+
+  # ============================================================
+  # approach.md — shape-specific Agent Roster; otherwise neutral
+  # ============================================================
+  approach:
+    sections:
+      - id: solution_brief
+        title: Solution Brief
+        required: true
+        applies_to: [all]
+        render_modes: [complete, foundation_only]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: agent_roster
+        title: Agent Roster
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: component_roster
+        title: Component Roster
+        required: false
+        applies_to_shapes: [python-service, node-ui, hosted-cloud, mixed]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: deferred
+        undefer_trigger: "First Stage 2.X slice that adds non-markdown-agent shape generation interview steps; component roster content authored when shape support ships"
+        source: schema_only
+
+  # ============================================================
+  # technical_architecture.md — heavily shape-specific
+  # ============================================================
+  technical_architecture:
+    sections:
+      - id: orchestration_model
+        title: Orchestration Model
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: agent_roster
+        title: Agent Roster
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: permission_boundaries
+        title: Permission Boundaries
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: task_completion_checklists
+        title: Task Completion Checklists
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: integrations
+        title: Integrations
+        required: false
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: scale_tier
+        title: Scale Tier
+        required: false
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: regulatory_compliance_gaps_foundation_only
+        title: "Regulatory & compliance gaps (foundation-only mode)"
+        required: false
+        applies_to: [all]
+        render_modes: [foundation_only]
+        operator_visible: true
+        population_status: populated
+        source: template
+        notes: "Template H2 added per S2.6 R1 F2 disposition 2026-05-19; populated when DOCUMENT-path stop conditions are documented during loop per S2.2 Decision H"
+      - id: deployment_topology
+        title: Deployment Topology
+        required: false
+        applies_to_shapes: [python-service, node-ui, hosted-cloud, mixed]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: deferred
+        undefer_trigger: "First Stage 2.X slice that adds deployment-topology interview content for the relevant non-markdown shape"
+        source: schema_only
+      - id: data_model
+        title: Data Model
+        required: false
+        applies_to_shapes: [python-service, node-ui, hosted-cloud, mixed]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: deferred
+        undefer_trigger: "First Stage 2.X slice that adds data-model interview content for the relevant non-markdown shape"
+        source: schema_only
+
+  # ============================================================
+  # execution_plan.md — shape-specific Build Phases / HITL Map / Work Plans
+  # ============================================================
+  execution_plan:
+    sections:
+      - id: mvp_definition
+        title: MVP Definition
+        required: true
+        applies_to: [all]
+        render_modes: [complete, foundation_only]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: build_phases
+        title: Build Phases
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: execution_sequence
+        title: Execution Sequence
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: human_in_the_loop_map
+        title: Human-in-the-Loop Map
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: sprint_planning
+        title: Sprint Planning
+        required: false
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: work_plans
+        title: Work Plans
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: deployment_pipeline
+        title: Deployment Pipeline
+        required: false
+        applies_to_shapes: [python-service, node-ui, hosted-cloud, mixed]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: deferred
+        undefer_trigger: "First Stage 2.X slice that adds deployment-pipeline interview content for the relevant non-markdown shape"
+        source: schema_only
+
+  # ============================================================
+  # test_cases.md — entirely markdown-agent-locked; replacement deferred
+  # ============================================================
+  test_cases:
+    coverage_by_shape:
+      markdown-agents-on-claude-code: populated
+      python-service: blocked_pending_replacement
+      node-ui: blocked_pending_replacement
+      hosted-cloud: blocked_pending_replacement
+      mixed: blocked_pending_replacement
+    foundation_only_render: SKIP  # per S2.2 Decision G + § A.5 line 451
+    downstream_gate_per_s2.6_decision_a: "Render-contract validator FAILs full non-markdown bundle generation while ANY shape has coverage_by_shape: blocked_pending_replacement; enforced via validate-render-request subcommand per S2.6 R1 F1 disposition"
+    undefer_trigger_for_replacement: "S2.X 'test_cases replacement investigation' slice closes; content rewritten per shape-aware testing approach"
+    sections:
+      - id: test_triggers
+        title: Test Triggers
+        required: true
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: test_coverage_requirements
+        title: Test Coverage Requirements
+        required: true
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+        notes: "Contains 32 categorized test sub-sections (H/E/Q/A/M/T/L/N/S/V/C/D/AC/G/EN/W/MT/F/P/B/SC/WZ/R/O/REV/ID/FI/SCE/VS); 637-line markdown-agent test inventory; content NOT rewritten at S2.6 per Decision A"
+      - id: agent_specific_tests
+        title: Agent-Specific Tests
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+
+  # ============================================================
+  # audit_framework.md — Security + Drift universal; Log + Architecture shape-specific
+  # ============================================================
+  audit_framework:
+    sections:
+      - id: security_audits
+        title: Security Audits
+        required: true
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+      - id: log_audits
+        title: Log Audits
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+        notes: "Uses /logs/ path convention specific to markdown-agents-on-claude-code shape"
+      - id: architecture_audits
+        title: Architecture Audits
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+        notes: "Phase-gate review references autonomy levels — markdown-agents-on-claude-code-specific"
+      - id: drift_audits
+        title: Drift Audits
+        required: true
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+
+  # ============================================================
+  # prd.md — required public API filename but not currently template-generated
+  # ============================================================
+  prd:
+    sections:
+      - id: vision_link
+        title: Vision Link
+        required: true
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: deferred
+        undefer_trigger: "Wizard interview supports PRD authoring (post-Stage-2 scope; deferred)"
+        source: schema_only
+      - id: persona_jtbd
+        title: Persona / JTBD
+        required: true
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: deferred
+        undefer_trigger: "Wizard interview supports PRD authoring (post-Stage-2 scope; deferred)"
+        source: schema_only
+      - id: functional_requirements
+        title: Functional Requirements
+        required: true
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: deferred
+        undefer_trigger: "Wizard interview supports PRD authoring (post-Stage-2 scope; deferred)"
+        source: schema_only
+      - id: non_functional_requirements
+        title: Non-Functional Requirements
+        required: true
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: deferred
+        undefer_trigger: "Wizard interview supports PRD authoring (post-Stage-2 scope; deferred)"
+        source: schema_only
