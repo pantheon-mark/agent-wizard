@@ -12,6 +12,7 @@ Templates for files generated in the root of the user's System project. Values i
 | `pending_decisions.md` | `pending_decisions.md` | Empty structure — populated at runtime | ✅ Complete (2026-04-01) |
 | `manual.md` | `manual.md` | Static — Mac installation guide. Includes permission prompts section (BF-3). | ✅ Complete (2026-04-01) |
 | `gitignore_template` | `.gitignore` | Static baseline + placeholder for CRED-2 entries | ✅ Complete (2026-04-01) |
+| `wizard_feedback.md` | `wizard_feedback.md` | Empty entries section — operator captures wizard-traceable issues during runtime | ✅ Complete (2026-04-04) |
 
 `start-session.sh` is in `/wizard/scripts/` — it is a shell script, not a document template.
 `.env` is not templated — created empty; values added during CRED-2.
