@@ -12,6 +12,15 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-20 — Templates root + docs _index.md inventory updates (operator-impact minimal)
+
+**Public-facing change:** two `_index.md` template-inventory files brought current. Specifically: `wizard/templates/root/_index.md` now lists `wizard_feedback.md` (template was already in the directory; the inventory pointer was just stale); `wizard/templates/docs/_index.md` now lists `how_your_system_works.md` (same shape — template existed, inventory was stale). No template content changed; no behavior change for operators running the wizard. This release accompanies build-side standup of operating-doc template variant/readiness policy (build-side governance work; not exposed in this distribution beyond the inventory fixes named above).
+
+- Source-Meta-Commit: `ef84afd`
+- Public repo commit: <to be filled in after subtree push>
+
+---
+
 ## 2026-05-20 — Distribution boundary v1 + cumulative interview content updates (since 2026-05-04)
 
 **Public-facing change:** the wizard distribution now ships with cleaner internal language across the interview flow and supporting modules. Build-side provenance references (slice IDs, issue identifiers, internal governance paths) have been removed from operator-facing content; where references were load-bearing for semantic clarity, neutral version IDs (e.g., `foundation-bundle-v0.1`) replace them. This release also adds:
