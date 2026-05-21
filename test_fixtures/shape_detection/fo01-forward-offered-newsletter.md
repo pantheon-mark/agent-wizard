@@ -23,7 +23,7 @@ notes: Operator's P1-2 answer contains strong forward-offered shape signals — 
 - "pull ... articles from a few sources" — implies Probe-4 yes (talks to other software)
 - "without me lifting a finger" — implies Probe-7 no (does NOT ask operator before each action)
 
-**Step 01 probes (asked despite forward-offered signals per S2.1 decision E — probes still fire):**
+**Step 01 probes (asked despite forward-offered signals per a prior slice decision E — probes still fire):**
 
 | Probe | Answer | Signal |
 |---|---|---|

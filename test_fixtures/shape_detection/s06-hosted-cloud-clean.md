@@ -70,8 +70,8 @@ regulatory_exposure:
 - BUT shape is non-markdown → unsupported-shape transition fires
 - Operator picks scope-out or foundation-only
 
-**Foundation-only path note:** if operator picks foundation-only, the generated foundation docs (vision / approach / etc.) should INCLUDE explicit HIPAA-applicable + hosted-cloud-deferred posture, so the operator's downstream Claude Code build conversation has the compliance context. Implementation of this foundation-only-mode behavior is OUT of S2.1 (per decision F).
+**Foundation-only path note:** if operator picks foundation-only, the generated foundation docs (vision / approach / etc.) should INCLUDE explicit HIPAA-applicable + hosted-cloud-deferred posture, so the operator's downstream Claude Code build conversation has the compliance context. Implementation of this foundation-only-mode behavior is OUT of a prior slice (per decision F).
 
 ## Discrimination note
 
-This fixture is the cleanest non-markdown signal density (5 strong-positives for top shape). HIPAA + non-markdown is the most-common compliance-class workload pattern; v1 ships with this scope explicitly deferred per PRD § 4.5 (un-defer trigger = wizard-side end-to-end hosted-cloud production demonstrated for non-technical operators with multi-month operational stability).
+This fixture is the cleanest non-markdown signal density (5 strong-positives for top shape). HIPAA + non-markdown is the most-common compliance-class workload pattern; v1 ships with this scope explicitly deferred per the relevant build-side spec (un-defer trigger = wizard-side end-to-end hosted-cloud production demonstrated for non-technical operators with multi-month operational stability).

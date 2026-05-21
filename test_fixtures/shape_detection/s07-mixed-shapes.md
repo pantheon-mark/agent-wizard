@@ -9,7 +9,7 @@ expected_halt: false   # Fixture expected path: operator picks foundation-only a
 expected_stop_conditions_fired: [1]   # Per R3 advisor C-011 cleanup; distinguishes "condition fires" from "wizard halts"
 expected_documented_in_foundation: [1]
 notes: |
-  Mixed shapes — operator wants both a thinking partner AND a background automation. Genuinely two-shape signal. Post-R1+R2 dispositions: capability-based condition 1 fires for mixed shapes with weakest-path audit_trail_crud == advisory; on foundation-only path, condition is DOCUMENTED not HALTED. IDQ-057 candidate CLOSED.
+  Mixed shapes — operator wants both a thinking partner AND a background automation. Genuinely two-shape signal. Post-R1+R2 dispositions: capability-based condition 1 fires for mixed shapes with weakest-path audit_trail_crud == advisory; on foundation-only path, condition is DOCUMENTED not HALTED. a tracked open question candidate CLOSED.
 ---
 
 # Fixture s07 — mixed (genuine multi-shape signal)
@@ -66,7 +66,7 @@ shape_hypothesis:
   forced_recheck_at_step_05: false
   operator_signals: # 8 probes
   forward_offered_signals_at_step_01: ["thinking partner I can use", "background system that monitors my email", "while I sleep"]
-  mixed_component_basis: ["markdown-agents", "python-service-operator-facing"]   # per advisor R2 C-010
+  mixed_component_basis: ["markdown-agents", "python-service-operator-facing"]   # per advisor an advisor finding
   fallback_mode_offered: not_offered
 
 regulatory_exposure:
@@ -74,13 +74,13 @@ regulatory_exposure:
   # ... other frameworks no ...
 ```
 
-## Expected step 02 unsupported-shape transition (P02-FB-6; post-R1 C-003 disposition)
+## Expected step 02 unsupported-shape transition (P02-FB-6; post-an advisor finding disposition)
 
 Shape is non-markdown MEDIUM confidence → P02-FB-6 fires at end of step 02. Operator picks scope-out OR foundation-only.
 
 This fixture's expected path: operator picks foundation-only. `fallback_mode_offered: foundation-only`; wizard proceeds to step 03.
 
-## Expected pre-step-05 re-check (post-R1+R2 capability-based logic; IDQ-057 RESOLVED)
+## Expected pre-step-05 re-check (post-R1+R2 capability-based logic; a tracked open question RESOLVED)
 
 `control_matrix_active` for `mixed` shape uses weakest-path-across-components per `wizard/shape_detection.md` § 8.3:
 
@@ -96,8 +96,8 @@ Outcome path (operator chose foundation-only): DOCUMENT path per shape_detection
 
 If operator had been on full-system-generation path (theoretical; markdown shape only): HALT path with condition 1 message verbatim.
 
-## Discrimination note (IDQ-057 RESOLVED)
+## Discrimination note (a tracked open question RESOLVED)
 
-`mixed` shape was the test case for the IDQ-057 candidate (stop-condition exact-match vs capability-match). The capability-based stop conditions (per advisor R1 C-002 disposition) resolve it cleanly: condition 1 fires on `audit_trail_crud != enforced` regardless of shape label. For `mixed` shapes, weakest-path-across-components ensures the system fails on the most-permissive constituent path. This is the conservative correct behavior — regulated data MUST flow through enforced-audit-trail components; if any component is below enforced, the system fails.
+`mixed` shape was the test case for the a tracked open question candidate (stop-condition exact-match vs capability-match). The capability-based stop conditions (per advisor an advisor finding disposition) resolve it cleanly: condition 1 fires on `audit_trail_crud != enforced` regardless of shape label. For `mixed` shapes, weakest-path-across-components ensures the system fails on the most-permissive constituent path. This is the conservative correct behavior — regulated data MUST flow through enforced-audit-trail components; if any component is below enforced, the system fails.
 
-**IDQ-057 candidate CLOSED at S2.1 R2 advisor pass.** No standalone IDQ filing needed.
+**a tracked open question candidate CLOSED at a prior slice R2 advisor pass.** No standalone IDQ filing needed.

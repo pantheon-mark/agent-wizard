@@ -14,7 +14,7 @@ expected_operator_choice_at_forced_disclosure: foundation-only
 expected_fallback_mode_offered: foundation-only
 expected_foundation_state_preserved: [vision.md, approach.md]
 expected_stop_conditions_mutation: {halted: false, documented_in_foundation: [1], resolved_via: stop_condition_reevaluate_loop_foundation_only}
-notes: Operator did NOT surface HIPAA at step 03 UP-6 (project framed generically). Vision content (step 05) mentions "patient communication" → pre-step-08 late-emergence stop-condition check (per `_pre_step_08_recheck.md` Step 2) re-fires HIPAA UP-6 probe → operator confirms HIPAA applies → condition 1 fires at pre-step-08 → operator picks (b) → loop iterations 1 + 2 → cap reached → foundation-only chosen. Vision.md + approach.md preserved on disk through loop iterations (foundation state preserved). Producer-visible terminal outcome is foundation_only (NOT forced_terminal) per R1 C-001; module mutates stop_conditions block per R1 C-002.
+notes: Operator did NOT surface HIPAA at step 03 UP-6 (project framed generically). Vision content (step 05) mentions "patient communication" → pre-step-08 late-emergence stop-condition check (per `_pre_step_08_recheck.md` Step 2) re-fires HIPAA UP-6 probe → operator confirms HIPAA applies → condition 1 fires at pre-step-08 → operator picks (b) → loop iterations 1 + 2 → cap reached → foundation-only chosen. Vision.md + approach.md preserved on disk through loop iterations (foundation state preserved). Producer-visible terminal outcome is foundation_only (NOT forced_terminal) per an advisor finding; module mutates stop_conditions block per an advisor finding.
 ---
 
 # Fixture scrl04 — Pre-step-08 late-emergence HIPAA → (b) loop → foundation-only with vision+approach preserved
@@ -63,7 +63,7 @@ Condition 1 fires: `hipaa_applicable == yes` AND `control_matrix_active.audit_tr
 
 ## Expected friction-acknowledgment + three-choice offer
 
-Per `_pre_step_08_recheck.md` Step 2 friction-ack (S2.3 Decision E):
+Per `_pre_step_08_recheck.md` Step 2 friction-ack (a prior slice):
 
 > Looking at what we've built so far — the vision and approach documents — I see "structured patient communication notes" and "session details for each patient." That suggests HIPAA applies, which I didn't pick up on at step 03. Before we generate the architecture, we need to handle this.
 >
@@ -127,7 +127,7 @@ shape_revision:
       pre_iteration_shape: markdown-agents
       pre_iteration_fired_conditions: [1]
       operator_choice: (b) change_shape
-      outcome: foundation_only           # producer-visible terminal outcome per R1 C-001
+      outcome: foundation_only           # producer-visible terminal outcome per an advisor finding
       terminal_reason: iteration_cap_reached
       terminal_at: <ISO 8601>
 shape_hypothesis:
@@ -136,11 +136,11 @@ shape_hypothesis:
   foundation_only_offered_timestamp: <ISO 8601>
 regulatory_exposure:
   hipaa_applicable: yes   # revised from no via late-emergence
-stop_conditions:                       # MUTATED at terminal foundation_only per R1 C-002 cross-slice rule
+stop_conditions:                       # MUTATED at terminal foundation_only per an advisor finding cross-slice rule
   evaluated_at: 08_pre_architecture     # late-emergence evaluation point
   fired: [1]
   halted: false                         # FLIPPED true → false (loop resolved halt to foundation-only)
-  documented_in_foundation: [1]         # POPULATED from `fired` so S2.2 gate module § 6 emits HIPAA gap in technical_architecture.md
+  documented_in_foundation: [1]         # POPULATED from `fired` so a prior slice gate module § 6 emits HIPAA gap in technical_architecture.md
   resolved_via: stop_condition_reevaluate_loop_foundation_only
   halt_message: <preserved verbatim from original late-emergence halt>
   late_emergence_source: vision
@@ -171,10 +171,10 @@ Step 15 close produces foundation-doc set per `_foundation_only_mode_gate.md` §
 
 This fixture exercises the **pre-step-08 late-emergence loop with foundation state preservation through iterations**. Three key behaviors:
 
-1. **Late-emergence detection** at pre_step_08 catches the HIPAA implication that step 03 UP-6 framing missed. Per ADR-0008 v1 honest-characterization rule — wizard surfaces the gap honestly rather than silently generating a non-compliant system.
+1. **Late-emergence detection** at pre_step_08 catches the HIPAA implication that step 03 UP-6 framing missed. Per the relevant ADR v1 honest-characterization rule — wizard surfaces the gap honestly rather than silently generating a non-compliant system.
 
-2. **Foundation state preserved through loop iterations**: vision.md + approach.md are on disk from earlier steps; the loop's probe re-ask + classifier re-emit + stop-condition re-eval do NOT touch those files. This honors the S2.1 contract `foundation_state.staging_file_preserved: true` semantics extended to vision/approach docs.
+2. **Foundation state preserved through loop iterations**: vision.md + approach.md are on disk from earlier steps; the loop's probe re-ask + classifier re-emit + stop-condition re-eval do NOT touch those files. This honors the a prior slice contract `foundation_state.staging_file_preserved: true` semantics extended to vision/approach docs.
 
-3. **Fresh iteration counter at pre_step_08** (S2.3 Decision E): even if a prior pre_step_05 loop had run + reached terminal (not the case here — no prior loop), pre_step_08 invocation would reset counter to 0 before increment. Reason: late-emergence regulatory exposure is genuinely new context; not a continuation of pre_step_05 loop.
+3. **Fresh iteration counter at pre_step_08** (a prior slice): even if a prior pre_step_05 loop had run + reached terminal (not the case here — no prior loop), pre_step_08 invocation would reset counter to 0 before increment. Reason: late-emergence regulatory exposure is genuinely new context; not a continuation of pre_step_05 loop.
 
 The friction-acknowledgment ("vision + approach are on disk; they're abstracted from implementation shape; we won't lose them") is critical — without it, operator may feel "the wizard wasted my time on vision + approach if HIPAA was going to fail." With it, operator sees the documents have lasting value regardless of which path they pick at terminal.

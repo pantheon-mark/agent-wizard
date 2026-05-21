@@ -74,7 +74,7 @@ Wizard says the halt message to operator. Offers two paths per `_pre_step_05_rec
 ## Expected wizard behavior
 
 If operator picks (a): scope-out cleanly; staging file preserved; halt log recorded.
-If operator picks foundation-only fallback: generates foundation docs that EXPLICITLY state the HIPAA + markdown-agents mismatch. (Foundation-only-mode behavior across steps 05-15 is OUT of S2.1 scope per decision F.)
+If operator picks foundation-only fallback: generates foundation docs that EXPLICITLY state the HIPAA + markdown-agents mismatch. (Foundation-only-mode behavior across steps 05-15 is OUT of a prior slice scope per decision F.)
 
 ## Discrimination + foundation note
 

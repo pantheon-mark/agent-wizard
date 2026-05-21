@@ -23,13 +23,13 @@ expected_terminal_outcome: foundation_only
 expected_terminal_reason: iteration_cap_reached
 expected_fallback_mode_offered: foundation-only
 expected_cross_slice_mutation:
-  stop_conditions.fired: [1]                              # active terminal-state conditions only (S2.4 R1 C-003); condition 4 resolved at iter 1
+  stop_conditions.fired: [1]                              # active terminal-state conditions only (per a prior advisor finding); condition 4 resolved at iter 1
   stop_conditions.documented_in_foundation: [1]           # active terminal compliance gap only
   stop_conditions.resolved_during_loop: [4]               # transitional condition resolved during loop (audit-trail)
   stop_conditions.halted: false                           # flipped from true at terminal foundation_only
   stop_conditions.resolved_via: stop_condition_reevaluate_loop_foundation_only
 notes: |
-  Condition-4 halt at pre-step-05 → operator picks (c) → identifies HIPAA (was initially marked `hipaa_applicable: no` at UP-6.2 + framework-unknown at #6 path) → mutation `hipaa_applicable: no → yes` + `unknown → no` → condition-1 fires post-revision → loop next_iteration → operator picks (b) at re-prompt → iter 2 probes 5-7 re-asked → markdown-agents re-emitted (same answers) → iter 2 == cap → forced terminal foundation-only (operator picks i). Cross-slice mutation per S2.4 R1 C-003 active-vs-transitional distinction: records active terminal condition [1] in `documented_in_foundation` and transitional condition [4] in `resolved_during_loop` audit-trail. Demonstrates the common-path of condition-4 in v1 reality (framework identification triggers conditions 1/2/3 against markdown-agents → foundation-only at iteration cap).
+  Condition-4 halt at pre-step-05 → operator picks (c) → identifies HIPAA (was initially marked `hipaa_applicable: no` at UP-6.2 + framework-unknown at #6 path) → mutation `hipaa_applicable: no → yes` + `unknown → no` → condition-1 fires post-revision → loop next_iteration → operator picks (b) at re-prompt → iter 2 probes 5-7 re-asked → markdown-agents re-emitted (same answers) → iter 2 == cap → forced terminal foundation-only (operator picks i). Cross-slice mutation per a prior advisor finding active-vs-transitional distinction: records active terminal condition [1] in `documented_in_foundation` and transitional condition [4] in `resolved_during_loop` audit-trail. Demonstrates the common-path of condition-4 in v1 reality (framework identification triggers conditions 1/2/3 against markdown-agents → foundation-only at iteration cap).
 ---
 
 # Fixture scrl06 — Condition-4 identify-HIPAA-to-foundation-only
@@ -103,7 +103,7 @@ Stop-condition 4 fires: `no_compliance_claim_framework_identification == unknown
          reason: framework_identification
      ```
 5. **Re-evaluate stop conditions (§ 4.4):**
-   - Condition 1 (HIPAA): `hipaa_applicable == yes` AND `control_matrix_active.audit_trail != enforced` (markdown-agents is `advisory` for audit-trail / encryption / access-control per ADR-0015 per-shape control matrix) → **condition 1 fires**
+   - Condition 1 (HIPAA): `hipaa_applicable == yes` AND `control_matrix_active.audit_trail != enforced` (markdown-agents is `advisory` for audit-trail / encryption / access-control per the relevant ADR per-shape control matrix) → **condition 1 fires**
    - Condition 2 (GDPR): not fired
    - Condition 3 (PCI-DSS): not fired
    - Condition 4: `no_compliance_claim_framework_identification == no` → no longer fires
@@ -156,22 +156,22 @@ Wizard says verbatim:
 
 `shape_hypothesis.fallback_mode_offered: not_offered → foundation-only`; `foundation_only_offered_timestamp` set.
 
-**Cross-slice mutation per S2.3 Lesson 2 + S2.4 R1 C-003 active-vs-transitional refinement:**
+**Cross-slice mutation per a prior slice Lesson 2 + per a prior advisor finding active-vs-transitional refinement:**
 
-Per S2.4 advisor R1 C-003 disposition (corrected at sub-module § 7 Terminal: foundation-only): `documented_in_foundation` records **active terminal-state conditions only** (those firing at terminal evaluation, not transitional conditions resolved during the loop). Condition 4 fired at iter-1 entry but was resolved when operator identified HIPAA (framework_identification: unknown → no); condition 1 fired post-revision and stayed unresolved through iter-2 cap. Only condition 1 is an active terminal compliance gap.
+Per a prior slice advisor an advisor finding disposition (corrected at sub-module § 7 Terminal: foundation-only): `documented_in_foundation` records **active terminal-state conditions only** (those firing at terminal evaluation, not transitional conditions resolved during the loop). Condition 4 fired at iter-1 entry but was resolved when operator identified HIPAA (framework_identification: unknown → no); condition 1 fired post-revision and stayed unresolved through iter-2 cap. Only condition 1 is an active terminal compliance gap.
 
 ```yaml
 stop_conditions:
   evaluated_at: 05_pre_vision
   fired: [1]                              # active terminal-state conditions only (condition 4 resolved at iter 1)
   halted: false                            # flipped from true (operator-elected foundation-only resolved the halt)
-  documented_in_foundation: [1]            # active terminal compliance gap only; S2.2 gate module § 6 emits HIPAA gap (not regulation-without-framework)
+  documented_in_foundation: [1]            # active terminal compliance gap only; a prior slice gate module § 6 emits HIPAA gap (not regulation-without-framework)
   resolved_during_loop: [4]                # audit-trail of conditions that fired during loop but were resolved before terminal
   resolved_via: stop_condition_reevaluate_loop_foundation_only
   halt_message: <preserved verbatim from original condition-4 halt at iteration 0>
 ```
 
-Verbatim S2.1 § A.5 foundation-only message said:
+Verbatim a prior slice § A.5 foundation-only message said:
 
 > Foundation-only mode confirmed. I'll generate the planning documents for your project — vision, approach, technical architecture, and so on — abstracted from the implementation shape. You'll take those docs to Claude Code directly to build the implementation. We won't generate the actual agents, scripts, or run files.
 
@@ -230,7 +230,7 @@ regulatory_exposure:
   probed_at_step: 03_up6
 stop_conditions:
   evaluated_at: 05_pre_vision
-  fired: [1]                                          # active terminal-state conditions only (S2.4 R1 C-003)
+  fired: [1]                                          # active terminal-state conditions only (per a prior advisor finding)
   halted: false                                       # flipped from true at terminal foundation_only
   documented_in_foundation: [1]                       # active terminal compliance gap only
   resolved_during_loop: [4]                           # condition 4 resolved at iter 1 (framework identified)
@@ -250,15 +250,15 @@ schema_versions:
 
 `_foundation_only_mode_gate.md` § 6 reads `stop_conditions.documented_in_foundation: [1]` and emits a compliance-gap section in `technical_architecture.md` at step 15 close listing the active terminal compliance gap (HIPAA on markdown-agents). Condition 4 is NOT emitted as a gap because it was resolved during the loop (operator identified HIPAA → framework_identification: no); the `resolved_during_loop: [4]` field provides audit-trail without misleading the foundation docs into emitting a false "regulated-but-unnamed-framework" gap.
 
-WITHOUT the cross-slice mutation, the compliance-gap section would be empty — operator would lose the regulatory-mismatch documentation. The mutation IS load-bearing per S2.3 Lesson 2; the active-vs-transitional distinction (S2.4 R1 C-003) ensures the right gap is documented, not a stale one.
+WITHOUT the cross-slice mutation, the compliance-gap section would be empty — operator would lose the regulatory-mismatch documentation. The mutation IS load-bearing per a prior slice Lesson 2; the active-vs-transitional distinction (per a prior advisor finding) ensures the right gap is documented, not a stale one.
 
 ## Discrimination value
 
 This is the **common-path for condition-4** in v1 reality — operator identifies a framework (HIPAA most often) that triggers conditions 1/2/3 against markdown-agents → loop converges to foundation-only via iteration cap.
 
 - Demonstrates the condition-4 → condition-1 **transition** per sub-module § 4.4 step "condition-4 path may transition into conditions 1/2/3 firing when operator identifies the framework — that's expected behavior; loop continues from § 6 branch table"
-- Demonstrates the **iteration cap exercise** under condition-4 (parallel to S2.3 scrl02's PCI iteration-cap-to-scope-out, but resolving to foundation-only via operator pick rather than scope-out)
-- Demonstrates the **cross-slice mutation contract with active-vs-transitional distinction** (S2.4 R1 C-003): `fired: [1]` + `documented_in_foundation: [1]` (active terminal gap only) + `resolved_during_loop: [4]` (audit-trail of transitional resolution); load-bearing for S2.2 gate module § 6 downstream consumption WITHOUT emitting a false condition-4 gap
+- Demonstrates the **iteration cap exercise** under condition-4 (parallel to a prior slice scrl02's PCI iteration-cap-to-scope-out, but resolving to foundation-only via operator pick rather than scope-out)
+- Demonstrates the **cross-slice mutation contract with active-vs-transitional distinction** (per a prior advisor finding): `fired: [1]` + `documented_in_foundation: [1]` (active terminal gap only) + `resolved_during_loop: [4]` (audit-trail of transitional resolution); load-bearing for a prior slice gate module § 6 downstream consumption WITHOUT emitting a false condition-4 gap
 - Demonstrates the **(c)→(b) operator path** within the loop (operator picks (c) first, then (b) at re-prompt) — different operator-agency-trajectory than scrl02 which exercised only (b)
 
 Without this fixture, the condition-4 → foundation-only path is unfixtured AND the cross-slice mutation with a multi-condition fired-list is unfixtured.

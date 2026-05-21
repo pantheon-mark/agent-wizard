@@ -18,7 +18,7 @@ expected_terminal_outcome: continued
 expected_terminal_reason: regulatory_exposure_revised_clears_conditions
 expected_fallback_mode_offered: not_offered
 notes: |
-  HIPAA halt at pre-step-05 (condition 1) → operator picks (c) → UP-6 re-asked with HIPAA-specific covered-entity disclosure → operator clarifies (de-identified aggregate statistics; not handling PHI) → `hipaa_applicable: yes → no` → condition 1 no longer fires → continue. Parallel to scrl03 (GDPR-revise) but for HIPAA. Decision A YES (S2.4 OPEN) included scrl09 as named-framework-revise coverage extension. Single loop iteration (cap not exercised). NOT a condition-4 case.
+  HIPAA halt at pre-step-05 (condition 1) → operator picks (c) → UP-6 re-asked with HIPAA-specific covered-entity disclosure → operator clarifies (de-identified aggregate statistics; not handling PHI) → `hipaa_applicable: yes → no` → condition 1 no longer fires → continue. Parallel to scrl03 (GDPR-revise) but for HIPAA. Decision A YES (a prior slice) included scrl09 as named-framework-revise coverage extension. Single loop iteration (cap not exercised). NOT a condition-4 case.
 ---
 
 # Fixture scrl09 — Condition-1 HIPAA named-framework revise-to-continue
@@ -149,11 +149,11 @@ Wizard proceeds normally to step 05 vision (not foundation-only). Foundation doc
 This fixture is the **HIPAA parallel of scrl03 (GDPR-revise)** — operator initially over-cautious on HIPAA + (c) path's covered-entity-status disclosure surfaces the precise applicability rule + operator clarifies + revision clears condition.
 
 - Demonstrates that the (c) path's load-bearing-value (operator-agency on (c) when initial UP-6 answer was over-cautious) extends to named-framework HIPAA case, not just GDPR
-- Closes S2.3 known coverage limit (partial — HIPAA-revise tested; PCI-revise still assumed; PCI-revise pattern follows same shape per § 4.2 Variant A PCI-DSS-specific examples)
-- Same `reason: operator_clarification` value as scrl03 (legitimate UP-6 revision class per S2.1 R1 C-006 framing)
+- Closes a prior slice known coverage limit (partial — HIPAA-revise tested; PCI-revise still assumed; PCI-revise pattern follows same shape per § 4.2 Variant A PCI-DSS-specific examples)
+- Same `reason: operator_clarification` value as scrl03 (legitimate UP-6 revision class per a prior advisor finding framing)
 
 Single loop iteration; cap (2) not exercised; foundation-only / scope-out paths not exercised.
 
 ## Coverage limit closed
 
-S2.3 § 10 known coverage limit "HIPAA / PCI-DSS / regulated-no-framework revise cases assumed to follow same pattern" — this fixture closes the HIPAA half. PCI-DSS-revise remains assumed (next coverage extension if surfaced as gap).
+a prior slice's relevant section known coverage limit "HIPAA / PCI-DSS / regulated-no-framework revise cases assumed to follow same pattern" — this fixture closes the HIPAA half. PCI-DSS-revise remains assumed (next coverage extension if surfaced as gap).

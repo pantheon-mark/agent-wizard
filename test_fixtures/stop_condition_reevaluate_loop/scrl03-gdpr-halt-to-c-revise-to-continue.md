@@ -129,4 +129,4 @@ This fixture exercises the **(c) regulatory-revise path's load-bearing value**: 
 
 The honest-characterization disclosure at § 4.2 is what makes this work — operator hears the GDPR-specific examples ("GDPR applies if you have EU customers"), realizes their initial answer was over-cautious, revises. Without (c), the operator would be forced through the (b) loop into foundation-only OR scope-out — losing real-system generation for a regulatory concern that doesn't actually apply.
 
-Per advisor S2.1 R1 C-006 framing: operator-driven clarification on UP-6 is a legitimate revision class (recorded as `reason: operator_clarification` per schema); the wizard is NOT pushing the operator to "say no" to escape the halt — it's surfacing the framework's actual applicability scope so the operator can answer correctly.
+Per advisor per a prior advisor finding framing: operator-driven clarification on UP-6 is a legitimate revision class (recorded as `reason: operator_clarification` per schema); the wizard is NOT pushing the operator to "say no" to escape the halt — it's surfacing the framework's actual applicability scope so the operator can answer correctly.

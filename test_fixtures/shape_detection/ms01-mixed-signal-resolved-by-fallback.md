@@ -62,6 +62,6 @@ Outcome: `confirmed`. No stop conditions; no contradicting signals from step 02-
 
 ## Discrimination note
 
-This fixture confirms hypothesis H-2 from S2.1 spec § 3: when step 01 yields MEDIUM-or-LOW confidence, step 02 fallback probes raise confidence to HIGH ≥60% of residual cases. ms01 is one positive datapoint. Real-operator-data signal on this hypothesis binds to the first operator-facing slice or E-α tester.
+This fixture confirms hypothesis H-2 from a prior slice spec § 3: when step 01 yields MEDIUM-or-LOW confidence, step 02 fallback probes raise confidence to HIGH ≥60% of residual cases. ms01 is one positive datapoint. Real-operator-data signal on this hypothesis binds to the first operator-facing slice or E-α tester.
 
 State-memory signal (Probe-5 yes) is interesting — operator wants the system to remember accumulated insights across sessions. For markdown-agents, this maps to the staging-file + agent-prompt pattern (memory in disk artifacts, not a datastore). The classifier treats this correctly — datastore-shape is rejected because the other 5 signals all align with markdown.

@@ -63,7 +63,7 @@ shape_hypothesis:
 ## Expected wizard behavior
 
 - If operator picks (a) scope-out: wizard exits cleanly with staging file preserved; `scope_out: <timestamp>` recorded
-- If operator picks (b) foundation-only: wizard proceeds with `fallback_mode_offered: foundation-only` flag set (downstream slice implements actual foundation-only behavior across steps 05-15; at S2.1, the flag is set but the behavior is NOT implemented per decision F)
+- If operator picks (b) foundation-only: wizard proceeds with `fallback_mode_offered: foundation-only` flag set (downstream slice implements actual foundation-only behavior across steps 05-15; at a prior slice, the flag is set but the behavior is NOT implemented per decision F)
 
 ## Confidence rationale
 

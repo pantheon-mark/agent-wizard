@@ -1,4 +1,4 @@
-# Foundation-only-mode fixture corpus — S2.2
+# Foundation-only-mode fixture corpus — a prior slice
 
 ## Purpose
 
@@ -6,11 +6,11 @@ Synthetic fixtures for foundation-only-mode behavior across wizard interview ste
 
 These fixtures exercise the entry-guard pattern + per-step adapted-path behavior defined at `wizard/interview/_foundation_only_mode_gate.md` + the per-step `## Foundation-only adapted path` sections of `wizard/interview/05_vision.md` through `15_close.md`.
 
-## Scope (S2.2 v0)
+## Scope (a prior slice v0)
 
-- Synthetic-fixture coverage only (`demonstrated` evidence level per `governance/methodology.md` § 3 success-criterion; NOT `validated`)
+- Synthetic-fixture coverage only (`demonstrated` evidence level per `the relevant build-side spec` § 3 success-criterion; NOT `validated`)
 - Real-operator-input validation deferred to E-α tester slice OR next operator-facing slice
-- Minimum 5 fixtures per S2.2 spec § A.8
+- Minimum 5 fixtures per a prior slice spec § A.8
 
 ## Fixture inventory
 
@@ -24,7 +24,7 @@ These fixtures exercise the entry-guard pattern + per-step adapted-path behavior
 
 ## Cross-references
 
-- S2.2 slice spec — `product_evidence/_slices/S2.2_foundation_only_mode_2026-05-19.md`
+- a prior slice spec — `the originating slice spec`
 - Gate module — `wizard/interview/_foundation_only_mode_gate.md`
-- S2.1 fixture corpus — `wizard/test_fixtures/shape_detection/` (source-shape inputs derived from these)
-- Validation evidence — `governance/validation/mech-foundation-only-mode-v0/2026-05-19_s2.2_initial_fixture_replay.md`
+- a prior slice fixture corpus — `wizard/test_fixtures/shape_detection/` (source-shape inputs derived from these)
+- Validation evidence — the relevant build-side validation evidence record

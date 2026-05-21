@@ -1,14 +1,14 @@
 # Fixture: frc01-markdown-agents-complete-mode-render
-# Class: foundation-render-contract (S2.6 Decision F § A.6)
+# Class: foundation-render-contract (a prior slice § A.6)
 # Target mechanism: mech-foundation-render-contract-v0
 # Purpose: validate 6-doc v0 bundle render in markdown-agents-on-claude-code complete mode
 #          (prd.md deferred at v0 per schema population_status; un-defer trigger = wizard supports PRD authoring)
-# Per S2.6 slice spec § A.6 fixture frc01 + § 4 success criterion item 8
+# Per a prior slice spec § A.6 fixture frc01 + § 4 success criterion item 8
 
 fixture_id: frc01-markdown-agents-complete-mode-render
 fixture_class: foundation-render-contract
 target_mechanism: mech-foundation-render-contract-v0
-generated_by_slice: S2.6
+generated_by_slice: a prior slice
 date: 2026-05-19
 
 input:

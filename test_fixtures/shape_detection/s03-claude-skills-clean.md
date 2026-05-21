@@ -83,4 +83,4 @@ Initial shape is non-markdown at HIGH confidence → unsupported-shape transitio
 
 ## Confidence rationale + v0 calibration note
 
-This fixture exercises the markdown-agents-vs-claude-skills ambiguity. The forward-offered signal is the discriminator. At v0, the classifier uses the signal as interpretive prior per S2.1 decision E. If this fixture's expected emit doesn't match actual classifier behavior during fixture replay, it's a calibration signal — first instance of forward-offered-signal-as-discriminator landing usefully.
+This fixture exercises the markdown-agents-vs-claude-skills ambiguity. The forward-offered signal is the discriminator. At v0, the classifier uses the signal as interpretive prior per a prior slice decision E. If this fixture's expected emit doesn't match actual classifier behavior during fixture replay, it's a calibration signal — first instance of forward-offered-signal-as-discriminator landing usefully.

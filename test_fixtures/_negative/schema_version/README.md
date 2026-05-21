@@ -1,8 +1,8 @@
 # Schema-version negative-test fixtures
 
-**Purpose:** verify that `tools/replay_fixtures.py`'s fail-closed schema-version check (S2.7 Decision C § A.3 + Decision H § A.8) actually FAILs on deliberately-broken fixtures. Without this exercise the fail-closed claim is theater per advisor R1 C-004.
+**Purpose:** verify that `tools/replay_fixtures.py`'s fail-closed schema-version check (a prior slice § A.3 + Decision H § A.8) actually FAILs on deliberately-broken fixtures. Without this exercise the fail-closed claim is theater per advisor an advisor finding.
 
-**Per S2.7 slice spec § A.8 Decision H** — narrow IDQ-059 fold-in. ONLY schema-version negative tests are folded into S2.7; the broader IDQ-059 cross-slice-mutation negative fixtures (stale-documented / missing-resolved-during-loop / missing-active-fired / etc.) remain deferred per IDQ-059 resolution path.
+**Per a prior slice spec § A.8 Decision H** — narrow a tracked open question fold-in. ONLY schema-version negative tests are folded into a prior slice; the broader a tracked open question cross-slice-mutation negative fixtures (stale-documented / missing-resolved-during-loop / missing-active-fired / etc.) remain deferred per a tracked open question resolution path.
 
 ## Fixtures
 
@@ -22,11 +22,11 @@ python3 tools/replay_fixtures.py --include-negative
 
 ## Discipline
 
-Per `feedback_coverage_map_fail_closed_pattern.md` (S2.6 R2-F1): validator gates referencing per-key status registries must validate keys-match-vocabulary + values-in-closed-enum + fail-closed on missing/unknown. These negative-test fixtures exercise that discipline at first-use for the schema-version fail-closed surface.
+Per `a relevant lesson record` (a prior slice R2-F1): validator gates referencing per-key status registries must validate keys-match-vocabulary + values-in-closed-enum + fail-closed on missing/unknown. These negative-test fixtures exercise that discipline at first-use for the schema-version fail-closed surface.
 
-## Out-of-scope (per S2.7 Decision H § A.8)
+## Out-of-scope (per a prior slice Decision H § A.8)
 
-The following IDQ-059 negative-test classes are NOT covered here; they remain deferred under IDQ-059:
+The following a tracked open question negative-test classes are NOT covered here; they remain deferred under a tracked open question:
 - Cross-slice mutation invariant violations (stale-documented [4, 1] for condition-4 → foundation_only paths)
 - Missing `resolved_during_loop` on condition-4 → foundation_only
 - Missing active fired-conditions list

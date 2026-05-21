@@ -14,7 +14,7 @@ expected_operator_choice_at_forced_disclosure: foundation-only
 expected_fallback_mode_offered: foundation-only
 expected_stop_conditions_mutation: {halted: false, documented_in_foundation: [1], resolved_via: stop_condition_reevaluate_loop_foundation_only}
 notes: |
-  HIPAA halt at pre-step-05 → operator picks (b) → step 02 fallback probes re-asked → operator gives same answers (project really does need to be markdown-agents) → classifier re-emits same shape → conditions still fire → operator picks (b) again → iteration 2 same trace → iteration cap reached → operator forced to choose foundation-only OR exit → picks foundation-only. Module mutates stop_conditions block per R1 C-002: rolls fired conditions into documented_in_foundation + flips halted to false + records resolved_via provenance.
+  HIPAA halt at pre-step-05 → operator picks (b) → step 02 fallback probes re-asked → operator gives same answers (project really does need to be markdown-agents) → classifier re-emits same shape → conditions still fire → operator picks (b) again → iteration 2 same trace → iteration cap reached → operator forced to choose foundation-only OR exit → picks foundation-only. Module mutates stop_conditions block per an advisor finding: rolls fired conditions into documented_in_foundation + flips halted to false + records resolved_via provenance.
 ---
 
 # Fixture scrl01 — HIPAA halt → (b) loop → foundation-only converged
@@ -115,18 +115,18 @@ shape_revision:
       classifier_re_emit: markdown-agents
       post_iteration_shape: markdown-agents
       post_iteration_fired_conditions: [1]
-      outcome: foundation_only           # producer-visible terminal outcome; CLOSED enum per R1 C-001 (forced_terminal is internal-only branch state)
+      outcome: foundation_only           # producer-visible terminal outcome; CLOSED enum per an advisor finding (forced_terminal is internal-only branch state)
       terminal_reason: iteration_cap_reached
       terminal_at: <ISO 8601>
 shape_hypothesis:
   shape: markdown-agents
   fallback_mode_offered: foundation-only
   foundation_only_offered_timestamp: <ISO 8601>
-stop_conditions:                       # MUTATED at terminal foundation_only per R1 C-002 cross-slice rule
+stop_conditions:                       # MUTATED at terminal foundation_only per an advisor finding cross-slice rule
   evaluated_at: 05_pre_vision           # preserved from original halt
   fired: [1]                            # preserved from original halt
   halted: false                         # FLIPPED true → false (loop resolved halt to foundation-only)
-  documented_in_foundation: [1]         # POPULATED from `fired` so S2.2 gate module § 6 emits HIPAA gap entry in technical_architecture.md
+  documented_in_foundation: [1]         # POPULATED from `fired` so a prior slice gate module § 6 emits HIPAA gap entry in technical_architecture.md
   resolved_via: stop_condition_reevaluate_loop_foundation_only
   halt_message: <preserved verbatim from original halt>
 schema_versions:
@@ -136,8 +136,8 @@ schema_versions:
 
 ## Expected downstream behavior
 
-Wizard proceeds to step 05. Foundation-only-mode entry guards fire per `_foundation_only_mode_gate.md` § 3. Steps 05-15 follow adapted paths per S2.2. Step 15 close produces 4-file foundation doc set + project_instructions.md (ADAPT) + manual.md (ADAPT) + next_steps.md (NEW) per `_foundation_only_mode_gate.md` § 5. DOCUMENT-path § "Regulatory & compliance gaps (foundation-only mode)" section added to `technical_architecture.md` with HIPAA gap entry, because `stop_conditions.documented_in_foundation: [1]` is populated by the loop sub-module's terminal foundation_only mutation (per R1 C-002 cross-slice rule); S2.2 gate module § 6 reads this and emits the gap entry.
+Wizard proceeds to step 05. Foundation-only-mode entry guards fire per `_foundation_only_mode_gate.md` § 3. Steps 05-15 follow adapted paths per a prior slice. Step 15 close produces 4-file foundation doc set + project_instructions.md (ADAPT) + manual.md (ADAPT) + next_steps.md (NEW) per `_foundation_only_mode_gate.md` § 5. DOCUMENT-path § "Regulatory & compliance gaps (foundation-only mode)" section added to `technical_architecture.md` with HIPAA gap entry, because `stop_conditions.documented_in_foundation: [1]` is populated by the loop sub-module's terminal foundation_only mutation (per an advisor finding cross-slice rule); a prior slice gate module § 6 reads this and emits the gap entry.
 
 ## Discrimination note
 
-This fixture exercises the **dominant v1 path**: HIPAA-fires → operator opts to loop → loop converges to foundation-only because markdown-agents can't meet HIPAA. The loop's value here is operator-agency + honest discovery: operator sees the structural mismatch (markdown-agents has audit_trail at `advisory`; HIPAA requires `enforced`) before committing to foundation-only. Honest characterization throughout (§ 2.2 disclosure + § 7 forced-terminal language). NOT silent fallback per ADR-0015 § 2.3.
+This fixture exercises the **dominant v1 path**: HIPAA-fires → operator opts to loop → loop converges to foundation-only because markdown-agents can't meet HIPAA. The loop's value here is operator-agency + honest discovery: operator sees the structural mismatch (markdown-agents has audit_trail at `advisory`; HIPAA requires `enforced`) before committing to foundation-only. Honest characterization throughout (§ 2.2 disclosure + § 7 forced-terminal language). NOT silent fallback per the relevant ADR § 2.3.

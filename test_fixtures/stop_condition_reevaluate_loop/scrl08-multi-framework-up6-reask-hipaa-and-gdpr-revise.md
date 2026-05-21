@@ -4,7 +4,7 @@ schema_version: fixture-replay-v1
 fixture_class: stop-condition-reevaluate-loop
 source_scenario: synthetic-no-direct-ancestor
 entry_path: pre_step_05_Step_2a_halt_path
-trigger_conditions: [1, 2]                    # both HIPAA + GDPR fire their respective conditions (S2.4 R2 C-006 — honest fired-list representation)
+trigger_conditions: [1, 2]                    # both HIPAA + GDPR fire their respective conditions (per a prior advisor finding — honest fired-list representation)
 primary_trigger_condition: 1                  # HIPAA fired first per condition-evaluation order; § 4.2 Variant A disclosure focuses on HIPAA per primary
 co_fired_conditions: [2]                       # GDPR-fires-condition-2 captured explicitly
 operator_choice_at_halt: (c) regulatory_exposure_revise
@@ -24,7 +24,7 @@ expected_terminal_outcome: continued
 expected_terminal_reason: regulatory_exposure_revised_clears_conditions
 expected_fallback_mode_offered: not_offered
 notes: |
-  Condition-1 halt at pre-step-05 (HIPAA + markdown-agents) with HIPAA + GDPR both active in regulatory_exposure → operator picks (c) → § 4.3 multi-field UP-6 re-ask iterates per-framework → operator revises BOTH `hipaa_applicable: yes → no` (not actually a business associate in the data flow) AND `gdpr_applicable: yes → no` (clients exited EU operations last year; thought they were still applicable) → condition 1 + condition 2 BOTH clear post-revision → continued. NOT a condition-4 case; this is the "+ UP-6 re-ask testing" half of S2.4 binding. Exercises § 4.3 step 1-3 per-framework loop with 2+ compliance-class frameworks active. Both frameworks are compliance-class (no ADR-0015 honesty gap per S2.4 R1 C-002 disposition — previously used FERPA which was insufficient-control sector-specific; restructured at R1).
+  Condition-1 halt at pre-step-05 (HIPAA + markdown-agents) with HIPAA + GDPR both active in regulatory_exposure → operator picks (c) → § 4.3 multi-field UP-6 re-ask iterates per-framework → operator revises BOTH `hipaa_applicable: yes → no` (not actually a business associate in the data flow) AND `gdpr_applicable: yes → no` (clients exited EU operations last year; thought they were still applicable) → condition 1 + condition 2 BOTH clear post-revision → continued. NOT a condition-4 case; this is the "+ UP-6 re-ask testing" half of a prior slice binding. Exercises § 4.3 step 1-3 per-framework loop with 2+ compliance-class frameworks active. Both frameworks are compliance-class (no the relevant ADR honesty gap per a prior advisor finding disposition — previously used FERPA which was insufficient-control sector-specific; restructured at R1).
 ---
 
 # Fixture scrl08 — Multi-framework UP-6 re-ask (HIPAA + GDPR both revised)
@@ -60,7 +60,7 @@ regulatory_exposure:
 
 ## Expected pre-step-05 re-check Step 2 evaluation
 
-**Both conditions 1 + 2 fire** (per `_pre_step_05_recheck.md` Step 2 condition-evaluation; S2.4 R2 C-006 honest fired-list representation):
+**Both conditions 1 + 2 fire** (per `_pre_step_05_recheck.md` Step 2 condition-evaluation; per a prior advisor finding honest fired-list representation):
 
 - Condition 1 (HIPAA): `hipaa_applicable == yes` AND `control_matrix_active.audit_trail_crud != enforced` (markdown-agents `advisory`) — FIRES.
 - Condition 2 (GDPR): `gdpr_applicable == yes` AND `control_matrix_active.access_control_authn != enforced` — FIRES.
@@ -133,7 +133,7 @@ shape_revision:
       entered_at: <ISO 8601>
       entered_from: pre_step_05
       pre_iteration_shape: markdown-agents
-      pre_iteration_fired_conditions: [1, 2]                       # both HIPAA + GDPR fire per honest fired-list representation (S2.4 R2 C-006)
+      pre_iteration_fired_conditions: [1, 2]                       # both HIPAA + GDPR fire per honest fired-list representation (per a prior advisor finding)
       primary_trigger_condition: 1                                  # disclosure-variant driver
       operator_choice: (c) regulatory_exposure_revise
       probes_re_asked: [UP-6-hipaa-applicable, UP-6-gdpr-applicable]
@@ -180,10 +180,10 @@ This fixture demonstrates the **multi-field UP-6 re-ask flow** per sub-module §
 - Demonstrates § 4.3 step 1-3 per-framework loop (not just single-framework re-ask)
 - Demonstrates `regulatory_exposure_revised[]` array correctly records per-field revisions for multiple frameworks revised in one (c) iteration
 - Demonstrates Variant A disclosure (named-framework HIPAA fired) — the firing condition determines disclosure variant; subsequent frameworks re-asked at § 4.3 step 1-3 don't trigger separate disclosures
-- Both frameworks (HIPAA + GDPR) are **compliance-class** with enforcement requirements; revising both clears conditions; no ADR-0015 honest-characterization gap
+- Both frameworks (HIPAA + GDPR) are **compliance-class** with enforcement requirements; revising both clears conditions; no the relevant ADR honest-characterization gap
 
 ## Restructuring history
 
-**S2.4 R1 C-002 disposition (2026-05-19):** original scrl08 design used HIPAA + FERPA (FERPA in `other_sector_specific[]` active). Advisor flagged: FERPA is a compliance-class sector framework with enforceable disclosure restrictions; markdown-agents has only advisory-class controls; "FERPA-applicable + markdown-agents continued" violates ADR-0015 § 2.3 honest-characterization rule (compliance-class workloads on advisory-only controls must surface as stop condition, not as terminal-continued-with-disclaimer). Restructured scrl08 to use HIPAA + GDPR (both compliance-class with named-framework fields; both revisable via (c) path). The multi-framework re-ask coverage value is preserved; the ADR-0015 gap is closed.
+**per a prior advisor finding disposition (2026-05-19):** original scrl08 design used HIPAA + FERPA (FERPA in `other_sector_specific[]` active). Advisor flagged: FERPA is a compliance-class sector framework with enforceable disclosure restrictions; markdown-agents has only advisory-class controls; "FERPA-applicable + markdown-agents continued" violates the relevant ADR § 2.3 honest-characterization rule (compliance-class workloads on advisory-only controls must surface as stop condition, not as terminal-continued-with-disclaimer). Restructured scrl08 to use HIPAA + GDPR (both compliance-class with named-framework fields; both revisable via (c) path). The multi-framework re-ask coverage value is preserved; the the relevant ADR gap is closed.
 
-**S2.4 R1 known coverage limit retained (about IDQ-056):** active FERPA / GLBA / similar compliance-class sector frameworks NOT exercised on a continuing path because v0 has no 5th stop condition for sector-specific compliance frameworks (IDQ-056). Demonstrating such a path would violate ADR-0015 § 2.3. The coverage limit is forward-looking — "this surface design is unresolved" — not "this surface is demonstrated working."
+**a prior slice R1 known coverage limit retained (about a tracked open question):** active FERPA / GLBA / similar compliance-class sector frameworks NOT exercised on a continuing path because v0 has no 5th stop condition for sector-specific compliance frameworks (a tracked open question). Demonstrating such a path would violate the relevant ADR § 2.3. The coverage limit is forward-looking — "this surface design is unresolved" — not "this surface is demonstrated working."

@@ -1,6 +1,6 @@
 # Shape-detection fixture pack
 
-**Source:** S2.1 slice spec § B (fixtures plan). Created at S2.1 implementation 2026-05-19.
+**Source:** a prior slice spec § B (fixtures plan). Created at a prior slice implementation 2026-05-19.
 **Mechanism:** `mech-shape-detection-v0` per `wizard/shape_detection.md`.
 
 ## Fixture format
@@ -44,15 +44,15 @@ notes: <one-line context>
 
 ## Replay protocol
 
-Per `governance/operational_change_safety.md` v0 § 5 validation evidence storage:
+Per `the relevant build-side spec` v0 § 5 validation evidence storage:
 
 1. Walk the classifier logic manually for each fixture
 2. Record actual emit + (if applicable) re-check outcome + (if applicable) halt outcome
 3. Compare to expected per fixture frontmatter
-4. File results at `governance/validation/mech-shape-detection-v0/<date>_<event-tag>.md`
-5. Update validation evidence index at `governance/validation/README.md`
+4. File results at the relevant build-side validation evidence record location
+5. Update validation evidence index at `the relevant build-side spec`
 
-S2.1 initial replay: `governance/validation/mech-shape-detection-v0/2026-05-19_s2.1_initial_fixture_replay.md`.
+a prior slice initial replay: the relevant build-side validation evidence record.
 
 ## Coverage limits at v0
 
@@ -60,12 +60,12 @@ S2.1 initial replay: `governance/validation/mech-shape-detection-v0/2026-05-19_s
 - 14 fixtures covers basic discrimination + each stop condition + 1 mixed-signal + 1 forward-offered
 - Multi-step re-check scenarios (where pre-step-05 confirms but pre-step-08 revises) NOT covered at v0 — bind to next operator-facing slice
 - Late-emergence stop-condition scenarios (regulatory exposure discovered at step 05-07) NOT covered at v0 — bind to next operator-facing slice
-- "Operator picks (b) foundation-only at unsupported-shape transition" path NOT exercised at v0 — bind to downstream slice that implements foundation-only-mode behavior across steps 05-15 (out of S2.1 scope per decision F)
+- "Operator picks (b) foundation-only at unsupported-shape transition" path NOT exercised at v0 — bind to downstream slice that implements foundation-only-mode behavior across steps 05-15 (out of a prior slice scope per decision F)
 - Stop-condition loop-back-to-step-02 NOT exercised at v0 — bind to downstream slice that implements the loop per decision G
 
 ## Cross-references
 
 - `wizard/shape_detection.md` — canonical spec
 - `wizard/handoff_contracts/shape_detection_v0.md` — handoff contract
-- `governance/operational_change_safety.md` v0 § 5 — validation evidence storage convention
-- `governance/validation/mech-shape-detection-v0/2026-05-19_s2.1_initial_fixture_replay.md` — first replay evidence
+- `the relevant build-side spec` v0 § 5 — validation evidence storage convention
+- the relevant build-side validation evidence record — first replay evidence

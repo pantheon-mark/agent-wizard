@@ -46,4 +46,4 @@ Identical to fom01 verbatim closing message.
 
 Same PASS / FAIL criterion as fom01 (+ fom04-style gap entry check if compliance gaps surface).
 
-**Key behavior exercised:** mixed-shape weakest-path-across-components consumption in foundation-only mode. v0 emits a single `control_matrix_active` block (weakest path); v1+ may add per-component matrix blocks per S2.1 handoff contract § 5 "What is NOT in v0." Current S2.2 implementation handles the v0 weakest-path emission correctly.
+**Key behavior exercised:** mixed-shape weakest-path-across-components consumption in foundation-only mode. v0 emits a single `control_matrix_active` block (weakest path); v1+ may add per-component matrix blocks per a prior slice handoff contract § 5 "What is NOT in v0." Current a prior slice implementation handles the v0 weakest-path emission correctly.

@@ -27,7 +27,7 @@ Source-shape inputs derived from `wizard/test_fixtures/shape_detection/sc01-hipa
 
 **HALT path (2a) fires** per `_pre_step_05_recheck.md` Step 2a — wizard says verbatim halt message + offers operator (a) save-and-exit OR (b) change-the-shape-and-re-evaluate.
 
-**Operator picks (b)** at halt recovery prompt. Per `_pre_step_05_recheck.md` Step 2a final paragraph: wizard offers operator to switch to foundation-only mode (since loop-back-to-shape-probes is out of S2.1 scope at the time `_pre_step_05_recheck.md` was authored). Operator confirms foundation-only.
+**Operator picks (b)** at halt recovery prompt. Per `_pre_step_05_recheck.md` Step 2a final paragraph: wizard offers operator to switch to foundation-only mode (since loop-back-to-shape-probes is out of a prior slice scope at the time `_pre_step_05_recheck.md` was authored). Operator confirms foundation-only.
 
 `shape_hypothesis.fallback_mode_offered` updates to `foundation-only`. Re-evaluation of conditions under foundation-only mode: per `_pre_step_05_recheck.md` Step 2b, conditions 1-3 follow DOCUMENT path (no HALT); compliance gap is recorded in staging.
 
@@ -85,4 +85,4 @@ PASS criterion: 7 files produced + § "Regulatory & compliance gaps (foundation-
 
 FAIL criterion: any of the above missed, OR the § "Regulatory & compliance gaps (foundation-only mode)" header is missing or empty.
 
-**Key behavior exercised:** DOCUMENT-path integration from `_pre_step_05_recheck.md` Step 2b feeding into `_foundation_only_mode_gate.md` § 6 at step 15 close. This is the cross-mechanism integration that S2.1 specified the contract for + S2.2 implements the consumer side.
+**Key behavior exercised:** DOCUMENT-path integration from `_pre_step_05_recheck.md` Step 2b feeding into `_foundation_only_mode_gate.md` § 6 at step 15 close. This is the cross-mechanism integration that a prior slice specified the contract for + a prior slice implements the consumer side.

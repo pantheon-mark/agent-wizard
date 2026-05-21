@@ -105,13 +105,13 @@ Wizard says halt message with condition-4-specific phrasing (per `_pre_step_05_r
        applicable: yes
      ```
    - Update `no_compliance_claim_framework_identification: unknown → no` per UP-6 source semantics at `03_user_profile.md` line 264 (`no` means "no unresolved framework-identification gap"; the framework identification clears the condition-4 trigger)
-   - Append revision entry to `shape_revision.history[1].regulatory_exposure_revised[]` with `reason: framework_identification` (per sub-module § 4.3 step 4 + S2.3 R3 C-001 / advisor lesson)
+   - Append revision entry to `shape_revision.history[1].regulatory_exposure_revised[]` with `reason: framework_identification` (per sub-module § 4.3 step 4 + per a prior advisor finding / advisor lesson)
 5. **Re-evaluate stop conditions (§ 4.4) against updated regulatory state + unchanged `control_matrix_active`:**
    - Condition 1 (HIPAA): `hipaa_applicable == no` → not fired
    - Condition 2 (GDPR): `gdpr_applicable == no` → not fired
    - Condition 3 (PCI-DSS): `pci_dss_applicable == no` → not fired
    - Condition 4: `no_compliance_claim_framework_identification == no` now → not fired
-   - The newly-identified sector-specific framework ("State Wildlife Data Reporting Standard (Advisory)") is advisory-only; does NOT enforce audit-trail / encryption / access-control. Markdown-agents `advisory` control posture (per `governance/generated_system_data_defaults.md` § 2.2 + ADR-0015 per-shape control matrix) is structurally compatible with an advisory-only sector framework.
+   - The newly-identified sector-specific framework ("State Wildlife Data Reporting Standard (Advisory)") is advisory-only; does NOT enforce audit-trail / encryption / access-control. Markdown-agents `advisory` control posture (per `the relevant build-side spec` § 2.2 + the relevant ADR per-shape control matrix) is structurally compatible with an advisory-only sector framework.
 6. **No conditions fire post-revision.** Outcome: `continued`. § 7 Terminal: continued.
 
 ## Expected § 7 Terminal: continued behavior

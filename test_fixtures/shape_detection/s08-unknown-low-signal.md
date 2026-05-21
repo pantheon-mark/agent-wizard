@@ -55,7 +55,7 @@ shape_hypothesis:
   fallback_mode_offered: not_offered
 ```
 
-**Design note (anticipated IDQ-055):** when operator emits `unknown` + `forced_recheck_at_step_05: true`, this is the "operator doesn't know shape yet" case anticipated at Stage 2 planning. IDQ-055 calls for a discovery path — interrogating the operator more deeply at this point to surface what kind of system they want. At S2.1 v0, the discovery path is NOT implemented; classifier emits `unknown` and pre-step-05 re-check re-evaluates with accumulated step 02-04 context. If signals remain insufficient at pre-step-05, the wizard may need to pause and ask operator to describe a similar existing system OR to walk through a typical day where the system would help. Real-data signal on this case binds IDQ-055 to a future slice.
+**Design note (anticipated a tracked open question):** when operator emits `unknown` + `forced_recheck_at_step_05: true`, this is the "operator doesn't know shape yet" case anticipated at Stage 2 planning. a tracked open question calls for a discovery path — interrogating the operator more deeply at this point to surface what kind of system they want. At a prior slice v0, the discovery path is NOT implemented; classifier emits `unknown` and pre-step-05 re-check re-evaluates with accumulated step 02-04 context. If signals remain insufficient at pre-step-05, the wizard may need to pause and ask operator to describe a similar existing system OR to walk through a typical day where the system would help. Real-data signal on this case binds a tracked open question to a future slice.
 
 ## Expected pre-step-05 re-check
 
@@ -63,8 +63,8 @@ shape_hypothesis:
 - Reads accumulated steps 02 (financial) + 03 (UP-1 to UP-5 + UP-6) + 04 (notifications)
 - If step 03 UP-4 (domain expertise) and UP-5 (involvement appetite) signal a single-operator markdown-agents pattern: classifier revises to `markdown-agents` with `confidence: medium`
 - If signals remain insufficient: classifier may surface to operator: "Looking at what we've discussed, I'm having trouble pinning down what shape of system to build. Can you describe a similar existing tool you've seen — or walk me through a typical day where this system would be helpful?"
-- This open-ended discovery interaction is currently AD-HOC at S2.1 (no canonical mechanism); IDQ-055 captures the gap
+- This open-ended discovery interaction is currently AD-HOC at a prior slice (no canonical mechanism); a tracked open question captures the gap
 
 ## Discrimination note
 
-This fixture exercises the LOW-confidence emit path + forced re-check at step 05. Real-operator data on this case may surface during a known-tester slice (E-α) or during the first non-self operator engagement post-S2.1.
+This fixture exercises the LOW-confidence emit path + forced re-check at step 05. Real-operator data on this case may surface during a known-tester slice (E-α) or during the first non-self operator engagement post-a prior slice.
