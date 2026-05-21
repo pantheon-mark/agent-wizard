@@ -1,0 +1,13 @@
+# Hash baseline for approach.md
+# Enforced-path drift detection mechanism for foundation bundle v0.1.
+# Regeneration rationale: initial baseline at foundation-bundle v0.1 release.
+template: approach.md
+schema_revision: v0.2
+sections_hash:
+- id: solution_brief
+  heading: Solution Brief
+  heading_hash: 5a7e8488cad8679d0300dad661a92ca8184f610b
+- id: agent_roster
+  heading: Agent Roster
+  heading_hash: f8632f44266b34fe006bfac5cc83fa51dd7e557e
+base_hash: b41716f42317d9701bce587a16454917d25dee66

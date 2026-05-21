@@ -12,6 +12,19 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-21 — foundation-bundle-v0.3.0 prerelease package
+
+**Public-facing change:** first concrete per-version foundation-bundle package activated at `wizard/foundation-bundles/v0.3.0/` with `status: prerelease` in the public registry. The package is self-contained: own `schemas/section-schema.yaml`, `templates/` (six foundation-doc `.md` files: vision, approach, technical_architecture, execution_plan, test_cases, audit_framework), `baselines/` (six per-template hash baselines), `manifest.yaml`, and `migration-manifest.yaml`. Section schema content is unchanged from the prior `v0/` schema-layer state — the package is a new layout/addressability layer over the same schema, not a schema revision.
+
+The wizard's foundation-bundle layout convention is also updated in this release: per-version package directories (`v0.3.0/`, eventually `v1.0.0/`) may exist for pre-v1 prerelease packages as well as stable v1.0.0+ releases, decoupling directory layout from v1.0.0 stability commitment. The `v0/` schema-layer canonical directory continues to track rolling schema migration history. v1.0.0 promotion remains the explicit stability-commitment trigger and is deferred until the wizard's foundation-bundle generator + generator-version-identity mechanism are wired in subsequent releases.
+
+No operator action required at this prerelease — the package is a structural prerelease ahead of the wizard's foundation-bundle generation pipeline going live. Operator projects continue to be unaffected.
+
+- Source-Meta-Commit: `<pending-close-commit>`
+- Public repo commit: `<filled-after-subtree-push>`
+
+---
+
 ## 2026-05-20 — Templates root + docs _index.md inventory updates (operator-impact minimal)
 
 **Public-facing change:** two `_index.md` template-inventory files brought current. Specifically: `wizard/templates/root/_index.md` now lists `wizard_feedback.md` (template was already in the directory; the inventory pointer was just stale); `wizard/templates/docs/_index.md` now lists `how_your_system_works.md` (same shape — template existed, inventory was stale). No template content changed; no behavior change for operators running the wizard. This release accompanies build-side standup of operating-doc template variant/readiness policy (build-side governance work; not exposed in this distribution beyond the inventory fixes named above).

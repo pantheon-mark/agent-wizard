@@ -1,0 +1,74 @@
+# Foundation bundle v0.3.0 migration manifest (target-owned per § 3 of the canonical
+# foundation-versioning specification)
+#
+# This file lives at wizard/foundation-bundles/v0.3.0/migration-manifest.yaml per § 8.3
+# per-version layout (decoupled from v1.0.0 stability commitment per § 1.3
+# layout-vs-stability decoupling).
+#
+# Target-owned discipline (§ 3.3): v0.3.0 (this release) declares what it migrates FROM
+# and how. Prior v0.x → v0.x+1 schema-layer transitions remain tracked in the rolling
+# wizard/foundation-bundles/v0/migration_manifest.yaml (schema-layer history continuity).
+#
+# Pre-v1 stabilization clause applies per § 1.3: no operator project depends on prior v0.x;
+# inventory check carry-forward from the prior 2026-05-20 release: zero v0.1 or persisted
+# v0.2 operator-project bundles found. stabilization_exemption field waives migration
+# runbook content per § 1.3; manifest YAML still ships per the canonical foundation-versioning
+# specification § 3 "every release ships migration manifest" requirement.
+
+target_version: v0.3.0
+release_date: 2026-05-21
+schema_version: v1  # this manifest's own schema version (§ 3.1)
+release_classification: first_concrete_per_version_prerelease_package
+
+migrations:
+  - from: "v0.2"  # the prior schema-layer state at wizard/foundation-bundles/v0/ (v0.2 schema_revision)
+    class: minor-additive  # per § 2.3 4-tier; new optional per-version package layout is backward-compatible — rolling v0/ continues to exist + section schema content unchanged + templates + baselines verbatim copies
+    stabilization_exemption: pre-v1-no-operator-project-dependency  # waives migration runbook content per § 1.3
+    requires_operator_approval: not_applicable  # no operator project exists at v0.x
+    preflight: not_applicable
+    rollback: not_applicable  # static-asset additive change; rollback = delete v0.3.0/ directory
+    migration_steps: not_applicable  # under stabilization clause; no runbook content authored
+    breaking_changes_summary: ""  # empty for minor-additive
+    supported: false  # no operator projects to support
+    stop_condition: |
+      No operator project depends on v0.2 (inventory check carry-forward from
+      the 2026-05-20 release: zero v0.1 or persisted v0.2 operator-project bundles found).
+      Per § 1.3 pre-v1 stabilization clause applies; no operator-project migration runbook
+      required. If a v0.2-installed operator project surfaces in future inventory check,
+      file an investigation and reinstall foundation bundle from v0.3.0 OR later release.
+    notes: |
+      First concrete per-version foundation-bundle package (2026-05-21 release).
+      Convention amendment in same atomic-change-set landed at the canonical
+      foundation-versioning specification § 1.3 + § 7 + § 8.3 + wizard/foundation-bundles/v0/README.md
+      + wizard/foundation-bundles/v0/migration_manifest.yaml comment — per-version directory
+      layout decoupled from v1.0.0 stability commitment.
+
+      Package self-contained:
+        - own schemas/section-schema.yaml (verbatim copy from v0/)
+        - own templates/ (6 .md files copied from wizard/templates/documents/)
+        - own baselines/ (6 .hash.yaml files copied from v0/baselines/; schema_revision: v0.2
+          preserved — no regeneration since templates + section schema content unchanged)
+        - own manifest.yaml + this migration-manifest.yaml
+
+      Generator-version identity NOT wired at v0.3.0 — forthcoming in subsequent release.
+      v0.3.0 manifest OMITS generator_version field with header comment noting deferral.
+
+      Forfeit of stabilization clause: first v1.0.0 tag. v0.3.0 → v0.4.0 (if any) +
+      v0.3.0 → v1.0.0 migration manifests will be authored at those release events
+      following the same target-owned per-version-package discipline.
+
+inventory_check_result:
+  date: 2026-05-21
+  scope: |
+    Carry-forward from the 2026-05-20 inventory check at wizard/foundation-bundles/v0/migration_manifest.yaml.
+    No new operator projects created between 2026-05-20 and 2026-05-21; carry-forward is sound.
+  result: zero_v0_2_or_persisted_v0_1_operator_bundles_found
+  classification_confirmed: |
+    first_concrete_per_version_prerelease_package stands; no operator-project migration debt
+    accruing silently; confirmed: no formal v1 bundle has shipped; no persisted v0.x
+    operator-project bundles exist. Pre-v1-stabilization clause active.
+
+# Future migrations append below per target-owned discipline: each target release declares
+# what it migrates FROM. Source projects do not predict future compatibility. Per-migration
+# step files (migrations/<from>-to-<target>.md) are authored at the first real migration event
+# (i.e., first persisted operator-project bundle; v0.x stabilization clause forfeit at v1.0.0).

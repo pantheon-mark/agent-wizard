@@ -1,7 +1,8 @@
-# Foundation bundle v0 directory
+# Foundation bundle v0 directory (schema-layer canonical)
 
-**Status:** v0.2 (test_cases.md shape-neutral 5-section rewrite from prior 3-section markdown-agents-locked structure; foundation-bundle-v0.2 release 2026-05-20)
+**Status:** v0.2 schema layer (test_cases.md shape-neutral 5-section rewrite from prior 3-section markdown-agents-locked structure; foundation-bundle-v0.2 release 2026-05-20). First concrete per-version package at `wizard/foundation-bundles/v0.3.0/` (status: prerelease; 2026-05-21).
 **Wizard distribution scope:** this directory ships in the public `pantheon-mark/agent-wizard` repo per the wizard distribution boundary.
+**Layout authority:** per the canonical foundation-versioning specification § 7 (directory layout) + § 1.3 layout-vs-stability decoupling — `v0/` is the schema-layer canonical directory (rolling pre-v1 schema migration); per-version packages (`v0.3.0/`, `v1.0.0/`, etc.) live as sibling directories under `wizard/foundation-bundles/`.
 
 ## What's in this directory
 
@@ -19,13 +20,16 @@
 - The build-side render-contract validator reads the YAML as the contract; it does NOT embed schema constants.
 - Drift between the build-side prose specification and `schemas/section-schema.yaml` is itself a render-contract violation.
 
-## Future expansion
+## Per-version package activation
 
-When the first wizard-driven foundation-bundle generation event fires:
+First concrete per-version package activated at `wizard/foundation-bundles/v0.3.0/` (2026-05-21; status: prerelease per registry; pre-v1 per § 1.3 layout-vs-stability decoupling). Per-version packages are self-contained: own `schemas/` + `templates/` + `baselines/` + `manifest.yaml` + `migration-manifest.yaml`. The `v0/` schema-layer canonical directory remains for rolling schema migration tracking and for any future v0.x → v0.x+1 schema-layer-only transitions.
 
-- A new directory `wizard/foundation-bundles/v1.0/` is created.
-- `migration_manifest.yaml` declares a migration class describing what is migrated from prior versions.
-- Per-migration step files are authored when the first real migration event needs them.
+When the next per-version package is created (e.g., v0.4.0 prerelease OR v1.0.0 stable):
+
+- A new directory `wizard/foundation-bundles/<full-semver>/` is created (full semver naming per § 7).
+- That package's `migration-manifest.yaml` declares the migration class describing what it migrates from (per-version target-owned discipline per § 3).
+- Per-migration step files at `migrations/<source>-to-<target>.md` are authored when the first real migration event needs them (deferred under § 1.3 pre-v1 stabilization clause where applicable).
+- v1.0.0 promotion is the **stability-commitment trigger** (forfeit of pre-v1 stabilization clause per § 1.3); F-9 generator-version-identity mechanism per ADR-0018 must be wired before v1.0.0 manifest.
 
 When new system shapes ship (per the wizard's system-shape roadmap):
 

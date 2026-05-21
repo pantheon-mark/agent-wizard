@@ -1,0 +1,19 @@
+# Hash baseline for test_cases.md
+# Enforced-path drift detection mechanism per foundation_versioning.md § 1.4 + § 4
+# Regeneration rationale: foundation-bundle-v0.2 release post-R2 thematic refactor (gemini R2 recommendation TAKE-APPLIED-AT-CLOSE): test_cases.md restructured with 4 pillars (Correctness/Reliability/Security/Operability) for universal Acceptance Criteria + 4 functional areas (Session Lifecycle/Agent Capabilities/System Coordination/Quality+Safety Guardrails) for Markdown Agent Validation Matrix; no AC row content changes; H3 -> H4 hierarchy reorganization
+template: test_cases.md
+schema_revision: v0.2
+sections_hash:
+- id: acceptance_criteria
+  heading: Acceptance Criteria
+  heading_hash: edcc04ccc0ba8beb55a17cea1f724f4d8f973d89
+- id: test_pyramid
+  heading: Test Pyramid
+  heading_hash: d5d7fa6e64c210a634437231515fc6ad5ad00974
+- id: validation_method
+  heading: Validation Method
+  heading_hash: ffade1af9a43418c6e26db1cf902f8f8a719be4d
+- id: markdown_agent_validation_matrix
+  heading: Markdown Agent Validation Matrix
+  heading_hash: 4273c4711b0836fd8fde17524713c9cd359f37c2
+base_hash: ae285c2223fed9decb2452032e34eeed0cac2134

@@ -13,11 +13,16 @@ schema_version: v0  # this manifest's schema version
 release_classification: pre_first_generated_bundle_baseline_normalization
 generated_by_release: foundation-bundle-v0.2
 
-# Interim v0.x rolling-manifest layout (foundation-bundle-v0.2 release 2026-05-20).
-# Per foundation_versioning.md § 8.3 the canonical layout uses per-version directories
-# (wizard/foundation-bundles/v1.0.0/migration-manifest.yaml etc.). At v0.x pre-stabilization,
-# this single rolling manifest at v0/ covers all v0.x → v0.x+1 transitions until first
-# v1.0.0 tag activates the per-version directory layout.
+# v0/ rolling-manifest layout (foundation-bundle-v0.2 release 2026-05-20; per-version layout
+# activated at v0.3.0 2026-05-21).
+# Per foundation_versioning.md § 7 + § 1.3 layout-vs-stability decoupling: per-version packages
+# (v0.3.0/, v1.0.0/, etc.) carry their own per-version migration-manifest.yaml under target-owned
+# discipline (§ 3). This v0/ rolling manifest covers the schema-layer pre-v0.3.0 history
+# (pre_release → v0.1 → v0.2 schema-layer transitions captured below). Going forward, schema-layer
+# transitions (if any) continue to be tracked here for the rolling v0/ layer; bundle releases
+# (per-version packages like v0.3.0) carry their own manifest at <version>/migration-manifest.yaml.
+# v1.0.0 promotion is the stability-commitment trigger (forfeit of pre-v1 stabilization clause
+# per § 1.3); the v0/ rolling layer is preserved for schema-history continuity.
 
 migrations:
   - from: "pre_release"
