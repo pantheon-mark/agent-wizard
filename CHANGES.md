@@ -12,6 +12,26 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-22 — foundation-bundle generator pipeline + first internal generation event
+
+**Public-facing change:** the wizard distribution now includes a foundation-bundle generator pipeline. A new library at `wizard/scripts/lib/generator.py` and a new CLI at `wizard/scripts/generate_bundle.py` together emit an operator-project bundle from a source foundation bundle plus a set of operator inputs supplied as JSON. The first internal generation event used the existing `v0.3.0` prerelease bundle as the source and synthetic placeholder inputs; the run produced seven foundation documents (`vision.md`, `prd.md` as a schema-only stub, `approach.md`, `execution_plan.md`, `technical_architecture.md`, `test_cases.md`, `audit_framework.md`) plus an operator manifest at `.wizard/manifest.yaml` carrying the foundation-bundle version, the source bundle's published commit, and the wizard generator code identity at emission time.
+
+**Honest characterization.** This release is an INTERNAL first-fire milestone. The synthetic inputs do not represent a real operator system, and this release does not constitute operator-fit validation, known-tester recruitment, or a stability commitment. v1.0.0 promotion remains deferred until interview-driven generation and additional shape support (markdown agents, other system shapes) land in subsequent releases.
+
+**Operator-facing notes:**
+
+- The generator is stdlib-only — no Python package installation is required on the operator side to run it.
+- The generator emits its operator manifest as deterministic text with a tight field set: `foundation_bundle_version`, `source_commit`, `generator_version`, and a per-file `files:` map carrying `managed:` / `base_hash:` / `current_hash_last_seen:` / `local_modifications:` / `merge_strategy:` per file. Package-side fields stay in the foundation-bundle's own `manifest.yaml`; the operator manifest is deliberately disjoint so downstream validators can detect operator vs. package context unambiguously.
+- The wizard generator code identity is recorded automatically at generation time. The generator refuses to emit when the wizard build state is not clean, so the recorded identity always points to a published wizard state. A `--permissive-dirty` flag exists for development use and should not be used to produce v1.0.0+ bundles.
+- The `prd.md` template ships as a schema-only stub at this prerelease: the operator authors content for the four canonical sections (Vision Link, Persona / JTBD, Functional Requirements, Non-Functional Requirements) per the section schema shipped at `wizard/foundation-bundles/v0.3.0/schemas/section-schema.yaml`. A full `prd.md` template is deferred to a future release when interview-driven PRD authoring lands.
+
+No operator action required at this release. Operator projects produced via earlier paths continue to be unaffected.
+
+- Source-Meta-Commit: `<filled at slice close>`
+- Public repo commit: `<filled at slice close after subtree push>`
+
+---
+
 ## 2026-05-21 — foundation-bundle-v0.3.0 prerelease package
 
 **Public-facing change:** first concrete per-version foundation-bundle package activated at `wizard/foundation-bundles/v0.3.0/` with `status: prerelease` in the public registry. The package is self-contained: own `schemas/section-schema.yaml`, `templates/` (six foundation-doc `.md` files: vision, approach, technical_architecture, execution_plan, test_cases, audit_framework), `baselines/` (six per-template hash baselines), `manifest.yaml`, and `migration-manifest.yaml`. Section schema content is unchanged from the prior `v0/` schema-layer state — the package is a new layout/addressability layer over the same schema, not a schema revision.
