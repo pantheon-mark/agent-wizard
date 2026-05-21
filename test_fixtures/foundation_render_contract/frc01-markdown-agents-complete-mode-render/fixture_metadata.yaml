@@ -47,12 +47,15 @@ expected_outcome:
       sections_skipped: [deployment_pipeline]
       notes: "All markdown-agents + universal sections render; deployment_pipeline deferred"
     test_cases.md:
-      sections_present: [test_triggers, test_coverage_requirements, agent_specific_tests]
-      sections_skipped: []
+      sections_present: [acceptance_criteria, test_pyramid, validation_method, markdown_agent_validation_matrix]
+      sections_skipped: [requirements_anchor]
       notes: |
-        coverage_by_shape.markdown-agents-on-claude-code: populated; all sections render in complete mode
-        for markdown-agents shape. For non-markdown shapes, validator would FAIL per Decision A § A.1
-        hard downstream gate (coverage_by_shape: blocked_pending_replacement).
+        Updated at foundation-bundle-v0.2 release 2026-05-20 per the-relevant-slice-decision
+        § A.4 target structure. requirements_anchor is source: schema_only + population_status:
+        deferred (un-defer trigger: wizard supports PRD authoring + prd.md populated for shape)
+        so it does NOT render at v0.2; the 4 sections that render are acceptance_criteria +
+        test_pyramid + validation_method + markdown_agent_validation_matrix for markdown-agents-
+        on-claude-code in complete mode. coverage_by_shape.markdown-agents-on-claude-code: populated.
     audit_framework.md:
       sections_present: [security_audits, log_audits, architecture_audits, drift_audits]
       sections_skipped: []
@@ -64,8 +67,9 @@ coverage_intent:
   - "Validates render_modes: [complete] filter correctly suppresses foundation_only-only sections"
   - "Validates population_status: deferred sections correctly suppressed"
   - "Validates test_cases coverage_by_shape: populated correctly renders test_cases for markdown-agents"
+  - "Validates post-foundation-bundle-v0.2 5-section test_cases structure (4 universal + 1 markdown extension) for markdown-agents shape"
 
 known_coverage_limits:
-  - "Does not exercise non-markdown shape complete-mode (those are blocked_pending_replacement for test_cases.md)"
   - "Does not exercise actual template content rendering — schema-level emission set verification only"
   - "Does not exercise foundation_only render mode — frc02 covers that"
+  - "Does not exercise non-markdown complete-mode — frc03 covers that (post-foundation-bundle-v0.2 release frc03 flipped to positive class)"

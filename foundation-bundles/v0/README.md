@@ -1,16 +1,16 @@
 # Foundation bundle v0 directory
 
-**Status:** v0.1 (additive minor extension to v0 baseline)
+**Status:** v0.2 (test_cases.md shape-neutral 5-section rewrite from prior 3-section markdown-agents-locked structure; foundation-bundle-v0.2 release 2026-05-20)
 **Wizard distribution scope:** this directory ships in the public `pantheon-mark/agent-wizard` repo per the wizard distribution boundary.
 
 ## What's in this directory
 
 | Path | Purpose | Released at |
 |---|---|---|
-| `schemas/section-schema.yaml` | Canonical machine-readable section schema for all 7 foundation-doc-types; v0.1 with shape-extension fields | foundation-bundle v0.1 |
-| `migration_manifest.yaml` | Target-owned migration manifest stub; pre-first-generated-bundle baseline normalization classification | foundation-bundle v0.1 |
-| `baselines/<template>.hash.yaml` | Per-template hash baselines for enforced-path drift detection | foundation-bundle v0.1 |
-| `README.md` | This file | foundation-bundle v0.1 |
+| `schemas/section-schema.yaml` | Canonical machine-readable section schema for all 7 foundation-doc-types; v0.2 with shape-extension fields + shape-neutral test_cases entry | foundation-bundle v0.2 |
+| `migration_manifest.yaml` | Target-owned migration manifest; tracks v0.x rolling pre-stabilization transitions per foundation_versioning.md § 1.3 | foundation-bundle v0.2 |
+| `baselines/<template>.hash.yaml` | Per-template hash baselines for enforced-path drift detection (all 6 templates at schema_revision: v0.2) | foundation-bundle v0.2 |
+| `README.md` | This file | foundation-bundle v0.2 |
 
 ## Schema authority discipline
 

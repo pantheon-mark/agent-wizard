@@ -2,7 +2,7 @@
 # Enforced-path drift detection mechanism for foundation bundle v0.1.
 # Regeneration rationale: initial baseline at foundation-bundle v0.1 release.
 template: audit_framework.md
-schema_revision: v0.1
+schema_revision: v0.2
 sections_hash:
 - id: security_audits
   heading: Security Audits

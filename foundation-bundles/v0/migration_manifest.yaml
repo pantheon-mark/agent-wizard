@@ -7,15 +7,22 @@
 # formal bundle release exists yet. The manifest is authored anyway as target-owned-discipline
 # practice ahead of the first wizard-driven foundation-bundle generation event.
 
-target_version: v0.1
-release_date: 2026-05-19
+target_version: v0.2
+release_date: 2026-05-20
 schema_version: v0  # this manifest's schema version
 release_classification: pre_first_generated_bundle_baseline_normalization
-generated_by_release: foundation-bundle-v0.1
+generated_by_release: foundation-bundle-v0.2
+
+# Interim v0.x rolling-manifest layout (foundation-bundle-v0.2 release 2026-05-20).
+# Per foundation_versioning.md § 8.3 the canonical layout uses per-version directories
+# (wizard/foundation-bundles/v1.0.0/migration-manifest.yaml etc.). At v0.x pre-stabilization,
+# this single rolling manifest at v0/ covers all v0.x → v0.x+1 transitions until first
+# v1.0.0 tag activates the per-version directory layout.
 
 migrations:
   - from: "pre_release"
-    class: pre-release-normalization  # custom class outside the standard 4-tier
+    class: minor-additive  # standard 4-tier per foundation_versioning.md § 2.3; v0 → v0.1 added optional shape-extension fields without removing required sections
+    stabilization_exemption: pre-v1-no-operator-project-dependency  # waives migration runbook content per foundation_versioning.md § 1.3 pre-v1 stabilization clause; manifest YAML still ships per ADR-0017 § 3
     requires_operator_approval: false
     preflight: not_required
     rollback: not_applicable
@@ -27,22 +34,55 @@ migrations:
       no operator-project migration required at this release. Manifest entry authored as
       target-owned-discipline practice ahead of the first wizard-driven foundation-bundle
       generation event.
+  - from: "v0.1"
+    class: major-breaking  # standard 4-tier per foundation_versioning.md § 2.3; required-section changes are major-breaking by structural definition
+    stabilization_exemption: pre-v1-no-operator-project-dependency  # waives migration runbook content per foundation_versioning.md § 1.3 pre-v1 stabilization clause; manifest YAML still ships per ADR-0017 § 3
+    supported: false
+    requires_operator_approval: not_applicable
+    preflight: not_applicable
+    rollback: not_applicable
+    migration_steps: not_applicable
+    breaking_changes_summary: |
+      test_cases.md schema rewritten from 3-section markdown-agents-locked structure
+      (test_triggers / test_coverage_requirements / agent_specific_tests) to 5-section
+      shape-neutral structure (requirements_anchor / acceptance_criteria / test_pyramid /
+      validation_method / markdown_agent_validation_matrix). All 5 shapes now coverage_by_shape:
+      populated. Validator hardcoded foundation_schema_version updated v0.1 → v0.2 at
+      tools/validate_foundation_render_contract.py:410.
+    stop_condition: |
+      No operator project depends on v0.1 (inventory check 2026-05-20 confirms zero v0.1
+      bundles persisted; only synthetic fixtures + the foundation-bundle-v0.1 release proof
+      bundle reference v0.1; both internal). Pre-v1 stabilization clause applies
+      (foundation_versioning.md § 1.3 amendment 2026-05-20). Direct upgrade path not authored
+      at the foundation-bundle-v0.2 release; v0.1 → v0.2 transition is a breaking-class schema
+      change but no operator-project migration runbook required under the stabilization clause.
+      If a v0.1-installed operator project surfaces in future inventory check, file an
+      investigation and reinstall foundation bundle from v0.2.
+    notes: |
+      Manifest entry reconciles the relevant slice decision packet § A.5 with ADR-0017 § 3
+      "every release ships migration manifest" requirement. Manifest YAML ships (this entry);
+      full migration runbook content not authored (no operator project requires it). Forfeit
+      of stabilization clause: first v1.0.0 tag.
 
 inventory_check_result:
-  date: 2026-05-19
+  date: 2026-05-20  # rolled forward at foundation-bundle-v0.2 release
   scope: |
     Inventory check across known operator-project locations and wizard distribution paths
     looking for foundation_schema_version frontmatter OR .wizard/manifest.yaml files OR
-    foundation bundle artifacts indicating a v1 generated bundle.
+    foundation bundle artifacts indicating a v0.1 OR v1 generated bundle.
   locations_checked:
     - wizard distribution copy
     - build-time templates directory (not generated bundles)
     - local project areas containing potential wizard-generated projects
-  result: zero_v1_bundles_found
+    - foundation-bundle-v0.1 release proof bundle (internal; not an operator project)
+    - synthetic fixture _synthetic_bundle (internal; not an operator project)
+  result: zero_v1_or_persisted_v0.1_bundles_found
   classification_confirmed: |
     pre_first_generated_bundle_baseline_normalization stands; no operator-project migration
-    debt accruing silently; confirmed: no formal v1 bundle has shipped.
+    debt accruing silently; confirmed: no formal v1 bundle has shipped; no persisted v0.1
+    operator-project bundles exist. Pre-v1-stabilization clause active.
 
 # Future migrations append below per target-owned discipline: each target release declares
 # what it migrates FROM. Source projects do not predict future compatibility. Per-migration
-# step files (migrations/<from>-to-<target>.md) are authored at the first real migration event.
+# step files (migrations/<from>-to-<target>.md) are authored at the first real migration event
+# (i.e., first persisted operator-project bundle; v0.x stabilization clause forfeit at v1.0.0).

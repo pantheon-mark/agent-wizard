@@ -2,7 +2,7 @@
 # Enforced-path drift detection mechanism for foundation bundle v0.1.
 # Regeneration rationale: regulatory & compliance gaps section added per foundation-only-mode integration (2026-05-19).
 template: technical_architecture.md
-schema_revision: v0.1
+schema_revision: v0.2
 sections_hash:
 - id: orchestration_model
   heading: Orchestration Model

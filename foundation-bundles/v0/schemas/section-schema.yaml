@@ -1,5 +1,10 @@
-# Foundation bundle v0.1 section schema
+# Foundation bundle v0.2 section schema
 # Canonical machine-readable instance for foundation-doc-type section schemas + shape-extension metadata.
+# v0.1 → v0.2 transition at the foundation-bundle-v0.2 release 2026-05-20: test_cases entry rewritten
+# from 3-section markdown-agents-locked structure (test_triggers / test_coverage_requirements /
+# agent_specific_tests) to 5-section shape-neutral structure (requirements_anchor / acceptance_criteria
+# / test_pyramid / validation_method / markdown_agent_validation_matrix). Pre-v1 stabilization clause
+# applies per foundation_versioning.md § 1.3.
 #
 # Schema discipline:
 # - This YAML is the canonical machine-readable instance for section schemas.
@@ -21,11 +26,11 @@
 #   undefer_trigger: prose (required when population_status != populated)
 #   source: template | runtime | schema_only           # distinguishes template-backed vs runtime-generated vs forward-declared sections
 
-section_schema_version: v0.1
-schema_authority: foundation-versioning-section-schema-v0.1
-governance_prose_section_1_4_hash: a450615ff0a6334643f0546781e082b00b08ccd0  # drift detection; bump explicitly when the canonical prose changes
-generated_by_release: foundation-bundle-v0.1
-generated_date: 2026-05-19
+section_schema_version: v0.2
+schema_authority: foundation-versioning-section-schema-v0.2
+governance_prose_section_1_4_hash: b67aadb1f1a47f6d64e7b25cbcd3f812a6e01e4a  # bumped at the foundation-bundle-v0.2 release via `validate_foundation_render_contract.py regenerate-prose-hash --rationale ...`
+generated_by_release: foundation-bundle-v0.2
+generated_date: 2026-05-20
 shape_vocabulary:
   - markdown-agents-on-claude-code
   - python-service
@@ -265,44 +270,65 @@ section_schema:
         source: schema_only
 
   # ============================================================
-  # test_cases.md — entirely markdown-agent-locked; replacement deferred
+  # test_cases.md — shape-neutral universal 4-section + markdown shape extension
+  # Replaced at foundation-bundle-v0.2 release 2026-05-20 (v0.1 → v0.2)
   # ============================================================
   test_cases:
     coverage_by_shape:
       markdown-agents-on-claude-code: populated
-      python-service: blocked_pending_replacement
-      node-ui: blocked_pending_replacement
-      hosted-cloud: blocked_pending_replacement
-      mixed: blocked_pending_replacement
-    foundation_only_render: SKIP  # foundation-only mode skips test_cases rendering
-    non_markdown_blocked_render_gate: "Render-contract validator FAILs full non-markdown bundle generation while ANY shape has coverage_by_shape: blocked_pending_replacement; enforced via validate-render-request subcommand."
-    undefer_trigger_for_replacement: "Future wizard release rewrites test_cases content per shape-aware testing approach."
+      python-service: populated
+      node-ui: populated
+      hosted-cloud: populated
+      mixed: populated
+    foundation_only_render: SKIP  # foundation-only mode skips test_cases rendering (preserved per the prior relevant slice decision on foundation-only bundle composition)
+    non_markdown_blocked_render_gate: "Render-contract validator FAILs full non-markdown bundle generation if ANY shape has coverage_by_shape: blocked_pending_replacement; gate is preserved in validator code per AT-11 and fires for any future shape added without populating coverage. At v0.2 all 5 known shapes are populated so the gate does not fire by default; the gate is fail-closed structural defense, not an active block."
     sections:
-      - id: test_triggers
-        title: Test Triggers
-        required: true
-        applies_to_shapes: [markdown-agents-on-claude-code]
-        render_modes: [complete]
-        operator_visible: true
-        population_status: populated
-        source: template
-      - id: test_coverage_requirements
-        title: Test Coverage Requirements
-        required: true
-        applies_to_shapes: [markdown-agents-on-claude-code]
-        render_modes: [complete]
-        operator_visible: true
-        population_status: populated
-        source: template
-        notes: "Contains 32 categorized test sub-sections (H/E/Q/A/M/T/L/N/S/V/C/D/AC/G/EN/W/MT/F/P/B/SC/WZ/R/O/REV/ID/FI/SCE/VS); 637-line markdown-agent test inventory."
-      - id: agent_specific_tests
-        title: Agent-Specific Tests
+      - id: requirements_anchor
+        title: Requirements Anchor
         required: false
-        applies_to_shapes: [markdown-agents-on-claude-code]
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: deferred
+        undefer_trigger: "Wizard interview supports PRD authoring and prd.md is populated for the operator's shape (currently deferred per prd entry source: schema_only at v0.x)"
+        source: schema_only
+        notes: "Operator's reference back to PRD functional/non-functional requirements + JTBD entries. Section is deferred at v0.2 because prd.md is source: schema_only (also deferred); requirements_anchor un-defers and becomes template-backed when prd authoring lands. Matches existing pattern: deferred + schema_only = schema-declaration only; NOT rendered in template."
+      - id: acceptance_criteria
+        title: Acceptance Criteria
+        required: true
+        applies_to: [all]
         render_modes: [complete]
         operator_visible: true
         population_status: populated
         source: template
+        notes: "Universal acceptance criteria across all shapes. Houses universal-concern test categories from prior 29-category disposition (E error handling concepts; L HITL universal; V validation discipline; C security/secrets; P PII redaction; SC scale monitoring; ID idempotency for external integrations; A-1..A-5 + A-30 + A-37..A-40 permission/atomicity/checkpoint/retry/idempotency; T completion + document-currency + vision-alignment; F-2..F-5 + F-9 + F-19 universal cost controls; Q-9..Q-23 security audit triggers + thresholds + quarantine; N alert routing + severity; B blast radius + scope declaration)."
+      - id: test_pyramid
+        title: Test Pyramid
+        required: false
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+        notes: "Layer distribution (unit / integration / e2e or shape-equivalent) chosen by operator per shape + risk profile."
+      - id: validation_method
+        title: Validation Method
+        required: true  # tightened per the-relevant-slice-decision review: every bundle should have a validation method even if minimal
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+        notes: "Concrete validation tooling per layer; cost-aware; chosen per deployment + observability surface. Minimum: how each acceptance criterion is verified (manual / scripted / automated)."
+      - id: markdown_agent_validation_matrix
+        title: Markdown Agent Validation Matrix
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]  # NOT applied to mixed per slice R1 F-5; mixed shape requires component-level metadata at future slice
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+        notes: "Houses markdown-agents-on-claude-code-shape-specific test categories from prior disposition: H handoff/coordination, A-6..A-52 agent identity/permissions (excluding universal sub-concepts), M MCP resilience, S session startup, D document update mechanism, AC auto-correct, G git/version control, R rationale propagation, O operational self-analysis, REV model-as-reviewer reviews, FI future items register, SCE session close enforcement, VS voice/style; plus shape-specific subsets from mixed categories (Q-1..Q-8 QA-agent specific; EN-18..EN-19 manual.md; MT-3..MT-11 agent prompts + scripts tier names; F-6..F-8 + F-10..F-26 markdown-specific cost/budget impl; A-row-level markdown-specific subset)."
 
   # ============================================================
   # audit_framework.md — Security + Drift universal; Log + Architecture shape-specific

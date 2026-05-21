@@ -1,6 +1,6 @@
 ---
 foundation_doc_type: audit_framework
-foundation_schema_version: v0.1
+foundation_schema_version: v0.2
 wizard_version_compatible: "{{WIZARD_VERSION}}"
 managed_by: wizard
 system_shape: "{{SYSTEM_SHAPE}}"

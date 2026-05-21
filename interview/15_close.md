@@ -158,7 +158,7 @@ This file is required by Addition 7 (session close enforcement). The orchestrato
 | `wizard/templates/documents/approach.md` | `approach.md` | Already written to disk during step 06; verify it exists, do not overwrite |
 | `wizard/templates/documents/technical_architecture.md` | `technical_architecture.md` | ARCH-1–5, SCALE-4, CRED registry, model tier mapping |
 | `wizard/templates/documents/execution_plan.md` | `execution_plan.md` | Vision goals, ARCH orchestration model, agent roster, build phases |
-| `wizard/templates/documents/test_cases.md` | `test_cases.md` | Accumulator 6 entries; agent-specific tests added during build |
+| `wizard/templates/documents/test_cases.md` | `test_cases.md` | Validation criteria for the system (5-section shape-neutral structure: requirements anchor + acceptance criteria + test pyramid + validation method + markdown-shape extension); agent-specific tests added during build |
 | `wizard/templates/documents/audit_framework.md` | `audit_framework.md` | DRIFT-1 cadence, architectural review settings |
 
 **Note on vision.md and approach.md:** These documents are written to disk during their respective interview steps (05 and 06). Do not regenerate them from templates — verify they exist on disk and are intact. If either is missing (should not happen), regenerate from staging file answers using the template.

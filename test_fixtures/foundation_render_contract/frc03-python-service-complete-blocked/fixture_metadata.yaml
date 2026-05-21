@@ -1,16 +1,32 @@
-# Fixture: frc03-python-service-complete-blocked (NEGATIVE-class)
-# Class: foundation-render-contract (S2.6 Decision F § A.6 + R1 F1 disposition 2026-05-19)
+# Fixture: frc03-python-service-complete-blocked (POSITIVE-class post-foundation-bundle-v0.2 release)
+# Class: foundation-render-contract
 # Target mechanism: mech-foundation-render-contract-v0
-# Purpose: validate Decision A § A.1 hard downstream gate FAILs non-markdown complete-mode generation
-#          while test_cases.md has coverage_by_shape: blocked_pending_replacement
-# Per S2.6 spec § A.1 + R1 F1 advisor disposition
+# Purpose: validate the hard downstream gate does NOT fire for python-service post-foundation-bundle-v0.2
+#          release (coverage_by_shape: populated for all 5 shapes post-test_cases.md replacement);
+#          python-service complete-mode now renders successfully with 4 universal test_cases sections.
+#
+# Post-foundation-bundle-v0.2 release transition (2026-05-20): test_cases.md replacement landed per
+# the-relevant-slice-decision § A.4; all 5 shapes in coverage_by_shape are now `populated`; the hard
+# downstream gate (which previously FAILed this fixture as a negative-class test) no longer fires for
+# python-service. Fixture flipped from NEGATIVE to POSITIVE class.
+#
+# The fail-closed gate behavior (gate fires for any shape with coverage_by_shape: blocked_pending_replacement)
+# is preserved in validator code at tools/validate_foundation_render_contract.py; it does not currently
+# fire for any of the 5 known shapes (all populated post-foundation-bundle-v0.2 release) but would fire
+# if a future shape were added without populating coverage_by_shape. Per the-relevant-slice-decision
+# acceptance test on coverage-map fail-closed enforcement: future negative-class fixture candidate
+# verifies this property when warranted.
 
-fixture_id: frc03-python-service-complete-blocked
+fixture_id: frc03-python-service-complete-blocked  # filename preserved for git history; subclass flipped
 fixture_class: foundation-render-contract
-fixture_subclass: negative
+fixture_subclass: positive  # FLIPPED from `negative` at the foundation-bundle-v0.2 release 2026-05-20
 target_mechanism: mech-foundation-render-contract-v0
-generated_by_slice: S2.6
-date: 2026-05-19
+generated_by_slice: foundation-bundle-v0.1
+post_v0_2_update_date: 2026-05-20
+post_v0_2_update_rationale: |
+  test_cases.md replacement landed at the foundation-bundle-v0.2 release per the-relevant-slice-decision
+  § A.4; coverage_by_shape for python-service flipped from blocked_pending_replacement to populated;
+  gate no longer fires; fixture flipped to positive class verifying successful render.
 
 input:
   system_shape: python-service
@@ -18,27 +34,66 @@ input:
   foundation_only_mode: false
 
 expected_outcome:
-  expected_result: fail
-  expected_failure_marker: "blocked_pending_replacement"
-  expected_failure_class: "non-markdown complete-mode generation gated"
-  expected_failure_action_clue: "S2.X 'test_cases replacement investigation' slice"
-  description: |
-    Validator's validate_render_request(system_shape=python-service, render_mode=complete) MUST FAIL
-    with a clear error message naming:
-    (a) the blocked shape (python-service)
-    (b) the gate cause (test_cases.coverage_by_shape: blocked_pending_replacement)
-    (c) the resolution path (S2.X test_cases replacement investigation slice)
-    Validator's structural guard is the load-bearing defense — without this gate, a future
-    non-markdown shape full-bundle generation could ship a 637-line markdown-agent-locked
-    test_cases.md to a python-service operator, producing wrong validation guidance.
+  expected_result: pass  # FLIPPED from `fail` at the foundation-bundle-v0.2 release
+  bundle_docs_emitted:
+    - vision.md           # universal sections render
+    - approach.md         # solution_brief universal; component_roster deferred
+    - technical_architecture.md  # integrations + scale_tier universal; markdown sections SKIP; deployment_topology + data_model deferred
+    - execution_plan.md   # mvp_definition + sprint_planning universal; markdown-specific sections SKIP; deployment_pipeline deferred
+    - test_cases.md       # NEW post-foundation-bundle-v0.2 release: 4 universal sections render; markdown_agent_validation_matrix SKIP
+    - audit_framework.md  # security_audits + drift_audits universal; log_audits + architecture_audits markdown-specific SKIP
+  bundle_docs_skipped:
+    - prd.md  # deferred until wizard supports PRD authoring
+  per_doc_sections:
+    test_cases.md:
+      sections_present:
+        - acceptance_criteria  # applies_to: [all]
+        - test_pyramid         # applies_to: [all]
+        - validation_method    # applies_to: [all]
+      sections_skipped:
+        - requirements_anchor              # source: schema_only + population_status: deferred at v0.2; does not render in any shape
+        - markdown_agent_validation_matrix  # applies_to_shapes: [markdown-agents-on-claude-code] only
+      notes: |
+        Post-foundation-bundle-v0.2 release test_cases structure: 3 universal sections render for
+        python-service shape in complete mode (acceptance_criteria + test_pyramid + validation_method);
+        requirements_anchor is source: schema_only + population_status: deferred (un-defer trigger:
+        wizard supports PRD authoring + prd.md populated for shape) so it does NOT render at v0.2;
+        markdown_agent_validation_matrix is markdown-agents-on-claude-code-shape-specific extension
+        so SKIP for python-service. Acceptance criteria content is shape-neutral.
 
 coverage_intent:
-  - "Validates Decision A § A.1 hard downstream gate enforcement (R1 F1 disposition)"
-  - "Validates validate_render_request CLI subcommand correctly FAILs on (python-service, complete)"
-  - "Validates error message contains actionable resolution path"
-  - "Negative-class fixture exercises the gate condition; positive-class fixtures (frc01, frc02) exercise normal render paths"
+  - "Validates post-foundation-bundle-v0.2 python-service complete-mode render NO LONGER FAILS the downstream gate"
+  - "Validates python-service receives 4 universal test_cases sections post-replacement"
+  - "Validates markdown_agent_validation_matrix correctly skipped for non-markdown shape"
+  - "Validates the foundation-bundle-v0.2 replacement unblocks the first_generated_bundle_event hard gate for non-markdown shapes"
+
+# Per the-relevant-slice-decision acceptance test on multi-shape realistic-content rendering: this
+# fixture is the schema-level structural check for python-service; the acceptance criteria content
+# realism is verified at template review (the foundation-bundle-v0.2 template lands realistic universal
+# content; not stub-only).
+realistic_content_check:
+  shape: python-service
+  acceptance_criteria_realism: |
+    The 4 universal sections in the post-foundation-bundle-v0.2 release template ship realistic
+    acceptance criteria content applicable to python-service shape (e.g., error handling concepts
+    apply to a Python service identically; input validation discipline applies; secrets discipline
+    applies; PII redaction applies; scale monitoring applies; idempotency applies; permission
+    boundaries + atomicity apply). No markdown-specific implementation details leak into universal
+    sections per the relevant acceptance tests on extraction verification + stale-reference cleanup.
 
 known_coverage_limits:
-  - "Only python-service shape tested; other deferred shapes (node-ui, hosted-cloud, mixed) would FAIL identically by structural symmetry but not explicitly fixture-tested at v0"
-  - "Foundation-only render mode is NOT gated by test_cases coverage (foundation_only_render: SKIP per S2.2 Decision G); fixture only exercises the complete-mode gate"
-  - "Gate is enforced at validator surface; runtime wizard logic must call the gate (E-β-firing slice or sequel)"
+  - "Schema-level emission set verification only; does not exercise actual template content rendering per shape"
+  - "python-service complete-mode is the canonical non-markdown coverage check; other deferred shapes (node-ui, hosted-cloud, mixed) covered by structural symmetry (all 5 shapes in shape_vocabulary; markdown_agent_validation_matrix applies only to markdown-agents-on-claude-code)"
+  - "The gate-fires-for-future-shape-without-coverage property is verified in validator code, not currently exercised by a negative-class fixture; future fixture candidate if warranted"
+
+# Historical note: pre-foundation-bundle-v0.2 release this fixture was NEGATIVE-class testing the gate
+# FIRES on python-service while test_cases.md.coverage_by_shape.python-service was blocked_pending_replacement.
+# The foundation-bundle-v0.2 release landed the replacement; gate no longer fires by default; fixture
+# flipped to POSITIVE.
+historical_negative_class_at_foundation_bundle_v0_1:
+  pre_v0_2_classification: negative
+  pre_v0_2_expected_result: fail
+  pre_v0_2_expected_failure_marker: "blocked_pending_replacement"
+  pre_v0_2_expected_failure_class: "non-markdown complete-mode generation gated"
+  pre_v0_2_expected_failure_action_clue: "test_cases replacement investigation slice"
+  v0_2_resolution: "Replacement landed; coverage_by_shape.python-service: populated; gate condition no longer fires; fixture flipped to positive."
