@@ -20,7 +20,7 @@ The wizard's foundation-bundle layout convention is also updated in this release
 
 No operator action required at this prerelease — the package is a structural prerelease ahead of the wizard's foundation-bundle generation pipeline going live. Operator projects continue to be unaffected.
 
-- Source-Meta-Commit: `<pending-close-commit>`
+- Source-Meta-Commit: `15757c5`
 - Public repo commit: `<filled-after-subtree-push>`
 
 ---

@@ -25,7 +25,7 @@ foundation_bundle_version: v0.3.0
 foundation_schema_version: v0.2
 agent_contract_version: v0-pre-rebuild  # see honesty note above
 release_date: 2026-05-21
-source_commit: <pending-close-commit>  # filled at release-close per atomic-change-set discipline
+source_commit: 15757c5  # filled at release-close per atomic-change-set discipline
 status: prerelease  # see wizard/registry/foundation-bundles.json entry for v0.3.0
 
 included_templates:

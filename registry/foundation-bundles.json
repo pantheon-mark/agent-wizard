@@ -5,7 +5,7 @@
       "foundation_bundle_version": "v0.3.0",
       "path": "wizard/foundation-bundles/v0.3.0/",
       "release_date": "2026-05-21",
-      "source_commit": "<pending-close-commit>",
+      "source_commit": "15757c5",
       "manifest": "wizard/foundation-bundles/v0.3.0/manifest.yaml",
       "status": "prerelease"
     }
