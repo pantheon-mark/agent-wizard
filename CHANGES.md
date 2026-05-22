@@ -12,6 +12,25 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-22 — foundation-bundle generator first real-operator generation event (structural anonymization)
+
+**Public-facing change:** the wizard distribution exercises the foundation-bundle generator pipeline against real-operator content for the first time. The release ships no code changes to the generator itself (the pipeline is unchanged from the prior `2026-05-22` internal first-generation event); what changes is the addition of a durable real-operator-content fixture under the wizard's test directory, exercising the same generator against operator answers from an actual real-world project rather than synthetic placeholders.
+
+**Honest characterization.** This is a real-operator-content first-capture milestone, NOT operator-fit validation, NOT arms-length operator review, and NOT a stability commitment for v1.0.0 promotion. The operator for this capture is the wizard's primary author (operator role and build-session lead role collapse in this release); arms-length operator validation remains forthcoming.
+
+**Privacy discipline.** All identifying entities in the real-operator content (entity identifiers across multiple categories — people, organizations, accounts, dates, amounts, locations, contact information) are captured using STABLE PLACEHOLDER LABELS rather than real values. The committed fixture preserves the operator content's STRUCTURAL SHAPE (scope / agents / orchestration / autonomy / phases) verbatim while keeping all third-party identifying information out of the distributed artifact. A real-label-to-placeholder mapping file lives on the operator's local disk outside any distributed repository. Operators using the wizard for sensitive content can adopt the same structural-anonymization discipline.
+
+**Operator-facing notes:**
+
+- The same generator pipeline (`wizard/scripts/generate_bundle.py` + `wizard/scripts/lib/generator.py`) is exercised; no version bump, no API change.
+- The wizard's `wizard-proposes-user-confirms` operating principle (per `wizard/CLAUDE.md` rule 5) is exercised at both the derivation surface (operator answers → Claude proposes derived content → operator confirms/adjusts) and the review surface (operator reviews generated documents → Claude proposes per-document verdict + surprises → operator confirms/adjusts). Both surfaces are bootstrap-grade (Claude-facilitated, ad-hoc); designed-mechanism implementation of the interview surface is forthcoming in a later release.
+- No operator action required at this release. Operator projects produced via earlier paths continue to be unaffected.
+
+- Source-Meta-Commit: `<TBD at Commit A landing>`
+- Public repo commit: `<TBD post-subtree-push>`
+
+---
+
 ## 2026-05-22 — foundation-bundle generator pipeline + first internal generation event
 
 **Public-facing change:** the wizard distribution now includes a foundation-bundle generator pipeline. A new library at `wizard/scripts/lib/generator.py` and a new CLI at `wizard/scripts/generate_bundle.py` together emit an operator-project bundle from a source foundation bundle plus a set of operator inputs supplied as JSON. The first internal generation event used the existing `v0.3.0` prerelease bundle as the source and synthetic placeholder inputs; the run produced seven foundation documents (`vision.md`, `prd.md` as a schema-only stub, `approach.md`, `execution_plan.md`, `technical_architecture.md`, `test_cases.md`, `audit_framework.md`) plus an operator manifest at `.wizard/manifest.yaml` carrying the foundation-bundle version, the source bundle's published commit, and the wizard generator code identity at emission time.
