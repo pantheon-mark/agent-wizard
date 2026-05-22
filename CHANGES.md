@@ -28,7 +28,7 @@ Entries appear newest-first.
 No operator action required at this release. Operator projects produced via earlier paths continue to be unaffected.
 
 - Source-Meta-Commit: `c37067f`
-- Public repo commit: `<filled after subtree push>`
+- Public repo commit: `6de09d7`
 
 ---
 
