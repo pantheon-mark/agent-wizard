@@ -26,7 +26,7 @@ Entries appear newest-first.
 - The wizard's `wizard-proposes-user-confirms` operating principle (per `wizard/CLAUDE.md` rule 5) is exercised at both the derivation surface (operator answers → Claude proposes derived content → operator confirms/adjusts) and the review surface (operator reviews generated documents → Claude proposes per-document verdict + surprises → operator confirms/adjusts). Both surfaces are bootstrap-grade (Claude-facilitated, ad-hoc); designed-mechanism implementation of the interview surface is forthcoming in a later release.
 - No operator action required at this release. Operator projects produced via earlier paths continue to be unaffected.
 
-- Source-Meta-Commit: `<TBD at Commit A landing>`
+- Source-Meta-Commit: `ca22c00`
 - Public repo commit: `<TBD post-subtree-push>`
 
 ---
