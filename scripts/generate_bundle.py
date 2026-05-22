@@ -37,13 +37,21 @@ if str(_SCRIPTS_LIB) not in sys.path:
 from generator import generate_bundle, GeneratorError  # noqa: E402
 
 
+class _UsageError(Exception):
+    """Raised by helpers when a usage-level precondition fails. Caught by main()
+    and surfaced as exit code 2 per the documented contract."""
+
+
 def _detect_build_repo_root(start: Path) -> Path:
-    """Walk up from start until finding a directory containing .git."""
+    """Walk up from start until finding a directory containing .git.
+
+    Raises _UsageError (caught by main() → exit 2) if no .git ancestor is found.
+    """
     for candidate in [start] + list(start.parents):
         if (candidate / ".git").exists():
             return candidate
-    raise SystemExit(
-        f"ERROR: cannot locate .git ancestor of {start}; pass --build-repo-root explicitly"
+    raise _UsageError(
+        f"cannot locate .git ancestor of {start}; pass --build-repo-root explicitly"
     )
 
 
@@ -89,10 +97,14 @@ def main() -> int:
     args = parser.parse_args()
 
     # Resolve build-repo root.
-    if args.build_repo_root is None:
-        build_repo_root = _detect_build_repo_root(Path(__file__).resolve())
-    else:
-        build_repo_root = args.build_repo_root.resolve()
+    try:
+        if args.build_repo_root is None:
+            build_repo_root = _detect_build_repo_root(Path(__file__).resolve())
+        else:
+            build_repo_root = args.build_repo_root.resolve()
+    except _UsageError as exc:
+        sys.stderr.write(f"ERROR: {exc}\n")
+        return 2
 
     # Read and parse inputs.json (stdlib).
     if not args.inputs.exists():

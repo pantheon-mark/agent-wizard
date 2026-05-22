@@ -54,7 +54,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, NamedTuple, Optional
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 
 # ============================================================================
@@ -114,11 +114,17 @@ def _resolve_source_bundle(
             f"foundation-bundles registry not found at {registry_path}"
         )
     try:
-        registry = json.loads(registry_path.read_text())
+        registry_text = registry_path.read_text()
+    except OSError as exc:
+        raise GeneratorError(
+            f"cannot read foundation-bundles registry at {registry_path}: {exc}"
+        ) from exc
+    try:
+        registry = json.loads(registry_text)
     except json.JSONDecodeError as exc:
         raise GeneratorError(
             f"foundation-bundles registry at {registry_path} is not valid JSON: {exc}"
-        )
+        ) from exc
     bundles = registry.get("bundles", [])
     for entry in bundles:
         if entry.get("foundation_bundle_version") == source_version:
@@ -135,9 +141,16 @@ def _read_required_foundation_docs(
 ) -> List[Dict[str, str]]:
     """Read required_foundation_docs ordering from the hash-baseline JSON contract.
 
-    Returns the list verbatim; downstream code uses it to (a) determine which
-    files to emit, (b) order the operator manifest's files map, (c) populate
-    per-file managed_by / local_modifications / merge_strategy.
+    Delegates to manifest_contract.load_manifest_contract() — the validated
+    loader enforces contract id/version, required fields, duplicate paths,
+    enum validity, and manifest-field shape (8 fail-closed validation gates).
+    This preserves Path A delegation: generator does NOT re-implement
+    contract validation; it consumes the loader's verdict.
+
+    Returns the required_foundation_docs list verbatim; downstream code uses
+    it to (a) determine which files to emit, (b) order the operator manifest's
+    files map, (c) populate per-file managed_by / local_modifications /
+    merge_strategy.
     """
     contract_path = (
         build_repo_root
@@ -147,23 +160,20 @@ def _read_required_foundation_docs(
         / "contracts"
         / "foundation-manifest-hash-baseline-v1.json"
     )
-    if not contract_path.exists():
-        raise GeneratorError(
-            f"foundation-manifest-hash-baseline contract not found at {contract_path}"
-        )
+    # Import lazily to keep the module-level surface tight and avoid sys.path
+    # gymnastics at import time (generator.py and manifest_contract.py are
+    # siblings under wizard/scripts/lib/).
+    from manifest_contract import (  # type: ignore
+        ManifestContractError,
+        load_manifest_contract,
+    )
     try:
-        contract = json.loads(contract_path.read_text())
-    except json.JSONDecodeError as exc:
+        contract = load_manifest_contract(contract_path)
+    except ManifestContractError as exc:
         raise GeneratorError(
-            f"hash-baseline contract at {contract_path} is not valid JSON: {exc}"
-        )
-    required = contract.get("required_foundation_docs")
-    if not isinstance(required, list) or not required:
-        raise GeneratorError(
-            f"hash-baseline contract at {contract_path} missing or empty "
-            "required_foundation_docs field"
-        )
-    return required
+            f"hash-baseline contract at {contract_path} failed validation: {exc}"
+        ) from exc
+    return contract["required_foundation_docs"]
 
 
 # ============================================================================
@@ -174,7 +184,7 @@ def _substitute_placeholders(
     content: str,
     inputs: Dict[str, str],
     template_name: str,
-) -> str:
+) -> "Tuple[str, set]":
     """Substitute {{KEY}} placeholders in content using inputs dict.
 
     - Fail-fast on missing keys (raises GeneratorError naming the template
@@ -182,8 +192,8 @@ def _substitute_placeholders(
     - Substitutions are not rescanned (no recursion).
     - Strict placeholder pattern: uppercase + underscores only.
 
-    Does NOT enforce all-inputs-used; the caller can warn about unused keys
-    after collecting substituted-key sets.
+    Returns (result, seen_keys) so the caller can aggregate seen-keys across
+    templates and warn about inputs that no template referenced.
     """
     missing: List[str] = []
     seen: set = set()
@@ -210,7 +220,7 @@ def _substitute_placeholders(
             f"template {template_name!r} references undefined placeholder(s): "
             f"{unique_missing}"
         )
-    return result
+    return result, seen
 
 
 # ============================================================================
@@ -388,6 +398,7 @@ def generate_bundle(
     # 4. Generate foundation docs (6 from templates + 1 prd.md stub).
     paths_written: List[Path] = []
     files_map_entries: List[Dict[str, str]] = []
+    all_seen_keys: set = set()
 
     foundation_dir = target_dir / "foundation"
     foundation_dir.mkdir(parents=True, exist_ok=True)
@@ -411,13 +422,24 @@ def generate_bundle(
                 raise GeneratorError(
                     f"required template not found in source bundle: {template_path}"
                 )
-            template_content = template_path.read_text()
-            content = _substitute_placeholders(
+            try:
+                template_content = template_path.read_text()
+            except OSError as exc:
+                raise GeneratorError(
+                    f"cannot read template {template_path}: {exc}"
+                ) from exc
+            content, seen_keys = _substitute_placeholders(
                 template_content, inputs, template_name=doc_name
             )
+            all_seen_keys.update(seen_keys)
 
         out_path = target_dir / rel_path
-        out_path.write_text(content)
+        try:
+            out_path.write_text(content)
+        except OSError as exc:
+            raise GeneratorError(
+                f"cannot write foundation doc {out_path}: {exc}"
+            ) from exc
         paths_written.append(out_path)
 
         # Compute per-file hash.
@@ -443,8 +465,30 @@ def generate_bundle(
     wizard_dir = target_dir / ".wizard"
     wizard_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = wizard_dir / "manifest.yaml"
-    manifest_path.write_text(manifest_text)
+    try:
+        manifest_path.write_text(manifest_text)
+    except OSError as exc:
+        raise GeneratorError(
+            f"cannot write operator manifest {manifest_path}: {exc}"
+        ) from exc
     paths_written.append(manifest_path)
+
+    # 6. Warn (stderr) on operator-input keys that no template referenced.
+    # Substituted values are not rescanned, so unused keys are silent waste —
+    # often a sign of typos in the inputs file. Underscore-prefixed keys
+    # (e.g., "_comment", "_provenance") are documentation, skip those.
+    unused_keys = sorted(
+        k
+        for k in inputs
+        if k not in all_seen_keys
+        and not k.startswith("_")
+        and k != "WIZARD_VERSION"  # consumed by prd.md stub frontmatter, not via template substitution
+    )
+    if unused_keys:
+        sys.stderr.write(
+            f"WARNING: {len(unused_keys)} input key(s) not referenced by any template "
+            f"(possible typos or stale inputs): {unused_keys}\n"
+        )
 
     return GenerationResult(
         success=True,

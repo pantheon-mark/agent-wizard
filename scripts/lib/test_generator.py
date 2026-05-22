@@ -118,7 +118,36 @@ def _write_contract(
     build_repo_root: Path,
     required_docs: list,
 ) -> None:
-    contract = {"required_foundation_docs": required_docs}
+    # Build a contract that passes manifest_contract.load_manifest_contract()'s
+    # 8 validation gates — the generator delegates to that loader per Path A.
+    contract = {
+        "contract_id": "foundation-manifest-hash-baseline",
+        "contract_version": "manifest-v1",
+        "schema_authorities": [
+            "foundation_bundle_public_api.required_foundation_docs",
+            "foundation_manifest_hash_baseline.file_fields",
+            "foundation_manifest_hash_baseline.merge_strategy_enum",
+        ],
+        "description": "test-fixture contract for wizard.scripts.lib.test_generator",
+        "required_foundation_docs": required_docs,
+        "manifest_file_fields": [
+            "managed",
+            "base_hash",
+            "current_hash_last_seen",
+            "local_modifications",
+            "merge_strategy",
+        ],
+        "enums": {
+            "managed_by": ["shared", "operator", "wizard"],
+            "local_modifications": ["expected", "allowed", "not_recommended"],
+            "merge_strategy": [
+                "three_way",
+                "operator_review",
+                "warn_on_drift",
+                "frozen",
+            ],
+        },
+    }
     (
         build_repo_root
         / "wizard"
@@ -149,8 +178,9 @@ class TestSubstitution(unittest.TestCase):
     def test_substitute_basic(self):
         content = "Hello {{NAME}}, welcome to {{PROJECT}}."
         inputs = {"NAME": "Alice", "PROJECT": "Wizard"}
-        result = _substitute_placeholders(content, inputs, "test.md")
+        result, seen = _substitute_placeholders(content, inputs, "test.md")
         self.assertEqual(result, "Hello Alice, welcome to Wizard.")
+        self.assertEqual(seen, {"NAME", "PROJECT"})
 
     def test_substitute_failfast_on_missing(self):
         content = "Hello {{NAME}}, project {{PROJECT}} owes {{OWED_VALUE}}."
@@ -166,15 +196,23 @@ class TestSubstitution(unittest.TestCase):
         # lowercase keys must NOT match (matches the strict pattern).
         content = "lowercase {{name}} should not match; UPPER {{NAME}} does."
         inputs = {"NAME": "Yes"}
-        result = _substitute_placeholders(content, inputs, "test.md")
+        result, _seen = _substitute_placeholders(content, inputs, "test.md")
         self.assertEqual(result, "lowercase {{name}} should not match; UPPER Yes does.")
 
     def test_substitute_no_recursion(self):
         # Substituted value itself contains a {{KEY}} which should NOT be expanded.
         content = "outer {{KEY}}"
         inputs = {"KEY": "literal {{NESTED}}"}
-        result = _substitute_placeholders(content, inputs, "test.md")
+        result, _seen = _substitute_placeholders(content, inputs, "test.md")
         self.assertEqual(result, "outer literal {{NESTED}}")
+
+    def test_substitute_returns_seen_keys(self):
+        # Returned seen-set lets the caller detect unused inputs.
+        content = "only {{USED_KEY}} here"
+        inputs = {"USED_KEY": "x", "UNUSED_KEY": "y"}
+        result, seen = _substitute_placeholders(content, inputs, "test.md")
+        self.assertEqual(result, "only x here")
+        self.assertEqual(seen, {"USED_KEY"})  # UNUSED_KEY NOT in seen-set
 
     def test_substitute_pattern_matches_test_corpus(self):
         # Sanity: pattern matches the actual {{KEY}} shapes used across templates.

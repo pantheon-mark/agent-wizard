@@ -27,8 +27,8 @@ Entries appear newest-first.
 
 No operator action required at this release. Operator projects produced via earlier paths continue to be unaffected.
 
-- Source-Meta-Commit: `<filled at slice close>`
-- Public repo commit: `<filled at slice close after subtree push>`
+- Source-Meta-Commit: `c37067f`
+- Public repo commit: `<filled after subtree push>`
 
 ---
 
