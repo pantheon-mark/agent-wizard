@@ -27,7 +27,7 @@ Entries appear newest-first.
 - No operator action required at this release. Operator projects produced via earlier paths continue to be unaffected.
 
 - Source-Meta-Commit: `ca22c00`
-- Public repo commit: `<TBD post-subtree-push>`
+- Public repo commit: `5f2fe67`
 
 ---
 
