@@ -25,7 +25,7 @@ Entries appear newest-first.
 - No version bump (the templates remain part of the `v0.3.0` prerelease bundle); no generator or schema change.
 
 - Source-Meta-Commit: `a6f00c5`
-- Public repo commit: _(filled after subtree push)_
+- Public repo commit: `b6c28d4`
 
 ---
 
