@@ -12,6 +12,23 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-26 — foundation-bundle templates: lifecycle + maintenance completeness
+
+**Public-facing change:** two of the `v0.3.0` foundation-bundle templates gain more complete coverage of system-lifecycle and maintenance topics, surfaced while walking a real-operator-generated bundle. No code, schema, manifest, or placeholder-key changes — template prose only; generated bundles continue to render from the same keys.
+
+- **Audit-framework template:** the autonomy framing is generalized so it applies across every autonomy level rather than implying only a subset is defined; a new **Rules library** section consolidates rule definitions already used elsewhere in the wizard; and a new **System lifecycle** section adds **Maintenance** and **Upgrades** subsections so an operator-facing bundle documents how the system is kept healthy and how it is upgraded over time.
+- **Test-cases template:** an introductory note now makes explicit that some test cases reference mechanisms defined in the broader foundation documents (not all mechanisms are defined inside the test file itself), and a new **Test maintenance** section covers how the test suite is maintained and evolved as the system changes.
+
+**Operator-facing notes:**
+
+- No operator action required. These are template-content improvements; operator projects generated from earlier template states are unaffected unless regenerated.
+- No version bump (the templates remain part of the `v0.3.0` prerelease bundle); no generator or schema change.
+
+- Source-Meta-Commit: `a6f00c5`
+- Public repo commit: _(filled after subtree push)_
+
+---
+
 ## 2026-05-22 — foundation-bundle generator first real-operator generation event (structural anonymization)
 
 **Public-facing change:** the wizard distribution exercises the foundation-bundle generator pipeline against real-operator content for the first time. The release ships no code changes to the generator itself (the pipeline is unchanged from the prior `2026-05-22` internal first-generation event); what changes is the addition of a durable real-operator-content fixture under the wizard's test directory, exercising the same generator against operator answers from an actual real-world project rather than synthetic placeholders.
