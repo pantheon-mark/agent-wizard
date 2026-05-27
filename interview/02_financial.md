@@ -296,7 +296,7 @@ Do not ask the operator anything. Apply the classifier per `wizard/shape_detecti
 
 1. Re-tally strong-positive and strong-negative signals per shape using all 8 probe values
 2. Recompute confidence (HIGH / MEDIUM / LOW)
-3. Emit final hypothesis (per advisor R2 C-008 + C-009 + C-010 dispositions: include status:emitted + schema_versions + handoff_phase + mixed_component_basis):
+3. Emit final hypothesis (include status:emitted + schema_versions + handoff_phase + mixed_component_basis):
 
 ```yaml
 ## Shape detection
@@ -342,7 +342,7 @@ Write sub-step marker: Append `step_02_P02-FB-5: complete | <timestamp>` to `~/c
 
 ## P02-FB-6 — Unsupported-shape transition (CONDITIONAL; fires only when step 02 final emit is HIGH-or-MEDIUM-confidence non-markdown)
 
-**Trigger condition (per advisor R1 C-003 + R2 C-008 dispositions — comply with the relevant product spec section honest-disclosure-at-step-02 mandate; trigger uses unambiguous field combination):**
+**Trigger condition (comply with the relevant product spec section honest-disclosure-at-step-02 mandate; trigger uses unambiguous field combination):**
 
 - `shape_hypothesis.status == emitted` (P02-FB-5 wrote the field for finalized step-02 emit) AND `shape_hypothesis.detected_at_step == 02` AND `shape_hypothesis.v1_supported == false` AND `shape_hypothesis.confidence in [high, medium]`
 

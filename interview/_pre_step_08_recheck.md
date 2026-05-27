@@ -195,7 +195,7 @@ Handle (a) and (b) per pre-step-05 § 5 logic. The late-revision-at-architecture
 
 ## Step 6 — Completion
 
-**Per advisor R2 C-009 disposition: update `handoff_phase` to `pre_step_08_evaluated`** in the staging file so downstream consumers know the final lifecycle phase is satisfied. Locate the existing line (currently `handoff_phase: pre_step_05_evaluated`) and rewrite to:
+**Update `handoff_phase` to `pre_step_08_evaluated`** in the staging file so downstream consumers know the final lifecycle phase is satisfied. Locate the existing line (currently `handoff_phase: pre_step_05_evaluated`) and rewrite to:
 
 ```yaml
 handoff_phase: pre_step_08_evaluated

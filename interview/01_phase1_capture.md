@@ -219,7 +219,7 @@ Do not ask the operator anything in this sub-step. Apply the classifier per `wiz
 3. If confidence is HIGH: emit shape hypothesis NOW (write `## Shape detection` section to staging file with `detected_at_step: 01`)
 4. If confidence is MEDIUM or LOW: defer emit; the staging file gets a placeholder entry `shape_hypothesis.status: pending_step_02_fallback`; fallback probes 5-8 fire at end of step 02
 
-**Emit format** (HIGH-confidence case at step 01 — append to staging file after `## Captured answers` section). Per advisor R2 C-008 + C-009 dispositions, finalized emits MUST include `schema_versions`, `handoff_phase`, AND `shape_hypothesis.status: emitted`:
+**Emit format** (HIGH-confidence case at step 01 — append to staging file after `## Captured answers` section). Finalized emits MUST include `schema_versions`, `handoff_phase`, AND `shape_hypothesis.status: emitted`:
 
 ```yaml
 ## Shape detection
@@ -251,7 +251,7 @@ shape_hypothesis:
   probe_7_operator_confirm: not_asked
   probe_8_document_output: not_asked
   forward_offered_signals_at_step_01: <list of verbatim phrases captured at P1-2 scan; may be empty list>
-  mixed_component_basis: <empty list unless shape == mixed; per advisor R2 C-010; if shape == mixed, list constituent component shapes detected>
+  mixed_component_basis: <empty list unless shape == mixed; if shape == mixed, list constituent component shapes detected>
   fallback_mode_offered: not_offered
   emit_timestamp: <ISO 8601 timestamp>
   recheck_log: []
@@ -289,7 +289,7 @@ Write sub-step marker: Append `step_01_P1-8: complete | <timestamp>` to `~/claud
 
 ## P1-9 — Unsupported-shape transition (CONDITIONAL; fires only when classifier emits HIGH-confidence non-markdown at step 01)
 
-**Trigger condition (per advisor R1 C-003 + R2 C-008 dispositions — comply with the relevant product spec section honest-disclosure-at-step-02-or-earlier mandate; trigger uses unambiguous field combination):**
+**Trigger condition (comply with the relevant product spec section honest-disclosure-at-step-02-or-earlier mandate; trigger uses unambiguous field combination):**
 
 - `shape_hypothesis.status == emitted` (P1-8 wrote the field for HIGH-confidence finalized emit) AND `shape_hypothesis.detected_at_step == 01` AND `shape_hypothesis.v1_supported == false` AND `shape_hypothesis.confidence == high`
 

@@ -44,7 +44,7 @@ Read these in order:
 
 ---
 
-## Step 2 — Stop-condition evaluation (CAPABILITY-BASED per advisor R1 C-002 disposition; HALT-vs-DOCUMENT split per advisor R1 C-003 disposition)
+## Step 2 — Stop-condition evaluation (CAPABILITY-BASED; HALT-vs-DOCUMENT split)
 
 Evaluate the 4 stop conditions from `wizard/shape_detection.md` § 8.3 against shape **capabilities** (the `control_matrix_active` block) rather than shape labels. This handles `mixed` shapes correctly and is robust to future shape additions.
 
@@ -58,7 +58,7 @@ Evaluate the 4 stop conditions from `wizard/shape_detection.md` § 8.3 against s
 
 **Condition 4 (regulated + no framework):** `regulatory_exposure.no_compliance_claim == no` AND `regulatory_exposure.no_compliance_claim_framework_identification == unknown`
 
-(Per advisor R1 C-001 disposition 2026-05-19: the prior framework-applicable-yes-required predicate was internally inconsistent — if a specific framework were `applicable: yes`, framework identification would NOT be `unknown` per UP-6 source semantics at `03_user_profile.md` line 243. The corrected predicate uses `no_compliance_claim == no` to mean "operator marked at least one regulated bucket at UP-6.1" — combined with framework_identification `unknown` this matches the canonical case UP-6 line 243 specifies as the condition-4 trigger.)
+(The prior framework-applicable-yes-required predicate was internally inconsistent — if a specific framework were `applicable: yes`, framework identification would NOT be `unknown` per UP-6 source semantics at `03_user_profile.md` line 243. The corrected predicate uses `no_compliance_claim == no` to mean "operator marked at least one regulated bucket at UP-6.1" — combined with framework_identification `unknown` this matches the canonical case UP-6 line 243 specifies as the condition-4 trigger.)
 
 **Outcome path branches on `shape_hypothesis.fallback_mode_offered`:**
 
@@ -105,7 +105,7 @@ Then say:
 
 Loop sub-module runs iteration + classifier re-emit + stop-condition re-evaluation; returns control with `outcome` set in `shape_revision.history[<last>].outcome`. The outcome enum is CLOSED to 4 producer-visible values (per `_stop_condition_reevaluate_loop.md` § 1 output contract; `forced_terminal` is internal-only branch state, NEVER producer-visible). Act per outcome:
 - `continued` → proceed to Step 3 (re-check trigger evaluation)
-- `foundation_only` → wizard's `shape_hypothesis.fallback_mode_offered` is already set to `foundation-only` by the module (with `stop_conditions` mutated per R1 C-002 cross-slice rule: `halted: false`, `documented_in_foundation` populated, `resolved_via: stop_condition_reevaluate_loop_foundation_only`); foundation-only-mode behavior fires at step 05 entry guard per `_foundation_only_mode_gate.md`; proceed to step 05
+- `foundation_only` → wizard's `shape_hypothesis.fallback_mode_offered` is already set to `foundation-only` by the module (with `stop_conditions` mutated per the cross-slice mutation rule: `halted: false`, `documented_in_foundation` populated, `resolved_via: stop_condition_reevaluate_loop_foundation_only`); foundation-only-mode behavior fires at step 05 entry guard per `_foundation_only_mode_gate.md`; proceed to step 05
 - `scope_out` → wizard's `shape_hypothesis.fallback_mode_offered` is already set to `scope-out` by the module; exit cleanly per Terminal: scope_out handling
 - `next_iteration` → re-offer (a)/(b)/(c) at this Step 2a; operator's next pick (or (a) save-and-exit) re-invokes the module
 
@@ -288,7 +288,7 @@ Proceed to step 05 (with foundation-only flag set; downstream slices will branch
 
 Once Step 2 (stop-condition check), Step 3 (re-check trigger evaluation), Step 4 (re-check resolution if triggered), and Step 5 (unsupported-shape transition if triggered) are complete:
 
-**Per advisor R2 C-009 disposition: update `handoff_phase` to `pre_step_05_evaluated`** in the staging file so downstream consumers (notably pre-step-08 re-check and the eventual rebuild slices) know the pre-step-05 lifecycle phase is satisfied. Locate the existing line (currently `handoff_phase: regulatory_exposure_populated`) and rewrite to:
+**Update `handoff_phase` to `pre_step_05_evaluated`** in the staging file so downstream consumers (notably pre-step-08 re-check and the eventual rebuild slices) know the pre-step-05 lifecycle phase is satisfied. Locate the existing line (currently `handoff_phase: regulatory_exposure_populated`) and rewrite to:
 
 ```yaml
 handoff_phase: pre_step_05_evaluated

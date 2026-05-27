@@ -244,7 +244,7 @@ If operator says "I know it's regulated but I don't know which framework": store
 
 ### UP-6.3 — Final emit
 
-After UP-6.1 + UP-6.2 complete, write the full `## Regulatory exposure` section to staging file. **Per advisor R2 C-009 disposition: also update `handoff_phase` from `provisional_shape_emit` to `regulatory_exposure_populated`** so downstream consumers know the regulatory data is now available.
+After UP-6.1 + UP-6.2 complete, write the full `## Regulatory exposure` section to staging file. **Also update `handoff_phase` from `provisional_shape_emit` to `regulatory_exposure_populated`** so downstream consumers know the regulatory data is now available.
 
 Example for an operator who marked #1 (health) + #6 (sector-specific):
 

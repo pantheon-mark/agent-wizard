@@ -29,7 +29,7 @@ If the entry guard fires AND the label is missing from staging file, that is a w
 - The originating slice spec (build-side; not distributed) is the design provenance for this module.
 - `wizard/shape_detection.md` § 6 — unsupported-shape transition (sets `fallback_mode_offered`)
 - the relevant product spec section + § 4.4 — operator-facing contract
-- ADR-0015 § 2.3 — honest characterization rule (FD-W4-D1)
+- the honest-characterization rule
 
 ---
 
@@ -37,7 +37,7 @@ If the entry guard fires AND the label is missing from staging file, that is a w
 
 Foundation-only-mode behavior gates on a **mode profile** — four fields that are a **deterministic projection** of the single `shape_hypothesis.fallback_mode_offered` enum label. They are NOT independent capabilities (unlike `control_matrix_active` capability fields in the shape detection contract, which are independent per shape × control combination). They are NOT persisted to the staging file at v0; per-step entry guards re-derive from the label at use.
 
-*(Naming honesty per advisor R1 C-006 disposition: this is centralized mode projection, not a peer of capability contracts. The projection earns its keep ONLY through (a) version-checking the handoff contract before reading the label, AND (b) being transition-order-safe in step 05 + step 08 where pre-step re-checks can mutate the label.)*
+*(Naming honesty: this is centralized mode projection, not a peer of capability contracts. The projection earns its keep ONLY through (a) version-checking the handoff contract before reading the label, AND (b) being transition-order-safe in step 05 + step 08 where pre-step re-checks can mutate the label.)*
 
 | Mode profile field | Type | Meaning |
 |---|---|---|
@@ -116,7 +116,7 @@ Each step file has two behavior paths after the entry guard:
 
 ## Section 4 — Honest-characterization disclosure rules
 
-Per FD-W4-D1 (ADR-0015 § 2.3) + § A.5 + spec § A.9.
+Per the honest-characterization rule.
 
 **When `honest_characterization_disclosure == foundation_only`:**
 
@@ -245,13 +245,13 @@ primary_mechanism: this gate module (derived mode-profile schema + label-to-mode
 reinforcing_mechanisms:
   - shape_hypothesis.fallback_mode_offered label in staging file (set at unsupported-shape transition per wizard/shape_detection.md § 6) — persisted source-of-truth for derivation
   - wizard/handoff_contracts/shape_detection_v0.md § 8 cross-reference to this module
-  - Derived mode-profile gating per the prior retrospective lesson record, applied with R1 C-006 framing correction (centralized projection of the single enum label, NOT a peer of control-matrix capability contracts; extends cleanly to new enum values)
-  - Honest-characterization rule (ADR-0015 § 2.3) — disclosure surfaces at step 15 close + project_instructions.md + next_steps.md
+  - Derived mode-profile gating per the prior retrospective lesson record, applied with the framing correction (centralized projection of the single enum label, NOT a peer of control-matrix capability contracts; extends cleanly to new enum values)
+  - Honest-characterization rule — disclosure surfaces at step 15 close + project_instructions.md + next_steps.md
 detection_recovery_mechanisms:
   - Per-step entry-guard internal-state-error halt (when fallback_mode_offered missing OR scope-out reaches steps 05-15; foundation state preserved)
   - Stop-condition DOCUMENT-path integration (compliance gaps surfaced honestly in foundation docs rather than silenced)
   - Operator-resume optionality preserved via `capture_implementation_inputs: true` + staging file preservation (contract specified § A.10 Decision D; concrete resume tooling deferred)
-rationale: Foundation-only mode is a behavior-shape mode that gates implementation-emit decisions across 11 interview steps. A shared gate module + derived mode profile + per-step entry-guard pattern provides single-source-of-truth and reduces propagation surface (per the prior retrospective lesson #2 spec-update-must-propagate-to-producers). The mode is deterministic; the derived projection extends cleanly if v2 adds more enum values to `fallback_mode_offered` (e.g., `partial-implementation` for a future hybrid mode). Per R1 C-006 disposition: this is centralized mode projection, NOT a peer of control-matrix capability contracts; label persisted in staging, mode profile NOT persisted. Stop-condition DOCUMENT-path integration ensures honest characterization without silent fallback (per FD-W4-D1 + § A.5 last paragraph).
+rationale: Foundation-only mode is a behavior-shape mode that gates implementation-emit decisions across 11 interview steps. A shared gate module + derived mode profile + per-step entry-guard pattern provides single-source-of-truth and reduces propagation surface (per the prior retrospective lesson #2 spec-update-must-propagate-to-producers). The mode is deterministic; the derived projection extends cleanly if v2 adds more enum values to `fallback_mode_offered` (e.g., `partial-implementation` for a future hybrid mode). This is centralized mode projection, NOT a peer of control-matrix capability contracts; label persisted in staging, mode profile NOT persisted. Stop-condition DOCUMENT-path integration ensures honest characterization without silent fallback.
 validation_method: manual paper-replay walkthrough of entry-guard branching + adapted-path execution against synthetic fixtures (5 foundation-only-mode fixtures + regression check). Per AR-004 F-2.8 + D2 § 5 validation evidence storage convention.
 validation_evidence: validation/mech-foundation-only-mode-v0/2026-05-19_s2.2_initial_fixture_replay.md
 known_coverage_limits:
@@ -274,7 +274,7 @@ mvp_lifecycle: foundation-tier per AR-002 F-1.6 (gates behavior across 11 interv
 - The originating slice spec (build-side; not distributed) — unsupported-shape transition + foundation-only-mode contract origin.
 - `wizard/shape_detection.md` § A.5 + § 8.5 — DOCUMENT-path semantics
 - `wizard/handoff_contracts/shape_detection_v0.md` — `fallback_mode_offered` field source
-- the per-shape control matrix (ADR-0015) — honest characterization rule (FD-W4-D1)
-- the operational change safety spec § mechanism-stack-template (ADR-0016) — mechanism stack record format for `mech-foundation-only-mode-v0`
+- the per-shape control matrix — honest characterization rule
+- the operational change safety spec § mechanism-stack-template — mechanism stack record format for `mech-foundation-only-mode-v0`
 - the relevant product spec section + § 4.4 — operator-facing contract
 - `_pre_step_05_recheck.md` Step 2b — DOCUMENT-path source for stop-condition gap entries

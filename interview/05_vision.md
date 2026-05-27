@@ -47,7 +47,7 @@ After pre-recheck completes successfully (no halt; no scope-out): proceed to the
 
 ## Foundation-only-mode entry guard
 
-*(Placement note — per `_foundation_only_mode_gate.md` § 3 + advisor R1 C-001 disposition: this entry guard MUST run AFTER the pre-step-05 re-check above, because the re-check can mutate `shape_hypothesis.fallback_mode_offered` via the unsupported-shape transition. An entry guard run BEFORE the re-check would branch on stale state.)*
+*(Placement note — per `_foundation_only_mode_gate.md` § 3: this entry guard MUST run AFTER the pre-step-05 re-check above, because the re-check can mutate `shape_hypothesis.fallback_mode_offered` via the unsupported-shape transition. An entry guard run BEFORE the re-check would branch on stale state.)*
 
 Before any step-05 user-facing question fires:
 

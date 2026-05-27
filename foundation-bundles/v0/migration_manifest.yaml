@@ -27,7 +27,7 @@ generated_by_release: foundation-bundle-v0.2
 migrations:
   - from: "pre_release"
     class: minor-additive  # standard 4-tier per foundation_versioning.md § 2.3; v0 → v0.1 added optional shape-extension fields without removing required sections
-    stabilization_exemption: pre-v1-no-operator-project-dependency  # waives migration runbook content per foundation_versioning.md § 1.3 pre-v1 stabilization clause; manifest YAML still ships per ADR-0017 § 3
+    stabilization_exemption: pre-v1-no-operator-project-dependency  # waives migration runbook content per the foundation-versioning policy (§ 1.3 pre-v1 stabilization clause); manifest YAML still ships per that policy
     requires_operator_approval: false
     preflight: not_required
     rollback: not_applicable
@@ -41,7 +41,7 @@ migrations:
       generation event.
   - from: "v0.1"
     class: major-breaking  # standard 4-tier per foundation_versioning.md § 2.3; required-section changes are major-breaking by structural definition
-    stabilization_exemption: pre-v1-no-operator-project-dependency  # waives migration runbook content per foundation_versioning.md § 1.3 pre-v1 stabilization clause; manifest YAML still ships per ADR-0017 § 3
+    stabilization_exemption: pre-v1-no-operator-project-dependency  # waives migration runbook content per the foundation-versioning policy (§ 1.3 pre-v1 stabilization clause); manifest YAML still ships per that policy
     supported: false
     requires_operator_approval: not_applicable
     preflight: not_applicable
@@ -64,7 +64,7 @@ migrations:
       If a v0.1-installed operator project surfaces in future inventory check, file an
       investigation and reinstall foundation bundle from v0.2.
     notes: |
-      Manifest entry reconciles the relevant slice decision packet § A.5 with ADR-0017 § 3
+      Manifest entry reconciles the relevant slice decision packet with the foundation-versioning policy
       "every release ships migration manifest" requirement. Manifest YAML ships (this entry);
       full migration runbook content not authored (no operator project requires it). Forfeit
       of stabilization clause: first v1.0.0 tag.

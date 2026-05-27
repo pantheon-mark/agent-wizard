@@ -59,7 +59,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Generate an operator-project bundle from a source foundation bundle. "
-            "Stdlib-only wizard runtime per ADR-0010."
+            "Stdlib-only wizard runtime."
         )
     )
     parser.add_argument(

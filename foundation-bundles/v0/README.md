@@ -29,7 +29,7 @@ When the next per-version package is created (e.g., v0.4.0 prerelease OR v1.0.0 
 - A new directory `wizard/foundation-bundles/<full-semver>/` is created (full semver naming per § 7).
 - That package's `migration-manifest.yaml` declares the migration class describing what it migrates from (per-version target-owned discipline per § 3).
 - Per-migration step files at `migrations/<source>-to-<target>.md` are authored when the first real migration event needs them (deferred under § 1.3 pre-v1 stabilization clause where applicable).
-- v1.0.0 promotion is the **stability-commitment trigger** (forfeit of pre-v1 stabilization clause per § 1.3); F-9 generator-version-identity mechanism per ADR-0018 must be wired before v1.0.0 manifest.
+- v1.0.0 promotion is the **stability-commitment trigger** (forfeit of pre-v1 stabilization clause per § 1.3); the generator-version-identity mechanism must be wired before v1.0.0 manifest.
 
 When new system shapes ship (per the wizard's system-shape roadmap):
 

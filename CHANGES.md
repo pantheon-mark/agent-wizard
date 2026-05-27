@@ -12,6 +12,20 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-27 — internal documentation hygiene: removed build-process references from public files
+
+**Public-facing change:** several public wizard files (interview-step modules, the bundle-generator script, and two foundation-bundle docs) carried short citations pointing at the wizard's *private* build-process design records — identifiers that an operator has no access to and does not need. Those citations were removed or replaced with plain-language descriptions of the rule/behavior they pointed at (e.g. "the honest-characterization rule", "the foundation-versioning policy"). No code, schema, manifest, template, placeholder-key, or generated-output changes — wording only.
+
+**Operator-facing notes:**
+
+- No operator action required. Wizard behavior and every generated output are unchanged; this only tidies internal references out of the public files.
+- No version bump.
+
+- Source-Meta-Commit: `<pending close commit>`
+- Public repo commit: `<pending subtree push>`
+
+---
+
 ## 2026-05-26 — stop-condition test fixture: pre-step-08 late-emergence regulated-data case
 
 **Public-facing change:** one new test fixture is added to the stop-condition re-evaluate-loop fixture set (`test_fixtures/stop_condition_reevaluate_loop/`), covering the case where regulated-data exposure surfaces late (at the pre-architecture re-check) via an advisor the operator added, with the specific framework not yet identified — then resolves to foundation-only mode. No code, schema, manifest, template, or placeholder-key changes; test-fixture content only.
