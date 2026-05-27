@@ -21,8 +21,8 @@ Entries appear newest-first.
 - No operator action required. Wizard behavior and every generated output are unchanged; this only finishes tidying internal references out of the public files.
 - No version bump.
 
-- Source-Meta-Commit: `pending`
-- Public repo commit: `pending`
+- Source-Meta-Commit: `719b5f9`
+- Public repo commit: `d13834a`
 
 ---
 
