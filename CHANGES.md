@@ -12,6 +12,20 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-26 — stop-condition test fixture: pre-step-08 late-emergence regulated-data case
+
+**Public-facing change:** one new test fixture is added to the stop-condition re-evaluate-loop fixture set (`test_fixtures/stop_condition_reevaluate_loop/`), covering the case where regulated-data exposure surfaces late (at the pre-architecture re-check) via an advisor the operator added, with the specific framework not yet identified — then resolves to foundation-only mode. No code, schema, manifest, template, or placeholder-key changes; test-fixture content only.
+
+**Operator-facing notes:**
+
+- No operator action required. This is an internal test-coverage addition; it does not change wizard behavior or any generated output.
+- No version bump.
+
+- Source-Meta-Commit: `pending close commit`
+- Public repo commit: `pending subtree push`
+
+---
+
 ## 2026-05-26 — foundation-bundle templates: lifecycle + maintenance completeness
 
 **Public-facing change:** two of the `v0.3.0` foundation-bundle templates gain more complete coverage of system-lifecycle and maintenance topics, surfaced while walking a real-operator-generated bundle. No code, schema, manifest, or placeholder-key changes — template prose only; generated bundles continue to render from the same keys.
