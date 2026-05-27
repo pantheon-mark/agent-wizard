@@ -21,8 +21,8 @@ Entries appear newest-first.
 - No operator action required. This is an internal test-coverage addition; it does not change wizard behavior or any generated output.
 - No version bump.
 
-- Source-Meta-Commit: `pending close commit`
-- Public repo commit: `pending subtree push`
+- Source-Meta-Commit: `3ad51d4`
+- Public repo commit: `3d08afb`
 
 ---
 
