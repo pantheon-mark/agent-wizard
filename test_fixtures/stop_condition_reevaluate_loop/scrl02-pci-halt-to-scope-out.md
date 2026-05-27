@@ -13,9 +13,9 @@ expected_terminal_reason: iteration_cap_reached
 expected_operator_choice_at_forced_disclosure: scope-out
 expected_fallback_mode_offered: scope-out
 expected_stop_conditions_mutation: |
-  none (terminal scope_out does NOT trigger cross-slice mutation — only terminal foundation_only does per R1 C-002)
+  none (terminal scope_out does NOT trigger cross-slice mutation — only terminal foundation_only does per the cross-slice-mutation rule)
 notes: |
-  PCI-DSS halt at pre-step-05 → operator picks (b) → loop iterations 1 + 2 → cap reached → operator picks scope-out at forced-terminal final-choice prompt. Exercises clean-exit path through the loop. Producer-visible outcome is scope_out (NOT forced_terminal) per R1 C-001 disposition; terminal_reason: iteration_cap_reached captures how operator reached terminal.
+  PCI-DSS halt at pre-step-05 → operator picks (b) → loop iterations 1 + 2 → cap reached → operator picks scope-out at forced-terminal final-choice prompt. Exercises clean-exit path through the loop. Producer-visible outcome is scope_out (NOT forced_terminal) per the producer-visible-outcome rule; terminal_reason: iteration_cap_reached captures how operator reached terminal.
 ---
 
 # Fixture scrl02 — PCI-DSS halt → (b) loop → cap → scope-out
@@ -108,14 +108,14 @@ shape_revision:
       probes_re_asked: [P-5, P-6, P-7]
       classifier_re_emit: markdown-agents
       post_iteration_fired_conditions: [3]
-      outcome: scope_out             # producer-visible terminal outcome per R1 C-001 (forced_terminal is internal-only)
+      outcome: scope_out             # producer-visible terminal outcome (forced_terminal is internal-only)
       terminal_reason: iteration_cap_reached
       terminal_at: <ISO 8601>
 shape_hypothesis:
   shape: markdown-agents
   fallback_mode_offered: scope-out
   scope_out_at_halt: <ISO 8601>
-stop_conditions:                   # PRESERVED from original halt; no cross-slice mutation for terminal scope_out (only foundation_only triggers mutation per R1 C-002)
+stop_conditions:                   # PRESERVED from original halt; no cross-slice mutation for terminal scope_out (only foundation_only triggers mutation per the cross-slice-mutation rule)
   evaluated_at: 05_pre_vision
   fired: [3]
   halted: true                      # preserved; operator chose scope-out so halt remains valid

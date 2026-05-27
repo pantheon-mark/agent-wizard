@@ -342,7 +342,7 @@ class TestEndToEnd(unittest.TestCase):
         self._run_generator(inputs, target)
         manifest = (target / ".wizard" / "manifest.yaml").read_text()
         # Tight field set: only 4 top-level + files map.
-        # Per § A.5 AP-7: NO package-side fields permitted.
+        # NO package-side fields permitted (per the operator-manifest contract).
         forbidden_fields = [
             "foundation_schema_version:",
             "agent_contract_version:",

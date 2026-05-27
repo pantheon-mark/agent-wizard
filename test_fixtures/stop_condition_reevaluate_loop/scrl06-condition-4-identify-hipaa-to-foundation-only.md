@@ -171,7 +171,7 @@ stop_conditions:
   halt_message: <preserved verbatim from original condition-4 halt at iteration 0>
 ```
 
-Verbatim a prior slice § A.5 foundation-only message said:
+Verbatim the foundation-only message said:
 
 > Foundation-only mode confirmed. I'll generate the planning documents for your project — vision, approach, technical architecture, and so on — abstracted from the implementation shape. You'll take those docs to Claude Code directly to build the implementation. We won't generate the actual agents, scripts, or run files.
 

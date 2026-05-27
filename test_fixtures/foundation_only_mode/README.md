@@ -10,7 +10,7 @@ These fixtures exercise the entry-guard pattern + per-step adapted-path behavior
 
 - Synthetic-fixture coverage only (`demonstrated` evidence level per `the relevant build-side spec` § 3 success-criterion; NOT `validated`)
 - Real-operator-input validation deferred to E-α tester slice OR next operator-facing slice
-- Minimum 5 fixtures per a prior slice spec § A.8
+- Minimum 5 fixtures per a prior slice
 
 ## Fixture inventory
 

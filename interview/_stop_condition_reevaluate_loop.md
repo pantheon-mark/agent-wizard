@@ -97,7 +97,7 @@ This disclosure is **NOT optional** per the honest-characterization rule. Operat
 
 ### Step 2.3 — Re-ask step 02 fallback probes (P-5, P-6, P-7)
 
-Per Decision B: re-ask **only the step 02 fallback probes** (P-5 / P-6 / P-7), NOT step 01 probes P-1 through P-4.
+Re-ask **only the step 02 fallback probes** (P-5 / P-6 / P-7), NOT step 01 probes P-1 through P-4.
 
 For each of P-5, P-6, P-7 in order (probes defined at `wizard/shape_detection.md` § 2.2):
 
@@ -132,7 +132,7 @@ Proceed to § 6 stop-condition re-evaluation.
 
 ## Section 3 — Iteration cap + counter semantics
 
-Per Decision A: **iteration cap = 2** at v0 (calibration-pending; first-real-operator-data may revise).
+**Iteration cap = 2** at v0 (calibration-pending; first-real-operator-data may revise).
 
 **Semantics of cap = 2:** two loop iterations are permitted; on entering a third loop iteration, force terminal per § 7. Concretely:
 
@@ -143,13 +143,13 @@ Per Decision A: **iteration cap = 2** at v0 (calibration-pending; first-real-ope
 
 When `new_iteration > iteration_cap`, the loop forces terminal choice per § 7. No third probe re-ask runs; the operator is offered only foundation-only OR scope-out.
 
-**Cap applies per-producer.** Per Decision E: pre_step_08 invocation starts fresh counter (`shape_revision.iteration` resets to 0 when entered_from changes from pre_step_05 to pre_step_08, AS LONG AS pre_step_05 reached terminal first; otherwise treat as continuation). Implementation: on `entered_from: pre_step_08` AND prior `shape_revision.history[*].entered_from: pre_step_05` AND prior outcomes all terminal, RESET counter to 0 before increment. Document this transition in `shape_revision.history[]` for traceability.
+**Cap applies per-producer.** Per the counter-reset policy, pre_step_08 invocation starts fresh counter (`shape_revision.iteration` resets to 0 when entered_from changes from pre_step_05 to pre_step_08, AS LONG AS pre_step_05 reached terminal first; otherwise treat as continuation). Implementation: on `entered_from: pre_step_08` AND prior `shape_revision.history[*].entered_from: pre_step_05` AND prior outcomes all terminal, RESET counter to 0 before increment. Document this transition in `shape_revision.history[]` for traceability.
 
 ---
 
 ## Section 4 — Loop entry: (c) Re-evaluate regulatory exposure
 
-Per Decision C = YES.
+The (c) regulatory-exposure re-evaluation path is supported at v0.
 
 ### Step 4.1 — Increment iteration counter
 
@@ -298,7 +298,7 @@ stop_conditions:
   halt_message: <preserved verbatim from original halt — operator already saw it; record retained>
 ```
 
-The § A.5 unsupported-shape-transition foundation-only message is reused verbatim (no new operator-facing message required at this seam; foundation-only entry is structurally same regardless of how operator reached it):
+The unsupported-shape-transition foundation-only message is reused verbatim (no new operator-facing message required at this seam; foundation-only entry is structurally same regardless of how operator reached it):
 
 > Foundation-only mode confirmed. I'll generate the planning documents for your project — vision, approach, technical architecture, and so on — abstracted from the implementation shape. You'll take those docs to Claude Code directly to build the implementation. We won't generate the actual agents, scripts, or run files.
 
@@ -367,14 +367,14 @@ The disclosure is **NOT optional** — silent fallback into foundation-only with
 
 ## Section 9 — Persistence schema
 
-Per § A.2 + handoff contract § 9.
+Per the persistence-schema design + handoff contract § 9.
 
 ```yaml
 shape_revision:
   pending: false # boolean — true during active loop iteration; flipped to false at terminal state
   iteration: 0 # integer — current loop iteration count; 0 before first entry; increments at each (b)/(c) entry
   iteration_cap: 2 # integer — stable at v0 per the relevant slice decision; means "two loop iterations permitted; on entering a third, force terminal"
-  history: # append-only array — preserved at terminal per the relevant slice decision/J
+  history: # append-only array — preserved at terminal per the cleanup-discipline policy
   - iteration: 1
   entered_at: <ISO 8601>
   entered_from: pre_step_05 | pre_step_08
@@ -405,9 +405,9 @@ shape_revision:
 
 This is NOT in the `shape_revision` block; it's an out-of-block mutation required for cross-slice integration with the foundation-only-mode gate module's § 6. gate module § 6 reads `documented_in_foundation` only; `resolved_during_loop` is audit-only and NOT consumed by the gate module (verified R2).
 
-**Cleanup discipline (Decision I/J).** At terminal state, `pending: false` is set; `history[]` array is **preserved** (not cleared) for diagnostic / audit-trail value. Subsequent producers reading the staging file see full loop history. The cross-slice `stop_conditions` mutation (when applicable) is also preserved.
+**Cleanup discipline.** At terminal state, `pending: false` is set; `history[]` array is **preserved** (not cleared) for diagnostic / audit-trail value. Subsequent producers reading the staging file see full loop history. The cross-slice `stop_conditions` mutation (when applicable) is also preserved.
 
-**Counter-reset across producers.** Per Decision E folded with K-question: on `entered_from: pre_step_08` AND prior `shape_revision.history[*].entered_from: pre_step_05` AND prior outcomes all terminal, RESET `iteration` to 0 before increment. The reset transition is itself recorded in `history` for traceability.
+**Counter-reset across producers.** Per the counter-reset policy: on `entered_from: pre_step_08` AND prior `shape_revision.history[*].entered_from: pre_step_05` AND prior outcomes all terminal, RESET `iteration` to 0 before increment. The reset transition is itself recorded in `history` for traceability.
 
 ---
 
@@ -418,7 +418,7 @@ Per the operational change safety spec mechanism-stack-template.
 ```yaml
 mechanism_id: mech-stop-condition-reevaluate-loop-v0
 mechanism_name: Stop-condition halt → re-evaluate-shape loop
-mechanism_class: AR-004 family A — Skill, pure markdown (advisory or guided)
+mechanism_class: Skill — pure markdown (advisory or guided)
 mechanism_type: markdown
 hybrid_contract_status: not-applicable
 canonical_governance_doc: wizard/interview/_stop_condition_reevaluate_loop.md
@@ -428,7 +428,7 @@ reinforcing_mechanisms:
   - shape_revision block in staging file (NEW ; persistence of loop history; additive schema extension via schema_minor 0 → 1)
   - wizard/shape_detection.md § 8.4 step 4 (cross-references this sub-module as canonical impl)
   - wizard/handoff_contracts/shape_detection_v0.md § 9 (consumer contract for shape_revision block; additive)
-  - Iteration cap (Decision A; 2 at v0) — prevents infinite loops + bounds operator-loop-fatigue exposure
+  - Iteration cap (2 at v0) — prevents infinite loops + bounds operator-loop-fatigue exposure
   - Honest-characterization disclosure rule — disclosed at loop iteration entry + at terminal state
   - foundation-only-mode interaction (mech-foundation-only-mode-v0) — loop terminal state may transition to foundation-only mode
 detection_recovery_mechanisms:
@@ -437,21 +437,21 @@ detection_recovery_mechanisms:
   - Foundation state preservation through loop iterations — staging file + vision/approach (pre_step_08 case) preserved; loop does NOT mutate them
   - Honest-characterization disclosure at iteration entry — operator knows the likely outcomes; no surprise foundation-only landing
 rationale: prior wizard work specified the contract surface ("(b) Change the shape and re-evaluate") at pre_step_05 + pre_step_08 + shape_detection.md § 8.4 step 4 but deferred implementation; this module implements the real loop. The loop's value in v1 is operator-agency: even when the loop converges to foundation-only OR exit (the dominant v1 outcome given v1-shape-set constraints — markdown-agents only), running it transparently lets the operator discover their options vs. silently dropping them into foundation-only. The (c) regulatory-exposure path adds a third axis of operator agency — operator can realize they over-stated regulatory exposure at step 03 and revise without committing to shape revision. The iteration cap prevents loop-fatigue. The shared sub-module pattern earns its keep through substantive state-machine logic + propagation-fragility of inlining (per the validate-the-WHY discipline; the precedent-source's shared-module justification was different, but the structural reason transfers here).
-validation_method: manual paper-replay walkthrough of loop state machine + iteration cap + probe re-ask + terminal-state branching against synthetic fixtures (4 stop-condition-reevaluate-loop fixtures + regression check). Per AR-004 F-2.8 + D2 § 5 validation evidence storage convention.
+validation_method: manual paper-replay walkthrough of loop state machine + iteration cap + probe re-ask + terminal-state branching against synthetic fixtures (4 stop-condition-reevaluate-loop fixtures + regression check). Per the validation evidence storage convention.
 validation_evidence: validation/mech-stop-condition-reevaluate-loop-v0/2026-05-19_s2.4_condition_4_fixture_extension.md (extends validation/mech-stop-condition-reevaluate-loop-v0/2026-05-19_s2.3_initial_fixture_replay.md)
 known_coverage_limits:
   - Synthetic fixtures only; no real-operator data
   - Paper-replay only (markdown-driven interview agent; no executable run)
   - Iteration cap calibration (2) is hypothesis-only; first-real-operator-data may revise
-  - Probe re-ask path (step 02 fallback probes only; P-5/P-6/P-7) is Decision B v0 default; first-real-operator-data may revise to Alt A (re-ask all 7 probes) or Alt B (free-text describe-changes)
+  - Probe re-ask path (step 02 fallback probes only; P-5/P-6/P-7) is the v0 default; first-real-operator-data may revise to Alt A (re-ask all 7 probes) or Alt B (free-text describe-changes)
   - PCI-DSS / SOX / COPPA (c) revise paths not separately fixtured at v0 (HIPAA + GDPR + sector-specific covered via scrl03 + scrl05 + scrl06 + scrl08 + scrl09; remaining named frameworks assumed symmetric per § 4.2 Variant A framework-specific disclosure variants)
-  - Pre-step-08 loop with vision+approach already on disk tested for HIPAA late-emergence only (scrl04); pre-step-08 condition-4 late-emergence NOT separately fixtured (Decision E pre_step_05 only; structurally same as scrl04 with different trigger framework); other framework late-emergence cases assumed to follow same pattern
+  - Pre-step-08 loop with vision+approach already on disk tested for HIPAA late-emergence only (scrl04); pre-step-08 condition-4 late-emergence NOT separately fixtured (pre_step_05 only; structurally same as scrl04 with different trigger framework); other framework late-emergence cases assumed to follow same pattern
   - Mixed-shape per-component capability loop interaction not exercised (reserved for v1+ handoff contract § 5)
-  - Concurrent loop-then-late-emergence-at-pre-step-08 case tested with fresh iteration counter at pre_step_08 (Decision E); inherit-counter alternative not exercised
+  - Concurrent loop-then-late-emergence-at-pre-step-08 case tested with fresh iteration counter at pre_step_08; inherit-counter alternative not exercised
   - Sector-specific compliance-class frameworks (FERPA / GLBA / similar with enforceable controls) NOT exercised on continuing paths because v0 has no 5th stop condition for sector-specific compliance frameworks beyond the named ones (HIPAA / GDPR / PCI-DSS / SOX / COPPA). Demonstrating active compliance-class sector framework on continuing path would violate the honest-characterization rule. an open question reserves the design space for the 5th stop condition; v0 fixtures use named-compliance frameworks (HIPAA + GDPR in scrl08) for multi-framework re-ask coverage. Forward-looking gap; not a demonstrated-working surface. scrl08 was restructured from HIPAA + FERPA to HIPAA + GDPR to avoid demonstrating an honest-characterization-rule violation.
   - Active-vs-transitional distinction at cross-slice mutation: `documented_in_foundation` records active terminal-state fired conditions only; transitional conditions resolved during loop iterations (e.g., condition 4 resolved when operator identifies framework) are recorded in optional `resolved_during_loop` audit-trail field, NOT in `documented_in_foundation`. Without this distinction, foundation docs would emit false stale gaps (e.g., "regulated-but-unnamed-framework" gap when framework was actually identified). scrl06 fixture demonstrates correct behavior.
-reverify_trigger: first real-operator-input loop iteration; OR iteration cap calibration revised; OR probe re-ask path Decision B revised; OR shape-detection contract major-version bump (would change shape_revision block schema semantics); OR foundation-only-mode mechanism revised (mech-foundation-only-mode-v0 revision); OR new v1-supported shape added (would change loop convergence behavior); OR 5th stop condition added; OR sector-specific framework treatment policy revised
-mvp_lifecycle: foundation-tier per AR-002 F-1.6 (gates operator-recovery path from regulatory-constraint halt; load-bearing for full-system-generation path completion when stop conditions fire)
+reverify_trigger: first real-operator-input loop iteration; OR iteration cap calibration revised; OR the probe-re-ask-path policy revised; OR shape-detection contract major-version bump (would change shape_revision block schema semantics); OR foundation-only-mode mechanism revised (mech-foundation-only-mode-v0 revision); OR new v1-supported shape added (would change loop convergence behavior); OR 5th stop condition added; OR sector-specific framework treatment policy revised
+mvp_lifecycle: foundation-tier (gates operator-recovery path from regulatory-constraint halt; load-bearing for full-system-generation path completion when stop conditions fire)
 ```
 
 ---

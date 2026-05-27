@@ -72,7 +72,7 @@ These fixtures exercise the loop's state machine + iteration cap (2 at v0) + pro
 - PCI-DSS / SOX / COPPA (c) revise paths not separately fixtured (HIPAA + GDPR + sector-specific are covered; remaining named frameworks assumed symmetric per § 4.2 Variant A).
 - Pre-step-08 late-emergence loop with vision+approach already on disk tested for HIPAA late-emergence only (scrl04); other framework late-emergence cases assumed to follow same pattern; pre-step-08 condition-4 late-emergence NOT separately fixtured (a prior slice pre_step_05 only).
 - Mixed-shape per-component capability loop interaction not exercised (reserved for v1+ per a prior slice handoff contract § 5).
-- Concurrent loop-then-late-emergence-at-pre-step-08 case tested with fresh iteration counter (scrl04 Decision E); inherit-counter alternative not exercised.
+- Concurrent loop-then-late-emergence-at-pre-step-08 case tested with fresh iteration counter (scrl04); inherit-counter alternative not exercised.
 - Operator-mid-loop-interruption-then-resume case (loop fires; autocompaction occurs mid-iteration; operator resumes wizard) not exercised. `shape_revision.pending: true` is the recovery signal but no fixture exercises restart-mid-iteration behavior.
 
 **New known limits surfaced by a prior slice (post R1 disposition):**
@@ -84,7 +84,7 @@ These fixtures exercise the loop's state machine + iteration cap (2 at v0) + pro
 
 a prior slice fixture pack (14 fixtures at `wizard/test_fixtures/shape_detection/`) + a prior slice fixture pack (5 fixtures at `wizard/test_fixtures/foundation_only_mode/`) + a prior slice fixture pack (4 fixtures scrl01-04) MUST continue to replay correctly post-a prior slice.
 
-a prior slice adds fixtures only; no spec / contract / sub-module text changes (per Decision I minimal). a prior slice extension is additive.
+a prior slice adds fixtures only; no spec / contract / sub-module text changes (minimal). a prior slice extension is additive.
 
 ## Cross-references
 

@@ -6,7 +6,7 @@
 #          python-service complete-mode now renders successfully with 4 universal test_cases sections.
 #
 # Post-foundation-bundle-v0.2 release transition (2026-05-20): test_cases.md replacement landed per
-# the-relevant-slice-decision § A.4; all 5 shapes in coverage_by_shape are now `populated`; the hard
+# the-relevant-slice-decision; all 5 shapes in coverage_by_shape are now `populated`; the hard
 # downstream gate (which previously FAILed this fixture as a negative-class test) no longer fires for
 # python-service. Fixture flipped from NEGATIVE to POSITIVE class.
 #
@@ -25,7 +25,7 @@ generated_by_slice: foundation-bundle-v0.1
 post_v0_2_update_date: 2026-05-20
 post_v0_2_update_rationale: |
   test_cases.md replacement landed at the foundation-bundle-v0.2 release per the-relevant-slice-decision
-  § A.4; coverage_by_shape for python-service flipped from blocked_pending_replacement to populated;
+  coverage_by_shape for python-service flipped from blocked_pending_replacement to populated;
   gate no longer fires; fixture flipped to positive class verifying successful render.
 
 input:

@@ -1,9 +1,9 @@
 # Fixture: frc01-markdown-agents-complete-mode-render
-# Class: foundation-render-contract (a prior slice § A.6)
+# Class: foundation-render-contract (a prior slice)
 # Target mechanism: mech-foundation-render-contract-v0
 # Purpose: validate 6-doc v0 bundle render in markdown-agents-on-claude-code complete mode
 #          (prd.md deferred at v0 per schema population_status; un-defer trigger = wizard supports PRD authoring)
-# Per a prior slice spec § A.6 fixture frc01 + § 4 success criterion item 8
+# Per a prior slice (fixture frc01)
 
 fixture_id: frc01-markdown-agents-complete-mode-render
 fixture_class: foundation-render-contract
@@ -51,7 +51,7 @@ expected_outcome:
       sections_skipped: [requirements_anchor]
       notes: |
         Updated at foundation-bundle-v0.2 release 2026-05-20 per the-relevant-slice-decision
-        § A.4 target structure. requirements_anchor is source: schema_only + population_status:
+        the target structure. requirements_anchor is source: schema_only + population_status:
         deferred (un-defer trigger: wizard supports PRD authoring + prd.md populated for shape)
         so it does NOT render at v0.2; the 4 sections that render are acceptance_criteria +
         test_pyramid + validation_method + markdown_agent_validation_matrix for markdown-agents-

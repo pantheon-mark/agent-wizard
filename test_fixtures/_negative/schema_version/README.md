@@ -1,8 +1,8 @@
 # Schema-version negative-test fixtures
 
-**Purpose:** verify that `tools/replay_fixtures.py`'s fail-closed schema-version check (a prior slice § A.3 + Decision H § A.8) actually FAILs on deliberately-broken fixtures. Without this exercise the fail-closed claim is theater per advisor an advisor finding.
+**Purpose:** verify that `tools/replay_fixtures.py`'s fail-closed schema-version check (per a prior slice) actually FAILs on deliberately-broken fixtures. Without this exercise the fail-closed claim is theater per advisor an advisor finding.
 
-**Per a prior slice spec § A.8 Decision H** — narrow a tracked open question fold-in. ONLY schema-version negative tests are folded into a prior slice; the broader a tracked open question cross-slice-mutation negative fixtures (stale-documented / missing-resolved-during-loop / missing-active-fired / etc.) remain deferred per a tracked open question resolution path.
+**Per a prior slice** — narrow a tracked open question fold-in. ONLY schema-version negative tests are folded into a prior slice; the broader a tracked open question cross-slice-mutation negative fixtures (stale-documented / missing-resolved-during-loop / missing-active-fired / etc.) remain deferred per a tracked open question resolution path.
 
 ## Fixtures
 
@@ -24,7 +24,7 @@ python3 tools/replay_fixtures.py --include-negative
 
 Per `a relevant lesson record` (a prior slice R2-F1): validator gates referencing per-key status registries must validate keys-match-vocabulary + values-in-closed-enum + fail-closed on missing/unknown. These negative-test fixtures exercise that discipline at first-use for the schema-version fail-closed surface.
 
-## Out-of-scope (per a prior slice Decision H § A.8)
+## Out-of-scope (per a prior slice)
 
 The following a tracked open question negative-test classes are NOT covered here; they remain deferred under a tracked open question:
 - Cross-slice mutation invariant violations (stale-documented [4, 1] for condition-4 → foundation_only paths)

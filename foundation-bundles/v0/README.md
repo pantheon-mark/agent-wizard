@@ -9,7 +9,7 @@
 | Path | Purpose | Released at |
 |---|---|---|
 | `schemas/section-schema.yaml` | Canonical machine-readable section schema for all 7 foundation-doc-types; v0.2 with shape-extension fields + shape-neutral test_cases entry | foundation-bundle v0.2 |
-| `migration_manifest.yaml` | Target-owned migration manifest; tracks v0.x rolling pre-stabilization transitions per foundation_versioning.md § 1.3 | foundation-bundle v0.2 |
+| `migration_manifest.yaml` | Target-owned migration manifest; tracks v0.x rolling pre-stabilization transitions per the foundation-versioning policy | foundation-bundle v0.2 |
 | `baselines/<template>.hash.yaml` | Per-template hash baselines for enforced-path drift detection (all 6 templates at schema_revision: v0.2) | foundation-bundle v0.2 |
 | `README.md` | This file | foundation-bundle v0.2 |
 

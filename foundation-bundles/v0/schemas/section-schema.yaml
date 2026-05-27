@@ -4,7 +4,7 @@
 # from 3-section markdown-agents-locked structure (test_triggers / test_coverage_requirements /
 # agent_specific_tests) to 5-section shape-neutral structure (requirements_anchor / acceptance_criteria
 # / test_pyramid / validation_method / markdown_agent_validation_matrix). Pre-v1 stabilization clause
-# applies per foundation_versioning.md § 1.3.
+# applies per the foundation-versioning policy.
 #
 # Schema discipline:
 # - This YAML is the canonical machine-readable instance for section schemas.
@@ -323,7 +323,7 @@ section_schema:
       - id: markdown_agent_validation_matrix
         title: Markdown Agent Validation Matrix
         required: false
-        applies_to_shapes: [markdown-agents-on-claude-code]  # NOT applied to mixed per slice R1 F-5; mixed shape requires component-level metadata at future slice
+        applies_to_shapes: [markdown-agents-on-claude-code]  # NOT applied to mixed shape; mixed shape requires component-level metadata at future slice
         render_modes: [complete]
         operator_visible: true
         population_status: populated

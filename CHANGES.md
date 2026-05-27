@@ -12,6 +12,20 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-27 — internal documentation hygiene (continued): remaining build-process references removed
+
+**Public-facing change:** a follow-on to the prior hygiene pass that finishes removing short citations to the wizard's *private* build-process design records from the public files. Covered: two interview-step modules, several foundation-bundle docs (a migration manifest, a README, two section schemas, two hash baselines), one generator unit test, and eleven test fixtures. Each citation was either deleted (where the surrounding text already carried the meaning) or replaced with a plain-language description of the rule/behavior it pointed at (e.g. "the foundation-versioning policy", "the validation evidence storage convention"). The build-side reference checker that guards the public files was extended to catch the remaining identifier forms, plus a new advisory (non-blocking) review pass for the few ambiguous forms that can also be legitimate public wording. No code, schema, manifest, template, placeholder-key, or generated-output changes — wording only.
+
+**Operator-facing notes:**
+
+- No operator action required. Wizard behavior and every generated output are unchanged; this only finishes tidying internal references out of the public files.
+- No version bump.
+
+- Source-Meta-Commit: `pending`
+- Public repo commit: `pending`
+
+---
+
 ## 2026-05-27 — internal documentation hygiene: removed build-process references from public files
 
 **Public-facing change:** several public wizard files (interview-step modules, the bundle-generator script, and two foundation-bundle docs) carried short citations pointing at the wizard's *private* build-process design records — identifiers that an operator has no access to and does not need. Those citations were removed or replaced with plain-language descriptions of the rule/behavior they pointed at (e.g. "the honest-characterization rule", "the foundation-versioning policy"). No code, schema, manifest, template, placeholder-key, or generated-output changes — wording only.

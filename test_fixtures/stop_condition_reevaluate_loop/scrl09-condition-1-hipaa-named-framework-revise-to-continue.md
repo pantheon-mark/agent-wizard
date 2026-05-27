@@ -18,7 +18,7 @@ expected_terminal_outcome: continued
 expected_terminal_reason: regulatory_exposure_revised_clears_conditions
 expected_fallback_mode_offered: not_offered
 notes: |
-  HIPAA halt at pre-step-05 (condition 1) → operator picks (c) → UP-6 re-asked with HIPAA-specific covered-entity disclosure → operator clarifies (de-identified aggregate statistics; not handling PHI) → `hipaa_applicable: yes → no` → condition 1 no longer fires → continue. Parallel to scrl03 (GDPR-revise) but for HIPAA. Decision A YES (a prior slice) included scrl09 as named-framework-revise coverage extension. Single loop iteration (cap not exercised). NOT a condition-4 case.
+  HIPAA halt at pre-step-05 (condition 1) → operator picks (c) → UP-6 re-asked with HIPAA-specific covered-entity disclosure → operator clarifies (de-identified aggregate statistics; not handling PHI) → `hipaa_applicable: yes → no` → condition 1 no longer fires → continue. Parallel to scrl03 (GDPR-revise) but for HIPAA. A prior slice included scrl09 as named-framework-revise coverage extension. Single loop iteration (cap not exercised). NOT a condition-4 case.
 ---
 
 # Fixture scrl09 — Condition-1 HIPAA named-framework revise-to-continue

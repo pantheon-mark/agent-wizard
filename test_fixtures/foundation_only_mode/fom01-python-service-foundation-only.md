@@ -42,7 +42,7 @@ Per-step entry guard branches to `## Foundation-only adapted path` section at en
 - `execution_plan.md`
 - `project_instructions.md` (foundation-only voice; opening line: "These foundation docs describe your project at the system-blueprint level. They are implementation-agnostic. Implementation NOT included in this output.")
 - `manual.md` (pointer doc; surfaces pointer to `next_steps.md`)
-- `next_steps.md` (NEW per spec § A.4 template; mentions shape `python-service-operator-facing`; two paths forward enumerated)
+- `next_steps.md` (NEW per the foundation-only template; mentions shape `python-service-operator-facing`; two paths forward enumerated)
 
 **SKIPPED (NOT in operator project directory):**
 

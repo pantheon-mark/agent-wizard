@@ -110,7 +110,7 @@ The entry-guard sub-step is **verbatim across all 11 step files** (steps 05 thro
 Each step file has two behavior paths after the entry guard:
 
 1. **Normal behavior path** — the step's existing content (immediately below the entry guard); followed when `produce_system_implementation == true`
-2. **Foundation-only adapted path** — a new section titled `## Foundation-only adapted path` appended at the end of each step file; followed when `produce_system_implementation == false`; disposition spec § A.3 table (PRODUCE / ADAPT-capture / ADAPT-split / ADAPT-rebuild)
+2. **Foundation-only adapted path** — a new section titled `## Foundation-only adapted path` appended at the end of each step file; followed when `produce_system_implementation == false`; the foundation-only disposition table (PRODUCE / ADAPT-capture / ADAPT-split / ADAPT-rebuild)
 
 ---
 
@@ -170,7 +170,7 @@ In foundation-only mode (`produce_system_implementation == false` AND `produce_f
 | 13 (operations) | § "Operational requirements" > "Operational requirements (cadence, scale, drift)" |
 | 14 (document review) | (not captured here; produces simpler document review of the 4-doc foundation set) |
 
-**Operator project directory structure in foundation-only mode** (spec § A.10 Decision J):
+**Operator project directory structure in foundation-only mode**:
 
 ```
 ~/[project-name]/
@@ -217,7 +217,7 @@ Per `wizard/shape_detection.md` § 8.5 + `_pre_step_05_recheck.md` Step 2b: stop
 
 ## Section 7 — Close ceremony adaptation pointer
 
-Step 15 close (`15_close.md`) implements the foundation-only-mode close ceremony spec § A.4. Full per-sub-step disposition lives at `15_close.md` § "Foundation-only adapted path"; this section is a summary cross-reference only.
+Step 15 close (`15_close.md`) implements the foundation-only-mode close ceremony. Full per-sub-step disposition lives at `15_close.md` § "Foundation-only adapted path"; this section is a summary cross-reference only.
 
 **Summary of step 15 adaptation:**
 
@@ -237,7 +237,7 @@ Per the operational change safety spec mechanism-stack-template.
 ```yaml
 mechanism_id: mech-foundation-only-mode-v0
 mechanism_name: Foundation-only-mode behavior (steps 05-15)
-mechanism_class: AR-004 family A — Skill, pure markdown (advisory or guided)
+mechanism_class: Skill — pure markdown (advisory or guided)
 mechanism_type: markdown
 hybrid_contract_status: not-applicable
 canonical_governance_doc: wizard/interview/_foundation_only_mode_gate.md
@@ -250,9 +250,9 @@ reinforcing_mechanisms:
 detection_recovery_mechanisms:
   - Per-step entry-guard internal-state-error halt (when fallback_mode_offered missing OR scope-out reaches steps 05-15; foundation state preserved)
   - Stop-condition DOCUMENT-path integration (compliance gaps surfaced honestly in foundation docs rather than silenced)
-  - Operator-resume optionality preserved via `capture_implementation_inputs: true` + staging file preservation (contract specified § A.10 Decision D; concrete resume tooling deferred)
+  - Operator-resume optionality preserved via `capture_implementation_inputs: true` + staging file preservation (contract-specified; concrete resume tooling deferred)
 rationale: Foundation-only mode is a behavior-shape mode that gates implementation-emit decisions across 11 interview steps. A shared gate module + derived mode profile + per-step entry-guard pattern provides single-source-of-truth and reduces propagation surface (per the prior retrospective lesson #2 spec-update-must-propagate-to-producers). The mode is deterministic; the derived projection extends cleanly if v2 adds more enum values to `fallback_mode_offered` (e.g., `partial-implementation` for a future hybrid mode). This is centralized mode projection, NOT a peer of control-matrix capability contracts; label persisted in staging, mode profile NOT persisted. Stop-condition DOCUMENT-path integration ensures honest characterization without silent fallback.
-validation_method: manual paper-replay walkthrough of entry-guard branching + adapted-path execution against synthetic fixtures (5 foundation-only-mode fixtures + regression check). Per AR-004 F-2.8 + D2 § 5 validation evidence storage convention.
+validation_method: manual paper-replay walkthrough of entry-guard branching + adapted-path execution against synthetic fixtures (5 foundation-only-mode fixtures + regression check). Per the validation evidence storage convention.
 validation_evidence: validation/mech-foundation-only-mode-v0/2026-05-19_s2.2_initial_fixture_replay.md
 known_coverage_limits:
   - Synthetic fixtures only; no real-operator data
@@ -263,7 +263,7 @@ known_coverage_limits:
   - Mixed-shape per-component capability blocks not tested (reserved for v1+ handoff contract § 5)
   - Sub-step resume in foundation-only mode not exercised
 reverify_trigger: first real-operator-input foundation-only mode session; OR foundation-doc template cross-shape neutralization slice completes; OR the relevant product spec requirement re-open path implementation slice completes; OR shape-detection contract major-version bump (would change fallback_mode_offered field semantics).
-mvp_lifecycle: foundation-tier per AR-002 F-1.6 (gates behavior across 11 interview steps; load-bearing for honest characterization of unsupported-shape path)
+mvp_lifecycle: foundation-tier (gates behavior across 11 interview steps; load-bearing for honest characterization of unsupported-shape path)
 ```
 
 ---
