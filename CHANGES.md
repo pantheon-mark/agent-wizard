@@ -28,8 +28,8 @@ No schema, manifest, placeholder-key, or generated-output *structure* changes â€
 - No operator action required for existing setups. If you regenerate or re-read your foundation docs, you'll see the clearer coordination + autonomy wording. The session-lock fix prevents a "configured but does nothing on schedule" failure mode.
 - No version bump (clarifying wording + a corrective fix; no compatibility-affecting structural change).
 
-- Source-Meta-Commit: `(filled post-commit)`
-- Public repo commit: `(filled post-subtree-push)`
+- Source-Meta-Commit: `9dda645`
+- Public repo commit: `8fa6702`
 
 ---
 
