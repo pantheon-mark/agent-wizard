@@ -12,6 +12,27 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-27 — clearer, more honest execution model for generated multi-agent systems (+ a session-lock fix)
+
+**Public-facing change:** the wizard's generated markdown-agent systems now carry a clearer and more honest description of *how they run*, plus a real fix to the session lock that coordinates them.
+
+- **Coordination model made explicit.** Every generated system has one **Orchestrator** that coordinates the work (selects from the queue, routes work, tracks session state); the **specialist agents** do the domain work. You interact with the work queue and the Claude Code session the Orchestrator runs in — not with individual agents directly. The `technical_architecture.md` template now states this up front.
+- **Honest autonomy.** The `execution_plan.md` template now makes clear the system **runs when invoked** — either when you start a Claude Code session, or when a scheduled job starts the Orchestrator on a cadence you set. It is not an always-on background service and does not act while no session is open. "Operating on a cadence" means a scheduled run starts, completes its work, and exits.
+- **Session-lock fix (important).** The single session lock (`maintenance_mode.md`) is now owned by the Orchestrator and lives in one place (the project root). Previously a path mismatch — plus a leftover check inside the specialist invocation script — could have caused scheduled or Orchestrator-spawned agent work to be skipped even though the system looked configured. Scheduled jobs now invoke the Orchestrator (which routes to agents); directly scheduling a single agent is an advanced exception. The agent handoff record now always includes a `stop_reason`.
+- Default execution is **sequential for tasks that share files** (parallel only when write scopes are clearly separate), to avoid two agents clobbering the same file.
+
+No schema, manifest, placeholder-key, or generated-output *structure* changes — template wording + the invocation script's session-lock handling.
+
+**Operator-facing notes:**
+
+- No operator action required for existing setups. If you regenerate or re-read your foundation docs, you'll see the clearer coordination + autonomy wording. The session-lock fix prevents a "configured but does nothing on schedule" failure mode.
+- No version bump (clarifying wording + a corrective fix; no compatibility-affecting structural change).
+
+- Source-Meta-Commit: `(filled post-commit)`
+- Public repo commit: `(filled post-subtree-push)`
+
+---
+
 ## 2026-05-27 — internal documentation hygiene (continued): remaining build-process references removed
 
 **Public-facing change:** a follow-on to the prior hygiene pass that finishes removing short citations to the wizard's *private* build-process design records from the public files. Covered: two interview-step modules, several foundation-bundle docs (a migration manifest, a README, two section schemas, two hash baselines), one generator unit test, and eleven test fixtures. Each citation was either deleted (where the surrounding text already carried the meaning) or replaced with a plain-language description of the rule/behavior it pointed at (e.g. "the foundation-versioning policy", "the validation evidence storage convention"). The build-side reference checker that guards the public files was extended to catch the remaining identifier forms, plus a new advisory (non-blocking) review pass for the few ambiguous forms that can also be legitimate public wording. No code, schema, manifest, template, placeholder-key, or generated-output changes — wording only.

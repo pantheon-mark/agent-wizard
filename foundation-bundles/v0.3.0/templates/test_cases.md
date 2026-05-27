@@ -372,7 +372,7 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 | MA-A-6 | Invocation script loads prompt file | Agent invocation script loads prompt file before invoking Claude — no invocation without guardrails |
 | MA-A-7 | Invocation script aborts on missing prompt | If prompt file is missing, invocation script aborts and logs Critical |
 | MA-A-8 | Invocation script disk I/O correctness | Inputs read from correct disk locations; outputs written to correct disk locations |
-| MA-A-9 | Cron job triggers on correct schedule | Cron job fires for each configured agent on its configured schedule |
+| MA-A-9 | Cron job triggers on correct schedule | Cron job fires the scheduled Orchestrator run on its configured schedule; the Orchestrator routes to the configured agents (direct specialist scheduling is a declared exception) |
 | MA-A-10 | Headless agent run completes cleanly | Headless run completes, writes output to disk, and exits without error |
 | MA-A-11 | Session entry scripts execute without error | All three start-session.sh flag variants complete without error after wizard setup |
 | MA-A-12 | --resume flag initiates resume startup | `start-session.sh --resume` runs the resume startup sequence |
@@ -382,7 +382,7 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 | MA-A-42 | Deferred stop reason distinct from completed | `deferred` means agent stopped before finishing; `completed` means agent finished |
 | MA-A-43 | QA agent reads stop reasons as first-pass signal | `budget_exceeded` and `error` stop reasons trigger investigation check by QA agent |
 | MA-A-44 | Orchestrator responds appropriately to stop reasons | `budget_exceeded` triggers continuation or escalation; `error` triggers investigation before retry |
-| MA-A-45 | Maintenance mode causes cron agent to skip and log | Cron agent skips run and logs reason when maintenance mode file is present — not silent failure |
+| MA-A-45 | Maintenance mode causes the scheduled run to skip and log | The scheduled Orchestrator run is skipped and logged when the session lock (`maintenance_mode.md`) is present — not silent failure |
 | MA-A-46 | Maintenance mode cleared at session end | Maintenance mode file deleted before session exits |
 | MA-A-47 | Stale maintenance mode detected and cleared at startup | Stale file auto-cleared and Warning alert sent at session startup |
 

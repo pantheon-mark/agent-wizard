@@ -46,7 +46,7 @@
 
 ## Upcoming scheduled tasks
 
-*Cron-triggered agent runs. Updated at session close from `/agents/cron/cron_config.md`.*
+*Cron-triggered Orchestrator runs (which route to the configured agents). Updated at session close from `/agents/cron/cron_config.md`.*
 
 | Agent | Next trigger | Frequency | Notes |
 |-------|-------------|-----------|-------|

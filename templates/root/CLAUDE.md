@@ -26,10 +26,9 @@ This system starts via `./start-session.sh`. Three modes:
 
 **Alert-response sessions (`--resume --alert`):** Read the notification log first. Identify what triggered the alert and confirm the correct response before acting on anything else. Critical alerts are adjudicated before all other work.
 
-**Maintenance mode:** At the start of every interactive session, check whether `/work/maintenance_mode.md` exists.
-- If it exists: a previous session ended without clearing it (crashed or force-quit). Delete it, write a Warning alert entry to `/logs/notification_log.md` noting the stale flag, and continue.
-- Once confirmed absent: create `/work/maintenance_mode.md`. This prevents cron-triggered agent runs from executing while the interactive session is active.
-- At session end: delete `/work/maintenance_mode.md` before closing.
+**Maintenance mode (session lock):** The system uses a single session lock — `maintenance_mode.md` in the project root — so that only one session runs at a time. The **Orchestrator owns this lock**: it claims `maintenance_mode.md` at startup and clears it at session end. A scheduled (cron) run invokes the Orchestrator, whose startup check refuses to start when the lock is already held — so a scheduled run never collides with an active session. Specialist agents spawned by the Orchestrator run beneath this lock and do not re-check it.
+- Do not create or delete `maintenance_mode.md` yourself — the Orchestrator manages it.
+- If you find a `maintenance_mode.md` left over from a session that crashed or was force-quit (and no other session is running), it is stale: delete it, write a Warning alert to `/logs/notification_log.md` noting the stale flag, and start a fresh session.
 
 ---
 
