@@ -28,8 +28,8 @@ Entries appear newest-first.
 - `wizard upgrade-plan --to v0.4.0` reports the migration as `tier: major-breaking` end-to-end.
 - The two NEW deferred sections in `technical_architecture.md` will render as honest stub text describing why the content is not yet captured + when it will be. Operators should NOT author content into these sections at this version.
 
-**Source-Meta-Commit:** FILLED_AT_S2.26_CLOSE
-**Public repo commit:** FILLED_AT_S2.26_PUBLIC_PUSH
+**Source-Meta-Commit:** d4fbf73
+**Public repo commit:** 1599d9b
 
 ---
 

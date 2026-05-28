@@ -65,6 +65,6 @@
     "section_schema": "schemas/section-schema.yaml"
   },
   "release_date": "2026-05-28",
-  "source_commit": "FILLED_AT_S2.26_CLOSE",
+  "source_commit": "d4fbf73",
   "status": "prerelease"
 }
