@@ -31,8 +31,8 @@ Entries appear newest-first.
 - If you experiment with the CLI against a test operator project, expect the standing-approval status to show `unavailable_idq_050_open` and expect `wizard upgrade --to <version>` to refuse without `--plan-only`.
 - No version bump on the policy itself; this is the implementation of the previously-shipped foundation-versioning policy (minor-additive update to the implementation document).
 
-- Source-Meta-Commit: `(filled at push)`
-- Public repo commit: `(filled after subtree push)`
+- Source-Meta-Commit: `dafaee0`
+- Public repo commit: `64448af`
 
 ---
 
