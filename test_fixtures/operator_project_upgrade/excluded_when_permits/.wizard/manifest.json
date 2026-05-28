@@ -1,0 +1,66 @@
+{
+  "agent_contract_version": "v0-pre-rebuild",
+  "foundation_bundle_version": "v0.3.0",
+  "foundation_schema_version": "v0.2",
+  "managed_files": {
+    "foundation/approach.md": {
+      "base_hash": "sha256:59b0917ffa796ec8ca208293e73c351c5e5e21f46b29787907ef4ef7980c7cf9",
+      "current_hash_last_seen": "sha256:59b0917ffa796ec8ca208293e73c351c5e5e21f46b29787907ef4ef7980c7cf9",
+      "local_modifications": "allowed",
+      "managed": "true",
+      "managed_by": "shared",
+      "merge_strategy": "three_way"
+    },
+    "foundation/audit_framework.md": {
+      "base_hash": "sha256:5023dbeb7e00578b161789a4549650071ad7d43d33b492c224c9942796043fc9",
+      "current_hash_last_seen": "sha256:5023dbeb7e00578b161789a4549650071ad7d43d33b492c224c9942796043fc9",
+      "local_modifications": "not_recommended",
+      "managed": "true",
+      "managed_by": "wizard",
+      "merge_strategy": "warn_on_drift"
+    },
+    "foundation/execution_plan.md": {
+      "base_hash": "sha256:b24c391fa69185a36f31d09da77ee29b041ae40f254f9093a160fd054ef5013e",
+      "current_hash_last_seen": "sha256:b24c391fa69185a36f31d09da77ee29b041ae40f254f9093a160fd054ef5013e",
+      "local_modifications": "expected",
+      "managed": "true",
+      "managed_by": "operator",
+      "merge_strategy": "operator_review"
+    },
+    "foundation/prd.md": {
+      "base_hash": "sha256:b951d0bc37f7ded61a59d9b5b8c994c5f47d9811f03dff1c3368c391070fbf0f",
+      "current_hash_last_seen": "sha256:b951d0bc37f7ded61a59d9b5b8c994c5f47d9811f03dff1c3368c391070fbf0f",
+      "local_modifications": "expected",
+      "managed": "true",
+      "managed_by": "operator",
+      "merge_strategy": "operator_review"
+    },
+    "foundation/technical_architecture.md": {
+      "base_hash": "sha256:37b3190fcd3172c3502c8511d2a643ef2e8f5f48d372341f2485bf298514fb6b",
+      "current_hash_last_seen": "sha256:37b3190fcd3172c3502c8511d2a643ef2e8f5f48d372341f2485bf298514fb6b",
+      "local_modifications": "allowed",
+      "managed": "true",
+      "managed_by": "shared",
+      "merge_strategy": "three_way"
+    },
+    "foundation/test_cases.md": {
+      "base_hash": "sha256:ac934385d20dfacce6e07634c2137f965b002f6544cf2b43085bc3bdaff4fae6",
+      "current_hash_last_seen": "sha256:ac934385d20dfacce6e07634c2137f965b002f6544cf2b43085bc3bdaff4fae6",
+      "local_modifications": "expected",
+      "managed": "true",
+      "managed_by": "operator",
+      "merge_strategy": "operator_review"
+    },
+    "foundation/vision.md": {
+      "base_hash": "sha256:9a2734ec25e31c40d1de8928c498b8626f48335e7e9a623794ba9cbb0b18630d",
+      "current_hash_last_seen": "sha256:9a2734ec25e31c40d1de8928c498b8626f48335e7e9a623794ba9cbb0b18630d",
+      "local_modifications": "expected",
+      "managed": "true",
+      "managed_by": "shared",
+      "merge_strategy": "three_way"
+    }
+  },
+  "release_date": "2026-05-21",
+  "source_commit": "fixture-only",
+  "status": "fixture"
+}

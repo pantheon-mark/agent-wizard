@@ -1,0 +1,28 @@
+{
+  "_note": "JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing companion. Both files MUST stay in sync.",
+  "inventory_check_result": {
+    "classification_confirmed": "first_concrete_per_version_prerelease_package stands; no operator-project migration debt accruing silently; confirmed: no formal v1 bundle has shipped; no persisted v0.x operator-project bundles exist. Pre-v1-stabilization clause active.",
+    "date": "2026-05-21",
+    "result": "zero_v0_2_or_persisted_v0_1_operator_bundles_found",
+    "scope": "Carry-forward from the 2026-05-20 inventory check at wizard/foundation-bundles/v0/migration_manifest.yaml. No new operator projects created between 2026-05-20 and 2026-05-21; carry-forward is sound."
+  },
+  "migrations": [
+    {
+      "breaking_changes_summary": "",
+      "class": "minor-additive",
+      "from": "v0.2",
+      "migration_steps": "not_applicable",
+      "notes": "First concrete per-version foundation-bundle package (2026-05-21 release). Convention amendment landed at the canonical foundation-versioning specification (per-version directory layout decoupled from v1.0.0 stability commitment). Package self-contained: own schemas, own templates, own baselines, own manifest, own migration-manifest. Generator-version identity NOT wired at v0.3.0 — forthcoming. v0.3.0 manifest OMITS generator_version with header comment noting deferral.",
+      "preflight": "not_applicable",
+      "requires_operator_approval": "not_applicable",
+      "rollback": "not_applicable",
+      "stabilization_exemption": "pre-v1-no-operator-project-dependency",
+      "stop_condition": "No operator project depends on v0.2 (inventory check carry-forward from the 2026-05-20 release: zero v0.1 or persisted v0.2 operator-project bundles found). Per pre-v1 stabilization clause applies; no operator-project migration runbook required. If a v0.2-installed operator project surfaces in future inventory check, file an investigation and reinstall foundation bundle from v0.3.0 OR later release.",
+      "supported": false
+    }
+  ],
+  "release_classification": "first_concrete_per_version_prerelease_package",
+  "release_date": "2026-05-21",
+  "schema_version": "v1",
+  "target_version": "v0.3.0"
+}

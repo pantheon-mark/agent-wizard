@@ -1,0 +1,21 @@
+{
+  "bundles": [
+    {
+      "foundation_bundle_version": "v0.2.0",
+      "manifest": "wizard/test_fixtures/operator_project_upgrade/_synthetic_bundles/v0.2.0/manifest.yaml",
+      "path": "wizard/test_fixtures/operator_project_upgrade/_synthetic_bundles/v0.2.0/",
+      "release_date": "2026-05-01",
+      "source_commit": "fixture-only",
+      "status": "fixture-hypothetical"
+    },
+    {
+      "foundation_bundle_version": "v0.3.0",
+      "manifest": "wizard/foundation-bundles/v0.3.0/manifest.yaml",
+      "path": "wizard/foundation-bundles/v0.3.0/",
+      "release_date": "2026-05-21",
+      "source_commit": "15757c5",
+      "status": "prerelease"
+    }
+  ],
+  "schema_version": "v1"
+}

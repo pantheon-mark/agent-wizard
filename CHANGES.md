@@ -12,6 +12,30 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-28 — foundation-bundle upgrade lifecycle: plan-only CLI + drift detection + content-addressed strict-receipt provenance
+
+**Public-facing change:** the wizard ships its first operator-facing upgrade lifecycle: two new CLI commands (`wizard upgrade-check` + `wizard upgrade --to <version> --plan-only` / `wizard upgrade-plan --to <version>`) plus a content-addressed strict-receipt provenance file emitted alongside each foundation bundle. At this release the lifecycle is **plan-only** — the CLI describes what an upgrade would do but does not apply changes. The apply path lands at the next release that ships the per-operator-project state files.
+
+- **Two new CLI commands operationalize what the foundation-versioning policy described.**
+  - `wizard upgrade-check` reads an operator project's `.wizard/manifest.json` plus the public bundle registry and reports: available newer versions, per-target upgrade tier, per-managed-file drift status, and the current standing-approval status.
+  - `wizard upgrade --to <version> --plan-only` produces a written upgrade plan (planned migration steps, planned drift handling per merge strategy, planned post-validation). `wizard upgrade-plan --to <version>` is the same thing with a tidier subcommand name.
+  - At this release **`--plan-only` is mandatory** on `wizard upgrade --to <version>`; calling without it produces a clear error pointing to the next release. The apply path itself ships at the release that adds operator-project state files.
+- **Standing approval is fully disabled at this release.** Every upgrade requires explicit operator approval, including clean patch-mechanical ones. The CLI reports `standing_approval_status: unavailable_idq_050_open`. This is honest about a precondition that hasn't shipped yet (operator authority profile generation); when that ships, standing approval activates per the documented profile-gated rules.
+- **Hash-based drift detection** runs in **non-destructive planning mode** at this release. The engine reports candidate diffs + plan actions per merge strategy (`three_way` / `operator_review` / `warn_on_drift` / `frozen`) but does not write merged content. The real merge algorithm + write semantics ship at a later release.
+- **New `foundation-bundle.provenance.json` ships alongside each foundation bundle.** An 11-field content-addressed strict receipt records what was in the bundle + how it was generated, with a separate `generated_at` timestamp that is metadata-only (not in any content hash) so byte-level reproducibility holds across re-emissions. The receipt also names its own schema_version + hash_algorithm + canonicalization_version so future changes are explicit.
+- **JSON sidecars** (`manifest.json` + `migration-manifest.json`) now ship alongside their YAML companions in each `wizard/foundation-bundles/<version>/` directory. The wizard's runtime CLI consumes the JSON; the YAML stays the human-facing copy. No third-party Python dependencies introduced.
+
+**Operator-facing notes:**
+
+- No operator action required at this release. There is no operator-project apply path yet — the upgrade CLI is plan-only.
+- If you experiment with the CLI against a test operator project, expect the standing-approval status to show `unavailable_idq_050_open` and expect `wizard upgrade --to <version>` to refuse without `--plan-only`.
+- No version bump on the policy itself; this is the implementation of the previously-shipped foundation-versioning policy (minor-additive update to the implementation document).
+
+- Source-Meta-Commit: `(filled at push)`
+- Public repo commit: `(filled after subtree push)`
+
+---
+
 ## 2026-05-27 — clearer, more honest execution model for generated multi-agent systems (+ a session-lock fix)
 
 **Public-facing change:** the wizard's generated markdown-agent systems now carry a clearer and more honest description of *how they run*, plus a real fix to the session lock that coordinates them.

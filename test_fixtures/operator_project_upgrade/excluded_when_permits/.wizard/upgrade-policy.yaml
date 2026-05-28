@@ -1,0 +1,13 @@
+# Fixture upgrade-policy.yaml — would permit standing approval if operator-authority-profile generation were resolved.
+# At v0 the CLI MUST ignore this and report unavailable_idq_050_open.
+standing_approval:
+  enabled: true
+  max_target: patch-mechanical
+  requires_clean_git: true
+  requires_backup_ready: false
+  requires_preflight_pass: true
+  excluded_when:
+    trust_posture: low
+    desired_autonomy: low
+    domain_risk: high
+    regulated_data: true
