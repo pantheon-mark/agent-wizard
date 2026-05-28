@@ -37,11 +37,20 @@ expected_outcome:
       sections_skipped: [component_roster]
       notes: "agent_roster renders for markdown-agents-on-claude-code; component_roster deferred for other shapes"
     technical_architecture.md:
-      sections_present: [orchestration_model, agent_roster, permission_boundaries, task_completion_checklists, integrations, scale_tier]
-      sections_skipped: [regulatory_compliance_gaps_foundation_only, deployment_topology, data_model]
+      sections_present: [orchestration_model, task_completion_checklists, integrations, scale_tier]
+      sections_skipped: [agent_architecture_detail, permission_boundary_architecture, regulatory_compliance_gaps_foundation_only, deployment_topology, data_model]
       notes: |
-        markdown-agents sections render; regulatory_compliance_gaps_foundation_only only renders in
-        foundation_only mode; deployment_topology + data_model deferred for other shapes
+        markdown-agents sections render in complete mode. Per the v0.4.0 release (2026-05-28) refactor:
+        agent_roster + permission_boundaries sections REMOVED from technical_architecture;
+        agent_architecture_detail + permission_boundary_architecture sections ADDED with
+        population_status: deferred (undefer_trigger fires when wizard interview captures
+        the relevant detail OR first foundation-bundle emission slice operationalizes
+        derivation). Deferred sections are skipped by the validator's emission-set logic
+        (population_status != populated → not present), even though the template carries
+        fixed deferred-state stub text (with live-link cross-refs to canonical homes:
+        approach.md § agent_roster and execution_plan.md § human_in_the_loop_map).
+        regulatory_compliance_gaps_foundation_only only renders in foundation_only mode;
+        deployment_topology + data_model deferred for other shapes.
     execution_plan.md:
       sections_present: [mvp_definition, build_phases, execution_sequence, human_in_the_loop_map, sprint_planning, work_plans]
       sections_skipped: [deployment_pipeline]

@@ -1,0 +1,133 @@
+# Foundation bundle v0.4.0 migration manifest (target-owned per § 3 of the canonical
+# foundation-versioning specification)
+#
+# This file lives at wizard/foundation-bundles/v0.4.0/migration-manifest.yaml per § 8.3
+# per-version layout (decoupled from v1.0.0 stability commitment per § 1.3
+# layout-vs-stability decoupling).
+#
+# Target-owned discipline (§ 3.3): v0.4.0 (this release) declares what it migrates FROM
+# and how. Prior v0.x → v0.x+1 schema-layer transitions remain tracked in their respective
+# per-version manifests (v0.3.0/migration-manifest.yaml carries v0.2 → v0.3.0).
+#
+# Pre-v1 stabilization clause applies per § 1.3: no operator project depends on v0.3.0;
+# inventory check confirms zero persisted v0.3.0 operator-project bundles. stabilization_exemption
+# field waives migration runbook content per § 1.3; manifest YAML still ships per the
+# canonical foundation-versioning specification § 3 "every release ships migration manifest"
+# requirement.
+#
+# THIS IS THE FIRST major-breaking RELEASE in the v0.x prerelease series. v0.4.0 introduces
+# the single-home + cross-reference + extended-info + deferred-state template-design
+# discipline per the foundation-versioning template-design discipline (the v0.4.0 release (2026-05-28)).
+
+target_version: v0.4.0
+release_date: 2026-05-28
+schema_version: v1  # this manifest's own schema version (§ 3.1)
+release_classification: first_major_breaking_schema_section_refactor_prerelease
+
+migrations:
+  - from: "v0.3.0"
+    class: major-breaking  # per § 2.3 4-tier; section-schema removal + addition is breaking at the public API surface (per § 1.1 "sections per doc-type" is part of foundation bundle public API)
+    stabilization_exemption: pre-v1-no-operator-project-dependency  # waives migration runbook content per § 1.3
+    requires_operator_approval: not_applicable  # no operator project exists at v0.3.0
+    preflight: not_applicable
+    rollback: not_applicable  # static-asset schema change; rollback = re-install foundation bundle from v0.3.0 directory (still on disk)
+    migration_steps: not_applicable  # under stabilization clause; no runbook content authored
+    breaking_changes_summary: |
+      Section schema for technical_architecture.md (schemas/section-schema.yaml):
+      - REMOVED section id=agent_roster (title: "Agent Roster")
+      - REMOVED section id=permission_boundaries (title: "Permission Boundaries")
+      - ADDED section id=agent_architecture_detail (title: "Agent Architecture Detail";
+        population_status: deferred; undefer_trigger: wizard interview iteration that captures
+        per-agent architectural detail OR first foundation-bundle emission slice that
+        operationalizes architecture-detail derivation — whichever first)
+      - ADDED section id=permission_boundary_architecture (title: "Permission Boundary
+        Architecture"; population_status: deferred; undefer_trigger: wizard interview iteration
+        that captures boundary-architecture detail OR first foundation-bundle emission slice
+        that operationalizes boundary-architecture derivation — whichever first)
+
+      Placeholder inventory in technical_architecture.md template:
+      - REMOVED {{AGENT_ROSTER_ROWS}} placeholder
+      - REMOVED {{AUTONOMOUS_ACTIONS}} placeholder
+      - REMOVED {{ASKS_FIRST_ACTIONS}} placeholder
+      - NO new placeholders introduced at v0.4.0 (deferred sections render fixed stub
+        text directly in the template; generator fail-fast contract on placeholder
+        substitution is preserved)
+
+      Future minor-additive release (e.g., v0.5.0) will introduce {{AGENT_ARCHITECTURE_DETAIL}}
+      and/or {{PERMISSION_BOUNDARY_ARCHITECTURE}} placeholders + flip the corresponding
+      sections from `population_status: deferred` to `populated` — gated on undefer_trigger
+      firing per the section-schema definitions.
+
+      approach.md and execution_plan.md section schemas UNCHANGED; remain canonical homes
+      for Agent Roster (approach.md § agent_roster) and Human-in-the-Loop Map
+      (execution_plan.md § human_in_the_loop_map) respectively.
+
+      Coupling preserved: HITL_MAP_ROWS derives from ASKS_FIRST_ACTIONS + AUTONOMOUS_ACTIONS
+      + AUTONOMY_LEVEL per inputs.json _derivation_inputs. Per the v0.4.0 release R3 cross-vendor
+      pre-spec advisor s2.26pre-r3-gemini:C-001: derivation logic must strictly validate
+      presence of upstream dependencies even when downstream placeholders are removed
+      (extends generator fail-fast contract to derivation inputs lacking direct template
+      placeholders).
+    supported: false  # no operator projects to support
+    stop_condition: |
+      No operator project depends on v0.3.0 (inventory check carry-forward from
+      the 2026-05-21 release + no new operator projects created between 2026-05-21
+      and 2026-05-28).
+      Per § 1.3 pre-v1 stabilization clause applies; no operator-project migration runbook
+      required. If a v0.3.0-installed operator project surfaces in future inventory check,
+      file an investigation; the operator-project would need full re-install from v0.4.0
+      because section renames in technical_architecture.md are NOT auto-migratable.
+    notes: |
+      First major-breaking schema-section refactor in the v0.x prerelease series
+      (released 2026-05-28). Codifies the single-home + cross-reference + extended-info +
+      deferred-state template-design discipline per the foundation-versioning template-design discipline amendment.
+
+      Driven by the v0.3.x template redundancy concern (foundation-bundle template redundancy + drift risk; filed
+      2026-05-23 at the v0.3.x release line walkthrough of technical_architecture.md per Mark's
+      META finding on verbatim Agent Roster duplication).
+
+      Advisor sequence:
+      - Pre-spec R1 (codex gpt-5.5): 1 HIGH + 2 MED + 1 LOW; non-convergence;
+        all TAKE-variant applied (caught semver coherence + graveyard risk +
+        Permission/HITL framing + live-link refinement)
+      - Pre-spec R2 (codex thread continuation): 1 MED + 2 LOW; premise REJECTED
+        cleanup-class until § 8 partial-closure resolved; all TAKE applied
+      - Pre-spec R3 (gemini-3.1-pro-preview cross-vendor; alien-frame): 4 codex
+        diagnoses confirmed + 3 divergent findings (2 MED + 1 LOW) caught
+        by alien-frame lens; all TAKE-variant applied (derivation data-loss
+        risk + ADR cohesion bend deferred to future cleanup slice per § A.5
+        + schema-vs-template-stub duplication acknowledged as v0 trade-off)
+      - Calibration n=143 → n=148
+
+      Slice spec: the v0.4.0 release notes
+      First exercise of the v0.3.x release line plan-only CLI (`wizard upgrade-plan v0.3.0 → v0.4.0`) per
+      slice D7 — first non-trivial migration test with section-schema changes.
+
+      Package self-contained (same pattern as v0.3.0):
+        - own schemas/section-schema.yaml (v0.3 schema_revision; renames + deferred sections)
+        - own templates/ (6 .md files; technical_architecture.md refactored; 5 others verbatim)
+        - own baselines/ (6 .hash.yaml files; technical_architecture.md.hash.yaml regenerated;
+          5 others may bump schema_revision but content-hash unchanged)
+        - own manifest.yaml + this migration-manifest.yaml + JSON sidecars
+
+      Generator-version identity STILL not wired at v0.4.0 — forthcoming.
+      v0.4.0 manifest OMITS generator_version field with header comment noting deferral.
+
+      Forfeit of stabilization clause: first v1.0.0 tag. Until then, all v0.x → v0.y
+      migrations follow the same target-owned + stabilization-exempted discipline.
+
+inventory_check_result:
+  date: 2026-05-28
+  scope: |
+    Carry-forward from the 2026-05-21 inventory check at wizard/foundation-bundles/v0.3.0/migration-manifest.yaml.
+    No new operator projects created between 2026-05-21 and 2026-05-28; carry-forward is sound.
+  result: zero_v0_3_0_or_persisted_earlier_v0_x_operator_bundles_found
+  classification_confirmed: |
+    first_major_breaking_schema_section_refactor_prerelease stands; no operator-project
+    migration debt accruing silently; confirmed: no formal v1 bundle has shipped; no
+    persisted v0.x operator-project bundles exist. Pre-v1-stabilization clause active.
+
+# Future migrations append below per target-owned discipline: each target release declares
+# what it migrates FROM. Source projects do not predict future compatibility. Per-migration
+# step files (migrations/<from>-to-<target>.md) are authored at the first real migration event
+# (i.e., first persisted operator-project bundle; v0.x stabilization clause forfeit at v1.0.0).

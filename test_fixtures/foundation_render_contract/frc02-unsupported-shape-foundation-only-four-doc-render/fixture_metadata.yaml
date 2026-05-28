@@ -45,8 +45,8 @@ expected_outcome:
       sections_present: [regulatory_compliance_gaps_foundation_only]
       sections_skipped:
         - orchestration_model
-        - agent_roster
-        - permission_boundaries
+        - agent_architecture_detail
+        - permission_boundary_architecture
         - task_completion_checklists
         - integrations
         - scale_tier
@@ -57,6 +57,10 @@ expected_outcome:
         All other sections are render_modes: [complete] only OR shape-specific (applies_to_shapes).
         This matches a prior slice — compliance gaps section is where DOCUMENT-path stop
         conditions flow into foundation-only output (populated_when_documented_during_loop).
+        Per the v0.4.0 release (2026-05-28) refactor: agent_roster + permission_boundaries REMOVED;
+        agent_architecture_detail + permission_boundary_architecture ADDED (population_status:
+        deferred); both new sections are correctly listed in sections_skipped for
+        foundation_only mode (render_modes: [complete] only AND population_status: deferred).
     execution_plan.md:
       sections_present: [mvp_definition]
       sections_skipped:

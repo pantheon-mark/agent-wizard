@@ -15,7 +15,7 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 
 ## Security Audits
 
-**Trigger:** Runs on every agent-produced integration artifact. Cannot be disabled. Runs at all four autonomy levels.
+**Trigger:** Runs on every agent-produced integration artifact. Cannot be disabled. Runs at every autonomy level.
 
 **Qualifying criteria (any one triggers the audit):**
 
@@ -41,7 +41,7 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 | High | Route finding to work queue. Orchestrator notified. No automatic quarantine. |
 | Warning | Digest entry only. No quarantine. No work queue item. |
 
-*At Levels 1-2, Critical and High findings both quarantine automatically. At Levels 3-4, Critical quarantines; High routes to work queue without quarantine.*
+*At lower autonomy levels, Critical and High findings both quarantine automatically. At higher autonomy levels, Critical quarantines; High routes to work queue without quarantine.*
 
 ---
 
@@ -102,3 +102,38 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 - Vision/roadmap scope exception: surfaced to user — not auto-updated.
 - Scale drift (2+ consecutive weeks of one-tier divergence): routes to issues log at High severity and to advisor queue.
 - Document gaps: fixed automatically using the document update mechanism, change summary delivered in digest.
+
+---
+
+## Rules library
+
+The rules library is the system's accumulated record of calibrated quality rules — built up over time from human review feedback, audit calibration events, and phase-gate retrospectives.
+
+**Location:** `/quality/rules_library.md`. The file is created empty at wizard completion and populated at runtime as the system learns.
+
+**What it contains:** Generalized rules surfaced from past system behavior. Examples: rules established when a human review item is resolved in a way that creates new judgment; rules calibrated from recurring audit findings; rules for which semantic patterns are high-confidence vs. need-clarification.
+
+**Who writes to it:** The QA agent writes new entries when a resolved human review item establishes a new rule, recording the originating context, date, and the human judgment that established it. The audit framework writes calibration feedback after phase-gate retrospectives.
+
+**Who reads from it:** Agents consult the rules library during semantic validation, quality checks before handoff, research before surfacing questions, and — at higher autonomy — when building or modifying other agents. Phase-gate reviews read it as one of their required inputs.
+
+---
+
+## System lifecycle
+
+The audit framework above covers system **reads** — checks of system state against vision, foundation documents, and configured cadences. The system also has lifecycle **writes** that handle maintenance and upgrades.
+
+### Maintenance
+
+The system performs routine maintenance writes as usage accumulates:
+
+- Log rotation moves filled log files to `/archive/logs/`
+- Task archiving moves completed work-queue entries to `/archive/work_archive.md`
+- State pruning reduces accumulated session-bootstrap and checkpoint state past configured thresholds
+- Document maintenance compacts long-running operational documents when they grow past readable length
+
+Routine cases (log rotation; work-archive moves) run alongside existing audit cadences. Broader maintenance cadences and ownership are not yet fully codified at this version — operators may surface maintenance questions to the wizard as the system matures.
+
+### Upgrades
+
+This system was built from a foundation bundle managed by the wizard. When the wizard ships updated foundation documents or templates, the system can be updated through the wizard's upgrade path. **Upgrades are always operator-explicit** — the wizard never upgrades the system without confirmation. The upgrade mechanism is designed (versioning, drift detection, migration safety, approval gates) but the operator-facing commands are not yet activated at this version. Operators do not need to take any upgrade action until the wizard surfaces one.

@@ -1,0 +1,25 @@
+# Hash baseline for execution_plan.md
+# Enforced-path drift detection mechanism for foundation bundle v0.1.
+# Regeneration rationale: initial baseline at foundation-bundle v0.1 release.
+template: execution_plan.md
+schema_revision: v0.3
+sections_hash:
+- id: mvp_definition
+  heading: MVP Definition
+  heading_hash: 48d823c8b8554fb14ac423828053f6851fe8d77d
+- id: build_phases
+  heading: Build Phases
+  heading_hash: 9d06e30d2e6433f32663837446fe782efd137fb1
+- id: execution_sequence
+  heading: Execution Sequence
+  heading_hash: 48c2730ff81d4a51c5cbbea5340aa527dfcc483d
+- id: human_in_the_loop_map
+  heading: Human-in-the-Loop Map
+  heading_hash: e4887921837fd842ae0863395875173bc850db51
+- id: sprint_planning
+  heading: Sprint Planning
+  heading_hash: 1a43f685e84c9290967e61358b54eb8f8bb6df74
+- id: work_plans
+  heading: Work Plans
+  heading_hash: 80950ebaf57dc06024483d4da48400573200263e
+base_hash: 21c25fc0d6c4be9fb6c0bce93650851fbeed2da4

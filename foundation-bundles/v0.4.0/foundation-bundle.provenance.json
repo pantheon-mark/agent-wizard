@@ -1,0 +1,83 @@
+{
+  "bundle_file_manifest": [
+    {
+      "hash": "sha256:f4ee8e5d980db6f5e6da4204d170d6322065fa2451b4574e6e151e0b7858b097",
+      "path": "baselines/approach.md.hash.yaml"
+    },
+    {
+      "hash": "sha256:1db09bf2bc606195a0a2184bf20295e4c272e4fb2e15065ffd5d83bf7c7dd01d",
+      "path": "baselines/audit_framework.md.hash.yaml"
+    },
+    {
+      "hash": "sha256:6a1d5206a6aca0498d5a255249a11d610a27a9f7baaa39e1afd596364d36d6b8",
+      "path": "baselines/execution_plan.md.hash.yaml"
+    },
+    {
+      "hash": "sha256:f20194dcea930da1eb84ca2e35c917d16a350a27dac360ea82459d672f150dab",
+      "path": "baselines/technical_architecture.md.hash.yaml"
+    },
+    {
+      "hash": "sha256:5c0a5be7fdf01707d1f351d14f264a63f01f87695c0d9c5031b67113d31863e1",
+      "path": "baselines/test_cases.md.hash.yaml"
+    },
+    {
+      "hash": "sha256:50ccd358578ba55c91159f1542057a99c4d20e28ab68100c828ef2252f231c7b",
+      "path": "baselines/vision.md.hash.yaml"
+    },
+    {
+      "hash": "sha256:f2ec314f741a85c99cb6c8c7afb739d99170d5a7049757ace94a254022b736c7",
+      "path": "manifest.json"
+    },
+    {
+      "hash": "sha256:3982d762cbd2498634d25deb7839b4087087fe4fda39de77192324c65eea99e6",
+      "path": "manifest.yaml"
+    },
+    {
+      "hash": "sha256:aaf106ac0793fc4cdb1ec686193d1d5394404dd1b8dbbaf2c1dd3bd856599eb3",
+      "path": "migration-manifest.json"
+    },
+    {
+      "hash": "sha256:8c11d4cda14d224ed7012c381bab921d5e6656b71c520fc3d18a7ced2c1022dd",
+      "path": "migration-manifest.yaml"
+    },
+    {
+      "hash": "sha256:372558247650613c983cdd3745f8ef052f62f0e3f238aa8fb421ad07bf94aca1",
+      "path": "schemas/section-schema.yaml"
+    },
+    {
+      "hash": "sha256:6909dee91db9f537e8a49963259bca3a409284ca3971793e5b43bd3499ecbc70",
+      "path": "templates/approach.md"
+    },
+    {
+      "hash": "sha256:8b77f8854fea210d3b2a9a65e1e8549f66c1592780c02e26d8612e18dbb0ad35",
+      "path": "templates/audit_framework.md"
+    },
+    {
+      "hash": "sha256:e2bac585dbcbab33a25492cd693d34fb3a9ffdca7c659f902a2460b62fe8eaf1",
+      "path": "templates/execution_plan.md"
+    },
+    {
+      "hash": "sha256:8bcd63691a7817e68eac6ffce426885f0895052d62252ba087eced250edd980f",
+      "path": "templates/technical_architecture.md"
+    },
+    {
+      "hash": "sha256:0460e3cfcac1c50250807307aedf19e7abd8037aee722d11b4ee1a110e224713",
+      "path": "templates/test_cases.md"
+    },
+    {
+      "hash": "sha256:aebdb309c7a31312487b5680b1b461a49e3c0701f3966585a50574139b86c29e",
+      "path": "templates/vision.md"
+    }
+  ],
+  "canonicalization_version": "v1",
+  "generated_at": "2026-05-28T22:19:33Z",
+  "generator_version": "0b2de523c58ddb744c93eba6c1b8264d375baaab",
+  "hash_algorithm": "sha256-lf",
+  "schema_version": "v1",
+  "source_bundle_version": "v0.4.0",
+  "source_registry_entry_hash": "sha256:9ee6f58356beccc27fcbd27c6ba7be25aacddc445fbd7838356515342a75e23d",
+  "strict_mode": false,
+  "strict_mode_source": "cli_flag",
+  "template_tree_hash": "sha256:24790aa7b6c445751ce70db27e3f739f58c543dc755759b286e6215129d4fb2e",
+  "worktree_clean": false
+}

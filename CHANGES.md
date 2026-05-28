@@ -12,6 +12,27 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-28 — foundation bundle v0.4.0: technical_architecture template refactor (single-home + cross-reference + extended-info + deferred-state rendering)
+
+**Public-facing change:** foundation bundle releases its first major-breaking schema refactor in the v0.x prerelease series (v0.3.0 → v0.4.0). The `technical_architecture.md` template now follows a **single-home + cross-reference + extended-info + deferred-state rendering** discipline for content that crosses doc boundaries.
+
+- **Two section-schema refactors:** `technical_architecture.agent_roster` removed (canonical home now `approach.md § Agent Roster`); `technical_architecture.permission_boundaries` removed (canonical home now `execution_plan.md § Human-in-the-Loop Map`). Two new sections added: `agent_architecture_detail` + `permission_boundary_architecture`, both with `population_status: deferred` + concrete `undefer_trigger`.
+- **Cross-reference convention:** downstream sections start with an italic note containing a **live Markdown link** to the canonical home + a projection description + an extension-purpose statement + a non-duplication assertion. This is the canonical discipline going forward for any field that crosses doc boundaries.
+- **Deferred-state rendering:** new sections without populated content carry a fixed deferred-state stub text directly in the template (no placeholder substitution at deferred state). When the `undefer_trigger` fires, a future minor-additive release introduces the corresponding placeholder + flips the section to `populated`.
+- **No new placeholders at v0.4.0** — three placeholders REMOVED (`{{AGENT_ROSTER_ROWS}}`, `{{AUTONOMOUS_ACTIONS}}`, `{{ASKS_FIRST_ACTIONS}}`); zero added.
+- **Upgrade-plan tier reporting fix:** `wizard upgrade-plan` + `wizard upgrade-check` now correctly report `tier: major-breaking` for v0.3.0 → v0.4.0 by reading the target-owned migration manifest's `class:` field instead of inferring tier from naive semver arithmetic (which would mis-classify a minor-version bump as `minor-additive`).
+
+**Operator-facing notes:**
+
+- No operator action required. Per the foundation-versioning pre-v1 stabilization clause, the v0.3.0 → v0.4.0 migration carries `stabilization_exemption: pre-v1-no-operator-project-dependency` — no operator project depends on v0.3.0, so no operator-project migration runbook is required.
+- `wizard upgrade-plan --to v0.4.0` reports the migration as `tier: major-breaking` end-to-end.
+- The two NEW deferred sections in `technical_architecture.md` will render as honest stub text describing why the content is not yet captured + when it will be. Operators should NOT author content into these sections at this version.
+
+**Source-Meta-Commit:** FILLED_AT_S2.26_CLOSE
+**Public repo commit:** FILLED_AT_S2.26_PUBLIC_PUSH
+
+---
+
 ## 2026-05-28 — foundation-bundle upgrade lifecycle: plan-only CLI + drift detection + content-addressed strict-receipt provenance
 
 **Public-facing change:** the wizard ships its first operator-facing upgrade lifecycle: two new CLI commands (`wizard upgrade-check` + `wizard upgrade --to <version> --plan-only` / `wizard upgrade-plan --to <version>`) plus a content-addressed strict-receipt provenance file emitted alongside each foundation bundle. At this release the lifecycle is **plan-only** — the CLI describes what an upgrade would do but does not apply changes. The apply path lands at the next release that ships the per-operator-project state files.

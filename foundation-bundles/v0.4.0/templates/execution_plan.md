@@ -51,6 +51,8 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 
 **Current autonomy level:** {{AUTONOMY_LEVEL}}
 
+*Autonomy level governs how much the system does without asking you — not whether it keeps running on its own. This system runs when invoked: either when you start a Claude Code session, or when a scheduled job starts the Orchestrator on a cadence you set. It does not run on its own in the background, and does not act while no session is active. "Operating on a cadence" means a scheduled run starts, completes its work, and exits.*
+
 | Action category | Current behavior | Notes |
 |-----------------|-----------------|-------|
 | Routine operations | Proceeds autonomously — noted in digest | Configurable via chunk confirmation setting |

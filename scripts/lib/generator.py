@@ -46,7 +46,7 @@ Public API:
 
 Stub PRD section list lives in PRD_STUB_SECTIONS module constant. A parity
 test guards drift between the constant and the canonical YAML schema at
-wizard/foundation-bundles/v0.3.0/schemas/section-schema.yaml.
+wizard/foundation-bundles/v0.4.0/schemas/section-schema.yaml.
 """
 
 import hashlib
@@ -63,7 +63,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 # The generator runtime is stdlib-only and cannot parse YAML directly. The PRD
 # section titles are mirrored here as a module constant; a build-time parity
 # test reads the canonical YAML schema at
-# wizard/foundation-bundles/v0.3.0/schemas/section-schema.yaml and asserts these
+# wizard/foundation-bundles/v0.4.0/schemas/section-schema.yaml and asserts these
 # titles match. Drift is caught at CI.
 PRD_STUB_SECTIONS = [
     ("vision_link", "Vision Link"),
@@ -241,11 +241,11 @@ def _emit_prd_stub(inputs: Dict[str, str]) -> str:
           parity-tested against the canonical YAML section schema)
         - A deferred-population note per section
     """
-    wizard_version = inputs.get("WIZARD_VERSION", "v0.3.0")
+    wizard_version = inputs.get("WIZARD_VERSION", "v0.4.0")
     lines: List[str] = []
     lines.append("---")
     lines.append("foundation_doc_type: prd")
-    lines.append("foundation_schema_version: v0.2")
+    lines.append("foundation_schema_version: v0.3")
     lines.append(f'wizard_version_compatible: "{wizard_version}"')
     lines.append("managed_by: operator")
     lines.append("---")
@@ -257,7 +257,7 @@ def _emit_prd_stub(inputs: Dict[str, str]) -> str:
                  "ships for prd.md at this foundation bundle release — the "
                  "operator authors content for each section below per the "
                  "canonical section schema at "
-                 "`wizard/foundation-bundles/v0.3.0/schemas/section-schema.yaml` "
+                 "`wizard/foundation-bundles/v0.4.0/schemas/section-schema.yaml` "
                  "(prd entry).")
     lines.append("")
     for _section_id, section_title in PRD_STUB_SECTIONS:

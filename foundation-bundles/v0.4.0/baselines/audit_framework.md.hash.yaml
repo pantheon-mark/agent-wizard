@@ -1,0 +1,19 @@
+# Hash baseline for audit_framework.md
+# Enforced-path drift detection mechanism for foundation bundle v0.1.
+# Regeneration rationale: initial baseline at foundation-bundle v0.1 release.
+template: audit_framework.md
+schema_revision: v0.3
+sections_hash:
+- id: security_audits
+  heading: Security Audits
+  heading_hash: 3461245c80316cdf852ae38a8ac3738bc84c981d
+- id: log_audits
+  heading: Log Audits
+  heading_hash: 9feb560160a82a46dbc8f8a9b0674bf05ed39e9e
+- id: architecture_audits
+  heading: Architecture Audits
+  heading_hash: 959e481181bf1581bd50132ec4ed733b9cdd5eb7
+- id: drift_audits
+  heading: Drift Audits
+  heading_hash: bc4d6ca465d9bdef6154f6520b3a72924d14b170
+base_hash: db084436576cadbb8960f7962063b4526e942892

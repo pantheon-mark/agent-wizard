@@ -1,0 +1,28 @@
+{
+  "_note": "JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing companion. Both files MUST stay in sync.",
+  "inventory_check_result": {
+    "classification_confirmed": "first_major_breaking_schema_section_refactor_prerelease stands; no operator-project migration debt accruing silently; confirmed: no formal v1 bundle has shipped; no persisted v0.x operator-project bundles exist. Pre-v1-stabilization clause active.",
+    "date": "2026-05-28",
+    "result": "zero_v0_3_0_or_persisted_earlier_v0_x_operator_bundles_found",
+    "scope": "Carry-forward from the 2026-05-21 inventory check at wizard/foundation-bundles/v0.3.0/migration-manifest.yaml. No new operator projects created between 2026-05-21 and 2026-05-28; carry-forward is sound."
+  },
+  "migrations": [
+    {
+      "breaking_changes_summary": "Section schema for technical_architecture.md (schemas/section-schema.yaml): REMOVED section id=agent_roster (title: \"Agent Roster\"); REMOVED section id=permission_boundaries (title: \"Permission Boundaries\"); ADDED section id=agent_architecture_detail (title: \"Agent Architecture Detail\"; population_status: deferred); ADDED section id=permission_boundary_architecture (title: \"Permission Boundary Architecture\"; population_status: deferred). Placeholder inventory in technical_architecture.md template: REMOVED {{AGENT_ROSTER_ROWS}}, {{AUTONOMOUS_ACTIONS}}, {{ASKS_FIRST_ACTIONS}}. NO new placeholders introduced at v0.4.0 (deferred sections render fixed stub text directly; generator fail-fast contract preserved). Future minor-additive release will introduce {{AGENT_ARCHITECTURE_DETAIL}} and/or {{PERMISSION_BOUNDARY_ARCHITECTURE}} placeholders when undefer_trigger fires. approach.md and execution_plan.md section schemas UNCHANGED; remain canonical homes. Per the v0.4.0 release R3 cross-vendor pre-spec advisor: derivation logic must strictly validate presence of upstream dependencies (HITL_MAP_ROWS derives from ASKS_FIRST_ACTIONS + AUTONOMOUS_ACTIONS + AUTONOMY_LEVEL) even when downstream placeholders are removed.",
+      "class": "major-breaking",
+      "from": "v0.3.0",
+      "migration_steps": "not_applicable",
+      "notes": "First major-breaking schema-section refactor in the v0.x prerelease series (the v0.4.0 release (2026-05-28)). Codifies single-home + cross-reference + extended-info + deferred-state template-design discipline per the foundation-versioning template-design discipline amendment. Driven by the v0.3.x template redundancy concern (foundation-bundle template redundancy; filed 2026-05-23). Advisor sequence: R1 codex (1H+2M+1L) + R2 codex (1M+2L premise-rejected) + R3 gemini cross-vendor (4 confirms + 2M+1L alien-frame divergent); all TAKE-variant; calibration n=143→148. Slice spec: the v0.4.0 release notes First exercise of the v0.3.x release line plan-only CLI per D7. Generator-version identity STILL not wired at v0.4.0.",
+      "preflight": "not_applicable",
+      "requires_operator_approval": "not_applicable",
+      "rollback": "not_applicable",
+      "stabilization_exemption": "pre-v1-no-operator-project-dependency",
+      "stop_condition": "No operator project depends on v0.3.0 (inventory check carry-forward; zero persisted v0.3.0 operator-project bundles). Per pre-v1 stabilization clause applies; no operator-project migration runbook required. If a v0.3.0-installed operator project surfaces in future inventory check, file an investigation; the operator-project would need full re-install from v0.4.0 because section renames in technical_architecture.md are NOT auto-migratable.",
+      "supported": false
+    }
+  ],
+  "release_classification": "first_major_breaking_schema_section_refactor_prerelease",
+  "release_date": "2026-05-28",
+  "schema_version": "v1",
+  "target_version": "v0.4.0"
+}

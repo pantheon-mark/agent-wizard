@@ -10,6 +10,9 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 # Technical Architecture
 
 ## Orchestration Model
+
+*This system uses one logical coordinator — the Orchestrator — as its control plane: it owns the work queue, decides what runs next, routes work to specialist agents, and tracks session state. Specialist agents form the data plane that does the domain-specific work. The Orchestrator runs inside a Claude Code session (your control surface for the system); specialist agents are invoked as separate runs. You interact with the work queue and the Orchestrator, not with individual specialist agents directly.*
+
 {{ORCHESTRATION_MODEL}}
 
 ## Agent Architecture Detail

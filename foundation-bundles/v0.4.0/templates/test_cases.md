@@ -15,6 +15,8 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 
 *Structural note: universal acceptance criteria are grouped into four pillars (Correctness / Reliability / Security / Operability) for navigability. The markdown agent validation matrix is grouped by functional area (Session Lifecycle / Agent Capabilities / System Coordination / Quality & Safety Guardrails). Grouping is presentation-only; no semantic change to any acceptance criterion.*
 
+*Mechanisms referenced by name in test conditions — for example, the rules library, validation gate, handoff envelope, advisor knowledge base, session bootstrap, agent invocation scripts, and voice/style configuration — are defined in the system's broader documentation rather than restated here. Tests assume these mechanisms exist and behave as the operational documents describe.*
+
 ---
 
 ## Acceptance Criteria
@@ -599,3 +601,15 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 *Added during the build phase. One section per agent, populated when the agent's first build prompt is executed.*
 
 {{AGENT_SPECIFIC_TESTS}}
+
+---
+
+## Test maintenance
+
+Tests in this document are maintained over the system's life:
+
+**Wizard-shipped updates.** As the wizard ships updated foundation bundles, new universal tests and refined shape-specific tests may arrive. Updates are operator-explicit — the wizard surfaces what changed and the operator confirms. See the audit framework's System lifecycle section for how upgrades flow.
+
+**Operator-discovered scenarios.** As the operator uses the system, new workflow scenarios surface that the initial test inventory doesn't cover. These additions go into the `Agent-Specific Tests` section or as new test groups within the appropriate pillar.
+
+**Failing tests that may be wrong.** When a test fails consistently in ways that suggest the test itself is wrong (rather than the system), surface the test to the wizard for review. The wizard may recommend refining the test, removing it, or adjusting the underlying system behavior — depending on which is the actual issue.

@@ -570,6 +570,13 @@ def compute_upgrade_check(
             }
             if registry_path is not None:
                 me = _lookup_target_migration(registry_path, entry, current_version)
+                # Per the v0.4.0 release slice-level R2 advisor finding (HIGH):
+                # target-owned migration manifest is authoritative when available.
+                # Override semver-arithmetic tier with the migration manifest's class
+                # because semver minor-bump does NOT imply minor-additive class — pre-v1
+                # major-breaking changes can land on a minor-version bump.
+                target_record["tier"] = me.migration_class
+                target_record["semver_delta_tier"] = classify_tier(current_version, version)
                 target_record["migration_class"] = me.migration_class
                 target_record["requires_operator_approval"] = me.requires_operator_approval
                 target_record["supported"] = me.supported
@@ -630,11 +637,19 @@ def compute_upgrade_plan(
         raise BundleNotFoundError(f"target version {target_version!r} not in registry")
 
     drift_report = compute_drift_report(operator_project_dir, operator_manifest, target_version)
-    tier = classify_tier(current_version, target_version)
+    semver_delta_tier = classify_tier(current_version, target_version)
+    tier = semver_delta_tier  # default to semver arithmetic; overridden below if migration manifest available
 
     migration_entry: Optional[MigrationEntry] = None
     if registry_path is not None:
         migration_entry = _lookup_target_migration(registry_path, target_entry, current_version)
+        # Per the v0.4.0 release slice-level R2 advisor finding (HIGH):
+        # target-owned migration manifest is authoritative when available.
+        # Override semver-arithmetic tier with the migration manifest's class because
+        # semver minor-bump does NOT imply minor-additive class — pre-v1 major-breaking
+        # changes can land on a minor-version bump (e.g., v0.3.0 → v0.4.0 = major-breaking
+        # per the v0.4.0 stabilization-exempted schema refactor, NOT semver-minor-additive).
+        tier = migration_entry.migration_class
 
     steps: List[str] = []
     steps.append(f"v0 plan-only: upgrade-from={current_version} upgrade-to={target_version} tier={tier}")

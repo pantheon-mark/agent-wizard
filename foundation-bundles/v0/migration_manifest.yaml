@@ -7,11 +7,22 @@
 # formal bundle release exists yet. The manifest is authored anyway as target-owned-discipline
 # practice ahead of the first wizard-driven foundation-bundle generation event.
 
-target_version: v0.2
-release_date: 2026-05-20
+target_version: v0.3
+release_date: 2026-05-28
 schema_version: v0  # this manifest's schema version
-release_classification: pre_first_generated_bundle_baseline_normalization
-generated_by_release: foundation-bundle-v0.2
+release_classification: schema_section_refactor_release_v0_3
+generated_by_release: foundation-bundle-v0.4
+
+# Schema layer history:
+# v0.2 → v0.3 transition at the 2026-05-28 release: technical_architecture section schema refactored
+# per the foundation-versioning template-design discipline (single-home + cross-reference + extended-info
+# + deferred-state rendering). agent_roster + permission_boundaries sections REMOVED;
+# agent_architecture_detail + permission_boundary_architecture sections ADDED (population_status:
+# deferred + concrete undefer_trigger). approach.md + execution_plan.md schemas UNCHANGED (canonical
+# homes for Agent Roster and HITL Map respectively). Bundle-layer release: foundation-bundle-v0.4.0
+# (major-breaking per § 2.3; pre-v1 stabilization clause applies — no operator project depends on
+# v0.3.0). Per-version migration-manifest at wizard/foundation-bundles/v0.4.0/migration-manifest.yaml
+# carries the full v0.3.0 → v0.4.0 migration entry.
 
 # v0/ rolling-manifest layout (foundation-bundle-v0.2 release 2026-05-20; per-version layout
 # activated at v0.3.0 2026-05-21).
