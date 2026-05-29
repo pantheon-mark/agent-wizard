@@ -30,8 +30,8 @@ Entries appear newest-first.
 - The installed operating principles are designed to be read at session start — the generated `CLAUDE.md` points to them and inlines the few that matter most at the start of every session.
 - Foundation upgrades are **plan-only** at this version: the wizard can tell you what a newer foundation bundle would change, but applying changes automatically is not yet available (it arrives in a later release). `.wizard/UPGRADING.md` in the generated project explains how to check for updates.
 
-**Source-Meta-Commit:** (filled at publication)
-**Public repo commit:** (filled after subtree push)
+**Source-Meta-Commit:** 6985d11
+**Public repo commit:** a7aa5d2
 
 ---
 
