@@ -204,6 +204,33 @@ class GenerateOperatorSystemTests(unittest.TestCase):
             generate_operator_system(plan, staging, REPO_ROOT,
                                      generator_version_override="0" * 40)
 
+    def test_missing_foundation_input_fails_fast_before_any_write(self):
+        """Derivation-input fail-fast: a missing foundation placeholder is caught
+        BEFORE emission — no partial staging tree."""
+        from operator_system_emitter import generate_operator_system  # noqa: E402
+        from generator import GeneratorError  # noqa: E402
+        p = _valid_plan()
+        del p["foundation_doc_inputs"]["VISION_PURPOSE"]  # drop a required placeholder
+        plan = validate_emission_plan(p, self.contract)
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name) / "out"
+        with self.assertRaises(GeneratorError):
+            generate_operator_system(plan, staging, REPO_ROOT, generator_version_override="0" * 40)
+        # fail-fast: no partial tree written
+        self.assertFalse((staging / "CLAUDE.md").exists(), "partial tree written before fail-fast")
+
+    def test_empty_foundation_input_fails_fast(self):
+        """A silently-EMPTY derived input (the silent-data-loss surface) fails closed."""
+        from operator_system_emitter import generate_operator_system  # noqa: E402
+        from generator import GeneratorError  # noqa: E402
+        p = _valid_plan()
+        p["foundation_doc_inputs"]["VISION_PURPOSE"] = "   "  # present but whitespace-only
+        plan = validate_emission_plan(p, self.contract)
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        with self.assertRaises(GeneratorError):
+            generate_operator_system(plan, Path(tmp.name) / "o", REPO_ROOT,
+                                     generator_version_override="0" * 40)
+
     def test_missing_template_dependency_fails_closed(self):
         from operator_system_emitter import _verify_template_dependencies  # noqa: E402
         from generator import GeneratorError  # noqa: E402

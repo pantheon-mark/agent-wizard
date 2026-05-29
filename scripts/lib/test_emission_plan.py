@@ -107,7 +107,7 @@ def _valid_plan() -> dict:
                 "output_directory": "work/agent_outputs",
             }
         ],
-        "foundation_doc_inputs": _FOUNDATION_DOC_INPUTS,
+        "foundation_doc_inputs": dict(_FOUNDATION_DOC_INPUTS),  # copy: callers may mutate
         "corpus_cells": [
             {
                 "cell_id": "cell-applies-all", "emission_target": ["quality/rules_library.md"],

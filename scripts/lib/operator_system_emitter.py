@@ -81,6 +81,33 @@ def _verify_template_dependencies(plan: EmissionPlan, build_repo_root: Path) -> 
         )
 
 
+def _verify_foundation_inputs_complete(plan: EmissionPlan, build_repo_root: Path) -> None:
+    """Derivation-input fail-fast guard.
+
+    Every placeholder the foundation templates require must be supplied NON-EMPTY by
+    the plan's foundation_doc_inputs, validated BEFORE any file is written. This
+    catches a MISSING input (which the renderer would otherwise raise on mid-emission,
+    after a partial tree is written) AND a silently-EMPTY/whitespace-only input
+    (which the renderer treats as a valid substitution — the silent-data-loss surface
+    where a derived field returns empty and no error fires).
+
+    This emission stage consumes RESOLVED foundation_doc_inputs (every template field
+    is a direct placeholder), so completeness + non-emptiness IS the emission-layer
+    derivation-input guard. The deeper non-placeholder derivation-input validation
+    (fields that feed a derived value without being a direct placeholder) belongs to
+    the upstream derivation stage, which is out of this stage's scope."""
+    from generator import required_foundation_placeholders  # type: ignore
+    required = required_foundation_placeholders(plan.bundle_version, build_repo_root)
+    inputs = plan.foundation_doc_inputs
+    missing = sorted(k for k in required if k not in inputs)
+    empty = sorted(k for k in required if k in inputs and not str(inputs[k]).strip())
+    if missing or empty:
+        raise GeneratorError(
+            f"derivation-input fail-fast: foundation_doc_inputs is incomplete — "
+            f"missing={missing} empty={empty}"
+        )
+
+
 def generate_operator_system(plan: EmissionPlan, target_dir: Path, build_repo_root: Path,
                              require_clean: bool = True,
                              generator_version_override: Optional[str] = None) -> OperatorSystemResult:
@@ -101,6 +128,9 @@ def generate_operator_system(plan: EmissionPlan, target_dir: Path, build_repo_ro
          derivation-record contract: a plan may only be emitted by the exact clean
          generator that authored it; regenerate the plan after generator changes.
       4. required template dependencies present (see _verify_template_dependencies).
+      5. derivation-input fail-fast — every foundation-template placeholder is supplied
+         non-empty by plan.foundation_doc_inputs (see _verify_foundation_inputs_complete);
+         catches a missing OR silently-empty derived input before any write.
 
     `generator_version_override` (tests/dev) supplies the expected identity directly
     and skips the live clean-worktree computation; it does NOT relax the reconcile.
@@ -127,6 +157,7 @@ def generate_operator_system(plan: EmissionPlan, target_dir: Path, build_repo_ro
         )
 
     _verify_template_dependencies(plan, build_repo_root)
+    _verify_foundation_inputs_complete(plan, build_repo_root)
 
     written = emit_operator_system(plan, target_dir, build_repo_root)
     return OperatorSystemResult(

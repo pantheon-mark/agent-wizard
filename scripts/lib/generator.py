@@ -357,6 +357,26 @@ def _warn_unused_inputs(inputs: Dict[str, str], all_seen_keys: set) -> None:
         )
 
 
+def required_foundation_placeholders(source_version: str, build_repo_root: Path) -> set:
+    """Union of {{KEY}} placeholders the template-backed foundation docs reference
+    for `source_version` (prd.md is a schema-only stub — no template — excluded).
+
+    Supports the derivation-input fail-fast guard: a caller can assert the plan
+    supplies every required placeholder (non-empty) BEFORE emission, rather than
+    discovering a missing key mid-render or a silently-empty value never."""
+    registry_entry = _resolve_source_bundle(source_version, build_repo_root)
+    templates_dir = (build_repo_root / registry_entry["path"]).resolve() / "templates"
+    keys: set = set()
+    for required in _read_required_foundation_docs(build_repo_root):
+        doc_name = required["path"][len("foundation/"):]
+        if doc_name == "prd.md":
+            continue
+        tp = templates_dir / doc_name
+        if tp.exists():
+            keys |= set(PLACEHOLDER_RE.findall(tp.read_text(encoding="utf-8")))
+    return keys
+
+
 def render_foundation_docs(
     source_version: str,
     inputs: Dict[str, str],
