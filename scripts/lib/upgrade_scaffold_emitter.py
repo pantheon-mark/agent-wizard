@@ -75,6 +75,25 @@ LIFECYCLE_POLICY = {
     "operator_config": {  # operator-owned configuration seeded once
         "managed_by": "operator", "local_modifications": "expected", "merge_strategy": "operator_review",
     },
+    # Foundation docs carry per-doc policy from the hash-baseline contract
+    # (foundation-manifest-hash-baseline-v1.json). The contract is the canonical
+    # authority; these four buckets transcribe it faithfully (the parity test in
+    # test_upgrade_scaffold_emitter guards against transcription drift). Note vision
+    # is shared/EXPECTED while approach + technical_architecture are shared/ALLOWED —
+    # distinct buckets, not one. Replaced by contract-/plan-sourced policy at the
+    # mutator slice (plan.emitted_files policy integration); classifier is the v0 home.
+    "foundation_shared_expected": {  # vision.md
+        "managed_by": "shared", "local_modifications": "expected", "merge_strategy": "three_way",
+    },
+    "foundation_shared_allowed": {  # approach.md, technical_architecture.md
+        "managed_by": "shared", "local_modifications": "allowed", "merge_strategy": "three_way",
+    },
+    "foundation_operator": {  # prd.md, execution_plan.md, test_cases.md (operator-authored)
+        "managed_by": "operator", "local_modifications": "expected", "merge_strategy": "operator_review",
+    },
+    "foundation_wizard": {  # audit_framework.md
+        "managed_by": "wizard", "local_modifications": "not_recommended", "merge_strategy": "warn_on_drift",
+    },
 }
 
 # Exact-path lifecycle overrides (relative to the operator-project root).
@@ -89,6 +108,15 @@ _EXACT_LIFECYCLE = {
     "SESSION_STATE.md": "runtime_state",
     ".gitignore": "operator_config",
     COMMAND_SURFACE_REL: "inherited_content",
+    # Foundation docs (root-level in the operator project; per-doc policy from the
+    # hash-baseline contract — see the foundation_* lifecycles above).
+    "vision.md": "foundation_shared_expected",
+    "approach.md": "foundation_shared_allowed",
+    "technical_architecture.md": "foundation_shared_allowed",
+    "prd.md": "foundation_operator",
+    "execution_plan.md": "foundation_operator",
+    "test_cases.md": "foundation_operator",
+    "audit_framework.md": "foundation_wizard",
 }
 
 # Directory-prefix lifecycle rules (mirror the template tree's own semantics).
@@ -132,7 +160,13 @@ def _resolve_source_commit(plan: EmissionPlan, build_repo_root: Path) -> str:
         raise UpgradeScaffoldError(f"registry is not valid JSON: {registry_path}: {e}") from e
     for entry in registry.get("bundles", []):
         if entry.get("foundation_bundle_version") == plan.bundle_version:
-            return entry.get("source_commit", "")
+            source_commit = entry.get("source_commit")
+            if not source_commit:
+                raise UpgradeScaffoldError(
+                    f"registry entry for bundle {plan.bundle_version!r} has no source_commit "
+                    f"(false provenance); fix the registry before emitting"
+                )
+            return source_commit
     raise UpgradeScaffoldError(
         f"bundle version {plan.bundle_version!r} not in registry {registry_path}"
     )
@@ -143,6 +177,12 @@ def _staged_content_files(staging_dir: Path) -> List[str]:
     are inventoried separately and excluded from the hashed managed set)."""
     rels: List[str] = []
     for p in sorted(staging_dir.rglob("*")):
+        # Fail closed on symlinks: a symlink could hash content outside the staging
+        # tree (non-deterministic + unsafe). Our emitters only write regular files.
+        if p.is_symlink():
+            raise UpgradeScaffoldError(
+                f"refusing to hash symlink in staging: {p.relative_to(staging_dir).as_posix()}"
+            )
         if not p.is_file():
             continue
         rel = p.relative_to(staging_dir).as_posix()

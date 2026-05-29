@@ -590,5 +590,59 @@ class TestManifestTextEmission(unittest.TestCase):
         self.assertEqual(text, expected)
 
 
+# ============================================================================
+# Canonical foundation-doc renderer (shared by legacy generate_bundle + the
+# full-system foundation_doc_emitter). Renders against the REAL v0.4.0 bundle.
+# ============================================================================
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+# All foundation-template placeholders for a complete render (boundary-clean).
+from test_emission_plan import _FOUNDATION_DOC_INPUTS  # noqa: E402
+
+_EXPECTED_FOUNDATION_POLICY = {
+    "vision.md": ("shared", "expected", "three_way"),
+    "prd.md": ("operator", "expected", "operator_review"),
+    "approach.md": ("shared", "allowed", "three_way"),
+    "execution_plan.md": ("operator", "expected", "operator_review"),
+    "technical_architecture.md": ("shared", "allowed", "three_way"),
+    "test_cases.md": ("operator", "expected", "operator_review"),
+    "audit_framework.md": ("wizard", "not_recommended", "warn_on_drift"),
+}
+
+
+class TestRenderFoundationDocs(unittest.TestCase):
+    """render_foundation_docs returns one FoundationDocArtifact per required doc,
+    with operator (root) + legacy (foundation/) relpaths, substituted content, and
+    the hash-baseline contract policy attached."""
+
+    def setUp(self):
+        from generator import render_foundation_docs  # noqa: E402
+        self.records = render_foundation_docs("v0.4.0", dict(_FOUNDATION_DOC_INPUTS), REPO_ROOT)
+
+    def test_seven_records_at_root_and_legacy_paths(self):
+        by_root = {r.operator_relpath: r for r in self.records}
+        self.assertEqual(set(by_root), set(_EXPECTED_FOUNDATION_POLICY))
+        for r in self.records:
+            self.assertFalse("/" in r.operator_relpath, f"{r.operator_relpath} must be root-level")
+            self.assertEqual(r.legacy_relpath, f"foundation/{r.operator_relpath}")
+
+    def test_content_fully_substituted(self):
+        for r in self.records:
+            leftover = PLACEHOLDER_RE.findall(r.content)
+            self.assertEqual(leftover, [], f"{r.operator_relpath} has unsubstituted {leftover}")
+
+    def test_contract_policy_attached_faithfully(self):
+        for r in self.records:
+            mb, lm, ms = _EXPECTED_FOUNDATION_POLICY[r.operator_relpath]
+            self.assertEqual(r.contract_policy["managed_by"], mb, r.operator_relpath)
+            self.assertEqual(r.contract_policy["local_modifications"], lm, r.operator_relpath)
+            self.assertEqual(r.contract_policy["merge_strategy"], ms, r.operator_relpath)
+
+    def test_prd_is_stub(self):
+        prd = next(r for r in self.records if r.operator_relpath == "prd.md")
+        self.assertIn("OPERATOR-AUTHORED CONTENT REQUIRED", prd.content)
+
+
 if __name__ == "__main__":
     unittest.main()

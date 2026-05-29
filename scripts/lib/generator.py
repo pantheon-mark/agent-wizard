@@ -92,6 +92,24 @@ class GenerationResult(NamedTuple):
     errors: List[str]  # empty when success=True
 
 
+class FoundationDocArtifact(NamedTuple):
+    """One rendered foundation doc, output-location-agnostic.
+
+    The single canonical foundation-doc render result. Carries BOTH the
+    operator-project relpath (root-level, e.g. "vision.md") and the legacy
+    relpath ("foundation/vision.md") so the full-system foundation_doc_emitter
+    and the legacy generate_bundle path share ONE render implementation and
+    differ only in where they write + which manifest they emit. contract_policy
+    is the per-file managed_by/local_modifications/merge_strategy from the
+    hash-baseline contract (the canonical authority for foundation-doc policy).
+    """
+    doc_name: str           # "vision.md"
+    operator_relpath: str   # "vision.md"  (operator-project root)
+    legacy_relpath: str     # "foundation/vision.md"
+    content: str
+    contract_policy: Dict[str, str]
+
+
 # ============================================================================
 # Source-bundle resolution
 # ============================================================================
@@ -318,6 +336,105 @@ def _emit_manifest_text(
 
 
 # ============================================================================
+# Canonical foundation-doc renderer (shared: legacy generate_bundle + full-system)
+# ============================================================================
+
+def _warn_unused_inputs(inputs: Dict[str, str], all_seen_keys: set) -> None:
+    """Warn (stderr) on operator-input keys that no template referenced — often a
+    sign of typos / stale inputs. Underscore-prefixed keys are documentation;
+    WIZARD_VERSION is consumed by the prd stub frontmatter (not via substitution)."""
+    unused_keys = sorted(
+        k
+        for k in inputs
+        if k not in all_seen_keys
+        and not k.startswith("_")
+        and k != "WIZARD_VERSION"
+    )
+    if unused_keys:
+        sys.stderr.write(
+            f"WARNING: {len(unused_keys)} input key(s) not referenced by any template "
+            f"(possible typos or stale inputs): {unused_keys}\n"
+        )
+
+
+def render_foundation_docs(
+    source_version: str,
+    inputs: Dict[str, str],
+    build_repo_root: Path,
+) -> List[FoundationDocArtifact]:
+    """Render every required foundation doc into a typed FoundationDocArtifact.
+
+    The single render authority: resolves the source bundle + templates by
+    `source_version`, applies the ordering + per-file policy from the hash-baseline
+    contract, substitutes placeholders (fail-fast on any missing/undefined key),
+    and emits the prd schema-only stub. Returns one artifact per required doc, in
+    contract order. Warns on stderr about input keys no template referenced.
+
+    Output-location-agnostic: callers decide where to write each artifact (legacy
+    `foundation/` subdir vs operator-project root) and which manifest to emit.
+    """
+    registry_entry = _resolve_source_bundle(source_version, build_repo_root)
+    source_bundle_path = (build_repo_root / registry_entry["path"]).resolve()
+    if not source_bundle_path.exists():
+        raise GeneratorError(
+            f"source bundle directory not found at {source_bundle_path}"
+        )
+    templates_dir = source_bundle_path / "templates"
+    if not templates_dir.exists():
+        raise GeneratorError(
+            f"source bundle templates directory not found at {templates_dir}"
+        )
+
+    required_docs = _read_required_foundation_docs(build_repo_root)
+    records: List[FoundationDocArtifact] = []
+    all_seen_keys: set = set()
+    for required in required_docs:
+        rel_path = required["path"]  # e.g. "foundation/vision.md"
+        if not rel_path.startswith("foundation/"):
+            raise GeneratorError(
+                f"unexpected required-doc path shape {rel_path!r}; expected "
+                "'foundation/<name>.md'"
+            )
+        doc_name = rel_path[len("foundation/"):]
+
+        if doc_name == "prd.md":
+            content = _emit_prd_stub(inputs)
+        else:
+            template_path = templates_dir / doc_name
+            if not template_path.exists():
+                raise GeneratorError(
+                    f"required template not found in source bundle: {template_path}"
+                )
+            try:
+                template_content = template_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise GeneratorError(
+                    f"cannot read template {template_path}: {exc}"
+                ) from exc
+            content, seen_keys = _substitute_placeholders(
+                template_content, inputs, template_name=doc_name
+            )
+            all_seen_keys.update(seen_keys)
+
+        records.append(
+            FoundationDocArtifact(
+                doc_name=doc_name,
+                operator_relpath=doc_name,
+                legacy_relpath=rel_path,
+                content=content,
+                contract_policy={
+                    "managed_by": required["managed_by"],
+                    "local_modifications": required["local_modifications"],
+                    "merge_strategy": required["merge_strategy"],
+                },
+            )
+        )
+
+    _warn_unused_inputs(inputs, all_seen_keys)
+    return records
+
+
+# ============================================================================
 # Main generator entry point
 # ============================================================================
 
@@ -368,25 +485,8 @@ def generate_bundle(
     # from the registry — the source bundle's published commit).
     registry_entry = _resolve_source_bundle(source_version, build_repo_root)
     source_commit = registry_entry["source_commit"]
-    source_bundle_path = (
-        build_repo_root / registry_entry["path"]
-    ).resolve()
-    if not source_bundle_path.exists():
-        raise GeneratorError(
-            f"source bundle directory not found at {source_bundle_path}"
-        )
 
-    templates_dir = source_bundle_path / "templates"
-    if not templates_dir.exists():
-        raise GeneratorError(
-            f"source bundle templates directory not found at {templates_dir}"
-        )
-
-    # 2. Read required_foundation_docs from the hash-baseline contract
-    # (canonical ordering + per-file managed metadata).
-    required_docs = _read_required_foundation_docs(build_repo_root)
-
-    # 3. Compute generator_version via the helper (clean-worktree enforcement
+    # 2. Compute generator_version via the helper (clean-worktree enforcement
     # at emission time per the helper's contract).
     if generator_version_override is not None:
         generator_version = generator_version_override
@@ -395,66 +495,35 @@ def generate_bundle(
             build_repo_root, require_clean=require_clean
         )
 
-    # 4. Generate foundation docs (6 from templates + 1 prd.md stub).
+    # 3. Render foundation docs via the canonical renderer (resolves bundle +
+    # templates, ordering, per-file policy, substitution, prd stub, unused-key
+    # warning). Legacy path writes each at its `foundation/<name>.md` relpath +
+    # builds the v1 files map from the renderer's contract policy.
+    records = render_foundation_docs(source_version, inputs, build_repo_root)
     paths_written: List[Path] = []
     files_map_entries: List[Dict[str, str]] = []
-    all_seen_keys: set = set()
-
-    foundation_dir = target_dir / "foundation"
-    foundation_dir.mkdir(parents=True, exist_ok=True)
-
-    for required in required_docs:
-        rel_path = required["path"]  # e.g. "foundation/vision.md"
-        if not rel_path.startswith("foundation/"):
-            raise GeneratorError(
-                f"unexpected required-doc path shape {rel_path!r}; expected "
-                "'foundation/<name>.md'"
-            )
-        doc_name = rel_path[len("foundation/"):]
-
-        if doc_name == "prd.md":
-            # Schema-only stub.
-            content = _emit_prd_stub(inputs)
-        else:
-            # Template-backed substitution.
-            template_path = templates_dir / doc_name
-            if not template_path.exists():
-                raise GeneratorError(
-                    f"required template not found in source bundle: {template_path}"
-                )
-            try:
-                template_content = template_path.read_text()
-            except OSError as exc:
-                raise GeneratorError(
-                    f"cannot read template {template_path}: {exc}"
-                ) from exc
-            content, seen_keys = _substitute_placeholders(
-                template_content, inputs, template_name=doc_name
-            )
-            all_seen_keys.update(seen_keys)
-
-        out_path = target_dir / rel_path
+    for rec in records:
+        out_path = target_dir / rec.legacy_relpath
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            out_path.write_text(content)
+            out_path.write_text(rec.content, encoding="utf-8")
         except OSError as exc:
             raise GeneratorError(
                 f"cannot write foundation doc {out_path}: {exc}"
             ) from exc
         paths_written.append(out_path)
-
-        # Compute per-file hash.
-        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        content_hash = hashlib.sha256(rec.content.encode("utf-8")).hexdigest()
         files_map_entries.append(
             {
-                "path": rel_path,
+                "path": rec.legacy_relpath,
                 "base_hash": content_hash,
                 "current_hash_last_seen": content_hash,
-                "local_modifications": required["local_modifications"],
-                "merge_strategy": required["merge_strategy"],
+                "local_modifications": rec.contract_policy["local_modifications"],
+                "merge_strategy": rec.contract_policy["merge_strategy"],
             }
         )
 
-    # 5. Emit operator manifest (deterministic text; tight field set).
+    # 4. Emit operator manifest (deterministic text; tight field set; v1 shape).
     manifest_text = _emit_manifest_text(
         foundation_bundle_version=source_version,
         source_commit=source_commit,
@@ -466,29 +535,12 @@ def generate_bundle(
     wizard_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = wizard_dir / "manifest.yaml"
     try:
-        manifest_path.write_text(manifest_text)
+        manifest_path.write_text(manifest_text, encoding="utf-8")
     except OSError as exc:
         raise GeneratorError(
             f"cannot write operator manifest {manifest_path}: {exc}"
         ) from exc
     paths_written.append(manifest_path)
-
-    # 6. Warn (stderr) on operator-input keys that no template referenced.
-    # Substituted values are not rescanned, so unused keys are silent waste —
-    # often a sign of typos in the inputs file. Underscore-prefixed keys
-    # (e.g., "_comment", "_provenance") are documentation, skip those.
-    unused_keys = sorted(
-        k
-        for k in inputs
-        if k not in all_seen_keys
-        and not k.startswith("_")
-        and k != "WIZARD_VERSION"  # consumed by prd.md stub frontmatter, not via template substitution
-    )
-    if unused_keys:
-        sys.stderr.write(
-            f"WARNING: {len(unused_keys)} input key(s) not referenced by any template "
-            f"(possible typos or stale inputs): {unused_keys}\n"
-        )
 
     return GenerationResult(
         success=True,

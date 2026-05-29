@@ -23,6 +23,45 @@ from emission_plan import (  # noqa: E402
 )
 
 
+# Complete, boundary-clean foundation-doc placeholder set for the demo plan. Every
+# {{KEY}} referenced by the 6 v0.4.0 foundation templates appears here so the
+# full-system path can emit foundation docs without a fail-fast on a missing key.
+# Values are neutral demo content (NO build provenance — these land in the emitted
+# operator tree, which is provenance-scanned) and deterministic (no clock).
+_FOUNDATION_DOC_INPUTS = {
+    "VISION_PURPOSE": "Help the demo operator keep track of incoming requests.",
+    "VISION_GOALS": "Capture requests, triage them, and surface a daily summary.",
+    "VISION_AUDIENCE_OUTPUTS": "A solo operator; outputs are short markdown summaries.",
+    "VISION_SCOPE_BOUNDARY": "In scope: triage and summary. Out of scope: sending replies.",
+    "VISION_CONSTRAINTS": "Runs locally; no external data leaves the machine.",
+    "VISION_SUCCESS_CRITERIA": "Every request is triaged within a day.",
+    "APPROACH_SOLUTION_BRIEF": "A small set of agents read a work queue and write summaries.",
+    "MVP_CORE_FUNCTION": "Read the queue and produce a triage summary.",
+    "MVP_MINIMUM_VIABLE_STATE": "One agent triages; one agent summarizes.",
+    "MVP_SUCCESS_CONDITION": "The operator gets one accurate summary per run.",
+    "ORCHESTRATION_MODEL": "A single coordinator routes work to specialist agents.",
+    "AGENT_ROSTER_ROWS": "| researcher | Gathers source material | standard |",
+    "HITL_MAP_ROWS": "| triage | operator approves before send | required |",
+    "INTEGRATIONS": "None at this stage; everything is local files.",
+    "SCALE_TIER": "small",
+    "SCALE_TIER_BASIS": "single operator, low volume",
+    "SCALE_TIER_RATIONALE": "Low request volume needs no concurrency.",
+    "SYSTEM_SHAPE": "markdown-CC",
+    "FOUNDATION_ONLY_MODE": "false",
+    "AUTONOMY_LEVEL": "2",
+    "DRIFT_ANALYSIS_CADENCE": "weekly",
+    "WIZARD_VERSION": "v0.4.0",
+    "EXECUTION_SEQUENCE": "1. Triage the queue. 2. Summarize. 3. Notify the operator.",
+    "BUILD_PHASES_ROWS": "| 1 | Stand up the queue and agents | done |",
+    "CURRENT_SPRINT_NUMBER": "1",
+    "LAST_UPDATED_DATE": "(set at operator setup)",
+    "LAST_UPDATED_TRIGGER": "operator setup",
+    "AGENT_SPECIFIC_TESTS": "Researcher returns a non-empty summary for a known queue.",
+    "TASK_COMPLETION_CHECKLISTS": "- Queue read\n- Summary written\n- Operator notified",
+    "COMPLIANCE_GAPS_CONTENT": "No regulated data handled at this stage.",
+}
+
+
 def _valid_plan() -> dict:
     """A minimal plan that satisfies every invariant (I1-I10)."""
     return {
@@ -68,7 +107,7 @@ def _valid_plan() -> dict:
                 "output_directory": "work/agent_outputs",
             }
         ],
-        "foundation_doc_inputs": {},
+        "foundation_doc_inputs": _FOUNDATION_DOC_INPUTS,
         "corpus_cells": [
             {
                 "cell_id": "cell-applies-all", "emission_target": ["quality/rules_library.md"],

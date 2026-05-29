@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from upgrade_scaffold_emitter import (  # noqa: E402
     emit_upgrade_scaffold, build_operator_manifest, classify_lifecycle,
-    UpgradeScaffoldError, MANIFEST_SCHEMA_VERSION,
+    UpgradeScaffoldError, MANIFEST_SCHEMA_VERSION, LIFECYCLE_POLICY,
 )
 from emission_plan import load_contract, default_contract_path, validate_emission_plan  # noqa: E402
 from corpus_loader import load_corpus_pack  # noqa: E402
@@ -155,6 +155,71 @@ class UpgradeScaffoldEmitterTests(unittest.TestCase):
         self.assertEqual(classify_lifecycle("security/credentials_registry.md"), "operator_config")
         with self.assertRaises(UpgradeScaffoldError):
             classify_lifecycle("totally_unknown_root_file.md")
+
+
+class ScaffoldGuardTests(unittest.TestCase):
+    """Fail-closed guards: empty source_commit + symlinks in the staged tree."""
+
+    def test_resolve_source_commit_fails_closed_on_empty(self):
+        from upgrade_scaffold_emitter import _resolve_source_commit  # noqa: E402
+        import json
+        contract = load_contract(default_contract_path())
+        plan = validate_emission_plan(_valid_plan(), contract)
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        reg = root / "wizard" / "registry"
+        reg.mkdir(parents=True)
+        # registry entry for the plan's bundle_version with NO source_commit
+        (reg / "foundation-bundles.json").write_text(json.dumps({
+            "bundles": [{"foundation_bundle_version": plan.bundle_version, "path": "x"}]
+        }), encoding="utf-8")
+        with self.assertRaises(UpgradeScaffoldError):
+            _resolve_source_commit(plan, root)
+
+    def test_staged_walk_rejects_symlink(self):
+        from upgrade_scaffold_emitter import _staged_content_files  # noqa: E402
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name)
+        (staging / "real.md").write_text("ok", encoding="utf-8")
+        (staging / "link.md").symlink_to(staging / "real.md")
+        with self.assertRaises(UpgradeScaffoldError):
+            _staged_content_files(staging)
+
+
+class FoundationDocLifecycleTests(unittest.TestCase):
+    """The 4-bucket foundation-doc lifecycle classification faithfully reproduces
+    the hash-baseline contract's per-doc policy (vision is shared/EXPECTED, but
+    approach/technical_architecture are shared/ALLOWED — distinct buckets)."""
+
+    EXPECTED = {
+        "vision.md": "foundation_shared_expected",
+        "approach.md": "foundation_shared_allowed",
+        "technical_architecture.md": "foundation_shared_allowed",
+        "prd.md": "foundation_operator",
+        "execution_plan.md": "foundation_operator",
+        "test_cases.md": "foundation_operator",
+        "audit_framework.md": "foundation_wizard",
+    }
+
+    def test_each_foundation_doc_classifies(self):
+        for doc, lifecycle in self.EXPECTED.items():
+            self.assertEqual(classify_lifecycle(doc), lifecycle, doc)
+
+    def test_policy_parity_with_hash_baseline_contract(self):
+        """The classifier's resolved foundation-doc policy must equal the
+        hash-baseline contract per doc (guards transcription drift — NOT the
+        deferred plan-policy integration; a drift guard)."""
+        import json
+        contract = json.loads(
+            (REPO_ROOT / "wizard" / "foundation-bundles" / "v0" / "contracts"
+             / "foundation-manifest-hash-baseline-v1.json").read_text(encoding="utf-8")
+        )
+        for d in contract["required_foundation_docs"]:
+            doc = d["path"][len("foundation/"):]  # "foundation/vision.md" -> "vision.md"
+            policy = LIFECYCLE_POLICY[classify_lifecycle(doc)]
+            self.assertEqual(policy["managed_by"], d["managed_by"], doc)
+            self.assertEqual(policy["local_modifications"], d["local_modifications"], doc)
+            self.assertEqual(policy["merge_strategy"], d["merge_strategy"], doc)
 
 
 if __name__ == "__main__":

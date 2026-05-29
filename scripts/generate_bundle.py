@@ -35,6 +35,8 @@ if str(_SCRIPTS_LIB) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_LIB))
 
 from generator import generate_bundle, GeneratorError  # noqa: E402
+from emission_plan import load_emission_plan, EmissionPlanError  # noqa: E402
+from operator_system_emitter import generate_operator_system  # noqa: E402
 
 
 class _UsageError(Exception):
@@ -64,8 +66,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--source-version",
-        required=True,
-        help="foundation_bundle_version of the source bundle (e.g., v0.3.0)",
+        default=None,
+        help="foundation_bundle_version of the source bundle (e.g., v0.3.0). "
+             "Foundation-only mode (with --inputs).",
     )
     parser.add_argument(
         "--target",
@@ -75,9 +78,19 @@ def main() -> int:
     )
     parser.add_argument(
         "--inputs",
-        required=True,
+        default=None,
         type=Path,
-        help="path to operator inputs JSON file (stdlib-readable; NOT YAML)",
+        help="path to operator inputs JSON file (stdlib-readable; NOT YAML). "
+             "Foundation-only mode (with --source-version).",
+    )
+    parser.add_argument(
+        "--emission-plan",
+        default=None,
+        type=Path,
+        help="path to a validated EmissionPlan JSON file. FULL-SYSTEM mode: emits "
+             "the complete operator system (foundation docs + agents + corpus + "
+             "upgrade scaffold) to --target (staging). Enforces clean-worktree "
+             "provenance (--permissive-dirty does NOT apply in this mode).",
     )
     parser.add_argument(
         "--build-repo-root",
@@ -104,6 +117,50 @@ def main() -> int:
             build_repo_root = args.build_repo_root.resolve()
     except _UsageError as exc:
         sys.stderr.write(f"ERROR: {exc}\n")
+        return 2
+
+    # ----- FULL-SYSTEM mode (--emission-plan): emit the complete operator system.
+    if args.emission_plan is not None:
+        if args.source_version or args.inputs:
+            sys.stderr.write(
+                "ERROR: --emission-plan (full-system mode) is mutually exclusive "
+                "with --source-version/--inputs (foundation-only mode)\n"
+            )
+            return 2
+        if not args.emission_plan.exists():
+            sys.stderr.write(f"ERROR: emission plan file not found: {args.emission_plan}\n")
+            return 2
+        try:
+            plan = load_emission_plan(args.emission_plan.resolve())
+        except EmissionPlanError as exc:
+            sys.stderr.write(f"ERROR: invalid emission plan: {exc}\n")
+            return 2
+        try:
+            # Full-system mode ALWAYS enforces clean-worktree provenance; the
+            # --permissive-dirty escape is foundation-only (would undermine the
+            # provenance guard for a full generated system).
+            result = generate_operator_system(
+                plan, args.target.resolve(), build_repo_root, require_clean=True,
+            )
+        except GeneratorError as exc:
+            sys.stderr.write(f"FAIL: GeneratorError: {exc}\n")
+            return 1
+        except Exception as exc:  # noqa: BLE001 — surface unexpected (incl. dirty-worktree) as exit 1
+            sys.stderr.write(f"FAIL: {type(exc).__name__}: {exc}\n")
+            return 1
+        sys.stdout.write(
+            f"PASS: generated operator system at {result.staging_dir}; "
+            f"{len(result.paths_written)} files written\n"
+        )
+        sys.stdout.write(f"  manifest: {result.manifest_path}\n")
+        return 0
+
+    # ----- FOUNDATION-ONLY mode (--source-version + --inputs; legacy path).
+    if not args.source_version or not args.inputs:
+        sys.stderr.write(
+            "ERROR: foundation-only mode requires both --source-version and --inputs "
+            "(or use --emission-plan for full-system mode)\n"
+        )
         return 2
 
     # Read and parse inputs.json (stdlib).

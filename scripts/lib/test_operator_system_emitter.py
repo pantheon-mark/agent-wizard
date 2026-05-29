@@ -60,6 +60,9 @@ class OperatorSystemEmitterTests(unittest.TestCase):
             "agents/prompts/orchestrator_prompt.md", "agents/prompts/qa_agent_prompt.md",
             "agents/prompts/researcher_prompt.md", "agents/scripts/researcher.sh",
             "logs/audit_log.md",
+            # foundation docs at ROOT (wired in via emit_foundation_docs)
+            "vision.md", "approach.md", "execution_plan.md", "technical_architecture.md",
+            "test_cases.md", "audit_framework.md", "prd.md",
         ]:
             self.assertTrue((staging / rel).exists(), f"missing emitted artifact: {rel}")
 
@@ -74,6 +77,23 @@ class OperatorSystemEmitterTests(unittest.TestCase):
         self.assertTrue(len(m["corpus_authority"]["cells"]) > 0)
         # the composed system's manifest is drift-clean through the real consumer
         self.assertFalse(compute_drift_report(staging, m).has_drift)
+
+    def test_manifest_covers_foundation_docs_with_contract_policy(self):
+        from upgrade import load_operator_manifest  # noqa: E402
+        staging, _ = self._emit()
+        m = load_operator_manifest(staging / ".wizard/manifest.json")
+        mf = m["managed_files"]
+        # foundation docs are enrolled in the full-tree manifest at root
+        for doc in ["vision.md", "approach.md", "prd.md", "audit_framework.md"]:
+            self.assertIn(doc, mf, f"foundation doc {doc} missing from managed_files")
+        # vision = shared/expected/three_way; approach = shared/allowed/three_way;
+        # prd = operator/operator_review; audit_framework = wizard/warn_on_drift
+        self.assertEqual(mf["vision.md"]["merge_strategy"], "three_way")
+        self.assertEqual(mf["vision.md"]["managed_by"], "shared")
+        self.assertEqual(mf["vision.md"]["local_modifications"], "expected")
+        self.assertEqual(mf["approach.md"]["local_modifications"], "allowed")
+        self.assertEqual(mf["prd.md"]["merge_strategy"], "operator_review")
+        self.assertEqual(mf["audit_framework.md"]["merge_strategy"], "warn_on_drift")
 
     def test_claude_md_carries_rendered_corpus_block(self):
         staging, _ = self._emit()
@@ -123,6 +143,101 @@ class OperatorSystemEmitterTests(unittest.TestCase):
         for rel in files_a:
             self.assertEqual((a / rel).read_bytes(), (b / rel).read_bytes(),
                              f"non-deterministic content: {rel}")
+
+
+class GenerateOperatorSystemTests(unittest.TestCase):
+    """The guarded top-level orchestration entry: one validated EmissionPlan ->
+    complete runnable system in a staging dir, behind fail-fast preconditions
+    (foundation-only rejection / empty-staging / clean-worktree generator_version
+    reconcile / template-dependency check)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.contract = load_contract(default_contract_path())
+
+    def _plan(self, **over):
+        p = _valid_plan()
+        p.update(over)
+        return validate_emission_plan(p, self.contract)
+
+    def test_happy_path_emits_full_tree_and_manifest(self):
+        from operator_system_emitter import generate_operator_system  # noqa: E402
+        from upgrade import compute_drift_report, load_operator_manifest  # noqa: E402
+        plan = self._plan()
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name) / "out"  # absent -> created
+        result = generate_operator_system(
+            plan, staging, REPO_ROOT, generator_version_override="0" * 40,
+        )
+        self.assertTrue(result.manifest_path.exists())
+        self.assertTrue((staging / "vision.md").exists())
+        self.assertTrue((staging / "agents/prompts/orchestrator_prompt.md").exists())
+        m = load_operator_manifest(result.manifest_path)
+        self.assertFalse(compute_drift_report(staging, m).has_drift)
+
+    def test_rejects_foundation_only_mode(self):
+        from operator_system_emitter import generate_operator_system  # noqa: E402
+        from generator import GeneratorError  # noqa: E402
+        plan = self._plan(foundation_only_mode=True, agents=[])
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        with self.assertRaises(GeneratorError):
+            generate_operator_system(plan, Path(tmp.name) / "o", REPO_ROOT,
+                                     generator_version_override="0" * 40)
+
+    def test_generator_version_mismatch_fails_closed(self):
+        from operator_system_emitter import generate_operator_system  # noqa: E402
+        from generator import GeneratorError  # noqa: E402
+        plan = self._plan()  # plan.generator_version == "0"*40
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        with self.assertRaises(GeneratorError):
+            generate_operator_system(plan, Path(tmp.name) / "o", REPO_ROOT,
+                                     generator_version_override="f" * 40)
+
+    def test_non_empty_staging_fails_closed(self):
+        from operator_system_emitter import generate_operator_system  # noqa: E402
+        from generator import GeneratorError  # noqa: E402
+        plan = self._plan()
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name)  # exists + we put a file in it
+        (staging / "leftover.txt").write_text("stale", encoding="utf-8")
+        with self.assertRaises(GeneratorError):
+            generate_operator_system(plan, staging, REPO_ROOT,
+                                     generator_version_override="0" * 40)
+
+    def test_missing_template_dependency_fails_closed(self):
+        from operator_system_emitter import _verify_template_dependencies  # noqa: E402
+        from generator import GeneratorError  # noqa: E402
+        plan = self._plan()
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        with self.assertRaises(GeneratorError):
+            _verify_template_dependencies(plan, Path(tmp.name))  # empty fake repo -> no templates
+
+
+class GenerateBundleCliFullSystemTests(unittest.TestCase):
+    """The generate_bundle.py CLI --emission-plan mode routes to the guarded
+    full-system orchestration. The full-system mode enforces clean-worktree
+    provenance (no --permissive-dirty escape), so a fixture plan whose
+    generator_version cannot match a real generator identity fails closed (exit 1)."""
+
+    def test_cli_emission_plan_mode_enforces_provenance_guard(self):
+        import json
+        scripts_dir = REPO_ROOT / "wizard" / "scripts"
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        import generate_bundle as cli  # noqa: E402
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        plan_file = Path(tmp.name) / "plan.json"
+        plan_file.write_text(json.dumps(_valid_plan()), encoding="utf-8")
+        staging = Path(tmp.name) / "out"
+        argv = ["generate_bundle.py", "--emission-plan", str(plan_file),
+                "--target", str(staging), "--build-repo-root", str(REPO_ROOT)]
+        old = sys.argv
+        sys.argv = argv
+        try:
+            rc = cli.main()
+        finally:
+            sys.argv = old
+        self.assertEqual(rc, 1, "full-system CLI must fail closed on provenance mismatch")
 
 
 if __name__ == "__main__":
