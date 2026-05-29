@@ -1,0 +1,92 @@
+{
+  "contract_id": "emission-plan",
+  "contract_version": "emission-plan-v1",
+  "schema_authorities": [
+    "emission_plan.top_level_fields",
+    "emission_plan.enums",
+    "emission_plan.invariants"
+  ],
+  "description": "Wizard-distributed machine-readable contract for the typed emission plan. The generator validates the emission inputs into a typed, self-contained plan before emitting any files; downstream emitters read only the plan, never any build-side source. Shape-specific adaptation is handled by per-shape template-variant selection, not by logic in the generator. Authority-profile-gated content is emitted under a provisional default profile that is machine-visible and fail-closed until an operator authority profile becomes available. This JSON is the machine-readable instance; the canonical prose specification lives outside the wizard distribution (build-side documentation, not in this artifact).",
+  "enums": {
+    "system_shape": ["markdown-CC"],
+    "criticality_tier": ["critical", "standard", "supporting"],
+    "authority_posture": ["applies-all", "low-autonomy-operator-approval", "high-autonomy-enforced-control", "high-risk-operator-approved"],
+    "authority_basis": ["provisional_default", "not_applicable"],
+    "authority_source": ["delegated", "wizard-default", "hard-control", "operator-configured", "not_applicable"],
+    "emission_posture": ["install-verbatim", "operator-configure", "shape-conditional"],
+    "source_type": ["inline_payload", "template_variant"],
+    "managed_by": ["shared", "operator", "wizard"],
+    "local_modifications": ["expected", "allowed", "not_recommended"],
+    "merge_strategy": ["three_way", "operator_review", "warn_on_drift", "frozen"]
+  },
+  "required_top_level_fields": [
+    "schema_version",
+    "system_shape",
+    "foundation_only_mode",
+    "project_name",
+    "bundle_version",
+    "generator_version",
+    "authority_profile",
+    "model_tiers",
+    "control_plane",
+    "orchestrator",
+    "agents",
+    "foundation_doc_inputs",
+    "corpus_cells",
+    "emitted_files",
+    "template_variants"
+  ],
+  "authority_profile_fields": ["id", "posture", "source", "expires_on_trigger"],
+  "model_tiers_keys": ["high", "standard", "fast"],
+  "control_plane_fields": [
+    "queue_path",
+    "lock_path",
+    "handoff_dir",
+    "checkpoint_dir",
+    "cron_config_path",
+    "session_state_path",
+    "session_bootstrap_path",
+    "session_log_path",
+    "error_log_path",
+    "notification_log_path"
+  ],
+  "orchestrator_fields": ["model_tier_high", "model_tier_standard", "model_tier_fast", "schedule"],
+  "agent_record_fields": [
+    "id",
+    "role_description",
+    "criticality_tier",
+    "primary_model_tier",
+    "status_model_tier",
+    "permitted_write_directories",
+    "additional_context_files",
+    "step_completion_criteria",
+    "task_completion_criteria",
+    "output_format_specification",
+    "output_directory"
+  ],
+  "agent_optional_fields": ["cron_cadence"],
+  "corpus_cell_fields": [
+    "cell_id",
+    "emission_target",
+    "emission_posture",
+    "authority_gate",
+    "authority_basis",
+    "authority_source",
+    "source_type"
+  ],
+  "corpus_cell_optional_fields": ["payload", "template_variant_key"],
+  "emitted_file_fields": ["path", "managed_by", "local_modifications", "merge_strategy", "source_refs"],
+  "template_variant_fields": ["cell_id", "system_shape", "template_path"],
+  "invariants": [
+    "I1: all required_top_level_fields are present and correctly typed",
+    "I2: authority_profile.posture is a member of enums.authority_posture",
+    "I3: every corpus_cell with authority_gate != 'applies-all' has authority_basis == 'provisional_default' AND authority_source in {delegated, wizard-default, hard-control, operator-configured}; every corpus_cell with authority_gate == 'applies-all' has authority_basis == 'not_applicable' AND authority_source == 'not_applicable'",
+    "I4: every emitted_files[].path is unique",
+    "I5: every enum-valued field resolves to its closed-set member (fail-closed on unknown value)",
+    "I6: agent and orchestrator model-tier references are tier keys (high/standard/fast), never literal model strings; model_tiers keys are valid tier keys and values are non-empty resolved model strings",
+    "I7: if foundation_only_mode == true, agents is empty (no implementation layer emitted)",
+    "I8: every corpus_cell with source_type == 'template_variant' has a matching template_variants entry for its (cell_id, system_shape); every corpus_cell with source_type == 'inline_payload' has a non-empty payload",
+    "I9: every control_plane path and every agent.output_directory is covered by an emitted_files entry OR is declared runtime-created in control_plane_runtime_created",
+    "I10: every tier key referenced by the orchestrator (model_tier_high/standard/fast) or any agent (primary_model_tier/status_model_tier) is present as a key in model_tiers"
+  ]
+}

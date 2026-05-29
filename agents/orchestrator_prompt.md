@@ -134,4 +134,4 @@ At every session end, in this order:
 4. **Update `/work/work_queue.md`** — mark completed items as done, archive resolved items to `/archive/work_archive.md`.
 5. **Write a session close entry to `/logs/session_log.md`** — include stop reason and summary.
 6. Clear `maintenance_mode.md`.
-7. Auto-commit: `git add -A && git commit -m "Session {{DATE}}: [brief plain-language summary of what was done]"`. If GitHub remote is configured, push: `git push origin main`.
+7. Auto-commit: `git add -A && git commit -m "Session $(date +%Y-%m-%d): [brief plain-language summary of what was done]"`. If GitHub remote is configured, push: `git push origin main`.
