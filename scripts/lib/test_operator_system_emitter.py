@@ -239,6 +239,49 @@ class GenerateOperatorSystemTests(unittest.TestCase):
         with self.assertRaises(GeneratorError):
             _verify_template_dependencies(plan, Path(tmp.name))  # empty fake repo -> no templates
 
+    def test_empty_source_commit_fails_fast_prewrite(self):
+        """source_commit guard moved PREWRITE (close-review F2): empty source_commit
+        in the registry fails before any emission, not at manifest-build."""
+        import json
+        from operator_system_emitter import _verify_foundation_bundle_dependencies  # noqa: E402
+        from generator import GeneratorError  # noqa: E402
+        plan = self._plan()
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        reg = root / "wizard" / "registry"; reg.mkdir(parents=True)
+        (reg / "foundation-bundles.json").write_text(json.dumps({
+            "bundles": [{"foundation_bundle_version": plan.bundle_version, "path": "wizard/x", "source_commit": ""}]
+        }), encoding="utf-8")
+        with self.assertRaises(GeneratorError):
+            _verify_foundation_bundle_dependencies(plan, root)
+
+    def test_missing_foundation_template_fails_fast_prewrite(self):
+        """foundation-template existence guard moved PREWRITE (close-review F1): a
+        missing foundation template fails before any emission, not mid-render."""
+        import json
+        from operator_system_emitter import _verify_foundation_bundle_dependencies  # noqa: E402
+        from generator import GeneratorError  # noqa: E402
+        import shutil
+        plan = self._plan()
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        reg = root / "wizard" / "registry"; reg.mkdir(parents=True)
+        (reg / "foundation-bundles.json").write_text(json.dumps({
+            "bundles": [{"foundation_bundle_version": plan.bundle_version,
+                         "path": "wizard/bundle", "source_commit": "abc1234"}]
+        }), encoding="utf-8")
+        # provide the real hash-baseline contract so the failure isolates the
+        # MISSING TEMPLATE (not a missing contract)
+        contract_dst = root / "wizard" / "foundation-bundles" / "v0" / "contracts"
+        contract_dst.mkdir(parents=True)
+        shutil.copy(
+            REPO_ROOT / "wizard" / "foundation-bundles" / "v0" / "contracts" / "foundation-manifest-hash-baseline-v1.json",
+            contract_dst / "foundation-manifest-hash-baseline-v1.json",
+        )
+        (root / "wizard" / "bundle" / "templates").mkdir(parents=True)  # dir exists but EMPTY -> templates missing
+        with self.assertRaises(GeneratorError):
+            _verify_foundation_bundle_dependencies(plan, root)
+
 
 class GenerateBundleCliFullSystemTests(unittest.TestCase):
     """The generate_bundle.py CLI --emission-plan mode routes to the guarded

@@ -372,8 +372,11 @@ def required_foundation_placeholders(source_version: str, build_repo_root: Path)
         if doc_name == "prd.md":
             continue
         tp = templates_dir / doc_name
-        if tp.exists():
-            keys |= set(PLACEHOLDER_RE.findall(tp.read_text(encoding="utf-8")))
+        if not tp.exists():
+            raise GeneratorError(
+                f"required foundation template missing: {tp}"
+            )
+        keys |= set(PLACEHOLDER_RE.findall(tp.read_text(encoding="utf-8")))
     return keys
 
 

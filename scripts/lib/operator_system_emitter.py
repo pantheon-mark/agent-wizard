@@ -108,8 +108,24 @@ def _verify_foundation_inputs_complete(plan: EmissionPlan, build_repo_root: Path
         )
 
 
+def _verify_foundation_bundle_dependencies(plan: EmissionPlan, build_repo_root: Path) -> None:
+    """Prewrite guard: the source bundle's registry entry carries a non-empty
+    source_commit AND every required foundation template exists — validated BEFORE
+    any write. Previously source_commit was resolved only at manifest-build (the last
+    step) and foundation-template existence only mid-render, so a false provenance or a
+    missing template surfaced only after a partial tree had been written. This makes the
+    'all preconditions before any write' contract literally true for those two surfaces."""
+    from generator import _resolve_source_bundle, required_foundation_placeholders  # type: ignore
+    entry = _resolve_source_bundle(plan.bundle_version, build_repo_root)
+    if not entry.get("source_commit"):
+        raise GeneratorError(
+            f"registry entry for bundle {plan.bundle_version!r} has empty/missing source_commit "
+            f"(false provenance); fix the registry before emitting"
+        )
+    required_foundation_placeholders(plan.bundle_version, build_repo_root)  # raises on a missing template
+
+
 def generate_operator_system(plan: EmissionPlan, target_dir: Path, build_repo_root: Path,
-                             require_clean: bool = True,
                              generator_version_override: Optional[str] = None) -> OperatorSystemResult:
     """Guarded top-level orchestration entry: validate provenance + dependencies,
     then emit the complete operator system for `plan` into `target_dir` (staging).
@@ -127,13 +143,23 @@ def generate_operator_system(plan: EmissionPlan, target_dir: Path, build_repo_ro
          (false provenance) or a stale plan (identity skew) fails closed. Pinned-
          derivation-record contract: a plan may only be emitted by the exact clean
          generator that authored it; regenerate the plan after generator changes.
-      4. required template dependencies present (see _verify_template_dependencies).
-      5. derivation-input fail-fast — every foundation-template placeholder is supplied
+      4. source-bundle dependencies present + provenance non-empty (see
+         _verify_foundation_bundle_dependencies — non-empty source_commit + every
+         required foundation template exists).
+      5. required template dependencies present (see _verify_template_dependencies).
+      6. derivation-input fail-fast — every foundation-template placeholder is supplied
          non-empty by plan.foundation_doc_inputs (see _verify_foundation_inputs_complete);
          catches a missing OR silently-empty derived input before any write.
 
-    `generator_version_override` (tests/dev) supplies the expected identity directly
+    `plan` MUST be a validated EmissionPlan (the only sanctioned constructors are
+    emission_plan.validate_emission_plan / load_emission_plan, which enforce I1-I10);
+    the dataclass type IS the validated-plan contract.
+
+    `generator_version_override` (tests only) supplies the expected identity directly
     and skips the live clean-worktree computation; it does NOT relax the reconcile.
+    The clean-worktree requirement is SEALED — there is no require_clean=False escape on
+    this guarded entry (real emission always reverifies against a clean worktree); use
+    the override seam for tests, never a dirty-worktree emission.
     """
     if plan.foundation_only_mode:
         raise GeneratorError(
@@ -149,13 +175,16 @@ def generate_operator_system(plan: EmissionPlan, target_dir: Path, build_repo_ro
         expected_gv = generator_version_override
     else:
         from generator_version import current_generator_version  # type: ignore
-        expected_gv = current_generator_version(build_repo_root, require_clean=require_clean)
+        # SEALED clean-worktree requirement — no require_clean=False escape on the
+        # guarded entry (a dirty worktree would record false provenance).
+        expected_gv = current_generator_version(build_repo_root, require_clean=True)
     if plan.generator_version != expected_gv:
         raise GeneratorError(
             f"plan.generator_version {plan.generator_version!r} != emission-time generator "
             f"identity {expected_gv!r}; the plan is stale — regenerate it from a clean worktree"
         )
 
+    _verify_foundation_bundle_dependencies(plan, build_repo_root)
     _verify_template_dependencies(plan, build_repo_root)
     _verify_foundation_inputs_complete(plan, build_repo_root)
 

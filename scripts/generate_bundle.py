@@ -136,11 +136,11 @@ def main() -> int:
             sys.stderr.write(f"ERROR: invalid emission plan: {exc}\n")
             return 2
         try:
-            # Full-system mode ALWAYS enforces clean-worktree provenance; the
-            # --permissive-dirty escape is foundation-only (would undermine the
-            # provenance guard for a full generated system).
+            # Full-system mode ALWAYS enforces clean-worktree provenance; the guarded
+            # entry seals the clean-worktree requirement (no require_clean escape), so
+            # --permissive-dirty (foundation-only) has no effect here by construction.
             result = generate_operator_system(
-                plan, args.target.resolve(), build_repo_root, require_clean=True,
+                plan, args.target.resolve(), build_repo_root,
             )
         except GeneratorError as exc:
             sys.stderr.write(f"FAIL: GeneratorError: {exc}\n")
