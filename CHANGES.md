@@ -23,8 +23,8 @@ Entries appear newest-first.
 
 - No operator action required. This is internal substrate; the interview step that uses it — and any operator-visible behavior — arrives in a later release.
 
-**Source-Meta-Commit:** (filled at publication)
-**Public repo commit:** (filled after subtree push)
+**Source-Meta-Commit:** 864fe1b
+**Public repo commit:** 60a31d1
 
 ---
 
