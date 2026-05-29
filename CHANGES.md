@@ -12,6 +12,22 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-29 — derivation-mechanism substrate: a derived-record contract + validator + event-sourced replay (internal; no operator-facing change yet)
+
+**Public-facing change:** internal plumbing only — no change to how a generated system looks or behaves yet. The wizard gains the substrate for a **designed, testable derivation mechanism** — the part that will turn your interview answers into the system's foundation-document fields in a repeatable, checkable way. These pieces are **not yet wired into the interview** (that integration arrives in a later release), so there is **no operator action and no behavior change** at this version.
+
+- A **`derived-record` contract** (`wizard/foundation-bundles/v0/contracts/derived-record-contract-v1.json`): enforces the shape + provenance of a derived record — for each field, where it came from, how it was produced, whether it is an operator decision, and whether it has been confirmed — without fixing a closed list of field names.
+- **Validation + replay libraries** (`wizard/scripts/lib/derived_record.py`, `derivation_replay.py`): a fail-closed validator plus an event-sourced replay-and-drift mechanism that make the derivation repeatable and let the wizard detect when a re-run would change an earlier answer.
+
+**Operator-facing notes:**
+
+- No operator action required. This is internal substrate; the interview step that uses it — and any operator-visible behavior — arrives in a later release.
+
+**Source-Meta-Commit:** (filled at publication)
+**Public repo commit:** (filled after subtree push)
+
+---
+
 ## 2026-05-29 — generated systems now inherit a base operating scaffold + a curated operating-principles corpus
 
 **Public-facing change:** the wizard's deterministic generator can now emit a complete operator-system layout — not just the foundation documents. A generated project now includes its **base operating scaffold** (the root `CLAUDE.md`, `project_instructions.md` with the resolved model-tier map, `start-session.sh`, and the operational directories `logs/` / `quality/` / `work/` / `docs/` / `security/` / `archive/`), the **agent execution layer** (the orchestrator + QA + specialist prompts and their invocation scripts), and a **curated corpus of inherited operating principles**.
