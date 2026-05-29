@@ -111,6 +111,69 @@ class TestDriftSplit(unittest.TestCase):
         self.assertEqual(d["content"]["decision"], [])
         self.assertEqual(d["content"]["narrative"], [])
 
+    def test_protocol_drift_detected(self):
+        prev = copy.deepcopy(self.prev)
+        new = copy.deepcopy(self.prev)
+        prev["_audit"]["AUTONOMOUS_ACTIONS"]["_prompt_version"] = "p1"
+        new["_audit"]["AUTONOMOUS_ACTIONS"]["_prompt_version"] = "p2"
+        d = rp.compute_drift(prev, new)
+        self.assertIn("AUTONOMOUS_ACTIONS", d["protocol"])
+
+    def test_top_level_meta_keys_not_treated_as_drift(self):
+        # A real accepted record carries _provenance etc.; changing them must NOT read as drift.
+        prev = copy.deepcopy(self.prev); prev["_provenance"] = "capture A"
+        new = copy.deepcopy(self.prev); new["_provenance"] = "capture B"
+        d = rp.compute_drift(prev, new)
+        self.assertEqual(d["envelope"], [])
+        self.assertEqual(d["content"]["decision"], [])
+        self.assertEqual(d["content"]["narrative"], [])
+
+
+class TestCloseReviewFixes(unittest.TestCase):
+    """Regressions for the four gemini close-ratification findings (A-D)."""
+
+    def _base(self):
+        return rp.compile_transcript(_transcript())
+
+    def test_A_canonicalize_normalizes_crlf_in_string_content(self):
+        # CRLF inside a value must normalize to LF BEFORE serialization (Windows == Unix hash).
+        self.assertEqual(rp.content_hash({"F": "a\r\nb"}), rp.content_hash({"F": "a\nb"}))
+
+    def test_B_added_decision_field_routes_to_content_decision(self):
+        prev = self._base()
+        new = copy.deepcopy(prev)
+        new["NEW_POLICY"] = "The system auto-archives records after 30 days."
+        new["_audit"]["NEW_POLICY"] = {
+            "_source": "claude-derived-operator-confirmed", "_derivation_class": "policy",
+            "_decision_field": True, "_decision_kind": "policy_rule",
+            "_derivation_inputs": ["AUTONOMY_LEVEL"],
+            "_confirmation_state": "accepted", "_confirmed_at": "2026-01-01"}
+        d = rp.compute_drift(prev, new)
+        self.assertIn("NEW_POLICY", d["content"]["decision"])  # net-new decision is alarming
+        self.assertIn("NEW_POLICY", d["envelope"])             # and the field set changed
+
+    def test_C_content_drift_uses_canonical_not_python_equality(self):
+        prev = {"F": 1, "_audit": {"F": {"_decision_field": False}}}
+        new = {"F": 1.0, "_audit": {"F": {"_decision_field": False}}}   # Python-equal, canonically distinct
+        d = rp.compute_drift(prev, new)
+        self.assertIn("F", d["content"]["narrative"])
+
+    def test_D_project_whitelist_excludes_unconfirmed(self):
+        record = {
+            "AUTO_F": "v0.3.0",
+            "CONFIRMED_F": "ok",
+            "UNCONFIRMED_F": "draft, no confirmation event yet",
+            "_audit": {
+                "AUTO_F": {"_source": "auto"},
+                "CONFIRMED_F": {"_source": "operator-content", "_confirmation_state": "accepted"},
+                "UNCONFIRMED_F": {"_source": "claude-derived-operator-confirmed"},
+            },
+        }
+        proj = rp.project(record)
+        self.assertIn("AUTO_F", proj)            # auto fills project
+        self.assertIn("CONFIRMED_F", proj)       # accepted* projects
+        self.assertNotIn("UNCONFIRMED_F", proj)  # mid-interview unconfirmed must NOT project
+
 
 if __name__ == "__main__":
     unittest.main()

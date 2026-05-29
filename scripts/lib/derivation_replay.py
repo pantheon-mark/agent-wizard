@@ -31,6 +31,9 @@ _PROTOCOL_KEYS = ("_prompt_version", "_spec_version")
 _LIST_ENVELOPE_KEYS = ("_derivation_inputs", "_source_question_ids", "_source_candidates")
 
 _META_KEY = "_audit"
+# Top-level record metadata keys — excluded from payload-key comparisons (must match
+# derived_record.TOP_LEVEL_META_KEYS so drift and validation agree on what a payload key is).
+_TOP_LEVEL_META_KEYS = frozenset({"_provenance", "_audit", "_schema_extension_points", "_source_taxonomy"})
 
 
 class DerivationReplayError(Exception):
@@ -39,11 +42,32 @@ class DerivationReplayError(Exception):
 
 # --- canonicalization --------------------------------------------------------
 
+def _normalize_text(s: str) -> str:
+    """NFC + LF-normalized text. Applied to string CONTENT, before serialization."""
+    return unicodedata.normalize("NFC", s).replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _normalize_strings(obj: Any) -> Any:
+    """Recursively NFC+LF-normalize every string key and value.
+
+    Newline/Unicode normalization MUST happen on the string content BEFORE json.dumps:
+    once serialized, a real CR/LF inside a value is escaped to the two literal characters
+    backslash-r / backslash-n, so a post-serialization replace is a no-op and a Windows vs.
+    Unix operator would hash differently.
+    """
+    if isinstance(obj, str):
+        return _normalize_text(obj)
+    if isinstance(obj, dict):
+        return {(_normalize_text(k) if isinstance(k, str) else k): _normalize_strings(v)
+                for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_normalize_strings(x) for x in obj]
+    return obj
+
+
 def canonicalize(obj: Any) -> str:
-    """Deterministic textual form: sorted keys, compact separators, NFC, LF newlines."""
-    s = json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    s = unicodedata.normalize("NFC", s)
-    return s.replace("\r\n", "\n").replace("\r", "\n")
+    """Deterministic textual form: string content NFC+LF-normalized, then sorted-key compact JSON."""
+    return json.dumps(_normalize_strings(obj), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def content_hash(obj: Any) -> str:
@@ -98,17 +122,26 @@ def compile_transcript(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     return record
 
 
+_PROJECTABLE_STATES = {"accepted", "accepted_with_adjustments", "accepted_uncertain_for_now"}
+
+
 def project(record: Dict[str, Any]) -> Dict[str, Any]:
     """Project a derived record into emission `foundation_doc_inputs` (values only).
 
-    Fields whose `_confirmation_state == deferred_not_emittable` do NOT project.
+    WHITELIST (defense-in-depth; `project` is an independent public function, not gated by
+    the validator): a field projects only if `_source == auto` (mechanical fill, no
+    confirmation) OR its `_confirmation_state` is an accepted* state. `deferred_not_emittable`
+    and unconfirmed mid-interview fields (a derivation event but no confirmation event yet)
+    do NOT project.
     """
     audit = record.get(_META_KEY, {})
     out: Dict[str, Any] = {}
     for f, env in audit.items():
-        if env.get("_confirmation_state") == "deferred_not_emittable":
+        cstate = env.get("_confirmation_state")
+        if cstate == "deferred_not_emittable":
             continue
-        out[f] = record[f]
+        if env.get("_source") == "auto" or cstate in _PROJECTABLE_STATES:
+            out[f] = record[f]
     return out
 
 
@@ -127,7 +160,7 @@ def replay_is_byte_identical(events: List[Dict[str, Any]]) -> bool:
 # --- drift -------------------------------------------------------------------
 
 def _payload_keys(record: Dict[str, Any]) -> set:
-    return {k for k in record if k != _META_KEY}
+    return {k for k in record if k not in _TOP_LEVEL_META_KEYS}
 
 
 def compute_drift(prev_record: Dict[str, Any], new_record: Dict[str, Any]) -> Dict[str, Any]:
@@ -151,6 +184,14 @@ def compute_drift(prev_record: Dict[str, Any], new_record: Dict[str, Any]) -> Di
     decision: List[str] = []
     narrative: List[str] = []
 
+    # Net-new fields are content too — a newly invented DECISION is the most alarming drift,
+    # so it must reach content.decision, not just envelope.
+    for f in (new_keys - prev_keys):
+        if new_audit.get(f, {}).get("_decision_field") is True:
+            decision.append(f)
+        else:
+            narrative.append(f)
+
     for f in sorted(prev_keys & new_keys):
         pe = prev_audit.get(f, {})
         ne = new_audit.get(f, {})
@@ -158,7 +199,9 @@ def compute_drift(prev_record: Dict[str, Any], new_record: Dict[str, Any]) -> Di
             protocol.append(f)
         if any(pe.get(k) != ne.get(k) for k in _ENVELOPE_DRIFT_KEYS):
             envelope.append(f)
-        if prev_record[f] != new_record[f]:
+        # Compare CANONICAL forms, not Python objects: 1 vs 1.0 (and dict key-order) are
+        # Python-equal but canonically distinct — Python `!=` would miss a hash-affecting change.
+        if canonicalize(prev_record[f]) != canonicalize(new_record[f]):
             if ne.get("_decision_field") is True:
                 decision.append(f)
             else:
@@ -167,5 +210,5 @@ def compute_drift(prev_record: Dict[str, Any], new_record: Dict[str, Any]) -> Di
     return {
         "protocol": protocol,
         "envelope": sorted(envelope),
-        "content": {"decision": decision, "narrative": narrative},
+        "content": {"decision": sorted(decision), "narrative": sorted(narrative)},
     }
