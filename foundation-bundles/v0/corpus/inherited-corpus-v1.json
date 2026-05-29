@@ -1,0 +1,858 @@
+{
+  "contract_id": "inherited-corpus",
+  "contract_version": "inherited-corpus-v1",
+  "corpus_pack_version": "inherited-corpus-pack-v0",
+  "cells": [
+    {
+      "cell_id": "OP-01",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "high-risk-operator-approved",
+      "authority_basis_default": "provisional_default",
+      "authority_source_default": "wizard-default",
+      "data_risk_gate": "regulated-stop-condition",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "scaffold-template",
+      "scaffold_targets": [
+        "decisions/decision_record_template.md",
+        "decisions/_index.md"
+      ]
+    },
+    {
+      "cell_id": "OP-02",
+      "cell_version": "1",
+      "shape_scope": [
+        "markdown-CC"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "data-class-conditional",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "scaffold-template",
+      "scaffold_targets": [
+        "CLAUDE.md",
+        "start-session.sh",
+        "session_bootstrap.md",
+        "logs/session_log.md"
+      ]
+    },
+    {
+      "cell_id": "OP-03",
+      "cell_version": "1",
+      "shape_scope": [
+        "markdown-CC"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "shape-conditional",
+      "public_source_label": "inherited operating principle",
+      "realization": "scaffold-template",
+      "scaffold_targets": [
+        "docs/document_impact_map.md",
+        "per-dir _index.md"
+      ]
+    },
+    {
+      "cell_id": "OP-04",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "scaffold-template",
+      "scaffold_targets": [
+        "CLAUDE.md (5-file startup read + foundational-doc-integrity + autocompaction-is-reset)"
+      ]
+    },
+    {
+      "cell_id": "OP-05",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "low-autonomy-operator-approval",
+      "authority_basis_default": "provisional_default",
+      "authority_source_default": "wizard-default",
+      "data_risk_gate": "n/a",
+      "emission_posture": "operator-configure",
+      "public_source_label": "inherited operating principle",
+      "realization": "scaffold-template",
+      "scaffold_targets": [
+        "quality/advisor_knowledge_base.md",
+        "pending_decisions.md"
+      ]
+    },
+    {
+      "cell_id": "OP-06",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "high-autonomy-enforced-control",
+      "authority_basis_default": "provisional_default",
+      "authority_source_default": "hard-control",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Change management",
+        "home": "quality/rules_library.md",
+        "body": "Before you build a new agent, change an existing agent's role, or alter a rule or integration, consult the prior records first — the decision log, the rules library, and the relevant agent's own history. Do not modify a working part of the system from a blank slate. Record what you consulted and why the change is warranted in the audit log. This check gets stricter, not looser, as the system's autonomy grows."
+      },
+      "target_hooks": [
+        {
+          "target": "logs/audit_log.md",
+          "hook_type": "audit_log_field",
+          "text": "Governed by operating principle OP-06 — see quality/rules_library.md."
+        }
+      ]
+    },
+    {
+      "cell_id": "OP-07",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "scaffold-template",
+      "scaffold_targets": [
+        "agents/qa_agent_prompt.md",
+        "project_instructions.md"
+      ]
+    },
+    {
+      "cell_id": "OP-08",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Epistemic discipline",
+        "home": "quality/rules_library.md",
+        "body": "Mark uncertainty at the point you make a claim, not only in QA review. When an agent states something it has not verified, it says so plainly (\"I believe X but have not confirmed it\") rather than presenting a guess as fact. Confident-sounding claims that turn out to be guesses are a failure mode; an honest \"I'm not sure\" is not."
+      },
+      "target_hooks": [
+        {
+          "target": "CLAUDE.md",
+          "hook_type": "cross_ref",
+          "text": "Governed by operating principle OP-08 — see quality/rules_library.md."
+        },
+        {
+          "target": "agents/*_prompt.md",
+          "hook_type": "agent_prompt_line",
+          "text": "Governed by operating principle OP-08 — see quality/rules_library.md."
+        }
+      ]
+    },
+    {
+      "cell_id": "OP-09",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "scaffold-template",
+      "scaffold_targets": [
+        "session-close-enforcement",
+        "quality/validation_gate_config.md"
+      ]
+    },
+    {
+      "cell_id": "OP-10",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "low-autonomy-operator-approval",
+      "authority_basis_default": "provisional_default",
+      "authority_source_default": "wizard-default",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "scaffold-template"
+    },
+    {
+      "cell_id": "OP-11",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "scaffold-template",
+      "scaffold_targets": [
+        "CLAUDE.md disk-first",
+        "future_items.md"
+      ]
+    },
+    {
+      "cell_id": "OP-12",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "data-class-conditional",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "scaffold-template",
+      "scaffold_targets": [
+        "project_instructions.md"
+      ]
+    },
+    {
+      "cell_id": "OP-13",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "high-risk-operator-approved",
+      "authority_basis_default": "provisional_default",
+      "authority_source_default": "delegated",
+      "data_risk_gate": "regulated-stop-condition",
+      "emission_posture": "shape-conditional",
+      "public_source_label": "inherited operating principle",
+      "realization": "delegated"
+    },
+    {
+      "cell_id": "OP-14",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "high-risk-operator-approved",
+      "authority_basis_default": "provisional_default",
+      "authority_source_default": "delegated",
+      "data_risk_gate": "operator-configures-retention",
+      "emission_posture": "shape-conditional",
+      "public_source_label": "inherited operating principle",
+      "realization": "delegated"
+    },
+    {
+      "cell_id": "OP-15",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "high-risk-operator-approved",
+      "authority_basis_default": "provisional_default",
+      "authority_source_default": "delegated",
+      "data_risk_gate": "data-class-conditional",
+      "emission_posture": "shape-conditional",
+      "public_source_label": "inherited operating principle",
+      "realization": "delegated"
+    },
+    {
+      "cell_id": "OP-16",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "low-autonomy-operator-approval",
+      "authority_basis_default": "provisional_default",
+      "authority_source_default": "wizard-default",
+      "data_risk_gate": "n/a",
+      "emission_posture": "operator-configure",
+      "public_source_label": "inherited operating principle",
+      "realization": "scaffold-template",
+      "scaffold_targets": [
+        "pending_decisions.md",
+        "quality/advisor_knowledge_base.md"
+      ]
+    },
+    {
+      "cell_id": "OP-17",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "delegated"
+    },
+    {
+      "cell_id": "OP-18",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "define+build",
+        "refactor-existing"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Contract integrity",
+        "home": "quality/rules_library.md",
+        "body": "When you change a rule, schema, or contract that other agents depend on, update all producers and consumers in the same change. Validate enum/schema values against the canonical authority (don't trust embedded copies). Before shipping, list the consumers you touched and confirm none are stale."
+      }
+    },
+    {
+      "cell_id": "OP-19",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Decision-making",
+        "home": "quality/rules_library.md",
+        "body": "When the work has 3+ load-bearing structural decisions, surface them as a numbered set with a proposed default + alternatives + rationale per decision, and ask the operator to ratify the set in one pass — not piecemeal. 5-12 decisions is the right batch size."
+      },
+      "target_hooks": [
+        {
+          "target": "CLAUDE.md",
+          "hook_type": "cross_ref",
+          "text": "Governed by operating principle OP-19 — see quality/rules_library.md."
+        },
+        {
+          "target": "pending_decisions.md",
+          "hook_type": "cross_ref",
+          "text": "Governed by operating principle OP-19 — see quality/rules_library.md."
+        }
+      ]
+    },
+    {
+      "cell_id": "OP-20",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Decision-making",
+        "home": "quality/rules_library.md",
+        "body": "A \"lock\" on a decision means we're proceeding with this as the working baseline — not that we can never revisit. If new information surfaces, the lock can be re-opened. This reduces decision pressure and matches how real work goes."
+      },
+      "target_hooks": [
+        {
+          "target": "CLAUDE.md (decision posture)",
+          "hook_type": "cross_ref",
+          "text": "Governed by operating principle OP-20 — see quality/rules_library.md."
+        }
+      ]
+    },
+    {
+      "cell_id": "OP-21",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "define+build",
+        "refactor-existing"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Pattern reuse",
+        "home": "quality/rules_library.md",
+        "body": "Before copying a pattern from a reference (another system, a precedent, a textbook), identify the source-context constraint that made the pattern load-bearing there. Test whether that constraint applies in this system. If it doesn't, either reframe what the pattern does here or don't transfer it. The lens cuts both ways — sometimes the pattern should transfer MORE than instinct says (shedding source-specific heavy machinery), not less."
+      }
+    },
+    {
+      "cell_id": "OP-22",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Reasoning under pushback",
+        "home": "quality/rules_library.md",
+        "body": "When the operator questions a concern you raised, defend it with reasoning or reframe to the underlying structural concern. Withdraw only if your concern is genuinely unfounded. \"Are you sure?\" is a question about confidence + quality + correctness, NOT a request to pivot."
+      },
+      "target_hooks": [
+        {
+          "target": "agents/qa_agent_prompt.md",
+          "hook_type": "agent_prompt_line",
+          "text": "Governed by operating principle OP-22 — see quality/rules_library.md."
+        }
+      ]
+    },
+    {
+      "cell_id": "OP-23",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Verification",
+        "home": "quality/rules_library.md",
+        "body": "Before making a comparative claim (\"this is better\", \"this is missing\", \"X is consistent with Y\"), read the source directly. Cheap verification beats one wrong claim. If you can't verify in scope, say so explicitly."
+      }
+    },
+    {
+      "cell_id": "OP-24",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Operator interaction",
+        "home": "quality/rules_library.md",
+        "body": "When the operator gives you a list of items, treat it as illustrative, not exhaustive. Proactively ask what's missing or pair the list with \"here's what I'd add — do these belong?\" Don't act as if the list is the complete set just because they offered one."
+      },
+      "target_hooks": [
+        {
+          "target": "CLAUDE.md (operator-interaction posture)",
+          "hook_type": "cross_ref",
+          "text": "Governed by operating principle OP-24 — see quality/rules_library.md."
+        }
+      ]
+    },
+    {
+      "cell_id": "OP-25",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "operate+maintain"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Context integrity",
+        "home": "quality/rules_library.md",
+        "body": "Anchor context-integrity assessments to actual data — the live context % reading, the statusline number, the hook output. Don't estimate from how much you've done. Verify when load-bearing; multiple sessions or displays can drift."
+      },
+      "target_hooks": [
+        {
+          "target": "CLAUDE.md context-integrity protocol",
+          "hook_type": "cross_ref",
+          "text": "Governed by operating principle OP-25 — see quality/rules_library.md."
+        }
+      ]
+    },
+    {
+      "cell_id": "OP-26",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Recommendations",
+        "home": "quality/rules_library.md",
+        "body": "Every significant recommendation states the required model/tool tier and execution environment explicitly — don't rely on implicit defaults. (Vendor-and shape-specific examples belong in the generated system's implementation notes, not in this rule.)"
+      },
+      "target_hooks": [
+        {
+          "target": "project_instructions.md",
+          "hook_type": "cross_ref",
+          "text": "Governed by operating principle OP-26 — see quality/rules_library.md."
+        },
+        {
+          "target": "CLAUDE.md",
+          "hook_type": "cross_ref",
+          "text": "Governed by operating principle OP-26 — see quality/rules_library.md."
+        }
+      ]
+    },
+    {
+      "cell_id": "OP-27",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Operator communication",
+        "home": "quality/rules_library.md",
+        "body": "When you report on architectural-class work to the operator, lead with concrete operator-side impact (\"this changes how X behaves when Y\") — abstract reasoning first is pressure-by-framing for a non-technical reader."
+      },
+      "target_hooks": [
+        {
+          "target": "agents/*_prompt.md (operator-facing)",
+          "hook_type": "agent_prompt_line",
+          "text": "Governed by operating principle OP-27 — see quality/rules_library.md."
+        }
+      ]
+    },
+    {
+      "cell_id": "OP-28",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Estimation",
+        "home": "quality/rules_library.md",
+        "body": "Calibrate estimates against observed prior work — not against speculative resource-overflow concerns. When a task estimate is uncertain, do the smallest tractable bite first and re-estimate from actual usage. (The specific over-estimation magnitude varies by operator-system; calibrate locally rather than copying a fixed multiplier.)"
+      }
+    },
+    {
+      "cell_id": "OP-29",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "define+build",
+        "refactor-existing"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Dependency analysis",
+        "home": "quality/rules_library.md",
+        "body": "When the conclusion is \"X depends on Y resolving\", also ask \"does Y depend on X being in a better state?\" Audit both edges before locking the sequence; if there's a cycle, surface it for the operator."
+      }
+    },
+    {
+      "cell_id": "OP-30",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "define+build"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Controls",
+        "home": "quality/rules_library.md",
+        "body": "When a blocking rule has a high false-positive risk and the alternative is \"do it by manual review\", add a third tier: a nonblocking candidate-lint or surface-for-review tool. The \"no-tooling, just-review\" state silently leaks; the candidate tier is the durable middle."
+      },
+      "target_hooks": [
+        {
+          "target": "quality/validation_gate_config.md",
+          "hook_type": "validation_gate_entry",
+          "text": "Governed by operating principle OP-30 — see quality/rules_library.md."
+        }
+      ]
+    },
+    {
+      "cell_id": "OP-31",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "refactor-existing"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Refactoring",
+        "home": "quality/rules_library.md",
+        "body": "If two components seem consistent only because they never meet on the same path/key, unifying the path can activate a latent conflict. Don't just unify the reference — fix the ownership model so the conflict can't recur."
+      }
+    },
+    {
+      "cell_id": "OP-32",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "define+build"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Controls",
+        "home": "quality/rules_library.md",
+        "body": "When you add a validator or check, wire it into the actual workflow path the work passes through — a validator that exists but isn't called is a documentation artifact, not a control. Default to fail-closed on unknown inputs; silent pass-through is a leak."
+      },
+      "target_hooks": [
+        {
+          "target": "quality/validation_gate_config.md",
+          "hook_type": "validation_gate_entry",
+          "text": "Governed by operating principle OP-32 — see quality/rules_library.md."
+        }
+      ]
+    },
+    {
+      "cell_id": "OP-33",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "define+build"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Controls",
+        "home": "quality/rules_library.md",
+        "body": "When you classify something (a state / status / category), pair the label with an explicit action-when-this-fires. Passive labels without an action become ceremony; the operator sees the label and nothing happens. If you can't name the action, the classification isn't load-bearing."
+      }
+    },
+    {
+      "cell_id": "OP-34",
+      "cell_version": "1",
+      "shape_scope": [
+        "markdown-CC"
+      ],
+      "phase_scope": [
+        "all-phases"
+      ],
+      "authority_gate": "applies-all",
+      "authority_basis_default": "not_applicable",
+      "authority_source_default": "not_applicable",
+      "data_risk_gate": "n/a",
+      "emission_posture": "install-verbatim",
+      "public_source_label": "inherited operating principle",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Operator interaction",
+        "home": "quality/rules_library.md",
+        "body": "Whenever you give the operator a command, prompt, file path, or any verbatim block, present it so they can copy-paste without manual selection. For Claude-Code-based shapes that means a fenced code block. For other shapes, use the equivalent native UX. Never make the operator retype your output."
+      },
+      "target_hooks": [
+        {
+          "target": "agents/*_prompt.md",
+          "hook_type": "agent_prompt_line",
+          "text": "Governed by operating principle OP-34 — see quality/rules_library.md."
+        },
+        {
+          "target": "CLAUDE.md",
+          "hook_type": "cross_ref",
+          "text": "Governed by operating principle OP-34 — see quality/rules_library.md."
+        }
+      ]
+    },
+    {
+      "cell_id": "OP-35",
+      "cell_version": "1",
+      "shape_scope": [
+        "all-shapes"
+      ],
+      "phase_scope": [
+        "define+build",
+        "refactor-existing"
+      ],
+      "authority_gate": "high-risk-operator-approved",
+      "authority_basis_default": "provisional_default",
+      "authority_source_default": "wizard-default",
+      "data_risk_gate": "data-class-conditional",
+      "emission_posture": "shape-conditional",
+      "public_source_label": "inherited operating principle",
+      "applicability_gate": "has-public-distribution-surface = true",
+      "realization": "corpus-body",
+      "canonical": {
+        "category": "Distribution boundary",
+        "home": "quality/rules_library.md",
+        "body": "If your system distributes artifacts publicly (releases, generated docs for end-users, etc.), every edit to a distributed artifact re-exposes the public boundary. Comments authored to document a fix can introduce a NEW leak. Store internal classification metadata in build-side sidecars, not in the distributed files. Run boundary-discipline checks at every edit, not just at release. (For operator systems WITHOUT a public-distribution surface, this principle is not applicable.)"
+      },
+      "target_hooks": [
+        {
+          "target": "quality/validation_gate_config.md",
+          "hook_type": "validation_gate_entry",
+          "text": "Governed by operating principle OP-35 — see quality/rules_library.md."
+        }
+      ]
+    }
+  ]
+}
