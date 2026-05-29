@@ -192,6 +192,14 @@ def compute_drift(prev_record: Dict[str, Any], new_record: Dict[str, Any]) -> Di
         else:
             narrative.append(f)
 
+    # Removed fields are symmetric — a silently DROPPED decision (a deleted permission /
+    # constraint / spend limit) is as impactful as an added one. Classify by the PRIOR audit.
+    for f in (prev_keys - new_keys):
+        if prev_audit.get(f, {}).get("_decision_field") is True:
+            decision.append(f)
+        else:
+            narrative.append(f)
+
     for f in sorted(prev_keys & new_keys):
         pe = prev_audit.get(f, {})
         ne = new_audit.get(f, {})

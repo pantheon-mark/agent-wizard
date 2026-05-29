@@ -158,6 +158,16 @@ class TestCloseReviewFixes(unittest.TestCase):
         d = rp.compute_drift(prev, new)
         self.assertIn("F", d["content"]["narrative"])
 
+    def test_E_removed_decision_field_routes_to_content(self):
+        # gemini R2: a DROPPED decision is as alarming as a net-new one (symmetry with B).
+        prev = self._base()
+        new = copy.deepcopy(prev)
+        del new["AUTONOMOUS_ACTIONS"]          # policy / _decision_field == True
+        del new["_audit"]["AUTONOMOUS_ACTIONS"]
+        d = rp.compute_drift(prev, new)
+        self.assertIn("AUTONOMOUS_ACTIONS", d["content"]["decision"])
+        self.assertIn("AUTONOMOUS_ACTIONS", d["envelope"])
+
     def test_D_project_whitelist_excludes_unconfirmed(self):
         record = {
             "AUTO_F": "v0.3.0",
