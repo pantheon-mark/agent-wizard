@@ -8,7 +8,9 @@
 
 ## Rules
 
-*No rules yet. Rules are added from: user feedback corrections, QA investigation outcomes validated by the user, advisor response decisions, and human review queue resolutions.*
+{{RULES_LIBRARY_ENTRIES}}
+
+*Additional rules accumulate over time from: user feedback corrections, QA investigation outcomes validated by the user, advisor response decisions, and human review queue resolutions. Rules are never auto-deleted — obsolete rules are marked inactive.*
 
 ---
 

@@ -12,6 +12,25 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-29 — generated systems now inherit a base operating scaffold + a curated operating-principles corpus
+
+**Public-facing change:** the wizard's deterministic generator can now emit a complete operator-system layout — not just the foundation documents. A generated project now includes its **base operating scaffold** (the root `CLAUDE.md`, `project_instructions.md` with the resolved model-tier map, `start-session.sh`, and the operational directories `logs/` / `quality/` / `work/` / `docs/` / `security/` / `archive/`), the **agent execution layer** (the orchestrator + QA + specialist prompts and their invocation scripts), and a **curated corpus of inherited operating principles**.
+
+- **Inherited operating principles, single-homed in `quality/rules_library.md`.** A set of operating principles (identified `OP-…`) is installed as structured Rule entries — covering change management, epistemic discipline, contract integrity, decision-making, verification, operator interaction, estimation, controls, and more. Each principle lives in exactly one place; other files (the root `CLAUDE.md`, the agent prompts, the validation-gate config, the audit log) carry a short cross-reference or enforcement pointer back to it rather than a duplicate copy.
+- **A `decisions/` decision-record core.** Generated systems ship a decision-record template — with an explicit **Operator actions** field for load-bearing manual steps — plus an index, so the system records its own architectural decisions over time.
+- **Model selection stays programmatic.** The generator resolves the model-tier → model mapping into `project_instructions.md` and `start-session.sh`; the operator never has to pick a model by hand.
+- **Provisional authority handling, recorded honestly.** Principles that depend on the operator's authority preferences are installed under a conservative, operator-approval-first default and recorded in a machine-readable sidecar, so they can be revisited automatically once the operator's authority profile is captured.
+
+**Operator-facing notes:**
+
+- No operator action required. This is part of the in-progress generation pipeline; the end-to-end generate-and-hand-off flow is still being completed, and a generated system is produced into a staging location for review before it becomes a live project.
+- The installed operating principles are designed to be read at session start — the generated `CLAUDE.md` points to them and inlines the few that matter most at the start of every session.
+
+**Source-Meta-Commit:** (filled at publication)
+**Public repo commit:** (filled after subtree push)
+
+---
+
 ## 2026-05-28 — foundation bundle v0.4.0: technical_architecture template refactor (single-home + cross-reference + extended-info + deferred-state rendering)
 
 **Public-facing change:** foundation bundle releases its first major-breaking schema refactor in the v0.x prerelease series (v0.3.0 → v0.4.0). The `technical_architecture.md` template now follows a **single-home + cross-reference + extended-info + deferred-state rendering** discipline for content that crosses doc boundaries.

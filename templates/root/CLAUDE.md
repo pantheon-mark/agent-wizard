@@ -113,6 +113,12 @@ The autonomy level governs what Claude may do independently versus what requires
 
 ---
 
+## Inherited operating principles
+
+{{INHERITED_OPERATING_PRINCIPLES}}
+
+---
+
 ## Permission scope
 
 Claude Code will ask for confirmation before editing files or running shell commands. This is expected — these prompts protect the system from unintended changes.
