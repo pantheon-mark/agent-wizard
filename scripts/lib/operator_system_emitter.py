@@ -7,13 +7,17 @@ STAGING directory, in the order their dependencies require:
   1. render the inherited-principles block for CLAUDE.md;
   2. emit the base scaffold (root + operational dirs), feeding it that block;
   3. emit the /agents/ execution layer (reuse the agent-layer emitter);
-  4. emit the corpus single home (rules_library), the decisions/ ADR core, and
-     the authority sidecar;
-  5. inject per-target operational hooks into the now-emitted files (idempotent).
+  4. emit the corpus single home (rules_library) and the decisions/ ADR core;
+  5. inject per-target operational hooks into the now-emitted files (idempotent);
+  6. emit the .wizard/ upgrade scaffold LAST — the manifest-v2 full-tree manifest
+     (which folds the corpus authority stamps in and hashes the now-final tree),
+     the upgrade policy + history, and the operator command surface.
 
 Steps 3-5 depend on step 2's files existing (hooks attach to scaffold + agent
-files), which is why the corpus hook pass runs last. The corpus pack is loaded
-once and shared across the corpus emitters for consistency.
+files), which is why the corpus hook pass runs before the scaffold. Step 6 runs
+strictly last so its per-file base_hashes cover the final post-hook content, and
+so the corpus authority (folded into the manifest) replaces the separate sidecar.
+The corpus pack is loaded once and shared across the corpus emitters for consistency.
 
 The foundation-doc set (vision/approach/... + operator manifest) is produced by
 the foundation-doc generator and wired in separately; it is not part of this
@@ -31,9 +35,9 @@ from corpus_loader import load_corpus_pack  # type: ignore
 from scaffold_emitter import emit_scaffold  # type: ignore
 from agent_emitter import emit_agent_layer  # type: ignore
 from corpus_emitter import (  # type: ignore
-    render_claude_md_block, emit_rules_library, emit_decisions,
-    emit_corpus_authority, inject_target_hooks,
+    render_claude_md_block, emit_rules_library, emit_decisions, inject_target_hooks,
 )
+from upgrade_scaffold_emitter import emit_upgrade_scaffold  # type: ignore
 
 
 def emit_operator_system(plan: EmissionPlan, staging_dir: Path,
@@ -52,12 +56,15 @@ def emit_operator_system(plan: EmissionPlan, staging_dir: Path,
     # 3. agent execution layer.
     written += emit_agent_layer(plan, staging_dir, build_repo_root)
 
-    # 4. corpus single home + decisions core + authority sidecar.
+    # 4. corpus single home + decisions core (authority folds into the manifest at step 6).
     written += emit_rules_library(plan, staging_dir, build_repo_root, records=records)
     written += emit_decisions(plan, staging_dir, build_repo_root)
-    written += emit_corpus_authority(plan, staging_dir, records=records)
 
     # 5. per-target hooks (idempotent) into the now-emitted scaffold + agent files.
     inject_target_hooks(plan, staging_dir, records=records)
+
+    # 6. upgrade scaffold LAST — manifest-v2 (folds corpus authority + hashes the
+    #    final post-hook tree) + upgrade policy/history + command surface.
+    written += emit_upgrade_scaffold(plan, staging_dir, build_repo_root, records=records)
 
     return written

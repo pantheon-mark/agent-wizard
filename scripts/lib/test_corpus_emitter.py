@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from corpus_emitter import (  # noqa: E402
     emit_rules_library, emit_decisions, inject_target_hooks, render_claude_md_block,
-    emit_corpus_authority,
+    emit_corpus_authority, build_corpus_authority_doc,
 )
 from corpus_loader import load_corpus_pack, resolve_for_shape  # noqa: E402
 from scaffold_emitter import emit_scaffold  # noqa: E402
@@ -244,7 +244,7 @@ class CorpusEmitterAuthorityTests(unittest.TestCase):
         self.assertTrue(path.exists())
         doc = json.loads(path.read_text())
         self.assertIn("version", doc)
-        self.assertIn("_absorption_note", doc)         # M3: folds into Phase-3 manifest
+        self.assertIn("_absorption_note", doc)         # folds into the upgrade-scaffold manifest
         self.assertIn("authority_profile", doc)
 
     def test_all_gated_cells_stamped_across_realization_classes(self):
@@ -271,6 +271,18 @@ class CorpusEmitterAuthorityTests(unittest.TestCase):
                           ("delegated", "wizard-default", "hard-control", "operator-configured"),
                           c["cell_id"])
             self.assertTrue(c["expires_on_trigger"], c["cell_id"])
+
+    def test_build_corpus_authority_doc_returns_embeddable_dict(self):
+        # The dict-returning fold-in source: same gated cells + authority_profile as the
+        # sidecar, but WITHOUT the standalone-sidecar-only fields (schema / _absorption_note)
+        # — once embedded in the manifest the absorption note is stale (the manifest fold-in).
+        plan = validate_emission_plan(_valid_plan(), self.contract)
+        doc = build_corpus_authority_doc(plan, self.records)
+        self.assertIn("version", doc)
+        self.assertIn("authority_profile", doc)
+        self.assertEqual(sorted(c["cell_id"] for c in doc["cells"]), self.gated_ids)
+        self.assertNotIn("_absorption_note", doc)
+        self.assertNotIn("schema", doc)
 
     def test_stamps_not_in_operator_file_frontmatter(self):
         # Authority provenance lives in the sidecar, never in the operator rule files.

@@ -10,6 +10,7 @@ Templates for files generated in the root of the user's System project. Values i
 | `project_instructions.md` | `project_instructions.md` | UP-1–5, FIN-1–2, NOTIF-1–5, ERR-2, QA-4, CONC-1–2, START-1–2, DRIFT-1, SCALE-4, Item 16 model mapping | ✅ Complete (2026-04-01) |
 | `session_bootstrap.md` | `session_bootstrap.md` | All phases — living orientation file | ✅ Complete (2026-04-01) |
 | `pending_decisions.md` | `pending_decisions.md` | Empty structure — populated at runtime | ✅ Complete (2026-04-01) |
+| `SESSION_STATE.md` | `SESSION_STATE.md` | Static — initial state `CLEAR`; rewritten at runtime by the control plane at every session close | ✅ Complete (2026-05-29) |
 | `manual.md` | `manual.md` | Static — Mac installation guide. Includes permission prompts section (BF-3). | ✅ Complete (2026-04-01) |
 | `gitignore_template` | `.gitignore` | Static baseline + placeholder for CRED-2 entries | ✅ Complete (2026-04-01) |
 | `wizard_feedback.md` | `wizard_feedback.md` | Empty entries section — operator captures wizard-traceable issues during runtime | ✅ Complete (2026-04-04) |

@@ -225,14 +225,17 @@ def inject_target_hooks(plan: EmissionPlan, staging_dir: Path,
     return modified
 
 
-def emit_corpus_authority(plan: EmissionPlan, staging_dir: Path,
-                          records: Optional[List[CorpusCellRecord]] = None) -> List[Path]:
-    """Emit .wizard/corpus_authority.json — the provisional authority stamp for
-    every gated cell (across ALL realization classes, not just corpus-body).
+def build_corpus_authority_doc(plan: EmissionPlan,
+                               records: Optional[List[CorpusCellRecord]] = None) -> dict:
+    """Build the canonical authority doc (the provisional authority stamp for every
+    gated cell across ALL realization classes) as an embeddable dict.
 
-    Under the provisional authority profile the stamp is machine-visible and
-    carries the migration trigger; when the real operator authority profile
-    arrives, the expires_on_trigger condition fires and gated cells re-emit."""
+    This is the FOLD-IN SOURCE consumed by the upgrade-scaffold manifest emitter,
+    which embeds it under .wizard/manifest.json's `corpus_authority` block. It
+    deliberately omits the standalone-sidecar-only fields (`schema` /
+    `_absorption_note`): once embedded in the manifest, an absorption note pointing
+    at the manifest is stale. `emit_corpus_authority` re-adds those for the legacy
+    standalone-sidecar form."""
     resolved = _resolved_records(plan, records)
     ap = plan.authority_profile
     cells = [
@@ -247,15 +250,31 @@ def emit_corpus_authority(plan: EmissionPlan, staging_dir: Path,
         for r in sorted(resolved, key=lambda c: c.cell_id)
         if r.authority_gate != "applies-all"
     ]
-    doc = {
-        "schema": CORPUS_AUTHORITY_SCHEMA,
+    return {
         "version": CORPUS_AUTHORITY_VERSION,
-        "_absorption_note": CORPUS_AUTHORITY_ABSORPTION_NOTE,
         "authority_profile": {
             "id": ap.id, "posture": ap.posture, "source": ap.source,
             "expires_on_trigger": ap.expires_on_trigger,
         },
         "cells": cells,
+    }
+
+
+def emit_corpus_authority(plan: EmissionPlan, staging_dir: Path,
+                          records: Optional[List[CorpusCellRecord]] = None) -> List[Path]:
+    """Emit .wizard/corpus_authority.json — the standalone authority sidecar.
+
+    Standalone form: wraps build_corpus_authority_doc() with the sidecar-only
+    `schema` + `_absorption_note` fields. NOTE: the composed operator system folds
+    this content into .wizard/manifest.json instead (see upgrade_scaffold_emitter);
+    the orchestrator no longer emits this separate sidecar. Retained as a standalone
+    capability + for the migration trigger semantics: under the provisional authority
+    profile the stamp is machine-visible and carries the expires_on_trigger; when the
+    real operator authority profile arrives, gated cells re-emit."""
+    doc = {
+        "schema": CORPUS_AUTHORITY_SCHEMA,
+        "_absorption_note": CORPUS_AUTHORITY_ABSORPTION_NOTE,
+        **build_corpus_authority_doc(plan, records),
     }
     dest = staging_dir / CORPUS_AUTHORITY_DEST
     dest.parent.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,161 @@
+"""Tests for the upgrade-scaffold emitter (stdlib unittest; pip-install-free).
+
+emit_upgrade_scaffold computes the operator-project `.wizard/` upgrade scaffold
+(manifest-v2 full-tree manifest + folded corpus authority + control-file
+inventory + upgrade policy + history + command surface) over a STAGING tree that
+has already been rendered. These tests assert: manifest-v2 covers the full tree
+(not just foundation docs); hashes are sha256:-prefixed AND drift-clean through
+the real compute_drift_report consumer; the corpus_authority sidecar is folded in
+and retired; control files are inventoried but not merge-managed; unclassified
+staged files fail closed; the scaffold is emitted deterministically; and
+source_commit is resolved from the registry.
+"""
+
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from upgrade_scaffold_emitter import (  # noqa: E402
+    emit_upgrade_scaffold, build_operator_manifest, classify_lifecycle,
+    UpgradeScaffoldError, MANIFEST_SCHEMA_VERSION,
+)
+from emission_plan import load_contract, default_contract_path, validate_emission_plan  # noqa: E402
+from corpus_loader import load_corpus_pack  # noqa: E402
+from corpus_emitter import (  # noqa: E402
+    render_claude_md_block, emit_rules_library, emit_decisions, inject_target_hooks,
+)
+from scaffold_emitter import emit_scaffold  # noqa: E402
+from agent_emitter import emit_agent_layer  # noqa: E402
+from upgrade import compute_drift_report  # noqa: E402
+from test_emission_plan import _valid_plan  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _emit_base_tree(plan, staging, repo, records):
+    """Render the operator system MINUS the upgrade scaffold (the orchestrator's
+    pre-scaffold steps), so the scaffold emitter has a real tree to inventory."""
+    block = render_claude_md_block(plan, records)
+    emit_scaffold(plan, staging, repo, extra_inputs={"INHERITED_OPERATING_PRINCIPLES": block})
+    emit_agent_layer(plan, staging, repo)
+    emit_rules_library(plan, staging, repo, records=records)
+    emit_decisions(plan, staging, repo)
+    inject_target_hooks(plan, staging, records=records)
+
+
+class UpgradeScaffoldEmitterTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.contract = load_contract(default_contract_path())
+        cls.records = load_corpus_pack()
+
+    def _emit(self, into=None):
+        plan = validate_emission_plan(_valid_plan(), self.contract)
+        if into is None:
+            self._tmp = tempfile.TemporaryDirectory()
+            into = Path(self._tmp.name)
+        _emit_base_tree(plan, into, REPO_ROOT, self.records)
+        written = emit_upgrade_scaffold(plan, into, REPO_ROOT, records=self.records)
+        return plan, into, written
+
+    def tearDown(self):
+        tmp = getattr(self, "_tmp", None)
+        if tmp is not None:
+            tmp.cleanup()
+
+    def _manifest(self, staging):
+        import json
+        return json.loads((staging / ".wizard/manifest.json").read_text())
+
+    def test_manifest_emitted_as_v2_with_provenance(self):
+        plan, staging, _ = self._emit()
+        m = self._manifest(staging)
+        self.assertEqual(m["manifest_schema_version"], MANIFEST_SCHEMA_VERSION)
+        self.assertEqual(m["foundation_bundle_version"], plan.bundle_version)
+        self.assertEqual(m["generator_version"], plan.generator_version)
+        self.assertEqual(m["project_name"], plan.project_name)
+        self.assertEqual(m["system_shape"], plan.system_shape)
+        self.assertIn("source_commit", m)
+
+    def test_manifest_covers_full_tree_not_just_foundation_docs(self):
+        _, staging, _ = self._emit()
+        managed = self._manifest(staging)["managed_files"]
+        for rel in ["CLAUDE.md", "quality/rules_library.md", "SESSION_STATE.md",
+                    "agents/prompts/orchestrator_prompt.md", "agents/scripts/researcher.sh",
+                    "logs/audit_log.md", "decisions/decision_record_template.md",
+                    ".wizard/UPGRADING.md"]:
+            self.assertIn(rel, managed, f"manifest does not cover {rel}")
+
+    def test_hashes_sha256_prefixed_and_drift_clean_through_consumer(self):
+        # The critical producer/consumer-seam test: every base_hash must be
+        # sha256:-prefixed AND match the actual staged bytes when read back through
+        # the REAL drift consumer (bare hex would make every file report drift).
+        _, staging, _ = self._emit()
+        m = self._manifest(staging)
+        for rel, meta in m["managed_files"].items():
+            self.assertTrue(meta["base_hash"].startswith("sha256:"), f"{rel} base_hash not prefixed")
+            self.assertEqual(meta["base_hash"], meta["current_hash_last_seen"], rel)
+        report = compute_drift_report(staging, m)
+        self.assertFalse(report.has_drift,
+                         f"manifest reports drift on freshly-emitted tree: "
+                         f"{[e.path for e in report.entries if e.status != 'no_drift']}")
+
+    def test_corpus_authority_folded_in_and_sidecar_retired(self):
+        _, staging, _ = self._emit()
+        m = self._manifest(staging)
+        self.assertIn("corpus_authority", m)
+        self.assertIn("cells", m["corpus_authority"])
+        self.assertTrue(len(m["corpus_authority"]["cells"]) > 0)
+        self.assertNotIn("_absorption_note", m["corpus_authority"])  # stale once embedded
+        self.assertFalse((staging / ".wizard/corpus_authority.json").exists(),
+                         "standalone corpus_authority.json sidecar should be retired")
+
+    def test_control_files_inventoried_not_merge_managed(self):
+        _, staging, _ = self._emit()
+        m = self._manifest(staging)
+        for cf in [".wizard/manifest.json", ".wizard/upgrade-policy.yaml",
+                   ".wizard/upgrade-history.log"]:
+            self.assertIn(cf, m["control_files"], f"{cf} not in control inventory")
+            self.assertNotIn(cf, m["managed_files"], f"{cf} must not be merge-managed")
+
+    def test_fail_closed_on_unclassified_staged_file(self):
+        plan = validate_emission_plan(_valid_plan(), self.contract)
+        self._tmp = tempfile.TemporaryDirectory()
+        staging = Path(self._tmp.name)
+        _emit_base_tree(plan, staging, REPO_ROOT, self.records)
+        (staging / "MYSTERY_UNCLASSIFIED.md").write_text("stray\n")
+        with self.assertRaises(UpgradeScaffoldError):
+            emit_upgrade_scaffold(plan, staging, REPO_ROOT, records=self.records)
+
+    def test_policy_history_and_command_surface_emitted(self):
+        _, staging, _ = self._emit()
+        for rel in [".wizard/upgrade-policy.yaml", ".wizard/upgrade-history.log",
+                    ".wizard/UPGRADING.md"]:
+            self.assertTrue((staging / rel).exists(), f"missing scaffold artifact: {rel}")
+
+    def test_source_commit_resolved_from_registry(self):
+        _, staging, _ = self._emit()
+        # plan.bundle_version == v0.4.0 -> registry source_commit d4fbf73
+        self.assertEqual(self._manifest(staging)["source_commit"], "d4fbf73")
+
+    def test_emission_deterministic(self):
+        a = Path(tempfile.mkdtemp())
+        b = Path(tempfile.mkdtemp())
+        self._emit(into=a)
+        self._emit(into=b)
+        self.assertEqual((a / ".wizard/manifest.json").read_bytes(),
+                         (b / ".wizard/manifest.json").read_bytes())
+
+    def test_classify_lifecycle_fail_closed(self):
+        self.assertEqual(classify_lifecycle("logs/audit_log.md"), "runtime_state")
+        self.assertEqual(classify_lifecycle("CLAUDE.md"), "inherited_content")
+        self.assertEqual(classify_lifecycle("security/credentials_registry.md"), "operator_config")
+        with self.assertRaises(UpgradeScaffoldError):
+            classify_lifecycle("totally_unknown_root_file.md")
+
+
+if __name__ == "__main__":
+    unittest.main()

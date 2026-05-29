@@ -52,15 +52,28 @@ class OperatorSystemEmitterTests(unittest.TestCase):
     def test_full_runnable_tree_present(self):
         staging, _ = self._emit()
         for rel in [
-            "CLAUDE.md", "project_instructions.md", "start-session.sh",
+            "CLAUDE.md", "project_instructions.md", "start-session.sh", "SESSION_STATE.md",
             "quality/rules_library.md", "quality/validation_gate_config.md",
             "decisions/decision_record_template.md", "decisions/_index.md",
-            ".wizard/corpus_authority.json",
+            ".wizard/manifest.json", ".wizard/upgrade-policy.yaml",
+            ".wizard/upgrade-history.log", ".wizard/UPGRADING.md",
             "agents/prompts/orchestrator_prompt.md", "agents/prompts/qa_agent_prompt.md",
             "agents/prompts/researcher_prompt.md", "agents/scripts/researcher.sh",
             "logs/audit_log.md",
         ]:
             self.assertTrue((staging / rel).exists(), f"missing emitted artifact: {rel}")
+
+    def test_upgrade_scaffold_folds_authority_and_retires_sidecar(self):
+        from upgrade import load_operator_manifest, compute_drift_report  # noqa: E402
+        staging, _ = self._emit()
+        # the standalone corpus_authority.json sidecar is retired (folded into manifest)
+        self.assertFalse((staging / ".wizard/corpus_authority.json").exists())
+        m = load_operator_manifest(staging / ".wizard/manifest.json")  # loads through v2 consumer
+        self.assertEqual(m["manifest_schema_version"], "manifest-v2")
+        self.assertIn("corpus_authority", m)
+        self.assertTrue(len(m["corpus_authority"]["cells"]) > 0)
+        # the composed system's manifest is drift-clean through the real consumer
+        self.assertFalse(compute_drift_report(staging, m).has_drift)
 
     def test_claude_md_carries_rendered_corpus_block(self):
         staging, _ = self._emit()

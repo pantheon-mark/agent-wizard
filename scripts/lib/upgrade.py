@@ -65,6 +65,18 @@ MERGE_STRATEGY_OPERATOR_REVIEW = "operator_review"
 MERGE_STRATEGY_WARN_ON_DRIFT = "warn_on_drift"
 MERGE_STRATEGY_FROZEN = "frozen"
 
+# Operator-project manifest schema versions.
+#   manifest-v1: legacy / foundation-docs-only manifests (no manifest_schema_version field).
+#   manifest-v2: full-tree-ownership manifests emitted by the operator-system pipeline.
+MANIFEST_SCHEMA_V1 = "manifest-v1"
+MANIFEST_SCHEMA_V2 = "manifest-v2"
+
+_MERGE_STRATEGIES = {
+    MERGE_STRATEGY_THREE_WAY, MERGE_STRATEGY_OPERATOR_REVIEW,
+    MERGE_STRATEGY_WARN_ON_DRIFT, MERGE_STRATEGY_FROZEN,
+}
+_LOCAL_MODIFICATIONS = {"expected", "allowed", "not_recommended"}
+
 # Drift status
 DRIFT_NONE = "no_drift"
 DRIFT_DETECTED = "drift_detected"
@@ -257,11 +269,68 @@ class UpgradeCheckResult:
 
 # ===== Loaders =====
 
-def load_operator_manifest(path: Path) -> Dict[str, Any]:
-    """Load operator-project `.wizard/manifest.json`.
+def _validate_manifest_path_key(key: str, path: Path) -> None:
+    """Reject unsafe managed_files path keys (empty / absolute / parent-traversal).
+    Defensive for the future apply path — a manifest must not be able to point an
+    upgrade at a file outside the operator project."""
+    if not key or key.startswith("/") or ".." in key.split("/"):
+        raise OperatorManifestError(
+            f"manifest at {path}: unsafe managed_files path key {key!r}"
+        )
 
-    Runtime CLI consumes JSON sidecar only at v0; YAML manifest is human-facing companion.
-    Operator-side YAML+JSON sync flow lands at the next foundation-bundle emission release.
+
+def _validate_manifest_v2(data: Dict[str, Any], path: Path) -> None:
+    """Strict manifest-v2 (full-tree-ownership) validation. v2 manifests carry the
+    full emitted tree + a generator_version (required unconditionally per the
+    foundation-versioning policy § 4.1 F-9) and must pass per-file enum + hash-format
+    + path-safety checks so the future apply path can trust them."""
+    required = ["foundation_bundle_version", "generator_version", "managed_files"]
+    missing = [k for k in required if k not in data]
+    if missing:
+        raise OperatorManifestError(f"manifest-v2 at {path} missing required keys: {missing}")
+    files = data.get("managed_files")
+    if not isinstance(files, dict):
+        raise OperatorManifestError(f"manifest-v2 at {path}: managed_files must be a JSON object")
+    for key, meta in files.items():
+        _validate_manifest_path_key(key, path)
+        if not isinstance(meta, dict):
+            raise OperatorManifestError(
+                f"manifest-v2 at {path}: managed_files[{key!r}] must be a JSON object"
+            )
+        for field in ("base_hash", "current_hash_last_seen"):
+            v = meta.get(field, "")
+            if not (isinstance(v, str) and v.startswith("sha256:")):
+                raise OperatorManifestError(
+                    f"manifest-v2 at {path}: managed_files[{key!r}].{field} must be a "
+                    f"'sha256:'-prefixed string; got {v!r}"
+                )
+        if meta.get("merge_strategy") not in _MERGE_STRATEGIES:
+            raise OperatorManifestError(
+                f"manifest-v2 at {path}: managed_files[{key!r}].merge_strategy "
+                f"{meta.get('merge_strategy')!r} not in {sorted(_MERGE_STRATEGIES)}"
+            )
+        if meta.get("local_modifications") not in _LOCAL_MODIFICATIONS:
+            raise OperatorManifestError(
+                f"manifest-v2 at {path}: managed_files[{key!r}].local_modifications "
+                f"{meta.get('local_modifications')!r} not in {sorted(_LOCAL_MODIFICATIONS)}"
+            )
+
+
+def load_operator_manifest(path: Path) -> Dict[str, Any]:
+    """Load operator-project `.wizard/manifest.json`, branching on manifest schema
+    version (explicit v1 -> v2 loader branching).
+
+    - Absent `manifest_schema_version` OR `manifest-v1`: legacy / foundation-docs-only
+      manifest. Backward-compatible required-key check (foundation_bundle_version +
+      managed_files) — existing operator projects keep loading.
+    - `manifest-v2`: full-tree-ownership manifest. Strict validation per
+      `_validate_manifest_v2` (generator_version required; per-file enum + hash-format
+      + path-safety).
+    - Any other value: fail-closed (a v2 consumer must never silently treat an unknown
+      schema as a known one).
+
+    Runtime CLI consumes the JSON manifest; drift detection (`compute_drift_report`)
+    reads the per-file `managed_files` block identically for both versions.
 
     Raises OperatorManifestError on missing path, malformed JSON, or schema gap.
     """
@@ -278,11 +347,19 @@ def load_operator_manifest(path: Path) -> Dict[str, Any]:
         raise OperatorManifestError(f"malformed JSON in {path}: {e}") from e
     if not isinstance(data, dict):
         raise OperatorManifestError(f"manifest must be a JSON object; got {type(data).__name__}")
-    required = ["foundation_bundle_version", "managed_files"]
-    missing = [k for k in required if k not in data]
-    if missing:
+
+    schema_version = data.get("manifest_schema_version")
+    if schema_version in (None, MANIFEST_SCHEMA_V1):
+        required = ["foundation_bundle_version", "managed_files"]
+        missing = [k for k in required if k not in data]
+        if missing:
+            raise OperatorManifestError(f"manifest at {path} missing required keys: {missing}")
+    elif schema_version == MANIFEST_SCHEMA_V2:
+        _validate_manifest_v2(data, path)
+    else:
         raise OperatorManifestError(
-            f"manifest at {path} missing required keys: {missing}"
+            f"manifest at {path}: unknown manifest_schema_version {schema_version!r} "
+            f"(expected absent / {MANIFEST_SCHEMA_V1!r} / {MANIFEST_SCHEMA_V2!r})"
         )
     return data
 
