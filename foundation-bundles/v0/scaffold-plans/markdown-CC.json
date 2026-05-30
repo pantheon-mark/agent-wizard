@@ -1,0 +1,57 @@
+{
+  "contract_id": "scaffold-plan",
+  "contract_version": "scaffold-plan-v1",
+  "system_shape": "markdown-CC",
+  "authority_profile": {
+    "id": "provisional_operator_approval_v0",
+    "posture": "low-autonomy-operator-approval",
+    "source": "wizard-default",
+    "expires_on_trigger": "operator-authority-profile-available"
+  },
+  "model_tiers": {"high": "model-high", "standard": "model-standard", "fast": "model-fast"},
+  "model_tiers_note": "Neutral default. The real tier-to-model resolution is supplied at generation time via an override; the placeholder strings here keep the distributed data shape-correct without pinning a model name that changes over time.",
+  "control_plane": {
+    "queue_path": "work/work_queue.md",
+    "lock_path": "maintenance_mode.md",
+    "handoff_dir": "agents/handoffs",
+    "checkpoint_dir": "agents/checkpoints",
+    "cron_config_path": "agents/cron/cron_config.md",
+    "session_state_path": "SESSION_STATE.md",
+    "session_bootstrap_path": "session_bootstrap.md",
+    "session_log_path": "logs/session_log.md",
+    "error_log_path": "logs/error_log.md",
+    "notification_log_path": "logs/notification_log.md"
+  },
+  "control_plane_runtime_created": [
+    "maintenance_mode.md", "agents/handoffs", "agents/checkpoints", "work/agent_outputs"
+  ],
+  "orchestrator": {
+    "model_tier_high": "high", "model_tier_standard": "standard",
+    "model_tier_fast": "fast", "schedule": "0 * * * *"
+  },
+  "i9_coverage_files": [
+    "work/work_queue.md", "agents/cron/cron_config.md", "SESSION_STATE.md",
+    "session_bootstrap.md", "logs/session_log.md", "logs/error_log.md",
+    "logs/notification_log.md", "quality/rules_library.md", "CLAUDE.md"
+  ],
+  "i9_coverage_note": "The minimal set of emitted paths needed to satisfy the emission plan's path-coverage invariant (every control-plane path and agent output directory must be a covered emitted file or a declared runtime-created path). This is NOT the full output manifest — the complete manifest is computed by scanning the generated tree.",
+  "emitted_file_defaults": {
+    "managed_by": "wizard", "local_modifications": "not_recommended",
+    "merge_strategy": "warn_on_drift", "source_refs": []
+  },
+  "agent_prompt_dir": "agents/prompts",
+  "agent_scripts_dir": "agents/scripts",
+  "agent_output_profile": {
+    "output_directory": "work/agent_outputs",
+    "permitted_write_directories": ["work/agent_outputs"],
+    "additional_context_files": ["approach.md"],
+    "output_format_specification": "markdown"
+  },
+  "criticality_model_policy": {
+    "critical":   {"primary_model_tier": "high",     "status_model_tier": "standard"},
+    "standard":   {"primary_model_tier": "standard", "status_model_tier": "fast"},
+    "supporting": {"primary_model_tier": "fast",     "status_model_tier": "fast"}
+  },
+  "allowed_resource_claims": ["requires_cron"],
+  "allowed_resource_claims_note": "Only claims with a deterministic generation effect are allowed. A claimed capability the shape does not support is rejected by the assembler, never silently dropped."
+}
