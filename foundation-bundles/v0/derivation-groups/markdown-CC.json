@@ -27,13 +27,13 @@
     {
       "group_id": "approach_roster",
       "input_question_ids": ["UP-4", "AP-1", "AP-2", "AP-3", "ADV-1", "ADV-2", "ADV-3", "ADV-4", "ARCH-2", "ARCH-3"],
-      "target_fields": ["APPROACH_SOLUTION_BRIEF", "AGENT_ROSTER_ROWS"],
+      "target_fields": ["APPROACH_SOLUTION_BRIEF", "AGENT_ROSTER_ROWS", "ADVISOR_ENTRIES"],
       "close_after": "step_08",
       "confirmation_marker": "group_approach_roster_confirmed",
       "preview_docs": ["approach.md"],
       "skip_satisfied_if": ["ADV-2", "ADV-3", "ADV-4"],
       "barrier_stakes": "high",
-      "special_behaviors": ["voice-and-style seeding (synthesis class; from literacy/info-preference/verbosity/style answers + the operator's vision voice)", "agent-intent derivation (agent roster answers -> agent intents + resource claims)", "name-consistency (extraction; names used verbatim everywhere)"]
+      "special_behaviors": ["voice-and-style seeding (synthesis class; from literacy/info-preference/verbosity/style answers + the operator's vision voice)", "agent-intent derivation (agent roster answers -> agent intents + resource claims)", "name-consistency (extraction; names used verbatim everywhere)", "advisor knowledge base seeding (extraction; the confirmed advisor list -> ADVISOR_ENTRIES, emitted into the advisor knowledge base; empty when no advisors)"]
     },
     {
       "group_id": "orchestration_build",

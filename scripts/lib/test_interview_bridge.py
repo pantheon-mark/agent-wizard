@@ -101,6 +101,24 @@ class GateAcceptanceTests(unittest.TestCase):
                                                  generator_version_override="0" * 40)
         self.assertEqual(self.calls, {"full": 0, "foundation": 1})
 
+    def test_model_tiers_resolve_to_real_models_by_default(self):
+        # The gate resolves the maintained tier->model registry (real Claude ids), NOT the
+        # scaffold-plan's shape-correct placeholders, so the emitted --model is real.
+        res = ib.build_operator_system_from_transcript(_events(), [_ai()], system_shape="markdown-CC",
+                                                       generator_version_override="0" * 40)
+        for tier in ("high", "standard", "fast"):
+            v = res.plan.model_tiers[tier]
+            self.assertFalse(v.startswith("model-"), f"{tier} is a placeholder {v!r}")
+            self.assertTrue(v.startswith("claude-"), f"{tier}={v!r} is not a Claude model id")
+
+    def test_model_tiers_override_wins(self):
+        # The override seam (tests / special cases) still takes precedence over the registry.
+        custom = {"high": "claude-x-hi", "standard": "claude-x-std", "fast": "claude-x-fast"}
+        res = ib.build_operator_system_from_transcript(_events(), [_ai()], system_shape="markdown-CC",
+                                                       generator_version_override="0" * 40,
+                                                       model_tiers_override=custom)
+        self.assertEqual(res.plan.model_tiers, custom)
+
 
 class GateRealSinkTest(unittest.TestCase):
     def test_full_gate_emits_a_runnable_tree(self):

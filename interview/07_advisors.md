@@ -106,7 +106,7 @@ python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard
 python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ADV-4 --group approach_roster --reason "downstream interview-guide generation; no operator source input"
 ```
 
-The advisor knowledge base and interview guides are still produced below as before (the operator's system needs them); the skips record only that those steps capture no new operator source input.
+The advisor knowledge base is now emitted by the generator from the `ADVISOR_ENTRIES` derivation (no longer written mid-interview — see ADV-3); the per-advisor interview guides are still produced below (ADV-4). The skips record only that those steps capture no new operator source input.
 
 **If zero advisors confirmed (user removed all proposed advisors):** Skip ADV-2 through ADV-4 entirely (still record the ADV-1 answer above as "no advisors" and the ADV-2/ADV-3/ADV-4 skips so the group stays complete). Store ADVISOR_COUNT = 0 and ADVISORS_SEEDED = true in the staging file. Say:
 
@@ -136,13 +136,11 @@ Write sub-step marker: Append `step_07_ADV-2: complete | <timestamp>` to `~/clau
 
 ---
 
-## ADV-3 — Seed the advisor knowledge base [DYNAMIC]
+## ADV-3 — Confirm the advisor entries are captured (the knowledge base is emitted at the end) [DYNAMIC]
 
-For each confirmed advisor, write a header entry to the advisor knowledge base.
+**The advisor knowledge base is no longer written during the interview.** The generator emits `quality/advisor_knowledge_base.md` at the end from the `ADVISOR_ENTRIES` field — derived (`extraction`) from the confirmed advisor list (`ADV-1`) at the step-08 `approach_roster` barrier (see `08_architecture.md`). Do NOT create or write that file here; the generator owns it like every other system file (this retires the mid-interview write).
 
-**File:** `[PROJECT_DIR]/quality/advisor_knowledge_base.md`
-
-Each header entry format:
+This step only ensures the advisor list is recorded (`ADV-1`, captured above). The reference shape the step-08 derivation produces — one block per confirmed advisor — is:
 
 ```
 ## [Advisor Role or Name]
@@ -151,26 +149,9 @@ Each header entry format:
 **Status:** Active
 **First identified:** [wizard setup date]
 **Notes:** [any initial notes the user provided, or "None"]
-
-<!-- Guidance entries will be added here as consultations occur -->
 ```
 
-Write all header entries to the file before proceeding. If the file does not exist, create it with a brief preamble:
-
-```
-# Advisor Knowledge Base
-
-This file records guidance extracted from advisor consultations.
-Each entry captures the rule, the reasoning behind it, the conditions
-under which it applies, and when it should be reviewed. Agents read
-and apply these entries at Level 3 and above.
-
----
-```
-
-Then write the header entries below the separator.
-
-Update the staging file with the number of advisors seeded.
+If no advisors were confirmed, `ADVISOR_ENTRIES` is derived as an empty value and the generator emits the knowledge base with its preamble and no entries (advisors can be added later). The interview does not assemble the preamble — the template carries it.
 
 Write sub-step marker: Append `step_07_ADV-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -256,7 +237,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-ADV-1 through ADV-4 complete. All confirmed advisors recorded in the staging file. Advisor knowledge base seeded with a header entry for each advisor at `[PROJECT_DIR]/quality/advisor_knowledge_base.md`. First interview guide written for each advisor at `[PROJECT_DIR]/advisor/interview-guides/`. ADVISORS_SEEDED = true in the staging file.
+ADV-1 through ADV-4 complete. All confirmed advisors recorded in the staging file and as the `ADV-1` transcript answer (the source for the step-08 `ADVISOR_ENTRIES` derivation). The advisor knowledge base is emitted by the generator at the end (not written here). First interview guide written for each advisor at `[PROJECT_DIR]/advisor/interview-guides/`. ADVISORS_SEEDED = true in the staging file.
 
 **Write completion marker:** Append `step_07: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

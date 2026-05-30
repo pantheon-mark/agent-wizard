@@ -95,6 +95,11 @@ def _drive_approach_roster_group(transcript, progress):
                          "| Agent | Role |\n|---|---|\n| Monitor | Watches sources |",
                          inputs=["APPROACH_SOLUTION_BRIEF"], clock=lambda: CLOCK)
     cli.cmd_confirm_field(transcript, "AGENT_ROSTER_ROWS", "approach_roster", "accepted", clock=lambda: CLOCK)
+    # advisor knowledge base entries (extraction; from the confirmed advisor list ADV-1)
+    cli.cmd_derive_field(transcript, SHAPE, "ADVISOR_ENTRIES",
+                         "## Care coordinator\n\n**Domain:** care decisions\n**Status:** Active\n**Notes:** None",
+                         sources=["ADV-1"], clock=lambda: CLOCK)
+    cli.cmd_confirm_field(transcript, "ADVISOR_ENTRIES", "approach_roster", "accepted", clock=lambda: CLOCK)
     return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
 
 

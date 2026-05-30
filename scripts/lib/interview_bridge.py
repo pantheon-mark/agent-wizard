@@ -25,11 +25,12 @@ Stdlib-only, pip-install-free.
 """
 
 from pathlib import Path
-from typing import Any, List, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 
 from derivation_replay import compile_transcript, content_hash  # type: ignore
 from build_intent import BuildIntent, AgentIntent  # type: ignore
 from scaffold_plan import load_scaffold_plan  # type: ignore
+from model_tiers import load_model_tiers  # type: ignore
 from corpus_loader import load_corpus_pack  # type: ignore
 from emission_plan_assembler import assemble_emission_plan  # type: ignore
 from emission_plan import (  # type: ignore
@@ -76,9 +77,15 @@ def build_operator_system_from_transcript(
     generator_version_override: Optional[str] = None,
     project_name: str = "operator-system",
     bundle_version: str = "v0.4.0",
+    model_tiers_override: Optional[Dict[str, str]] = None,
 ) -> BridgeResult:
     """The fail-closed gate. See module docstring. There is intentionally NO
     foundation_doc_inputs parameter — inputs are projector-produced from the transcript.
+
+    Tier->model resolution: by default the maintained model-tiers registry for the shape
+    (real Claude ids, so the emitted start-session.sh carries a real --model — the
+    programmatic-model rule), NOT the scaffold-plan's shape-correct placeholders.
+    model_tiers_override is the seam for tests / special cases.
 
     Raises DerivedRecordError (invalid record), ConstraintViolation (unmappable intent),
     or EmissionPlanError (plan invariant) — failing closed before any file is written.
@@ -86,6 +93,7 @@ def build_operator_system_from_transcript(
     record = compile_transcript(events)
     scaffold = load_scaffold_plan(system_shape)
     corpus = load_corpus_pack()
+    tiers = dict(model_tiers_override) if model_tiers_override else load_model_tiers(system_shape)
 
     # generator_version (C-006): real clean-worktree identity unless a test override is supplied.
     if generator_version_override is not None:
@@ -97,7 +105,7 @@ def build_operator_system_from_transcript(
     intent = BuildIntent(derived_record=record, agent_intents=list(agent_intents))
     plan_dict = assemble_emission_plan(
         intent, scaffold, corpus,
-        model_tiers=scaffold.model_tiers,
+        model_tiers=tiers,
         project_name=project_name, bundle_version=bundle_version, generator_version=generator_version,
     )
     plan = validate_emission_plan(plan_dict, load_contract(default_contract_path()))

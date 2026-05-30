@@ -280,14 +280,17 @@ python3 wizard/scripts/interview_cli.py record-agent-intent --transcript ~/claud
 
 Add a resource-claim flag only when the operator's description actually implies it (e.g. `--requires-cron` for an agent that must run on a schedule). **Forced confirmation for the highest tier:** before recording any agent as `critical`, state plainly — "I've marked [agent] as your most critical agent; failures here have the highest impact — please confirm" — and only proceed on explicit acknowledgment (per the agent-intent prompt's confirmation hooks). Surface low-confidence agents explicitly.
 
-### Step 2 — Derive the approach solution brief and the agent roster
+### Step 2 — Derive the approach solution brief, the agent roster, and the advisor entries
 
-Derive the two `approach_roster` foundation-doc fields (both `synthesis` — cite prior confirmed field keys, not question-IDs):
+Derive the `approach_roster` group's fields. The first two are `synthesis` (cite prior confirmed field keys, not question-IDs); the third, the advisor knowledge-base entries, is `extraction` from the confirmed advisor list (`ADV-1` from step 07):
 
 ```
 python3 wizard/scripts/interview_cli.py derive-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field APPROACH_SOLUTION_BRIEF --value "<the solution brief, in the operator's voice>" --inputs CORE_PURPOSE,VISION_PURPOSE,VISION_GOALS
 python3 wizard/scripts/interview_cli.py derive-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field AGENT_ROSTER_ROWS --value "<a markdown table of the agents, rendered from the agent intents>" --inputs APPROACH_SOLUTION_BRIEF
+python3 wizard/scripts/interview_cli.py derive-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field ADVISOR_ENTRIES --value "<one knowledge-base header block per confirmed advisor — role/name, Domain, Status: Active, Notes — taken verbatim from the advisor list; an empty string if the operator confirmed no advisors>" --sources ADV-1
 ```
+
+`ADVISOR_ENTRIES` fills the advisor knowledge base the generator emits at the end — it is no longer written mid-interview at step 07. An empty value is correct (and matches a zero-advisor system) when no advisors were confirmed.
 
 Carry the operator's voice/style (their literacy + information preference + their own framing) into the prose — voice-and-style is a property of the derivation, not a separate field. Use names verbatim from the operator's answers everywhere (name-consistency; the structured projection then uses the accepted values verbatim, which structurally eliminates name drift).
 
@@ -316,7 +319,7 @@ Say exactly this before the operator responds:
 python3 wizard/scripts/interview_cli.py close-group --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --progress ~/claude-wizard-draft/wizard_progress.md --shape markdown-CC --group approach_roster
 ```
 
-This records `group_approach_roster_confirmed` (carrying the source hash). The group cannot close unless both approach fields are confirmed. **Do NOT write `step_08: complete` until this succeeds** — a step marker before its group is confirmed is an illegal state.
+This records `group_approach_roster_confirmed` (carrying the source hash). The group cannot close unless all of its derived fields — the solution brief, the agent roster, and the advisor entries — are confirmed. **Do NOT write `step_08: complete` until this succeeds** — a step marker before its group is confirmed is an illegal state.
 
 **Say:**
 
