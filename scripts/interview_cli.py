@@ -213,7 +213,20 @@ def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_roo
     --model) and fails closed BEFORE any write on a stale generator identity / non-empty target /
     missing-or-empty derived input. Returns the receipt (foundation-only flag + the two hashes)."""
     from interview_bridge import build_operator_system_from_transcript  # type: ignore
+    from derivation_groups import group_confirmation_is_stale  # type: ignore
+    from transcript_recorder import group_source_hash  # type: ignore
     events = TranscriptRecorder(Path(transcript)).events()
+    # Fail-closed (defense-in-depth): a group confirmed earlier whose upstream source answers
+    # changed since (stale group_source_hash) must NOT emit stale derived content. The carrier
+    # re-confirms stale groups interactively on resume; this is the independent emit-time guard,
+    # so a carrier gap can never silently emit content derived from superseded answers.
+    _markers = {e["group_id"]: e for e in events if e.get("event_type") == "group_confirmed"}
+    for _g in load_derivation_groups(shape).groups:
+        _m = _markers.get(_g.group_id)
+        if _m and group_confirmation_is_stale(_m, group_source_hash(events, _g.input_question_ids)):
+            raise InterviewCLIError(
+                f"cannot emit: group {_g.group_id!r} confirmation is stale — an upstream answer "
+                f"changed after the group was confirmed; re-confirm the group before emitting")
     res = build_operator_system_from_transcript(
         read_derived_replay_events(events), read_agent_intents(events),
         system_shape=shape, target_dir=Path(target_dir), build_repo_root=Path(build_repo_root),

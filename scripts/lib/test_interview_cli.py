@@ -469,6 +469,43 @@ class EmitSystemCLITests(unittest.TestCase):
             self.assertFalse(any(t.startswith("agents/") for t in tree),
                              "foundation-only emission must not emit the agent layer")
 
+    def test_emit_system_fails_closed_on_stale_group(self):
+        # Defense-in-depth (cross-vendor close Finding C): a group confirmed earlier whose
+        # upstream source answer changed AFTER confirmation (stale group_source_hash) must
+        # abort emit before any write — the carrier re-confirms interactively, but emit must
+        # not trust that and silently emit content derived from superseded answers.
+        from test_emission_plan import _FOUNDATION_DOC_INPUTS
+        from test_interview_bridge import _ai
+        from derivation_groups import load_derivation_groups
+        from transcript_recorder import group_source_hash, source_event_range
+        env = {"_source": "operator-content", "_derivation_class": "extraction",
+               "_decision_field": False, "_decision_kind": "none", "_prompt_version": "sha256:p1"}
+        with tempfile.TemporaryDirectory() as td:
+            tpath = Path(td) / "t.jsonl"
+            r = TranscriptRecorder(tpath, clock=lambda: CLOCK)
+            g = load_derivation_groups(SHAPE).group_by_id("vision")
+            skippable = set(g.skip_satisfied_if)
+            for q in g.input_question_ids:                       # source answers
+                if q in skippable:
+                    r.record_source_skip(q, "vision", reason="n/a")
+                else:
+                    r.record_source_answer(q, "vision", f"answer for {q}")
+            for k, v in _FOUNDATION_DOC_INPUTS.items():          # full record (emit would otherwise succeed)
+                r.record_derived_field(k, "vision", v, dict(env))
+                r.record_field_confirmation(k, "vision", "accepted")
+            r.record_agent_intent("approach_roster", _ai())
+            # confirm the vision group with the source hash AS OF NOW (mirrors close_group's marker)
+            _ev = r.events()
+            r.record_group_confirmed("vision", source_event_range(_ev, g.input_question_ids),
+                                     group_source_hash(_ev, g.input_question_ids), confirmed_at=CLOCK)
+            edit_q = next(q for q in g.input_question_ids if q not in skippable)
+            r.record_source_answer(edit_q, "vision", "EDITED after the group was confirmed")  # -> stale
+            target = Path(td) / "operator-project"
+            with self.assertRaises(cli.InterviewCLIError):
+                cli.cmd_emit_system(str(tpath), SHAPE, str(target), str(REPO_ROOT),
+                                    generator_version_override="0" * 40)
+            self.assertFalse(target.exists(), "emit must fail closed BEFORE writing on a stale group")
+
 
 if __name__ == "__main__":
     unittest.main()

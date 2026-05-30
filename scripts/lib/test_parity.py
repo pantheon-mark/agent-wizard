@@ -108,6 +108,19 @@ class ParityScaffoldTests(unittest.TestCase):
             #  here, because the forbidden-reference token literals must not appear in this
             #  publicly-distributed file — the scanner correctly flags them if they do.)
 
+    def test_derived_values_present_in_emitted_content(self):     # R7: content, not just presence
+        # Cross-vendor close Finding A: manifest/presence parity is necessary-not-sufficient.
+        # Assert specific DERIVED VALUES land in the emitted documents — catches empty/null
+        # resolution and dropped content a presence-only check misses. (Minimal coverage; full
+        # semantic/golden parity is a tracked residual — no System-A baseline exists post-retirement.)
+        plan = _plan()
+        with tempfile.TemporaryDirectory() as td:
+            generate_operator_system(plan, Path(td), REPO_ROOT, generator_version_override=plan.generator_version)
+            vision = (Path(td) / "vision.md").read_text(encoding="utf-8")
+            for key in ("VISION_PURPOSE", "VISION_SUCCESS_CRITERIA"):
+                self.assertIn(_FOUNDATION_DOC_INPUTS[key], vision,
+                              f"derived {key} value missing from emitted vision.md (empty/dropped?)")
+
 
 if __name__ == "__main__":
     unittest.main()

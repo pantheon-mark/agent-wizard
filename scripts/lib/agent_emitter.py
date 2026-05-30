@@ -77,14 +77,17 @@ _CRON_HUMAN = {
 _CRON_EMPTY_NOTE = "\n*No entries yet. Cron entries are added during the wizard closing sequence.*"
 
 
-def _orchestrator_invocation(plan: EmissionPlan) -> str:
+def _orchestrator_invocation(plan: EmissionPlan, agent_id: str, cadence: str) -> str:
     """The default scheduled-run command (the control plane): invoke the Orchestrator
-    headlessly at the resolved high tier — NOT a specialist invocation script. The
-    Orchestrator reads the work queue and routes to the specialist; directly scheduling
-    a specialist is the declared advanced exception, not the default."""
+    headlessly at the resolved high tier, carrying the schedule TRIGGER (which agent, what
+    cadence) so the Orchestrator knows which scheduled work is due — NOT a specialist
+    invocation script. The Orchestrator reads the work queue and routes to the specialist;
+    directly scheduling a specialist is the declared advanced exception, not the default."""
     model = plan.model_tiers[plan.orchestrator["model_tier_high"]]
-    return (f'claude --model {model} --print "Act as the Orchestrator: read '
-            f'agents/prompts/orchestrator_prompt.md, process the work queue, route to specialists."')
+    return (f'claude --model {model} --print "Act as the Orchestrator (agents/prompts/'
+            f'orchestrator_prompt.md). Scheduled trigger: agent={agent_id} cadence={cadence}. '
+            f'Read the work queue + agents/cron/cron_config.md and run or enqueue the due '
+            f'scheduled work for that agent through normal routing."')
 
 
 def _render_cron_entries(plan: EmissionPlan) -> str:
@@ -94,7 +97,6 @@ def _render_cron_entries(plan: EmissionPlan) -> str:
     orchestrator.schedule onto cron_cadence) becomes one row whose invocation targets
     the Orchestrator by default. With no scheduled agent, the honest empty-state note
     is preserved."""
-    invocation = _orchestrator_invocation(plan)
     rows: List[str] = []
     for a in plan.agents:
         if not a.cron_cadence:
@@ -102,6 +104,7 @@ def _render_cron_entries(plan: EmissionPlan) -> str:
         first_line = (a.role_description.replace("|", "\\|").splitlines() or [""])
         what = first_line[0] if first_line else ""
         human = _CRON_HUMAN.get(a.cron_cadence, "Custom schedule")
+        invocation = _orchestrator_invocation(plan, a.id, a.cron_cadence)  # per-agent trigger
         rows.append(f"| {a.id} | {what} | {human} | `{a.cron_cadence}` | {invocation} | — | — |")
     return "\n".join(rows) if rows else _CRON_EMPTY_NOTE
 
