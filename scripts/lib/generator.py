@@ -457,6 +457,69 @@ def render_foundation_docs(
     return records
 
 
+def render_foundation_doc_preview(
+    source_version: str,
+    doc_name: str,
+    inputs: Dict[str, str],
+    build_repo_root: Path,
+) -> FoundationDocArtifact:
+    """Render ONE foundation doc into an in-memory preview artifact (the caller does NOT write it).
+
+    STRICT single-doc preview. Unlike render_foundation_docs — which renders every required doc
+    and fail-fasts on ANY missing placeholder across all of them (including globals other docs
+    need) — this scopes the required placeholders to `doc_name` alone and fail-fasts only on THAT
+    doc's missing OR empty placeholders. Same {{KEY}} substitution semantics as the full renderer.
+
+    The group barrier uses this to SHOW a non-technical operator a rendered draft of a group's
+    foundation doc(s) before any file is emitted (the Partial Artifact Render): the operator
+    validates prose, not JSON fields, and a half-derived doc (a missing or blank derived value)
+    never reaches them — it fails loud at the barrier instead.
+    """
+    registry_entry = _resolve_source_bundle(source_version, build_repo_root)
+    source_bundle_path = (build_repo_root / registry_entry["path"]).resolve()
+    templates_dir = source_bundle_path / "templates"
+
+    by_name = {r["path"][len("foundation/"):]: r for r in _read_required_foundation_docs(build_repo_root)}
+    if doc_name not in by_name:
+        raise GeneratorError(
+            f"{doc_name!r} is not a required foundation doc; known: {sorted(by_name)}"
+        )
+    required_entry = by_name[doc_name]
+
+    if doc_name == "prd.md":
+        # schema-only stub: no template, no operator placeholders to be strict about.
+        content = _emit_prd_stub(inputs)
+    else:
+        template_path = templates_dir / doc_name
+        if not template_path.exists():
+            raise GeneratorError(f"foundation template not found for preview: {template_path}")
+        template_content = template_path.read_text(encoding="utf-8")
+        # STRICT pre-check: every placeholder THIS doc references must be present AND non-empty.
+        placeholders = set(PLACEHOLDER_RE.findall(template_content))
+        missing = sorted(k for k in placeholders if k not in inputs)
+        empty = sorted(k for k in placeholders if k in inputs and not str(inputs[k]).strip())
+        if missing or empty:
+            parts = []
+            if missing:
+                parts.append(f"missing placeholder(s) {missing}")
+            if empty:
+                parts.append(f"empty placeholder(s) {empty}")
+            raise GeneratorError(f"cannot preview {doc_name!r}: " + "; ".join(parts))
+        content, _seen = _substitute_placeholders(template_content, inputs, template_name=doc_name)
+
+    return FoundationDocArtifact(
+        doc_name=doc_name,
+        operator_relpath=doc_name,
+        legacy_relpath=required_entry["path"],
+        content=content,
+        contract_policy={
+            "managed_by": required_entry["managed_by"],
+            "local_modifications": required_entry["local_modifications"],
+            "merge_strategy": required_entry["merge_strategy"],
+        },
+    )
+
+
 # ============================================================================
 # Main generator entry point
 # ============================================================================
