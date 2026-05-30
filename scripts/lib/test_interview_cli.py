@@ -443,6 +443,32 @@ class EmitSystemCLITests(unittest.TestCase):
             self.assertTrue(any(t.startswith("agents/prompts/") for t in tree))
             self.assertIn("quality/advisor_knowledge_base.md", tree)
 
+    def test_emit_system_foundation_only_from_a_transcript_file(self):
+        # The other e2e branch: a foundation-only transcript (FOUNDATION_ONLY_MODE=true, zero
+        # agent intents) emits the foundation docs through the CLI WITHOUT the agent layer.
+        from test_emission_plan import _FOUNDATION_DOC_INPUTS
+        env = {"_source": "operator-content", "_derivation_class": "extraction",
+               "_decision_field": False, "_decision_kind": "none", "_prompt_version": "sha256:p1"}
+        inputs = dict(_FOUNDATION_DOC_INPUTS)
+        inputs["FOUNDATION_ONLY_MODE"] = "true"
+        with tempfile.TemporaryDirectory() as td:
+            tpath = Path(td) / "t.jsonl"
+            r = TranscriptRecorder(tpath, clock=lambda: CLOCK)
+            for k, v in inputs.items():
+                r.record_derived_field(k, "vision", v, dict(env))
+                r.record_field_confirmation(k, "vision", "accepted")
+            # NO agent intent recorded -> the foundation-only branch
+            target = Path(td) / "operator-project"
+            rec = cli.cmd_emit_system(str(tpath), SHAPE, str(target), str(REPO_ROOT),
+                                      generator_version_override="0" * 40)
+            self.assertTrue(rec["foundation_only_mode"])
+            tree = {str(p.relative_to(target)) for p in target.rglob("*") if p.is_file()}
+            # foundation-only emits the foundation BUNDLE layout (docs under foundation/ + the
+            # .wizard manifest), distinct from the full system's root-level docs.
+            self.assertIn("foundation/vision.md", tree)
+            self.assertFalse(any(t.startswith("agents/") for t in tree),
+                             "foundation-only emission must not emit the agent layer")
+
 
 if __name__ == "__main__":
     unittest.main()
