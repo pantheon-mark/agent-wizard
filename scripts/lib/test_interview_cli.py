@@ -132,6 +132,160 @@ class ApproachRosterAcceptanceTests(unittest.TestCase):
             self.assertIn("group_approach_roster_confirmed", markers)
 
 
+def _record_sources(transcript, group_id, answered):
+    """Record every input question of a group: answer those in `answered`, validly skip the rest
+    (the group's skip_satisfied_if set is what makes a skip count toward completeness)."""
+    g = load_derivation_groups(SHAPE).group_by_id(group_id)
+    for q in g.input_question_ids:
+        if q in answered:
+            cli.cmd_record_answer(transcript, q, group_id, f"answer for {q}", clock=lambda: CLOCK)
+        else:
+            cli.cmd_skip_answer(transcript, q, group_id, reason="n/a", clock=lambda: CLOCK)
+
+
+def _derive_confirm(transcript, field, group, value, *, sources=None, inputs=None,
+                    state="accepted", revisit=None):
+    cli.cmd_derive_field(transcript, SHAPE, field, value, sources=sources, inputs=inputs, clock=lambda: CLOCK)
+    cli.cmd_confirm_field(transcript, field, group, state, revisit_trigger=revisit, clock=lambda: CLOCK)
+
+
+def _drive_orchestration_build_group(transcript, progress):
+    """Drive orchestration_build atop approach_roster. Extraction/classification fields first so
+    the synthesis fields can cite them as prior derived field keys (DR-5/DR-8)."""
+    _drive_approach_roster_group(transcript, progress)
+    _record_sources(transcript, "orchestration_build",
+                    {"P1-4", "ARCH-1", "CRED-1", "SCALE-1", "SCALE-2", "SCALE-3", "SCALE-4", "CONC-2"})
+    _derive_confirm(transcript, "INTEGRATIONS", "orchestration_build", "- a calendar feed", sources=["CRED-1"])
+    _derive_confirm(transcript, "SCALE_TIER", "orchestration_build", "small", sources=["SCALE-1", "SCALE-2"])
+    _derive_confirm(transcript, "ORCHESTRATION_MODEL", "orchestration_build",
+                    "A single orchestrator routes work to specialists.", inputs=["INTEGRATIONS"])
+    for f in ("SCALE_TIER_BASIS", "SCALE_TIER_RATIONALE"):
+        _derive_confirm(transcript, f, "orchestration_build", "Low volume, single operator.", inputs=["SCALE_TIER"])
+    _derive_confirm(transcript, "COMPLIANCE_GAPS_CONTENT", "orchestration_build",
+                    "No regulated data in scope.", inputs=["INTEGRATIONS"])
+    _derive_confirm(transcript, "TASK_COMPLETION_CHECKLISTS", "orchestration_build",
+                    "- output written\n- handoff recorded", inputs=["ORCHESTRATION_MODEL"])
+    _derive_confirm(transcript, "BUILD_PHASES_ROWS", "orchestration_build",
+                    "| Phase | Goal |\n|---|---|\n| 1 | first agent |", inputs=["ORCHESTRATION_MODEL"])
+    _derive_confirm(transcript, "EXECUTION_SEQUENCE", "orchestration_build",
+                    "- build the monitor first", inputs=["ORCHESTRATION_MODEL"])
+    _derive_confirm(transcript, "MVP_CORE_FUNCTION", "orchestration_build",
+                    "Surface what needs attention.", inputs=["APPROACH_SOLUTION_BRIEF"])
+    _derive_confirm(transcript, "MVP_MINIMUM_VIABLE_STATE", "orchestration_build",
+                    "One agent runs daily.", inputs=["APPROACH_SOLUTION_BRIEF"])
+    _derive_confirm(transcript, "MVP_SUCCESS_CONDITION", "orchestration_build",
+                    "The operator misses nothing important.", inputs=["VISION_SUCCESS_CRITERIA"])
+    return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
+
+
+def _drive_hitl_autonomy_group(transcript, progress):
+    """Drive hitl_autonomy atop orchestration_build (execution_plan.md, hitl's preview, needs
+    orchestration_build's MVP_*/BUILD_PHASES/EXECUTION fields — so orchestration must close first)."""
+    _drive_orchestration_build_group(transcript, progress)
+    _record_sources(transcript, "hitl_autonomy",
+                    {"FIN-1", "FIN-2", "UP-1", "UP-2", "UP-3", "UP-5", "NOTIF-1", "NOTIF-2", "NOTIF-3",
+                     "ARCH-4", "ERR-1", "ERR-2", "CONC-1", "START-1", "START-2", "QA-2"})
+    # AUTONOMY_LEVEL: provisional auto-default (F-3); confirmed accepted_uncertain_for_now + revisit.
+    _derive_confirm(transcript, "AUTONOMY_LEVEL", "hitl_autonomy", "2",
+                    state="accepted_uncertain_for_now", revisit="operator-authority-profile-available")
+    # HITL_MAP_ROWS: policy citing prior fields, with explicit negative permissions in the rows.
+    _derive_confirm(transcript, "HITL_MAP_ROWS", "hitl_autonomy",
+                    "| Action | System behavior | Rationale |\n|---|---|---|\n"
+                    "| Spend money | Always stop and ask; never spends autonomously | Irreversible |",
+                    inputs=["VISION_CONSTRAINTS"])
+    return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
+
+
+def _drive_tests_audit_group(transcript, progress):
+    """Drive tests_audit atop hitl_autonomy. Two preview docs (test_cases.md + audit_framework.md)."""
+    _drive_hitl_autonomy_group(transcript, progress)
+    _record_sources(transcript, "tests_audit", {"GATE-1", "GATE-2", "QA-1", "QA-3", "ARCH-5", "DRIFT-1"})
+    _derive_confirm(transcript, "AGENT_SPECIFIC_TESTS", "tests_audit",
+                    "- monitor surfaces a known item", inputs=["APPROACH_SOLUTION_BRIEF"])
+    _derive_confirm(transcript, "DRIFT_ANALYSIS_CADENCE", "tests_audit", "weekly", sources=["DRIFT-1"])
+    return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
+
+
+# operational barriers fire in registry order at step_13; close them in that order.
+_OPERATIONAL = ["orchestration_build", "hitl_autonomy", "tests_audit"]
+
+
+class FullFiveGroupAcceptanceTests(unittest.TestCase):
+    """The whole unified interview through the CLI: vision -> approach_roster -> the 3 operational
+    groups (all closing at step_13, in registry order). Proves the cross-group cumulative-preview
+    dependency (execution_plan.md needs orchestration_build fields), AUTONOMY_LEVEL's provisional
+    auto modeling, the HITL policy field, tests_audit's two preview docs, and a clean marker
+    invariant once every step_13 group is confirmed."""
+
+    def test_full_transcript_compiles_and_validates(self):
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "t.jsonl"); ppath = str(Path(td) / "p.md")
+            r = _drive_tests_audit_group(tpath, ppath)
+            record = compile_transcript(read_derived_replay_events(r.events()))
+            contract = derived_record.load_contract(derived_record.default_contract_path())
+            derived_record.validate_derived_record(record, contract)   # raises on failure
+            projected = project(record)
+            for f in ("AUTONOMY_LEVEL", "HITL_MAP_ROWS", "MVP_CORE_FUNCTION",
+                      "AGENT_SPECIFIC_TESTS", "DRIFT_ANALYSIS_CADENCE", "SCALE_TIER"):
+                self.assertIn(f, projected, f"{f} did not project")
+
+    def test_autonomy_level_is_provisional_auto(self):
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "t.jsonl"); ppath = str(Path(td) / "p.md")
+            r = _drive_tests_audit_group(tpath, ppath)
+            record = compile_transcript(read_derived_replay_events(r.events()))
+            env = record["_audit"]["AUTONOMY_LEVEL"]
+            self.assertEqual(env["_source"], "auto")
+            self.assertTrue(env["_decision_field"])                       # still a decision
+            self.assertEqual(env["_confirmation_state"], "accepted_uncertain_for_now")
+            self.assertEqual(env["_revisit_trigger"], "operator-authority-profile-available")
+
+    def test_all_operational_previews_render(self):
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "t.jsonl"); ppath = str(Path(td) / "p.md")
+            _drive_tests_audit_group(tpath, ppath)
+            expected = {"orchestration_build": ["technical_architecture.md"],
+                        "hitl_autonomy": ["execution_plan.md"],
+                        "tests_audit": ["test_cases.md", "audit_framework.md"]}
+            for grp, docs in expected.items():
+                previews = cli.cmd_preview_group(tpath, SHAPE, grp, SOURCE_VERSION, REPO_ROOT, auto_values=AUTO)
+                self.assertEqual([d for d, _ in previews], docs)
+                for _, content in previews:
+                    self.assertNotIn("{{", content, f"{grp} preview has an unresolved placeholder")
+
+    def test_marker_invariant_clean_after_all_groups_close(self):
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "t.jsonl"); ppath = str(Path(td) / "p.md")
+            _drive_tests_audit_group(tpath, ppath)
+            cli.cmd_close_group(tpath, ppath, SHAPE, "vision", clock=lambda: CLOCK)
+            cli.cmd_mark_step(ppath, "step_05", clock=lambda: CLOCK)
+            cli.cmd_close_group(tpath, ppath, SHAPE, "approach_roster", clock=lambda: CLOCK)
+            cli.cmd_mark_step(ppath, "step_08", clock=lambda: CLOCK)
+            for grp in _OPERATIONAL:
+                cli.cmd_close_group(tpath, ppath, SHAPE, grp, clock=lambda: CLOCK)
+            cli.cmd_mark_step(ppath, "step_13", clock=lambda: CLOCK)
+            dg = load_derivation_groups(SHAPE)
+            markers = parse_progress_markers(Path(ppath).read_text(encoding="utf-8"))
+            self.assertEqual(validate_marker_invariant(markers, dg), [])
+            rp = cli.cmd_resume(ppath, SHAPE)
+            self.assertEqual(rp["highest_completed_step"], 13)
+            self.assertEqual(set(rp["confirmed_groups"]),
+                             {"vision", "approach_roster", "orchestration_build", "hitl_autonomy", "tests_audit"})
+
+    def test_step_13_illegal_before_all_operational_groups_close(self):
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "t.jsonl"); ppath = str(Path(td) / "p.md")
+            _drive_tests_audit_group(tpath, ppath)
+            cli.cmd_close_group(tpath, ppath, SHAPE, "orchestration_build", clock=lambda: CLOCK)
+            # close hitl + tests NOT done; step_13 marker is now illegal
+            cli.cmd_mark_step(ppath, "step_13", clock=lambda: CLOCK)
+            dg = load_derivation_groups(SHAPE)
+            markers = parse_progress_markers(Path(ppath).read_text(encoding="utf-8"))
+            violations = validate_marker_invariant(markers, dg)
+            self.assertTrue(any("hitl_autonomy" in v for v in violations))
+            self.assertTrue(any("tests_audit" in v for v in violations))
+
+
 class VisionGroupAcceptanceTests(unittest.TestCase):
     def test_transcript_compiles_and_validates(self):
         with tempfile.TemporaryDirectory() as td:
