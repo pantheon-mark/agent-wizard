@@ -75,6 +75,11 @@ LIFECYCLE_POLICY = {
     "operator_config": {  # operator-owned configuration seeded once
         "managed_by": "operator", "local_modifications": "expected", "merge_strategy": "operator_review",
     },
+    "operator_fill_template": {  # wizard-seeded build-session template the operator FILLS in
+        # (review prompts / skill templates): provided once, completed + edited by the operator;
+        # upgrades must not clobber the operator's fills. Intentionally retains {{}} placeholders.
+        "managed_by": "operator", "local_modifications": "expected", "merge_strategy": "operator_review",
+    },
     # Foundation docs carry per-doc policy from the hash-baseline contract
     # (foundation-manifest-hash-baseline-v1.json). The contract is the canonical
     # authority; these four buckets transcribe it faithfully (the parity test in
@@ -107,6 +112,7 @@ _EXACT_LIFECYCLE = {
     "wizard_feedback.md": "runtime_state",
     "SESSION_STATE.md": "runtime_state",
     ".gitignore": "operator_config",
+    ".env": "operator_config",   # operator-owned secrets file, emitted empty; never wizard-overwritten
     COMMAND_SURFACE_REL: "inherited_content",
     # Foundation docs (root-level in the operator project; per-doc policy from the
     # hash-baseline contract — see the foundation_* lifecycles above).
@@ -129,6 +135,7 @@ _DIR_LIFECYCLE = {
     "docs/": "inherited_content",
     "quality/": "inherited_content",
     "security/": "operator_config",
+    "wizard/": "operator_fill_template",   # operator's build-session materials (review prompts / skill templates)
 }
 
 

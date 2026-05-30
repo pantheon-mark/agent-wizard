@@ -93,9 +93,14 @@ class ParityScaffoldTests(unittest.TestCase):
                         "vision.md", "approach.md", "technical_architecture.md", "prd.md",
                         ".wizard/manifest.json", "quality/rules_library.md"):
                 self.assertIn(rel, tree, f"missing emitted artifact: {rel}")
-            # No unresolved placeholders anywhere in the emitted tree.
+            # No unresolved placeholders anywhere in the emitted tree — EXCEPT the operator-fill
+            # templates (review prompts / skill templates), which are emitted verbatim and
+            # intentionally retain {{}} placeholders for the operator to complete during build.
+            from operator_fill_emitter import is_operator_fill_path
             for p in files:
                 if p.suffix in (".md", ".sh", ".json", ".log", ".yaml"):
+                    if is_operator_fill_path(str(p.relative_to(td))):
+                        continue
                     text = p.read_text(encoding="utf-8", errors="ignore")
                     self.assertNotIn("{{", text, f"unresolved placeholder in {p.name}")
             # (Build-provenance-leak scanning of the emitted tree is covered by the emitter

@@ -40,6 +40,7 @@ from corpus_loader import load_corpus_pack  # type: ignore
 from scaffold_emitter import emit_scaffold  # type: ignore
 from agent_emitter import emit_agent_layer  # type: ignore
 from foundation_doc_emitter import emit_foundation_docs  # type: ignore
+from operator_fill_emitter import emit_operator_fill_templates  # type: ignore
 from corpus_emitter import (  # type: ignore
     render_claude_md_block, emit_rules_library, emit_decisions, inject_target_hooks,
 )
@@ -227,6 +228,11 @@ def emit_operator_system(plan: EmissionPlan, staging_dir: Path,
     #    enrolls them (full-tree ownership). Hooks do not target foundation docs,
     #    so this may run after hook injection without interaction.
     written += emit_foundation_docs(plan, staging_dir, build_repo_root)
+
+    # 6b. operator-fill build-session helpers (review prompts + skill templates, copied
+    #     verbatim with their operator-fill {{}} intact) + an empty .env — parity with the
+    #     legacy close-assembly. Before the upgrade scaffold so the full-tree manifest enrolls them.
+    written += emit_operator_fill_templates(plan, staging_dir, build_repo_root)
 
     # 7. upgrade scaffold LAST — manifest-v2 (folds corpus authority + hashes the
     #    final tree, foundation docs included) + upgrade policy/history + command surface.

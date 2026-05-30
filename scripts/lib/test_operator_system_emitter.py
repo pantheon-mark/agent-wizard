@@ -110,14 +110,20 @@ class OperatorSystemEmitterTests(unittest.TestCase):
         self.assertIn("OP-19", (staging / "pending_decisions.md").read_text())     # cross_ref hook
 
     def test_no_placeholder_survives_anywhere(self):
+        from operator_fill_emitter import is_operator_fill_path
         staging, _ = self._emit()
         offenders = []
         for p in staging.rglob("*"):
             if not p.is_file():
                 continue
+            rel = p.relative_to(staging)
+            # operator-fill templates (review prompts / skill templates) are emitted verbatim
+            # and intentionally retain {{}} placeholders for the operator to complete — exempt.
+            if is_operator_fill_path(str(rel)):
+                continue
             leftover = PLACEHOLDER_RE.findall(p.read_text(encoding="utf-8", errors="ignore"))
             if leftover:
-                offenders.append((p.relative_to(staging), leftover))
+                offenders.append((rel, leftover))
         self.assertEqual(offenders, [], f"unsubstituted placeholders survived: {offenders}")
 
     def test_emitted_tree_has_no_build_provenance(self):
