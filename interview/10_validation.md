@@ -218,6 +218,19 @@ Write sub-step marker: Append `step_10_WRITE: complete | <timestamp>` to `~/clau
 
 ---
 
+## Recording answers (event transcript)
+
+Record this step's `tests_audit` source answers to `~/claude-wizard-draft/wizard_transcript.jsonl`. GATE-1 (input-type inventory) and GATE-2 (domain sensitivity) carry operator content that feeds the agent-specific tests; GATE-3 (override behavior) and GATE-4 (hard vs soft pushback) are explanations with no derivation source content, recorded as skips (registry skip-satisfied):
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid GATE-1 --group tests_audit --value "<input type inventory>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid GATE-2 --group tests_audit --value "<domain sensitivity configuration>"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid GATE-3 --group tests_audit --reason "override behavior explanation; no derivation source content"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid GATE-4 --group tests_audit --reason "hard vs soft pushback explanation; no derivation source content"
+```
+
+---
+
 ## Step-boundary capture (testing mode only)
 
 *This section runs only during test sessions. In normal wizard operation, skip directly to the success condition.*

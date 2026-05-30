@@ -238,6 +238,19 @@ Write sub-step marker: Append `step_12_WRITE: complete | <timestamp>` to `~/clau
 
 ---
 
+## Recording answers (event transcript)
+
+Record this step's derivation-group source answers to `~/claude-wizard-draft/wizard_transcript.jsonl`. QA-1 (reporting style) + QA-3 (source registry) are `tests_audit` sources; QA-2 (future feedback channel) is a `hitl_autonomy` source; QA-4 (confidence flagging threshold) is recorded as a skip (registry skip-satisfied — not a foundation-doc source):
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-1 --group tests_audit --value "<investigation reporting style>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-2 --group hitl_autonomy --value "<future feedback channel preference>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-3 --group tests_audit --value "<source registry initialization>"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-4 --group tests_audit --reason "confidence flagging threshold; not a foundation-doc source"
+```
+
+---
+
 ## Step-boundary capture (testing mode only)
 
 *This section runs only during test sessions. In normal wizard operation, skip directly to the success condition.*

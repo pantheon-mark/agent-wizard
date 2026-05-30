@@ -1,7 +1,7 @@
 # 13 — Operations Settings
 
 ## What this file does
-Configure how the system behaves during operation. Three technical thresholds (retry threshold, gate conflict timeout, deferred alert limit) are set as **silent defaults** from the system profile — the user has no basis for choosing these values. User-facing questions cover chunk confirmation preference, drift analysis cadence, and scale tier. Produces the scale tier entry in `technical_architecture.md` and `project_instructions.md`. Writes all configured values to the staging file.
+Configure how the system behaves during operation. Three technical thresholds (retry threshold, gate conflict timeout, deferred alert limit) are set as **silent defaults** from the system profile — the user has no basis for choosing these values. User-facing questions cover chunk confirmation preference, drift analysis cadence, and scale tier. This step records its operations answers to the event transcript and, at its end, **closes the three operational logical groups** — `orchestration_build`, then `hitl_autonomy`, then `tests_audit` (in that order; the order is load-bearing — see "How to run this phase"). It does **not** write `technical_architecture.md`, `execution_plan.md`, `test_cases.md`, `audit_framework.md`, or `project_instructions.md` — those are emitted by the generator at the end of the interview from the confirmed transcript.
 
 ## When this file runs
 After `12_qa_settings.md` completes and QA_CONFIGURED = true in the staging file.
@@ -69,9 +69,13 @@ Before doing anything else in this step:
 
 This phase sets operational behavior. Three technical thresholds (CONC-1 retry threshold, CONC-2 gate conflict timeout, START-1 deferred alert limit) are **silent defaults** — the user has no basis for choosing these values and the recommendations are accepted >90% of the time. They are derived from the system profile and presented as a summary, not asked as questions.
 
-The remaining topics require genuine user input: chunk confirmation preference (START-2), drift analysis cadence (DRIFT-1), and scale tier (SCALE-1 through SCALE-4). Work through them in sequence after presenting the auto-configured defaults. No disk artifacts are written until SCALE-4 is confirmed.
+The remaining topics require genuine user input: chunk confirmation preference (START-2), drift analysis cadence (DRIFT-1), and scale tier (SCALE-1 through SCALE-4). Work through them in sequence after presenting the auto-configured defaults.
 
-**Before starting:** Read the vision document, confirmed agent roster, and system profile (domain sensitivity from step 10, involvement level from step 03) to derive the silent defaults and tailor rationale to this specific system.
+**Recording (event transcript).** Record each operations answer to `~/claude-wizard-draft/wizard_transcript.jsonl`, tagged to the group it feeds: CONC-2 + SCALE-1/2/3/4 → `orchestration_build`; CONC-1 + START-1 + START-2 → `hitl_autonomy`; DRIFT-1 → `tests_audit`. The record-answer line is shown at each step below. **No foundation-doc or `project_instructions.md` file is written here** — the scale tier and everything else are emitted by the generator at the end.
+
+**Group closes at the end of this step (order is load-bearing).** After all answers are recorded, this step closes the three operational groups **in registry order: `orchestration_build` FIRST, then `hitl_autonomy`, then `tests_audit`.** The order matters because `execution_plan.md` (the `hitl_autonomy` preview) renders fields derived in `orchestration_build` (the MVP/build-phase/execution fields) — the cumulative-confirmed preview inputs only contain them once `orchestration_build` has closed. Closing out of order would fail the strict single-doc preview render.
+
+**Before starting:** Read the confirmed vision, the confirmed agent roster, and the system profile (domain sensitivity from step 10, involvement level from step 03) to derive the silent defaults and tailor rationale to this specific system.
 
 ---
 
@@ -103,6 +107,14 @@ Do not wait for a response. Proceed to START-2.
 
 Write sub-step marker: Append `step_13_AUTO-DEFAULTS: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
+**Record the three silent-default thresholds as source answers** (they feed their groups even though they were not asked):
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CONC-1 --group hitl_autonomy --value "retry threshold = 3 automatic attempts before escalation"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CONC-2 --group orchestration_build --value "gate conflict timeout = <derived value>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid START-1 --group hitl_autonomy --value "deferred alert limit = 3 deferrals before escalation"
+```
+
 ---
 
 ## START-2 — Chunk confirmation preference [FIXED — topic]
@@ -128,6 +140,8 @@ Write sub-step marker: Append `step_13_AUTO-DEFAULTS: complete | <timestamp>` to
 Write the configured value to the staging file: `CHUNK_CONFIRMATION = [Confirm each / Confirm important only]`.
 
 Write sub-step marker: Append `step_13_START-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+**Record:** `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid START-2 --group hitl_autonomy --value "<CHUNK_CONFIRMATION>"`
 
 ---
 
@@ -162,6 +176,8 @@ Write the configured value to the staging file: `DRIFT_CADENCE = [Weekly / Biwee
 
 Write sub-step marker: Append `step_13_DRIFT-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
+**Record:** `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid DRIFT-1 --group tests_audit --value "<DRIFT_CADENCE>"`
+
 ---
 
 ## Scale tier — SCALE-1, SCALE-2, SCALE-3 [FIXED]
@@ -191,6 +207,14 @@ Ask each question in sequence. Wait for the answer before moving to the next.
 **Wait for answer.**
 
 Write sub-step marker: Append `step_13_SCALE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+**Record:**
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid SCALE-1 --group orchestration_build --value "<volume answer>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid SCALE-2 --group orchestration_build --value "<frequency answer>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid SCALE-3 --group orchestration_build --value "<peak-period answer>"
+```
 
 ---
 
@@ -222,34 +246,62 @@ Write the configured value to the staging file: `SCALE_TIER = [S / M / L] (provi
 
 Write sub-step marker: Append `step_13_SCALE-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
+**Record:** `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid SCALE-4 --group orchestration_build --value "<the operator-confirmed tier: small / medium / large + any adjustment note>"` (the SCALE_TIER field itself is derived + confirmed at the orchestration_build barrier below; this records the operator's tier input).
+
 ---
 
-## Disk writes
+## Close the three operational groups — derive, render, confirm, close (IN ORDER)
 
-After SCALE-4 is confirmed, write the scale tier to two documents.
+All inputs for the three operational groups are now captured (across steps 01-13). Instead of writing any foundation-doc or `project_instructions.md` file, derive each group's fields, show the operator the rendered preview, take one round of changes, and close the group. **Close in this order — `orchestration_build`, then `hitl_autonomy`, then `tests_audit`** — because the hitl preview (`execution_plan.md`) renders orchestration_build's fields, which are only in the cumulative confirmed set once orchestration_build has closed.
 
-### Write to technical_architecture.md
+Throughout: synthesis/policy fields cite prior **confirmed field keys** via `--inputs` (not question-IDs); extraction/classification fields cite question-IDs via `--sources`. The class derivation prompts live at `wizard/foundation-bundles/v0/derivation-prompts/<class>.md`; the field manifest (`wizard/foundation-bundles/v0/field-manifests/markdown-CC.json`) names each field's class, decision coupling, and which doc it previews. Render each preview with the same `preview-group` command shape used at the vision/approach barriers (pass all six `--auto` globals + `--source-version v0.4.0 --build-repo-root <wizard build repo root>`). Confirm with the one-round pattern; **forced confirmation on every decision/policy field** (SCALE_TIER, AUTONOMY_LEVEL, HITL_MAP_ROWS, DRIFT_ANALYSIS_CADENCE).
 
-Locate the `technical_architecture.md` file in the project directory. Add a new section titled **Scale Tier** at the end of the file:
+### Barrier 1 — orchestration_build (preview `technical_architecture.md`)
 
-```markdown
-## Scale Tier
-
-**Provisional tier:** [S / M / L]
-**Rationale:** [The one-sentence rationale stated at SCALE-4.]
-**Basis:** [Brief plain-language summary of the three scale answers — volume, frequency, and peak periods.]
-**Status:** Provisional — set during wizard setup. Will be reviewed after first production run and checked weekly from that point. Requires explicit user confirmation to change.
-```
-
-### Write to project_instructions.md
-
-Locate the `project_instructions.md` file in the project directory. Add a scale tier entry to the system configuration section:
+Derive the extraction/classification fields first so the synthesis fields can cite them:
 
 ```
-Scale tier: [S / M / L] (provisional — set [DATE], confirmed by user at wizard setup)
+# extraction + classification (cite question-IDs)
+interview_cli derive-field --field INTEGRATIONS --value "<integrations list>" --sources CRED-1
+interview_cli derive-field --field SCALE_TIER --value "<small|medium|large>" --sources SCALE-1,SCALE-2,SCALE-3,SCALE-4   # decision: forced confirm
+# synthesis (cite prior confirmed field keys)
+interview_cli derive-field --field ORCHESTRATION_MODEL --value "<...>" --inputs INTEGRATIONS
+interview_cli derive-field --field SCALE_TIER_BASIS --value "<...>" --inputs SCALE_TIER
+interview_cli derive-field --field SCALE_TIER_RATIONALE --value "<...>" --inputs SCALE_TIER
+interview_cli derive-field --field COMPLIANCE_GAPS_CONTENT --value "<...>" --inputs INTEGRATIONS
+interview_cli derive-field --field TASK_COMPLETION_CHECKLISTS --value "<...>" --inputs ORCHESTRATION_MODEL
+interview_cli derive-field --field BUILD_PHASES_ROWS --value "<...>" --inputs ORCHESTRATION_MODEL
+interview_cli derive-field --field EXECUTION_SEQUENCE --value "<...>" --inputs ORCHESTRATION_MODEL
+interview_cli derive-field --field MVP_CORE_FUNCTION --value "<...>" --inputs APPROACH_SOLUTION_BRIEF
+interview_cli derive-field --field MVP_MINIMUM_VIABLE_STATE --value "<...>" --inputs APPROACH_SOLUTION_BRIEF
+interview_cli derive-field --field MVP_SUCCESS_CONDITION --value "<...>" --inputs VISION_SUCCESS_CRITERIA
 ```
 
-Write an audit trail entry: `Scale tier set to [S/M/L] (provisional) during wizard setup — based on [volume description], [frequency description], [peak description]. User confirmed.`
+(`interview_cli` = `python3 wizard/scripts/interview_cli.py ... --transcript ~/claude-wizard-draft/wizard_transcript.jsonl` — `--shape markdown-CC` for derive-field.) Confirm each field (`confirm-field --group orchestration_build --state accepted`; forced confirm on SCALE_TIER). Render `technical_architecture.md` via `preview-group --group orchestration_build`, show the operator the rendered markdown, one round of changes, then `close-group --group orchestration_build`.
+
+### Barrier 2 — hitl_autonomy (preview `execution_plan.md`)
+
+```
+# AUTONOMY_LEVEL: provisional auto-default (the operator authority profile does not exist yet).
+interview_cli derive-field --field AUTONOMY_LEVEL --value "<conservative default, e.g. 2>"
+interview_cli confirm-field --field AUTONOMY_LEVEL --group hitl_autonomy --state accepted_uncertain_for_now --revisit-trigger "operator-authority-profile-available"
+# HITL_MAP_ROWS: policy — consume the vision-barrier Tier-1 additions + the ARCH-4 always-ask summary.
+interview_cli derive-field --field HITL_MAP_ROWS --value "<markdown table: Action | System behavior | Rationale; state BOTH what is permitted AND what is forbidden>" --inputs VISION_CONSTRAINTS
+interview_cli confirm-field --field HITL_MAP_ROWS --group hitl_autonomy --state accepted
+```
+
+`AUTONOMY_LEVEL` is a decision field auto-defaulted at this wizard version (no authority-profile probes yet) — it is confirmed `accepted_uncertain_for_now` with a neutral revisit trigger, so when the authority profile is added later the field gains question-ID sources + becomes a classification, which is envelope drift that forces re-confirmation. `HITL_MAP_ROWS` is a policy rule set: it MUST state explicit negative permissions, and it consumes the `TIER_1_ADDITIONS` derived at the vision barrier plus the ARCH-4 always-ask additions. Render `execution_plan.md` via `preview-group --group hitl_autonomy` (it renders orchestration_build's MVP/build-phase fields too — that is why orchestration_build closed first), show the operator, one round, then `close-group --group hitl_autonomy`.
+
+### Barrier 3 — tests_audit (preview `test_cases.md` + `audit_framework.md`)
+
+```
+interview_cli derive-field --field AGENT_SPECIFIC_TESTS --value "<markdown list of per-agent acceptance tests>" --inputs APPROACH_SOLUTION_BRIEF
+interview_cli confirm-field --field AGENT_SPECIFIC_TESTS --group tests_audit --state accepted
+interview_cli derive-field --field DRIFT_ANALYSIS_CADENCE --value "<DRIFT_CADENCE>" --sources DRIFT-1   # decision: forced confirm
+interview_cli confirm-field --field DRIFT_ANALYSIS_CADENCE --group tests_audit --state accepted
+```
+
+**Deferred-items capture (WI-013):** while in this group, scan the interview for items the operator explicitly deferred ("not now", "later", "phase 2") and capture them as deferred-item content. NOTE (build-side): the emitted `future_items.md` target for these is not yet a manifest field — its re-home is owed before close-assembly retirement (tracked with the advisor-KB gap); do not block the tests_audit close on it at v0. Render both `test_cases.md` and `audit_framework.md` via `preview-group --group tests_audit` (two docs), show the operator, one round, then `close-group --group tests_audit`.
 
 ---
 
@@ -257,20 +309,20 @@ Write an audit trail entry: `Scale tier set to [S/M/L] (provisional) during wiza
 
 **Say:**
 
-> Operations settings confirmed. Here's what's in place:
+> Operations settings confirmed, and that completes the interview content. Here's what's in place:
 >
-> - **Retry threshold:** [n] automatic attempts before escalation
+> - **Retry threshold:** 3 automatic attempts before escalation
 > - **Gate conflict timeout:** [value] before flagging resource conflicts
-> - **Deferred alert limit:** [n] deferrals before an alert is escalated as overdue
+> - **Deferred alert limit:** 3 deferrals before an alert is escalated as overdue
 > - **Chunk confirmation:** [Confirm each step / Confirm important only]
 > - **Drift analysis:** Runs [Weekly / Biweekly / Monthly]
 > - **Scale tier:** Tier [S / M / L] (provisional)
 >
 > Next we'll review the documents your system has produced so far and set up your GitHub backup.
 
-Update staging file: `OPERATIONS_CONFIGURED = true`
+Update staging file: `OPERATIONS_CONFIGURED = true`. **No foundation-doc or `project_instructions.md` file was written — the scale tier and all operational settings are emitted by the generator at the end from the confirmed transcript.**
 
-Write sub-step marker: Append `step_13_WRITE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+Write sub-step marker: Append `step_13_WRITE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`. (Only after all three operational `group_*_confirmed` markers are recorded — a `step_13` marker before its groups close is an illegal state.)
 
 ---
 
@@ -296,9 +348,9 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-CONC-1, CONC-2, START-1, START-2, DRIFT-1, and SCALE-1 through SCALE-4 complete. Scale tier written to `technical_architecture.md` and `project_instructions.md`. All configured values written to the staging file. `OPERATIONS_CONFIGURED = true` in the staging file.
+CONC-1, CONC-2, START-1, START-2, DRIFT-1, and SCALE-1 through SCALE-4 recorded to the transcript (tagged to their groups). **All three operational groups closed** (`group_orchestration_build_confirmed`, `group_hitl_autonomy_confirmed`, `group_tests_audit_confirmed` recorded, in that order): each group's fields derived, the rendered preview shown and confirmed (forced confirmation on the decision/policy fields). **No `technical_architecture.md`, `execution_plan.md`, `test_cases.md`, `audit_framework.md`, or `project_instructions.md` file was written** — they are emitted by the generator at the end. `OPERATIONS_CONFIGURED = true` in the staging file.
 
-**Write completion marker:** Append `step_13: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+**Write completion marker:** Append `step_13: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`. (Only after all three operational `group_*_confirmed` markers are recorded — the step marker is illegal before its groups close.)
 
 Proceed to `14_document_review.md`.
 
@@ -306,24 +358,12 @@ Proceed to `14_document_review.md`.
 
 ## Foundation-only adapted path
 
-**Disposition: ADAPT — capture operational requirements as foundation section; skip runtime config writes.**
+**Disposition: ADAPT — same recording + the three operational barriers; the foundation-only emission split happens at the generator, not here.**
 
-Conduct the operations interview from the existing step content above (CONC-1, CONC-2, START-1, START-2, DRIFT-1, SCALE-1 through SCALE-4 — chunk confirmation preference + drift analysis cadence + scale tier + silent default thresholds for retry / gate-conflict-timeout / deferred-alert-limit).
+Conduct the operations interview exactly as the normal path above (CONC-1, CONC-2, START-1, START-2, DRIFT-1, SCALE-1 through SCALE-4, recorded to the transcript), and close the three operational groups exactly as above (orchestration_build → hitl_autonomy → tests_audit; pass `--auto FOUNDATION_ONLY_MODE=true` to each `preview-group`).
 
-**Difference from normal behavior:**
+**No foundation-doc or `project_instructions.md` file is written here in either mode.** At the end of the interview the bridge dispatches a foundation-only `EmissionPlan` to the generator's foundation-only branch, which emits the shape-agnostic foundation docs (scale tier appears as a foundation-level operational note, not a runtime-config knob) and skips the runtime/implementation artifacts. The captured operations answers live in the transcript; append any additional foundation-level operational requirements surfaced here to the staging file under `## Foundation-only-mode captures > Operational requirements (cadence, scale, drift)` for the step-15 close assembly per `_foundation_only_mode_gate.md` § 5/§ 6.
 
-DO NOT:
-
-- Write scale tier entry to `technical_architecture.md` in implementation-runtime-config voice. In foundation-only mode, `technical_architecture.md` is a foundation doc; scale tier is captured as a foundation-level operational requirement, not a runtime config knob.
-- Write operations values to `project_instructions.md` as wizard-runtime config (`project_instructions.md` in foundation-only mode is a foundation-doc).
-
-DO:
-
-- Conduct the operations questions and capture answers
-- Append captured operations data to the staging file under `## Foundation-only-mode captures > Operational requirements (cadence, scale, drift)` (chunk confirmation + drift cadence + scale tier + silent default thresholds for inheritance reference)
-
-At step 15 close, the captured operations data extracts to `technical_architecture.md` § "Operational requirements" > "Operational requirements (cadence, scale, drift)" per `_foundation_only_mode_gate.md` § 5. The scale tier is included as a foundation-level note (e.g., "Designed for scale tier: small / medium / large") in the architecture content.
-
-**Write completion marker:** Append `step_13: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+**Write completion marker:** Append `step_13: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md` (only after all three operational `group_*_confirmed` markers).
 
 Proceed to `14_document_review.md`.

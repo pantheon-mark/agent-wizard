@@ -177,6 +177,17 @@ Update staging file: ERROR_HANDLING_CONFIGURED = true
 
 ---
 
+## Recording answers (event transcript)
+
+Record this step's `hitl_autonomy` source answers to `~/claude-wizard-draft/wizard_transcript.jsonl` (they inform the HITL map + escalation behavior derived at the step-13 barrier; ERR-2 is a silent default but still recorded as a source):
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ERR-1 --group hitl_autonomy --value "<notification verbosity>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ERR-2 --group hitl_autonomy --value "three-strikes threshold = 3"
+```
+
+---
+
 ## Step-boundary capture (testing mode only)
 
 *This section runs only during test sessions. In normal wizard operation, skip directly to the success condition.*

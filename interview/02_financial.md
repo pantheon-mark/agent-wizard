@@ -390,6 +390,17 @@ Write sub-step marker: Append `step_02_P02-FB-6: complete | <timestamp>` to `~/c
 
 ---
 
+## Recording answers (event transcript)
+
+Record this step's `hitl_autonomy` source answers to `~/claude-wizard-draft/wizard_transcript.jsonl` (values from the staging fields captured above). They inform the HITL map + autonomy defaults derived at the step-13 barrier:
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid FIN-1 --group hitl_autonomy --value "<plan type>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid FIN-2 --group hitl_autonomy --value "<monthly spend ceiling>"
+```
+
+---
+
 ## Step-boundary capture (testing mode only)
 
 *This section runs only during test sessions. In normal wizard operation, skip directly to the success condition.*

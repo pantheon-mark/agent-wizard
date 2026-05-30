@@ -325,6 +325,21 @@ Write sub-step marker: Append `step_09_WRITE: complete | <timestamp>` to `~/clau
 
 ---
 
+## Recording answers (event transcript)
+
+Record the credential inventory (CRED-1) as an `orchestration_build` source answer to `~/claude-wizard-draft/wizard_transcript.jsonl` — it feeds the INTEGRATIONS derivation at the step-13 barrier. CRED-1a (the .gitignore/.env creation) and CRED-2/3/4/5 (provider onboarding + rotation/no-expiry/session lifetime — credential lifecycle config, not a foundation-doc source) are recorded as skips (the registry treats them as skip-satisfied; the credential setup itself still happens above):
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CRED-1 --group orchestration_build --value "<the credential / integration inventory>"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CRED-1a --group orchestration_build --reason "internal .gitignore/.env creation; no derivation source content"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CRED-2 --group orchestration_build --reason "provider onboarding; credential lifecycle, not a foundation-doc source"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CRED-3 --group orchestration_build --reason "rotation lead time; credential lifecycle, not a foundation-doc source"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CRED-4 --group orchestration_build --reason "no-expiry confirmation cadence; credential lifecycle, not a foundation-doc source"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CRED-5 --group orchestration_build --reason "session lifetime explanation; no derivation source content"
+```
+
+---
+
 ## Step-boundary capture (testing mode only)
 
 *This section runs only during test sessions. In normal wizard operation, skip directly to the success condition.*

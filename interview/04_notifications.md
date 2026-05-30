@@ -287,6 +287,22 @@ Write sub-step marker: Append `step_04_NOTIF-6: complete | <timestamp>` to `~/cl
 
 ---
 
+## Recording answers (event transcript)
+
+Record this step's `hitl_autonomy` source answers to `~/claude-wizard-draft/wizard_transcript.jsonl`. NOTIF-1/2/3 carry operator content (cadence, stale-decision threshold, and the confirmed Tier-1 always-ask baseline — the latter feeds the HITL policy); NOTIF-4/5/6/7 are channel setup/verification steps with no derivation source content, recorded as skips (the registry treats them as skip-satisfied):
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid NOTIF-1 --group hitl_autonomy --value "<tiered digest cadence>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid NOTIF-2 --group hitl_autonomy --value "<stale decision threshold>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid NOTIF-3 --group hitl_autonomy --value "<confirmed Tier-1 always-ask baseline + any additions>"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid NOTIF-4 --group hitl_autonomy --reason "NTFY channel setup; no derivation source content"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid NOTIF-5 --group hitl_autonomy --reason "email verification; no derivation source content"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid NOTIF-6 --group hitl_autonomy --reason "production path note; no derivation source content"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid NOTIF-7 --group hitl_autonomy --reason "stakeholder identification; no derivation source content"
+```
+
+---
+
 ## Step-boundary capture (testing mode only)
 
 *This section runs only during test sessions. In normal wizard operation, skip directly to the success condition.*

@@ -178,6 +178,12 @@ The probes follow the canonical spec at `wizard/shape_detection.md` § 2.1.
 
 Write sub-step marker: Append `step_01_P1-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
+**Record to the event transcript** (P1-4 is an `orchestration_build` source — it informs the orchestration/execution-cadence derivation at the step-13 barrier):
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid P1-4 --group orchestration_build --value "<probe_1_continuous_runtime: yes | no | unsure>"
+```
+
 ---
 
 ### P1-5 — Multi-user probe
