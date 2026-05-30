@@ -16,6 +16,12 @@ Event vocabulary (event_type):
   - field_confirmation  the operator's confirmation of a derived field (-> "confirmation")
   - group_proposed   a logical group's fields were proposed (rendered preview shown)
   - group_confirmed  a group barrier passed (carries source_event_range + source_hash)
+  - agent_intent     a structured, Claude-derived AgentIntent (the operator-meaning of one
+                     agent + its resource claims). Richer than any foundation-doc field, so
+                     it cannot ride in a derived_field; persisted here so the intents are
+                     disk-first + resume-safe (the bridge consumes them at close via
+                     read_agent_intents()). NOT a derived-record field — the replay view
+                     drops it.
 
 Disk-first + resume-safe: each event is appended as one JSON line (JSONL) the moment it is
 recorded, before the next question. A new recorder on an existing file continues the
@@ -32,10 +38,11 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from derivation_replay import (  # type: ignore
     compile_transcript, project, content_hash,
 )
+from build_intent import AgentIntent, ResourceClaims  # type: ignore
 
 KNOWN_EVENT_TYPES: Set[str] = {
     "source_answer", "source_skip", "derived_field", "field_confirmation",
-    "group_proposed", "group_confirmed",
+    "group_proposed", "group_confirmed", "agent_intent",
 }
 
 # Sentinel hashed in place of a value for a validly-skipped source question, so an
@@ -151,6 +158,32 @@ class TranscriptRecorder:
             "source_hash": source_hash, "confirmed_at": confirmed_at or self._clock(),
         })
 
+    def record_agent_intent(self, group_id: str, intent: "AgentIntent") -> Dict[str, Any]:
+        """Persist one structured AgentIntent (the narrow operator-meaning of an agent). The
+        booleans/lists are stored flat so the event is plain JSON; read_agent_intents()
+        reconstructs the AgentIntent. Re-recording the same display_name (an operator edit in
+        the one-round change) appends a new event; the reader keeps the latest."""
+        rc = intent.resource_claims
+        return self._append({
+            "event_seq": self._next_seq(), "event_type": "agent_intent",
+            "group_id": group_id,
+            "display_name": intent.display_name,
+            "function_summary": intent.function_summary,
+            "role_intent": intent.role_intent,
+            "acceptance_signals": list(intent.acceptance_signals),
+            "output_purpose": intent.output_purpose,
+            "criticality_tier": intent.criticality_tier,
+            "resource_claims": {
+                "requires_cron": rc.requires_cron,
+                "requires_external_network": rc.requires_external_network,
+                "requires_broad_fs_read": rc.requires_broad_fs_read,
+            },
+            "confidence": intent.confidence,
+            "insufficiency_flags": list(intent.insufficiency_flags),
+            "source_spans": list(intent.source_spans),
+            "recorded_at": self._clock(),
+        })
+
 
 # --- filtered views ----------------------------------------------------------
 
@@ -180,7 +213,45 @@ def read_derived_replay_events(events: List[Dict[str, Any]]) -> List[Dict[str, A
                 if k in ev:
                     m[k] = ev[k]
             out.append(m)
-        # source_answer / source_skip / group_proposed / group_confirmed: not replay events.
+        # source_answer / source_skip / group_proposed / group_confirmed / agent_intent:
+        # not replay events.
+    return out
+
+
+def read_agent_intents(events: List[Dict[str, Any]]) -> List["AgentIntent"]:
+    """Reconstruct the structured AgentIntent list from the agent_intent events — the view the
+    bridge consumes at close. Deduped by display_name with the latest event winning (an operator
+    edit during the one-round change re-records the agent), preserving first-seen order so the
+    roster order is stable across a resume."""
+    latest: Dict[str, Dict[str, Any]] = {}
+    order: List[str] = []
+    for ev in sorted(events, key=lambda e: e.get("event_seq", 0)):
+        if ev.get("event_type") != "agent_intent":
+            continue
+        name = ev.get("display_name")
+        if name not in latest:
+            order.append(name)
+        latest[name] = ev
+    out: List[AgentIntent] = []
+    for name in order:
+        ev = latest[name]
+        rc = ev.get("resource_claims", {}) or {}
+        out.append(AgentIntent(
+            display_name=ev["display_name"],
+            function_summary=ev.get("function_summary", ""),
+            role_intent=ev.get("role_intent", ""),
+            acceptance_signals=list(ev.get("acceptance_signals", [])),
+            output_purpose=ev.get("output_purpose", ""),
+            criticality_tier=ev.get("criticality_tier", "standard"),
+            resource_claims=ResourceClaims(
+                requires_cron=bool(rc.get("requires_cron", False)),
+                requires_external_network=bool(rc.get("requires_external_network", False)),
+                requires_broad_fs_read=bool(rc.get("requires_broad_fs_read", False)),
+            ),
+            confidence=ev.get("confidence", "low"),
+            insufficiency_flags=list(ev.get("insufficiency_flags", [])),
+            source_spans=list(ev.get("source_spans", [])),
+        ))
     return out
 
 

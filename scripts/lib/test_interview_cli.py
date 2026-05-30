@@ -23,7 +23,7 @@ sys.path.insert(0, str(_SCRIPTS))
 
 import interview_cli as cli  # noqa: E402
 from derivation_replay import compile_transcript, project  # noqa: E402
-from transcript_recorder import TranscriptRecorder, read_derived_replay_events  # noqa: E402
+from transcript_recorder import TranscriptRecorder, read_derived_replay_events, read_agent_intents  # noqa: E402
 import derived_record  # noqa: E402
 from derivation_groups import load_derivation_groups, parse_progress_markers, validate_marker_invariant  # noqa: E402
 
@@ -63,6 +63,73 @@ def _drive_vision_group(transcript, progress):
         cli.cmd_derive_field(transcript, SHAPE, field, value, sources=sources, inputs=None, clock=lambda: CLOCK)
         cli.cmd_confirm_field(transcript, field, "vision", "accepted", clock=lambda: CLOCK)
     return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
+
+
+def _drive_approach_roster_group(transcript, progress):
+    """Record the approach_roster group through the CLI on top of a driven vision group.
+
+    Synthesis fields cite prior DERIVED field keys (DR-5/DR-8), so vision must run first.
+    The raw AP/ADV/ARCH answers are recorded as source events (load-bearing for the
+    group-complete close gate + the source hash), and one agent intent is recorded."""
+    _drive_vision_group(transcript, progress)
+    g = load_derivation_groups(SHAPE).group_by_id("approach_roster")
+    answered = {"UP-4", "AP-1", "AP-2", "AP-3", "ADV-1", "ARCH-2", "ARCH-3"}  # ADV-2/3/4 validly skipped
+    for q in g.input_question_ids:
+        if q in answered:
+            cli.cmd_record_answer(transcript, q, "approach_roster", f"answer for {q}", clock=lambda: CLOCK)
+        else:
+            cli.cmd_skip_answer(transcript, q, "approach_roster", reason="no advisors", clock=lambda: CLOCK)
+    # one agent intent (structured; persisted disk-first; consumed by the bridge at close)
+    cli.cmd_record_agent_intent(
+        transcript, "approach_roster", display_name="Monitor",
+        function_summary="Watches for things that need attention.",
+        role_intent="Monitors the operator's sources and surfaces what needs action.",
+        acceptance_signals=["nothing important missed"], output_purpose="a daily digest",
+        criticality_tier="standard", source_spans=["ARCH-2#1"], clock=lambda: CLOCK)
+    # the two approach_roster target fields (synthesis; cite prior derived field keys)
+    cli.cmd_derive_field(transcript, SHAPE, "APPROACH_SOLUTION_BRIEF",
+                         "A monitoring-and-drafting approach that surfaces what the operator would miss.",
+                         inputs=["CORE_PURPOSE", "VISION_PURPOSE", "VISION_GOALS"], clock=lambda: CLOCK)
+    cli.cmd_confirm_field(transcript, "APPROACH_SOLUTION_BRIEF", "approach_roster", "accepted", clock=lambda: CLOCK)
+    cli.cmd_derive_field(transcript, SHAPE, "AGENT_ROSTER_ROWS",
+                         "| Agent | Role |\n|---|---|\n| Monitor | Watches sources |",
+                         inputs=["APPROACH_SOLUTION_BRIEF"], clock=lambda: CLOCK)
+    cli.cmd_confirm_field(transcript, "AGENT_ROSTER_ROWS", "approach_roster", "accepted", clock=lambda: CLOCK)
+    return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
+
+
+class ApproachRosterAcceptanceTests(unittest.TestCase):
+    def test_transcript_compiles_and_validates(self):
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "transcript.jsonl"); ppath = str(Path(td) / "wizard_progress.md")
+            r = _drive_approach_roster_group(tpath, ppath)
+            record = compile_transcript(read_derived_replay_events(r.events()))
+            contract = derived_record.load_contract(derived_record.default_contract_path())
+            derived_record.validate_derived_record(record, contract)   # raises on failure
+            projected = project(record)
+            self.assertIn("APPROACH_SOLUTION_BRIEF", projected)
+            self.assertIn("AGENT_ROSTER_ROWS", projected)
+
+    def test_preview_renders_approach_markdown(self):
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "transcript.jsonl"); ppath = str(Path(td) / "wizard_progress.md")
+            _drive_approach_roster_group(tpath, ppath)
+            previews = cli.cmd_preview_group(tpath, SHAPE, "approach_roster", SOURCE_VERSION, REPO_ROOT, auto_values=AUTO)
+            self.assertEqual([d for d, _ in previews], ["approach.md"])
+            content = previews[0][1]
+            self.assertNotIn("{{", content)
+            self.assertIn("monitoring-and-drafting", content)
+
+    def test_close_group_and_agent_intent_persisted(self):
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "transcript.jsonl"); ppath = str(Path(td) / "wizard_progress.md")
+            r = _drive_approach_roster_group(tpath, ppath)
+            ev = cli.cmd_close_group(tpath, ppath, SHAPE, "approach_roster", clock=lambda: CLOCK)
+            self.assertEqual(ev["event_type"], "group_confirmed")
+            intents = read_agent_intents(r.events())
+            self.assertEqual([a.display_name for a in intents], ["Monitor"])
+            markers = parse_progress_markers(Path(ppath).read_text(encoding="utf-8"))
+            self.assertIn("group_approach_roster_confirmed", markers)
 
 
 class VisionGroupAcceptanceTests(unittest.TestCase):
@@ -163,6 +230,32 @@ class CLIGuardTests(unittest.TestCase):
             tpath = str(Path(td) / "transcript.jsonl")
             with self.assertRaises(Exception):
                 cli.cmd_derive_field(tpath, SHAPE, "NOPE", "x", sources=["V-1"], inputs=None, clock=lambda: CLOCK)
+
+
+class AgentIntentCLITests(unittest.TestCase):
+    def test_record_agent_intent_round_trips_through_cli(self):
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "transcript.jsonl")
+            cli.cmd_record_agent_intent(
+                tpath, "approach_roster",
+                display_name="Researcher", function_summary="Gathers source material.",
+                role_intent="Gathers source material for the operator.",
+                acceptance_signals=["non-empty summary"], output_purpose="a summary",
+                criticality_tier="critical", requires_cron=True,
+                confidence="high", source_spans=["ARCH-2#1"], clock=lambda: CLOCK)
+            intents = read_agent_intents(TranscriptRecorder(Path(tpath)).events())
+            self.assertEqual([a.display_name for a in intents], ["Researcher"])
+            self.assertTrue(intents[0].resource_claims.requires_cron)
+            self.assertEqual(intents[0].criticality_tier, "critical")
+
+    def test_record_agent_intent_bad_criticality_fails_loud(self):
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "transcript.jsonl")
+            with self.assertRaises(cli.InterviewCLIError):
+                cli.cmd_record_agent_intent(
+                    tpath, "approach_roster", display_name="X", function_summary="f",
+                    role_intent="r", acceptance_signals=["s"], output_purpose="o",
+                    criticality_tier="MEGA", clock=lambda: CLOCK)
 
 
 if __name__ == "__main__":

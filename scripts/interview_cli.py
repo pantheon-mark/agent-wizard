@@ -35,6 +35,7 @@ _LIB = Path(__file__).resolve().parent / "lib"
 sys.path.insert(0, str(_LIB))
 
 from transcript_recorder import TranscriptRecorder, read_derived_replay_events  # type: ignore  # noqa: E402
+from build_intent import AgentIntent, ResourceClaims, CRITICALITY_TIERS  # type: ignore  # noqa: E402
 from field_manifest import load_field_manifest, FieldSpec  # type: ignore  # noqa: E402
 from derivation_prompts import load_derivation_prompt  # type: ignore  # noqa: E402
 from derivation_groups import (  # type: ignore  # noqa: E402
@@ -129,6 +130,40 @@ def cmd_confirm_field(transcript: str, field: str, group: str, state: str, *,
         field, group, state, value=value, revisit_trigger=revisit_trigger)
 
 
+_CONFIDENCE = ("high", "medium", "low")
+
+
+def cmd_record_agent_intent(transcript: str, group: str, *,
+                            display_name: str, function_summary: str, role_intent: str,
+                            output_purpose: str, criticality_tier: str,
+                            acceptance_signals: Optional[List[str]] = None,
+                            requires_cron: bool = False, requires_external_network: bool = False,
+                            requires_broad_fs_read: bool = False, confidence: str = "high",
+                            insufficiency_flags: Optional[List[str]] = None,
+                            source_spans: Optional[List[str]] = None,
+                            clock: Optional[Callable[[], str]] = None) -> Dict[str, Any]:
+    """Record one structured AgentIntent (the agent-intent derivation; approach_roster). The
+    intent carries operator-meaning + resource CLAIMS only — no fs/model/cron/permission values
+    (the assembler decides those). Fail-loud on a bad criticality tier or confidence value."""
+    if criticality_tier not in CRITICALITY_TIERS:
+        raise InterviewCLIError(
+            f"agent {display_name!r}: criticality_tier must be one of {CRITICALITY_TIERS}; "
+            f"got {criticality_tier!r}")
+    if confidence not in _CONFIDENCE:
+        raise InterviewCLIError(
+            f"agent {display_name!r}: confidence must be one of {_CONFIDENCE}; got {confidence!r}")
+    intent = AgentIntent(
+        display_name=display_name, function_summary=function_summary, role_intent=role_intent,
+        acceptance_signals=list(acceptance_signals or []), output_purpose=output_purpose,
+        criticality_tier=criticality_tier,
+        resource_claims=ResourceClaims(requires_cron=requires_cron,
+                                       requires_external_network=requires_external_network,
+                                       requires_broad_fs_read=requires_broad_fs_read),
+        confidence=confidence, insufficiency_flags=list(insufficiency_flags or []),
+        source_spans=list(source_spans or []))
+    return TranscriptRecorder(Path(transcript), clock=clock).record_agent_intent(group, intent)
+
+
 def cmd_preview_group(transcript: str, shape: str, group_id: str, source_version: str,
                       build_repo_root, *, auto_values: Dict[str, str]) -> List:
     events = TranscriptRecorder(Path(transcript)).events()
@@ -176,6 +211,14 @@ def _split(csv: Optional[str]) -> Optional[List[str]]:
     return [x.strip() for x in csv.split(",") if x.strip()]
 
 
+def _split_semi(s: Optional[str]) -> List[str]:
+    """Split a ';'-separated list arg (used for agent-intent fields whose values may contain
+    commas — acceptance signals, source spans, insufficiency flags)."""
+    if not s:
+        return []
+    return [x.strip() for x in s.split(";") if x.strip()]
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(prog="interview_cli", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -199,6 +242,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp.add_argument("--field", required=True); sp.add_argument("--group", required=True)
     sp.add_argument("--state", default="accepted"); sp.add_argument("--value")
     sp.add_argument("--revisit-trigger", dest="revisit_trigger")
+
+    sp = sub.add_parser("record-agent-intent"); add_transcript(sp)
+    sp.add_argument("--group", required=True)
+    sp.add_argument("--display-name", dest="display_name", required=True)
+    sp.add_argument("--function-summary", dest="function_summary", required=True)
+    sp.add_argument("--role-intent", dest="role_intent", required=True)
+    sp.add_argument("--output-purpose", dest="output_purpose", required=True)
+    sp.add_argument("--criticality-tier", dest="criticality_tier", required=True)
+    sp.add_argument("--acceptance-signals", dest="acceptance_signals", help="';'-separated")
+    sp.add_argument("--requires-cron", dest="requires_cron", action="store_true")
+    sp.add_argument("--requires-external-network", dest="requires_external_network", action="store_true")
+    sp.add_argument("--requires-broad-fs-read", dest="requires_broad_fs_read", action="store_true")
+    sp.add_argument("--confidence", default="high")
+    sp.add_argument("--insufficiency-flags", dest="insufficiency_flags", help="';'-separated")
+    sp.add_argument("--source-spans", dest="source_spans", help="';'-separated")
 
     sp = sub.add_parser("preview-group"); add_transcript(sp)
     sp.add_argument("--shape", default="markdown-CC"); sp.add_argument("--group", required=True)
@@ -227,6 +285,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         elif args.cmd == "confirm-field":
             cmd_confirm_field(args.transcript, args.field, args.group, args.state,
                               value=args.value, revisit_trigger=args.revisit_trigger)
+        elif args.cmd == "record-agent-intent":
+            cmd_record_agent_intent(
+                args.transcript, args.group,
+                display_name=args.display_name, function_summary=args.function_summary,
+                role_intent=args.role_intent, output_purpose=args.output_purpose,
+                criticality_tier=args.criticality_tier,
+                acceptance_signals=_split_semi(args.acceptance_signals),
+                requires_cron=args.requires_cron,
+                requires_external_network=args.requires_external_network,
+                requires_broad_fs_read=args.requires_broad_fs_read,
+                confidence=args.confidence,
+                insufficiency_flags=_split_semi(args.insufficiency_flags),
+                source_spans=_split_semi(args.source_spans))
         elif args.cmd == "preview-group":
             autos = dict(kv.split("=", 1) for kv in args.auto)
             for doc, content in cmd_preview_group(args.transcript, args.shape, args.group,

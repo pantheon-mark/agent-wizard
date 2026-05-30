@@ -18,6 +18,7 @@ from transcript_recorder import (  # noqa: E402
     TranscriptRecorder,
     TranscriptError,
     read_derived_replay_events,
+    read_agent_intents,
     answered_and_skipped,
     group_source_hash,
     source_event_range,
@@ -26,6 +27,7 @@ from transcript_recorder import (  # noqa: E402
 )
 from derivation_replay import compile_transcript, project, replay_is_byte_identical  # noqa: E402
 from derivation_groups import group_inputs_complete, group_confirmation_is_stale, DerivationGroup  # noqa: E402
+from build_intent import AgentIntent, ResourceClaims  # noqa: E402
 
 FIXED_CLOCK = lambda: "2026-05-30T12:00:00Z"  # noqa: E731  deterministic record-time stamp
 
@@ -74,7 +76,7 @@ class RecordReadTests(unittest.TestCase):
         self.assertEqual(
             KNOWN_EVENT_TYPES,
             {"source_answer", "source_skip", "derived_field", "field_confirmation",
-             "group_proposed", "group_confirmed"},
+             "group_proposed", "group_confirmed", "agent_intent"},
         )
 
 
@@ -167,6 +169,55 @@ class GroupHashTests(unittest.TestCase):
             r.record_source_answer("B", "g", "2")   # seq 3
             lo, hi = source_event_range(r.events(), ["A", "B"])
             self.assertEqual((lo, hi), (1, 3))
+
+
+class AgentIntentEventTests(unittest.TestCase):
+    """agent_intent events persist the structured, Claude-derived agent intents disk-first
+    (richer than any foundation-doc field; the operator confirms them at the approach_roster
+    barrier but the bridge consumes them at close). read_agent_intents() reconstructs the
+    AgentIntent objects; the derived-replay view drops them (they are not derived-record fields)."""
+
+    def _ai(self, name, cron=False, crit="standard", flags=()):
+        return AgentIntent(
+            display_name=name, function_summary=f"{name} does a thing.",
+            role_intent=f"{name} exists to do the thing for the operator.",
+            acceptance_signals=["the thing is done"], output_purpose="a result",
+            criticality_tier=crit, resource_claims=ResourceClaims(requires_cron=cron),
+            confidence="high", insufficiency_flags=list(flags), source_spans=["ARCH-2#1"])
+
+    def test_agent_intent_round_trips(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = TranscriptRecorder(Path(td) / "t.jsonl", clock=FIXED_CLOCK)
+            r.record_agent_intent("approach_roster", self._ai("Researcher", cron=True, crit="critical"))
+            r.record_agent_intent("approach_roster", self._ai("Drafter"))
+            intents = read_agent_intents(r.events())
+            self.assertEqual([a.display_name for a in intents], ["Researcher", "Drafter"])
+            self.assertTrue(intents[0].resource_claims.requires_cron)
+            self.assertEqual(intents[0].criticality_tier, "critical")
+            self.assertEqual(intents[0].source_spans, ["ARCH-2#1"])
+
+    def test_agent_intent_dropped_from_replay_view(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = TranscriptRecorder(Path(td) / "t.jsonl", clock=FIXED_CLOCK)
+            r.record_derived_field("APPROACH_SOLUTION_BRIEF", "approach_roster", "a brief",
+                                   _envelope(_source="claude-derived-operator-confirmed",
+                                             _derivation_class="synthesis", _derivation_inputs=["AP-1"]))
+            r.record_field_confirmation("APPROACH_SOLUTION_BRIEF", "approach_roster", "accepted")
+            r.record_agent_intent("approach_roster", self._ai("Researcher"))
+            replay = read_derived_replay_events(r.events())
+            self.assertEqual({e["event_type"] for e in replay}, {"derivation", "confirmation"})
+            # the compiler never sees an agent_intent event (would raise on unknown type)
+            compile_transcript(replay)
+
+    def test_agent_intent_last_wins_by_display_name(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = TranscriptRecorder(Path(td) / "t.jsonl", clock=FIXED_CLOCK)
+            r.record_agent_intent("approach_roster", self._ai("Researcher", crit="standard"))
+            # operator revises during the one-round change: same agent, now critical
+            r.record_agent_intent("approach_roster", self._ai("Researcher", crit="critical"))
+            intents = read_agent_intents(r.events())
+            self.assertEqual([a.display_name for a in intents], ["Researcher"])   # deduped
+            self.assertEqual(intents[0].criticality_tier, "critical")             # last wins
 
 
 if __name__ == "__main__":
