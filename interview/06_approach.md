@@ -1,13 +1,13 @@
 # 06 — Approach Document
 
 ## What this file does
-Derive the approach document from the vision document and the approach-level content buffer maintained during the vision interview. There are no user interview questions in this step — Claude drafts internally and presents for confirmation. One round of changes, confirm, write to disk.
+Gather the approach content — how the system will work, and a first-pass sense of the agents it will need — by presenting a derived proposal grounded in the vision and the approach-level content buffer, and capturing the operator's reaction. This step **records the approach content to the event transcript**; it does **not** write an `approach.md` file and does **not** finalize the approach. The approach document is part of the `approach_roster` group, which is derived, shown to the operator as a rendered draft, confirmed, and closed at the end of step 08 (after the agent roster is captured) — and the `approach.md` file itself is emitted at the end of the interview by the generator, not written here.
 
 ## When this file runs
-After `05_vision.md` completes and the vision document is confirmed on disk.
+After `05_vision.md` completes and the vision group is confirmed (`group_vision_confirmed`).
 
 ## Prerequisites
-VISION_CONFIRMED = true in the staging file. Approach-level content buffer active from the vision interview.
+`group_vision_confirmed` recorded in `~/claude-wizard-draft/wizard_progress.md`. Approach-level content buffer active from the vision interview.
 
 ---
 
@@ -76,69 +76,47 @@ The approach document contains two sections:
 
 ---
 
-## AP-1 — Derive and draft [DYNAMIC]
+## Recording answers (event transcript)
 
-Do not ask the user any questions before drafting.
-
-Draft the approach document from two sources:
-1. The confirmed vision document (already on disk at `[PROJECT_DIR]/vision.md`)
-2. The approach-level content buffer accumulated during the vision interview — everything the user said about implementation, technology, process, or mechanics
-
-If the approach buffer is thin or empty (the user stayed purely at the vision level during the interview), draft from the vision document alone. Use the vision document's purpose, goals, audience/outputs, scope boundary, and constraints to infer a reasonable first-pass approach. Thin is fine — this is a living document and the architecture phase will elaborate it.
-
-**Approach document structure:**
-
-```
-# Approach
-
-## Solution Brief
-[How the system turns the vision into operational reality. Key processes,
-mechanics, and implementation approach. Written in plain language — not
-technical. If the user described how they imagine it working, capture that.
-If not, describe a reasonable approach derived from the vision.]
-
-## Agent Roster (Preliminary)
-[First-pass list of agents the system will likely need. For each agent:
-one sentence on its role. Mark as preliminary — this list is confirmed
-and detailed during the architecture phase.]
-```
-
-Write in plain language. No jargon. If a section is thin, write what can be derived — even one sentence is valid. Do not pad or invent specifics not grounded in what the user said or what the vision implies.
-
-Write sub-step marker: Append `step_06_AP-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+This step records the approach content to the **event transcript** at `~/claude-wizard-draft/wizard_transcript.jsonl`, tagged to the `approach_roster` group, in addition to the staging file. The transcript is the authoritative record the system is built from; the staging file is the human-readable mirror. The approach content captured here (AP-1/AP-2/AP-3) feeds two derivations at the step-08 barrier: the approach solution brief and the agent intents. Keep writing the staging file and the sub-step markers exactly as before — the transcript runs alongside them.
 
 ---
 
-## AP-2 — Present and confirm [DYNAMIC]
+## AP-1/AP-2/AP-3 — Present the approach proposal, capture the operator's content [DYNAMIC]
 
-Present the draft and say:
+Do not ask the operator to invent an approach from a blank slate (wizard proposes, user confirms). Instead **propose a derived approach, then capture how the operator reacts** — and record that content as the three approach source answers.
 
-> Here's the approach document — this is the bridge between your vision and the system we'll build. It captures how the system will work and the agents it will need. Take a look and tell me anything that's off or missing — you have one round of changes here. This is also a living document, so as the architecture takes shape it will stay current. What would you like to change, if anything?
+**Derive a proposal from two sources** (do not write it to a file):
+1. The confirmed vision (the vision fields the operator confirmed at step 05)
+2. The approach-level content buffer accumulated during the vision interview — everything the operator said about implementation, technology, process, or mechanics
 
-**Wait for answer.**
+If the buffer is thin, derive a reasonable first-pass approach from the vision alone. Thin is fine — this is a living document that the architecture step elaborates.
 
-- If the user makes no changes: confirm and proceed to AP-3.
-- If the user requests changes: incorporate them now. Do not open another round. Confirm the updated draft and proceed to AP-3.
+**Present the proposal and invite reaction:**
 
-Write sub-step marker: Append `step_06_AP-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+> Here's how I think your system will work, based on everything you've told me — the overall approach, the key things it'll do day to day, and a first sense of the helpers (agents) it'll need. Take a look and tell me what's right, what's off, and anything missing. We'll firm this up together once we've sketched the agents in the next step.
+>
+> [Present, in plain language: (1) the overall solution approach; (2) the key processes / how the agents will work day to day; (3) how the pieces fit together. Plus a preliminary one-line-per-agent roster. No jargon. Do not pad or invent specifics not grounded in the vision or what the operator said.]
 
----
+**Wait for the operator's reaction.** Accept everything; incorporate their adjustments into your understanding.
 
-## AP-3 — Write to disk
-
-Write the confirmed approach document to:
+**Record the approach content as three source answers** (the operator's confirmed/adjusted content, mapped to the three facets the solution brief covers — draw from their reaction plus the approach buffer; thin is fine, do not fabricate):
 
 ```
-[PROJECT_DIR]/approach.md
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid AP-1 --group approach_roster --value "<the overall solution approach, in the operator's framing>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid AP-2 --group approach_roster --value "<the key processes / how the agents will work day to day>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid AP-3 --group approach_roster --value "<how the pieces fit together>"
 ```
+
+Write sub-step markers as each facet is captured: append `step_06_AP-1: complete | <timestamp>`, `step_06_AP-2: complete`, `step_06_AP-3: complete` to `~/claude-wizard-draft/wizard_progress.md`.
+
+**Do NOT write an `approach.md` file here, and do NOT finalize the approach.** The approach solution brief and the agent roster are derived, rendered as a draft for the operator to confirm, and the `approach_roster` group is closed at the end of step 08 (after the agent roster is captured). The `approach.md` file is emitted at the end of the interview by the generator.
 
 **Say:**
 
-> Approach document saved. In the next step, we'll work through the architecture in detail — confirming how the agents are organized, what each one does, and what the system can and can't do on its own.
+> Got it — I've captured your approach. Next we'll bring in any outside advisors or reference sources, then sketch the agents — and right after that I'll show you the finished approach to confirm.
 
-Update the staging file: APPROACH_CONFIRMED = true
-
-Write sub-step marker: Append `step_06_AP-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+Update the staging file (human-readable mirror): APPROACH_CAPTURED = true.
 
 ---
 
@@ -164,7 +142,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-AP-1 through AP-3 complete. Approach document confirmed by the user and written to `[PROJECT_DIR]/approach.md`. APPROACH_CONFIRMED = true in the staging file.
+The approach content is recorded to the transcript as the three `approach_roster` source answers (AP-1/AP-2/AP-3). **No `approach.md` file was written** — the approach is derived, confirmed, and closed at the step-08 barrier, and the file is emitted by the generator at the end. APPROACH_CAPTURED = true in the staging file. (The `approach_roster` group is NOT closed here — it closes at step 08, so do not record `group_approach_roster_confirmed` yet.)
 
 **Write completion marker:** Append `step_06: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -176,8 +154,6 @@ Proceed to `07_advisors.md`.
 
 **Disposition: PRODUCE.**
 
-In foundation-only mode, this step's behavior is identical to the normal path. Approach is a foundation-level artifact; shape-agnostic; the same draft / revision round / disk write applies.
-
-Follow the existing step content above. The approach document is one of the four foundation docs per `_foundation_only_mode_gate.md` § 5.
+In foundation-only mode, this step's behavior is identical to the normal path. Approach is a foundation-level artifact; shape-agnostic; the same propose / capture-source-answers flow applies (and, as in the normal path, no `approach.md` is written here — it is emitted at the end through the generator's foundation-only branch). The approach document is one of the four foundation docs per `_foundation_only_mode_gate.md` § 5.
 
 **Write completion marker + proceed:** same as normal path (`step_06: complete | <timestamp>`; proceed to `07_advisors.md`).

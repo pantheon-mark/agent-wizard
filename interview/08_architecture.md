@@ -1,13 +1,13 @@
 # 08 — Architecture
 
 ## What this file does
-Present the system architecture for user confirmation in five steps: orchestration model, agent roster, criticality tier assignments, permission summary, and task completion checklists. Claude derives all of these from the vision document, approach document, and advisor list — the user confirms and adjusts, but does not design. Produces the technical architecture foundation document.
+Present the system architecture for user confirmation in five steps: orchestration model, agent roster, criticality tier assignments, permission summary, and task completion checklists. Claude derives all of these from the confirmed vision, the captured approach, and the advisor list — the user confirms and adjusts, but does not design. This step **records each architecture answer to the event transcript** and, at its end, **closes the `approach_roster` group** (the second logical group): it derives the agents as structured intents, derives the approach solution brief and the agent roster, shows the operator the rendered approach document for one round of confirmation, and closes the group. It does **not** write a `technical_architecture.md` or `approach.md` file — the architecture answers (ARCH-1/4/5) feed groups that close at step 13, and all foundation-doc files are emitted by the generator at the end of the interview.
 
 ## When this file runs
-After `07_advisors.md` completes and ADVISORS_SEEDED = true in the staging file.
+After `07_advisors.md` completes.
 
 ## Prerequisites
-APPROACH_CONFIRMED = true and ADVISORS_SEEDED = true in the staging file. Vision document and approach document confirmed on disk.
+APPROACH_CAPTURED = true and ADVISORS_SEEDED = true in the staging file; `group_vision_confirmed` recorded. The approach source answers (AP-1/2/3) and advisor list (ADV-1) are in the transcript.
 
 ---
 
@@ -81,7 +81,7 @@ Before any step-08 user-facing question fires:
 
 All five steps in this phase follow the same pattern: Claude derives and presents, the user confirms or adjusts. The user is not asked to make architectural decisions — only to confirm that Claude's understanding of their work matches reality. When the user corrects something, update the model and continue.
 
-Maintain a running architecture document internally as each step is confirmed. Write to disk after ARCH-5.
+**Recording (event transcript).** Record each architecture answer to `~/claude-wizard-draft/wizard_transcript.jsonl`, tagged to the group it feeds: ARCH-1 (orchestration model) → `orchestration_build`; ARCH-2 (agent roster) + ARCH-3 (criticality tiers) → `approach_roster`; ARCH-4 (permission/always-ask summary) → `hitl_autonomy`; ARCH-5 (task completion conditions) → `tests_audit`. The record-answer line is shown at the end of each ARCH step below. Do **not** maintain or write a `technical_architecture.md` file here — the architecture is emitted by the generator at the end from the confirmed transcript. After ARCH-5, this step closes the `approach_roster` group (derive → render approach.md preview → confirm → close).
 
 ---
 
@@ -145,6 +145,8 @@ The architectural conclusion (whether a scoped orchestrator is needed, which wor
 
 Write sub-step marker: Append `step_08_ARCH-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
+**Record:** `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ARCH-1 --group orchestration_build --value "<the confirmed workflow/orchestration description>"`
+
 ---
 
 ## ARCH-2 — Agent roster [DYNAMIC]
@@ -173,6 +175,8 @@ Present the proposed agent roster derived from the vision document, approach doc
 Update the internal roster before proceeding to ARCH-3.
 
 Write sub-step marker: Append `step_08_ARCH-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+**Record:** `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ARCH-2 --group approach_roster --value "<the confirmed agent roster: each agent's name + what it does + why it exists>"`
 
 ---
 
@@ -205,6 +209,8 @@ Assign each confirmed agent a criticality tier. Present the assignments with a p
 
 Write sub-step marker: Append `step_08_ARCH-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
+**Record:** `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ARCH-3 --group approach_roster --value "<the confirmed criticality tier per agent: critical / standard / supporting>"`
+
 ---
 
 ## ARCH-4 — Permission summary [FIXED — topic]
@@ -231,6 +237,8 @@ Present what the system will and will not be able to do on its own, in plain lan
 
 Write sub-step marker: Append `step_08_ARCH-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
+**Record:** `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ARCH-4 --group hitl_autonomy --value "<the confirmed always-ask additions + autonomous-action summary>"` (this feeds the HITL map derived at the step-13 barrier, alongside the vision-barrier Tier-1 additions).
+
 ---
 
 ## ARCH-5 — Task completion checklists [DYNAMIC]
@@ -252,48 +260,69 @@ For each agent:
 
 Write sub-step marker: Append `step_08_ARCH-5: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
+**Record:** `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ARCH-5 --group tests_audit --value "<the confirmed per-agent completion conditions>"`
+
 ---
 
-## Write architecture to disk
+## Close the approach_roster group — derive the agents, render the approach, confirm, close
 
-After ARCH-5, write the technical architecture foundation document.
+All of the `approach_roster` group's inputs are now captured (UP-4 at step 03, AP-1/2/3 at step 06, ADV-1 at step 07, ARCH-2/3 here). **Instead of writing `technical_architecture.md` or `approach.md` to disk, derive the approach-group fields, derive the agents as structured intents, show the operator the rendered approach document, take one round of changes, and close the group.** The architecture answers ARCH-1/4/5 belong to groups that close later (at step 13) — they were recorded above and are consumed there. No foundation-doc file is written here; the generator emits them at the end.
 
-**File:** `[PROJECT_DIR]/technical_architecture.md`
+### Step 1 — Derive the agents as structured intents
 
-**Structure:**
+For each confirmed agent (from ARCH-2 + the criticality tiers from ARCH-3), derive a structured **agent intent** using the agent-intent derivation prompt (`wizard/foundation-bundles/v0/derivation-prompts/agent-intent.md`). The intent captures the agent's MEANING and its resource CLAIMS only — never its filesystem paths, model, cron cadence, or permissions (the generator decides those deterministically from the system shape). Draw each sub-field from the operator's own words (ARCH-2/3 + the approach answers AP-2/AP-3 + the vision); flag thin sub-fields in `insufficiency_flags`; never fabricate.
+
+Record one intent per agent:
 
 ```
-# Technical Architecture
-
-## Orchestration Model
-[Plain-language description of the confirmed workflow structure —
-which workflows are independent, which are sequential, and why.]
-
-## Agent Roster
-[Table or list: each confirmed agent with its function, rationale,
-and criticality tier.]
-
-| Agent | Function | Criticality |
-|-------|----------|-------------|
-| [name] | [one sentence] | Critical / Standard / Supporting |
-
-## Permission Boundaries
-[What the system can do autonomously. What it always asks before doing.
-Tier 1 items confirmed during setup, including any user additions.]
-
-## Task Completion Checklists
-[For each agent: the confirmed completion condition.]
-
-**[Agent name]:** [Completion condition]
+python3 wizard/scripts/interview_cli.py record-agent-intent --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --group approach_roster --display-name "<agent name>" --function-summary "<one sentence>" --role-intent "<2-4 sentences: why it exists>" --acceptance-signals "<signal 1>;<signal 2>" --output-purpose "<what its output is for>" --criticality-tier <critical|standard|supporting> --confidence <high|medium|low> --source-spans "ARCH-2;ARCH-3" [--requires-cron] [--requires-external-network] [--requires-broad-fs-read] [--insufficiency-flags "<subfield>;..."]
 ```
+
+Add a resource-claim flag only when the operator's description actually implies it (e.g. `--requires-cron` for an agent that must run on a schedule). **Forced confirmation for the highest tier:** before recording any agent as `critical`, state plainly — "I've marked [agent] as your most critical agent; failures here have the highest impact — please confirm" — and only proceed on explicit acknowledgment (per the agent-intent prompt's confirmation hooks). Surface low-confidence agents explicitly.
+
+### Step 2 — Derive the approach solution brief and the agent roster
+
+Derive the two `approach_roster` foundation-doc fields (both `synthesis` — cite prior confirmed field keys, not question-IDs):
+
+```
+python3 wizard/scripts/interview_cli.py derive-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field APPROACH_SOLUTION_BRIEF --value "<the solution brief, in the operator's voice>" --inputs CORE_PURPOSE,VISION_PURPOSE,VISION_GOALS
+python3 wizard/scripts/interview_cli.py derive-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field AGENT_ROSTER_ROWS --value "<a markdown table of the agents, rendered from the agent intents>" --inputs APPROACH_SOLUTION_BRIEF
+```
+
+Carry the operator's voice/style (their literacy + information preference + their own framing) into the prose — voice-and-style is a property of the derivation, not a separate field. Use names verbatim from the operator's answers everywhere (name-consistency; the structured projection then uses the accepted values verbatim, which structurally eliminates name drift).
+
+### Step 3 — Render the approach preview and show the operator
+
+```
+python3 wizard/scripts/interview_cli.py preview-group --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --group approach_roster --source-version v0.4.0 --build-repo-root <path to the wizard build repo root> --auto SYSTEM_SHAPE=markdown-CC --auto FOUNDATION_ONLY_MODE=<false|true> --auto WIZARD_VERSION=v0.4.0 --auto LAST_UPDATED_DATE=<today> --auto LAST_UPDATED_TRIGGER="initial build" --auto CURRENT_SPRINT_NUMBER=1
+```
+
+Show the operator the **rendered approach markdown** the command prints — the actual document they will receive, not the field values.
+
+### Step 4 — One round of changes, then confirm
+
+Say exactly this before the operator responds:
+
+> Here's your approach — how your system will work and the agents it'll need, based on everything so far. Take a look and tell me anything that's wrong or missing — you have one round of changes here. The system keeps this current as things evolve, so good enough to build from is the right standard. What would you like to change, if anything?
+
+**Wait for answer.**
+
+- **No changes:** confirm each field — `python3 wizard/scripts/interview_cli.py confirm-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field <FIELD> --group approach_roster --state accepted`.
+- **Changes:** incorporate them, re-derive the affected field(s) (and re-record any changed agent intent), then confirm with the edited value (`--state accepted --value "<edited value>"`). Re-render the preview once, then confirm. Do not open a second round.
+
+### Step 5 — Close the approach_roster group
+
+```
+python3 wizard/scripts/interview_cli.py close-group --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --progress ~/claude-wizard-draft/wizard_progress.md --shape markdown-CC --group approach_roster
+```
+
+This records `group_approach_roster_confirmed` (carrying the source hash). The group cannot close unless both approach fields are confirmed. **Do NOT write `step_08: complete` until this succeeds** — a step marker before its group is confirmed is an illegal state.
 
 **Say:**
 
-> Architecture confirmed and saved. That covers the structure of your system — how it's organized, what each part does, and how it behaves. Next we'll go through the technical setup: credentials, integrations, and the build sequence.
+> Approach confirmed. Next we'll go through the technical setup — credentials, integrations, and the build sequence.
 
-Update staging file: ARCHITECTURE_CONFIRMED = true
-
-Also update `[PROJECT_DIR]/approach.md` — replace the preliminary agent roster section with the confirmed roster from ARCH-2 and ARCH-3 (agents, functions, criticality tiers).
+Update the staging file (human-readable mirror): ARCHITECTURE_CONFIRMED = true; APPROACH_CONFIRMED = true.
 
 Write sub-step marker: Append `step_08_WRITE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -321,9 +350,9 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-ARCH-1 through ARCH-5 complete. Technical architecture document confirmed and written to `[PROJECT_DIR]/technical_architecture.md`. Approach document updated with confirmed agent roster. ARCHITECTURE_CONFIRMED = true in the staging file.
+ARCH-1 through ARCH-5 recorded to the transcript (tagged to their groups). The `approach_roster` group is closed (`group_approach_roster_confirmed` recorded): the agents are captured as structured intents, the approach solution brief + roster are derived and confirmed against the rendered preview. **No `technical_architecture.md` or `approach.md` file was written** — they are emitted by the generator at the end; the operator confirmed the rendered approach draft at the barrier. ARCHITECTURE_CONFIRMED = true in the staging file.
 
-**Write completion marker:** Append `step_08: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+**Write completion marker:** Append `step_08: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`. (Only after `group_approach_roster_confirmed` is recorded — the step marker is illegal before its group closes.)
 
 Proceed to `09_credentials.md`.
 
@@ -331,29 +360,14 @@ Proceed to `09_credentials.md`.
 
 ## Foundation-only adapted path
 
-**Disposition: ADAPT — split foundation-level technical architecture (PRODUCE) from implementation outputs (SKIP).**
+**Disposition: ADAPT — same recording + approach_roster barrier; the foundation-only emission split happens at the generator, not here.**
 
-Conduct the architecture interview from the existing step content above (ARCH-1 through ARCH-5) to capture the operator's understanding of how their system works.
+Conduct the architecture interview exactly as the normal path above (ARCH-1 through ARCH-5, recorded to the transcript), and close the `approach_roster` group exactly as above (derive the agents as intents → derive the approach fields → render the approach preview → confirm → close). Pass `--auto FOUNDATION_ONLY_MODE=true` to the preview command.
 
-**Difference from normal behavior:**
+**The foundation-level vs implementation split is the generator's job, not the interview's.** At the end of the interview the bridge dispatches a foundation-only `EmissionPlan` (with `agents == []`) to the generator's foundation-only branch, which emits the foundation docs (including a shape-agnostic `technical_architecture.md` and `approach.md`) and skips the agent layer / permission-tier files / per-agent task checklists. So: record the agent intents and derive `AGENT_ROSTER_ROWS` as normal (they render into the foundation-level `approach.md` and are harmlessly ignored by the foundation-only dispatch — no agent files are emitted); do NOT write any `technical_architecture.md` or `approach.md` here in either mode.
 
-PRODUCE (foundation-level; survives in foundation-only mode):
+**Stop-condition DOCUMENT-path integration:** if `_pre_step_05_recheck.md` Step 2b recorded entries in `stop_conditions.documented_in_foundation`, the "Regulatory & compliance gaps (foundation-only mode)" section is assembled into the emitted `technical_architecture.md` at step 15 close per `_foundation_only_mode_gate.md` § 6 (read from staging `stop_conditions.documented_in_foundation` + `control_matrix_active`). Append any additional operational requirements surfaced here to the staging file under `## Foundation-only-mode captures > Architecture notes` for that assembly.
 
-- `technical_architecture.md` written to disk at `[PROJECT_DIR]/technical_architecture.md`. CONTENT is the SHAPE-AGNOSTIC architecture: orchestration model abstracted from markdown-agents specifics; system-component decomposition; data flows; external dependencies. Markdown-agents-specific implementation details (skill mappings, Claude Code permission tiers, agent-roster-as-files) are OMITTED.
-
-SKIP (implementation-level; not produced in foundation-only mode):
-
-- Agent roster as separate files (markdown-agents-specific)
-- Permission tier files (markdown-agents-specific)
-- Task completion checklists for agents (markdown-agents-specific)
-- Approach document update with "confirmed agent roster" (approach.md stays shape-agnostic in foundation-only mode)
-
-DO:
-
-- Append any additional operational requirements surfaced during the architecture interview to the staging file under `## Foundation-only-mode captures > Architecture notes`. These feed into `technical_architecture.md` § "Operational requirements" at step 15 close.
-
-**Stop-condition DOCUMENT-path integration:** if `_pre_step_05_recheck.md` Step 2b recorded entries in `stop_conditions.documented_in_foundation`, append a placeholder header for § "Regulatory & compliance gaps (foundation-only mode)" to the `technical_architecture.md` draft. The full gap-section content is assembled at step 15 close per `_foundation_only_mode_gate.md` § 6 (read from staging `stop_conditions.documented_in_foundation` + `control_matrix_active`).
-
-**Write completion marker:** Append `step_08: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+**Write completion marker:** Append `step_08: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md` (only after `group_approach_roster_confirmed`).
 
 Proceed to `09_credentials.md`.

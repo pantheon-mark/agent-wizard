@@ -4,10 +4,10 @@
 Identify the advisors the system will route decisions to. Claude proposes a list of relevant advisor types based on the vision document, the user confirms or adjusts, and each confirmed advisor is recorded with their domain. Explain the two-path advisor workflow in plain language. Seed the advisor knowledge base with a header entry for each confirmed advisor. Generate a first interview guide for each confirmed advisor.
 
 ## When this file runs
-After `06_approach.md` completes and the approach document is confirmed on disk.
+After `06_approach.md` completes and the approach content is captured.
 
 ## Prerequisites
-APPROACH_CONFIRMED = true in the staging file. Vision document on disk at `[PROJECT_DIR]/vision.md`.
+APPROACH_CAPTURED = true in the staging file (step 06 recorded the approach source answers; the `approach_roster` group is not closed until step 08). Vision fields confirmed at step 05.
 
 ---
 
@@ -97,7 +97,18 @@ Update staging file.
 
 Write sub-step marker: Append `step_07_ADV-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
-**If zero advisors confirmed (user removed all proposed advisors):** Skip ADV-2 through ADV-4 entirely. Store ADVISOR_COUNT = 0 and ADVISORS_SEEDED = true in the staging file. Say:
+**Record to the event transcript.** ADV-1 (the confirmed advisor list) is an `approach_roster` source answer. ADV-2 (workflow explanation) and ADV-3/ADV-4 (knowledge-base + interview-guide generation) gather no separate operator source content — they are recorded as source skips (the registry treats them as skip-satisfied). Record ADV-1 now (and the skips once those steps run / are bypassed):
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ADV-1 --group approach_roster --value "<the confirmed advisor list: role/name + domain per advisor, or 'no advisors' if none>"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ADV-2 --group approach_roster --reason "informational workflow explanation; no operator source input"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ADV-3 --group approach_roster --reason "downstream knowledge-base seeding; no operator source input"
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ADV-4 --group approach_roster --reason "downstream interview-guide generation; no operator source input"
+```
+
+The advisor knowledge base and interview guides are still produced below as before (the operator's system needs them); the skips record only that those steps capture no new operator source input.
+
+**If zero advisors confirmed (user removed all proposed advisors):** Skip ADV-2 through ADV-4 entirely (still record the ADV-1 answer above as "no advisors" and the ADV-2/ADV-3/ADV-4 skips so the group stays complete). Store ADVISOR_COUNT = 0 and ADVISORS_SEEDED = true in the staging file. Say:
 
 > No advisors for now — that's fine. If you identify someone later whose expertise would be useful, you can add them at any time by telling the system "add an advisor." The system will walk you through the same setup.
 

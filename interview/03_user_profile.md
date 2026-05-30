@@ -296,6 +296,16 @@ Store: UP_PROFILE_SUMMARY = the confirmed paragraph
 
 Update staging file with the confirmed summary.
 
+**Record to the event transcript.** The user-profile answers feed two derivation groups whose barriers fire later: UP-4 (domain expertise) is an `approach_roster` source; UP-1/UP-2/UP-3/UP-5 are `hitl_autonomy` sources (they shape the HITL map + the provisional autonomy default). Record them now, after confirmation (UP-6 is shape-detection data, not a derivation-group source — it stays in the staging file only):
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid UP-1 --group hitl_autonomy --value "<UP_TECHNICAL_LITERACY>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid UP-2 --group hitl_autonomy --value "<UP_INFORMATION_PREFERENCE>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid UP-3 --group hitl_autonomy --value "<UP_DECISION_PREFERENCE>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid UP-4 --group approach_roster --value "<UP_DOMAIN_EXPERTISE>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid UP-5 --group hitl_autonomy --value "<UP_INVOLVEMENT_APPETITE>"
+```
+
 ---
 
 ## Step-boundary capture (testing mode only)
