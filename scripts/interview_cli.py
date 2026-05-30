@@ -34,7 +34,7 @@ from typing import Any, Callable, Dict, List, Optional
 _LIB = Path(__file__).resolve().parent / "lib"
 sys.path.insert(0, str(_LIB))
 
-from transcript_recorder import TranscriptRecorder, read_derived_replay_events  # type: ignore  # noqa: E402
+from transcript_recorder import TranscriptRecorder, read_derived_replay_events, read_agent_intents  # type: ignore  # noqa: E402
 from build_intent import AgentIntent, ResourceClaims, CRITICALITY_TIERS  # type: ignore  # noqa: E402
 from field_manifest import load_field_manifest, FieldSpec  # type: ignore  # noqa: E402
 from derivation_prompts import load_derivation_prompt  # type: ignore  # noqa: E402
@@ -203,6 +203,26 @@ def cmd_resume(progress: str, shape: str) -> Dict[str, Any]:
     return resume_point(parse_progress_markers(text), dg)
 
 
+def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_root: str, *,
+                    project_name: str = "operator-system",
+                    generator_version_override: Optional[str] = None) -> Dict[str, Any]:
+    """Emit the complete operator system from the recorded transcript via the fail-closed bridge
+    (compile -> assemble -> validate -> dispatch -> generator). The recorder stores the rich event
+    vocabulary; map it to the replay view the bridge compiles (read_derived_replay_events) and read
+    the agent intents from the same store. The bridge resolves the maintained tier->model map (real
+    --model) and fails closed BEFORE any write on a stale generator identity / non-empty target /
+    missing-or-empty derived input. Returns the receipt (foundation-only flag + the two hashes)."""
+    from interview_bridge import build_operator_system_from_transcript  # type: ignore
+    events = TranscriptRecorder(Path(transcript)).events()
+    res = build_operator_system_from_transcript(
+        read_derived_replay_events(events), read_agent_intents(events),
+        system_shape=shape, target_dir=Path(target_dir), build_repo_root=Path(build_repo_root),
+        project_name=project_name, generator_version_override=generator_version_override,
+    )
+    return {"foundation_only_mode": res.plan.foundation_only_mode, "target_dir": str(target_dir),
+            "derived_record_hash": res.derived_record_hash, "transcript_hash": res.transcript_hash}
+
+
 # --- argparse layer ----------------------------------------------------------
 
 def _split(csv: Optional[str]) -> Optional[List[str]]:
@@ -273,6 +293,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp = sub.add_parser("resume")
     sp.add_argument("--progress", required=True); sp.add_argument("--shape", default="markdown-CC")
 
+    sp = sub.add_parser("emit-system"); add_transcript(sp)
+    sp.add_argument("--shape", default="markdown-CC")
+    sp.add_argument("--target-dir", dest="target_dir", required=True)
+    sp.add_argument("--build-repo-root", dest="build_repo_root", required=True)
+    sp.add_argument("--project-name", dest="project_name", default="operator-system")
+    sp.add_argument("--generator-version-override", dest="generator_version_override")
+
     args = p.parse_args(argv)
     try:
         if args.cmd == "record-answer":
@@ -313,6 +340,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             rp = cmd_resume(args.progress, args.shape)
             rp = {**rp, "confirmed_groups": sorted(rp["confirmed_groups"])}
             sys.stdout.write(json.dumps(rp, sort_keys=True) + "\n")
+        elif args.cmd == "emit-system":
+            rec = cmd_emit_system(args.transcript, args.shape, args.target_dir, args.build_repo_root,
+                                  project_name=args.project_name,
+                                  generator_version_override=args.generator_version_override)
+            sys.stdout.write(json.dumps(rec, sort_keys=True) + "\n")
     except InterviewCLIError as e:
         sys.stderr.write(f"FAIL: {e}\n")
         return 1

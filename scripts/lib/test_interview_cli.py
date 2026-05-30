@@ -417,5 +417,32 @@ class AgentIntentCLITests(unittest.TestCase):
                     criticality_tier="MEGA", clock=lambda: CLOCK)
 
 
+class EmitSystemCLITests(unittest.TestCase):
+    def test_emit_system_emits_a_complete_tree_from_a_transcript_file(self):
+        # Build a RICH-shape transcript on disk (the recorder's vocabulary, as the live wizard
+        # records) from the proven-emittable neutral field set, then emit through the CLI command.
+        from test_emission_plan import _FOUNDATION_DOC_INPUTS
+        from test_interview_bridge import _ai
+        env = {"_source": "operator-content", "_derivation_class": "extraction",
+               "_decision_field": False, "_decision_kind": "none", "_prompt_version": "sha256:p1"}
+        with tempfile.TemporaryDirectory() as td:
+            tpath = Path(td) / "t.jsonl"
+            r = TranscriptRecorder(tpath, clock=lambda: CLOCK)
+            for k, v in _FOUNDATION_DOC_INPUTS.items():
+                r.record_derived_field(k, "vision", v, dict(env))
+                r.record_field_confirmation(k, "vision", "accepted")
+            r.record_agent_intent("approach_roster", _ai())   # one agent -> full-system path
+            target = Path(td) / "operator-project"
+            rec = cli.cmd_emit_system(str(tpath), SHAPE, str(target), str(REPO_ROOT),
+                                      generator_version_override="0" * 40)
+            self.assertFalse(rec["foundation_only_mode"])
+            self.assertTrue(rec["derived_record_hash"].startswith("sha256:"))
+            tree = {str(p.relative_to(target)) for p in target.rglob("*") if p.is_file()}
+            self.assertIn("vision.md", tree)
+            self.assertTrue(any(t.endswith("CLAUDE.md") for t in tree))
+            self.assertTrue(any(t.startswith("agents/prompts/") for t in tree))
+            self.assertIn("quality/advisor_knowledge_base.md", tree)
+
+
 if __name__ == "__main__":
     unittest.main()

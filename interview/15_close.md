@@ -1,13 +1,13 @@
 # 15 — Closing Sequence
 
 ## What this file does
-Complete the wizard interview. Assemble all project files from templates and staging data (CLOSE-ASSEMBLY), including the system guide written to disk. Initialize git and make the initial commit (CLOSE-4). Set up the GitHub remote backup (GH-1). Deliver a tight, action-oriented closing (CLOSE-13) with the first build prompt front and center (CLOSE-14), and point the user to the system guide and manual for reference. This is the final interview file.
+Complete the wizard interview. Emit the entire operator system from the recorded interview transcript via the deterministic generator (CLOSE-EMIT) — the transcript is the single source, the generator the single assembler. Initialize git and make the initial commit (CLOSE-4). Set up the GitHub remote backup (GH-1). Deliver a tight, action-oriented closing (CLOSE-13) with the first build prompt front and center (CLOSE-14), and point the user to the system guide and manual for reference. This is the final interview file.
 
 ## When this file runs
-After `14_document_review.md` completes. All configuration is confirmed. All documents are written to disk.
+After `14_document_review.md` completes. All configuration is confirmed. Every answer is recorded in the event transcript; every foundation-doc field is derived and confirmed at its group barrier.
 
 ## Prerequisites
-OPERATIONS_CONFIGURED = true in the staging file. All wizard-produced documents exist on disk in the project directory.
+OPERATIONS_CONFIGURED = true in the staging file. All five logical groups are confirmed (`group_vision_confirmed` … `group_tests_audit_confirmed` markers present); the event transcript at `~/claude-wizard-draft/wizard_transcript.jsonl` carries every confirmed field + agent intent.
 
 ---
 
@@ -15,19 +15,19 @@ OPERATIONS_CONFIGURED = true in the staging file. All wizard-produced documents 
 
 Before beginning this phase, assess whether your context window is near the autocompaction threshold.
 
-If it is: write the current staging file to disk, give the user the following instruction, and stop:
+If it is: the transcript is already on disk (nothing is lost), give the user the following instruction, and stop:
 
-> Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
+> Your project is saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 15_close.md. All configuration is complete. All documents are on disk. Read the staging file and the project directory, then continue from where you left off."
+> "Resume wizard from 15_close.md. All configuration is complete. The interview transcript is on disk. Read the staging file and continue from where you left off."
 
-Do not begin CLOSE-ASSEMBLY until you are confident the full phase will complete before compaction risk.
+Do not begin CLOSE-EMIT until you are confident the full phase will complete before compaction risk.
 
 ---
 
 ## Sub-step resume check
 
-Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_15_*` (e.g., `step_15_CLOSE-ASSEMBLY: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_15_*` (e.g., `step_15_CLOSE-EMIT: complete`), this step was partially completed in a prior session. Skip to the first section below that does NOT have a corresponding completion marker.
 
 If all sub-step markers for this step are present but the step-level marker (`step_15: complete`) is not, proceed directly to the success condition.
 
@@ -61,7 +61,7 @@ Before doing anything else in this step:
 **Say:**
 
 > **Step 16 of 16 — Wrapping up**
-> We'll assemble your project, set up your backup, and hand you the keys to start building.
+> We'll build your project, set up your backup, and hand you the keys to start building.
 
 ---
 
@@ -69,7 +69,7 @@ Before doing anything else in this step:
 
 The closing sequence has four parts:
 
-1. **Project assembly** (CLOSE-ASSEMBLY, internal) — read the staging file and all templates, write every output file to the project directory, including the system guide.
+1. **Emit the operator system** (CLOSE-EMIT, internal) — run the generator over the recorded transcript; it writes the complete project to disk in one deterministic pass.
 2. **Initial commit** (CLOSE-4, internal) — initialize git and commit the completed wizard setup.
 3. **GitHub remote setup** (GH-1) — optional backup to a private GitHub repository.
 4. **Closing and handoff** (CLOSE-13, CLOSE-14) — tight action-oriented closing with the first build prompt front and center.
@@ -78,245 +78,64 @@ Work through these in order without skipping.
 
 ---
 
-## Part 1 — Project assembly (CLOSE-ASSEMBLY) [INTERNAL]
+## Part 1 — Emit the operator system (CLOSE-EMIT) [INTERNAL]
 
-This step is internal. The user does not need to see the assembly process — they see one plain-language progress message. This is where every wizard-gathered value becomes a real file on disk.
+This step is internal. The user sees one plain-language progress message. This is where the recorded interview becomes a complete operator system on disk — emitted by the deterministic generator from the event transcript, NOT hand-assembled template-by-template.
 
 **Say:**
 
-> I'm now setting up your project files. This takes a moment.
+> I'm now building your project files. This takes a moment.
 
 ### What this step does
 
-Read the staging file (`session_bootstrap.md` in the project directory). Read every template in `wizard/templates/`. For each template, substitute the gathered values from the staging file and write the output file to the correct location in the project directory. Create all required directories first, then write files.
+The whole interview was recorded to an event transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`): every confirmed answer, every derived foundation-doc field, every agent intent. One deterministic pass turns that transcript into the complete runnable operator system — there is no hand-assembly here. The transcript is the single source; the generator is the single assembler. (This replaces the legacy template-by-template close-assembly: the directory tree, every file, the model-flag resolution, and the special behaviors below are all produced by the generator from the transcript.)
 
-### Directory creation
+### Run the unified emit
 
-Create the following directories in the project directory if they do not already exist:
+The project directory MUST NOT already exist (or must be empty) — the generator creates and populates it fresh from the transcript. Run, from the wizard directory:
 
-```
-agents/
-agents/prompts/
-agents/scripts/
-agents/cron/
-agents/handoffs/
-agents/failed_queue/
-agents/checkpoints/
-quality/
-work/
-logs/
-docs/
-security/
-archive/
-archive/advisor-guides/
-archive/logs/
-digests/
-wizard/
-wizard/build_prompts/
-wizard/review_prompts/
-wizard/skills/
-advisor/
-advisor/interview-guides/
+```bash
+python3 wizard/scripts/interview_cli.py emit-system \
+  --transcript ~/claude-wizard-draft/wizard_transcript.jsonl \
+  --shape markdown-CC \
+  --target-dir ~/[PROJECT_FOLDER_NAME] \
+  --build-repo-root <the wizard directory root> \
+  --project-name [PROJECT_NAME]
 ```
 
-**Conditional directory:** Create `security/session_cookies/` only if the staging file indicates any username/password credentials were configured (path 09b — `SESSION_COOKIES_NEEDED = true`).
+Internally this is the fail-closed bridge `build_operator_system_from_transcript`: it compiles the transcript to the derived record + agent intents, assembles a validated `EmissionPlan` (resolving the maintained tier→model map, so `start-session.sh` carries a real `--model`, not a tier name), and dispatches to the generator — which emits the complete tree: the foundation docs at the project root, the `/agents/` execution layer (orchestrator + per-agent prompts and scripts), the inherited corpus (`quality/rules_library.md` + the `decisions/` ADR core), every operational directory (`logs/`, `work/`, `docs/`, `security/`, `archive/`), the build-session helper templates (`wizard/review_prompts/`, `wizard/skills/`), an empty `.env`, and the `.wizard/` upgrade scaffold. The generator FAILS CLOSED before any file is written on a missing or empty derived input, a stale generator identity, or a non-empty target directory. **If the command raises, STOP and surface the error — do NOT hand-assemble.**
 
-### File assembly — complete manifest
+### The legacy close-time scans are now derivations — do NOT redo them
 
-For each file below: read the template, substitute values from the staging file, and write to the target path. If a template field has no value in the staging file (e.g., the user skipped an optional section), write the template default or leave the placeholder with a note that it will be populated at runtime.
+The special behaviors the legacy close-assembly performed by hand are DERIVATIONS recorded in the transcript at their group barriers and emitted by the generator. Do NOT re-scan or re-assemble any of these here:
 
-**Root-level files:**
+- **WI-011 constraint elevation** (vision constraints → Tier-1 always-ask policy) → the `TIER_1_ADDITIONS` policy derivation at the vision barrier.
+- **WI-013 deferred items** → `docs/future_items.md` (the deferred-items derivation; empty when none were deferred).
+- **Voice-and-style seeding** → carried inside the synthesis derivations' prose (not a separate close-time scan).
+- **Name-consistency** → structural: the projector uses the operator's confirmed values verbatim everywhere, which eliminates the name-drift class without a close-time scan.
 
-| Template | Target | Value source |
-|----------|--------|-------------|
-| `wizard/templates/root/CLAUDE.md` | `CLAUDE.md` | P1-1, P1-2, autonomy level (Level 2) |
-| `wizard/templates/root/project_instructions.md` | `project_instructions.md` | UP-1–5, FIN-1–2, NOTIF-1–5, ERR-1–2, QA-1–4, CONC-1–2, START-1–2, DRIFT-1, SCALE-1–4, CRED-1–5, GATE-1–2, model tier mapping |
-| `wizard/templates/root/session_bootstrap.md` | `session_bootstrap.md` | All phases — initial state populated, queues at zero |
-| `wizard/templates/root/pending_decisions.md` | `pending_decisions.md` | Empty structure |
-| `wizard/templates/root/manual.md` | `manual.md` | Static content — copy as-is |
-| `wizard/templates/root/gitignore_template` | `.gitignore` | Static baseline + CRED-2 entries |
+### Per-advisor interview guides (post-emission)
 
-**`SESSION_STATE.md`** — not from a template. Create this file directly in the project root with the following content:
+The generator does not emit the per-advisor interview guides — they are tailored prose, not a deterministic template. After the system is emitted, for each confirmed advisor (from the `ADV-1` answer in the transcript), write a first interview guide to `~/[PROJECT_FOLDER_NAME]/advisor/interview-guides/[advisor-role-slug]-interview-guide.md` using the guide format defined in `07_advisors.md` ADV-4 (purpose / about the system / 5–8 tailored questions / follow-ups, grounded in the vision + approach). If no advisors were confirmed, skip this — there are no guides to write.
 
-```
-# Session State
+### Verification
 
-CLEAR
-```
+After the emit, verify (the generator's own fail-closed guards already enforce most of this — confirm it held):
 
-This file is required by Addition 7 (session close enforcement). The orchestrator updates it at every session close with current task state. Initial state is "CLEAR" — no task in progress. The health check (Check 2) verifies this file exists.
+1. The project directory exists and is non-empty.
+2. Critical files present and non-empty: `CLAUDE.md`, `project_instructions.md`, `session_bootstrap.md`, `SESSION_STATE.md`, `vision.md`, `approach.md`, `technical_architecture.md`, `.gitignore`, `docs/how_your_system_works.md`. (`.env` is present but intentionally empty — credentials are added at setup.)
+3. `start-session.sh` is executable and contains `--model` with a real model name (not a tier name or placeholder).
+4. No unresolved `{{...}}` placeholders survive — EXCEPT inside the operator-fill templates under `wizard/review_prompts/` and `wizard/skills/`, which intentionally keep their placeholders for the operator to complete during build sessions.
 
-**`.env`** — not from a template. Create an empty `.env` file. If credentials were configured during step 09, write the environment variable names as comments (no values — values were entered during CRED-2 and should already be in the file if the credential onboarding step wrote them). Verify `.gitignore` includes `.env` before this file is created.
-
-**`start-session.sh`** — copied from `wizard/scripts/start-session.sh`. Ensure it is executable (`chmod +x`).
-
-**Foundation documents:**
-
-| Template | Target | Value source |
-|----------|--------|-------------|
-| `wizard/templates/documents/vision.md` | `vision.md` | V-1 through V-8 — already written to disk during step 05; verify it exists, do not overwrite |
-| `wizard/templates/documents/approach.md` | `approach.md` | Already written to disk during step 06; verify it exists, do not overwrite |
-| `wizard/templates/documents/technical_architecture.md` | `technical_architecture.md` | ARCH-1–5, SCALE-4, CRED registry, model tier mapping |
-| `wizard/templates/documents/execution_plan.md` | `execution_plan.md` | Vision goals, ARCH orchestration model, agent roster, build phases |
-| `wizard/templates/documents/test_cases.md` | `test_cases.md` | Validation criteria for the system (5-section shape-neutral structure: requirements anchor + acceptance criteria + test pyramid + validation method + markdown-shape extension); agent-specific tests added during build |
-| `wizard/templates/documents/audit_framework.md` | `audit_framework.md` | DRIFT-1 cadence, architectural review settings |
-
-**Note on vision.md and approach.md:** These documents are written to disk during their respective interview steps (05 and 06). Do not regenerate them from templates — verify they exist on disk and are intact. If either is missing (should not happen), regenerate from staging file answers using the template.
-
-**Agent files:**
-
-| Template | Target | Value source |
-|----------|--------|-------------|
-| `wizard/templates/agents/roster.md` | `agents/roster.md` | ARCH-2, ARCH-3 — agent names, roles, criticality tiers |
-| `wizard/templates/agents/cron_config.md` | `agents/cron/cron_config.md` | Empty structure — entries added during agent build phase |
-
-**Per-agent prompt and script files** are not generated at assembly time. They are produced during the agent build phase (after the wizard completes). The assembly step only creates the directory structure they will live in.
-
-**Quality files:**
-
-| Template | Target | Value source |
-|----------|--------|-------------|
-| `wizard/templates/quality/rules_library.md` | `quality/rules_library.md` | Empty structure |
-| `wizard/templates/quality/human_review_queue.md` | `quality/human_review_queue.md` | Empty structure |
-| `wizard/templates/quality/source_registry.md` | `quality/source_registry.md` | QA-3 confirmed sources |
-| `wizard/templates/quality/validation_gate_config.md` | `quality/validation_gate_config.md` | GATE-1, GATE-2 answers |
-| `wizard/templates/quality/co-protected-workflows.md` | `quality/co-protected-workflows.md` | Pre-populated from Tier 1 categories |
-| `wizard/templates/quality/advisor_knowledge_base.md` | `quality/advisor_knowledge_base.md` | ADV-1 confirmed advisors (header entries) |
-
-**Conditional — zero-advisors branch:** If the staging file shows zero confirmed advisors (`ADVISOR_COUNT = 0`), still create `quality/advisor_knowledge_base.md` with the empty structure from the template (advisors can be added later). Do not populate advisor header entries.
-
-**Work files:**
-
-| Template | Target | Value source |
-|----------|--------|-------------|
-| `wizard/templates/work/work_queue.md` | `work/work_queue.md` | Empty structure |
-| `wizard/templates/work/issues_log.md` | `work/issues_log.md` | Empty structure |
-| `wizard/templates/work/stub_tracker.md` | `work/stub_tracker.md` | Any stubs identified during interview (credentials pending, sources TBD) |
-| `wizard/templates/work/execution_plan_state.md` | `work/execution_plan_state.md` | Empty structure |
-
-**Log files:**
-
-| Template | Target | Value source |
-|----------|--------|-------------|
-| `wizard/templates/logs/audit_log.md` | `logs/audit_log.md` | Header and structure |
-| `wizard/templates/logs/session_log.md` | `logs/session_log.md` | Header and structure |
-| `wizard/templates/logs/error_log.md` | `logs/error_log.md` | Header and structure |
-| `wizard/templates/logs/qa_log.md` | `logs/qa_log.md` | Header and structure |
-| `wizard/templates/logs/source_health_log.md` | `logs/source_health_log.md` | Header and structure |
-| `wizard/templates/logs/drift_log.md` | `logs/drift_log.md` | Header and structure |
-| `wizard/templates/logs/advisor_log.md` | `logs/advisor_log.md` | Header and structure |
-| `wizard/templates/logs/notification_log.md` | `logs/notification_log.md` | Header and structure |
-| `wizard/templates/logs/validation_log.md` | `logs/validation_log.md` | Header and structure |
-| `wizard/templates/logs/cost_efficiency_log.md` | `logs/cost_efficiency_log.md` | Header and structure |
-
-**Docs files:**
-
-| Template | Target | Value source |
-|----------|--------|-------------|
-| `wizard/templates/docs/document_impact_map.md` | `docs/document_impact_map.md` | Standard change event taxonomy + project-specific categories from agent roster |
-| `wizard/templates/docs/architectural_review_staging.md` | `docs/architectural_review_staging.md` | Empty structure |
-| `wizard/templates/docs/future_items.md` | `docs/future_items.md` | Monitoring cadence from wizard answers; deferred items from staging file (see WI-013 below) |
-| `wizard/templates/docs/voice_and_style.md` | `docs/voice_and_style.md` | Seeded from UP-1–5, ERR-1, QA-1, vision document voice (see below) |
-| `wizard/templates/docs/how_your_system_works.md` | `docs/how_your_system_works.md` | Static content — copy as-is |
-
-**Security files:**
-
-| Template | Target | Value source |
-|----------|--------|-------------|
-| `wizard/templates/security/credentials_registry.md` | `security/credentials_registry.md` | CRED-1, CRED-2 confirmed credentials |
-| `wizard/templates/security/gitignore_manifest.md` | `security/gitignore_manifest.md` | Baseline .gitignore entries |
-
-**Conditional — zero-credentials branch:** If the staging file shows zero confirmed credentials (`CREDENTIAL_COUNT = 0`), still create `security/credentials_registry.md` with the empty structure (credentials can be added later). Skip credential reference rows in `project_instructions.md`.
-
-**Archive files:**
-
-| Template | Target | Value source |
-|----------|--------|-------------|
-| `wizard/templates/archive/decisions_archive.md` | `archive/decisions_archive.md` | Empty structure |
-| `wizard/templates/archive/work_archive.md` | `archive/work_archive.md` | Empty structure |
-| `wizard/templates/archive/review_queue_archive.md` | `archive/review_queue_archive.md` | Empty structure |
-| `wizard/templates/archive/notification_archive.md` | `archive/notification_archive.md` | Empty structure |
-
-**Review prompts:** Copy the three review prompt files from `wizard/review_prompts/` to the project's `wizard/review_prompts/` directory:
-- `post_wizard_review.md`
-- `per_agent_review.md`
-- `phase_gate_review.md`
-
-**Skill templates:** Copy the three skill template files from `wizard/skills/` to the project's `wizard/skills/` directory (create the directory first):
-- `_index.md`
-- `skill_template_external.md`
-- `skill_template_internal.md`
-
-These templates are referenced by the system CLAUDE.md and used during agent build sessions to create skills. The `_index.md` file serves as the skill registry; the two template files define the structure for external-facing and internal skills respectively.
-
-### Name consistency — all personal names from staging data
-
-**This rule applies to every file written during assembly.** All personal names — the user's name, family member names, team member names, advisor names, any name that appears in any output file — must be read from the confirmed values in the staging file. Never generate or infer a name independently for any individual file. If a name appears in the vision document answers, the user profile, the advisor list, or any other staging data section, use that exact spelling everywhere.
-
-Before writing each file: read the relevant name values from the staging file. After writing each file: verify that every personal name in the file matches the staging data exactly. If a template contains a placeholder like `{{USER_NAME}}` or `{{FAMILY_MEMBER_1}}`, the substituted value must come from one source — the staging file — never from the model's own generation.
-
-This prevents the systematic name inconsistency where foundation documents get correct names but derived/operational documents get hallucinated alternatives (e.g., "Matt" instead of "Mark", "Sarah" instead of "Lauren").
-
-### WI-011 — Constraint elevation to project_instructions.md
-
-During assembly, before writing `project_instructions.md`, scan the vision document answers in the staging file for critical constraints. Look for:
-
-- **Privacy constraints** — statements like "nothing leaves my computer," "no external sharing," "data stays local"
-- **Data locality constraints** — restrictions on where data can be stored or processed
-- **External communication prohibitions** — rules about what the system must never send, post, or share externally
-- **Absolute prohibitions** — "never" statements about actions the system must not take
-
-For each critical constraint found, write it as an enforced rule in `project_instructions.md` under the "What the system always asks first — User additions to Tier 1" section. Format each as a plain-language rule:
-
-> - [Constraint from vision document] — elevated from vision document, enforced as Tier 1
-
-This ensures that constraints the user stated during the vision interview become system-level enforcement rules, not just documentation.
-
-### WI-013 — Populate future_items.md with deferred items
-
-During assembly, before writing `docs/future_items.md`, scan the staging file for deferred items. These are requests the user made during the interview that the wizard noted for later rather than acting on immediately. Common patterns:
-
-- "We'll revisit that after the first agents are running"
-- Items flagged as `DEFERRED` or `FUTURE` in the staging file
-- Agent capabilities the user requested that were scoped out of the initial build
-- Features or integrations noted as "not yet" or "later"
-
-For each deferred item found:
-- If it has a natural trigger date (e.g., "after the first month"): write it as a **date-triggered item**
-- If it has a natural condition (e.g., "when the first agent is running"): write it as a **condition-triggered item**
-- If it is an ongoing concern: add it to the **monitoring cadence register**
-
-This ensures that nothing the user asked for is silently dropped — every deferred request has a structured home that the system will check at every session close.
-
-### Voice and style seeding
-
-When writing `docs/voice_and_style.md`, derive initial values from existing wizard answers — do not ask new questions:
-
-- **Explanation depth:** derived from UP-1 (technical literacy) — higher literacy → more concise; lower literacy → more explanatory
-- **Tone:** derived from UP-2 (information preference) — "just the bottom line" → direct; "understand the reasoning" → conversational
-- **Technical level:** derived from UP-1 — maps directly
-- **Notification verbosity:** use ERR-1 answer (Minimal/Standard/Detailed)
-- **QA reporting style:** use QA-1 answer (funneled/direct)
-- **Vision document voice:** read the user's own words from the vision document answers in the staging file — note their natural writing style (formal vs. casual, brief vs. detailed, direct vs. explanatory) and use it as the basis for approved examples
-
-### Assembly verification
-
-After all files are written, run a quick verification:
-
-1. **Count check:** verify the number of files created matches the expected count from the manifest above (adjust for conditional branches).
-2. **Critical file check:** verify these files exist and are non-empty: `CLAUDE.md`, `project_instructions.md`, `session_bootstrap.md`, `SESSION_STATE.md`, `vision.md`, `approach.md`, `technical_architecture.md`, `.gitignore`, `.env`, `docs/how_your_system_works.md`.
-3. **Conditional check:** if `SESSION_COOKIES_NEEDED = true`, verify `security/session_cookies/` directory exists. If `CREDENTIAL_COUNT = 0`, verify `security/credentials_registry.md` exists but has no credential rows.
-4. **Model flag check:** verify `start-session.sh` contains `--model` with a resolved model name (not a placeholder). Verify the model name matches the High tier value in `project_instructions.md`.
-
-If any verification fails: stop, identify what is missing, and fix it before proceeding to CLOSE-4.
+If any check fails: STOP, surface what is missing, and do not proceed to CLOSE-4.
 
 **Say:**
 
-> Your project files are set up. Everything from the interview has been written to your project directory. Let me save a snapshot.
+> Your project files are built. Everything from the interview has been written to your project directory. Let me save a snapshot.
 
 Proceed to Part 2 (CLOSE-4).
 
-Write sub-step marker: Append `step_15_CLOSE-ASSEMBLY: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+Write sub-step marker: Append `step_15_CLOSE-EMIT: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -326,8 +145,8 @@ This step is internal. Do not narrate it to the user in technical terms. One pla
 
 **Before committing:**
 
-1. Verify that `.gitignore` is in place and excludes `.env`. Do not proceed if `.gitignore` is absent — generate it now if missing (see `09_credentials.md`).
-2. Create `wizard_feedback.md` in the project root from `wizard/templates/root/wizard_feedback.md`. This file is the bridge from system runtime back to wizard improvement — it stays in the user's project for agents to write to when they encounter wizard-related issues.
+1. Verify that `.gitignore` is in place and excludes `.env` (the generator emits both; confirm). Do not proceed if `.gitignore` is absent.
+2. Verify `wizard_feedback.md` is present in the project root (the generator emits it from the inherited corpus — it is the bridge from system runtime back to wizard improvement; agents write to it when they hit wizard-related issues). It is no longer created by hand here.
 
 Run the following commands in the project directory:
 
@@ -456,7 +275,7 @@ Then deliver CLOSE-14 immediately (the build prompt).
 
 ### CLOSE-14 — First build prompt [INTERNAL]
 
-**Before producing the prompt:** Read the confirmed agent roster from `technical_architecture.md`. Identify the first agent to build — this should be the agent at the foundation of the system (typically the orchestrator or the primary data-access agent, whichever the roster designates as the starting point).
+**Before producing the prompt:** Read the confirmed agent roster from `technical_architecture.md` (now emitted by the generator). Identify the first agent to build — this should be the agent at the foundation of the system (typically the orchestrator or the primary data-access agent, whichever the roster designates as the starting point).
 
 **Produce the following prompt** (exact wording — this becomes the paste-ready content):
 
@@ -510,7 +329,7 @@ Then deliver CLOSE-14 immediately (the build prompt).
 
 **Layer 3 — Deep dive: on disk, not verbal**
 
-There is no Layer 3 delivery. The system guide (`docs/how_your_system_works.md`) is already on disk from the assembly step. The user reads it at their own pace. The wizard does not deliver behavior briefings verbally — they are written to disk where they can be referenced any time, rather than delivered in a moment when the user has just finished a long interview and is ready to act.
+There is no Layer 3 delivery. The system guide (`docs/how_your_system_works.md`) is already on disk from the emit step. The user reads it at their own pace. The wizard does not deliver behavior briefings verbally — they are written to disk where they can be referenced any time, rather than delivered in a moment when the user has just finished a long interview and is ready to act.
 
 ---
 
@@ -542,7 +361,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-CLOSE-ASSEMBLY project assembly complete — all files written to disk, verification passed, system guide written to `docs/how_your_system_works.md`. CLOSE-4 git initialized and initial commit made. GH-1 complete (remote connected or user opted out, preference recorded). CLOSE-13 layered closing delivered — build prompt front and center, reference pointers provided, briefings on disk. First build prompt written to `/wizard/build_prompts/agent_01_build_prompt.md` and handed off to user. Audit trail entry written.
+CLOSE-EMIT complete — the generator emitted the complete operator system from the transcript to the project directory, verification passed (critical files present, real `--model`, no stray placeholders), the system guide is at `docs/how_your_system_works.md`, and any per-advisor interview guides were written post-emission. CLOSE-4 git initialized and initial commit made. GH-1 complete (remote connected or user opted out, preference recorded). CLOSE-13 layered closing delivered — build prompt front and center, reference pointers provided, briefings on disk. First build prompt written to `/wizard/build_prompts/agent_01_build_prompt.md` and handed off to user. Audit trail entry written.
 
 Update staging file: `WIZARD_COMPLETE = true`
 
@@ -554,23 +373,36 @@ The interview sequence is complete. The wizard has produced a running project di
 
 ## Foundation-only adapted path
 
-**Disposition: ADAPT — large close-ceremony rebuild.**
+**Disposition: ADAPT — emit foundation docs via the dispatcher; foundation-only close ceremony.**
 
-In foundation-only mode, step 15 close does NOT execute the full normal close path (no git init, no first build prompt, no implementation files). Instead, follow the foundation-only close ceremony below.
+In foundation-only mode, step 15 close does NOT execute the full normal close path (no git init, no first build prompt, no implementation files). The foundation-doc emission STILL goes through the unified generator — the bridge auto-dispatches to the foundation-only branch from `FOUNDATION_ONLY_MODE = true` in the transcript (no separate hand-assembly) — and the foundation-only-specific ceremony docs are written post-emission.
 
-### CLOSE-ASSEMBLY (foundation-only)
+### CLOSE-EMIT (foundation-only)
 
-Assemble and write ONLY the foundation doc set + adapted close-ceremony docs to the operator project directory:
+Run the same emit command as the normal path:
+
+```bash
+python3 wizard/scripts/interview_cli.py emit-system \
+  --transcript ~/claude-wizard-draft/wizard_transcript.jsonl \
+  --shape markdown-CC \
+  --target-dir ~/[PROJECT_FOLDER_NAME] \
+  --build-repo-root <the wizard directory root> \
+  --project-name [PROJECT_NAME]
+```
+
+Because the transcript carries `FOUNDATION_ONLY_MODE = true`, the bridge dispatches to the generator's foundation-only branch: it emits the foundation doc set (`vision.md`, `approach.md`, `technical_architecture.md`, `execution_plan.md`) and the operator manifest, and SKIPS the agent layer, permission-tier files, and per-agent task checklists (`agents == []`). If the command raises, STOP and surface the error.
+
+### Post-emission foundation-only ceremony (write by hand — these are not generator artifacts)
+
+After the foundation docs are emitted, write the foundation-only-specific ceremony docs to the project directory (the generator does not produce these):
 
 | File | Source | Voice / content |
 |---|---|---|
-| `vision.md` | Step 05 draft (already on disk) | Confirm presence at `[PROJECT_DIR]/vision.md`; no re-write |
-| `approach.md` | Step 06 draft (already on disk) | Confirm presence at `[PROJECT_DIR]/approach.md`; no re-write |
-| `technical_architecture.md` | Step 08 draft + captured-input sections from steps 07/09/10/11/12/13 + DOCUMENT-path stop-condition gaps if any | ASSEMBLE now per `_foundation_only_mode_gate.md` § 5 + § 6 (read all `## Foundation-only-mode captures > *` sections from staging file; integrate into `technical_architecture.md` § "Operational requirements") |
-| `execution_plan.md` | Foundation-level execution sequencing from staging data + captured operations data from step 13 | ASSEMBLE now; shape-agnostic execution sequencing for the foundation docs (what to build first, dependencies, decision points) |
-| `project_instructions.md` | Foundation-only voice template | ASSEMBLE now per `_foundation_only_mode_gate.md` § 4; opening section MUST surface verbatim: "These foundation docs describe your project at the system-blueprint level. They are implementation-agnostic. Implementation NOT included in this output." |
-| `manual.md` | Pointer doc | ASSEMBLE now; MUST surface pointer to `next_steps.md`; no claim of "operating manual" semantics implying a running system |
-| `next_steps.md` | NEW | ASSEMBLE now; structure per "next_steps.md content (template)" below |
+| `project_instructions.md` | Foundation-only voice template | ASSEMBLE per `_foundation_only_mode_gate.md` § 4; opening section MUST surface verbatim: "These foundation docs describe your project at the system-blueprint level. They are implementation-agnostic. Implementation NOT included in this output." |
+| `manual.md` | Pointer doc | MUST surface a pointer to `next_steps.md`; no claim of "operating manual" semantics implying a running system |
+| `next_steps.md` | NEW | Per the "next_steps.md content (template)" below |
+
+Confirm `technical_architecture.md` carries the captured operational requirements per `_foundation_only_mode_gate.md` § 5 + § 6 (the captured `## Foundation-only-mode captures > *` sections were recorded into the transcript and emitted into `technical_architecture.md`; verify, do not re-assemble).
 
 ### next_steps.md content (template)
 
@@ -623,7 +455,7 @@ This output reflects the wizard's intentional implementation-agnostic stance. Th
 - CLOSE-4 (git init): SKIP. Foundation docs are portable; operator decides repo strategy.
 - GH-1 (GitHub remote): SKIP. Same reason.
 - CLOSE-14 (first build prompt): SKIP. No markdown-agents to build; path forward lives in `next_steps.md`.
-- Implementation file writes — agent prompts, scripts, `.env`, `.gitignore`, `start-session.sh`, `session_bootstrap.md`, `/agents/`, `/quality/`, `/work/`, `/logs/`, `/security/`, `/docs/`, `/archive/`: all SKIP.
+- The agent layer + implementation files — agent prompts, scripts, `.env`, `.gitignore`, `start-session.sh`, `session_bootstrap.md`, `/agents/`, the operational dirs: the foundation-only dispatch already skips emitting these (`agents == []`); do not write them by hand either.
 
 ### CLOSE-13 (closing message) adaptation
 
@@ -637,18 +469,16 @@ Tell operator (verbatim):
 
 ### Step 15 close write progression (foundation-only)
 
-1. Read staging file fully + read all foundation-doc captures (`## Foundation-only-mode captures > *` sections)
-2. Assemble `technical_architecture.md` per `_foundation_only_mode_gate.md` § 5 + § 6 (write to `[PROJECT_DIR]/technical_architecture.md`)
-3. Assemble `execution_plan.md` from foundation-level execution sequencing (write to `[PROJECT_DIR]/execution_plan.md`)
-4. Assemble `project_instructions.md` in foundation-only voice (write to `[PROJECT_DIR]/project_instructions.md`)
-5. Assemble `manual.md` as pointer doc (write to `[PROJECT_DIR]/manual.md`)
-6. Write `next_steps.md` per content template above (write to `[PROJECT_DIR]/next_steps.md`)
-7. Verify `vision.md` + `approach.md` already on disk (written at step 05 + step 06)
-8. Update staging file: `WIZARD_COMPLETE = true`
-9. Append step-marker to `~/claude-wizard-draft/wizard_progress.md`:
+1. Run `emit-system` (above) — the bridge dispatches foundation-only from the transcript; the foundation docs + operator manifest are emitted, the agent layer skipped.
+2. Write `project_instructions.md` in foundation-only voice per `_foundation_only_mode_gate.md` § 4 (post-emission)
+3. Write `manual.md` as a pointer doc (post-emission)
+4. Write `next_steps.md` per the content template above (post-emission)
+5. Verify `vision.md` + `approach.md` + `technical_architecture.md` + `execution_plan.md` are present (emitted)
+6. Update staging file: `WIZARD_COMPLETE = true`
+7. Append step-marker to `~/claude-wizard-draft/wizard_progress.md`:
  ```
  step_15: complete | <timestamp>
  ```
-10. Deliver CLOSE-13 closing message
+8. Deliver CLOSE-13 closing message
 
 The wizard exits cleanly after the closing message. NO first-build-prompt; NO git init; NO GitHub remote.
