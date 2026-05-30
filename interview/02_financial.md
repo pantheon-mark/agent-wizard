@@ -51,8 +51,10 @@ If all sub-step markers for this step are present but the step-level marker (`st
 > Which best describes your plan?
 >
 > - **Pro** ($20/month) — The standard paid plan for individuals. Fixed monthly cost with a daily message cap.
-> - **Max** ($100 or $200/month) — The highest personal tier. Much more generous limits, designed for heavy use.
-> - **Team** ($25–30/user/month) — A business plan shared across a team. Has its own billing structure and shared rate limits.
+> - **Max 5x** ($100/month) — A higher personal tier, with roughly 5× Pro's usage. For regular, heavier use.
+> - **Max 20x** ($200/month) — The highest personal tier, with roughly 20× Pro's usage. For intensive use.
+> - **Team Standard** ($100/user/month) — A business plan shared across a team; same price and per-seat capacity as Max 5x. Its own billing, shared rate limits.
+> - **Team Premium** ($200/user/month) — The higher business tier; same price and per-seat capacity as Max 20x.
 > - **Free** — You use Claude without paying.
 >
 > If you're not sure, check claude.ai/settings/billing — it shows your current plan.
@@ -80,13 +82,13 @@ Store: PLAN_TYPE = "free"
 Store: PLAN_TYPE = "pro"
 Store: OVERAGE_PLAN_TYPE = "rate-limited"
 
-**If Max:**
+**If Max 5x or Max 20x:**
 
 > Max gives you the most room to work with — your agents will rarely hit capacity constraints.
 
-**Ask:** "Is your Max plan the $100/month tier or the $200/month tier?"
+If the user already named the tier (Max 5x or Max 20x), use it. If they only said "Max," **ask:** "Is your Max plan the 5x ($100/month) tier or the 20x ($200/month) tier?" and **wait for the answer.**
 
-**Wait for answer.** Store: MAX_TIER = "$100" or "$200"
+Store: MAX_TIER = "$100" (Max 5x) or "$200" (Max 20x)
 
 > Here's how Max works with agents:
 >
@@ -97,10 +99,14 @@ Store: OVERAGE_PLAN_TYPE = "rate-limited"
 Store: PLAN_TYPE = "max"
 Store: OVERAGE_PLAN_TYPE = "rate-limited"
 
-**If Team:**
+**If Team Standard or Team Premium:**
 
-> Team plans work a bit differently. Let me ask two quick follow-ups.
->
+> Team plans work a bit differently. Let me confirm your tier and ask two quick follow-ups.
+
+If the user already named the tier (Team Standard or Team Premium), use it. If they only said "Team," **ask:** "Is it Team Standard (the $100/seat tier, same capacity as Max 5x) or Team Premium (the $200/seat tier, same capacity as Max 20x)?" and **wait for the answer.**
+
+Store: TEAM_TIER = "standard" (Team Standard) or "premium" (Team Premium)
+
 > **First:** Do you have access to your team's billing settings at claude.ai/settings/billing, or does someone else manage that?
 
 **Wait for answer.** Store: TEAM_BILLING_ACCESS = true or false
@@ -177,32 +183,42 @@ After storing the ceiling, provide calibration guidance based on the user's plan
 >
 > Since your Pro subscription is a fixed $20/month, the ceiling is about how much of your plan's capacity the system uses — not about surprise charges. If agents regularly bump against the ceiling or the daily message cap, that's a signal to either raise the ceiling, spread tasks across off-peak hours, or consider upgrading to Max.
 
-**If PLAN_TYPE = "max":**
+**If PLAN_TYPE = "max" or PLAN_TYPE = "team":**
 
-> A few things worth knowing about your ceiling and your Max plan together:
+First determine the **capacity tier** — the Max-equivalent envelope this plan provides (Team plans share their counterpart Max plan's price and per-seat capacity):
+
+- **5x tier:** Max 5x ($100) — or Team Standard ($100/seat).
+- **20x tier:** Max 20x ($200) — or Team Premium ($200/seat).
+
+**If the 5x tier (Max 5x or Team Standard):**
+
+> A few things worth knowing about your ceiling and your plan together:
 >
-> **Usage limits:** Max has significantly higher rate limits and priority access. Rate-limiting is rare — you'd need sustained heavy concurrent use before it kicks in. Your agents and personal use share the same generous allocation.
+> **Usage limits:** Your plan gives you roughly 5× Pro's capacity, with higher rate limits and priority access. Rate-limiting is uncommon in normal use.
 >
 > **What your ceiling supports:**
-> - **Under $50/month:** Conservative — leaves most of your Max capacity for personal use. Fine if your system is doing light, focused work.
-> - **$50–$100/month:** Comfortable range for a moderately active system with several agents.
-> - **$100–$200/month:** Room for a fully active system — multiple agents running frequently, handling complex work, with budget for intensive operations.
-> - **Over $200/month:** Your ceiling gives the system full room to operate. Combined with Max's generous rate limits, budget and capacity won't be constraints.
->
-> Your Max subscription is a fixed monthly cost — the ceiling is about how much capacity the system uses, not about surprise charges.
+> - **Under $50/month:** Conservative — light, focused work, leaving most of your capacity free.
+> - **$50–$100/month:** Comfortable for a moderately active system with several agents handling regular tasks.
+> - **Over $100/month:** Plenty of room; budget won't constrain normal operation.
 
-**If PLAN_TYPE = "team":**
+**If the 20x tier (Max 20x or Team Premium):**
 
-> A few things worth knowing about your ceiling and your Team plan together:
+> A few things worth knowing about your ceiling and your plan together:
 >
-> **Usage limits:** Your team's rate limits are shared across all [TEAM_SIZE] members. Your agents' activity counts toward the team total. Setting the ceiling conservatively is especially important here — you don't want agent activity to crowd out your teammates.
+> **Usage limits:** Your plan gives you roughly 20× Pro's capacity — the most headroom available. Rate-limiting is rare; you'd need sustained heavy concurrent use before it kicks in.
 >
 > **What your ceiling supports:**
-> - **Under $20/month:** Conservative and team-friendly. Light, focused work — good for starting out while you see how agent activity affects your team's shared usage.
-> - **$20–$50/month:** A reasonable range for a small agent team, as long as your team's total usage has headroom.
-> - **Over $50/month:** Make sure your team's plan can support this level of agent activity alongside everyone else's usage. Consider discussing with your team admin.
->
-> The key constraint on a Team plan is shared capacity — the ceiling protects both your budget and your teammates' access. If agents are bumping against limits, the first step is checking whether it's a team-wide capacity issue or just your allocation.
+> - **Under $50/month:** Conservative — leaves most of your capacity unused.
+> - **$50–$150/month:** Comfortable for a fully active system — multiple agents running frequently, handling complex work, with budget for intensive operations.
+> - **Over $150/month:** Full room to operate; budget and capacity won't be constraints.
+
+**If PLAN_TYPE = "team" (either tier), also add the shared-capacity note:**
+
+> One Team-specific note: your tier's capacity is **per seat**, but heavy agent activity still draws on your team's shared usage across all [TEAM_SIZE] members. Setting the ceiling conservatively keeps agent work from crowding out teammates. If someone else manages billing, let them know you're running an agent system — they'll see the usage.
+
+In all cases:
+
+> Your subscription is a fixed monthly cost — the ceiling is about how much of your plan's capacity the system uses, not about surprise charges.
 
 **If PLAN_TYPE = "unknown":**
 

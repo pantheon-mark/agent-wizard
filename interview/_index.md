@@ -22,3 +22,14 @@ Numbered markdown state machine files. Claude reads them in order when running t
 | `13_operations.md` | CONC-1, CONC-2, START-1, START-2, DRIFT-1, SCALE-1 through SCALE-4 | Operations settings |
 | `14_document_review.md` | DOC-1, DOC-2 | Document artifacts |
 | `15_close.md` | CLOSE-1 through CLOSE-4, GH-1, CLOSE-5 through CLOSE-14 | Closing sequence (GH-1 embedded after CLOSE-4) |
+
+## How answers become documents (the group flow)
+
+The 16 files above are the **question carriers**. Underneath, the wizard organizes the work into a small set of **logical groups** (defined as data in the `derivation_groups` registry — not a change to the file layout). The flow for each group is **record → derive → confirm (via preview) → close**:
+
+1. **Record** — each answer is written to a durable transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`) the moment it is given.
+2. **Derive** — once a group's inputs are complete, that group's foundation-doc content is derived from the recorded answers.
+3. **Preview + confirm** — the operator is shown a **rendered preview** of the group's document(s) and confirms before the group closes.
+4. **Close** — a group-close marker carrying a **source hash** is written, so a resumed session knows the group is done and can detect when an earlier answer was edited afterward.
+
+The complete system is **emitted in one pass at `15_close.md`** (CLOSE-EMIT) from the confirmed transcript. Mid-interview document writes are **retired** — earlier versions wrote `approach.md`, `technical_architecture.md`, and other docs partway through; now nothing is written until close, generated from exactly what the operator confirmed. Cold-resume reads **both** the step markers and the group markers, so an interrupted session resumes without re-asking answered questions or re-deriving confirmed (and still-fresh) groups; if an earlier answer feeding a confirmed group was edited, that group's confirmation is invalidated (its source hash no longer matches) and it is re-derived and re-confirmed.

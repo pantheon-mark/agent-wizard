@@ -61,6 +61,8 @@ Each file contains:
 - The exact questions to ask or steps to execute, in order
 - Completion criteria and handoff instruction to the next file
 
+**How the interview turns into the system (the document flow).** The wizard does not write your foundation documents one at a time as you answer. Instead it **records** every answer to a durable transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`), **derives** the document content in logical groups (your vision; then your approach and the agent roster; then how the agents coordinate; then what you approve versus what runs on its own; then testing and audit), **shows you a rendered preview** of each group's documents to confirm before moving on, and **emits the whole system in one pass at the end** (`15_close.md`) from the confirmed transcript. The numbered files above are still the question carriers — the logical groups are how the answers become documents. Earlier wizard versions wrote `approach.md`, `technical_architecture.md`, and other documents partway through the interview; that is retired, so nothing is ever left half-written. The documents appear at close, generated from exactly what you confirmed.
+
 ---
 
 ## Operating rules
