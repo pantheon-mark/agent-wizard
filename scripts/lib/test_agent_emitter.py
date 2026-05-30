@@ -94,6 +94,56 @@ class AgentEmitterTests(unittest.TestCase):
         self.assertEqual(written, [])
         self.assertFalse((staging / "agents").exists())
 
+    # --- T7 / C-008: cron-claim consumption into the emitted cron_config.md ---
+
+    @staticmethod
+    def _cron_plan():
+        """A valid plan whose single agent carries a cron cadence (the requires_cron
+        path: assembler stamps orchestrator.schedule onto the agent's cron_cadence)."""
+        import copy
+        p = copy.deepcopy(_valid_plan())
+        p["agents"][0]["cron_cadence"] = "0 * * * *"
+        return p
+
+    def _cron_entry_rows(self, staging):
+        """The cron_config.md table rows that name the scheduled agent 'researcher'."""
+        cron = (staging / "agents/cron/cron_config.md").read_text()
+        rows = [ln for ln in cron.splitlines()
+                if ln.lstrip().startswith("|") and "researcher" in ln]
+        return cron, rows
+
+    def test_cron_agent_cadence_reaches_cron_config(self):
+        # The requires_cron agent's cadence must reach the emitted cron config as a
+        # scheduled entry — today the emitter copies the static template verbatim and
+        # the cadence is dropped on the floor.
+        staging, _ = self._emit(self._cron_plan())
+        cron, rows = self._cron_entry_rows(staging)
+        self.assertTrue(rows, "no cron table row for the requires_cron agent 'researcher'")
+        self.assertTrue(any("0 * * * *" in ln for ln in rows),
+                        "the agent's cron cadence did not reach its cron_config row")
+        self.assertNotIn("No entries yet", cron,
+                         "cron config still shows the empty-state note despite a scheduled agent")
+
+    def test_scheduled_job_invokes_orchestrator_by_default(self):
+        # Control-plane rule: a scheduled job invokes the Orchestrator (control plane) by
+        # default; directly scheduling the specialist (agents/scripts/<id>.sh) is the
+        # declared exception, not the default.
+        staging, _ = self._emit(self._cron_plan())
+        _cron, rows = self._cron_entry_rows(staging)
+        self.assertTrue(rows)
+        self.assertTrue(any("orchestrator_prompt.md" in ln for ln in rows),
+                        "scheduled entry does not invoke the Orchestrator by default")
+        self.assertFalse(any("scripts/researcher.sh" in ln for ln in rows),
+                         "scheduled entry directly invokes the specialist (declared exception, not the default)")
+
+    def test_no_cron_agents_preserves_empty_state_note(self):
+        # Differential-gate baseline: with no scheduled agent the cron config keeps its
+        # honest empty-state note (byte-equivalent to the prior verbatim copy). Guards
+        # the empty branch so the retirement differential stays green.
+        staging, _ = self._emit(_valid_plan())  # researcher carries no cron_cadence
+        cron = (staging / "agents/cron/cron_config.md").read_text()
+        self.assertIn("No entries yet", cron)
+
 
 if __name__ == "__main__":
     unittest.main()

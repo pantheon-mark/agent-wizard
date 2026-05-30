@@ -10,8 +10,7 @@
 
 | Agent | What it does on schedule | Schedule | Cron expression | Invocation command | Last run | Last status |
 |-------|------------------------|----------|----------------|-------------------|----------|------------|
-
-*No entries yet. Cron entries are added during the wizard closing sequence.*
+{{CRON_ENTRIES}}
 
 ---
 

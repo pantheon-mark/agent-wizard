@@ -62,6 +62,50 @@ def _bash_context_array(items: List[str]) -> str:
     return "\n  ".join(f'"$PROJECT_ROOT/{f}"' for f in items)
 
 
+# Human-readable schedule labels — mirror the cron_config.md "Schedule reference" table.
+_CRON_HUMAN = {
+    "0 6 * * *": "Every day at 6 AM",
+    "0 0 * * *": "Every day at midnight",
+    "0 * * * *": "Every hour",
+    "0 9 * * 1-5": "Every weekday at 9 AM",
+    "0 20 * * 0": "Every Sunday at 8 PM",
+}
+
+# Empty-state note. The leading newline reproduces the blank line the static template
+# carried between the table separator and the note, so the no-cron case stays
+# byte-equivalent to the prior verbatim copy (preserves the retirement differential).
+_CRON_EMPTY_NOTE = "\n*No entries yet. Cron entries are added during the wizard closing sequence.*"
+
+
+def _orchestrator_invocation(plan: EmissionPlan) -> str:
+    """The default scheduled-run command (the control plane): invoke the Orchestrator
+    headlessly at the resolved high tier — NOT a specialist invocation script. The
+    Orchestrator reads the work queue and routes to the specialist; directly scheduling
+    a specialist is the declared advanced exception, not the default."""
+    model = plan.model_tiers[plan.orchestrator["model_tier_high"]]
+    return (f'claude --model {model} --print "Act as the Orchestrator: read '
+            f'agents/prompts/orchestrator_prompt.md, process the work queue, route to specialists."')
+
+
+def _render_cron_entries(plan: EmissionPlan) -> str:
+    """Render the cron_config.md table body from agents carrying a cron_cadence.
+
+    Each scheduled agent (the requires_cron path: the assembler stamps
+    orchestrator.schedule onto cron_cadence) becomes one row whose invocation targets
+    the Orchestrator by default. With no scheduled agent, the honest empty-state note
+    is preserved."""
+    invocation = _orchestrator_invocation(plan)
+    rows: List[str] = []
+    for a in plan.agents:
+        if not a.cron_cadence:
+            continue
+        first_line = (a.role_description.replace("|", "\\|").splitlines() or [""])
+        what = first_line[0] if first_line else ""
+        human = _CRON_HUMAN.get(a.cron_cadence, "Custom schedule")
+        rows.append(f"| {a.id} | {what} | {human} | `{a.cron_cadence}` | {invocation} | — | — |")
+    return "\n".join(rows) if rows else _CRON_EMPTY_NOTE
+
+
 def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Path) -> List[Path]:
     """Emit the /agents/ tree for `plan` into `staging_dir`. Returns paths written.
 
@@ -144,10 +188,14 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
         script_path.chmod(SCRIPT_MODE)
         written.append(script_path)
 
-    # --- Cron config (static template; runtime-populated) ---
+    # --- Cron config — scheduled agents become Orchestrator-invoked entries (control-plane default) ---
     cron_out = cron_dir / "cron_config.md"
-    cron_out.write_text((build_repo_root / CRON_TEMPLATE).read_text(encoding="utf-8"), encoding="utf-8")
-    written.append(cron_out)
+    written.append(_emit_from_template(
+        build_repo_root / CRON_TEMPLATE,
+        cron_out,
+        {"CRON_ENTRIES": _render_cron_entries(plan)},
+        "cron_config.md",
+    ))
 
     # --- Roster (generated; the Orchestrator health check reads this) ---
     roster_out = agents_dir / "roster.md"
