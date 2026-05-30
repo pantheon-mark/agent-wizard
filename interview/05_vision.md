@@ -21,7 +21,7 @@ If it is: write the current staging file to disk, give the user the following in
 >
 > "Resume wizard from 05_vision.md. NTFY_CONFIRMED = true and EMAIL_CONFIRMED = true. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then continue from where you left off."
 
-**Important:** The vision interview is the most open-ended phase of the wizard. Do not begin it unless you are confident the full interview — including draft, revision round, and disk write — will complete before compaction risk. If there is any doubt, clear context first.
+**Important:** The vision interview is the most open-ended phase of the wizard. Do not begin it unless you are confident the full interview — including field derivation, the rendered-preview confirmation round, and the group close — will complete before compaction risk. If there is any doubt, clear context first.
 
 ---
 
@@ -37,7 +37,7 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 Before any step-05 user-facing question fires, run `wizard/interview/_pre_step_05_recheck.md`. This module re-evaluates the provisional `shape_hypothesis` against accumulated context (steps 02-04 answers + step 03 UP-6 regulatory exposure), evaluates the 4 stop conditions, and triggers the unsupported-shape transition if shape revises to non-v1-supported.
 
-**The re-check is mandatory F-1.** Hard stop before vision generation — shape and stop conditions must be resolved here.
+**The re-check is mandatory.** Hard stop before vision generation — shape and stop conditions must be resolved here.
 
 If `step_05_pre_recheck: complete` is already in `~/claude-wizard-draft/wizard_progress.md` (e.g., resuming a partial step 05), skip the pre-recheck and proceed to the step opening. Otherwise, run the pre-recheck module first.
 
@@ -83,7 +83,25 @@ Before any step-05 user-facing question fires:
 
 The six questions are conversational — not a form. The user may answer in any order, blend categories, or volunteer information across multiple categories in a single answer. Accept everything. Do not redirect the user or ask them to stay on topic.
 
-**Maintain an internal approach-level content buffer throughout.** Any time the user says something about implementation, technology, process, or mechanics ("I imagine it would work by...", "I was thinking the agents could..."), note it internally but do not react to it or ask follow-up questions about it here. This buffer is carried forward after the vision document is confirmed — it seeds the approach document draft. The user will not be asked to repeat themselves.
+**Maintain an internal approach-level content buffer throughout.** Any time the user says something about implementation, technology, process, or mechanics ("I imagine it would work by...", "I was thinking the agents could..."), note it internally but do not react to it or ask follow-up questions about it here. This buffer is carried forward after the vision is confirmed — it seeds the approach document draft. The user will not be asked to repeat themselves.
+
+---
+
+## Recording answers (event transcript)
+
+This step records each answer to an **event transcript** at `~/claude-wizard-draft/wizard_transcript.jsonl` in addition to the staging file. The transcript is the authoritative record the system is built from; the staging file is the human-readable mirror used for resume. After each question below is answered, record it:
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid <Q-ID> --group vision --value "<the operator's answer>"
+```
+
+If a conditional question (V-7 follow-up, V-7b) is validly skipped, record the skip instead:
+
+```
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid <Q-ID> --group vision --reason "<why it was skipped>"
+```
+
+Keep writing the staging file and the sub-step markers exactly as before — the transcript runs alongside them, it does not replace them.
 
 ---
 
@@ -239,74 +257,68 @@ Write sub-step marker: Append `step_05_V-7b: complete | <timestamp>` to `~/claud
 
 ---
 
-## V-8 — Draft, one round of changes, confirm, write to disk [DYNAMIC]
+## V-8 — Derive the vision fields, render the preview, confirm, close the group [DYNAMIC]
 
-### Step 1 — Draft
+The vision answers are complete. Instead of hand-writing a vision document and saving it to disk now, **derive the vision FIELDS, show the operator the rendered vision draft, take one round of changes, and close the vision group.** The vision document file is emitted by the generator at the end of the interview — not written here.
 
-Draft the vision document from everything the user has said. Sort their answers into the six categories. Use plain, non-technical language. Write in the second person ("Your system...") or declarative statements — not as a transcript of the interview. The document should read as a coherent statement of intent, not a Q&A summary.
+### Step 1 — Derive the vision fields
 
-**Vision document structure:**
+Derive each vision field from the recorded answers, using the matching class derivation prompt (`wizard/foundation-bundles/v0/derivation-prompts/<class>.md`) and the field manifest (`wizard/foundation-bundles/v0/field-manifests/markdown-CC.json`, which names each field's class and the question-IDs that feed it). All vision fields are **extraction** class — preserve the operator's own words; do not polish or invent. Sort the answers into the six categories; thin is fine; do not pad or fabricate.
+
+Fields: `PROJECT_NAME` and `CORE_PURPOSE` (from P1-1 / P1-2 recorded at step 01), `VISION_PURPOSE`, `VISION_GOALS`, `VISION_AUDIENCE_OUTPUTS`, `VISION_SCOPE_BOUNDARY`, `VISION_CONSTRAINTS`, `VISION_SUCCESS_CRITERIA`.
+
+For each, record the derived value (the command assembles the audit envelope from the manifest + the class prompt — you supply only the value and the question-IDs you actually drew from):
 
 ```
-# Vision
-
-## Purpose
-[What problem this solves or what it makes possible]
-
-## Goals, Objectives, and Priorities
-[Day-to-day picture of success; the one or two most important outcomes]
-
-## Audience and Outputs
-[Who benefits; what form the outputs take]
-
-## Scope Boundary
-[What the system is explicitly not responsible for]
-
-## Constraints
-[What the system must always do; what it must never do without permission]
-
-## Success Criteria
-[How the user will know in six months whether this was worth building]
+python3 wizard/scripts/interview_cli.py derive-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field VISION_PURPOSE --value "<derived value, in the operator's words>" --sources V-1
 ```
 
-Thin sections are fine. Do not pad, infer, or fabricate. If a category is thin, write what was said — even one sentence is a valid entry.
+### Step 2 — Constraint elevation
 
-### Step 2 — Present with explicit one-round framing
+Scan the confirmed vision constraints. If any names a rule the system must **always stop and ask about** (a top-level always-ask rule), derive `TIER_1_ADDITIONS` — a policy field: state both what is permitted and what is forbidden. Record it with `derive-field --field TIER_1_ADDITIONS --sources V-5,V-7`. If the constraints contain no such rule, skip this step. These additions are carried forward into the later approval-rules step.
 
-Present the draft and say exactly this before the user responds:
+### Step 3 — Render the preview and show the operator
 
-> Here's the vision document based on what you've told me. Take a look and tell me anything that's wrong or missing — you have one round of changes here. The system is designed to keep this document current as things evolve, so anything else that comes up during the build is easy to update later. Good enough to build from is the right standard here, not perfect. What would you like to change, if anything?
+```
+python3 wizard/scripts/interview_cli.py preview-group --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --group vision --source-version v0.4.0 --build-repo-root <path to the wizard build repo root> --auto SYSTEM_SHAPE=markdown-CC --auto FOUNDATION_ONLY_MODE=<false|true> --auto WIZARD_VERSION=v0.4.0 --auto LAST_UPDATED_DATE=<today> --auto LAST_UPDATED_TRIGGER="initial build" --auto CURRENT_SPRINT_NUMBER=1
+```
+
+Show the operator the **rendered vision markdown** the command prints — the actual document they will receive, not the field values.
+
+### Step 4 — One round of changes, then confirm
+
+Say exactly this before the operator responds:
+
+> Here's your vision document based on what you've told me. Take a look and tell me anything that's wrong or missing — you have one round of changes here. The system keeps this document current as things evolve, so anything else that comes up later is easy to update. Good enough to build from is the right standard here, not perfect. What would you like to change, if anything?
 
 **Wait for answer.**
 
-- If the user makes no changes: confirm and proceed to Step 3.
-- If the user requests changes: incorporate them now. Do not open another round. Confirm the updated draft and proceed to Step 3.
+- **No changes:** confirm each field — `python3 wizard/scripts/interview_cli.py confirm-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field <FIELD> --group vision --state accepted`.
+- **Changes:** incorporate them into the affected field(s), re-derive those fields (Step 1), then confirm with the edited value — add `--state accepted --value "<edited value>"`. Re-render the preview once (Step 3) to show the updated draft, then confirm. Do not open a second round.
 
-The one-round limit is set before the user responds — it cannot be renegotiated after the fact.
+The one-round limit is set before the operator responds — it cannot be renegotiated after the fact.
 
-### Step 3 — Write to disk
-
-Write the confirmed vision document to:
+### Step 5 — Close the vision group
 
 ```
-[PROJECT_DIR]/vision.md
+python3 wizard/scripts/interview_cli.py close-group --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --progress ~/claude-wizard-draft/wizard_progress.md --shape markdown-CC --group vision
 ```
 
-Where `PROJECT_DIR` is the system project directory established in Phase 1 (`01_phase1_capture.md`).
+This records the `group_vision_confirmed` marker (carrying the source hash). The group cannot close unless every vision field is confirmed. **Do NOT write `step_05: complete` until this succeeds** — a step marker before its group is confirmed is an illegal state.
+
+**Do NOT write a `vision.md` file here.** The vision document is emitted by the generator at the end of the interview from the confirmed transcript; the operator has already seen and confirmed the rendered draft (Steps 3–4).
 
 **Say:**
 
-> Vision document saved. This is the anchor your system will build from — everything else references it. It's a living document, so when your goals evolve, we update it.
+> Vision confirmed. This is the anchor your system will build from — everything else references it. It stays current as your goals evolve.
 
-Update the staging file: VISION_CONFIRMED = true
+Update the staging file (human-readable mirror): VISION_CONFIRMED = true.
 
 Write sub-step marker: Append `step_05_V-8: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
-### Step 4 — Carry forward approach content
+### Step 6 — Carry forward approach content
 
-Do not discard the approach-level content buffer maintained during this interview. Note it internally. It will be used to seed the approach document draft in the next interview file.
-
-Do not mention the buffer to the user. Do not ask them to confirm or review it at this stage.
+Do not discard the approach-level content buffer maintained during this interview. Note it internally — it seeds the approach group in the next interview file. Do not mention the buffer to the user or ask them to confirm it here.
 
 ---
 
@@ -332,9 +344,9 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-V-1 through V-8 complete. Vision document confirmed by the user and written to `[PROJECT_DIR]/vision.md`. VISION_CONFIRMED = true in the staging file. Approach content buffer active and ready to carry forward.
+V-1 through V-8 complete. The vision fields are derived, the operator has confirmed the rendered draft, and the vision group is closed (`group_vision_confirmed` recorded). VISION_CONFIRMED = true in the staging file. **No `vision.md` was written — the generator emits it at the end.** Approach content buffer active and ready to carry forward.
 
-**Write completion marker:** Append `step_05: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+**Write completion marker:** Append `step_05: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`. (Only after `group_vision_confirmed` is recorded — the step marker is illegal before its group closes.)
 
 Proceed to `06_approach.md`.
 
@@ -344,7 +356,7 @@ Proceed to `06_approach.md`.
 
 **Disposition: PRODUCE.**
 
-In foundation-only mode, this step's behavior is identical to the normal path. Vision is a foundation-level artifact; shape-agnostic; the same questions (V-1 through V-8), draft / revision round, and disk write apply.
+In foundation-only mode, this step's behavior is identical to the normal path. Vision is a foundation-level artifact; shape-agnostic; the same questions (V-1 through V-8), the same derive / render-preview / one-round confirmation / group-close flow apply (pass `--auto FOUNDATION_ONLY_MODE=true` to the preview command). No `vision.md` is written here in either mode; the vision document is emitted at the end — in foundation-only mode through the generator's foundation-only branch.
 
 Follow the existing step content above. The vision document is one of the four foundation docs per `_foundation_only_mode_gate.md` § 5.
 

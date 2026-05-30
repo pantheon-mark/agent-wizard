@@ -85,6 +85,12 @@ The project folder will be created at `~/[folder-name]` — directly in the home
 
 Write sub-step marker: Append `step_01_P1-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
+**Record to the event transcript** (the raw answer; the vision step derives `PROJECT_NAME` from it later):
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid P1-1 --group vision --value "<the project name the operator gave>"
+```
+
 ---
 
 ## P1-2 — Core purpose
@@ -98,6 +104,12 @@ Accept any answer. One sentence is the goal but do not push back if they give mo
 **Store:** CORE_PURPOSE = the user's answer
 
 Write sub-step marker: Append `step_01_P1-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+**Record to the event transcript** (the raw answer; the vision step derives `CORE_PURPOSE` from it later):
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid P1-2 --group vision --value "<the operator's one-sentence purpose>"
+```
 
 ---
 

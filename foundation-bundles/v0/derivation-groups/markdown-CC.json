@@ -15,12 +15,12 @@
   "groups": [
     {
       "group_id": "vision",
-      "input_question_ids": ["P1-1", "P1-2", "V-1", "V-2", "V-3", "V-4", "V-5", "V-6", "V-7", "V-7b", "V-8"],
+      "input_question_ids": ["P1-1", "P1-2", "V-1", "V-2", "V-3", "V-4", "V-5", "V-6", "V-7", "V-7b"],
       "target_fields": ["PROJECT_NAME", "CORE_PURPOSE", "VISION_PURPOSE", "VISION_GOALS", "VISION_AUDIENCE_OUTPUTS", "VISION_SCOPE_BOUNDARY", "VISION_CONSTRAINTS", "VISION_SUCCESS_CRITERIA"],
       "close_after": "step_05",
       "confirmation_marker": "group_vision_confirmed",
       "preview_docs": ["vision.md"],
-      "skip_satisfied_if": ["V-7b"],
+      "skip_satisfied_if": ["V-7", "V-7b"],
       "barrier_stakes": "high",
       "special_behaviors": ["vision constraints elevated to top-level policy (policy class)"]
     },
