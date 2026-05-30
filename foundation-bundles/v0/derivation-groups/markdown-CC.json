@@ -1,0 +1,71 @@
+{
+  "contract_id": "derivation-groups",
+  "contract_version": "derivation-groups-v1",
+  "system_shape": "markdown-CC",
+  "registry_note": "Logical interview groups as DATA, not file layout. Each group declares which interview question-IDs feed it (input_question_ids), which foundation-doc fields it derives (target_fields), the step after which all its inputs are captured (close_after), its confirmation marker, the foundation doc(s) rendered at its barrier (preview_docs), and the conditional question-IDs whose valid-skip counts as satisfied (skip_satisfied_if). The numbered interview files remain physical CARRIERS; the state machine and disk-first cold-resume are preserved. vision and approach_roster are the high-stakes narrative groups the operator most needs to validate as rendered drafts; they confirm early. The operational groups confirm at their natural late close step.",
+  "auto_global_fields": [
+    "SYSTEM_SHAPE",
+    "FOUNDATION_ONLY_MODE",
+    "WIZARD_VERSION",
+    "LAST_UPDATED_DATE",
+    "LAST_UPDATED_TRIGGER",
+    "CURRENT_SPRINT_NUMBER"
+  ],
+  "auto_global_fields_note": "auto-class fields (mechanical fill at generation time) that are available early and are included in EVERY group's barrier preview inputs, so the strict single-doc preview renderer does not fail-fast on a global placeholder. These are NOT owned by any group.",
+  "groups": [
+    {
+      "group_id": "vision",
+      "input_question_ids": ["P1-1", "P1-2", "V-1", "V-2", "V-3", "V-4", "V-5", "V-6", "V-7", "V-7b", "V-8"],
+      "target_fields": ["PROJECT_NAME", "CORE_PURPOSE", "VISION_PURPOSE", "VISION_GOALS", "VISION_AUDIENCE_OUTPUTS", "VISION_SCOPE_BOUNDARY", "VISION_CONSTRAINTS", "VISION_SUCCESS_CRITERIA"],
+      "close_after": "step_05",
+      "confirmation_marker": "group_vision_confirmed",
+      "preview_docs": ["vision.md"],
+      "skip_satisfied_if": ["V-7b"],
+      "barrier_stakes": "high",
+      "special_behaviors": ["vision constraints elevated to top-level policy (policy class)"]
+    },
+    {
+      "group_id": "approach_roster",
+      "input_question_ids": ["UP-4", "AP-1", "AP-2", "AP-3", "ADV-1", "ADV-2", "ADV-3", "ADV-4", "ARCH-2", "ARCH-3"],
+      "target_fields": ["APPROACH_SOLUTION_BRIEF", "AGENT_ROSTER_ROWS"],
+      "close_after": "step_08",
+      "confirmation_marker": "group_approach_roster_confirmed",
+      "preview_docs": ["approach.md"],
+      "skip_satisfied_if": ["ADV-2", "ADV-3", "ADV-4"],
+      "barrier_stakes": "high",
+      "special_behaviors": ["voice-and-style seeding (synthesis class; from literacy/info-preference/verbosity/style answers + the operator's vision voice)", "agent-intent derivation (agent roster answers -> agent intents + resource claims)", "name-consistency (extraction; names used verbatim everywhere)"]
+    },
+    {
+      "group_id": "orchestration_build",
+      "input_question_ids": ["P1-4", "ARCH-1", "CRED-1", "CRED-1a", "CRED-2", "CRED-3", "CRED-4", "CRED-5", "SCALE-1", "SCALE-2", "SCALE-3", "SCALE-4", "CONC-2"],
+      "target_fields": ["ORCHESTRATION_MODEL", "INTEGRATIONS", "SCALE_TIER", "SCALE_TIER_BASIS", "SCALE_TIER_RATIONALE", "COMPLIANCE_GAPS_CONTENT", "TASK_COMPLETION_CHECKLISTS", "BUILD_PHASES_ROWS", "EXECUTION_SEQUENCE", "MVP_CORE_FUNCTION", "MVP_MINIMUM_VIABLE_STATE", "MVP_SUCCESS_CONDITION"],
+      "close_after": "step_13",
+      "confirmation_marker": "group_orchestration_build_confirmed",
+      "preview_docs": ["technical_architecture.md"],
+      "skip_satisfied_if": ["CRED-1a", "CRED-2", "CRED-3", "CRED-4", "CRED-5"],
+      "barrier_stakes": "medium"
+    },
+    {
+      "group_id": "hitl_autonomy",
+      "input_question_ids": ["FIN-1", "FIN-2", "UP-1", "UP-2", "UP-3", "UP-5", "NOTIF-1", "NOTIF-2", "NOTIF-3", "NOTIF-4", "NOTIF-5", "NOTIF-6", "NOTIF-7", "ARCH-4", "ERR-1", "ERR-2", "CONC-1", "START-1", "START-2", "QA-2"],
+      "target_fields": ["AUTONOMY_LEVEL", "HITL_MAP_ROWS"],
+      "close_after": "step_13",
+      "confirmation_marker": "group_hitl_autonomy_confirmed",
+      "preview_docs": ["execution_plan.md"],
+      "skip_satisfied_if": ["NOTIF-4", "NOTIF-5", "NOTIF-6", "NOTIF-7"],
+      "barrier_stakes": "medium",
+      "special_behaviors": ["AUTONOMY_LEVEL is a provisional auto-default carrying a decision-field flag and a revisit trigger (the operator authority profile is pending)", "HITL_MAP_ROWS is a policy-class rule set with explicit negative permissions"]
+    },
+    {
+      "group_id": "tests_audit",
+      "input_question_ids": ["GATE-1", "GATE-2", "GATE-3", "GATE-4", "QA-1", "QA-3", "QA-4", "ARCH-5", "DRIFT-1"],
+      "target_fields": ["AGENT_SPECIFIC_TESTS", "DRIFT_ANALYSIS_CADENCE"],
+      "close_after": "step_13",
+      "confirmation_marker": "group_tests_audit_confirmed",
+      "preview_docs": ["test_cases.md", "audit_framework.md"],
+      "skip_satisfied_if": ["GATE-3", "GATE-4", "QA-4"],
+      "barrier_stakes": "medium",
+      "special_behaviors": ["deferred-items population (extraction/classification)"]
+    }
+  ]
+}
