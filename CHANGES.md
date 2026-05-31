@@ -28,8 +28,8 @@ Entries appear newest-first.
 - How document correctness is checked: by **your confirmation of the rendered previews** during the interview, plus internal checks that the documents are structurally complete and that your derived answers actually appear in them. A full automatic comparison against the old build path is not available, because that path has been retired.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** 975e6e8
-**Public repo commit:** (filled after subtree push)
+**Source-Meta-Commit:** c5cb0b4
+**Public repo commit:** ab7a4b1
 
 ---
 
