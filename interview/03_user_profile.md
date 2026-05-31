@@ -278,9 +278,67 @@ Write sub-step marker: Append `step_03_UP-6: complete | <timestamp>` to `~/claud
 
 ---
 
+## UP-7 — Authority profile (how much the system acts on its own)
+
+This sets how much the system does on its own versus checking with you first. Three short confirmations. Propose a starting point from what the user has already told you (UP-1 through UP-6 + their project), per the wizard principle — but the two risk questions (UP-7a, UP-7b) require an **explicit pick**, not a passive "sounds good": they set the system's safety limits, and an inferred-then-rubber-stamped answer is not a real authorization. Do not accept "whatever you think" for those two — if the user is unsure, walk through the options with a concrete example from their project and let them choose.
+
+### UP-7a — How high-stakes is the work? (require an explicit choice)
+
+Propose a level from their UP-6 answer (regulated data) + project description, then ask them to pick directly.
+
+**Say:**
+
+> One important setting: how high-stakes is the work this system will handle? This controls how careful it is by default.
+>
+> From what you've told me so far, I'd guess **[proposed level + one-line why]**. Because this sets the system's safety limits, I'd like you to choose directly:
+>
+> 1. **High** — it touches money, regulated or sensitive data, or anything where a mistake is costly or hard to undo
+> 2. **Medium** — everyday operations; mistakes are recoverable but still matter
+> 3. **Low** — experimental, low-stakes, or easily-reversed work
+>
+> Which one fits best?
+
+**Wait for an explicit selection** (1, 2, or 3). Store DR = high | medium | low.
+
+Record: `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid DR --group hitl_autonomy --value "<DR>"`
+
+Write sub-step marker: Append `step_03_DR: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+### UP-7b — How easily can mistakes be undone? (require an explicit choice)
+
+**Say:**
+
+> And if the system does something you didn't want, how easy is it for you to undo it?
+>
+> 1. **Easy** — I can roll almost anything back without much cost
+> 2. **Mixed** — some things undo easily, some don't
+> 3. **Hard** — I'd rather it avoid anything that can't be cleanly reversed
+
+**Wait for an explicit selection.** Store REV = high (easy) | medium (mixed) | low (hard).
+
+Record: `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid REV --group hitl_autonomy --value "<REV>"`
+
+Write sub-step marker: Append `step_03_REV: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+### UP-7c — A second opinion for reviews? (propose and confirm)
+
+**Say:**
+
+> Last one: for important work, it can help to get a second opinion from another AI assistant before the system acts. Do you have access to another assistant — like ChatGPT or Gemini — you'd be willing to use for that?
+
+**Wait for answer.** Store RC = "yes-budget" (yes, and willing to pay if needed) | "yes-limited" (yes, free tier only) | "no". If unsure, default to "no" and note it can be added later.
+
+Record: `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid RC --group hitl_autonomy --value "<RC>"`
+
+Write sub-step marker: Append `step_03_RC: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+**How these are used (do not explain unless asked):** these answers, with the autonomy/involvement answers (UP-3, UP-5), become the operator's authority profile. The system's starting autonomy level is the **most cautious** of what the user wants and what the risk/reversibility allow — and because this is a brand-new system, it begins a notch more cautious and earns more independence over time. Routine, low-risk upkeep always runs on its own; the system never asks before *everything*. The derived level + the resulting ask-first rules are shown to the user for confirmation at the execution-plan preview later — they are not finalized here.
+
+---
+
 ## Synthesis step [INTERNAL]
 
-After all five answers are recorded, synthesize a one-paragraph user profile and confirm it with the user before proceeding.
+After all five user-profile answers plus the three authority confirmations (UP-7a/b/c) are recorded, synthesize a one-paragraph user profile and confirm it with the user before proceeding.
 
 **Say:**
 
@@ -330,7 +388,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-All five dimensions answered and confirmed. Profile summary stored.
+All five user-profile dimensions answered and confirmed, plus the three authority confirmations recorded (UP-7a domain risk + UP-7b reversibility — each an explicit choice — and UP-7c review capability). Profile summary stored.
 
 **Write completion marker:** Append `step_03: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

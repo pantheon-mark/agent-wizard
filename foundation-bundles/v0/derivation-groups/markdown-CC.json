@@ -47,14 +47,14 @@
     },
     {
       "group_id": "hitl_autonomy",
-      "input_question_ids": ["FIN-1", "FIN-2", "UP-1", "UP-2", "UP-3", "UP-5", "NOTIF-1", "NOTIF-2", "NOTIF-3", "NOTIF-4", "NOTIF-5", "NOTIF-6", "NOTIF-7", "ARCH-4", "ERR-1", "ERR-2", "CONC-1", "START-1", "START-2", "QA-2"],
+      "input_question_ids": ["FIN-1", "FIN-2", "UP-1", "UP-2", "UP-3", "UP-5", "NOTIF-1", "NOTIF-2", "NOTIF-3", "NOTIF-4", "NOTIF-5", "NOTIF-6", "NOTIF-7", "ARCH-4", "ERR-1", "ERR-2", "CONC-1", "START-1", "START-2", "QA-2", "DR", "REV", "RC"],
       "target_fields": ["AUTONOMY_LEVEL", "HITL_MAP_ROWS"],
       "close_after": "step_13",
       "confirmation_marker": "group_hitl_autonomy_confirmed",
       "preview_docs": ["execution_plan.md"],
       "skip_satisfied_if": ["NOTIF-4", "NOTIF-5", "NOTIF-6", "NOTIF-7"],
       "barrier_stakes": "medium",
-      "special_behaviors": ["AUTONOMY_LEVEL is a provisional auto-default carrying a decision-field flag and a revisit trigger (the operator authority profile is pending)", "HITL_MAP_ROWS is a policy-class rule set with explicit negative permissions"]
+      "special_behaviors": ["AUTONOMY_LEVEL is derived from the operator authority profile: a ceiling/min of the operator's desired autonomy capped by domain risk, reversibility, and trust posture; routine action classes (artifact quality, workflow hygiene) stay autonomous even at the lowest level", "HITL_MAP_ROWS is a policy-class rule set with explicit negative permissions, shaped by the authority profile's per-class posture", "the operator authority profile derives from DR (domain risk, force-active choice), REV (reversibility tolerance, force-active choice), RC (review capability), and the existing UP answers; trust posture is probationary at first build and lifts over time"]
     },
     {
       "group_id": "tests_audit",

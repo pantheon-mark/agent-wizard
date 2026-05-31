@@ -189,7 +189,7 @@ def _drive_hitl_autonomy_group(transcript, progress):
     _drive_orchestration_build_group(transcript, progress)
     _record_sources(transcript, "hitl_autonomy",
                     {"FIN-1", "FIN-2", "UP-1", "UP-2", "UP-3", "UP-5", "NOTIF-1", "NOTIF-2", "NOTIF-3",
-                     "ARCH-4", "ERR-1", "ERR-2", "CONC-1", "START-1", "START-2", "QA-2"})
+                     "ARCH-4", "ERR-1", "ERR-2", "CONC-1", "START-1", "START-2", "QA-2", "DR", "REV", "RC"})
     # AUTONOMY_LEVEL: provisional auto-default (F-3); confirmed accepted_uncertain_for_now + revisit.
     _derive_confirm(transcript, "AUTONOMY_LEVEL", "hitl_autonomy", "2",
                     state="accepted_uncertain_for_now", revisit="operator-authority-profile-available")

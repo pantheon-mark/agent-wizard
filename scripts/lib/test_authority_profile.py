@@ -99,7 +99,7 @@ class LineageAndEnvelopeTests(unittest.TestCase):
         # Vision / Phase-1 question-IDs never leak into the authority lineage.
         self.assertNotIn("V-1", p.source_question_ids)
         self.assertNotIn("P1-2", p.source_question_ids)
-        for q in ("UP-3", "UP-6", "REV"):
+        for q in ("UP-3", "DR", "REV"):
             self.assertIn(q, p.source_question_ids)
 
     def test_autonomy_level_envelope_is_a_classification_decision(self):

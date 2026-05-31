@@ -6,7 +6,9 @@ trust posture, plus review capability. The non-deterministic step — proposing 
 from the operator's earlier interview answers (UP-1/UP-3/UP-4/UP-5/UP-6) plus the reversibility
 (REV) and review-capability (RC) probes — happens upstream as a derivation prompt the operator
 confirms; THIS module is the deterministic mapping of confirmed dimensions -> emitted authority
-fields, so it is fully testable and replayable.
+fields, so it is fully testable and replayable. The high-stakes constraints (domain risk, via the
+DR confirmation; reversibility, via REV) are force-active operator choices, not passive defaults;
+trust posture is auto-'probationary' at first build and lifts over time via the earn-up path.
 
 Emitted authority surface (per field-manifests/markdown-CC.json): exactly
   - AUTONOMY_LEVEL  (enum "1"/"2"/"3")
@@ -45,8 +47,8 @@ DIMENSION_SOURCES = {
     "desired_autonomy": ["UP-3", "UP-5"],
     "reversibility_tolerance": ["REV"],
     "approval_latency": ["UP-5"],
-    "domain_risk": ["UP-6"],
-    "trust_posture": ["UP-5"],
+    "domain_risk": ["DR"],
+    "trust_posture": [],   # auto-'probationary' at first build (policy default; no operator probe at v0)
     "review_capability": ["RC"],
 }
 
