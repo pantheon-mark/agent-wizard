@@ -12,6 +12,27 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-31 — the wizard now tailors how independently your system works to YOUR preferences
+
+**Public-facing change:** the wizard now asks a short, plain-language set of questions about **how you want to work with your system** and uses your answers to set how much the agent team does on its own versus checks with you first — instead of always falling back to the most cautious "ask me about everything" placeholder. This is the operator-facing half of the setup that earlier releases had stubbed out.
+
+- **A few questions about working style.** Around the user-profile step, the wizard now asks: how hands-on/technical you are; how independently you want the team to act; how easy it is to undo its work; how quickly you're usually available to approve things; how risky the work is (money / regulated / safety vs. day-to-day vs. experimental); and whether you have a second AI assistant available for reviews. The wizard **proposes a sensible answer from what you've already told it** and you confirm or adjust — except the two highest-stakes questions (how risky the work is, and how reversible it is), which ask you to make an **active choice** rather than accept a silent default.
+- **Your answers set the team's independence level and its act-on-its-own vs. ask-first policy.** The result is one of three levels — *ask me before each step* / *check in on the bigger moves* / *act on its own* — plus a clear policy for which kinds of work the team handles automatically and which it brings to you first.
+- **It only ever gets MORE cautious, never less, than what you asked for.** High-risk work, hard-to-undo work, or a brand-new (not-yet-trusted) system make it more cautious; they can never push it past the independence you chose. Routine housekeeping (keeping documents tidy, session upkeep) always stays automatic, so it is never literally "ask before everything"; and anything touching security, your data, or irreversible actions always asks you first.
+- **Less-technical operators get one extra protection:** the system won't take it upon itself to change its own working conventions without asking.
+- **Honest record.** The generated system now records that its independence settings came from *your* answers (previously it shipped a provisional placeholder noting your preferences hadn't been captured yet).
+
+**Operator-facing notes:**
+
+- No operator action required for existing setups. As with recent releases, a generated system is produced into a **staging location for your review** before it becomes a live project; these new questions simply appear during the interview.
+- Two of the working-style inputs you give — how reachable you are for approvals, and whether you have a second reviewer available — are **recorded now and used in a later release**; they don't yet change a generated file.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** (filled at publication)
+**Public repo commit:** (filled after subtree push)
+
+---
+
 ## 2026-05-30 — the interview now drives the generator end-to-end (one build path); scheduled runs carry their schedule; plan-type question covers all current plans
 
 **Public-facing change:** the biggest change yet to *how* a system is built, plus two operator-visible fixes. The wizard's **live interview and its deterministic generator are now a single path.** The interview records your answers, derives the foundation-document content in logical groups, **shows you a rendered preview of each group's documents to confirm**, and at the end generates the **complete system through the one generator** in a single pass. The previous end-of-interview "close assembly" (a separate way of building the files) is **retired**. Nothing is written to your project mid-interview — the documents appear at the end, generated from exactly what you confirmed.
