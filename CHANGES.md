@@ -12,6 +12,27 @@ Entries appear newest-first.
 
 ---
 
+## 2026-05-30 — the interview now drives the generator end-to-end (one build path); scheduled runs carry their schedule; plan-type question covers all current plans
+
+**Public-facing change:** the biggest change yet to *how* a system is built, plus two operator-visible fixes. The wizard's **live interview and its deterministic generator are now a single path.** The interview records your answers, derives the foundation-document content in logical groups, **shows you a rendered preview of each group's documents to confirm**, and at the end generates the **complete system through the one generator** in a single pass. The previous end-of-interview "close assembly" (a separate way of building the files) is **retired**. Nothing is written to your project mid-interview — the documents appear at the end, generated from exactly what you confirmed.
+
+- **One build path, confirmed by you.** Foundation documents are no longer written piecemeal during the interview. Each logical group — your vision; your approach + agent roster; how the agents coordinate; what you approve vs. what runs on its own; testing + audit — is derived, **previewed as rendered documents for your confirmation**, and only then locked. The whole system is emitted at the end from your confirmed answers.
+- **Resume + edit safety.** An interrupted interview resumes cleanly from disk. If you go back and change an earlier answer that fed a group you had already confirmed, that group is flagged and re-confirmed — so the system is never built on a superseded answer. The final generation **refuses to run** if any confirmed group has gone stale, or if a group recorded answers but was never confirmed.
+- **Scheduled runs now carry their schedule.** When an agent is meant to run on a schedule, the generated cron configuration produces a real entry that wakes the **Orchestrator** on your chosen cadence **and tells it which agent's scheduled work is due** — so a scheduled run actually does that work instead of waking with no context. (Scheduled runs invoke the Orchestrator, which routes to the agent; directly scheduling a single agent remains an advanced exception.)
+- **Plan-type question now covers every current plan.** The financial step lists **Pro, Max 5x ($100), Max 20x ($200), Team Standard, Team Premium, and Free**, so operators on a Team plan can select their actual plan. Budget calibration is tailored per tier — Team Standard is calibrated like Max 5x, Team Premium like Max 20x.
+- **Interview guidance updated** to describe the new record → derive → confirm-by-preview → generate flow.
+
+**Operator-facing notes:**
+
+- No operator action required for existing setups. This is part of the in-progress generation pipeline; a generated system is produced into a **staging location for your review** before it becomes a live project.
+- How document correctness is checked: by **your confirmation of the rendered previews** during the interview, plus internal checks that the documents are structurally complete and that your derived answers actually appear in them. A full automatic comparison against the old build path is not available, because that path has been retired.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** 975e6e8
+**Public repo commit:** (filled after subtree push)
+
+---
+
 ## 2026-05-29 — derivation-mechanism substrate: a derived-record contract + validator + event-sourced replay (internal; no operator-facing change yet)
 
 **Public-facing change:** internal plumbing only — no change to how a generated system looks or behaves yet. The wizard gains the substrate for a **designed, testable derivation mechanism** — the part that will turn your interview answers into the system's foundation-document fields in a repeatable, checkable way. These pieces are **not yet wired into the interview** (that integration arrives in a later release), so there is **no operator action and no behavior change** at this version.
