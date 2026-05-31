@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from authority_profile import (  # noqa: E402
     AuthorityDimensions, AuthorityProfile, derive_authority, AuthorityProfileError,
 )
+from derivation_replay import compute_drift  # noqa: E402
 
 
 def _dims(**over):
@@ -119,6 +120,30 @@ class FailClosedTests(unittest.TestCase):
     def test_out_of_enum_desired_autonomy_fails_closed(self):
         with self.assertRaises(AuthorityProfileError):
             derive_authority(_dims(desired_autonomy="YOLO"))
+
+
+class AutonomyLevelEnvelopeDriftTests(unittest.TestCase):
+    """Flipping AUTONOMY_LEVEL from the provisional auto-default to the profile-derived
+    classification changes its structural envelope (_source + _derivation_class +
+    _confirmation_state) — so a previously-confirmed value must be re-confirmed, EVEN when the
+    value itself is unchanged. This is the forced-re-confirmation tripwire."""
+
+    def _rec(self, **env):
+        base = {"_decision_field": True, "_decision_kind": "closed_value"}
+        base.update(env)
+        return {"AUTONOMY_LEVEL": "2", "_audit": {"AUTONOMY_LEVEL": base}}
+
+    def test_auto_to_classification_is_envelope_drift_even_with_same_value(self):
+        prev = self._rec(_source="auto", _derivation_class="auto",
+                         _confirmation_state="accepted_uncertain_for_now")
+        new = self._rec(_source="operator-preference", _derivation_class="classification",
+                        _confirmation_state="accepted",
+                        _source_question_ids=["UP-3", "UP-5", "DR", "REV"])
+        drift = compute_drift(prev, new)
+        self.assertIn("AUTONOMY_LEVEL", drift["envelope"])
+        # value identical -> NOT content drift; the re-confirmation is forced purely by the envelope change.
+        self.assertNotIn("AUTONOMY_LEVEL", drift["content"]["decision"])
+        self.assertNotIn("AUTONOMY_LEVEL", drift["content"]["narrative"])
 
 
 if __name__ == "__main__":

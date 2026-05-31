@@ -190,9 +190,9 @@ def _drive_hitl_autonomy_group(transcript, progress):
     _record_sources(transcript, "hitl_autonomy",
                     {"FIN-1", "FIN-2", "UP-1", "UP-2", "UP-3", "UP-5", "NOTIF-1", "NOTIF-2", "NOTIF-3",
                      "ARCH-4", "ERR-1", "ERR-2", "CONC-1", "START-1", "START-2", "QA-2", "DR", "REV", "RC"})
-    # AUTONOMY_LEVEL: provisional auto-default (F-3); confirmed accepted_uncertain_for_now + revisit.
+    # AUTONOMY_LEVEL: now a classification (operator-preference) derived from the authority answers.
     _derive_confirm(transcript, "AUTONOMY_LEVEL", "hitl_autonomy", "2",
-                    state="accepted_uncertain_for_now", revisit="operator-authority-profile-available")
+                    sources=["UP-3", "UP-5", "DR", "REV"], state="accepted")
     # HITL_MAP_ROWS: policy citing prior fields, with explicit negative permissions in the rows.
     _derive_confirm(transcript, "HITL_MAP_ROWS", "hitl_autonomy",
                     "| Action | System behavior | Rationale |\n|---|---|---|\n"
@@ -234,16 +234,20 @@ class FullFiveGroupAcceptanceTests(unittest.TestCase):
                       "AGENT_SPECIFIC_TESTS", "DRIFT_ANALYSIS_CADENCE", "SCALE_TIER"):
                 self.assertIn(f, projected, f"{f} did not project")
 
-    def test_autonomy_level_is_provisional_auto(self):
+    def test_autonomy_level_is_profile_derived_classification(self):
+        # Post-flip: AUTONOMY_LEVEL is no longer a provisional auto-default — it is an
+        # operator-preference classification derived from the authority answers (UP-3/UP-5/DR/REV).
         with tempfile.TemporaryDirectory() as td:
             tpath = str(Path(td) / "t.jsonl"); ppath = str(Path(td) / "p.md")
             r = _drive_tests_audit_group(tpath, ppath)
             record = compile_transcript(read_derived_replay_events(r.events()))
             env = record["_audit"]["AUTONOMY_LEVEL"]
-            self.assertEqual(env["_source"], "auto")
-            self.assertTrue(env["_decision_field"])                       # still a decision
-            self.assertEqual(env["_confirmation_state"], "accepted_uncertain_for_now")
-            self.assertEqual(env["_revisit_trigger"], "operator-authority-profile-available")
+            self.assertEqual(env["_derivation_class"], "classification")   # flipped from auto
+            self.assertEqual(env["_source"], "operator-preference")
+            self.assertTrue(env["_decision_field"])                        # still a decision
+            self.assertEqual(env["_confirmation_state"], "accepted")       # no longer provisional
+            self.assertEqual(set(env["_source_question_ids"]), {"UP-3", "UP-5", "DR", "REV"})
+            self.assertNotIn("_revisit_trigger", env)                      # provisional revisit removed
 
     def test_all_operational_previews_render(self):
         with tempfile.TemporaryDirectory() as td:
