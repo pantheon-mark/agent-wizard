@@ -28,8 +28,8 @@ Entries appear newest-first.
 - Two of the working-style inputs you give — how reachable you are for approvals, and whether you have a second reviewer available — are **recorded now and used in a later release**; they don't yet change a generated file.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** (filled at publication)
-**Public repo commit:** (filled after subtree push)
+**Source-Meta-Commit:** 099a40b
+**Public repo commit:** 02ec922
 
 ---
 
