@@ -63,12 +63,12 @@ class CorpusLoaderTests(unittest.TestCase):
         self.assertEqual((len(body), len(scaf), len(deleg)), (20, 11, 4))
 
     def test_hard_control_cell_present(self):
-        # cat-2.3 consult-before-modify must be hard-control (advisor H2), provisional basis.
+        # consult-before-modify must be hard-control, now operator-profile-derived basis.
         records = load_corpus_pack()
         gated = [r for r in records if r.authority_source_default == "hard-control"]
         self.assertEqual(len(gated), 1)
         self.assertEqual(gated[0].authority_gate, "high-autonomy-enforced-control")
-        self.assertEqual(gated[0].authority_basis_default, "provisional_default")
+        self.assertEqual(gated[0].authority_basis_default, "operator-profile-derived")
 
     def test_resolve_markdown_cc(self):
         records = load_corpus_pack()
@@ -90,7 +90,7 @@ class CorpusLoaderTests(unittest.TestCase):
         # the hard-control cell survived the projection with correct I3 coupling
         hc = [c for c in ep.corpus_cells if c.authority_source == "hard-control"]
         self.assertEqual(len(hc), 1)
-        self.assertEqual(hc[0].authority_basis, "provisional_default")
+        self.assertEqual(hc[0].authority_basis, "operator-profile-derived")
 
     # --- fail-closed invariants -------------------------------------------
 

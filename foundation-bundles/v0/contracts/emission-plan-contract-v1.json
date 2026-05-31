@@ -11,7 +11,7 @@
     "system_shape": ["markdown-CC"],
     "criticality_tier": ["critical", "standard", "supporting"],
     "authority_posture": ["applies-all", "low-autonomy-operator-approval", "high-autonomy-enforced-control", "high-risk-operator-approved"],
-    "authority_basis": ["provisional_default", "not_applicable"],
+    "authority_basis": ["provisional_default", "operator-profile-derived", "not_applicable"],
     "authority_source": ["delegated", "wizard-default", "hard-control", "operator-configured", "not_applicable"],
     "emission_posture": ["install-verbatim", "operator-configure", "shape-conditional"],
     "source_type": ["inline_payload", "template_variant"],
@@ -80,7 +80,7 @@
   "invariants": [
     "I1: all required_top_level_fields are present and correctly typed",
     "I2: authority_profile.posture is a member of enums.authority_posture",
-    "I3: every corpus_cell with authority_gate != 'applies-all' has authority_basis == 'provisional_default' AND authority_source in {delegated, wizard-default, hard-control, operator-configured}; every corpus_cell with authority_gate == 'applies-all' has authority_basis == 'not_applicable' AND authority_source == 'not_applicable'",
+    "I3: every corpus_cell with authority_gate != 'applies-all' has authority_basis in {provisional_default, operator-profile-derived} AND authority_source in {delegated, wizard-default, hard-control, operator-configured}; every corpus_cell with authority_gate == 'applies-all' has authority_basis == 'not_applicable' AND authority_source == 'not_applicable'",
     "I4: every emitted_files[].path is unique",
     "I5: every enum-valued field resolves to its closed-set member (fail-closed on unknown value)",
     "I6: agent and orchestrator model-tier references are tier keys (high/standard/fast), never literal model strings; model_tiers keys are valid tier keys and values are non-empty resolved model strings",

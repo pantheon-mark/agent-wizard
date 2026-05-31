@@ -13,7 +13,7 @@
         "all-phases"
       ],
       "authority_gate": "high-risk-operator-approved",
-      "authority_basis_default": "provisional_default",
+      "authority_basis_default": "operator-profile-derived",
       "authority_source_default": "wizard-default",
       "data_risk_gate": "regulated-stop-condition",
       "emission_posture": "install-verbatim",
@@ -98,7 +98,7 @@
         "all-phases"
       ],
       "authority_gate": "low-autonomy-operator-approval",
-      "authority_basis_default": "provisional_default",
+      "authority_basis_default": "operator-profile-derived",
       "authority_source_default": "wizard-default",
       "data_risk_gate": "n/a",
       "emission_posture": "operator-configure",
@@ -119,7 +119,7 @@
         "all-phases"
       ],
       "authority_gate": "high-autonomy-enforced-control",
-      "authority_basis_default": "provisional_default",
+      "authority_basis_default": "operator-profile-derived",
       "authority_source_default": "hard-control",
       "data_risk_gate": "n/a",
       "emission_posture": "install-verbatim",
@@ -224,7 +224,7 @@
         "all-phases"
       ],
       "authority_gate": "low-autonomy-operator-approval",
-      "authority_basis_default": "provisional_default",
+      "authority_basis_default": "operator-profile-derived",
       "authority_source_default": "wizard-default",
       "data_risk_gate": "n/a",
       "emission_posture": "install-verbatim",
@@ -282,7 +282,7 @@
         "all-phases"
       ],
       "authority_gate": "high-risk-operator-approved",
-      "authority_basis_default": "provisional_default",
+      "authority_basis_default": "operator-profile-derived",
       "authority_source_default": "delegated",
       "data_risk_gate": "regulated-stop-condition",
       "emission_posture": "shape-conditional",
@@ -299,7 +299,7 @@
         "all-phases"
       ],
       "authority_gate": "high-risk-operator-approved",
-      "authority_basis_default": "provisional_default",
+      "authority_basis_default": "operator-profile-derived",
       "authority_source_default": "delegated",
       "data_risk_gate": "operator-configures-retention",
       "emission_posture": "shape-conditional",
@@ -316,7 +316,7 @@
         "all-phases"
       ],
       "authority_gate": "high-risk-operator-approved",
-      "authority_basis_default": "provisional_default",
+      "authority_basis_default": "operator-profile-derived",
       "authority_source_default": "delegated",
       "data_risk_gate": "data-class-conditional",
       "emission_posture": "shape-conditional",
@@ -333,7 +333,7 @@
         "all-phases"
       ],
       "authority_gate": "low-autonomy-operator-approval",
-      "authority_basis_default": "provisional_default",
+      "authority_basis_default": "operator-profile-derived",
       "authority_source_default": "wizard-default",
       "data_risk_gate": "n/a",
       "emission_posture": "operator-configure",
@@ -834,7 +834,7 @@
         "refactor-existing"
       ],
       "authority_gate": "high-risk-operator-approved",
-      "authority_basis_default": "provisional_default",
+      "authority_basis_default": "operator-profile-derived",
       "authority_source_default": "wizard-default",
       "data_risk_gate": "data-class-conditional",
       "emission_posture": "shape-conditional",

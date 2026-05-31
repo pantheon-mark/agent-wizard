@@ -3,11 +3,12 @@
   "contract_version": "scaffold-plan-v1",
   "system_shape": "markdown-CC",
   "authority_profile": {
-    "id": "provisional_operator_approval_v0",
+    "id": "operator_profile_derived_v0",
     "posture": "low-autonomy-operator-approval",
-    "source": "wizard-default",
-    "expires_on_trigger": "operator-authority-profile-available"
+    "source": "operator-configured",
+    "expires_on_trigger": "none"
   },
+  "authority_profile_note": "The operator authority profile mechanism now exists, so the emitted authority is operator-configured (no longer a provisional wizard default) and carries no pending re-emit trigger (expires_on_trigger: none). The operator's operative autonomy is the derived AUTONOMY_LEVEL foundation-doc field plus the per-cell authority gates; the top-level posture here is the conservative baseline the inherited cells are stamped under. Deriving the top-level posture per-operator from the profile (rather than the conservative baseline) is a documented follow-on and does not change AUTONOMY_LEVEL or the per-cell gates.",
   "model_tiers": {"high": "model-high", "standard": "model-standard", "fast": "model-fast"},
   "model_tiers_note": "Neutral default. The real tier-to-model resolution is supplied at generation time via an override; the placeholder strings here keep the distributed data shape-correct without pinning a model name that changes over time.",
   "control_plane": {

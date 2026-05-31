@@ -11,7 +11,7 @@
     "system_shape": ["markdown-CC", "python-service", "node-with-ui", "hosted-cloud", "mixed", "all-shapes"],
     "lifecycle_phase": ["define+build", "operate+maintain", "refactor-existing", "all-phases"],
     "authority_gate": ["applies-all", "low-autonomy-operator-approval", "high-autonomy-enforced-control", "high-risk-operator-approved"],
-    "authority_basis": ["provisional_default", "not_applicable"],
+    "authority_basis": ["provisional_default", "operator-profile-derived", "not_applicable"],
     "authority_source": ["delegated", "wizard-default", "hard-control", "operator-configured", "not_applicable"],
     "data_risk_gate": ["n/a", "no-PII", "data-class-conditional", "regulated-stop-condition", "operator-configures-retention"],
     "emission_posture": ["install-verbatim", "operator-configure", "shape-conditional"],
@@ -40,7 +40,7 @@
     "C2: every cell has all required_cell_fields; every enum-valued field resolves to its closed-set member (fail-closed on unknown value)",
     "C3: cell_id is unique across the pack",
     "C4: realization == 'corpus-body' requires canonical present with a non-empty body AND a non-empty home AND a category; realization in {scaffold-template, delegated} carries no canonical (the body is the installed scaffold template or the delegated control, not pack content)",
-    "C5: authority_gate == 'applies-all' requires authority_basis_default == 'not_applicable' AND authority_source_default == 'not_applicable'; authority_gate != 'applies-all' requires authority_basis_default == 'provisional_default' AND authority_source_default in {delegated, wizard-default, hard-control, operator-configured}",
+    "C5: authority_gate == 'applies-all' requires authority_basis_default == 'not_applicable' AND authority_source_default == 'not_applicable'; authority_gate != 'applies-all' requires authority_basis_default in {provisional_default, operator-profile-derived} AND authority_source_default in {delegated, wizard-default, hard-control, operator-configured}",
     "C6: every target_hooks[] entry has a non-empty target and a hook_type in enums.hook_type",
     "C7: every cell shape_scope[] is a member of enums.system_shape and phase_scope[] is a member of enums.lifecycle_phase"
   ]

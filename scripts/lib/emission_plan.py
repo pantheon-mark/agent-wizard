@@ -280,8 +280,8 @@ def validate_emission_plan(plan: Dict[str, Any], contract: Dict[str, Any]) -> Em
             _require(c["authority_source"] == "not_applicable", "I3",
                      f"{where} authority_gate=applies-all requires authority_source=not_applicable")
         else:
-            _require(c["authority_basis"] == "provisional_default", "I3",
-                     f"{where} authority_gate={gate} requires authority_basis=provisional_default")
+            _require(c["authority_basis"] in ("provisional_default", "operator-profile-derived"), "I3",
+                     f"{where} authority_gate={gate} requires authority_basis in (provisional_default, operator-profile-derived)")
             _require(c["authority_source"] in ("delegated", "wizard-default", "hard-control", "operator-configured"),
                      "I3", f"{where} authority_gate={gate} requires a concrete authority_source")
         # I8 — source self-containment

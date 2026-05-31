@@ -262,15 +262,16 @@ class CorpusEmitterAuthorityTests(unittest.TestCase):
         stamped = {c["cell_id"] for c in doc["cells"]}
         self.assertNotIn("OP-02", stamped)  # applies-all -> not authority-gated
 
-    def test_each_gated_cell_has_provisional_basis_and_concrete_source(self):
+    def test_each_gated_cell_has_profile_derived_basis_and_concrete_source(self):
         staging, _ = self._emit()
         doc = json.loads((staging / ".wizard/corpus_authority.json").read_text())
         for c in doc["cells"]:
-            self.assertEqual(c["authority_basis"], "provisional_default", c["cell_id"])
+            self.assertEqual(c["authority_basis"], "operator-profile-derived", c["cell_id"])
             self.assertIn(c["authority_source"],
                           ("delegated", "wizard-default", "hard-control", "operator-configured"),
                           c["cell_id"])
-            self.assertTrue(c["expires_on_trigger"], c["cell_id"])
+            # the IDQ re-emit obligation is discharged: no pending expiry trigger.
+            self.assertEqual(c["expires_on_trigger"], "none", c["cell_id"])
 
     def test_build_corpus_authority_doc_returns_embeddable_dict(self):
         # The dict-returning fold-in source: same gated cells + authority_profile as the

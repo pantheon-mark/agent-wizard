@@ -168,8 +168,8 @@ def validate_corpus_pack(pack: Dict[str, Any], contract: Dict[str, Any]) -> List
             _require(c["authority_source_default"] == "not_applicable", "C5",
                      f"{where} authority_gate=applies-all requires authority_source_default=not_applicable")
         else:
-            _require(c["authority_basis_default"] == "provisional_default", "C5",
-                     f"{where} authority_gate={gate} requires authority_basis_default=provisional_default")
+            _require(c["authority_basis_default"] in ("provisional_default", "operator-profile-derived"), "C5",
+                     f"{where} authority_gate={gate} requires authority_basis_default in (provisional_default, operator-profile-derived)")
             _require(c["authority_source_default"] in ("delegated", "wizard-default", "hard-control", "operator-configured"),
                      "C5", f"{where} authority_gate={gate} requires a concrete authority_source_default")
 

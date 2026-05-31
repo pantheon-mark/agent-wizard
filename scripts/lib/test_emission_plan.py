@@ -72,10 +72,10 @@ def _valid_plan() -> dict:
         "bundle_version": "v0.4.0",
         "generator_version": "0" * 40,
         "authority_profile": {
-            "id": "provisional_operator_approval_v0",
+            "id": "operator_profile_derived_v0",
             "posture": "low-autonomy-operator-approval",
-            "source": "wizard-default",
-            "expires_on_trigger": "operator-authority-profile-available",
+            "source": "operator-configured",
+            "expires_on_trigger": "none",
         },
         "model_tiers": {"high": "model-high", "standard": "model-standard", "fast": "model-fast"},
         "control_plane": {
