@@ -15,6 +15,22 @@ Emitted authority surface (per field-manifests/markdown-CC.json): exactly
   - the HITL posture that shapes HITL_MAP_ROWS (which action classes act autonomously vs ask-first)
 There is no separate autonomous/ask-first field — HITL_MAP_ROWS carries that split.
 
+Which dimensions drive the emitted surface at this version, and which are captured-but-deferred:
+  - AUTONOMY_LEVEL: desired_autonomy + domain_risk + reversibility_tolerance + trust_posture
+    (the ceiling/min below).
+  - HITL posture: level-driven (_AUTONOMOUS_BY_LEVEL) PLUS an expertise bound — operator expertise
+    constrains the quality / workflow-hygiene / experimental-convention action classes, and must
+    never touch the security/data/irreversible class. The binding case at this version is the
+    experimental-convention class (#8): a non-technical operator does NOT get it autonomously (they
+    cannot evaluate experimental-convention work). The routine quality (#4) + workflow-hygiene (#5)
+    classes stay autonomous at every level, so it is never "ask before everything"; the
+    experimental-convention class is not routine, so bounding it does not change that. A mixed or
+    technical operator keeps the level default.
+  - approval_latency and review_capability are captured on the AuthorityDimensions record (so they
+    are available + replayable downstream) but do NOT yet shape an emitted field at this version —
+    their fuller wiring (approval_latency -> how often the system pauses for the operator;
+    review_capability -> the recommended review rigor) is a later step.
+
 AUTONOMY_LEVEL = max(1, min(desired_level, domain_risk_cap, reversibility_cap, trust_cap))
   — a CEILING/min model, NOT additive subtraction. Additive stacking could bottom out and produce
   an unusable "ask before everything" system; min() cannot stack, and the HITL posture keeps
@@ -143,7 +159,15 @@ def derive_authority(dims: AuthorityDimensions) -> AuthorityProfile:
         _REVERSIBILITY_CAP[dims.reversibility_tolerance],
         _TRUST_CAP[dims.trust_posture],
     ))
-    autonomous = _AUTONOMOUS_BY_LEVEL[level]
+    autonomous = set(_AUTONOMOUS_BY_LEVEL[level])
+    # Expertise bound (never touches the security/data/irreversible class #1): a non-technical
+    # operator cannot autonomously run experimental-convention work (#8) they cannot evaluate, so
+    # #8 is masked out of their autonomous set. Routine quality (#4) + workflow-hygiene (#5) stay
+    # autonomous; #8 is not routine, so masking it does not re-introduce "ask before everything".
+    # A mixed/technical operator keeps the level default.
+    if dims.expertise == "non-technical":
+        autonomous.discard(8)
+    autonomous = frozenset(autonomous)
     ask_first = _ALL_CLASSES - autonomous
 
     # Profile lineage: every authority dimension's source question-IDs, deduped, stable order.

@@ -93,6 +93,48 @@ class HitlPostureTests(unittest.TestCase):
         self.assertTrue(lo.autonomous_classes <= hi.autonomous_classes)
 
 
+class ExpertiseMaskTests(unittest.TestCase):
+    """Expertise bounds the quality / workflow-hygiene / experimental-convention action classes
+    (never the security/data/irreversible class). Binding case: a non-technical operator does NOT
+    get the experimental-convention class (#8) autonomously; routine quality (#4) + workflow-
+    hygiene (#5) stay autonomous; a mixed/technical operator keeps the level default."""
+
+    def test_non_technical_loses_autonomous_class_8_at_level_2(self):
+        # level-2 default includes #8; a non-technical operator must NOT get it.
+        p = derive_authority(_dims(expertise="non-technical", desired_autonomy="high",
+                                   domain_risk="low", reversibility_tolerance="high",
+                                   trust_posture="probationary"))  # min(3,3,3,2)=2
+        self.assertEqual(p.autonomy_level, "2")
+        self.assertNotIn(8, p.autonomous_classes)
+        self.assertIn(8, p.ask_first_classes)
+        # routine #4/#5 stay autonomous — death-spiral defense preserved.
+        self.assertIn(4, p.autonomous_classes)
+        self.assertIn(5, p.autonomous_classes)
+
+    def test_non_technical_loses_class_8_at_level_3_keeps_class_2(self):
+        p = derive_authority(_dims(expertise="non-technical", desired_autonomy="high",
+                                   domain_risk="low", reversibility_tolerance="high",
+                                   trust_posture="established"))  # level 3
+        self.assertEqual(p.autonomy_level, "3")
+        self.assertNotIn(8, p.autonomous_classes)
+        self.assertIn(2, p.autonomous_classes)   # the level-3 class #2 grant is unaffected
+
+    def test_mixed_and_technical_keep_class_8_at_level_2(self):
+        for exp in ("mixed", "technical"):
+            p = derive_authority(_dims(expertise=exp, desired_autonomy="high",
+                                       domain_risk="low", reversibility_tolerance="high",
+                                       trust_posture="probationary"))  # level 2
+            self.assertEqual(p.autonomy_level, "2", exp)
+            self.assertIn(8, p.autonomous_classes, exp)
+
+    def test_non_technical_class_1_still_never_autonomous(self):
+        # the expertise mask must NEVER touch #1 (the security/data/irreversible hard invariant).
+        p = derive_authority(_dims(expertise="non-technical", desired_autonomy="high",
+                                   domain_risk="low", reversibility_tolerance="high",
+                                   trust_posture="established"))
+        self.assertNotIn(1, p.autonomous_classes)
+
+
 class LineageAndEnvelopeTests(unittest.TestCase):
     def test_source_question_ids_are_authority_answers_only(self):
         p = derive_authority(_dims())
