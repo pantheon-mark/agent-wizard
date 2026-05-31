@@ -221,8 +221,18 @@ def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_roo
     # re-confirms stale groups interactively on resume; this is the independent emit-time guard,
     # so a carrier gap can never silently emit content derived from superseded answers.
     _markers = {e["group_id"]: e for e in events if e.get("event_type") == "group_confirmed"}
+    _sourced = {e.get("group_id") for e in events
+                if e.get("event_type") in ("source_answer", "source_skip")}
     for _g in load_derivation_groups(shape).groups:
         _m = _markers.get(_g.group_id)
+        if _g.group_id in _sourced and not _m:
+            # a LIVE group (it recorded source answers) with no confirmation marker means the
+            # carrier skipped the operator's rendered-preview confirmation — never emit unconfirmed
+            # content. (Groups with no source events — field-only / foundation-only transcripts —
+            # are tolerated; field-level confirmation gates those.)
+            raise InterviewCLIError(
+                f"cannot emit: group {_g.group_id!r} recorded answers but has no confirmation "
+                f"marker — confirm the group (rendered preview) before emitting")
         if _m and group_confirmation_is_stale(_m, group_source_hash(events, _g.input_question_ids)):
             raise InterviewCLIError(
                 f"cannot emit: group {_g.group_id!r} confirmation is stale — an upstream answer "

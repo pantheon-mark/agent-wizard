@@ -139,6 +139,8 @@ class AgentEmitterTests(unittest.TestCase):
         # Orchestrator wakes on the cadence with no idea which scheduled work is due.
         self.assertTrue(any("agent=researcher" in ln for ln in rows),
                         "scheduled invocation does not carry the per-agent trigger")
+        self.assertTrue(any("cadence=" in ln for ln in rows),
+                        "scheduled invocation does not carry the cadence in the trigger")
 
     def test_no_cron_agents_preserves_empty_state_note(self):
         # Differential-gate baseline: with no scheduled agent the cron config keeps its

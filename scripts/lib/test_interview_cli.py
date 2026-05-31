@@ -506,6 +506,38 @@ class EmitSystemCLITests(unittest.TestCase):
                                     generator_version_override="0" * 40)
             self.assertFalse(target.exists(), "emit must fail closed BEFORE writing on a stale group")
 
+    def test_emit_system_fails_closed_on_unconfirmed_sourced_group(self):
+        # Cross-vendor close R2 (codex blocker): a LIVE group that recorded source answers but was
+        # never confirmed (no group_confirmed marker — a carrier that skipped the rendered-preview
+        # confirmation) must abort emit. Tolerating missing markers applies ONLY to field-only /
+        # foundation-only transcripts with no source events.
+        from test_emission_plan import _FOUNDATION_DOC_INPUTS
+        from test_interview_bridge import _ai
+        from derivation_groups import load_derivation_groups
+        env = {"_source": "operator-content", "_derivation_class": "extraction",
+               "_decision_field": False, "_decision_kind": "none", "_prompt_version": "sha256:p1"}
+        with tempfile.TemporaryDirectory() as td:
+            tpath = Path(td) / "t.jsonl"
+            r = TranscriptRecorder(tpath, clock=lambda: CLOCK)
+            g = load_derivation_groups(SHAPE).group_by_id("vision")
+            skippable = set(g.skip_satisfied_if)
+            for q in g.input_question_ids:                       # source answers recorded ...
+                if q in skippable:
+                    r.record_source_skip(q, "vision", reason="n/a")
+                else:
+                    r.record_source_answer(q, "vision", f"answer for {q}")
+            for k, v in _FOUNDATION_DOC_INPUTS.items():
+                r.record_derived_field(k, "vision", v, dict(env))
+                r.record_field_confirmation(k, "vision", "accepted")
+            r.record_agent_intent("approach_roster", _ai())
+            # ... but the vision group is NEVER confirmed (no group_confirmed marker)
+            target = Path(td) / "operator-project"
+            with self.assertRaises(cli.InterviewCLIError):
+                cli.cmd_emit_system(str(tpath), SHAPE, str(target), str(REPO_ROOT),
+                                    generator_version_override="0" * 40)
+            self.assertFalse(target.exists(),
+                             "emit must fail closed BEFORE writing on a sourced-but-unconfirmed group")
+
 
 if __name__ == "__main__":
     unittest.main()
