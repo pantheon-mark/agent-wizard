@@ -21,7 +21,7 @@ If it is: no project files exist yet to save. Tell the user:
 >
 > "Start the wizard from phase 1 capture. The environment check has passed. Run `01_phase1_capture.md`, then continue from where you left off."
 
-Do not begin P1-1 until you are confident the full phase will complete before compaction risk.
+Do not begin the first question (P1-2 — core purpose) until you are confident the full phase will complete before compaction risk.
 
 ---
 
@@ -42,13 +42,21 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 ---
 
+## Voice — human and plain, never affirming filler
+
+This step now has real conversational beats (the definition sketch, the proposed name, the capability questions). Run them in the plain, direct voice of `about.md`. **Open every beat with the substance — the grounded proposal or the question itself — never with empathy, affirmation, or acknowledgment.** Do NOT preface with lines like "that sounds hard," "this is a lot to carry," or "X has a lot of moving parts," and do NOT reflect the operator's words back as a standalone beat. They read as performative and erode trust — and they land especially badly when the operator's purpose is heavy or personal. Show you listened by making the sketch, the name, and the questions concrete and specific to exactly what the operator said — that is the entire signal. (Mirrors the voice rule in `05_vision.md`.)
+
+---
+
 ## Step 0 — Resume check (run before asking any questions)
 
-Before P1-1, check whether a prior wizard session exists:
+Before the first question (P1-2), check whether a prior wizard session exists:
 
 **Run:** Check if `~/claude-wizard-draft/wizard_session_draft.md` exists.
 
-**If the file does NOT exist:** Say "No previous session found — starting fresh." Then proceed to P1-1.
+**If the file does NOT exist:** proceed silently to the first question (P1-2 — core purpose). Do NOT announce "starting fresh" — a first-time operator has no prior session to reconcile, and surfacing it mid-interview reads as a spurious resume concern.
+
+> *Internal note: the authoritative resume handling runs at session-init (`wizard/CLAUDE.md` "How to start", before step 00), which already covers both the progress-marker case and the draft-file-existence case. This in-step check is a redundant backstop. Its full removal + the per-project-identity / explicit "new vs. continue [named project]" redesign are tracked as the separate **F3** sub-item; silencing the no-session announcement is the clean part that belongs with the front-door redesign and is done here.*
 
 **If the file EXISTS — say this to the user:**
 
@@ -62,7 +70,7 @@ Before P1-1, check whether a prior wizard session exists:
 
 **If user says "continue":** Read the full draft file. Identify RESUME_FROM. Skip all completed steps and resume from the indicated question ID. Update LAST_UPDATED in the draft file.
 
-**If user says "start fresh":** Delete the existing draft file. Proceed to P1-1 normally.
+**If user says "start fresh":** Delete the existing draft file. Proceed to P1-2 (the first question) normally.
 
 **Note on draft location:** The draft directory `~/claude-wizard-draft/` is at the home directory level (not inside Documents) to avoid slow startup indexing caused by Claude Code scanning large document folders.
 
