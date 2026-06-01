@@ -2,7 +2,7 @@
 
 **Mechanism ID:** `mech-shape-detection-v0`
 **Mechanism class:** Skill, pure markdown (advisory or guided).
-**Status:** v0 active.
+**Status:** v1 active (S2.32 — elicitation revised to the experiential capabilities beat; classifier, confidence rubric, emit schema, and handoff-contract surface are all UNCHANGED from v0; cross-vendor codex backstop owed before merge to `main`).
 **Authority:** This file is canonical for the wizard's shape-detection logic. Interview files (`wizard/interview/*.md`) reference this file as the spec for the probes they fire and the emit they produce.
 **Cross-references:** `wizard/handoff_contracts/shape_detection_v0.md` / `wizard/CLAUDE.md` § 9 (Forward-offered information capture).
 
@@ -18,18 +18,27 @@ The logic is **behavior-based** — operators are NOT asked "do you want Python 
 
 ## 2. Probe inventory + signal-to-shape mapping
 
-### 2.1 Step 01 — minimum probe set (4 probes; always fires)
+### 2.1 Step 01 — capabilities beat (experiential multi-select; 4 dimensions; always asked)
 
-These are sub-steps P1-4 through P1-7 of `wizard/interview/01_phase1_capture.md` (after P1-3 staging file creation).
+The four shape dimensions are elicited as **one grouped, experiential capabilities beat** — sub-steps P1-4 through P1-7 of `wizard/interview/01_phase1_capture.md`, presented to the operator as a single beat (NOT four separate cold ceremonial questions). The beat runs after the purpose → working-definition → name → staging-file beats (P1-2 → definition pass → P1-1 → P1-3). The four dimensions are asked **independently** (not as a mutually-exclusive pick-one), each on a **3-state** scale (yes / no / **not sure**), **framed by** the working definition from the definition pass but **never pre-filled** from it.
 
-| Probe | Operator-facing text | Signal classification |
-|---|---|---|
-| **Probe-1 (continuous-runtime)** | "Does the system need to keep running on its own, even when you're not using Claude?" | yes → Python service / Node+UI / hosted-cloud signal; no → markdown-agents friendly |
-| **Probe-2 (multi-user)** | "Will other people use this system — and need their own logins or different views?" | yes → Node+UI + multi-user-datastore signal; no → single-user-friendly |
-| **Probe-3 (thinking-partner)** | "Is it mainly something you'll work on WITH Claude — like a thinking partner you bring questions to?" | yes → markdown-agents OR Claude-skills signal; no → automated-systems signal |
-| **Probe-4 (external-software)** | "Does it need to talk to other software automatically — like getting prices, sending emails, checking accounts?" | yes → Python service signal; no → standalone-friendly |
+The operator-facing text is **experiential** (what the system will do for them in plain terms), not technical. Each dimension still resolves to the same `probe_N` value the classifier consumes — only the framing changed.
 
-Operator answers are stored as `yes | no | unsure`. `unsure` is treated as neutral signal (does not contribute strong-positive OR strong-negative).
+| Dimension | Operator-facing text (experiential) | Resolves to | Signal classification |
+|---|---|---|---|
+| **thinking-partner** | "Will you want to chat with it or ask it questions directly — bring it things to think through?" | `probe_3` | yes → markdown-agents OR Claude-skills signal; no → automated-systems signal |
+| **continuous-runtime** | "Should it run in the background or on a schedule — doing things even when you're not there?" | `probe_1` | yes → Python service / Node+UI / hosted-cloud signal; no → markdown-agents friendly |
+| **multi-user** | "Will other people use it, with their own access?" | `probe_2` | yes → Node+UI + multi-user-datastore signal; no → single-user-friendly |
+| **external-software** | "Does it need to connect to your other apps or accounts — to **read or write** data (email, calendar, documents, and the like)?" | `probe_4` | yes → Python service signal; no → standalone-friendly |
+
+Operator answers are stored as `yes | no | unsure` under `shape_hypothesis.operator_signals.probe_1..4` — the same field surface the classifier (§ 2.3), confidence rubric (§ 3), pre-step-05/08 re-checks (§ 5), control matrix (§ 7), and stop conditions (§ 8) consume. `unsure` is treated as neutral signal (does not contribute strong-positive OR strong-negative) and is a **first-class answer, NOT "unchecked = no."** The **continuous-runtime** answer is ALSO recorded to the event transcript under qid `P1-4`, group `orchestration_build` (it feeds the step-13 orchestration / execution-cadence derivation); the other three dimensions resolve to staging-file probe values only. The `probe_N` ↔ marker mapping is stable: `P1-4`↔`probe_1` (continuous-runtime), `P1-5`↔`probe_2` (multi-user), `P1-6`↔`probe_3` (thinking-partner), `P1-7`↔`probe_4` (external-software).
+
+**Beat rules (the elicitation contract; see § 9 decision-E):**
+
+- **Independent, not mutually exclusive.** Each dimension is answered on its own. Genuine mixed use is expressible — e.g., chat = yes AND background = yes routes through the classifier's `mixed` path (§ 2.3) or, when not yet ≥2 clusters, defers to the step-02 fallback. There is NO radio-button "pick the closest."
+- **No inference-hiding.** All four dimensions are ALWAYS asked. Forward-offered signals from the purpose / working definition (§ 9) may *contextualize the framing* ("based on what you described…") but MUST NEVER pre-fill an individual answer or skip a dimension.
+- **Preserve "not sure."** 3-state, never a binary checkbox. "Unsure" is the neutral signal the § 3 confidence rubric and the step-05/08 re-checks need; collapsing it to "no" would inflate confidence and skip the safety net.
+- **Read OR write** in the external-software question — a read-only integration must not falsely map to `probe_4 = no`.
 
 ### 2.2 Step 02 — conditional fallback probes (fire only if step 01 yields MEDIUM or LOW confidence)
 
@@ -70,6 +79,8 @@ Computed after each probe-set fires.
 | **LOW** | Top shape has 1 strong-positive AND signals scattered. OR ≥2 shapes tied with strong-positives. OR insufficient signal density (`mixed` / `unknown` emit). |
 
 **Rubric note.** Branch (b) of HIGH captures the "2 strong-positives + clean discrimination via strong-negatives ruling out alternatives" case — e.g., a fixture where `python-service-operator-facing` has 2 strong-positives (Probes 1+4) AND the same answers produce strong-negatives for `markdown-agents`/`claude-skills` (Probes 1 yes / 3 no / 4 yes). Without (b), that fixture would emit MEDIUM and fire step-02 fallback unnecessarily; with (b), HIGH at step 01 is honest.
+
+**Elicitation note (v1, S2.32).** This rubric is UNCHANGED by the v1 elicitation revision. Under v1 the four dimensions are asked via the experiential capabilities beat (§ 2.1), but each dimension's explicit yes/no/unsure answer IS the `probe_N` value fed to this rubric — there is no separate "confirm an inferred answer" step (the rejected v0-candidate "infer-and-confirm" shape), so a beat answer and a probe answer are the same input. `unsure` continues to count as a neutral signal here exactly as before; preserving it (rather than collapsing to "no") is what keeps the MEDIUM/LOW → step-02-fallback and `forced_recheck_at_step_05` safety nets honest.
 
 **Promotion logic:**
 
@@ -395,14 +406,16 @@ Per wizard CLAUDE.md § 9. At P1-2 (core purpose), operators frequently voluntee
 - "a thinking partner for legal research" — Probe-3 yes signal embedded
 - "a customer portal where my team can log in and update records" — Probe-1 yes + Probe-2 yes + Probe-5 yes signals embedded
 
-**Classifier integration (per decision E: interpretive prior; NOT authoritative):**
+**Classifier integration (decision-E, amended S2.32 v0→v1 — experiential capabilities beat):**
 
-1. At P1-2 answer capture, the wizard's classifier scans the operator's free-text answer for shape-signal phrases heuristically. (Heuristic match patterns are spec-only at v0; precise regex/keyword inventory deferred to first-real-operator-data observation.)
+> **Amendment note (decision-E reversal).** The original v0 decision-E forced the four shape dimensions to fire as **cold, blank technical questions** and held inferred signals as NON-authoritative interpretive priors only. Under v1, shape is elicited via the **experiential capabilities beat** (§ 2.1) — post-definition, grouped, 3-state, experientially phrased. **The operator's explicit per-dimension answer IS the authoritative probe value.** This reverses decision-E's "cold probes always fire / inference never authoritative" stance, but preserves its *intent* (shape must rest on an explicit operator answer, never on misread prose): the operator still answers each dimension explicitly; only the FORM changes from cold-technical to experiential, and inference is now allowed to *frame* a question without ever *answering* it. Safe because the four dimensions are orthogonal, each is explicitly answered, and `unsure` is preserved as a first-class neutral signal. Resolved via two gemini Class-3 consults (v0-candidates "infer-and-confirm" and "radio forced-choice" both rejected); cross-vendor codex backstop owed before merge. See `external_review/s2.32_front_door_redesign_v3_SPEC_2026-06-01.md`.
+
+1. At the purpose (P1-2) answer and during the working-definition pass, the wizard scans the operator's free-text for shape-signal phrases heuristically. (Match patterns are spec-only at v0; precise inventory deferred to first-real-operator-data observation.)
 2. Matched signals populate `shape_hypothesis.forward_offered_signals_at_step_01` as verbatim phrases.
-3. Probes 1-4 STILL fire — forward-offered signals do NOT substitute for explicit probe answers.
-4. When classifier resolves an ambiguous probe answer (operator says "unsure" or gives a non-binary answer), the forward-offered signals act as an **interpretive prior** — e.g., if Probe-1 answered "unsure" but the P1-2 answer contained "runs automatically every Monday," classifier may resolve Probe-1 toward yes; wizard then asks operator: "Earlier you mentioned [verbatim phrase] — does that mean the system needs to keep running on its own? (yes/no)"
+3. All four capability dimensions are ALWAYS asked (§ 2.1) — forward-offered signals do NOT substitute for, pre-fill, or skip any dimension's answer.
+4. Forward-offered signals may **contextualize the framing** of a question — e.g., "You mentioned a newsletter that goes out every Monday; should the system run on its own / on a schedule to do that, even when you're not there?" — but the operator still gives a clean yes/no/unsure, and that answer (not the inferred prior) is what is recorded. Inference colors the framing; it never decides the answer. (This is stricter than the v0 "resolve an ambiguous answer toward the inferred value" behavior, which is now removed.)
 
-**Anti-pattern to avoid:** treating forward-offered signals as authoritative answers without explicit probe confirmation. Probes are the canonical signal source.
+**Anti-pattern to avoid (sharpened under v1):** pre-filling a dimension's answer from inference, hiding/skipping a dimension because the purpose "already implied" it, or collapsing "unsure" into "no." Both rejected v0-candidates failed here — "infer-and-confirm" for automation-bias and a false confirm==answer equivalence; "infer-and-hide" for suppressing dimensions the operator never actually answered. Every dimension gets an explicit, un-pre-filled 3-state answer.
 
 ## 10. Mechanism stack record
 
@@ -411,23 +424,25 @@ Per wizard CLAUDE.md § 9. At P1-2 (core purpose), operators frequently voluntee
 | **mechanism_id** | `mech-shape-detection-v0` |
 | **mechanism_name** | Shape-detection classifier |
 | **mechanism_class** | Skill, pure markdown (advisory or guided) |
-| **primary** | Step 01 P1-4 through P1-7 probes + (conditional) step 02 fallback probes + classifier emit logic in `wizard/shape_detection.md` |
+| **primary** | Step 01 experiential capabilities beat (4 independent 3-state dimensions → `probe_1..4`; sub-steps P1-4–P1-7 of `01_phase1_capture.md`, presented as one grouped beat) + (conditional) step 02 fallback probes + classifier emit logic in `wizard/shape_detection.md` |
 | **reinforcing** | Pre-step-05 re-check + pre-step-08 re-check; forward-offered signal capture at P1-2 (interpretive prior) |
 | **detection-recovery** | Pre-step-05 stop-condition evaluation → halt with foundation state preserved; unsupported-shape transition → scope-out OR foundation-only; pre-step-05/08 re-check revise path |
 | **rationale** | Behavior-based detection (not shape-name probing) prevents the technical-knob-mismatch failure. Pre-step-05 + pre-step-08 re-check catches signal drift from accumulated interview context. Stop conditions prevent silently generating a system the operator's regulatory exposure can't accept. Unsupported-shape transition preserves operator's foundation state so a future wizard release can resume without restart. Forward-offered signal capture acts as interpretive prior only — probes remain canonical. |
 | **hybrid_contract_status** | n/a (not skill-calls-script) |
 | **contract_fields_complete** | n/a |
 | **health_check_last_run** | 2026-05-19 (initial fixture-replay) |
-| **fallback_verified** | yes (synthetic-fixture replay; real-operator validation bound to a future operator-facing wizard exercise) |
+| **fallback_verified** | yes for the v0 classifier logic (synthetic-fixture replay). The v1 experiential-elicitation revision (S2.32) is validated against the same fixtures (probe values unchanged); real-operator validation is bound to the S2.32 re-walk (steps 00–01) + cross-vendor codex backstop before merge. |
 
 ## 11. Versioning
 
-This is v0. The mechanism evolves through:
+This is **v1** (was v0 through S2.31). The mechanism evolves through:
 
 - **Probes refined** (calibration) — small revision; v0 → v0.1 amend.
 - **Stop conditions added** (e.g., a 5th condition) — substantive revision; v0 → v1.
 - **Schema field added to handoff contract** — substantive revision; coordinate with `wizard/handoff_contracts/shape_detection_v0.md` → v1.
 - **Foundation-shaping change** (e.g., shape taxonomy revised; classifier rewritten as non-markdown mechanism) — foundation-shaping; new mechanism_id.
+
+**v1 amendment (S2.32, 2026-06-01) — elicitation revised; no contract/classifier change.** The four shape dimensions are now elicited via the experiential capabilities beat (§ 2.1) instead of cold technical probes, and § 9 decision-E is reversed accordingly (the explicit per-dimension answer is now authoritative). This is a substantive elicitation revision (v0 → v1), NOT a foundation-shaping change: the shape taxonomy is unchanged, the classifier (§ 2.3) and confidence rubric (§ 3) are unchanged, and the emit schema (§ 4) and handoff-contract surface (`wizard/handoff_contracts/shape_detection_v0.md`) are unchanged — `probe_1..4` values + the four lifecycle phases are identical. Therefore the **`mechanism_id` stays `mech-shape-detection-v0`** (the `-v0` suffix is the mechanism-generation identifier, distinct from this spec version) and the handoff-contract filename + `schema_versions` are NOT bumped. The handoff contract's own version is untouched because no field name, value enum, or phase changed. Cross-vendor codex backstop owed before merge per the S2.32 ledger.
 
 ## 12. Cross-references
 

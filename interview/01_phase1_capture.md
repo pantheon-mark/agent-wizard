@@ -1,7 +1,7 @@
 # 01 — Phase 1: Immediate Capture
 
 ## What this file does
-Capture the project name and core purpose — the two pieces of information the user knows immediately. Then create the project draft file that persists through the entire wizard interview. Fast, zero-friction, no wrong answers.
+Establish the basics, in an order a non-technical operator can actually follow: the system's **purpose** first; then a **light definition pass** that sketches what it'll involve; then a **proposed name**; then the project draft file that persists through the interview; and finally a short **grouped beat of capability questions** that establish what kind of system to build. This is a help-you-think orientation, not a blank-slate form — every beat after the purpose is grounded in what the operator already said. No wrong answers.
 
 ## When this file runs
 Immediately after `00_env_check.md` passes. No project directory exists yet.
@@ -37,8 +37,8 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 **Say:**
 
-> **Step 2 of 16 — Project basics**
-> Two quick questions — your project name and what it's going to do for you.
+> **Step 2 of 16 — The basics**
+> Let's get the foundation down: what you want this to do, a quick sketch of what it'll involve, a name for it, and a few short questions about how it should work. Nothing here is locked in — we go deeper in later steps.
 
 ---
 
@@ -68,36 +68,13 @@ Before P1-1, check whether a prior wizard session exists:
 
 ---
 
-## P1-1 — Project name
+## P1-2 — Core purpose [ASKED FIRST]
+
+Purpose is the anchor everything else hangs off — the definition sketch, the proposed name, and the capability questions are all grounded in it. So it comes first, before the name.
 
 **Ask the user:**
 
-> What would you like to call this project?
-
-Accept any name the user gives. No validation needed — there are no wrong answers here. Short names, long names, names with spaces are all fine. The name will be used to create the project folder, so note that spaces will become hyphens in the folder name (e.g. "My Business System" → `my-business-system`). Mention this only if the name contains spaces.
-
-The project folder will be created at `~/[folder-name]` — directly in the home directory. This keeps the project isolated so Claude Code starts up quickly. Do not use `~/Documents/` as the default location.
-
-**Store:**
-- PROJECT_NAME = the user's answer (display name)
-- PROJECT_FOLDER_NAME = lowercase version with spaces replaced by hyphens and special characters removed
-- PROJECT_PATH = `~/` + PROJECT_FOLDER_NAME (e.g. `~/my-business-system`)
-
-Write sub-step marker: Append `step_01_P1-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
-
-**Record to the event transcript** (the raw answer; the vision step derives `PROJECT_NAME` from it later):
-
-```
-python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid P1-1 --group vision --value "<the project name the operator gave>"
-```
-
----
-
-## P1-2 — Core purpose
-
-**Ask the user:**
-
-> In one sentence — what is this system going to do for you?
+> In your own words — what is this system going to do for you? One sentence is plenty, but say as much as you like.
 
 Accept any answer. One sentence is the goal but do not push back if they give more. If they give significantly more than one sentence, accept it gracefully and use the most purpose-focused sentence for the core purpose field. The full answer is preserved in the project draft file.
 
@@ -109,6 +86,61 @@ Write sub-step marker: Append `step_01_P1-2: complete | <timestamp>` to `~/claud
 
 ```
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid P1-2 --group vision --value "<the operator's one-sentence purpose>"
+```
+
+---
+
+## Light definition pass — sketch what it'll involve
+
+This is the orientation beat. Before naming or any capability questions, help the operator *see the shape of what they're describing*: propose a concrete first cut of what the system would involve, grounded in the purpose they just gave, then let them react. It is a proposal to react to, not a blank-slate ask (operating rule #5), and it is the anchor the name and the capability questions hang off — without it, those land without grounding.
+
+**Propose, grounded in the purpose:**
+
+Draft a short, plain-language sketch from the operator's purpose — a few key things the system might do, plus a rough sense of what's in and out of scope. Keep it concrete and illustrative, and be explicit that it's a starting sketch, not a fixed list. Example shape (adapt to their actual purpose; do not reuse verbatim):
+
+> From what you said, here's a rough sketch of what this might involve — tell me what's right, what's off, and what's missing:
+>
+> - It would [key thing 1, in their terms]
+> - It would probably [key thing 2]
+> - It sounds like [X] is in scope, and [Y] is probably out — for now
+>
+> Does that match what you're picturing? What would you add, drop, or change?
+
+**Wait for answer.** Accept whatever they say.
+
+- If they confirm or adjust: fold their changes in. The result is the **working definition**.
+- If they add things: capture them. Operator-provided lists are examples, never exhaustive — proactively name anything obvious that seems missing, framed as a "for instance," not as the answer.
+- If they can't react meaningfully yet: that's fine. Keep the sketch light and proceed; the vision step (05) deepens it.
+
+Hold the working definition now — it is written to the staging file in P1-3 (under `## Working definition`) and **carried forward to the vision step (05), which deepens it rather than re-asking** (operating rule #9). Do NOT record it to the event transcript: it shapes the vision-step conversation and the framing of the beats below, not a generated field directly.
+
+Write sub-step marker: Append `step_01_DEF: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
+## P1-1 — Propose the name [FOLLOWS PURPOSE]
+
+Now that there's a working sketch, **propose** a name rather than asking the operator to invent one cold — a non-technical operator can't easily name a project before they've seen its shape, which is why this follows the purpose and definition (operating rule #5). Keep it low-stakes and reversible.
+
+**Propose, grounded in the purpose / definition:**
+
+> Based on that, I'll call it **"[proposed name]"** for now — you can rename it anytime, it's not locked in. Want to keep that, or call it something else?
+
+Derive a short, plain proposed name from the purpose / working definition (e.g., a college-planning helper → "College Planner"; a client-deliverable tracker → "Deliverable Tracker"). If the operator offers their own name, use theirs. Accept any name — there are no wrong answers. Short names, long names, names with spaces are all fine.
+
+The name will be used to create the project folder, so note that spaces will become hyphens in the folder name (e.g. "My Business System" → `my-business-system`). Mention this only if the chosen name contains spaces. The project folder will be created at `~/[folder-name]` — directly in the home directory. This keeps the project isolated so Claude Code starts up quickly. Do not use `~/Documents/` as the default location.
+
+**Store:**
+- PROJECT_NAME = the confirmed name (display name)
+- PROJECT_FOLDER_NAME = lowercase version with spaces replaced by hyphens and special characters removed
+- PROJECT_PATH = `~/` + PROJECT_FOLDER_NAME (e.g. `~/my-business-system`)
+
+Write sub-step marker: Append `step_01_P1-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+**Record to the event transcript** (the confirmed name; the vision step derives `PROJECT_NAME` from it later — a proposed-then-confirmed name records identically to a typed one, so downstream derivation is unchanged):
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid P1-1 --group vision --value "<the confirmed project name>"
 ```
 
 ---
@@ -140,8 +172,11 @@ All four prerequisite checks passed.
 - Claude Code: [version found]
 
 ## Captured answers
-[P1-1] Project name: [value]
 [P1-2] Core purpose: [value]
+[P1-1] Project name: [value]
+
+## Working definition
+[The working definition agreed in the light definition pass — the key things the system would do, plus rough in/out-of-scope. Carried forward to the vision step (05), which deepens it rather than re-asking. Human-readable mirror only; not recorded to the event transcript.]
 ```
 
 3. After writing the file successfully, **say this to the user:**
@@ -152,79 +187,34 @@ Write sub-step marker: Append `step_01_P1-3: complete | <timestamp>` to `~/claud
 
 ---
 
-## Shape-detection probes — P1-4 through P1-7
+## Capabilities beat — P1-4 through P1-7 (one grouped beat)
 
-The next four questions establish what kind of system you're building, in behavior-based terms. These are NOT about technology choices — they're about what the system needs to *do*. The wizard uses these answers (plus context from later steps) to decide which kind of system to generate.
+These four questions establish what kind of system you're building, in behavior-based terms — what it needs to *do*, never technology choices. Ask them as **one grouped beat**, not four separate cold questions, and frame each by the working definition the operator just sketched. The wizard uses these answers (plus context from later steps) to decide which kind of system to generate. Canonical spec: `wizard/shape_detection.md` § 2.1 (experiential capabilities beat).
 
-The probes follow the canonical spec at `wizard/shape_detection.md` § 2.1.
-
-**Internal note (per `wizard/shape_detection.md` § 9):** scan the operator's P1-2 core-purpose answer for shape-signal phrases (e.g., "automated newsletter every Monday" / "thinking partner for X" / "customer portal where my team logs in"). Capture any matched phrases verbatim under `shape_hypothesis.forward_offered_signals_at_step_01:` in the staging file. Probes still fire — forward-offered signals are interpretive prior only, not authoritative answers.
+**Internal note (per `wizard/shape_detection.md` § 9 — decision-E v1).** Scan the operator's purpose answer (P1-2) and the working definition for shape-signal phrases (e.g., "newsletter that goes out every Monday" / "something to think ideas through with" / "a place my team logs in"). Capture any matched phrases verbatim under `shape_hypothesis.forward_offered_signals_at_step_01:` in the staging file. These signals may **frame** a question ("Based on the newsletter you mentioned…") but must NEVER pre-fill an answer or skip a dimension — all four are always asked, and the operator's explicit answer is what gets recorded. Do not collapse "not sure" into "no."
 
 **Lead-in to operator:**
 
-> Four quick yes/no/unsure questions about what your system needs to do. There are no wrong answers — this is just helping me understand what to build.
+> A few quick questions about how this should work — there are no wrong answers, and "not sure" is a perfectly good answer to any of them. They're independent, so any mix is fine.
 
----
+Ask the four questions below as one beat — together, or one at a time in this order. Each resolves to a stored `probe_N` value. For each: accept **yes / no / unsure**; if the operator gives a qualified answer ("only sometimes" / "ideally yes but not required"), ask one follow-up to resolve to yes/no/unsure ("So is that more of a yes or a no?"); if still genuinely uncertain after one follow-up, store `unsure`. Frame each with the working definition where it helps, but never answer it for them.
 
-### P1-4 — Continuous-runtime probe
+| # | Ask the user | Store | Marker |
+|---|---|---|---|
+| 1 | "Will you want to chat with it or ask it questions directly — bring it things to think through?" | `probe_3_thinking_partner = yes \| no \| unsure` | `step_01_P1-6` |
+| 2 | "Should it run in the background or on a schedule — doing things even when you're not there?" | `probe_1_continuous_runtime = yes \| no \| unsure` | `step_01_P1-4` |
+| 3 | "Will other people use it, with their own access?" | `probe_2_multi_user = yes \| no \| unsure` | `step_01_P1-5` |
+| 4 | "Does it need to connect to your other apps or accounts — to read or write data (email, calendar, documents, and the like)?" | `probe_4_external_software = yes \| no \| unsure` | `step_01_P1-7` |
 
-**Ask the user:**
+After each question is answered, store its `probe_N` value and append its marker to `~/claude-wizard-draft/wizard_progress.md`. The `probe_N` ↔ marker mapping is fixed (it preserves the downstream contract): question 1 → `probe_3` / `P1-6`; question 2 → `probe_1` / `P1-4`; question 3 → `probe_2` / `P1-5`; question 4 → `probe_4` / `P1-7`. (Presentation order differs from the marker numbers by design — the experiential order reads more naturally; the markers stay tied to their probe.)
 
-> Does the system need to keep running on its own, even when you're not using Claude?
-
-**Accept:** yes / no / unsure. If operator gives a qualified answer ("only sometimes" / "ideally yes but not required"), ask one follow-up to resolve to yes/no/unsure: "So is that more of a yes or a no?" If genuinely uncertain after one follow-up, store as `unsure`.
-
-**Store:** `probe_1_continuous_runtime = yes | no | unsure`
-
-Write sub-step marker: Append `step_01_P1-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
-
-**Record to the event transcript** (P1-4 is an `orchestration_build` source — it informs the orchestration/execution-cadence derivation at the step-13 barrier):
+**Record the continuous-runtime answer (question 2) to the event transcript** — it is an `orchestration_build` source that informs the orchestration / execution-cadence derivation at the step-13 barrier. The other three dimensions are stored to the staging-file `shape_hypothesis` block only, not the transcript:
 
 ```
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid P1-4 --group orchestration_build --value "<probe_1_continuous_runtime: yes | no | unsure>"
 ```
 
----
-
-### P1-5 — Multi-user probe
-
-**Ask the user:**
-
-> Will other people use this system — and need their own logins or different views?
-
-**Accept:** yes / no / unsure. Same one-follow-up resolution pattern as P1-4.
-
-**Store:** `probe_2_multi_user = yes | no | unsure`
-
-Write sub-step marker: Append `step_01_P1-5: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
-
----
-
-### P1-6 — Thinking-partner probe
-
-**Ask the user:**
-
-> Is it mainly something you'll work on WITH Claude — like a thinking partner you bring questions to?
-
-**Accept:** yes / no / unsure. Same one-follow-up resolution pattern.
-
-**Store:** `probe_3_thinking_partner = yes | no | unsure`
-
-Write sub-step marker: Append `step_01_P1-6: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
-
----
-
-### P1-7 — External-software probe
-
-**Ask the user:**
-
-> Does it need to talk to other software automatically — like getting prices, sending emails, checking accounts?
-
-**Accept:** yes / no / unsure. Same one-follow-up resolution pattern.
-
-**Store:** `probe_4_external_software = yes | no | unsure`
-
-Write sub-step marker: Append `step_01_P1-7: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+Once all four dimensions are answered (markers `step_01_P1-4` through `step_01_P1-7` written and the P1-4 transcript record made), proceed to P1-8. On resume: if any of the four markers is missing, re-run the whole beat (re-confirm already-answered dimensions quickly from the staging `shape_hypothesis` block rather than treating them as new).
 
 ---
 

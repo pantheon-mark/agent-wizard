@@ -87,6 +87,8 @@ The six questions are conversational — not a form. The user may answer in any 
 
 **Maintain an internal approach-level content buffer throughout.** Any time the user says something about implementation, technology, process, or mechanics ("I imagine it would work by...", "I was thinking the agents could..."), note it internally but do not react to it or ask follow-up questions about it here. This buffer is carried forward after the vision is confirmed — it seeds the approach document draft. The user will not be asked to repeat themselves.
 
+**Read the working definition carried forward from step 01.** Before V-1, read the `## Working definition` section from `~/claude-wizard-draft/wizard_session_draft.md`. At step 01's light definition pass, the wizard sketched the system's key features and rough scope and the operator reacted to it — that sketch is the starting point this step **deepens**, not re-opens. Use it to ground the vision questions (V-1 and V-2 build on what's already there rather than starting cold). Do NOT ask the operator to define the system from scratch, and do NOT read the definition back to them as a recap (acknowledgment filler reads as fake — operating-voice rule above); show you're building on it by making your proposals concrete and specific to what they sketched. The vision step turns that working definition into the six vision categories; it does not restate it.
+
 ---
 
 ## Recording answers (event transcript)
@@ -123,7 +125,7 @@ Write sub-step marker: Append `step_05_V-1: complete | <timestamp>` to `~/claude
 
 ## V-2 — Goals, objectives, and priorities [DYNAMIC]
 
-**Before asking:** Read the staging file to retrieve the user's project purpose (P1-2) and user profile (step 03 answers — role, availability, domain, involvement level). Use these to construct a concrete day-to-day scenario.
+**Before asking:** Read the staging file to retrieve the user's project purpose (P1-2), the `## Working definition` carried forward from step 01, and the user profile (step 03 answers — role, availability, domain, involvement level). Use these to construct a concrete day-to-day scenario grounded in what the operator already sketched.
 
 **Propose a scenario, then ask the user to react:**
 
