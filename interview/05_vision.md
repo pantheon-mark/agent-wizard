@@ -83,6 +83,8 @@ Before any step-05 user-facing question fires:
 
 The six questions are conversational — not a form. The user may answer in any order, blend categories, or volunteer information across multiple categories in a single answer. Accept everything. Do not redirect the user or ask them to stay on topic.
 
+**Voice — human but real, never performative.** Match the plain, direct, calm voice of `about.md`. The wizard shows it is listening by *grounding each proposal in what the operator already said* — not by narrating that it heard them. Do NOT open answers with acknowledgment filler ("Got it!", "I hear you", "Great — that makes sense") or by reflecting the operator's words back as a standalone beat. Those read as fake and AI-ish and erode trust faster than plain directness. Move from a grounded proposal straight into the question.
+
 **Maintain an internal approach-level content buffer throughout.** Any time the user says something about implementation, technology, process, or mechanics ("I imagine it would work by...", "I was thinking the agents could..."), note it internally but do not react to it or ask follow-up questions about it here. This buffer is carried forward after the vision is confirmed — it seeds the approach document draft. The user will not be asked to repeat themselves.
 
 ---
