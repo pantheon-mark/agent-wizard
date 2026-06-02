@@ -120,6 +120,8 @@ Draft a short, plain-language sketch from the operator's purpose — a few key t
 - If they add things: capture them. Operator-provided lists are examples, never exhaustive — proactively name anything obvious that seems missing, framed as a "for instance," not as the answer.
 - If they can't react meaningfully yet: that's fine. Keep the sketch light and proceed; the vision step (05) deepens it.
 
+**Keep sources distinct (anti-bias).** What the operator actually said is their intent; what *you* proposed is a suggestion until they adopt it. When you write the working definition, do not silently convert your own suggested features into "what the operator wants" — keep anything they didn't explicitly confirm marked as a proposal (e.g., "(suggested — confirm later)"). This matters because the capability questions below are framed by the working definition: if a wizard-invented capability reads as operator intent, it can bias those answers.
+
 Hold the working definition now — it is written to the staging file in P1-3 (under `## Working definition`) and **carried forward to the vision step (05), which deepens it rather than re-asking** (operating rule #9). Do NOT record it to the event transcript: it shapes the vision-step conversation and the framing of the beats below, not a generated field directly.
 
 Write sub-step marker: Append `step_01_DEF: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
@@ -195,34 +197,46 @@ Write sub-step marker: Append `step_01_P1-3: complete | <timestamp>` to `~/claud
 
 ---
 
-## Capabilities beat — P1-4 through P1-7 (one grouped beat)
+## Capabilities beat — P1-4 through P1-7b (one grouped beat)
 
-These four questions establish what kind of system you're building, in behavior-based terms — what it needs to *do*, never technology choices. Ask them as **one grouped beat**, not four separate cold questions, and frame each by the working definition the operator just sketched. The wizard uses these answers (plus context from later steps) to decide which kind of system to generate. Canonical spec: `wizard/shape_detection.md` § 2.1 (experiential capabilities beat).
+These questions establish what kind of system you're building, in behavior-based terms — what it needs to *do*, never technology choices. Ask them as **one grouped beat**, and frame each by the working definition the operator just sketched. The wizard uses these answers (plus context from later steps) to decide which kind of system to generate. Canonical spec: `wizard/shape_detection.md` § 2.1 (experiential capabilities beat).
 
-**Internal note (per `wizard/shape_detection.md` § 9 — decision-E v1).** Scan the operator's purpose answer (P1-2) and the working definition for shape-signal phrases (e.g., "newsletter that goes out every Monday" / "something to think ideas through with" / "a place my team logs in"). Capture any matched phrases verbatim under `shape_hypothesis.forward_offered_signals_at_step_01:` in the staging file. These signals may **frame** a question ("Based on the newsletter you mentioned…") but must NEVER pre-fill an answer or skip a dimension — all four are always asked, and the operator's explicit answer is what gets recorded. Do not collapse "not sure" into "no."
+**Internal note (per `wizard/shape_detection.md` § 9 — decision-E v1).** Scan the operator's purpose answer (P1-2) and the working definition for shape-signal phrases (e.g., "newsletter that goes out every Monday" / "something to think ideas through with" / "a place my team logs in"). Capture any matched phrases verbatim under `shape_hypothesis.forward_offered_signals_at_step_01:` in the staging file. These signals may **frame** a question ("Based on the newsletter you mentioned…") but must NEVER pre-fill an answer or skip a question — every question is always asked, and the operator's explicit answer is what gets recorded. Do not collapse "not sure" into "no."
 
 **Lead-in to operator:**
 
 > A few quick questions about how this should work — there are no wrong answers, and "not sure" is a perfectly good answer to any of them. They're independent, so any mix is fine.
 
-Ask the four questions below as one beat — together, or one at a time in this order. Each resolves to a stored `probe_N` value. For each: accept **yes / no / unsure**; if the operator gives a qualified answer ("only sometimes" / "ideally yes but not required"), ask one follow-up to resolve to yes/no/unsure ("So is that more of a yes or a no?"); if still genuinely uncertain after one follow-up, store `unsure`. Frame each with the working definition where it helps, but never answer it for them.
+Ask the questions below as one beat. **Default to one at a time, in this order** — for a non-technical operator that lands more clearly than a wall of questions, and it cuts mapping mistakes; only ask several together if the operator is clearly moving fast. Each resolves to a stored `probe_N` value (the runtime question is one *leveled* pick that derives two values). For the yes/no questions: accept **yes / no / unsure**; if the operator gives a qualified answer ("only sometimes" / "ideally yes but not required"), ask one follow-up to resolve to yes/no/unsure ("So is that more of a yes or a no?"); if still genuinely uncertain after one follow-up, store `unsure`. Frame each with the working definition where it helps, but never answer it for them.
 
 | # | Ask the user | Store | Marker |
 |---|---|---|---|
 | 1 | "Will you want to chat with it or ask it questions directly — bring it things to think through?" | `probe_3_thinking_partner = yes \| no \| unsure` | `step_01_P1-6` |
-| 2 | "Should it run in the background or on a schedule — doing things even when you're not there?" | `probe_1_continuous_runtime = yes \| no \| unsure` | `step_01_P1-4` |
+| 2 (**leveled** — read the three and let them pick; "not sure" is fine) | "How does this need to run? — **(a) Only when you come to it** — you open it and ask when you need something. **(b) On a schedule** — it wakes at set times (like each morning, or a few times a day), does its work, sends you what it found, and is done until next time. **(c) All the time** — it has to stay on constantly and react within seconds the moment something happens." | `runtime_mode = on-demand \| scheduled \| always-on \| unsure` → derive `probe_1_scheduled_cadence` + `probe_9_always_on` (see derivation below) | `step_01_P1-4` |
 | 3 | "Will other people use it, with their own access?" | `probe_2_multi_user = yes \| no \| unsure` | `step_01_P1-5` |
-| 4 | "Does it need to connect to your other apps or accounts — to read or write data (email, calendar, documents, and the like)?" | `probe_4_external_software = yes \| no \| unsure` | `step_01_P1-7` |
+| 4 (**outbound**) | "Does it need to **reach out to your apps or accounts when it runs** — read your calendar, update your sheet, send an email? (**read or write** both count.)" | `probe_4_external_software = yes \| no \| unsure` | `step_01_P1-7` |
+| 5 (**inbound**) | "Does it need to **receive things from other systems live** — let other people or apps connect to it, get live updates or alerts pushed in, or have people sign in to it as part of using it day-to-day? (Just setting it up once with your own accounts does NOT count.)" | `probe_10_inbound_serve = yes \| no \| unsure` | `step_01_P1-7b` |
 
-After each question is answered, store its `probe_N` value and append its marker to `~/claude-wizard-draft/wizard_progress.md`. The `probe_N` ↔ marker mapping is fixed (it preserves the downstream contract): question 1 → `probe_3` / `P1-6`; question 2 → `probe_1` / `P1-4`; question 3 → `probe_2` / `P1-5`; question 4 → `probe_4` / `P1-7`. (Presentation order differs from the marker numbers by design — the experiential order reads more naturally; the markers stay tied to their probe.)
+**Frequency clarifier (question 2, only if they pick "(b) On a schedule").** Ask one short follow-up: "Roughly how often — a few times a day, hourly, or more often than that?" If the answer implies very frequent / near-real-time wakeups (every few minutes), gently note it's still buildable but worth knowing: "That's doable, but running it that often costs more to operate and can hit usage limits — we can revisit the cadence later." This stays on the scheduled (markdown-friendly) path; it is NOT an off-ramp. Capture the rough cadence verbatim under `## Early mentions` tagged `[→ step 13]` (scale tuning).
 
-**Record the continuous-runtime answer (question 2) to the event transcript** — it is an `orchestration_build` source that informs the orchestration / execution-cadence derivation at the step-13 barrier. The other three dimensions are stored to the staging-file `shape_hypothesis` block only, not the transcript:
+**Runtime-level → derived values (question 2).** Record the operator's pick, then derive:
+
+| Operator picks | `probe_1_scheduled_cadence` | `probe_9_always_on` |
+|---|---|---|
+| (a) Only when you come to it | no | no |
+| (b) On a schedule | yes | no |
+| (c) All the time | no | yes |
+| Not sure | unsure | unsure |
+
+After each question is answered, store its value(s) in the staging `shape_hypothesis.operator_signals` block and append its marker to `~/claude-wizard-draft/wizard_progress.md`. The `probe_N` ↔ marker mapping is fixed (it preserves the downstream contract): question 1 → `probe_3` / `P1-6`; question 2 → runtime (`probe_1_scheduled_cadence` + `probe_9_always_on`) / `P1-4`; question 3 → `probe_2` / `P1-5`; question 4 → `probe_4` (outbound) / `P1-7`; question 5 → `probe_10_inbound_serve` / `P1-7b`. (Presentation order keeps the markers tied to their probe; the experiential order reads more naturally.)
+
+**Record the RAW runtime answer (question 2) to the event transcript** — qid `P1-4`, group `orchestration_build` (it informs the orchestration / execution-cadence derivation at the step-13 barrier; the on-demand-vs-scheduled distinction is exactly what that derivation needs, and recording the raw mode keeps the always-on case in the transcript without a separate qid). The other dimensions are stored to the staging-file `shape_hypothesis` block only, not the transcript:
 
 ```
-python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid P1-4 --group orchestration_build --value "<probe_1_continuous_runtime: yes | no | unsure>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid P1-4 --group orchestration_build --value "<runtime_mode: on-demand | scheduled | always-on | unsure>"
 ```
 
-Once all four dimensions are answered (markers `step_01_P1-4` through `step_01_P1-7` written and the P1-4 transcript record made), proceed to P1-8. On resume: if any of the four markers is missing, re-run the whole beat (re-confirm already-answered dimensions quickly from the staging `shape_hypothesis` block rather than treating them as new).
+Once all five questions are answered (markers `step_01_P1-4`, `P1-5`, `P1-6`, `P1-7`, `P1-7b` written and the P1-4 transcript record made), proceed to P1-8. On resume: if any of the five markers is missing, re-run the whole beat (re-confirm already-answered dimensions quickly from the staging `shape_hypothesis` block rather than treating them as new).
 
 ---
 
@@ -241,7 +255,7 @@ Do not ask the operator anything in this sub-step. Apply the classifier per `wiz
 ## Shape detection
 
 schema_versions:
-  schema_major: 0
+  schema_major: 1 # (2026-06-02): bumped 0→1 — probe_1 renamed to probe_1_scheduled_cadence; probe_9_always_on + probe_10_inbound_serve added
   schema_minor: 0
   shape_taxonomy_version: 0
   stop_condition_set_version: 0
@@ -258,14 +272,16 @@ shape_hypothesis:
   rechecks_due: [05, 08]
   forced_recheck_at_step_05: false
   operator_signals:
-  probe_1_continuous_runtime: <stored value>
+  probe_1_scheduled_cadence: <stored value> # derived from runtime_mode (yes only for "On a schedule")
   probe_2_multi_user: <stored value>
   probe_3_thinking_partner: <stored value>
-  probe_4_external_software: <stored value>
+  probe_4_external_software: <stored value> # outbound; shape-neutral
   probe_5_state_memory: not_asked
   probe_6_regular_pattern: not_asked
   probe_7_operator_confirm: not_asked
   probe_8_document_output: not_asked
+  probe_9_always_on: <stored value> # derived from runtime_mode (yes only for "All the time")
+  probe_10_inbound_serve: <stored value>
   forward_offered_signals_at_step_01: <list of verbatim phrases captured at P1-2 scan; may be empty list>
   mixed_component_basis: <empty list unless shape == mixed; if shape == mixed, list constituent component shapes detected>
   fallback_mode_offered: not_offered
@@ -279,7 +295,7 @@ shape_hypothesis:
 ## Shape detection
 
 schema_versions:
-  schema_major: 0
+  schema_major: 1 # (2026-06-02): bumped 0→1 — probe_1 renamed to probe_1_scheduled_cadence; probe_9_always_on + probe_10_inbound_serve added
   schema_minor: 0
   shape_taxonomy_version: 0
   stop_condition_set_version: 0
@@ -290,10 +306,12 @@ handoff_phase: provisional_shape_emit
 shape_hypothesis:
   status: pending_step_02_fallback
   step_01_signals:
-  probe_1_continuous_runtime: <stored value>
+  probe_1_scheduled_cadence: <stored value>
   probe_2_multi_user: <stored value>
   probe_3_thinking_partner: <stored value>
   probe_4_external_software: <stored value>
+  probe_9_always_on: <stored value>
+  probe_10_inbound_serve: <stored value>
   step_01_provisional_confidence: <medium | low>
   forward_offered_signals_at_step_01: <list>
   step_01_completed_timestamp: <ISO 8601>

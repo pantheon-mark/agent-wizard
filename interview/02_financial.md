@@ -318,7 +318,7 @@ Do not ask the operator anything. Apply the classifier per `wizard/shape_detecti
 ## Shape detection
 
 schema_versions:
-  schema_major: 0
+  schema_major: 1 # (2026-06-02): bumped 0→1 — probe_1 renamed to probe_1_scheduled_cadence; probe_9_always_on + probe_10_inbound_serve added
   schema_minor: 0
   shape_taxonomy_version: 0
   stop_condition_set_version: 0
@@ -335,14 +335,16 @@ shape_hypothesis:
   rechecks_due: [05, 08]
   forced_recheck_at_step_05: <true if confidence == low else false>
   operator_signals:
-  probe_1_continuous_runtime: <stored value>
+  probe_1_scheduled_cadence: <stored value> # derived from runtime_mode (yes only for "On a schedule"); shape-neutral
   probe_2_multi_user: <stored value>
   probe_3_thinking_partner: <stored value>
-  probe_4_external_software: <stored value>
+  probe_4_external_software: <stored value> # outbound; shape-neutral
   probe_5_state_memory: <stored value>
   probe_6_regular_pattern: <stored value>
   probe_7_operator_confirm: <stored value>
   probe_8_document_output: <stored value>
+  probe_9_always_on: <stored value> # derived from runtime_mode (yes only for "All the time")
+  probe_10_inbound_serve: <stored value>
   forward_offered_signals_at_step_01: <preserved from step 01 placeholder>
   mixed_component_basis: <empty list unless shape == mixed; if shape == mixed, list constituent component shapes detected from probe signals + free-text signals>
   fallback_mode_offered: not_offered

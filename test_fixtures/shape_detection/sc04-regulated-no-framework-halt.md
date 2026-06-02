@@ -78,3 +78,7 @@ This is the most-operator-friendly halt because it surfaces a question the opera
 ## Discrimination note (v0 vs operator self-categorization)
 
 A risk of this stop condition: operator may bypass it by saying "none of the above" at UP-6.1 even when their domain implies regulation. The wizard cannot force operator self-knowledge. The honest characterization rule (D1 § 2.3) is the upstream protection — the generated system's documents will EXPLICITLY state "this system makes NO compliance claim" so operator + downstream reviewers see the gap.
+
+## F6 reconciliation note (2026-06-02)
+
+This fixture's target oracle (markdown-agents + stop-condition/halt) is **UNCHANGED** by the F6 reconciliation (`wizard/shape_detection.md` § 9), but the *reason* markdown reaches HIGH changed: under F6, markdown-agents is HIGH via **§ 3 branch (c)** (≥1 behavior positive — thinking-partner / operator-confirm / document-output — AND `probe_9_always_on` / `probe_10_inbound_serve` / `probe_2` all no/unsure), NOT via the removed `probe_1 no` / `probe_4 no` strong-positives. Read the probe table with the F6 mapping: `probe_1_scheduled_cadence` (scheduled) and `probe_4` (outbound) are shape-NEUTRAL; the renamed/added fields are `probe_1_scheduled_cadence`, `probe_9_always_on`, `probe_10_inbound_serve`. Emit `schema_major` is now `1`. The regulatory stop-condition logic is unchanged.

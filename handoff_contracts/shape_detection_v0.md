@@ -22,8 +22,8 @@ Versioning was previously a single `schema_version` field; this caused internal 
 
 ```yaml
 schema_versions:
-  schema_major: 0
-  schema_minor: 2 # bumped 1 → 2 (additive: optional `stop_conditions.resolved_during_loop` field for active-vs-transitional distinction); prior bump 0 → 1 added `shape_revision` block
+  schema_major: 1 # bumped 0 → 1 at F6 (2026-06-02): BREAKING — `probe_1_continuous_runtime` renamed to `probe_1_scheduled_cadence`; `probe_9_always_on` + `probe_10_inbound_serve` added to operator_signals. Field rename ⇒ major bump (see § 6). Consumers must expect major 1.
+  schema_minor: 0 # reset to 0 on the major bump. The major-0 lineage's additive features (`shape_revision` block at old minor 1; `stop_conditions.resolved_during_loop` at old minor 2) carry forward under major 1.
   shape_taxonomy_version: 0 # closed taxonomy; extension = major bump
   stop_condition_set_version: 0 # closed taxonomy; extension = major bump
   control_matrix_schema_version: 0 # closed status-value taxonomy
@@ -63,10 +63,10 @@ Two terminal states do NOT advance to `pre_step_05_evaluated` or later:
 ## 3. Full schema (all fields across all phases)
 
 ```yaml
-# shape_detection_handoff_v0
+# shape_detection_handoff_v0  (data contract; schema_major 1)
 schema_versions:
-  schema_major: 0
-  schema_minor: 2 # bumped 0 → 1 (additive: optional `shape_revision` block per § 9) and 1 → 2 (additive: optional `stop_conditions.resolved_during_loop` field)
+  schema_major: 1 # bumped 0 → 1 at F6 (field rename + new operator_signals fields; breaking)
+  schema_minor: 0 # reset on major bump; major-0 additive features (`shape_revision`, `stop_conditions.resolved_during_loop`) carry forward
   shape_taxonomy_version: 0
   stop_condition_set_version: 0
   control_matrix_schema_version: 0
@@ -81,14 +81,16 @@ shape_hypothesis:
   rechecks_due: [05, 08]
   forced_recheck_at_step_05: true | false
   operator_signals:
-  probe_1_continuous_runtime: yes | no | unsure
+  probe_1_scheduled_cadence: yes | no | unsure # F6: renamed from probe_1_continuous_runtime. Derived from the runtime level (yes only for "On a schedule"). SHAPE-NEUTRAL. Raw runtime answer recorded to transcript qid P1-4 as runtime_mode.
   probe_2_multi_user: yes | no | unsure
   probe_3_thinking_partner: yes | no | unsure
-  probe_4_external_software: yes | no | unsure
+  probe_4_external_software: yes | no | unsure # F6: outbound integration. SHAPE-NEUTRAL (markdown reaches out via scripts + step-09 creds per the markdown-agents execution model).
   probe_5_state_memory: yes | no | unsure | not_asked
   probe_6_regular_pattern: yes | no | unsure | not_asked
   probe_7_operator_confirm: yes | no | unsure | not_asked
   probe_8_document_output: yes | no | unsure | not_asked
+  probe_9_always_on: yes | no | unsure # F6 NEW: derived from the runtime level (yes only for "All the time"). Only non-markdown RUNTIME trigger.
+  probe_10_inbound_serve: yes | no | unsure # F6 NEW: inbound/live-serving integration. Non-markdown trigger.
   forward_offered_signals_at_step_01:
   - "<verbatim phrase from operator's P1-2 core-purpose answer>"
   fallback_mode_offered: complete | foundation-only | scope-out | not_offered
@@ -183,10 +185,10 @@ shape_revision:
 
 ## 4. Stability contract
 
-Downstream slices may RELY on the following holding at v0 (all listed under `schema_major: 0`):
+Downstream slices may RELY on the following holding (all listed under the current `schema_major: 1` — bumped from 0 at the runtime/integration reconciliation for the `probe_1_scheduled_cadence` rename + `probe_9_always_on` / `probe_10_inbound_serve` additions; the field-rename invoked exactly the major-bump rule below):
 
 - The 4 phases (`provisional_shape_emit` / `regulatory_exposure_populated` / `pre_step_05_evaluated` / `pre_step_08_evaluated`) are CLOSED — phase additions require `schema_major` bump
-- All field names within each phase's required keys are stable at `schema_minor: 0` — field renames within a major require `schema_major` bump
+- All field names within each phase's required keys are stable at the current `schema_major` — field renames within a major require a `schema_major` bump (this is precisely what F6 did: 0 → 1)
 - The 8 shape categories AND `unknown` are CLOSED — additions require `shape_taxonomy_version` bump (separate from `schema_major`)
 - The 4 stop conditions are CLOSED — additions require `stop_condition_set_version` bump (separate from `schema_major`)
 - The 6 control-matrix status values are CLOSED — additions require `control_matrix_schema_version` bump (separate from `schema_major`)

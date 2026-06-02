@@ -120,7 +120,7 @@ stop_conditions:                   # PRESERVED from original halt; no cross-slic
   fired: [3]
   halted: true                      # preserved; operator chose scope-out so halt remains valid
 schema_versions:
-  schema_major: 0
+  schema_major: 1
   schema_minor: 2
 ```
 

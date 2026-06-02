@@ -4,9 +4,9 @@ schema_version: fixture-replay-v1
 fixture_class: shape
 target_shape: node-ui
 expected_confidence: high
-expected_emit_step: 01
+expected_emit_step: 02
 expected_halt: false
-notes: Canonical Node+UI fixture — operator wants multi-user system with logins and a browser interface.
+notes: Canonical Node+UI fixture — multi-user system with logins and a browser interface. RE-DERIVED at F6 (2026-06-02) — non-markdown intent now carried by multi-user + inbound (people sign in / connect live), NOT by the old "continuous-runtime" probe.
 ---
 
 # Fixture s04 — node-ui (clean signal)
@@ -17,31 +17,30 @@ notes: Canonical Node+UI fixture — operator wants multi-user system with login
 
 **P1-2 (core purpose):** "I want a website where my clients can log in, see their account status, upload documents, and message us. My team and I would also log in to manage everything."
 
-**Step 01 probes:**
+**Step 01 capabilities beat:**
+
+| Question | Answer | F6 signal |
+|---|---|---|
+| thinking-partner (`probe_3`) | no | strong-negative for markdown-agents / claude-skills |
+| runtime (leveled) → `runtime_mode` | all the time ("it's a site people use whenever; it stays up") | `probe_1_scheduled_cadence = no`, `probe_9_always_on = yes` |
+| multi-user (`probe_2`) | yes ("clients and my team each log in with their own access") | strong-positive for node-ui / multi-user-datastore (non-markdown trigger) |
+| outbound (`probe_4`) | no | shape-neutral |
+| inbound (`probe_10_inbound_serve`) | yes ("clients log in and connect to it as the normal way they use it") | non-markdown integration trigger; node-ui signal |
+
+**Step 02 fallback probes fire** (node-ui has 2 strong-positives at step 01 — `probe_2` + `probe_10` — but so does hosted-cloud via `probe_9` + `probe_2`; ambiguous top → MEDIUM):
 
 | Probe | Answer | Signal |
 |---|---|---|
-| P1-4 continuous-runtime | yes | strong-positive for python-service / node-ui / hosted-cloud |
-| P1-5 multi-user | yes | strong-positive for node-ui / multi-user-datastore |
-| P1-6 thinking-partner | no | strong-negative for markdown-agents / claude-skills |
-| P1-7 external-software | no | strong-positive for markdown-agents (no) — neutral; markdown ruled out by Probes 1+2 |
+| P02-FB-1 state-memory (`probe_5`) | yes | datastore — supports node-ui AND multi-user-datastore |
+| P02-FB-2 regular-pattern (`probe_6`) | no | weak |
+| P02-FB-3 operator-confirm (`probe_7`) | no | weak |
+| P02-FB-4 document-output (`probe_8`) | no | weak |
 
-**Step 02 probes:** Not fired if step 01 emits HIGH confidence. Given the signals, top shape (node-ui) has 2 strong-positives (Probes 1 + 2); next-closest is multi-user-datastore with 1 (Probe 2). Threshold 2 strong-positives may emit MEDIUM at step 01; fallback fires.
+After step 02: node-ui has 3 strong-positives (`probe_2` + `probe_10` + `probe_5`) → HIGH.
 
-If step 02 fires:
+**Step 03 UP-6 regulatory exposure:** domestic clients assumed → `gdpr_applicable: no`; `no_compliance_claim: yes`.
 
-| Probe | Answer | Signal |
-|---|---|---|
-| P02-FB-1 state-memory | yes | strong-positive for datastore signal — supports node-ui AND multi-user-datastore |
-| P02-FB-2 regular-pattern | no | weak signal |
-| P02-FB-3 operator-confirm | no | weak signal |
-| P02-FB-4 document-output | no | weak signal |
-
-After step 02: node-ui has 3 strong-positives (Probes 1 + 2 + 5) → HIGH confidence emit.
-
-**Step 03 UP-6 regulatory exposure:** Possibly GDPR (operator's clients may include EU residents) — depends on synthetic input setup. For this fixture, set: `gdpr_applicable: no` (clients are domestic-only assumption); `no_compliance_claim: yes`.
-
-## Expected classifier emit (at step 02 if fallback fires; at step 01 if classifier promotes 2-strong-positive non-markdown shapes to HIGH)
+## Expected classifier emit (step 02)
 
 ```yaml
 shape_hypothesis:
@@ -49,17 +48,17 @@ shape_hypothesis:
   confidence: high
   detected_at_step: 02
   v1_supported: false
-  rechecks_due: [05, 08]
-  forced_recheck_at_step_05: false
-  operator_signals: # all 8 probes filled
-  forward_offered_signals_at_step_01: ["website where my clients can log in"]
   fallback_mode_offered: not_offered
+  # operator_signals (10 probes): probe_1_scheduled_cadence no, probe_2_multi_user yes,
+  # probe_3_thinking_partner no, probe_4_external_software no, probe_5_state_memory yes,
+  # probe_9_always_on yes, probe_10_inbound_serve yes
+  forward_offered_signals_at_step_01: ["website where my clients can log in"]
 ```
 
 ## Expected pre-step-05 re-check
 
 Unsupported-shape transition fires (node-ui not v1-supported). Operator picks scope-out or foundation-only.
 
-## Discrimination note
+## Discrimination note (F6)
 
-This fixture stress-tests the node-ui-vs-multi-user-datastore boundary. Probe-1 "yes" (continuous-runtime) is the key signal that selects node-ui over plain multi-user-datastore. Without continuous-runtime signal, the system would classify as multi-user-datastore (which is more a datastore-shape descriptor than a complete-system descriptor — node-ui is more specific).
+The node-ui signal is now carried by **multi-user (`probe_2`) + inbound/serving (`probe_10`)** — people sign in and connect to it as the normal way they use it, which is exactly the live-serving that markdown can't do (the markdown-agents execution model). `probe_9_always_on` reinforces it. node-ui vs multi-user-datastore is resolved by `probe_10` (a served UI). Pre-F6 this fixture leaned on `probe_1=yes` "continuous-runtime" as the discriminator; that signal is now shape-neutral, so the non-markdown intent is correctly expressed through the live-serving/multi-user triggers instead.

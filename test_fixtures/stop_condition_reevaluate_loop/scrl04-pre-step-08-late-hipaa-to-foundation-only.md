@@ -145,7 +145,7 @@ stop_conditions:                       # MUTATED at terminal foundation_only per
   halt_message: <preserved verbatim from original late-emergence halt>
   late_emergence_source: vision
 schema_versions:
-  schema_major: 0
+  schema_major: 1
   schema_minor: 2
 ```
 

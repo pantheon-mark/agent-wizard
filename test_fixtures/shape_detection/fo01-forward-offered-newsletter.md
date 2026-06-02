@@ -2,14 +2,14 @@
 fixture_id: fo01-forward-offered-newsletter
 schema_version: fixture-replay-v1
 fixture_class: forward-offered
-target_shape: python-service-operator-facing
+target_shape: markdown-agents
 expected_confidence: high
-expected_emit_step: 01
+expected_emit_step: 02
 expected_halt: false
-notes: Operator's P1-2 answer contains strong forward-offered shape signals — wizard captures them; probes confirm the same shape independently.
+notes: Forward-offered signals in P1-2 + the F6 reconciliation. RE-CLASSIFIED at F6 (2026-06-02) from python-service to markdown-agents — a scheduled, outbound, document-producing newsletter is exactly what v1 markdown does (cron→Orchestrator + send-script per the markdown-agents execution model). This is the canonical demonstration of the drift F6 fixes (pre-F6 it mis-classified python-service / fired the off-ramp).
 ---
 
-# Fixture fo01 — Forward-offered signal (newsletter automation)
+# Fixture fo01 — Forward-offered signal (newsletter automation) → markdown under F6
 
 ## Synthetic operator inputs
 
@@ -17,72 +17,84 @@ notes: Operator's P1-2 answer contains strong forward-offered shape signals — 
 
 **P1-2 (core purpose):** "I want an automated newsletter that goes out every Monday morning to my email list. The system should pull this week's relevant articles from a few sources I'd point it at, summarize them, format the issue, and send it without me lifting a finger. I'm subscribed to 12 sources I follow."
 
-**Forward-offered signals captured at P1-2** (per `wizard/shape_detection.md` § 9; classifier scans operator's free-text answer):
+**Forward-offered signals captured at P1-2** (per `wizard/shape_detection.md` § 9):
 
-- "automated newsletter that goes out every Monday morning" — implies Probe-1 yes (continuous-runtime; scheduled) + Probe-6 yes (regular pattern)
-- "pull ... articles from a few sources" — implies Probe-4 yes (talks to other software)
-- "without me lifting a finger" — implies Probe-7 no (does NOT ask operator before each action)
+- "automated newsletter that goes out every Monday morning" — scheduled (`probe_1_scheduled_cadence` yes) + regular pattern (`probe_6` yes). **F6: both markdown-NEUTRAL** — a scheduled cron→Orchestrator newsletter is markdown.
+- "pull ... articles from a few sources" — outbound (`probe_4` yes). **F6: markdown-NEUTRAL** (scripts + step-09 creds).
+- "without me lifting a finger" — `probe_7` no (does NOT ask before each action).
 
-**Step 01 probes (asked despite forward-offered signals per a prior slice decision E — probes still fire):**
+**Step 01 capabilities beat:**
+
+| Question | Answer | F6 signal |
+|---|---|---|
+| thinking-partner (`probe_3`) | no | not a thinking partner |
+| runtime (leveled) → `runtime_mode` | scheduled ("goes out every Monday morning") | `probe_1_scheduled_cadence = yes` (neutral), `probe_9_always_on = no` |
+| multi-user (`probe_2`) | no | single-operator |
+| outbound (`probe_4`) | yes ("pull from sources, send to list") | shape-neutral |
+| inbound (`probe_10_inbound_serve`) | no ("nobody connects to it; it just sends") | not a non-markdown trigger |
+
+Frequency clarifier (scheduled): "once a week" — low-frequency, no cost note.
+
+## Expected behavior at end of step 01 (deferred emit)
+
+At step 01 markdown-agents has 0 behavior strong-positives (`probe_3` no; `probe_7`/`probe_8` not yet asked) and 0 strong-negatives (`probe_9`/`probe_10`/`probe_2` all no). Branch (c) needs ≥1 strong-positive → does NOT fire yet. No shape has a positive → LOW/`unknown` provisional → defer to step 02 fallback. (`probe_1_scheduled_cadence` + `probe_4` are shape-neutral, so they contribute nothing for or against any shape.)
+
+**Step 02 fallback probes fire:**
 
 | Probe | Answer | Signal |
 |---|---|---|
-| P1-4 continuous-runtime | yes | strong-positive python-service / hosted-cloud / node-ui |
-| P1-5 multi-user | no | strong-positive single-user-friendly |
-| P1-6 thinking-partner | no | strong-negative markdown-agents / claude-skills |
-| P1-7 external-software | yes | strong-positive python-service |
+| P02-FB-1 state-memory (`probe_5`) | no | stateless-friendly |
+| P02-FB-2 regular-pattern (`probe_6`) | yes | markdown-friendly under F6 (scheduled cron→Orchestrator), NOT a service signal |
+| P02-FB-3 operator-confirm (`probe_7`) | no | autonomous send |
+| P02-FB-4 document-output (`probe_8`) | yes | strong-positive for markdown-agents (the newsletter IS a produced document) |
 
-**Step 02 probes:** Step 01 emits HIGH confidence for python-service-operator-facing — 2 strong-positives (Probes 1+4) + 2 strong-negatives ruling out markdown — fallback not strictly needed but classifier may still fire if MEDIUM threshold not met. For this fixture, classifier emits HIGH at step 01 with forward-offered signals as discriminator confirming the shape.
+After step 02: markdown-agents has 1 strong-positive (`probe_8` document-output) AND 0 strong-negatives AND every non-markdown trigger is no AND no other shape has ≥2 positives AND no claude-skills reuse signal → **HIGH via § 3 branch (c)**.
 
-**Step 03 UP-6 regulatory exposure:** GDPR potentially applicable (newsletter subscribers may include EU residents). Follow-up: "Are you/your organization a data controller of subscriber personal data?" → yes (operator controls subscriber list). Store `gdpr_applicable: yes`.
-
-## Expected classifier emit (at end of step 01)
+## Expected classifier emit (step 02)
 
 ```yaml
+schema_versions:
+  schema_major: 1
+  schema_minor: 0
+  shape_taxonomy_version: 0
+  stop_condition_set_version: 0
+  control_matrix_schema_version: 0
+
+handoff_phase: provisional_shape_emit
+
 shape_hypothesis:
-  shape: python-service-operator-facing
+  status: emitted
+  shape: markdown-agents
   confidence: high
-  detected_at_step: 01
-  v1_supported: false
+  detected_at_step: 02
+  v1_supported: true
   rechecks_due: [05, 08]
   forced_recheck_at_step_05: false
   operator_signals:
-    probe_1_continuous_runtime: yes
+    probe_1_scheduled_cadence: yes
     probe_2_multi_user: no
     probe_3_thinking_partner: no
     probe_4_external_software: yes
-    probe_5_state_memory: not_asked
-    probe_6_regular_pattern: not_asked
-    probe_7_operator_confirm: not_asked
-    probe_8_document_output: not_asked
+    probe_5_state_memory: no
+    probe_6_regular_pattern: yes
+    probe_7_operator_confirm: no
+    probe_8_document_output: yes
+    probe_9_always_on: no
+    probe_10_inbound_serve: no
   forward_offered_signals_at_step_01:
     - "automated newsletter that goes out every Monday morning"
     - "pull this week's relevant articles from a few sources I'd point it at"
     - "send it without me lifting a finger"
     - "subscribed to 12 sources I follow"
   fallback_mode_offered: not_offered
-
-regulatory_exposure:
-  gdpr_applicable: yes
-  hipaa_applicable: no
-  pci_dss_applicable: no
-  sox_applicable: no
-  coppa_or_gdpr_k_applicable: no
-  other_sector_specific: []
-  no_compliance_claim: no
-  no_compliance_claim_framework_identification: no
 ```
+
+**Step 03 UP-6 regulatory exposure:** domestic list assumed → `gdpr_applicable: no`; `no_compliance_claim: yes`. (If the operator's list included EU subscribers, GDPR + markdown would fire stop condition 2 at pre-step-05 — see `sc02-gdpr-markdown-halt`.)
 
 ## Expected pre-step-05 re-check
 
-- Stop conditions: GDPR-applicable + shape is `python-service-operator-facing` (not markdown-agents) → condition 2 does NOT fire (condition 2 requires markdown-agents)
-- Shape is non-markdown → unsupported-shape transition fires
-- Operator picks scope-out or foundation-only
+Outcome: `confirmed` (markdown-agents, no regulatory exposure). Wizard proceeds; generates a complete markdown-agents system: a cron-invoked Orchestrator that pulls sources, summarizes, formats, and sends the issue via step-09-credentialed scripts.
 
-If foundation-only: the generated foundation-doc set includes GDPR-applicable + python-service-deferred posture explicitly per D1 § 6.2 honest characterization rule.
+## Discrimination note (F6)
 
-## Discrimination note
-
-Forward-offered signals from P1-2 alone (without probes) would already strongly suggest python-service-operator-facing. The probes confirm independently. The classifier treats forward-offered signals as interpretive prior only (per decision E) — probes are canonical. In this fixture, both data sources agree, which is the easy case. The harder case (forward-offered signals contradict probes — operator's free-text vs. their explicit answers) is NOT tested at v0; bind to first-real-operator-data signal.
-
-This fixture also exercises the forward-offered signal capture mechanism (per wizard CLAUDE.md § 9 + `wizard/shape_detection.md` § 9 integration). Classifier should populate `forward_offered_signals_at_step_01` with verbatim phrases from operator's P1-2 answer.
+This fixture is the canonical demonstration of the F6 drift fix. **Pre-F6, `probe_1=yes` (continuous-runtime, scheduled) + `probe_4=yes` (external software) classified this python-service / HIGH and fired the unsupported-shape off-ramp** — wrong, because a scheduled outbound newsletter is exactly what markdown-agents does per the markdown-agents execution model. Post-F6, scheduled + outbound are shape-neutral, and markdown is selected via the document-output positive + absence of disqualifiers. It also exercises the forward-offered capture mechanism (verbatim phrases in `forward_offered_signals_at_step_01`) — which still works; the signals now correctly point at a markdown-deliverable system.

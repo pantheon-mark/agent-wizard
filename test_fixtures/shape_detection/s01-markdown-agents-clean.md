@@ -19,12 +19,13 @@ notes: Canonical markdown-agents fixture — Mark-class operator using Claude Co
 
 **Step 01 probes:**
 
-| Probe | Answer | Signal |
+| Question | Answer | F6 signal |
 |---|---|---|
-| P1-4 continuous-runtime | no | strong-positive for markdown-agents (no) |
-| P1-5 multi-user | no | strong-positive for markdown-agents (no) |
-| P1-6 thinking-partner | yes | strong-positive for markdown-agents |
-| P1-7 external-software | no | strong-positive for markdown-agents (no) |
+| thinking-partner (`probe_3`) | yes | strong-positive for markdown-agents |
+| runtime (leveled) → `runtime_mode` | on-demand ("only when I sit down with it") | `probe_1_scheduled_cadence = no`, `probe_9_always_on = no` |
+| multi-user (`probe_2`) | no | not a non-markdown trigger |
+| outbound (`probe_4`) | no | shape-neutral |
+| inbound (`probe_10_inbound_serve`) | no | not a non-markdown trigger |
 
 **Step 02 probes:** not fired (HIGH confidence at step 01).
 
@@ -41,7 +42,7 @@ shape_hypothesis:
   rechecks_due: [05, 08]
   forced_recheck_at_step_05: false
   operator_signals:
-    probe_1_continuous_runtime: no
+    probe_1_scheduled_cadence: no
     probe_2_multi_user: no
     probe_3_thinking_partner: yes
     probe_4_external_software: no
@@ -49,6 +50,8 @@ shape_hypothesis:
     probe_6_regular_pattern: not_asked
     probe_7_operator_confirm: not_asked
     probe_8_document_output: not_asked
+    probe_9_always_on: no
+    probe_10_inbound_serve: no
   forward_offered_signals_at_step_01: []
   fallback_mode_offered: not_offered
 ```
@@ -67,4 +70,4 @@ Wizard proceeds normally through all 16 steps. Generates complete markdown-agent
 
 ## Confidence rationale
 
-Per `wizard/shape_detection.md` § 3: top shape (markdown-agents) has 3 strong-positives (Probes 3 + Probes 1/4/5 as "no") AND 0 strong-negatives AND no other shape has ≥2 strong-positives → HIGH.
+Per `wizard/shape_detection.md` § 3 branch (c) [F6]: markdown-agents has 1 strong-positive (`probe_3` thinking-partner) AND 0 strong-negatives (`probe_9_always_on` / `probe_10_inbound_serve` / `probe_2` all no) AND no other shape has ≥2 strong-positives AND no claude-skills reuse signal → HIGH at step 01. (Pre-F6 this fixture relied on `probe_1 no` / `probe_4 no` as strong-positives; F6 made scheduled cadence + outbound shape-neutral, so HIGH now comes from the absence-of-disqualifiers branch, not from the absence of runtime/integration.)

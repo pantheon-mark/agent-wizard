@@ -68,3 +68,7 @@ shape_hypothesis:
 ## Discrimination note
 
 This fixture exercises the LOW-confidence emit path + forced re-check at step 05. Real-operator data on this case may surface during a known-tester slice (E-α) or during the first non-self operator engagement post-a prior slice.
+
+## F6 reconciliation note (2026-06-02)
+
+This fixture's target oracle (shape / confidence / stop-condition) is **UNCHANGED** by the F6 runtime/integration reconciliation (`wizard/shape_detection.md` § 9), so it was not re-derived. Read its probe table with the current F6 mapping: the runtime probe is now `probe_1_scheduled_cadence` (scheduled = shape-**NEUTRAL**, markdown-fine per the markdown-agents execution model) plus the new `probe_9_always_on` (the only non-markdown runtime trigger); integration splits into outbound `probe_4` (shape-NEUTRAL) and the new `probe_10_inbound_serve` (non-markdown trigger). Emit `schema_major` is now `1`. This fixture's verdict rests on signals F6 leaves intact (multi-user / always-on / inbound / low-signal-density / the regulatory stop condition), not on the now-neutral scheduled-or-outbound signals.

@@ -242,7 +242,7 @@ shape_hypothesis:
   fallback_mode_offered: foundation-only
   foundation_only_offered_timestamp: <ISO 8601>
 schema_versions:
-  schema_major: 0
+  schema_major: 1
   schema_minor: 2
 ```
 

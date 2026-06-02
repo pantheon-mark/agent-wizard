@@ -2,7 +2,7 @@
 
 **Mechanism ID:** `mech-shape-detection-v0`
 **Mechanism class:** Skill, pure markdown (advisory or guided).
-**Status:** v1 active (S2.32 — elicitation revised to the experiential capabilities beat; classifier, confidence rubric, emit schema, and handoff-contract surface are all UNCHANGED from v0; cross-vendor codex backstop owed before merge to `main`).
+**Status:** v1 active. Two amendments this cycle (2026): (1) the *elicitation* revision (experiential capabilities beat; classifier/rubric/emit/contract UNCHANGED); (2) the **runtime+integration reconciliation with the markdown-agents execution model (2026-06-02)** — this one DELIBERATELY changes the classifier (§ 2.3), the confidence rubric (§ 3 branch (c)), the emit schema (§ 4), and the handoff contract (`schema_major` 0→1): scheduled execution + outbound integration are markdown-fine, so the non-markdown triggers are now `probe_9_always_on` / `probe_10_inbound_serve` / `probe_2`. Cross-vendor advisor review complete; merge pending operator approval + the step-02 re-walk.
 **Authority:** This file is canonical for the wizard's shape-detection logic. Interview files (`wizard/interview/*.md`) reference this file as the spec for the probes they fire and the emit they produce.
 **Cross-references:** `wizard/handoff_contracts/shape_detection_v0.md` / `wizard/CLAUDE.md` § 9 (Forward-offered information capture).
 
@@ -18,27 +18,39 @@ The logic is **behavior-based** — operators are NOT asked "do you want Python 
 
 ## 2. Probe inventory + signal-to-shape mapping
 
-### 2.1 Step 01 — capabilities beat (experiential multi-select; 4 dimensions; always asked)
+### 2.1 Step 01 — capabilities beat (experiential; 5 questions across 4 dimensions; always asked)
 
-The four shape dimensions are elicited as **one grouped, experiential capabilities beat** — sub-steps P1-4 through P1-7 of `wizard/interview/01_phase1_capture.md`, presented to the operator as a single beat (NOT four separate cold ceremonial questions). The beat runs after the purpose → working-definition → name → staging-file beats (P1-2 → definition pass → P1-1 → P1-3). The four dimensions are asked **independently** (not as a mutually-exclusive pick-one), each on a **3-state** scale (yes / no / **not sure**), **framed by** the working definition from the definition pass but **never pre-filled** from it.
+The shape dimensions are elicited as **one grouped, experiential capabilities beat** — sub-steps P1-4 through P1-7b of `wizard/interview/01_phase1_capture.md`, presented to the operator as a single beat (NOT separate cold ceremonial questions). The beat runs after the purpose → working-definition → name → staging-file beats (P1-2 → definition pass → P1-1 → P1-3). The questions are asked **independently** (the runtime question is one *leveled* pick across an ordinal dimension; the rest are 3-state yes / no / **not sure**), **framed by** the working definition from the definition pass but **never pre-filled** from it.
 
-The operator-facing text is **experiential** (what the system will do for them in plain terms), not technical. Each dimension still resolves to the same `probe_N` value the classifier consumes — only the framing changed.
+The operator-facing text is **experiential** (what the system will do for them in plain terms), not technical. Each question resolves to the `probe_N` value(s) the classifier consumes — only the framing changed.
 
-| Dimension | Operator-facing text (experiential) | Resolves to | Signal classification |
+| Question | Operator-facing text (experiential) | Resolves to | Signal classification |
 |---|---|---|---|
 | **thinking-partner** | "Will you want to chat with it or ask it questions directly — bring it things to think through?" | `probe_3` | yes → markdown-agents OR Claude-skills signal; no → automated-systems signal |
-| **continuous-runtime** | "Should it run in the background or on a schedule — doing things even when you're not there?" | `probe_1` | yes → Python service / Node+UI / hosted-cloud signal; no → markdown-agents friendly |
+| **runtime** (leveled — 3 contrastive levels; "not sure" allowed) | "How does this need to run? — **(a) Only when you come to it** (you open it and ask); **(b) On a schedule** (wakes at set times — each morning or a few times a day — does its work, sends you what it found, done until next time); **(c) All the time** (stays on constantly and reacts *within seconds* when something happens)" | `probe_1_scheduled_cadence` + `probe_9_always_on` (both derived from the level; see below) | (a) on-demand → markdown-friendly; (b) scheduled → **markdown-friendly** (cron→Orchestrator per the markdown-agents execution model); (c) all-the-time → `probe_9_always_on` yes = non-markdown |
 | **multi-user** | "Will other people use it, with their own access?" | `probe_2` | yes → Node+UI + multi-user-datastore signal; no → single-user-friendly |
-| **external-software** | "Does it need to connect to your other apps or accounts — to **read or write** data (email, calendar, documents, and the like)?" | `probe_4` | yes → Python service signal; no → standalone-friendly |
+| **outbound integration** | "Does it need to **reach out to your apps or accounts when it runs** — read your calendar, update your sheet, send an email? (**read or write**)" | `probe_4` | **shape-NEUTRAL** (markdown reaches out via scripts + step-09 credentials per the markdown-agents execution model); captured for the integration inventory |
+| **inbound integration** | "Does it need to **receive things from other systems live** — let other people or apps connect to it, receive live updates/webhooks, or have people sign in to it as part of normal use? (one-time account setup does NOT count)" | `probe_10` | yes → non-markdown (live-serving / Event-Bound = future shapes per the markdown-agents execution model); no → markdown-friendly |
 
-Operator answers are stored as `yes | no | unsure` under `shape_hypothesis.operator_signals.probe_1..4` — the same field surface the classifier (§ 2.3), confidence rubric (§ 3), pre-step-05/08 re-checks (§ 5), control matrix (§ 7), and stop conditions (§ 8) consume. `unsure` is treated as neutral signal (does not contribute strong-positive OR strong-negative) and is a **first-class answer, NOT "unchecked = no."** The **continuous-runtime** answer is ALSO recorded to the event transcript under qid `P1-4`, group `orchestration_build` (it feeds the step-13 orchestration / execution-cadence derivation); the other three dimensions resolve to staging-file probe values only. The `probe_N` ↔ marker mapping is stable: `P1-4`↔`probe_1` (continuous-runtime), `P1-5`↔`probe_2` (multi-user), `P1-6`↔`probe_3` (thinking-partner), `P1-7`↔`probe_4` (external-software).
+**Runtime-level → flag derivation (runtime+integration reconciliation).** The operator's single runtime answer is recorded RAW to the transcript and derives the two staging flags:
+
+| Operator picks | transcript qid `P1-4` value (`runtime_mode`) | `probe_1_scheduled_cadence` | `probe_9_always_on` | Shape effect |
+|---|---|---|---|---|
+| (a) Only when you come to it | `on-demand` | no | no | markdown-friendly |
+| (b) On a schedule | `scheduled` | yes | no | markdown-friendly (orchestration cadence) |
+| (c) All the time | `always-on` | no | yes | non-markdown (`probe_9_always_on` is the only non-markdown runtime trigger) |
+| Not sure | `unsure` | unsure | unsure | neutral → fallback / recheck |
+
+Operator answers are stored under `shape_hypothesis.operator_signals` (`probe_1_scheduled_cadence`, `probe_2_multi_user`, `probe_3_thinking_partner`, `probe_4_external_software`, `probe_9_always_on`, `probe_10_inbound_serve`) — the same field surface the classifier (§ 2.3), confidence rubric (§ 3), pre-step-05/08 re-checks (§ 5), control matrix (§ 7), and stop conditions (§ 8) consume. `unsure` is treated as neutral signal (no strong-positive OR strong-negative) and is a **first-class answer, NOT "unchecked = no."** The **runtime answer is recorded RAW to the event transcript** under qid `P1-4`, group `orchestration_build`, as `runtime_mode = on-demand | scheduled | always-on | unsure` (it feeds the step-13 orchestration / execution-cadence derivation, which benefits from the on-demand-vs-scheduled distinction; `probe_1_scheduled_cadence` + `probe_9_always_on` are derived from it for the classifier). The other dimensions resolve to staging-file probe values only. The `probe_N` ↔ marker mapping: `P1-4`↔runtime (`runtime_mode` → `probe_1_scheduled_cadence` + `probe_9_always_on`), `P1-5`↔`probe_2` (multi-user), `P1-6`↔`probe_3` (thinking-partner), `P1-7`↔`probe_4` (outbound), `P1-7b`↔`probe_10` (inbound).
 
 **Beat rules (the elicitation contract; see § 9 decision-E):**
 
-- **Independent, not mutually exclusive.** Each dimension is answered on its own. Genuine mixed use is expressible — e.g., chat = yes AND background = yes routes through the classifier's `mixed` path (§ 2.3) or, when not yet ≥2 clusters, defers to the step-02 fallback. There is NO radio-button "pick the closest."
-- **No inference-hiding.** All four dimensions are ALWAYS asked. Forward-offered signals from the purpose / working definition (§ 9) may *contextualize the framing* ("based on what you described…") but MUST NEVER pre-fill an individual answer or skip a dimension.
-- **Preserve "not sure."** 3-state, never a binary checkbox. "Unsure" is the neutral signal the § 3 confidence rubric and the step-05/08 re-checks need; collapsing it to "no" would inflate confidence and skip the safety net.
-- **Read OR write** in the external-software question — a read-only integration must not falsely map to `probe_4 = no`.
+- **Independent, not mutually exclusive.** Each question is answered on its own. Genuine mixed use is expressible — e.g., chat = yes AND scheduled routes through the classifier's `mixed` path (§ 2.3) or, when not yet ≥2 clusters, defers to the step-02 fallback. The runtime question is the one *leveled* pick (an ordinal dimension — runtime intensity); it does NOT re-trip the rejected v2 radio-button (which forced a pick across *orthogonal* needs). There is NO radio-button "pick the closest" across the dimensions.
+- **No inference-hiding.** All questions are ALWAYS asked. Forward-offered signals from the purpose / working definition (§ 9) may *contextualize the framing* ("based on what you described…") but MUST NEVER pre-fill an answer or skip a question.
+- **Preserve "not sure."** 3-state (and a "not sure" runtime level), never a binary checkbox. "Unsure" is the neutral signal the § 3 confidence rubric and the step-05/08 re-checks need; collapsing it to "no" would inflate confidence and skip the safety net.
+- **Read OR write** in the outbound question — a read-only integration must not falsely map to `probe_4 = no`.
+- **One-time setup is NOT inbound.** The inbound question's non-markdown trigger is *live serving / others connecting to it / per-user sign-in as normal operation* — explicitly NOT one-time account or credential setup (markdown handles that via stored credentials + token refresh per the markdown-agents execution model).
+- **Frequency sentinel (light).** If the operator picks "On a schedule," capture a rough cadence in one short clarifier; if it implies sub-hourly / near-real-time wakeups, surface a gentle cost/feasibility note (an LLM-Orchestrator cron every few minutes burns budget and hits rate limits) — this stays markdown (NOT a shape off-ramp). Fuller volume/SLA modeling is out of scope here (tracked as F7 / step-13 scale).
 
 ### 2.2 Step 02 — conditional fallback probes (fire only if step 01 yields MEDIUM or LOW confidence)
 
@@ -47,7 +59,7 @@ Up to 4 additional probes from the relevant product spec section candidate set. 
 | Probe | Operator-facing text | Signal classification |
 |---|---|---|
 | **Probe-5 (state-memory)** | "Should the system remember things between times you use it?" | yes → datastore signal; no → stateless-friendly |
-| **Probe-6 (regular-pattern)** | "Does it need to do something automatically, on a regular pattern — like every day, every Monday morning, every hour?" | yes → service signal (scheduled); no → on-demand-friendly |
+| **Probe-6 (regular-pattern)** | "Does it need to do something automatically, on a regular pattern — like every day, every Monday morning, every hour?" | yes → **markdown-friendly** (scheduled cron→Orchestrator per the markdown-agents execution model; F6 reconciliation — scheduled is NOT a non-markdown signal); no → on-demand-friendly. (The non-markdown runtime trigger is `probe_9_always_on`, not regular-pattern scheduling.) |
 | **Probe-7 (operator-confirm)** | "Should the system ask you before doing anything important — like making a booking, sending money, or contacting someone?" | yes → markdown-agents-friendly (human-gate aligns); no → autonomous-action implies stronger guardrails |
 | **Probe-8 (document-output)** | "Does it produce a document, packet, or report that you'll review or share?" | yes → markdown-agents OR Claude-skills; no → service-output-friendly |
 
@@ -55,18 +67,20 @@ Fallback probes are drawn from a wizard-internal candidate set; not all fire on 
 
 ### 2.3 Signal-to-shape decision table
 
-Cumulative across all fired probes. Strong-positive / strong-negative are tallied per shape.
+Cumulative across all fired probes. Strong-positive / strong-negative are tallied per shape. **(F6 reconciliation — see § 9.)** Per the markdown-agents execution model, scheduled execution and outbound integration are things v1 markdown DOES, so `probe_1_scheduled_cadence` and `probe_4` (outbound) are **shape-NEUTRAL** — they appear in NO strong-positive/strong-negative column (captured for the orchestration / integration inventory only). The genuine non-markdown triggers are `probe_9_always_on` (daemonized/always-on), `probe_10_inbound_serve` (live-serving/inbound), and `probe_2` (multi-user).
 
 | Shape | Strong-positive signals | Strong-negative signals |
 |---|---|---|
-| `markdown-agents` (Claude Code, Mac) | Probe-3 yes / Probe-7 yes / Probe-8 yes / Probe-1 no / Probe-4 no | Probe-1 yes / Probe-2 yes |
-| `python-service-operator-facing` (deferred) | Probe-1 yes / Probe-4 yes / Probe-6 yes | Probe-3 yes |
-| `claude-skills` (deferred) | Probe-3 yes / Probe-8 yes / Probe-7 yes | Probe-1 yes / Probe-2 yes |
-| `node-ui` (deferred) | Probe-2 yes / (Probe-1 yes + Probe-5 yes) | Probe-3 yes |
+| `markdown-agents` (Claude Code, Mac) | Probe-3 yes / Probe-7 yes / Probe-8 yes | `probe_9_always_on` yes / `probe_10_inbound_serve` yes / Probe-2 yes |
+| `python-service-operator-facing` (deferred) | `probe_9_always_on` yes / `probe_10_inbound_serve` yes | Probe-3 yes |
+| `claude-skills` (deferred) | Probe-3 yes / Probe-8 yes / Probe-7 yes | `probe_9_always_on` yes / `probe_10_inbound_serve` yes / Probe-2 yes |
+| `node-ui` (deferred) | Probe-2 yes / `probe_10_inbound_serve` yes | Probe-3 yes |
 | `multi-user-datastore` (deferred) | Probe-2 yes / Probe-5 yes | Probe-3 yes |
-| `hosted-cloud` (deferred) | Probe-1 yes / Probe-2 yes / Probe-5 yes | Probe-3 yes |
+| `hosted-cloud` (deferred) | `probe_9_always_on` yes / Probe-2 yes / Probe-5 yes | Probe-3 yes |
 | `mixed` (deferred) | ≥2 shape clusters each have ≥2 strong-positives AND no shape's signals subsume another | n/a |
 | `unknown` | Insufficient signal density (no shape has ≥2 strong-positives) | n/a |
+
+**F6 note — markdown-agents and claude-skills share Probe-3/7/8 positives** (both are thinking-partner-shaped); the markdown-vs-skills tiebreak is pre-existing and unchanged by F6 (skills is deferred; both route through the same v1-supported-vs-not gate only for markdown). The decisive F6 change is that a *scheduled + outbound* system (the estate-executor case) no longer accrues any non-markdown signal and so resolves to `markdown-agents` via the absence-of-disqualifiers HIGH branch (§ 3 branch (c)).
 
 ## 3. Confidence rubric
 
@@ -74,13 +88,13 @@ Computed after each probe-set fires.
 
 | Confidence | Criteria |
 |---|---|
-| **HIGH** | (a) Top shape has ≥3 strong-positives AND 0 strong-negatives AND no other shape has ≥2 strong-positives; OR (b) Top shape has 2 strong-positives AND the same probe answers produce ≥2 strong-negatives for the next-closest competing shape (subsumption-by-strong-negatives ruling out alternatives) AND no other shape has ≥2 strong-positives |
-| **MEDIUM** | Top shape has 2 strong-positives AND 0-1 strong-negatives AND HIGH branch (b) does not apply (no subsumption). OR HIGH-like signal density but with 1 conflicting strong-negative. |
-| **LOW** | Top shape has 1 strong-positive AND signals scattered. OR ≥2 shapes tied with strong-positives. OR insufficient signal density (`mixed` / `unknown` emit). |
+| **HIGH** | (a) Top shape has ≥3 strong-positives AND 0 strong-negatives AND no other shape has ≥2 strong-positives; OR (b) Top shape has 2 strong-positives AND the same answers produce ≥2 strong-negatives for the next-closest competing shape (subsumption-by-strong-negatives ruling out alternatives) AND no other shape has ≥2 strong-positives; OR **(c) [`markdown-agents` only — absence-of-disqualifiers] `markdown-agents` has ≥1 strong-positive AND 0 strong-negatives AND every non-markdown trigger (`probe_9_always_on`, `probe_10_inbound_serve`, `probe_2`) is no/unsure AND no other shape has ≥2 strong-positives AND no `claude-skills` packaging/reuse signal is present** (a forward-offered "package this up / reuse across multiple conversations" signal selects `claude-skills` over `markdown-agents`; when present, branch (c) does NOT fire — defer to step-02 fallback for the markdown-vs-skills discrimination) |
+| **MEDIUM** | Top shape has 2 strong-positives AND 0-1 strong-negatives AND neither HIGH branch (b) nor (c) applies. OR HIGH-like signal density but with 1 conflicting strong-negative. |
+| **LOW** | Top shape has 1 strong-positive AND signals scattered AND branch (c) does NOT apply (i.e., the 1-positive shape is non-markdown, OR a non-markdown trigger fired). OR ≥2 shapes tied with strong-positives. OR insufficient signal density (`mixed` / `unknown` emit). |
 
-**Rubric note.** Branch (b) of HIGH captures the "2 strong-positives + clean discrimination via strong-negatives ruling out alternatives" case — e.g., a fixture where `python-service-operator-facing` has 2 strong-positives (Probes 1+4) AND the same answers produce strong-negatives for `markdown-agents`/`claude-skills` (Probes 1 yes / 3 no / 4 yes). Without (b), that fixture would emit MEDIUM and fire step-02 fallback unnecessarily; with (b), HIGH at step 01 is honest.
+**Rubric note.** Branch (b) captures "2 strong-positives + clean discrimination via strong-negatives ruling out alternatives" — e.g., a fixture where `python-service-operator-facing` has 2 strong-positives (`probe_9_always_on` + `probe_10_inbound_serve`) AND the same answers produce strong-negatives for `markdown-agents`/`claude-skills` (those two triggers). Branch **(c)** (F6) captures the asymmetry that `markdown-agents` is the v1-supported, conservative *default* shape: it is viable whenever no non-markdown trigger positively fires, so it reaches HIGH with even a single behavior positive (thinking-partner / operator-confirm / document-output) provided the disqualifiers are all absent and no deferred shape has accrued ≥2 positives. Deferred shapes do NOT get branch (c) — they require their triggers to be positively present. Without (c), the estate-executor case (thinking-partner=yes, scheduled, outbound, no always_on/inbound/multi-user) would emit MEDIUM/LOW and fire step-02 fallback unnecessarily even though markdown is the only viable shape. **The claude-skills guard on branch (c)** is load-bearing: `markdown-agents` and `claude-skills` share their entire positive set (probe_3/7/8), so they tie on probe counts and the discriminator is the forward-offered "package up / reuse across conversations" signal that points to skills. Branch (c) treats `markdown-agents` as the floor only when no such skills signal is present; when it IS present (e.g., fixture `s03`), markdown-vs-skills is resolved at the step-02 fallback via that interpretive prior, exactly as before F6. (Both are thinking-partner shapes; the distinction matters because `claude-skills` is v1-unsupported, so mis-selecting it would wrongly fire the unsupported-shape transition.)
 
-**Elicitation note (v1, S2.32).** This rubric is UNCHANGED by the v1 elicitation revision. Under v1 the four dimensions are asked via the experiential capabilities beat (§ 2.1), but each dimension's explicit yes/no/unsure answer IS the `probe_N` value fed to this rubric — there is no separate "confirm an inferred answer" step (the rejected v0-candidate "infer-and-confirm" shape), so a beat answer and a probe answer are the same input. `unsure` continues to count as a neutral signal here exactly as before; preserving it (rather than collapsing to "no") is what keeps the MEDIUM/LOW → step-02-fallback and `forced_recheck_at_step_05` safety nets honest.
+**Elicitation note (v1) + runtime+integration amendment (2026-06-02).** Each dimension's explicit answer IS the `probe_N` value fed to this rubric — there is no separate "confirm an inferred answer" step (the rejected v0-candidate "infer-and-confirm" shape), so a beat answer and a probe answer are the same input. `unsure` counts as a neutral signal; preserving it (rather than collapsing to "no") keeps the MEDIUM/LOW → step-02-fallback and `forced_recheck_at_step_05` safety nets honest. **This reconciliation DID change this rubric** (unlike the elicitation revision, which left it untouched): branch (c) was added so the reconciled neutral treatment of scheduled+outbound still lets `markdown-agents` reach confidence by absence of disqualifiers. The runtime question is leveled (§ 2.1) but still resolves to discrete `probe_1_scheduled_cadence` (neutral) + `probe_9_always_on` (negative-trigger) signals the rubric reads.
 
 **Promotion logic:**
 
@@ -97,8 +111,8 @@ At classifier emit, write the following structure to `~/claude-wizard-draft/wiza
 ## Shape detection
 
 schema_versions:
-  schema_major: 0
-  schema_minor: 2 # bumped 0 → 1 (additive: optional `shape_revision` block per handoff contract § 9) and 1 → 2 (additive: optional `stop_conditions.resolved_during_loop` field)
+  schema_major: 1 # bumped 0 → 1 at F6 (2026-06-02): breaking — `probe_1_continuous_runtime` renamed to `probe_1_scheduled_cadence`; `probe_9_always_on` + `probe_10_inbound_serve` added. Field rename ⇒ major bump per handoff contract § 6.
+  schema_minor: 0 # reset to 0 on the major bump. (The major-0 lineage's additive features — `shape_revision` block, `stop_conditions.resolved_during_loop` — carry forward under major 1.)
   shape_taxonomy_version: 0
   stop_condition_set_version: 0
   control_matrix_schema_version: 0
@@ -114,14 +128,16 @@ shape_hypothesis:
   rechecks_due: [05, 08]
   forced_recheck_at_step_05: true | false # true when emit was LOW
   operator_signals:
-  probe_1_continuous_runtime: yes | no | unsure
+  probe_1_scheduled_cadence: yes | no | unsure # F6: derived from the runtime level (yes only for "On a schedule"). SHAPE-NEUTRAL; the raw runtime answer is recorded to transcript qid P1-4 as runtime_mode.
   probe_2_multi_user: yes | no | unsure
   probe_3_thinking_partner: yes | no | unsure
-  probe_4_external_software: yes | no | unsure
+  probe_4_external_software: yes | no | unsure # F6: outbound integration. SHAPE-NEUTRAL (markdown reaches out via scripts + step-09 creds per the markdown-agents execution model).
   probe_5_state_memory: yes | no | unsure | not_asked
   probe_6_regular_pattern: yes | no | unsure | not_asked
   probe_7_operator_confirm: yes | no | unsure | not_asked
   probe_8_document_output: yes | no | unsure | not_asked
+  probe_9_always_on: yes | no | unsure # F6 NEW: derived from the runtime level (yes only for "All the time"). The only non-markdown RUNTIME trigger.
+  probe_10_inbound_serve: yes | no | unsure # F6 NEW: inbound/live-serving integration. Non-markdown trigger.
   forward_offered_signals_at_step_01:
   - "<verbatim phrase from operator's P1-2 core-purpose answer per wizard/CLAUDE.md § 9>"
   mixed_component_basis: [] # ONLY populated when shape == mixed; lists component shapes detected in the operator's input
@@ -402,13 +418,13 @@ This split (HALT for full-system, DOCUMENT for foundation-only with condition 4 
 
 Per wizard CLAUDE.md § 9. At P1-2 (core purpose), operators frequently volunteer shape signals embedded in their answer:
 
-- "an automated newsletter that goes out every Monday morning" — Probe-1 yes + Probe-6 yes signals embedded
-- "a thinking partner for legal research" — Probe-3 yes signal embedded
-- "a customer portal where my team can log in and update records" — Probe-1 yes + Probe-2 yes + Probe-5 yes signals embedded
+- "an automated newsletter that goes out every Monday morning" — scheduled (`probe_1_scheduled_cadence` yes) + outbound (`probe_4` yes) signals embedded. **F6 note:** both are now markdown-NEUTRAL — a scheduled, outbound newsletter is markdown-deliverable (cron→Orchestrator + send-script per the markdown-agents execution model), NOT a non-markdown signal.
+- "a thinking partner for legal research" — `probe_3` yes signal embedded
+- "a customer portal where my team can log in and update records" — `probe_2` yes (multi-user) + `probe_10_inbound_serve` yes ("log in" = others connecting live) signals embedded → non-markdown
 
-**Classifier integration (decision-E, amended S2.32 v0→v1 — experiential capabilities beat):**
+**Classifier integration (decision-E, amended v0→v1 — experiential capabilities beat):**
 
-> **Amendment note (decision-E reversal).** The original v0 decision-E forced the four shape dimensions to fire as **cold, blank technical questions** and held inferred signals as NON-authoritative interpretive priors only. Under v1, shape is elicited via the **experiential capabilities beat** (§ 2.1) — post-definition, grouped, 3-state, experientially phrased. **The operator's explicit per-dimension answer IS the authoritative probe value.** This reverses decision-E's "cold probes always fire / inference never authoritative" stance, but preserves its *intent* (shape must rest on an explicit operator answer, never on misread prose): the operator still answers each dimension explicitly; only the FORM changes from cold-technical to experiential, and inference is now allowed to *frame* a question without ever *answering* it. Safe because the four dimensions are orthogonal, each is explicitly answered, and `unsure` is preserved as a first-class neutral signal. Resolved via two gemini Class-3 consults (v0-candidates "infer-and-confirm" and "radio forced-choice" both rejected); cross-vendor codex backstop owed before merge. See `external_review/s2.32_front_door_redesign_v3_SPEC_2026-06-01.md`.
+> **Amendment note (decision-E reversal).** The original v0 decision-E forced the four shape dimensions to fire as **cold, blank technical questions** and held inferred signals as NON-authoritative interpretive priors only. Under v1, shape is elicited via the **experiential capabilities beat** (§ 2.1) — post-definition, grouped, 3-state, experientially phrased. **The operator's explicit per-dimension answer IS the authoritative probe value.** This reverses decision-E's "cold probes always fire / inference never authoritative" stance, but preserves its *intent* (shape must rest on an explicit operator answer, never on misread prose): the operator still answers each dimension explicitly; only the FORM changes from cold-technical to experiential, and inference is now allowed to *frame* a question without ever *answering* it. Safe because the four dimensions are orthogonal, each is explicitly answered, and `unsure` is preserved as a first-class neutral signal. Resolved via cross-vendor design review (the v0-candidates "infer-and-confirm" and "radio forced-choice" were both rejected) plus an independent cross-vendor backstop; full provenance in the build-side decision records.
 
 1. At the purpose (P1-2) answer and during the working-definition pass, the wizard scans the operator's free-text for shape-signal phrases heuristically. (Match patterns are spec-only at v0; precise inventory deferred to first-real-operator-data observation.)
 2. Matched signals populate `shape_hypothesis.forward_offered_signals_at_step_01` as verbatim phrases.
@@ -424,30 +440,32 @@ Per wizard CLAUDE.md § 9. At P1-2 (core purpose), operators frequently voluntee
 | **mechanism_id** | `mech-shape-detection-v0` |
 | **mechanism_name** | Shape-detection classifier |
 | **mechanism_class** | Skill, pure markdown (advisory or guided) |
-| **primary** | Step 01 experiential capabilities beat (4 independent 3-state dimensions → `probe_1..4`; sub-steps P1-4–P1-7 of `01_phase1_capture.md`, presented as one grouped beat) + (conditional) step 02 fallback probes + classifier emit logic in `wizard/shape_detection.md` |
+| **primary** | Step 01 experiential capabilities beat (5 questions across 4 dimensions: thinking-partner + leveled runtime + multi-user + outbound + inbound → `probe_1_scheduled_cadence` / `probe_2` / `probe_3` / `probe_4` / `probe_9_always_on` / `probe_10_inbound_serve`; sub-steps P1-4–P1-7b of `01_phase1_capture.md`, presented as one grouped beat) + (conditional) step 02 fallback probes + classifier emit logic in `wizard/shape_detection.md` |
 | **reinforcing** | Pre-step-05 re-check + pre-step-08 re-check; forward-offered signal capture at P1-2 (interpretive prior) |
 | **detection-recovery** | Pre-step-05 stop-condition evaluation → halt with foundation state preserved; unsupported-shape transition → scope-out OR foundation-only; pre-step-05/08 re-check revise path |
 | **rationale** | Behavior-based detection (not shape-name probing) prevents the technical-knob-mismatch failure. Pre-step-05 + pre-step-08 re-check catches signal drift from accumulated interview context. Stop conditions prevent silently generating a system the operator's regulatory exposure can't accept. Unsupported-shape transition preserves operator's foundation state so a future wizard release can resume without restart. Forward-offered signal capture acts as interpretive prior only — probes remain canonical. |
 | **hybrid_contract_status** | n/a (not skill-calls-script) |
 | **contract_fields_complete** | n/a |
 | **health_check_last_run** | 2026-05-19 (initial fixture-replay) |
-| **fallback_verified** | yes for the v0 classifier logic (synthetic-fixture replay). The v1 experiential-elicitation revision (S2.32) is validated against the same fixtures (probe values unchanged); real-operator validation is bound to the S2.32 re-walk (steps 00–01) + cross-vendor codex backstop before merge. |
+| **fallback_verified** | yes for the v0 classifier logic (synthetic-fixture replay). The experiential-elicitation revision is validated against the same fixtures (probe values unchanged). The **runtime+integration reconciliation** DELIBERATELY changes classifier output, so the shape-detection fixtures were re-derived (`s02`/`s04`/`s06`/`s07`/`fo01` re-authored to preserve non-markdown intent via `always_on`/`inbound_serve`; new positive `s09-scheduled-outbound-agent`); validated by hand re-derivation (cross-vendor advisor review). Real-operator validation bound to the step-02 re-walk. |
 
 ## 11. Versioning
 
-This is **v1** (was v0 through S2.31). The mechanism evolves through:
+This is **v1** (was v0 through the prior slice). The mechanism evolves through:
 
 - **Probes refined** (calibration) — small revision; v0 → v0.1 amend.
 - **Stop conditions added** (e.g., a 5th condition) — substantive revision; v0 → v1.
 - **Schema field added to handoff contract** — substantive revision; coordinate with `wizard/handoff_contracts/shape_detection_v0.md` → v1.
 - **Foundation-shaping change** (e.g., shape taxonomy revised; classifier rewritten as non-markdown mechanism) — foundation-shaping; new mechanism_id.
 
-**v1 amendment (S2.32, 2026-06-01) — elicitation revised; no contract/classifier change.** The four shape dimensions are now elicited via the experiential capabilities beat (§ 2.1) instead of cold technical probes, and § 9 decision-E is reversed accordingly (the explicit per-dimension answer is now authoritative). This is a substantive elicitation revision (v0 → v1), NOT a foundation-shaping change: the shape taxonomy is unchanged, the classifier (§ 2.3) and confidence rubric (§ 3) are unchanged, and the emit schema (§ 4) and handoff-contract surface (`wizard/handoff_contracts/shape_detection_v0.md`) are unchanged — `probe_1..4` values + the four lifecycle phases are identical. Therefore the **`mechanism_id` stays `mech-shape-detection-v0`** (the `-v0` suffix is the mechanism-generation identifier, distinct from this spec version) and the handoff-contract filename + `schema_versions` are NOT bumped. The handoff contract's own version is untouched because no field name, value enum, or phase changed. Cross-vendor codex backstop owed before merge per the S2.32 ledger.
+**v1 amendment (2026-06-01) — elicitation revised; no contract/classifier change.** The four shape dimensions are now elicited via the experiential capabilities beat (§ 2.1) instead of cold technical probes, and § 9 decision-E is reversed accordingly (the explicit per-dimension answer is now authoritative). This is a substantive elicitation revision (v0 → v1), NOT a foundation-shaping change: the shape taxonomy is unchanged, the classifier (§ 2.3) and confidence rubric (§ 3) are unchanged, and the emit schema (§ 4) and handoff-contract surface (`wizard/handoff_contracts/shape_detection_v0.md`) are unchanged — `probe_1..4` values + the four lifecycle phases are identical. Therefore the **`mechanism_id` stays `mech-shape-detection-v0`** (the `-v0` suffix is the mechanism-generation identifier, distinct from this spec version) and the handoff-contract filename + `schema_versions` are NOT bumped. The handoff contract's own version is untouched because no field name, value enum, or phase changed. Cross-vendor advisor backstop owed before merge per the build-side ledger.
+
+**Runtime + integration reconciliation amendment (2026-06-02) — with the markdown-agents execution model; classifier + contract DO change (cross-vendor advisor-backstopped).** Distinct from the elicitation amendment above: this one DELIBERATELY changes the downstream invariant the elicitation slice preserved. (a) Runtime probe → one leveled question deriving `probe_1_continuous_runtime`→**`probe_1_scheduled_cadence`** (renamed; shape-NEUTRAL — scheduled is markdown-fine per the markdown-agents execution model) + new **`probe_9_always_on`** (the only non-markdown runtime trigger). (b) Integration split: `probe_4` kept but re-mapped **shape-NEUTRAL** (outbound is markdown-fine) + new **`probe_10_inbound_serve`** (non-markdown trigger). (c) §2.3 decision table + §3 confidence rubric rewritten (new HIGH branch (c), absence-of-disqualifiers); §2.2 `probe_6` fixed. (d) The runtime answer is recorded RAW to transcript qid `P1-4` as `runtime_mode` (the cross-vendor-recommended wiring — a durable always-on record without a new qid; orchestration_build manifest UNCHANGED). **Handoff contract `schema_major` bumped 0 → 1** (field rename = breaking per contract § 6); `schema_minor` reset to 0. **12 consumer abort-checks** (05_vision / 06_approach / 07_advisors / 08_architecture / 09_credentials / 10_validation / 11_error_handling / 12_qa_settings / 13_operations / 14_document_review / 15_close / _foundation_only_mode_gate) updated to expect major `1`. Shape taxonomy + 4 stop conditions + control-matrix status values are UNCHANGED, so this is NOT a foundation-shaping change (`mechanism_id` stays `mech-shape-detection-v0`; the change is a substantive within-generation revision). Advisor: cross-vendor design critique + an independent cross-vendor backstop (full provenance in the build-side decision records).
 
 ## 12. Cross-references
 
 - `wizard/handoff_contracts/shape_detection_v0.md` — handoff contract for downstream consumers.
-- `wizard/interview/01_phase1_capture.md` — P1-4 through P1-7 probe sub-steps.
+- `wizard/interview/01_phase1_capture.md` — P1-4 through P1-7b capabilities-beat sub-steps (runtime / multi-user / thinking-partner / outbound / inbound).
 - `wizard/interview/02_financial.md` — P02-end fallback hook.
 - `wizard/interview/03_user_profile.md` — UP-6 regulatory-applicability probe.
 - `wizard/interview/_pre_step_05_recheck.md` — pre-step-05 re-check module.
