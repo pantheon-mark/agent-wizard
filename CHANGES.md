@@ -29,8 +29,8 @@ Entries appear newest-first.
 - A couple of working-style inputs (whether you have a second AI assistant available, and how it could be used) are **recorded now and used in a later release** — they don't yet change a generated file.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** _pending — filled in the provenance-fill commit after publication_
-**Public repo commit:** _pending_
+**Source-Meta-Commit:** e5a7db2
+**Public repo commit:** a7fe298
 
 ---
 
