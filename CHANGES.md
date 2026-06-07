@@ -12,6 +12,20 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-07 — internal: provenance-tag correctness (no operator-facing change)
+
+**Public-facing change:** none — this is an internal correctness fix with no effect on what you see, what you do, or the system the wizard builds. For its own records, the wizard tags how each value in your documents was produced (your own words versus something the wizard worked out for you). One derived value — your plan's included monthly automation credit — was being tagged as if you'd typed it, when the wizard actually looks it up from your plan. That internal tag is now correct.
+
+**Operator-facing notes:**
+
+- No operator action required.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** (pending — provenance fill after dual push)
+**Public repo commit:** (pending — provenance fill after subtree push)
+
+---
+
 ## 2026-06-07 — your vision document is written as a narrative, in your system's voice
 
 **Public-facing change:** the vision step now produces a vision document that is genuinely *written for you* — a short narrative in your system's voice that tells the story of what your system is for, drawn from what you told the wizard — rather than your answers slotted flatly under headings. The wizard drafts it from your answers, shows you the rendered document to review, and gives you one round of changes.

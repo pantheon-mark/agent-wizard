@@ -56,6 +56,13 @@ def _envelope_for(spec: FieldSpec, prompt_version: str,
     prompt version. Picks _source + the input-citation key by class, fail-loud if the
     carrier supplied the wrong kind of input (the contract's input rules made executable)."""
     cls = spec.derivation_class
+    # The class picks a DEFAULT `_source`, but the manifest may DECLARE an explicit `source` to
+    # override it (provenance is its own axis in the derived-record contract). Example:
+    # a lookup-extraction field (AUTOMATION_CREDIT_POOL) is `extraction`-class but its value is
+    # plan-derived, so it declares `source: claude-derived-operator-confirmed`, not operator-content.
+    # A nonsensical override (e.g. operator-preference on a synthesis field) is caught downstream by
+    # the derived-record validator's DR rules (fail-closed); this assembler only picks the value.
+    override = spec.source
     env: Dict[str, Any] = {
         "_derivation_class": cls,
         "_decision_field": spec.decision_field,
@@ -63,7 +70,7 @@ def _envelope_for(spec: FieldSpec, prompt_version: str,
         "_prompt_version": prompt_version,
     }
     if cls == "auto":
-        env["_source"] = "auto"
+        env["_source"] = override or "auto"
         return env
     if cls in ("synthesis", "policy"):
         if not inputs:
@@ -71,7 +78,7 @@ def _envelope_for(spec: FieldSpec, prompt_version: str,
                 f"{spec.field}: a {cls} field is derived from prior fields — pass --inputs "
                 f"(prior field keys), not --sources"
             )
-        env["_source"] = "claude-derived-operator-confirmed"
+        env["_source"] = override or "claude-derived-operator-confirmed"
         env["_derivation_inputs"] = list(inputs)
         return env
     if cls == "extraction":
@@ -80,7 +87,7 @@ def _envelope_for(spec: FieldSpec, prompt_version: str,
                 f"{spec.field}: an extraction field is pulled from the operator's answers — "
                 f"pass --sources (question-IDs)"
             )
-        env["_source"] = "operator-content"
+        env["_source"] = override or "operator-content"
         env["_source_question_ids"] = list(sources)
         return env
     if cls == "authoring":
@@ -92,16 +99,16 @@ def _envelope_for(spec: FieldSpec, prompt_version: str,
                 f"{spec.field}: an authoring field is written in the system voice, grounded in "
                 f"the operator's answers — pass --sources (question-IDs)"
             )
-        env["_source"] = "claude-derived-operator-confirmed"
+        env["_source"] = override or "claude-derived-operator-confirmed"
         env["_source_question_ids"] = list(sources)
         return env
     if cls == "classification":
         # operator-preference cites question-IDs; a claude-derived classification cites prior fields.
         if inputs:
-            env["_source"] = "claude-derived-operator-confirmed"
+            env["_source"] = override or "claude-derived-operator-confirmed"
             env["_derivation_inputs"] = list(inputs)
         elif sources:
-            env["_source"] = "operator-preference"
+            env["_source"] = override or "operator-preference"
             env["_source_question_ids"] = list(sources)
         else:
             raise InterviewCLIError(f"{spec.field}: a classification field requires --sources or --inputs")

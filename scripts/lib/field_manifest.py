@@ -29,6 +29,11 @@ EXPECTED_CONTRACT_VERSIONS = {"field-manifest-v1"}
 DERIVATION_CLASSES = {"extraction", "synthesis", "classification", "policy", "auto", "authoring"}
 DECISION_KINDS = {"none", "closed_value", "policy_rule", "schedule", "threshold",
                   "spend_limit", "integration_boundary"}
+# Provenance source classes (mirror the derived-record contract `source` enum). A field
+# MAY declare an explicit `source` to override the class-default the envelope assembler picks
+# (e.g. a lookup-extraction field whose value is plan-derived, not the operator's words).
+SOURCE_CLASSES = {"operator-content", "operator-preference", "claude-derived-operator-confirmed",
+                  "auto", "ambiguous"}
 # Classes that the derived-record contract forces to be decisions.
 _DECISION_CLASSES = {"classification", "policy"}
 
@@ -37,7 +42,8 @@ REQUIRED_FIELD_KEYS = (
     "value_shape", "source_question_ids", "preview_doc",
 )
 # Keys consumed into typed FieldSpec attributes; everything else becomes `constraints`.
-_TYPED_KEYS = set(REQUIRED_FIELD_KEYS)
+# `source` is an OPTIONAL typed key (an explicit provenance override; not in REQUIRED_FIELD_KEYS).
+_TYPED_KEYS = set(REQUIRED_FIELD_KEYS) | {"source"}
 
 
 class FieldManifestError(Exception):
@@ -55,6 +61,7 @@ class FieldSpec:
     source_question_ids: List[str]
     preview_doc: str
     constraints: Dict[str, Any]   # enum_domain / required_columns / requires_explicit_negative_permissions / notes / ...
+    source: Optional[str] = None  # explicit `_source` override; None => the envelope assembler uses the class default
 
 
 @dataclass(frozen=True)
@@ -149,12 +156,18 @@ def load_field_manifest(system_shape: str, manifests_dir: Optional[Path] = None)
             _require(len(raw["source_question_ids"]) > 0, "source_required",
                      f"{name}: {dclass} field must declare at least one source question-ID")
 
+        # optional explicit provenance override (else the envelope assembler uses the class default)
+        src_override = raw.get("source")
+        if src_override is not None:
+            _require(src_override in SOURCE_CLASSES, "source",
+                     f"{name}: source {src_override!r} not in {sorted(SOURCE_CLASSES)}")
+
         constraints = {k: v for k, v in raw.items() if k not in _TYPED_KEYS}
         fields[name] = FieldSpec(
             field=name, group_id=raw["group_id"], derivation_class=dclass,
             decision_field=dfield, decision_kind=dkind, value_shape=raw["value_shape"],
             source_question_ids=list(raw["source_question_ids"]), preview_doc=raw["preview_doc"],
-            constraints=constraints,
+            constraints=constraints, source=src_override,
         )
 
     return FieldManifest(system_shape=system_shape, fields=fields)

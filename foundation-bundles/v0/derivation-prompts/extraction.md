@@ -16,7 +16,7 @@ Example target fields this class produces: `PROJECT_NAME`, `CORE_PURPOSE`, `VISI
 | team + `TEAM_TIER` standard | `$20` |
 | team + `TEAM_TIER` premium | `$100` |
 
-For a lookup-extraction field, set `_source: claude-derived-operator-confirmed` (the value is derived from the plan, not quoted), `_source_question_ids: ["FIN-1"]`, and confirm it at the barrier (`_confirmation_state` + `_confirmed_at`). All other extraction fields keep `_source: operator-content`.
+For a lookup-extraction field, the field manifest DECLARES `"source": "claude-derived-operator-confirmed"` (the value is derived from the plan, not quoted), so the envelope assembler stamps that provenance instead of the extraction default `operator-content` — you do not set `_source` by hand. The field still cites `_source_question_ids: ["FIN-1"]` and is confirmed at the barrier (`_confirmation_state` + `_confirmed_at`, which the declared source requires). All other extraction fields omit `source` in the manifest and keep the default `_source: operator-content`.
 
 ## Inputs
 

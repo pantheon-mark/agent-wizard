@@ -75,6 +75,14 @@ class LoaderTests(unittest.TestCase):
             else:
                 self.assertTrue(spec.source_question_ids, f"{name} ({spec.derivation_class}) has no source questions")
 
+    def test_source_override_loaded(self):
+        m = load_field_manifest(SHAPE)
+        # AUTOMATION_CREDIT_POOL is extraction-class but its value is a plan-lookup, so it declares
+        # an explicit provenance override (claude-derived), NOT the extraction default operator-content.
+        self.assertEqual(m.spec_for("AUTOMATION_CREDIT_POOL").source, "claude-derived-operator-confirmed")
+        # a field with no declared override carries source None (the envelope assembler uses the class default)
+        self.assertIsNone(m.spec_for("VISION_PURPOSE").source)
+
 
 class CrossArtifactConsistencyTests(unittest.TestCase):
     def test_manifest_covers_every_registry_target_field(self):
@@ -114,6 +122,15 @@ class FailClosedTests(unittest.TestCase):
                 "field": "BAD", "group_id": "vision", "derivation_class": "classification",
                 "decision_field": False, "decision_kind": "none", "value_shape": "enum",
                 "source_question_ids": ["V-1"], "preview_doc": ""}])
+            with self.assertRaises(FieldManifestError):
+                load_field_manifest(SHAPE, manifests_dir=d)
+
+    def test_bad_source_override_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = self._write(td, [{
+                "field": "BAD", "group_id": "vision", "derivation_class": "extraction",
+                "source": "made-up-source", "decision_field": False, "decision_kind": "none",
+                "value_shape": "prose", "source_question_ids": ["V-1"], "preview_doc": ""}])
             with self.assertRaises(FieldManifestError):
                 load_field_manifest(SHAPE, manifests_dir=d)
 

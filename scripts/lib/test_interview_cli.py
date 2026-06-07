@@ -397,6 +397,17 @@ class VisionGroupAcceptanceTests(unittest.TestCase):
 
 
 class CLIGuardTests(unittest.TestCase):
+    def test_source_override_honored_for_automation_credit_pool(self):
+        # AUTOMATION_CREDIT_POOL is extraction-class but a plan-lookup; the manifest declares a
+        # `source` override, so the envelope assembler stamps claude-derived (not operator-content).
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "transcript.jsonl")
+            ev = cli.cmd_derive_field(tpath, SHAPE, "AUTOMATION_CREDIT_POOL", "$20",
+                                      sources=["FIN-1"], inputs=None, clock=lambda: CLOCK)
+            self.assertEqual(ev["envelope"]["_source"], "claude-derived-operator-confirmed")
+            self.assertEqual(ev["envelope"]["_derivation_class"], "extraction")
+            self.assertEqual(ev["envelope"]["_source_question_ids"], ["FIN-1"])
+
     def test_derive_synthesis_without_inputs_fails_loud(self):
         with tempfile.TemporaryDirectory() as td:
             tpath = str(Path(td) / "transcript.jsonl")
