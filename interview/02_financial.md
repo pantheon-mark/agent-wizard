@@ -50,11 +50,11 @@ If all sub-step markers for this step are present but the step-level marker (`st
 >
 > Which best describes your plan?
 >
-> - **Pro** ($20/month) — The standard paid plan for individuals. Fixed monthly cost with a daily message cap.
-> - **Max 5x** ($100/month) — A higher personal tier, with roughly 5× Pro's usage. For regular, heavier use.
+> - **Pro** ($20/month, or $17/month billed annually) — The standard paid plan for individuals. Fixed monthly cost with a daily message cap. (Baseline usage — "1×".)
+> - **Max 5x** (from $100/month) — A higher personal tier, with roughly 5× Pro's usage. For regular, heavier use.
 > - **Max 20x** ($200/month) — The highest personal tier, with roughly 20× Pro's usage. For intensive use.
-> - **Team Standard** ($100/user/month) — A business plan shared across a team; same price and per-seat capacity as Max 5x. Its own billing, shared rate limits.
-> - **Team Premium** ($200/user/month) — The higher business tier; same price and per-seat capacity as Max 20x.
+> - **Team Standard** ($20/seat/month billed annually, or $25/seat/month billed monthly) — A business plan for teams (minimum 5 seats); roughly 1.25× Pro's usage per seat. Its own billing, shared rate limits across the team.
+> - **Team Premium** ($100/seat/month billed annually, or $125/seat/month billed monthly) — The higher business tier (minimum 5 seats); roughly 6.25× Pro's usage per seat.
 > - **Free** — You use Claude without paying.
 >
 > If you're not sure, check claude.ai/settings/billing — it shows your current plan.
@@ -103,7 +103,7 @@ Store: OVERAGE_PLAN_TYPE = "rate-limited"
 
 > Team plans work a bit differently. Let me confirm your tier and ask two quick follow-ups.
 
-If the user already named the tier (Team Standard or Team Premium), use it. If they only said "Team," **ask:** "Is it Team Standard (the $100/seat tier, same capacity as Max 5x) or Team Premium (the $200/seat tier, same capacity as Max 20x)?" and **wait for the answer.**
+If the user already named the tier (Team Standard or Team Premium), use it. If they only said "Team," **ask:** "Is it Team Standard (about $20–25/seat per month, roughly 1.25× Pro's usage) or Team Premium (about $100–125/seat per month, roughly 6.25× Pro's usage)?" and **wait for the answer.**
 
 Store: TEAM_TIER = "standard" (Team Standard) or "premium" (Team Premium)
 
@@ -185,23 +185,26 @@ After storing the ceiling, provide calibration guidance based on the user's plan
 
 **If PLAN_TYPE = "max" or PLAN_TYPE = "team":**
 
-First determine the **capacity tier** — the Max-equivalent envelope this plan provides (Team plans share their counterpart Max plan's price and per-seat capacity):
+First determine the **capacity tier** from the plan's actual usage multiplier relative to Pro. **Team seats do NOT mirror the Max tiers** — Team Standard is ~1.25× Pro (essentially Pro-class), and Team Premium is ~6.25× Pro (a little above Max 5x, well below Max 20x):
 
-- **5x tier:** Max 5x ($100) — or Team Standard ($100/seat).
-- **20x tier:** Max 20x ($200) — or Team Premium ($200/seat).
+- **Pro-class (~1–1.25× Pro):** Pro — or Team Standard.
+- **5x-class (~5–6× Pro):** Max 5x — or Team Premium (~6.25×).
+- **20x-class (~20× Pro):** Max 20x.
 
-**If the 5x tier (Max 5x or Team Standard):**
+**If the plan is Team Standard (Pro-class):** use the **Pro calibration guidance above**, plus this note: your Team Standard seat gives roughly 1.25× Pro's per-seat usage — modestly more headroom than Pro, but still daily-cap-sensitive, and the cap is shared across your team (see the Team note below). Then skip the 5x/20x guidance.
+
+**If 5x-class (Max 5x or Team Premium):**
 
 > A few things worth knowing about your ceiling and your plan together:
 >
-> **Usage limits:** Your plan gives you roughly 5× Pro's capacity, with higher rate limits and priority access. Rate-limiting is uncommon in normal use.
+> **Usage limits:** Your plan gives you roughly 5–6× Pro's capacity (Max 5x ≈ 5×; Team Premium ≈ 6.25×), with higher rate limits and priority access. Rate-limiting is uncommon in normal use.
 >
 > **What your ceiling supports:**
 > - **Under $50/month:** Conservative — light, focused work, leaving most of your capacity free.
 > - **$50–$100/month:** Comfortable for a moderately active system with several agents handling regular tasks.
 > - **Over $100/month:** Plenty of room; budget won't constrain normal operation.
 
-**If the 20x tier (Max 20x or Team Premium):**
+**If 20x-class (Max 20x):**
 
 > A few things worth knowing about your ceiling and your plan together:
 >
