@@ -26,7 +26,6 @@ def _dims(**over):
         approval_latency="async-business-hours",
         domain_risk="low",
         trust_posture="calibrated",
-        review_capability="no",
     )
     base.update(over)
     return AuthorityDimensions(**base)

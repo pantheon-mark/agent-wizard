@@ -2,9 +2,9 @@
 
 Derives the operator's authority surface from their confirmed authority-profile dimensions:
 expertise / desired autonomy / reversibility tolerance / approval latency / domain risk /
-trust posture, plus review capability. The non-deterministic step — proposing dimension values
+trust posture. The non-deterministic step — proposing dimension values
 from the operator's earlier interview answers (UP-1/UP-3/UP-4/UP-5/UP-6) plus the reversibility
-(REV) and review-capability (RC) probes — happens upstream as a derivation prompt the operator
+(REV) probe — happens upstream as a derivation prompt the operator
 confirms; THIS module is the deterministic mapping of confirmed dimensions -> emitted authority
 fields, so it is fully testable and replayable. The high-stakes constraints (domain risk, via the
 DR confirmation; reversibility, via REV) are force-active operator choices, not passive defaults;
@@ -26,10 +26,12 @@ Which dimensions drive the emitted surface at this version, and which are captur
     classes stay autonomous at every level, so it is never "ask before everything"; the
     experimental-convention class is not routine, so bounding it does not change that. A mixed or
     technical operator keeps the level default.
-  - approval_latency and review_capability are captured on the AuthorityDimensions record (so they
-    are available + replayable downstream) but do NOT yet shape an emitted field at this version —
-    their fuller wiring (approval_latency -> how often the system pauses for the operator;
-    review_capability -> the recommended review rigor) is a later step.
+  - approval_latency is captured on the AuthorityDimensions record (available + replayable
+    downstream) but does NOT yet shape an emitted field at this version — its fuller wiring
+    (approval_latency -> how often the system pauses for the operator) is a later step.
+    (review_capability / RC was removed 2026-06-07: it was captured-but-inert, and its enum
+    captured willingness-to-pay rather than access modality; reintroduce it — assistant identity +
+    plan tier -> programmatic-vs-manual review path — in the same change that wires its consumer.)
 
 AUTONOMY_LEVEL = max(1, min(desired_level, domain_risk_cap, reversibility_cap, trust_cap))
   — a CEILING/min model, NOT additive subtraction. Additive stacking could bottom out and produce
@@ -55,7 +57,6 @@ REVERSIBILITY = ("low", "medium", "high")
 APPROVAL_LATENCY = ("sync", "async-business-hours", "async-multi-day")
 DOMAIN_RISK = ("low", "medium", "high")
 TRUST_POSTURE = ("probationary", "calibrated", "established")
-REVIEW_CAPABILITY = ("yes-budget", "yes-limited", "no")
 
 # Q-IDs feeding each dimension — the lineage (authority answers only).
 DIMENSION_SOURCES = {
@@ -65,7 +66,6 @@ DIMENSION_SOURCES = {
     "approval_latency": ["UP-5"],
     "domain_risk": ["DR"],
     "trust_posture": [],   # auto-'probationary' at first build (policy default; no operator probe at v0)
-    "review_capability": ["RC"],
 }
 
 # The dimensions that CAP AUTONOMY_LEVEL (desired preference + the three constraints).
@@ -78,7 +78,6 @@ _ENUMS = {
     "approval_latency": APPROVAL_LATENCY,
     "domain_risk": DOMAIN_RISK,
     "trust_posture": TRUST_POSTURE,
-    "review_capability": REVIEW_CAPABILITY,
 }
 
 # Ceiling tables: each maps a dimension value to the MAXIMUM AUTONOMY_LEVEL it permits.
@@ -118,7 +117,6 @@ class AuthorityDimensions:
     approval_latency: str
     domain_risk: str
     trust_posture: str
-    review_capability: str
 
 
 @dataclass(frozen=True)

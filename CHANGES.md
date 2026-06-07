@@ -12,6 +12,23 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-07 — clearer "how reversible is the work?" question; removed an inert "second assistant" question
+
+**Public-facing change:** two refinements to the safety questions in the getting-to-know-you step.
+
+- **The reversibility question is now concrete and factual.** Instead of an abstract "how easy is it to undo?" (which read like a preference — and was genuinely hard to answer), it now asks what's actually *true* of the work your system does: are its actions **mostly permanent, a mix, or mostly reversible** — with examples drawn from your own project — and it states plainly what your answer changes (the more permanent, the more the system checks with you before acting). You still choose directly; on this safety setting the wizard does *not* propose an answer for you.
+- **Removed a question that didn't do anything yet.** A question asking whether you have a second AI assistant (ChatGPT/Gemini) for reviews has been removed: it didn't yet affect the generated system, and asking it implied the system would use that assistant. It will return — asking the details that actually matter (which assistant and plan) — in the release that builds the review feature it feeds.
+
+**Operator-facing notes:**
+
+- No operator action required.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** _pending — filled in the provenance-fill commit after publication_
+**Public repo commit:** _pending_
+
+---
+
 ## 2026-06-07 — spending & limits rebuilt around Claude's automation credit; clearer, more reliable "getting to know you" questions
 
 **Public-facing change:** the **Spending and limits** step has been rebuilt to match how Claude actually bills automated work, and several questions in the **getting-to-know-you** step are clearer and more dependable.

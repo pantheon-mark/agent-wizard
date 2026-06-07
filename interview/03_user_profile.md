@@ -284,7 +284,7 @@ Write sub-step marker: Append `step_03_UP-6: complete | <timestamp>` to `~/claud
 
 ## UP-7 — Authority profile (how much the system acts on its own)
 
-This sets how much the system does on its own versus checking with you first. Three short confirmations. Propose a starting point from what the user has already told you (UP-1 through UP-6 + their project), per the wizard principle — but the two risk questions (UP-7a, UP-7b) require an **explicit pick**, not a passive "sounds good": they set the system's safety limits, and an inferred-then-rubber-stamped answer is not a real authorization. Do not accept "whatever you think" for those two — if the user is unsure, walk through the options with a concrete example from their project and let them choose.
+This sets how much the system does on its own versus checking with you first. **Two short confirmations — both require an explicit pick**, not a passive "sounds good": they set the system's safety limits, and an inferred-then-rubber-stamped answer is not a real authorization. For **UP-7a** (how high-stakes the work is), propose a starting level from what the user has already told you (UP-1 through UP-6 + their project) and have them pick. For **UP-7b** (reversibility), use their prior answers ONLY to ground the examples — do NOT propose which option; it is a **factual** question about their environment that they must answer themselves (proposing an answer to a non-technical operator just produces a rubber-stamp). If the user is unsure, walk the options with a concrete example from their project and let them choose.
 
 ### UP-7a — How high-stakes is the work? (require an explicit choice)
 
@@ -308,33 +308,27 @@ Record: `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/cl
 
 Write sub-step marker: Append `step_03_DR: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
-### UP-7b — How easily can mistakes be undone? (require an explicit choice)
+### UP-7b — Are the system's actions reversible? (require an explicit choice — a FACTUAL question, not a preference)
 
-**Say:**
+This sets the system's safety ceiling. Map the operator's factual answer to the stored enum **under the hood** — do NOT show enum labels, and do NOT propose which option (proposing an answer here just yields a rubber-stamp from a non-technical operator). Use their earlier answers only to ground the examples. State the implication plainly.
 
-> And if the system does something you didn't want, how easy is it for you to undo it?
+**Say** (ground the examples in their own system, per the section rule):
+
+> One more on the safety side — I need you to pick this one directly, because it sets a real limit on how much the system does on its own. It's not about what you'd *prefer* — it's about what's actually *true* of the work it'll do: **if it does something you didn't want, how permanent is that?**
 >
-> 1. **Easy** — I can roll almost anything back without much cost
-> 2. **Mixed** — some things undo easily, some don't
-> 3. **Hard** — I'd rather it avoid anything that can't be cleanly reversed
+> Think about the specific things it'll do for you — [grounded examples from their system, e.g. drafting emails you still send yourself, updating your task list, logging call notes, researching] — and tell me which is most accurate:
+>
+> 1. **Mostly permanent** — a lot of what it does would be hard, costly, or impossible to take back (for example: sending messages on its own, spending money, or deleting things for good)
+> 2. **A mix** — some of it undoes easily, but some creates messier or outside-world consequences
+> 3. **Mostly reversible** — almost anything it does can be rolled back at little cost (for example: it only drafts, edits notes you can fix, or just reads and researches)
+>
+> The more permanent its actions are, the more it will check with you before doing them.
 
-**Wait for an explicit selection.** Store REV = high (easy) | medium (mixed) | low (hard).
+**Wait for an explicit selection.** Map the factual answer to the stored value: **1 (mostly permanent) → REV = low**; **2 (a mix) → REV = medium**; **3 (mostly reversible) → REV = high**. (The operator picks the FACT; the wizard maps fact → cap.)
 
 Record: `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid REV --group hitl_autonomy --value "<REV>"`
 
 Write sub-step marker: Append `step_03_REV: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
-
-### UP-7c — A second opinion for reviews? (propose and confirm)
-
-**Say:**
-
-> Last one: for important work, it can help to get a second opinion from another AI assistant before the system acts. Do you have access to another assistant — like ChatGPT or Gemini — you'd be willing to use for that?
-
-**Wait for answer.** Store RC = "yes-budget" (yes, and willing to pay if needed) | "yes-limited" (yes, free tier only) | "no". If unsure, default to "no" and note it can be added later.
-
-Record: `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid RC --group hitl_autonomy --value "<RC>"`
-
-Write sub-step marker: Append `step_03_RC: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 **How these are used (do not explain unless asked):** these answers, with the autonomy/involvement answers (UP-3, UP-5), become the operator's authority profile. The system's starting autonomy level is the **most cautious** of what the user wants and what the risk/reversibility allow — and because this is a brand-new system, it begins a notch more cautious and earns more independence over time. Routine, low-risk upkeep always runs on its own; the system never asks before *everything*. The derived level + the resulting ask-first rules are shown to the user for confirmation at the execution-plan preview later — they are not finalized here.
 
@@ -342,7 +336,7 @@ Write sub-step marker: Append `step_03_RC: complete | <timestamp>` to `~/claude-
 
 ## Synthesis step [INTERNAL]
 
-After all five user-profile answers plus the three authority confirmations (UP-7a/b/c) are recorded, synthesize a one-paragraph user profile and confirm it with the user before proceeding.
+After all five user-profile answers plus the two authority confirmations (UP-7a/b) are recorded, synthesize a one-paragraph user profile and confirm it with the user before proceeding.
 
 **Say:**
 
@@ -350,7 +344,7 @@ After all five user-profile answers plus the three authority confirmations (UP-7
 >
 > [One paragraph synthesizing UP-1 through UP-5 in plain language. Cover: how they like to receive information, how much detail they want, when they want to be asked vs. informed, their areas of expertise, and how hands-on they expect to be. Write this as a description of the person, not a list of attributes.]
 >
-> [Then a one-line bridge so the authority answers (UP-7a/b/c) aren't silently dropped from the read-back: acknowledge that the safety settings just captured — how high-stakes the work is, how reversible mistakes are, and the second-opinion option — are recorded but NOT being finalized here; they'll be shown as concrete "ask-first" rules at the execution-plan preview, for confirmation in context. Example: "I've also got your safety settings from a moment ago — how careful it should be, how reversible things are, and the second-opinion option. I'm not locking those in here; you'll see exactly how they turn into 'ask-first' rules when we lay out the plan, and you can confirm them then."]
+> [Then a one-line bridge so the authority answers (UP-7a/b) aren't silently dropped from the read-back: acknowledge that the safety settings just captured — how high-stakes the work is, and how reversible its actions are — are recorded but NOT being finalized here; they'll be shown as concrete "ask-first" rules at the execution-plan preview, for confirmation in context. Example: "I've also got your safety settings from a moment ago — how careful it should be, and how reversible its actions are. I'm not locking those in here; you'll see exactly how they turn into 'ask-first' rules when we lay out the plan, and you can confirm them then."]
 >
 > Does that sound right? Anything to adjust?
 
@@ -394,7 +388,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-All five user-profile dimensions answered and confirmed, plus the three authority confirmations recorded (UP-7a domain risk + UP-7b reversibility — each an explicit choice — and UP-7c review capability). Profile summary stored.
+All five user-profile dimensions answered and confirmed, plus the two authority confirmations recorded (UP-7a domain risk + UP-7b reversibility — each an explicit factual choice). Profile summary stored.
 
 **Write completion marker:** Append `step_03: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

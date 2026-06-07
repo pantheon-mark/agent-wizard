@@ -189,7 +189,7 @@ def _drive_hitl_autonomy_group(transcript, progress):
     _drive_orchestration_build_group(transcript, progress)
     _record_sources(transcript, "hitl_autonomy",
                     {"FIN-1", "FIN-3", "FIN-4", "UP-1", "UP-2", "UP-3", "UP-5", "NOTIF-1", "NOTIF-2", "NOTIF-3",
-                     "ARCH-4", "ERR-1", "ERR-2", "CONC-1", "START-1", "START-2", "QA-2", "DR", "REV", "RC"})
+                     "ARCH-4", "ERR-1", "ERR-2", "CONC-1", "START-1", "START-2", "QA-2", "DR", "REV"})
     # AUTONOMY_LEVEL: now a classification (operator-preference) derived from the authority answers.
     _derive_confirm(transcript, "AUTONOMY_LEVEL", "hitl_autonomy", "2",
                     sources=["UP-3", "UP-5", "DR", "REV"], state="accepted")
