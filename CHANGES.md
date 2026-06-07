@@ -12,6 +12,20 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-07 — vision step restates your existing rules in plain words
+
+**Public-facing change:** in the vision step, when the wizard reminds you of rules you already set, it now restates them in plain words — rather than referring to them by an internal name ("the always-ask rules") or by which earlier step they came from, which assumed you'd be holding the wizard's own labels. The example wording is plainer too.
+
+**Operator-facing notes:**
+
+- No operator action required.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** _pending — filled in the provenance-fill commit after publication_
+**Public repo commit:** _pending_
+
+---
+
 ## 2026-06-07 — notifications step builds on what you've told the wizard; shorter alert-channel name; clearer, honest email step
 
 **Public-facing change:** the notifications step is more personal, plainer, and more honest.

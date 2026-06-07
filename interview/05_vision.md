@@ -178,13 +178,13 @@ Write sub-step marker: Append `step_05_V-4: complete | <timestamp>` to `~/claude
 
 **Before asking:** Read the staging file to retrieve the user's Tier 1 decision confirmations from step 04 (NOTIF-3) and any Tier 1 additions (TIER_1_ADDITIONS). These are rules the user has already confirmed — do not re-ask them.
 
-**Present what's already captured, then ask for additions:**
+**Present what's already captured, then ask for additions** (restate the actual rules in plain words — do NOT refer to them by an internal label like "the always-ask rules" or "Tier-1," and do NOT reference "the notification step": the operator doesn't hold the wizard's vocabulary or its step structure, so grounding-by-reference must carry the substance, not the name):
 
-> You've already locked in some rules for this system in the notification step. Here's what you told me it must always stop and ask about:
+> You've already told me some things this system should always check with you about before it does them — here they are:
 >
-> [Read back the confirmed Tier 1 baseline items and any TIER_1_ADDITIONS from the staging file. Present as a bulleted list — e.g., "Spending money," "Sending messages on your behalf," "Irreversible actions," plus any user additions.]
+> [Read back the confirmed Tier 1 baseline items and any TIER_1_ADDITIONS from the staging file. Present as a plain bulleted list — e.g., "Spending money," "Sending anything outside to other people," "Deleting things, or anything that can't be undone," plus any additions the operator made.]
 >
-> Beyond those — are there other rules this system should always follow, or other things it should never do? For example, data it should never access, topics it should stay away from, or actions specific to your situation that should always require your approval.
+> Beyond those — anything else this system should always do, or never do? For example: information it should never touch, topics to steer clear of, or anything specific to your situation that should always need your okay first.
 
 **Wait for answer.**
 
