@@ -21,8 +21,8 @@ Entries appear newest-first.
 - No operator action required.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** (pending — provenance fill after dual push)
-**Public repo commit:** (pending — provenance fill after subtree push)
+**Source-Meta-Commit:** 3e490fe
+**Public repo commit:** bc38193
 
 ---
 
