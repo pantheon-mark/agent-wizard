@@ -174,9 +174,12 @@ Write sub-step marker: Append `step_02_FIN-4: complete | <timestamp>` to `~/clau
 
 **If no / not sure:**
 
-> No problem — turning on paid overflow needs an owner. For now I'll set it to **Wait** (pause until next month, no extra cost), and your admin can switch it on later. You can change this anytime by telling me.
+> No problem — turning on paid overflow needs an account owner, so I won't set that up now (your admin can switch it on later). Without it, here's what your system can do at no extra cost — which would you prefer?
+>
+> - **Wait** — stop when it reaches the monthly amount, and pick back up next month.
+> - **Keep helping when you're around** — stop working on its own, but still help out whenever you're using it.
 
-Store `EXHAUSTION_BEHAVIOR = "wait"`; skip the rest of FIN-5.
+**Wait for answer.** Store `EXHAUSTION_BEHAVIOR = "wait"` or `"interactive-fallback"` per the operator's choice (no default — let the operator decide between the two no-cost behaviors). Add to staging `## Setup reminders`: `[→ setup] Operator chose paid overflow but needs a Team admin to enable usage credits — revisit once enabled.` Skip the rest of FIN-5.
 
 **If yes (or non-Team plan), continue:**
 
