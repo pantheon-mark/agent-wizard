@@ -172,14 +172,14 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 
 #### Cost Controls
 
-*Spend thresholds, intensive-operation gating, periodic backstop review. Specific numbers (75/90/100% thresholds) are operator-configured; structural pattern is universal.*
+*Automation-budget thresholds, intensive-operation gating, periodic backstop review. Specific numbers (75/90/100% thresholds) are operator-configured; structural pattern is universal.*
 
 | # | Acceptance criterion | Pass condition |
 |---|---|---|
-| AC-F-1 | Spend ceiling configured at wizard setup | Spend ceiling, overage plan type, and intensive-operation threshold all present in system config |
-| AC-F-2 | 75% threshold produces digest entry | 75% spend triggers digest entry — not a real-time alert |
-| AC-F-3 | 90% threshold triggers High alert | 90% spend triggers real-time High severity alert |
-| AC-F-4 | 100% ceiling stops system unconditionally | All autonomous operations halt at spend ceiling — no exceptions |
+| AC-F-1 | Automation budget configured at wizard setup | Automation budget, exhaustion behavior, and intensive-operation threshold all present in system config |
+| AC-F-2 | 75% threshold produces digest entry | 75% of automation budget triggers digest entry — not a real-time alert |
+| AC-F-3 | 90% threshold triggers High alert | 90% of automation budget triggers real-time High severity alert |
+| AC-F-4 | Automation budget exhaustion enforced | At 100% of the automation budget, autonomous work follows the configured exhaustion behavior (wait / keep-helping-when-present / paid-overflow within the cap) — no silent overrun |
 | AC-F-5 | Stop-the-system not auto-lifted | System remains stopped until explicit operator authorization |
 | AC-F-6 | Cost/efficiency log written after every component run | Component, tokens, and cumulative total updated after each run |
 | AC-F-7 | Periodic backstop review fires at cadence | Backstop review fires at correct interval — not skipped |
@@ -516,7 +516,7 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 
 #### Financial Guardrails
 
-*Markdown-shape implementation: intensive operations + autonomy-ladder framing + per-agent session budgets. Universal cost-control concepts (75/90/100% thresholds, stop-the-system, cost/efficiency log, periodic backstop) live in Acceptance Criteria § Cost Controls above (AC-F-1 through AC-F-7).*
+*Markdown-shape implementation: intensive operations + autonomy-ladder framing + per-agent session budgets. Universal cost-control concepts (75/90/100% thresholds, exhaustion behavior, cost/efficiency log, periodic backstop) live in Acceptance Criteria § Cost Controls above (AC-F-1 through AC-F-7).*
 
 | # | Test | Pass condition |
 |---|---|---|
@@ -532,7 +532,7 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 | MA-F-10 | Staged findings incorporated at next phase-gate | No staged finding missed in next phase-gate review |
 | MA-F-11 | Phase-gate retrospective runs | Calibration signal captured as part of every phase-gate |
 | MA-F-12 | Calibration feedback writes rules library entry | Rules library entry written for affected finding type after feedback |
-| MA-F-13 | Per-agent session budget set at invocation | Budget amount derived from spend ceiling and agent workload fraction |
+| MA-F-13 | Per-agent session budget set at invocation | Budget amount derived from the project automation budget and agent workload fraction |
 | MA-F-14 | Agent approaching budget initiates wrap-up mode | Progress summarized, state persisted, remaining work reported |
 | MA-F-15 | Agent exceeding budget terminates gracefully | Graceful termination with state preserved |
 | MA-F-16 | First budget-exceeded triggers auto-continue | New session started automatically — informational notification sent, no operator action required |

@@ -60,7 +60,7 @@
 
 | Setting | Value |
 |---------|-------|
-| Spend ceiling | {{SPEND_CEILING}} |
+| Automation budget (monthly) | {{PROJECT_AUTOMATION_BUDGET}} — when reached: {{EXHAUSTION_BEHAVIOR}} |
 | Three-strikes threshold | {{THREE_STRIKES_THRESHOLD}} |
 | Confidence flagging threshold | {{CONFIDENCE_THRESHOLD}} |
 | Pre-flight saturation threshold | {{PREFLIGHT_THRESHOLD}} |

@@ -1,13 +1,13 @@
 # 02 — Financial Guardrails
 
 ## What this file does
-Establish the financial guardrails that govern all autonomous spending by the system. Three elements: plan type identification (which determines rate limits and billing behavior), monthly spend ceiling, and calibration guidance tailored to the user's specific plan. These answers are stored in `project_instructions.md` and enforced by the system from the first day of operation.
+Establish the financial guardrails for any work the system does **on its own** (unattended/scheduled runs). Three operator-facing elements: which Claude plan the operator is on (which sizes the included monthly automation allowance and gates out Free), how much of that allowance this project may use when several systems share it, and what the system should do if it ever uses the allowance up. The wizard does all dollar arithmetic internally — the operator never sets a dollar figure except at the one real-money boundary (paid overflow). These answers are derived into `project_instructions.md` and the system's cost log, and enforced from day one.
 
 ## When this file runs
 After `01_phase1_capture.md` completes. The staging file exists and is being updated after each answer.
 
 ## Prerequisites
-Staging file at `~/claude-wizard-draft/wizard_session_draft.md` has been created and contains the P1-1 and P1-2 answers.
+Staging file at `~/claude-wizard-draft/wizard_session_draft.md` has been created and contains the P1-1 and P1-2 answers, and the step-01 `## Shape detection` block.
 
 ---
 
@@ -37,203 +37,171 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 **Say:**
 
-> **Step 3 of 16 — Financial setup**
-> We'll set spending limits so your system knows its boundaries.
+> **Step 3 of 16 — Spending and limits**
+> A couple of quick questions so your system knows its boundaries when it works on its own.
 
 ---
 
-## FIN-1 — Plan type identification
+## How the credit model works (wizard-internal — do NOT recite to the operator)
+
+Read this; do not read it aloud. From 2026-06-15, work the system does **headlessly/on a schedule** (the Agent SDK / `claude -p` path the Orchestrator uses for unattended runs) draws a **separate monthly dollar "automation credit"** included with the operator's plan — distinct from their interactive 5h/7d Claude use, which it cannot touch. Pool size by plan (per-user, NOT pooled across teammates, no rollover):
+
+| Plan | Included monthly automation credit (`AUTOMATION_CREDIT_POOL`) |
+|------|------|
+| Pro | $20 |
+| Max 5x | $100 |
+| Max 20x | $200 |
+| Team Standard (per seat) | $20 |
+| Team Premium (per seat) | $100 |
+| Free | none |
+
+`last_verified: 2026-06-07` against `support.claude.com/articles/15036540`. **Version-dependent** (effective 2026-06-15; re-verify these figures before relying — pricing/credit facts rot). The credit is a **one-time opt-in the operator must claim once** ("your plan includes…" is false until claimed). **There is no programmatic balance read**, so the generated system meters its OWN estimated spend (tokens × API rate; already counted in `cost_efficiency_log.md`) with a conservative safety margin — a documented v0 bridge. The included pool is a platform hard-boundary: at $0, unattended requests stop unless the operator has enabled paid overflow ("usage credits").
+
+**Budget arithmetic (wizard computes; operator never sets it):**
+- `PROJECT_AUTOMATION_BUDGET` = `AUTOMATION_CREDIT_POOL` × share fraction, where share = ~0.9 if `PROJECT_SHARE_POSTURE = sole`, ~0.4 if `one-of-several` (conservative, leaves room for the operator's other systems). Express as a rounded dollar figure.
+- `INTENSIVE_OPERATION_THRESHOLD` = ~10% of `PROJECT_AUTOMATION_BUDGET` (one estimated-expensive operation above this pauses for operator approval).
+- A purely operator-invoked system (no scheduled/background runs per the step-01 shape signals) consumes little or none of this pool; keep the questions brief and frame honestly ("if your system does work on its own…"). *(Conditioning the whole step on `probe_1_scheduled_cadence` is a noted future refinement; v0 asks regardless, framed honestly.)*
+
+---
+
+## FIN-1 — Plan identification
 
 **Ask the user:**
 
-> Before we set up your system's spending limits, I need to know which Claude plan you're on. Different plans have different rate limits and billing — and that affects how much your agents can do.
+> Which Claude plan are you on? *(I use this to size how much your system can do on its own each month — you won't have to work any of that out.)*
 >
-> Which best describes your plan?
+> - **Pro**
+> - **Max 5x**
+> - **Max 20x**
+> - **Team Standard**
+> - **Team Premium**
+> - **Free**
 >
-> - **Pro** ($20/month, or $17/month billed annually) — The standard paid plan for individuals. Fixed monthly cost with a daily message cap. (Baseline usage — "1×".)
-> - **Max 5x** (from $100/month) — A higher personal tier, with roughly 5× Pro's usage. For regular, heavier use.
-> - **Max 20x** ($200/month) — The highest personal tier, with roughly 20× Pro's usage. For intensive use.
-> - **Team Standard** ($20/seat/month billed annually, or $25/seat/month billed monthly) — A business plan for teams (minimum 5 seats); roughly 1.25× Pro's usage per seat. Its own billing, shared rate limits across the team.
-> - **Team Premium** ($100/seat/month billed annually, or $125/seat/month billed monthly) — The higher business tier (minimum 5 seats); roughly 6.25× Pro's usage per seat.
-> - **Free** — You use Claude without paying.
->
-> If you're not sure, check claude.ai/settings/billing — it shows your current plan.
+> Not sure? Open claude.ai/settings/billing — your plan's at the top.
 
 **Wait for answer.**
 
 **If Free:**
 
-> The wizard needs a paid Claude plan — Pro at minimum — to build and run an agent system. The free tier doesn't provide enough capacity for agents to operate reliably.
+> The wizard needs a paid Claude plan — Pro at minimum — to build and run an agent system. The free tier doesn't include the automation allowance agents need to operate.
 >
 > You can upgrade at claude.ai/settings/billing. Pro ($20/month) is enough to get started. Come back and resume when you've upgraded — everything you've told me so far is saved.
 
-Store: PLAN_TYPE = "free"
+Store: `PLAN_TYPE = "free"`
 
 **HARD GATE: Do not proceed. The wizard cannot continue on a Free plan.**
 
-**If Pro:**
+**If Max (5x or 20x):** if the user already named the tier, use it. If they only said "Max," **ask:** "Is your Max plan the 5x ($100/month) tier or the 20x ($200/month) tier?" and **wait.** Store `MAX_TIER = "$100"` (5x) or `"$200"` (20x). Store `PLAN_TYPE = "max"`.
 
-> Great — Pro is the most common plan for running a system like this. Here's how it works with agents:
->
-> - Your cost is fixed at $20/month — agent activity doesn't add extra charges on top of your subscription.
-> - Pro has a daily message cap. When you or your agents approach it, Claude slows down (rate-limiting) rather than stopping entirely. Your agents still work, just more slowly during high-usage periods.
-> - The system I'll build for you manages its workload to stay within your limits — it spreads tasks across the day rather than doing everything at once.
+**If Team (Standard or Premium):** if the user already named the tier, use it. If they only said "Team," **ask:** "Is it Team Standard or Team Premium? (You can see which at claude.ai/settings/billing.)" and **wait.** Store `TEAM_TIER = "standard"` or `"premium"`. Store `PLAN_TYPE = "team"`.
 
-Store: PLAN_TYPE = "pro"
-Store: OVERAGE_PLAN_TYPE = "rate-limited"
+**If Pro:** Store `PLAN_TYPE = "pro"`.
 
-**If Max 5x or Max 20x:**
+**If unsure / can't determine:**
 
-> Max gives you the most room to work with — your agents will rarely hit capacity constraints.
+> No problem — check claude.ai/settings/billing when you can; it shows your plan at the top. For now I'll set this up for Pro-level limits, which is the safest starting point, and you can tell me to adjust it later.
 
-If the user already named the tier (Max 5x or Max 20x), use it. If they only said "Max," **ask:** "Is your Max plan the 5x ($100/month) tier or the 20x ($200/month) tier?" and **wait for the answer.**
+Store: `PLAN_TYPE = "unknown"` (treat as Pro for sizing).
 
-Store: MAX_TIER = "$100" (Max 5x) or "$200" (Max 20x)
-
-> Here's how Max works with agents:
->
-> - Your cost is fixed at $[MAX_TIER]/month. No surprise charges from agent activity.
-> - Max has significantly higher rate limits and priority access. Your system can handle more concurrent work and intensive tasks without slowing down.
-> - Rate-limiting is rare on Max — you'd need sustained heavy use before it kicks in.
-
-Store: PLAN_TYPE = "max"
-Store: OVERAGE_PLAN_TYPE = "rate-limited"
-
-**If Team Standard or Team Premium:**
-
-> Team plans work a bit differently. Let me confirm your tier and ask two quick follow-ups.
-
-If the user already named the tier (Team Standard or Team Premium), use it. If they only said "Team," **ask:** "Is it Team Standard (about $20–25/seat per month, roughly 1.25× Pro's usage) or Team Premium (about $100–125/seat per month, roughly 6.25× Pro's usage)?" and **wait for the answer.**
-
-Store: TEAM_TIER = "standard" (Team Standard) or "premium" (Team Premium)
-
-> **First:** Do you have access to your team's billing settings at claude.ai/settings/billing, or does someone else manage that?
-
-**Wait for answer.** Store: TEAM_BILLING_ACCESS = true or false
-
-> **Second:** How many people are on your team plan?
-
-**Wait for answer.** Store: TEAM_SIZE = the number given
-
-> Here's what matters for your system on a Team plan:
->
-> - Rate limits are shared across everyone on the plan. Your agents' activity counts toward the team's total usage.
-> - I'll configure the system to be mindful of shared limits so your agents don't crowd out your teammates.
-> - If someone else manages billing, you may want to let them know you're setting up an agent system — they'll see the usage.
-
-Store: PLAN_TYPE = "team"
-Store: OVERAGE_PLAN_TYPE = "team-managed"
-
-**If unsure or can't determine:**
-
-> No problem. Check claude.ai/settings/billing when you get a chance — it shows your plan right at the top. For now, I'll assume Pro-level limits, which is the safest starting point. You can update this any time.
-
-Store: PLAN_TYPE = "unknown"
-Store: OVERAGE_PLAN_TYPE = "unknown"
-
-Update staging file with all stored values.
+**Internally** map the plan to `AUTOMATION_CREDIT_POOL` per the table above (unknown → $20). Update the staging file.
 
 Write sub-step marker: Append `step_02_FIN-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
-## FIN-2 — Monthly spend ceiling
+## Claim check (paid plans only — brief)
+
+**Say:**
+
+> One quick thing: that monthly automation allowance is something you turn on once for your account. If you haven't yet, you can activate it at claude.ai/settings/billing — I'll remind you again when we set the system live. Want me to note that as a setup step? *(yes/no)*
+
+Note the answer in the staging file under `## Setup reminders` if yes (`[→ setup] Claim/activate Agent SDK automation credit`). Do not block on it.
+
+---
+
+## Orientation (one plain line — sets up both choices)
+
+**Say:**
+
+> Your plan includes some "runs on its own" time each month — work your system does in the background when you're not around — at no extra cost, up to a point. Two quick choices about that.
+
+*(Ground the framing in what the operator told you about their system where it helps — per the balanced-elicitation rule: frame with their context, keep the ask neutral, never pre-fill the answer.)*
+
+---
+
+## FIN-3 — Sharing posture
 
 **Ask the user:**
 
-> Now let's set a monthly ceiling — the point where the system stops all autonomous work and checks in with you. This isn't a prediction of what you'll spend — it's a safety net.
+> Is this your only system, or might you run a few? Anything you build shares that same monthly allowance.
 >
-> Your [PLAN_TYPE] plan has a fixed subscription cost, so this ceiling is about how much of your plan's capacity the system is allowed to use. If it hits this limit, it pauses and waits for you to decide what to do next.
+> - **Just this one, for now** — it can use most of what your plan includes.
+> - **One of a few** — I'll keep it modest so there's room for the others. *(Add another later and I'll rebalance them.)*
+
+**Wait for answer.** Store: `PROJECT_SHARE_POSTURE = "sole"` or `"one-of-several"`. (If genuinely unsure, default `sole` and note it's adjustable.)
+
+*Honest note (say only if asked how the limit is kept):* the system tracks its own estimated use and eases off as it nears its share; because there's no live balance read yet, it keeps a safety margin and errs on the cautious side. The included allowance itself can't be overspent — at the limit, unattended work simply stops.
+
+Write sub-step marker: Append `step_02_FIN-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
+## FIN-4 — Exhaustion behavior
+
+**Ask the user:**
+
+> If it ever uses up that monthly amount, what should it do?
 >
-> Some people start at $20 and adjust up. Others set $100 from day one. Your system won't use anywhere near this in the early weeks.
+> - **Wait** — stop, and pick back up next month. No extra cost.
+> - **Keep helping when you're around** — stop working on its own, but still help out whenever you're using it. No extra cost.
+> - **Keep going on its own** — keep running past what's included, which costs a little extra. You set the limit, and I'll always tell you before it spends.
 >
-> What number feels right to start?
+> Not sure? I'll choose **Wait** — it never costs extra, and you can change any of this later just by telling me.
 
-**Wait for answer.** Accept any dollar amount. If the user gives a range (e.g. "maybe $50 to $100"), pick the lower end and note it.
+**Wait for answer.** Store: `EXHAUSTION_BEHAVIOR = "wait"` | `"interactive-fallback"` (keep helping when you're around) | `"paid-overflow"` (keep going on its own). Default unsure → `"wait"`.
 
-**Once you have a number:**
+Write sub-step marker: Append `step_02_FIN-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
-Calculate the intensive operation threshold at 10% of the ceiling (e.g. if ceiling is $50, threshold is $5.00).
+---
 
-**Say this:**
+## FIN-5 — Paid-overflow setup (CONDITIONAL — only if FIN-4 == "paid-overflow")
 
-> Got it — I'll set your ceiling at $[SPEND_CEILING]. Any time a single operation is estimated to cost more than $[INTENSIVE_THRESHOLD] on its own, the system will pause and ask for your approval before proceeding. You can raise or lower these at any time.
+**If `EXHAUSTION_BEHAVIOR != "paid-overflow"`: skip this entire section.**
 
-Store:
-- SPEND_CEILING = the dollar amount
-- INTENSIVE_OPERATION_THRESHOLD = 10% of SPEND_CEILING (rounded to two decimal places)
+**Team-plan billing-authority gate (only if `PLAN_TYPE == "team"`):**
 
-Update staging file with both values.
+> Quick check — on a Team plan, only an account owner/admin can turn on paid usage. Are you the person who can change billing settings for this plan? *(yes / no / not sure)*
 
-### Calibration guidance (after FIN-2, before proceeding)
+**If no / not sure:**
 
-After storing the ceiling, provide calibration guidance based on the user's plan type (FIN-1) and ceiling amount. This helps the user understand what their budget can support — framed in terms of both what the system can do and the usage limits of their plan.
+> No problem — turning on paid overflow needs an owner. For now I'll set it to **Wait** (pause until next month, no extra cost), and your admin can switch it on later. You can change this anytime by telling me.
 
-**If PLAN_TYPE = "pro":**
+Store `EXHAUSTION_BEHAVIOR = "wait"`; skip the rest of FIN-5.
 
-> A few things worth knowing about your ceiling and your Pro plan together:
+**If yes (or non-Team plan), continue:**
+
+> Two quick things:
 >
-> **Usage limits:** Pro gives you a daily message cap. Your agents share this cap with your personal Claude use. The system manages its workload to stay under the cap, but on days when you also use Claude heavily, agents may slow down.
+> 1. How much extra per month are you comfortable spending? I'd start with a **$[propose a small default — e.g. $20]** cap — does that work, or would you prefer a different number?
+> 2. You'll switch on extra usage in your Claude billing settings, and **leave auto-reload off** so your cap is a real ceiling. I'll show you exactly how when we set the system live.
 >
-> **What your ceiling supports:**
-> - **Under $20/month:** Light, focused work — checking a few things regularly and alerting you when something needs attention. You'll want to keep your agent team small (1–2 agents) and run them on a schedule rather than continuously.
-> - **$20–$50/month:** Comfortable range for a small team of agents handling regular tasks — monitoring, summarizing, and flagging things for your review. Enough headroom for occasional intensive operations.
-> - **$50–$100/month:** Room for a more active system — multiple agents running frequently, handling more complex work.
-> - **Over $100/month:** Your ceiling gives plenty of room. Budget won't be a constraint in normal operation.
->
-> Since your Pro subscription is a fixed $20/month, the ceiling is about how much of your plan's capacity the system uses — not about surprise charges. If agents regularly bump against the ceiling or the daily message cap, that's a signal to either raise the ceiling, spread tasks across off-peak hours, or consider upgrading to Max.
+> Once it's on paid usage, I'll alert you when it starts and as it nears your limit, keep a safety margin, and stop before the cap.
 
-**If PLAN_TYPE = "max" or PLAN_TYPE = "team":**
+**Wait for answer.** Store: `PAYG_CAP = "$<amount>"`. Add to staging `## Setup reminders`: `[→ setup] Enable usage credits + set monthly spending cap to $<amount> at claude.ai/settings/usage; leave auto-reload OFF`.
 
-First determine the **capacity tier** from the plan's actual usage multiplier relative to Pro. **Team seats do NOT mirror the Max tiers** — Team Standard is ~1.25× Pro (essentially Pro-class), and Team Premium is ~6.25× Pro (a little above Max 5x, well below Max 20x):
+*(Honest internal note: the operator's Anthropic platform spending cap is the AUTHORITATIVE hard limit; the generated system's `PAYG_CAP` is an early-stop guard + alerting + graceful checkpoint, enforced on its own conservative estimate. Both are recorded so the emitted system warns and stops early.)*
 
-- **Pro-class (~1–1.25× Pro):** Pro — or Team Standard.
-- **5x-class (~5–6× Pro):** Max 5x — or Team Premium (~6.25×).
-- **20x-class (~20× Pro):** Max 20x.
+Write sub-step marker: Append `step_02_FIN-5: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
-**If the plan is Team Standard (Pro-class):** use the **Pro calibration guidance above**, plus this note: your Team Standard seat gives roughly 1.25× Pro's per-seat usage — modestly more headroom than Pro, but still daily-cap-sensitive, and the cap is shared across your team (see the Team note below). Then skip the 5x/20x guidance.
+---
 
-**If 5x-class (Max 5x or Team Premium):**
+## Confirm (brief, plain)
 
-> A few things worth knowing about your ceiling and your plan together:
->
-> **Usage limits:** Your plan gives you roughly 5–6× Pro's capacity (Max 5x ≈ 5×; Team Premium ≈ 6.25×), with higher rate limits and priority access. Rate-limiting is uncommon in normal use.
->
-> **What your ceiling supports:**
-> - **Under $50/month:** Conservative — light, focused work, leaving most of your capacity free.
-> - **$50–$100/month:** Comfortable for a moderately active system with several agents handling regular tasks.
-> - **Over $100/month:** Plenty of room; budget won't constrain normal operation.
+**Say (substitute the operator's choices in plain language; do NOT recite credit/pool jargon):**
 
-**If 20x-class (Max 20x):**
+> Got it. Your system will do its own background work within what your plan includes, and if it ever reaches that point it'll **[wait for next month / keep helping when you're around / keep going at up to $[PAYG_CAP]]**. I'll also pause for your OK before any unusually large single task. You can change any of this later just by telling me.
 
-> A few things worth knowing about your ceiling and your plan together:
->
-> **Usage limits:** Your plan gives you roughly 20× Pro's capacity — the most headroom available. Rate-limiting is rare; you'd need sustained heavy concurrent use before it kicks in.
->
-> **What your ceiling supports:**
-> - **Under $50/month:** Conservative — leaves most of your capacity unused.
-> - **$50–$150/month:** Comfortable for a fully active system — multiple agents running frequently, handling complex work, with budget for intensive operations.
-> - **Over $150/month:** Full room to operate; budget and capacity won't be constraints.
-
-**If PLAN_TYPE = "team" (either tier), also add the shared-capacity note:**
-
-> One Team-specific note: your tier's capacity is **per seat**, but heavy agent activity still draws on your team's shared usage across all [TEAM_SIZE] members. Setting the ceiling conservatively keeps agent work from crowding out teammates. If someone else manages billing, let them know you're running an agent system — they'll see the usage.
-
-In all cases:
-
-> Your subscription is a fixed monthly cost — the ceiling is about how much of your plan's capacity the system uses, not about surprise charges.
-
-**If PLAN_TYPE = "unknown":**
-
-Use the Pro guidance above. Add:
-
-> Once you've confirmed your plan type (check claude.ai/settings/billing), let me know and I can adjust these settings to match.
-
-**Note for step 13 cross-reference:** When SCALE-1 through SCALE-4 are answered in step 13 (operations), the wizard should compare the declared scale/velocity against the FIN-2 ceiling. If the scale suggests higher usage than the ceiling comfortably supports (e.g., Large scale tier with a $10 ceiling), surface the discrepancy to the user in plain language and ask if they'd like to adjust either the ceiling or the scale expectation. This check happens in step 13, not here — record `FIN_CALIBRATION_DELIVERED = true` in the staging file so step 13 knows to run the cross-reference.
-
-Store: FIN_CALIBRATION_DELIVERED = true in staging file.
-
-Write sub-step marker: Append `step_02_FIN-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+Internally store `PROJECT_AUTOMATION_BUDGET` and `INTENSIVE_OPERATION_THRESHOLD` per the arithmetic above. Update the staging file with all stored values.
 
 ---
 
@@ -413,11 +381,18 @@ Write sub-step marker: Append `step_02_P02-FB-6: complete | <timestamp>` to `~/c
 
 ## Recording answers (event transcript)
 
-Record this step's `hitl_autonomy` source answers to `~/claude-wizard-draft/wizard_transcript.jsonl` (values from the staging fields captured above). They inform the HITL map + autonomy defaults derived at the step-13 barrier:
+Record this step's `hitl_autonomy` source answers to `~/claude-wizard-draft/wizard_transcript.jsonl` (values from the staging fields captured above). They feed the financial guardrail + the HITL map + autonomy defaults derived at the step-13 barrier:
 
 ```
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid FIN-1 --group hitl_autonomy --value "<plan type>"
-python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid FIN-2 --group hitl_autonomy --value "<monthly spend ceiling>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid FIN-3 --group hitl_autonomy --value "<share posture: sole | one-of-several>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid FIN-4 --group hitl_autonomy --value "<exhaustion behavior: wait | interactive-fallback | paid-overflow>"
+```
+
+If `EXHAUSTION_BEHAVIOR == "paid-overflow"`, also record FIN-5:
+
+```
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid FIN-5 --group hitl_autonomy --value "<payg cap, e.g. $20>"
 ```
 
 ---
@@ -444,7 +419,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-FIN-1 (plan type identified — or hard-gated on Free) and FIN-2 (spend ceiling set) answered and stored.
+FIN-1 (plan identified — or hard-gated on Free), FIN-3 (sharing posture), and FIN-4 (exhaustion behavior) answered and stored; FIN-5 (paid-overflow cap) stored if and only if `EXHAUSTION_BEHAVIOR == "paid-overflow"`.
 
 **Write completion marker:** Append `step_02: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

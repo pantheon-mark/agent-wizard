@@ -10,7 +10,7 @@ Example target fields this class produces: `HITL_MAP_ROWS` (a table of Action / 
 
 Policy fields draw primarily from the operator's autonomy and oversight answers, financial guardrails, and stated constraints.
 
-For `HITL_MAP_ROWS`: draw from UP-1, UP-2, UP-3, UP-5, FIN-1, FIN-2, NOTIF-1, NOTIF-2, NOTIF-3, ARCH-4, ERR-1, ERR-2, CONC-1, and the derived `AUTONOMY_LEVEL`.
+For `HITL_MAP_ROWS`: draw from UP-1, UP-2, UP-3, UP-5, FIN-1, FIN-3 (sharing posture), FIN-4 (exhaustion behavior), NOTIF-1, NOTIF-2, NOTIF-3, ARCH-4, ERR-1, ERR-2, CONC-1, and the derived `AUTONOMY_LEVEL`, `EXHAUSTION_BEHAVIOR`, and `PROJECT_AUTOMATION_BUDGET`. (The financial signal is the exhaustion behavior + budget, not a dollar ceiling — the old FIN-2 dollar-ceiling input is retired.)
 
 For autonomous-action lists and asks-first lists: draw from the same sources, plus START-1, START-2, QA-2.
 

@@ -4,7 +4,19 @@
 
 Extraction pulls the operator's own words directly into a field with as little transformation as possible. The goal is faithful capture, not rewriting or polishing. The operator's phrasing, emphasis, and voice are preserved intact.
 
-Example target fields this class produces: `PROJECT_NAME`, `CORE_PURPOSE`, `VISION_PURPOSE`, `VISION_GOALS`, `VISION_SCOPE_BOUNDARY`, `VISION_CONSTRAINTS`, `INTEGRATIONS`.
+Example target fields this class produces: `PROJECT_NAME`, `CORE_PURPOSE`, `VISION_PURPOSE`, `VISION_GOALS`, `VISION_SCOPE_BOUNDARY`, `VISION_CONSTRAINTS`, `INTEGRATIONS`, `AUTOMATION_CREDIT_POOL`.
+
+**Lookup-extraction special case (`AUTOMATION_CREDIT_POOL`).** A few extraction fields are not the operator's words but a fixed value the stated answer maps to. `AUTOMATION_CREDIT_POOL` is the included monthly Agent-SDK automation-credit dollar pool, looked up from the operator's plan (FIN-1) via this table (verified 2026-06-07, effective 2026-06-15, `support.claude.com/articles/15036540` — VOLATILE; re-verify before relying):
+
+| Plan (FIN-1 / `PLAN_TYPE`) | `AUTOMATION_CREDIT_POOL` |
+|---|---|
+| pro (or unknown → treat as pro) | `$20` |
+| max + `MAX_TIER` $100 | `$100` |
+| max + `MAX_TIER` $200 | `$200` |
+| team + `TEAM_TIER` standard | `$20` |
+| team + `TEAM_TIER` premium | `$100` |
+
+For a lookup-extraction field, set `_source: claude-derived-operator-confirmed` (the value is derived from the plan, not quoted), `_source_question_ids: ["FIN-1"]`, and confirm it at the barrier (`_confirmation_state` + `_confirmed_at`). All other extraction fields keep `_source: operator-content`.
 
 ## Inputs
 

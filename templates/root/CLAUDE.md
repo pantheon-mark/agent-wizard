@@ -42,7 +42,7 @@ Five documents govern this system. Read the relevant document before acting on a
 | `approach.md` | How the vision becomes a solution; agent roster and roles |
 | `technical_architecture.md` | Data sources, integrations, security, logging, scale assumptions |
 | `execution_plan.md` | Work sequencing, sprint plans, context management, human-in-the-loop map |
-| `project_instructions.md` | Autonomy authorizations, notification preferences, thresholds, model tier mapping, spend ceiling |
+| `project_instructions.md` | Autonomy authorizations, notification preferences, thresholds, model tier mapping, automation budget |
 
 These are living documents — maintained by the system as the project evolves. Never modify them outside the system's document update mechanism.
 
@@ -101,7 +101,7 @@ The autonomy level governs what Claude may do independently versus what requires
 
 **Three-strikes escalation.** A task that fails at the configured threshold (see `project_instructions.md`) escalates to the user rather than retrying silently.
 
-**Spend ceiling.** When the project's spend ceiling is reached (see `project_instructions.md`): unconditional stop. No auto-resume. User must explicitly authorize continuation.
+**Automation budget.** Autonomous (unattended/scheduled) work draws the plan's separate monthly automation credit. When this project's automation budget is reached (see `project_instructions.md`), behavior follows the configured `EXHAUSTION_BEHAVIOR`: **wait** (stop unattended work, no auto-resume, resume next cycle or on user authorization), **interactive-fallback** (stop scheduled/headless dispatch but keep draining the work queue during interactive sessions — do NOT spawn headless runs in this mode), or **paid-overflow** (continue into platform pay-as-you-go up to the cap; the authoritative cap is the user's Anthropic spending limit; self-meter + alert + stop before cap). Enforcement is a self-metered estimate with a conservative safety margin (no live balance read). On any budget stop, checkpoint progress + reason to `/agents/checkpoints/` and resume from the last confirmed checkpoint.
 
 **Exact prompts always.** Every significant recommendation includes an exact prompt or command, which model to use, and whether to run it in Claude.ai or Claude Code.
 

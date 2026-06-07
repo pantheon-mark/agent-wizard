@@ -20,19 +20,21 @@ What is safe to log: opaque record IDs (e.g., `customer [ID:4782]`), task names,
 
 | Level | Meaning |
 |-------|---------|
-| Critical | 100% of spend ceiling reached — all autonomous operations stopped unconditionally |
-| High | 90% of spend ceiling or plan limit reached — real-time alert |
-| Warning | 75% of spend ceiling or plan limit reached — digest entry |
+| Critical | 100% of automation budget reached — autonomous operations stop per the configured behavior (wait / interactive-fallback / paid-overflow) |
+| High | 90% of automation budget reached — real-time alert |
+| Warning | 75% of automation budget reached — digest entry |
 | Informational | Normal cost log entry |
 
 ---
 
-## Spend ceiling: {{SPEND_CEILING}}
-## Intensive operation threshold: {{INTENSIVE_OPERATION_THRESHOLD}} ({{INTENSIVE_OPERATION_THRESHOLD_PCT}}% of ceiling)
+## Automation budget (monthly): {{PROJECT_AUTOMATION_BUDGET}}
+## Intensive operation threshold: {{INTENSIVE_OPERATION_THRESHOLD}} ({{INTENSIVE_OPERATION_THRESHOLD_PCT}}% of budget)
+
+*Metering is the system's own estimate (tokens × API rate) against the automation budget, with a conservative safety margin — there is no live credit-balance read (v0 bridge). The included plan automation credit is a platform hard-boundary; paid overflow (if enabled) is capped at the operator's Anthropic spending limit.*
 
 ---
 
 ## Entries
 
-| Entry ID | Timestamp | Severity | Agent | Task ID | Tokens used | Session cumulative | Monthly cumulative | Monthly % of ceiling | Notes |
+| Entry ID | Timestamp | Severity | Agent | Task ID | Tokens used | Session cumulative | Monthly cumulative | Monthly % of budget | Notes |
 |----------|-----------|----------|-------|---------|-------------|-------------------|-------------------|---------------------|-------|

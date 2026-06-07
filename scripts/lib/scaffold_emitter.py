@@ -92,12 +92,18 @@ def _default_scaffold_inputs() -> Dict[str, str]:
         "SCALE_TIER_RATIONALE": CONFIGURE,
         "SCALE_TIER_BASIS": CONFIGURE,
         "SCALE_TIER_SET_DATE": AT_SETUP,
-        # --- financial (operator-supplied) ---
-        "OVERAGE_PLAN_TYPE": "stop-at-ceiling",
-        "SPEND_CEILING": CONFIGURE,
-        "INTENSIVE_THRESHOLD": CONFIGURE,
+        # --- financial / automation budget (interview-derived via the
+        # hitl_autonomy group, override the CONFIGURE fallbacks through foundation_doc_inputs.
+        # Replaces the retired OVERAGE_PLAN_TYPE / SPEND_CEILING / INTENSIVE_THRESHOLD keys —
+        # the dollar-ceiling-on-a-flat-plan model was a fiction; the honest guardrail is the
+        # plan's separate monthly automation credit (Agent SDK credit pool), metered by estimate) ---
+        "AUTOMATION_CREDIT_POOL": CONFIGURE,
+        "PROJECT_AUTOMATION_BUDGET": CONFIGURE,
+        "PROJECT_SHARE_POSTURE": "sole",
+        "EXHAUSTION_BEHAVIOR": "wait",
+        "PAYG_CAP": "n/a (not using paid overflow)",
         "INTENSIVE_OPERATION_THRESHOLD": CONFIGURE,
-        "INTENSIVE_OPERATION_THRESHOLD_PCT": CONFIGURE,
+        "INTENSIVE_OPERATION_THRESHOLD_PCT": "10",
         # --- notifications (operator-supplied) ---
         "NTFY_TOPIC": CONFIGURE,
         "DIGEST_EMAIL": CONFIGURE,

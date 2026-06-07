@@ -4,7 +4,7 @@
 
 Classification maps the operator's intent or preference onto one specific value drawn from a named, closed set of allowed values. The allowed set is defined in the field's manifest entry — it is not open-ended. Only values that appear in that manifest entry are valid outputs. This class always produces a decision field because the operator is choosing between defined options.
 
-Example target fields this class produces: `SCALE_TIER` (allowed values: small / medium / large), `AUTONOMY_LEVEL`, and criticality tiers assigned to agents or operations.
+Example target fields this class produces: `SCALE_TIER` (allowed values: small / medium / large), `AUTONOMY_LEVEL`, criticality tiers assigned to agents or operations, and the financial choices `PROJECT_SHARE_POSTURE` (sole / one-of-several) and `EXHAUSTION_BEHAVIOR` (wait / interactive-fallback / paid-overflow), plus `PAYG_CAP` (a `spend_limit`-kind value, conditional on `EXHAUSTION_BEHAVIOR == paid-overflow`).
 
 ## Inputs
 
@@ -12,9 +12,11 @@ Read the interview answers and any prior derived fields that describe the dimens
 
 For `SCALE_TIER`: draw from SCALE-1, SCALE-2, SCALE-3, SCALE-4, and the derived `SCALE_TIER_RATIONALE` if it is already produced.
 
-For `AUTONOMY_LEVEL`: draw from UP-1, UP-2, UP-3, FIN-1, FIN-2, and any prior answers that describe how much independent action the operator is comfortable with.
+For `AUTONOMY_LEVEL`: draw from the operator authority profile signals (UP-3, UP-5, DR, REV) per the manifest entry — the authoritative sources — plus any prior answers that describe how much independent action the operator is comfortable with. (Earlier drafts loosely cited FIN-1/FIN-2; the dollar-ceiling FIN-2 is retired and FIN is not an authoritative autonomy source.)
 
-For criticality tiers: draw from the agent-roster answers (AP-2, AP-3, ARCH-2, ARCH-3) and any financial or irreversibility signals from FIN-1, FIN-2, ERR-1.
+For criticality tiers: draw from the agent-roster answers (AP-2, AP-3, ARCH-2, ARCH-3) and any financial or irreversibility signals from FIN-1, FIN-4 (exhaustion behavior), ERR-1.
+
+For the financial choices: `PROJECT_SHARE_POSTURE` is the operator's direct answer to FIN-3 (sole / one-of-several); `EXHAUSTION_BEHAVIOR` is the direct answer to FIN-4 (wait / interactive-fallback / paid-overflow); `PAYG_CAP` is the dollar cap from FIN-5 (present only when behavior is paid-overflow). These are operator-stated choices: set `_source: operator-preference`, cite `_source_question_ids` only (NOT `_derivation_inputs`), and capture the value the operator chose — these are the one place the operator may name a real dollar (the overflow cap), so confirm `PAYG_CAP` against their real out-of-pocket comfort.
 
 Always read the manifest entry for the field to confirm which values are in the allowed set before choosing one.
 

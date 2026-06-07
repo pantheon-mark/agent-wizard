@@ -53,13 +53,28 @@
 
 ## Financial Configuration
 
+This system's autonomous (unattended/scheduled) work draws on the separate monthly **automation credit** included with your Claude plan — not your everyday interactive Claude use, which is unaffected.
+
 | Setting | Value |
 |---------|-------|
-| Overage plan type | {{OVERAGE_PLAN_TYPE}} |
-| Monthly spend ceiling | {{SPEND_CEILING}} |
-| Intensive operation threshold | {{INTENSIVE_THRESHOLD}} |
+| Plan automation credit (monthly) | {{AUTOMATION_CREDIT_POOL}} |
+| This project's automation budget (monthly) | {{PROJECT_AUTOMATION_BUDGET}} |
+| Sharing posture | {{PROJECT_SHARE_POSTURE}} |
+| When the budget is used up | {{EXHAUSTION_BEHAVIOR}} |
+| Paid-overflow cap | {{PAYG_CAP}} |
+| Intensive operation threshold | {{INTENSIVE_OPERATION_THRESHOLD}} |
 
-*When the spend ceiling is reached: unconditional stop. No auto-resume. The user must explicitly authorize continuation before any autonomous work resumes.*
+**Budget enforcement (self-metered estimate — v0).** The system meters its own estimated automation spend (tokens × API rate; see `/logs/cost_efficiency_log.md`) against this project's monthly automation budget, with a conservative safety margin. There is no live credit-balance read, so it errs early. The included automation credit is itself a platform hard-boundary: when the plan's monthly credit is exhausted, unattended requests stop at the platform unless paid overflow ("usage credits") is enabled.
+
+**When this project's automation budget is reached, behavior follows `{{EXHAUSTION_BEHAVIOR}}`:**
+
+- **wait** — stop unattended work; no auto-resume; resume next billing cycle or on explicit user authorization. No extra cost.
+- **interactive-fallback** — stop unattended (scheduled/headless) dispatch, but continue serving queued work whenever the user is in an interactive session (which draws the separate interactive allowance, not the automation credit). No extra cost. In this mode the Orchestrator must NOT spawn headless `claude -p` runs; interactive sessions drain `/work/work_queue.md` directly.
+- **paid-overflow** — continue into the platform's pay-as-you-go usage credits up to {{PAYG_CAP}}. The AUTHORITATIVE cap is the user's Anthropic platform monthly spending limit (set at claude.ai/settings/usage, with auto-reload OFF); this system self-meters an estimate, alerts when paid usage begins and as it nears the cap, and stops before the cap. Requires usage credits enabled (on Team plans, by an org admin).
+
+*Any single operation estimated above the intensive operation threshold ({{INTENSIVE_OPERATION_THRESHOLD}}) pauses for explicit user approval regardless of remaining budget.*
+
+*To change any of these, tell the system in a session (e.g. "switch to wait" or "raise my overflow cap to $30") — it updates this file and confirms. The user never edits this file by hand.*
 
 ---
 

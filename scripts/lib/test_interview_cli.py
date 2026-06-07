@@ -188,7 +188,7 @@ def _drive_hitl_autonomy_group(transcript, progress):
     orchestration_build's MVP_*/BUILD_PHASES/EXECUTION fields — so orchestration must close first)."""
     _drive_orchestration_build_group(transcript, progress)
     _record_sources(transcript, "hitl_autonomy",
-                    {"FIN-1", "FIN-2", "UP-1", "UP-2", "UP-3", "UP-5", "NOTIF-1", "NOTIF-2", "NOTIF-3",
+                    {"FIN-1", "FIN-3", "FIN-4", "UP-1", "UP-2", "UP-3", "UP-5", "NOTIF-1", "NOTIF-2", "NOTIF-3",
                      "ARCH-4", "ERR-1", "ERR-2", "CONC-1", "START-1", "START-2", "QA-2", "DR", "REV", "RC"})
     # AUTONOMY_LEVEL: now a classification (operator-preference) derived from the authority answers.
     _derive_confirm(transcript, "AUTONOMY_LEVEL", "hitl_autonomy", "2",
@@ -198,6 +198,14 @@ def _drive_hitl_autonomy_group(transcript, progress):
                     "| Action | System behavior | Rationale |\n|---|---|---|\n"
                     "| Spend money | Always stop and ask; never spends autonomously | Irreversible |",
                     inputs=["VISION_CONSTRAINTS"])
+    # Financial guardrail (FIN-1/FIN-3/FIN-4): extraction/classification first, then synthesis citing them per DR-5/DR-8.
+    _derive_confirm(transcript, "AUTOMATION_CREDIT_POOL", "hitl_autonomy", "$20", sources=["FIN-1"])
+    _derive_confirm(transcript, "PROJECT_SHARE_POSTURE", "hitl_autonomy", "sole", sources=["FIN-3"])
+    _derive_confirm(transcript, "EXHAUSTION_BEHAVIOR", "hitl_autonomy", "wait", sources=["FIN-4"])
+    _derive_confirm(transcript, "PROJECT_AUTOMATION_BUDGET", "hitl_autonomy", "$18",
+                    inputs=["AUTOMATION_CREDIT_POOL", "PROJECT_SHARE_POSTURE"])
+    _derive_confirm(transcript, "INTENSIVE_OPERATION_THRESHOLD", "hitl_autonomy", "$1.80",
+                    inputs=["PROJECT_AUTOMATION_BUDGET"])
     return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
 
 

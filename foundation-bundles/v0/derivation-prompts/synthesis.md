@@ -11,6 +11,8 @@ Example target fields this class produces: `APPROACH_SOLUTION_BRIEF`, `MVP_CORE_
 Always cite the specific prior field keys you are combining. Do not synthesize from raw interview answers directly when a derived field already captures that content — use the derived field.
 
 Common input combinations:
+- `PROJECT_AUTOMATION_BUDGET` — `_derivation_inputs`: `AUTOMATION_CREDIT_POOL`, `PROJECT_SHARE_POSTURE`. Compute = pool × share fraction, where `sole` → ~0.9 and `one-of-several` → ~0.4 (conservative, leaves room for the operator's other systems). Round to a sensible dollar figure (e.g. pool `$20` + `sole` → `$18`). This is the enforceable monthly automation budget.
+- `INTENSIVE_OPERATION_THRESHOLD` — `_derivation_inputs`: `PROJECT_AUTOMATION_BUDGET`. Compute = ~10% of the budget (e.g. budget `$18` → `$1.80`); one estimated-expensive single operation above this pauses for operator approval. Both are wizard-computed (the operator never sets a dollar) and confirmed plainly at the barrier; `_decision_field: false`.
 - `APPROACH_SOLUTION_BRIEF` — draws from `VISION_PURPOSE`, `VISION_GOALS`, `VISION_SCOPE_BOUNDARY`, and answers to AP-1, AP-2, AP-3.
 - `MVP_CORE_FUNCTION` — draws from `CORE_PURPOSE`, `VISION_GOALS`, and answers to ARCH-1, SCALE-1.
 - `SCALE_TIER_RATIONALE` — draws from SCALE-1, SCALE-2, SCALE-3, SCALE-4 and the derived `SCALE_TIER` value.
