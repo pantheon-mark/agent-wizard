@@ -267,27 +267,30 @@ The vision answers are complete. Instead of hand-writing a vision document and s
 
 ### Step 1 — Derive the vision fields
 
-Derive each vision field from the recorded answers, using the matching class derivation prompt (`wizard/foundation-bundles/v0/derivation-prompts/<class>.md`) and the field manifest (`wizard/foundation-bundles/v0/field-manifests/markdown-CC.json`, which names each field's class and the question-IDs that feed it). All vision fields are **extraction** class — preserve the operator's own words; do not polish or invent. Sort the answers into the six categories; thin is fine; do not pad or fabricate.
+Derive each vision field from the recorded answers, using the matching class derivation prompt (`wizard/foundation-bundles/v0/derivation-prompts/<class>.md`) and the field manifest (`wizard/foundation-bundles/v0/field-manifests/markdown-CC.json`, which names each field's class and the question-IDs that feed it). There are two kinds of field here:
 
-Fields: `PROJECT_NAME` and `CORE_PURPOSE` (from P1-1 / P1-2 recorded at step 01), `VISION_PURPOSE`, `VISION_GOALS`, `VISION_AUDIENCE_OUTPUTS`, `VISION_SCOPE_BOUNDARY`, `VISION_CONSTRAINTS`, `VISION_SUCCESS_CRITERIA`.
+- **`PROJECT_NAME` and `CORE_PURPOSE` are extraction** (from P1-1 / P1-2 recorded at step 01): the name is copied verbatim; the core purpose is the operator's own one-line statement. Never paraphrase a name.
+- **The six vision sections are authoring** (`VISION_PURPOSE`, `VISION_GOALS`, `VISION_AUDIENCE_OUTPUTS`, `VISION_SCOPE_BOUNDARY`, `VISION_CONSTRAINTS`, `VISION_SUCCESS_CRITERIA`). The vision is a narrative document the operator reads — not a paste of their answers. **Author** each section as prose in the system's voice. Read `wizard/foundation-bundles/v0/derivation-prompts/authoring.md` for the full treatment, and `about.md` for the voice. Write to *this* operator (tune to their UP-1 technical comfort and UP-2 decision style). Ground strictly in what they said — no invented specifics, no detail borrowed from any example. Keep thin answers honestly thin; do not pad. Use a list only when there are genuinely several parallel items, otherwise prose. No AI tells (no em-dashes for effect, no "not just X but Y", no dramatic fragments, no padding triads, no throat-clearing, no cutesy bold labels). The operator answers "Help me…" in the first person; the authored vision speaks back to them about their system ("Your system…").
 
 For each, record the derived value (the command assembles the audit envelope from the manifest + the class prompt — you supply only the value and the question-IDs you actually drew from):
 
 ```
-python3 wizard/scripts/interview_cli.py derive-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field VISION_PURPOSE --value "<derived value, in the operator's words>" --sources V-1
+python3 wizard/scripts/interview_cli.py derive-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field VISION_PURPOSE --value "<authored narrative, in the system voice, grounded in the operator's answer>" --sources V-1
 ```
+
+The six authored fields carry `_source: claude-derived-operator-confirmed` and must be confirmed at Step 4 (the confirm step records the confirmation + timestamp the contract requires). The two extraction fields keep `_source: operator-content`.
 
 ### Step 2 — Constraint elevation
 
 Scan the confirmed vision constraints. If any names a rule the system must **always stop and ask about** (a top-level always-ask rule), derive `TIER_1_ADDITIONS` — a policy field: state both what is permitted and what is forbidden. Record it with `derive-field --field TIER_1_ADDITIONS --sources V-5,V-7`. If the constraints contain no such rule, skip this step. These additions are carried forward into the later approval-rules step.
 
-### Step 3 — Render the preview and show the operator
+### Step 3 — Render the preview to a reviewable file and show the operator
 
 ```
 python3 wizard/scripts/interview_cli.py preview-group --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --group vision --source-version v0.4.0 --build-repo-root <path to the wizard build repo root> --auto SYSTEM_SHAPE=markdown-CC --auto FOUNDATION_ONLY_MODE=<false|true> --auto WIZARD_VERSION=v0.4.0 --auto LAST_UPDATED_DATE=<today> --auto LAST_UPDATED_TRIGGER="initial build" --auto CURRENT_SPRINT_NUMBER=1
 ```
 
-Show the operator the **rendered vision markdown** the command prints — the actual document they will receive, not the field values.
+Write the **rendered vision markdown** the command prints to a reviewable file the operator can open in a markdown viewer — do NOT show it only as raw terminal or chat text. Write it to a clearly-named review copy in the draft directory (`~/claude-wizard-draft/vision_PREVIEW.md`) and surface that file so it renders for the operator. This is the actual document they will receive, not the field values. Do NOT write the canonical `vision.md` here — that is emitted by the generator at the end of the interview; this is a throwaway review copy for the one-round confirmation only.
 
 ### Step 4 — One round of changes, then confirm
 

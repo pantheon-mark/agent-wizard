@@ -22,6 +22,7 @@ def _valid_record():
         "_source_taxonomy": {},
         "WIZARD_VERSION": "v0.3.0",
         "VISION_PURPOSE": "A system that helps a small team track customer follow-ups.",
+        "VISION_GOALS": "Your system surfaces what needs your attention and drafts the routine replies for your review.",
         "INTEGRATIONS": "Reads a shared spreadsheet and a local folder; portal access is operator-mediated.",
         "APPROACH_SOLUTION_BRIEF": "A back-of-house layer of agents handling follow-up tracking and reminders.",
         "SCALE_TIER": "small",
@@ -38,6 +39,10 @@ def _valid_record():
             "VISION_PURPOSE": {"_source": "operator-content", "_derivation_class": "extraction",
                                "_decision_field": False, "_decision_kind": "none",
                                "_confirmation_state": "accepted", "_confirmed_at": "2026-01-01"},
+            "VISION_GOALS": {"_source": "claude-derived-operator-confirmed", "_derivation_class": "authoring",
+                             "_decision_field": False, "_decision_kind": "none",
+                             "_source_question_ids": ["V-2"],
+                             "_confirmation_state": "accepted", "_confirmed_at": "2026-01-01"},
             "INTEGRATIONS": {"_source": "operator-content", "_derivation_class": "extraction",
                              "_decision_field": True, "_decision_kind": "integration_boundary",
                              "_confirmation_state": "accepted", "_confirmed_at": "2026-01-01"},
@@ -153,6 +158,24 @@ class TestDerivedRecordInvariants(unittest.TestCase):
         rec = _valid_record()
         del rec["_audit"]["APPROACH_SOLUTION_BRIEF"]["_derivation_inputs"]
         self._expect(rec, "DR-5")
+
+    def test_dr5_authoring_without_source_question_ids(self):
+        rec = _valid_record()
+        del rec["_audit"]["VISION_GOALS"]["_source_question_ids"]
+        self._expect(rec, "DR-5")
+
+    def test_dr5_authoring_with_derivation_inputs(self):
+        # authored narrative is answer-only at v0 — must not cite prior payload fields
+        rec = _valid_record()
+        rec["_audit"]["VISION_GOALS"]["_derivation_inputs"] = ["VISION_PURPOSE"]
+        self._expect(rec, "DR-5")
+
+    def test_dr3_authoring_without_confirmation(self):
+        # authored fields are claude-derived → DR-3 forces confirmation + timestamp
+        rec = _valid_record()
+        del rec["_audit"]["VISION_GOALS"]["_confirmation_state"]
+        del rec["_audit"]["VISION_GOALS"]["_confirmed_at"]
+        self._expect(rec, "DR-3")
 
     def test_dr6_classification_decision_field_false(self):
         rec = _valid_record()

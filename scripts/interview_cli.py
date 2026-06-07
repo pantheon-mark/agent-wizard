@@ -83,6 +83,18 @@ def _envelope_for(spec: FieldSpec, prompt_version: str,
         env["_source"] = "operator-content"
         env["_source_question_ids"] = list(sources)
         return env
+    if cls == "authoring":
+        # An authored field is written in the system voice, grounded in the operator's answers.
+        # Honest provenance: claude-derived-operator-confirmed (DR-3 forces confirmation + timestamp).
+        # Answer-only at v0: cite question-IDs, never prior payload fields (DR-5 enforces).
+        if not sources:
+            raise InterviewCLIError(
+                f"{spec.field}: an authoring field is written in the system voice, grounded in "
+                f"the operator's answers — pass --sources (question-IDs)"
+            )
+        env["_source"] = "claude-derived-operator-confirmed"
+        env["_source_question_ids"] = list(sources)
+        return env
     if cls == "classification":
         # operator-preference cites question-IDs; a claude-derived classification cites prior fields.
         if inputs:

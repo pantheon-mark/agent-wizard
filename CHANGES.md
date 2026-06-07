@@ -12,6 +12,24 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-07 — your vision document is written as a narrative, in your system's voice
+
+**Public-facing change:** the vision step now produces a vision document that is genuinely *written for you* — a short narrative in your system's voice that tells the story of what your system is for, drawn from what you told the wizard — rather than your answers slotted flatly under headings. The wizard drafts it from your answers, shows you the rendered document to review, and gives you one round of changes.
+
+- **It stays honest.** It never adds details you didn't give, keeps thin parts thin instead of padding them, and uses a list only where you genuinely have several items.
+- **You review it as a document, not raw text.** When the wizard shows you the draft vision, it now opens as a file you can read in a markdown viewer, instead of scrolling raw text in the terminal.
+- Your project name and core purpose are still kept exactly as you said them.
+
+**Operator-facing notes:**
+
+- No operator action required.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** (pending — provenance fill after dual push)
+**Public repo commit:** (pending — provenance fill after subtree push)
+
+---
+
 ## 2026-06-07 — vision step restates your existing rules in plain words
 
 **Public-facing change:** in the vision step, when the wizard reminds you of rules you already set, it now restates them in plain words — rather than referring to them by an internal name ("the always-ask rules") or by which earlier step they came from, which assumed you'd be holding the wizard's own labels. The example wording is plainer too.

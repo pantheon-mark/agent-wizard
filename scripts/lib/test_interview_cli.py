@@ -58,7 +58,7 @@ def _drive_vision_group(transcript, progress):
             cli.cmd_record_answer(transcript, q, "vision", f"answer for {q}", clock=lambda: CLOCK)
         else:
             cli.cmd_skip_answer(transcript, q, "vision", reason="not applicable", clock=lambda: CLOCK)
-    # 2. derive (extraction) + 3. confirm each vision field
+    # 2. derive (authoring for the 6 vision sections; extraction for PROJECT_NAME/CORE_PURPOSE) + 3. confirm each
     for field, (value, sources) in VISION.items():
         cli.cmd_derive_field(transcript, SHAPE, field, value, sources=sources, inputs=None, clock=lambda: CLOCK)
         cli.cmd_confirm_field(transcript, field, "vision", "accepted", clock=lambda: CLOCK)
@@ -316,6 +316,15 @@ class VisionGroupAcceptanceTests(unittest.TestCase):
             projected = project(record)
             for f in VISION:
                 self.assertIn(f, projected, f"{f} did not project")
+            # The six vision sections are AUTHORED narrative (claude-derived), not extraction.
+            vp = record["_audit"]["VISION_PURPOSE"]
+            self.assertEqual(vp["_derivation_class"], "authoring")
+            self.assertEqual(vp["_source"], "claude-derived-operator-confirmed")
+            self.assertIn("V-1", vp["_source_question_ids"])
+            self.assertNotIn("_derivation_inputs", vp)   # answer-only at v0
+            # PROJECT_NAME / CORE_PURPOSE stay extraction (names + core purpose are verbatim).
+            self.assertEqual(record["_audit"]["PROJECT_NAME"]["_derivation_class"], "extraction")
+            self.assertEqual(record["_audit"]["CORE_PURPOSE"]["_derivation_class"], "extraction")
 
     def test_preview_renders_vision_markdown(self):
         with tempfile.TemporaryDirectory() as td:

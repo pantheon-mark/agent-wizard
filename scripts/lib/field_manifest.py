@@ -26,7 +26,7 @@ EXPECTED_CONTRACT_ID = "field-manifest"
 EXPECTED_CONTRACT_VERSIONS = {"field-manifest-v1"}
 
 # Mirror the derived-record contract enums (the manifest couples to that contract).
-DERIVATION_CLASSES = {"extraction", "synthesis", "classification", "policy", "auto"}
+DERIVATION_CLASSES = {"extraction", "synthesis", "classification", "policy", "auto", "authoring"}
 DECISION_KINDS = {"none", "closed_value", "policy_rule", "schedule", "threshold",
                   "spend_limit", "integration_boundary"}
 # Classes that the derived-record contract forces to be decisions.

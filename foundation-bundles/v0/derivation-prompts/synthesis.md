@@ -19,7 +19,7 @@ Common input combinations:
 - Voice-and-style fields — draw from the operator's answers to UP-4, ADV-1, and the prose register visible in V-1 through V-5.
 - Per-agent role description — draws from AP-2, AP-3, ARCH-2, ARCH-3, and the corresponding rows in `AGENT_ROSTER_ROWS`.
 
-List every input field key or question ID used in `_derivation_inputs` so the chain of evidence is auditable.
+List every prior derived field key used in `_derivation_inputs` so the chain of evidence is auditable. `_derivation_inputs` holds prior **payload field keys** only (the validator rejects anything that is not a payload key); when a synthesized value also draws on raw interview answers, cite those question IDs in `_source_question_ids`, not in `_derivation_inputs`.
 
 ## Output contract
 

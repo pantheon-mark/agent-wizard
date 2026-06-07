@@ -162,6 +162,12 @@ def validate_envelope(field: str, env: Dict[str, Any], value: Any,
     if cls == "classification":
         _require(_nonempty_list(env.get("_derivation_inputs")) or _nonempty_list(env.get("_source_question_ids")),
                  "DR-5", f"{where} derivation_class=classification requires non-empty _derivation_inputs OR _source_question_ids")
+    if cls == "authoring":
+        # authored narrative: grounded in the operator's raw answers (question IDs), not prior fields.
+        _require(_nonempty_list(env.get("_source_question_ids")), "DR-5",
+                 f"{where} derivation_class=authoring requires non-empty _source_question_ids")
+        _require("_derivation_inputs" not in env, "DR-5",
+                 f"{where} derivation_class=authoring must not carry _derivation_inputs at v0 (answer-only)")
 
     # DR-6: decision-ness coupling (one-way to class; biconditional with kind)
     if cls in ("classification", "policy"):
