@@ -1,7 +1,7 @@
 # 04 — Notification Channels
 
 ## What this file does
-Determine who should receive notifications, set up the notification channels — NTFY for real-time alerts and email for the operations digest — configure the tiered digest cadence and decision-aging thresholds. Both channels are verified with test notifications before proceeding. Neither channel is optional.
+Determine who should receive notifications, set up the notification channels — NTFY for real-time alerts and email for the operations digest — configure the tiered digest cadence and decision-aging thresholds. NTFY is verified with a live test notification before proceeding; the email channel has its address verified (actual email sending is set up later, at build time). Neither channel is optional.
 
 ## When this file runs
 After `03_user_profile.md` completes and the user profile is confirmed.
@@ -42,9 +42,20 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 ---
 
+## Grounding — open every question from what you already know
+
+Per operating rules #5 (propose from what you already know) + #9 (use forward-captured early mentions): **do not ask these questions cold.** Before each one, check the working definition, `## Early mentions`, and prior steps' answers, and open from that context:
+- **NOTIF-7** from any co-executor / partner / advisor already named — e.g. "you mentioned [name/role] earlier — should the system send them their own updates, or is it just you (and you keep them in the loop the way you do now)?"
+- **NOTIF-1** from the digest cadence the operator described at UP-5 — e.g. "you said you'd want a daily summary early, easing to weekly as it earns your trust — here's how I'd set that up."
+- **NOTIF-3** from the always-ask actions they already gave at UP-3 (money / external comms / deletions) — acknowledge those are already in the baseline rather than re-presenting them as new.
+
+Keep the *ask* balanced (examples frame, never pre-fill); fall back to a question's cold phrasing only when nothing relevant was mentioned earlier. The question texts below are the **content + neutral fallback wording**, not a script to read verbatim.
+
+---
+
 ## NOTIF-7 — Stakeholder identification
 
-**Ask the user:**
+**Ask the user** (ground per the step-level rule above — open from any co-executor/partner/advisor already named):
 
 > Before we set up notifications, a quick question: is anyone else involved in this project who should receive updates — a family member, a teammate, a business partner?
 >
@@ -121,7 +132,7 @@ Write sub-step marker: Append `step_04_NOTIF-1: complete | <timestamp>` to `~/cl
 >
 > **How many days should pass before the system nudges you about an unresolved decision?**
 >
-> The default is 7 days. Most people find that works well. You can adjust it anytime.
+> The default is 7 days; you can change it anytime.
 
 **Wait for answer.** If they accept the default or give a number, store it. If they say "I'll figure it out" or similar, use the default.
 
@@ -178,11 +189,11 @@ Do not proceed past this step until the user has confirmed receipt of a test not
 
 **Generate a unique topic string:**
 
-Derive the project name slug from P1-1 (stored in staging file): lowercase the project name, replace spaces and special characters with hyphens, strip leading/trailing hyphens, truncate to 30 characters if needed.
+Derive the project name slug from P1-1 (stored in staging file): lowercase the project name, replace spaces and special characters with hyphens, strip leading/trailing hyphens, then **shorten it for typeability** — keep whole hyphen-separated words only, up to ~12 characters total (drop the later words rather than cutting mid-word; if even the first word exceeds 12 characters, truncate that word to 12). The operator has to TYPE this on their phone to subscribe, so a short, recognizable slug beats a complete one.
 
 Run: `openssl rand -hex 4`
 
-This produces an 8-character random hex string. Combine with the slug: `[project-name-slug]-[hex]` (e.g., `jacobs-college-adventure-a3f8c21d`). This format is easy to recognize in the NTFY app and distinguishable across projects.
+This produces an 8-character random hex string. Combine with the slug: `[project-name-slug]-[hex]` (e.g., "Jacob's College Adventure" → slug `jacobs` → topic `jacobs-a3f8c21d`; "Estate Settlement Tracker" → `estate-a3f8c21d`). Short enough to type on a phone, still recognizable in the NTFY app and distinguishable across projects. The 8-hex suffix keeps the topic unguessable (it functions as a private key — anyone who knows it can read/send), so do not shorten the hex.
 
 **Store:** NTFY_TOPIC = the generated slug-hex string
 
@@ -251,13 +262,13 @@ Do not proceed past this step until the user has confirmed the email address is 
 
 **Say:**
 
-> I'm going to send a test email now to confirm the connection is working. Keep an eye on your inbox — it should arrive within a minute or two. (Check your spam folder if you don't see it.)
+> I won't send a test email just yet — your system starts emailing you once it's built. Right now I just want to make sure I've got your address exactly right.
 
-At this point, note to the user: the actual email delivery mechanism for their live system will be configured during the build phase, using the email address they've provided. For now, confirm the address is correct by asking them to verify it.
+(No live email is sent at this step — sending is set up later, when the system is built, using the address captured here. This step only verifies the address is correct. Do NOT tell the operator to watch their inbox.)
 
 **Say:**
 
-> While the build process will set up the delivery mechanism during agent construction, I want to confirm the address is right. Can you read back the email address you just gave me? — I'll verify it matches what I recorded.
+> Can you read the email address back to me so I can check it matches what I recorded, character for character? A digest is no use if one letter's off.
 
 Wait for the user to confirm the address matches. If they correct it, update DIGEST_EMAIL and confirm again.
 
@@ -265,7 +276,7 @@ Wait for the user to confirm the address matches. If they correct it, update DIG
 
 **Say:**
 
-> Confirmed. Your digests will go to [DIGEST_EMAIL]. The delivery connection gets fully wired up during the build phase — I'll note that as a step to complete then.
+> Confirmed — your digests will go to [DIGEST_EMAIL] once your system is up and running. I've noted setting that up as a step for when we build the system.
 
 Update staging file with DIGEST_EMAIL and a note that email delivery setup is deferred to the build phase.
 

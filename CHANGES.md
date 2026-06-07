@@ -12,6 +12,25 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-07 — notifications step builds on what you've told the wizard; shorter alert-channel name; clearer, honest email step
+
+**Public-facing change:** the notifications step is more personal, plainer, and more honest.
+
+- **It builds on what you already said.** Who's involved, your digest rhythm, and the "always ask me first" actions now open from your earlier answers (e.g. "you mentioned a daily summary early, easing to weekly") instead of asking from scratch.
+- **Your private alert-channel name is now short enough to type on a phone** — e.g. `estate-a3f8c21d` instead of a long full-project-name string — while staying unique and recognizable.
+- **The email step is honest and plain.** It no longer claims to send a test email (it doesn't yet — email sending is set up when your system is built); it simply confirms your address, without technical jargon.
+- **Removed a needless nudge** ("most people find that works well").
+
+**Operator-facing notes:**
+
+- No operator action required.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** _pending — filled in the provenance-fill commit after publication_
+**Public repo commit:** _pending_
+
+---
+
 ## 2026-06-07 — clearer "how reversible is the work?" question; removed an inert "second assistant" question
 
 **Public-facing change:** two refinements to the safety questions in the getting-to-know-you step.
