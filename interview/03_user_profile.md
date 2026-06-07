@@ -7,7 +7,7 @@ Establish the user profile across five dimensions. These answers calibrate how t
 After `02_financial.md` completes.
 
 ## Prerequisites
-FIN-1 and FIN-2 answered and stored in the staging file.
+Step 02 (financial guardrails) complete — FIN-1 (plan) and the sharing/exhaustion answers (FIN-3/FIN-4, and FIN-5 if paid-overflow) answered and stored in the staging file.
 
 ---
 
@@ -19,7 +19,7 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 03_user_profile.md. FIN-1 and FIN-2 are complete. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then continue from where you left off."
+> "Resume wizard from 03_user_profile.md. Step 02 (financial guardrails) is complete. Read the staging file at `~/claude-wizard-draft/wizard_session_draft.md`, then continue from where you left off."
 
 Do not begin UP-1 until you are confident the full phase will complete before compaction risk.
 
@@ -54,6 +54,8 @@ These are five conversational questions, not a form. Ask them in order, but let 
 
 The goal is a genuine sense of this person: how they think, what they need, where they want to be hands-on vs. hands-off. Listen for signals beyond the literal answer — someone who describes a complex multi-stakeholder operation probably has high domain expertise even if they say they're "not technical."
 
+**Ground each question in what the operator has already told you.** Where it helps, frame the question and any examples using their project, working definition, and earlier answers — concrete to *their* system, not generic script text or the system's internal vocabulary (avoid words like "agent"/"task" when a plain phrase works). But keep the *ask* balanced: present both readings, never pre-fill the answer — examples frame, they don't lead. Keep questions short; a rambling personalized question is worse than a plain one. (This is the balanced-elicitation rule — the same guardrail the shape-detection capabilities beat uses.)
+
 **If the user says "I don't know" or gives a vague/uncertain answer to any question:** propose a reasonable default based on what you know so far — their project purpose, their answers to earlier questions, and the context from Phase 1. Say: "Based on what you've told me so far, I'd suggest [proposed characterization]. Does that sound about right, or would you describe it differently?" This follows the wizard question design principle: Claude proposes, user confirms. No question should stall because the user can't articulate a preference from scratch.
 
 ---
@@ -80,7 +82,9 @@ Write sub-step marker: Append `step_03_UP-1: complete | <timestamp>` to `~/claud
 
 **Ask the user:**
 
-> When the system tells you something happened — like an agent completed a task or something needed attention — do you generally want to know the reasoning and context, or do you prefer the short version: what happened and what to do?
+> When the system tells you something happened — say it finished a piece of work you'd asked for, or it ran into something it needs your input on — do you generally want the reasoning and context behind it, or just the short version: what happened and what to do?
+
+*(Ground the examples in the operator's own system where it helps — e.g. for an estate helper, "it updated your task list" / "it found a deadline coming up" — per the balanced-elicitation rule: examples frame, keep both readings open, never pre-fill.)*
 
 **Wait for answer.** Common responses: "short version", "I like to understand why", "depends on the situation". If "depends," ask a quick follow-up: "When does the longer version feel useful to you?"
 
@@ -187,7 +191,7 @@ regulatory_exposure:
   probed_timestamp: <ISO 8601>
 ```
 
-Append the `## Regulatory exposure` section to staging file with the above content. Skip UP-6.2 (no follow-up needed). Proceed to synthesis step.
+Append the `## Regulatory exposure` section to staging file with the above content. Skip UP-6.2 (no per-framework role/scope follow-up needed — there is no matched framework). **Still perform UP-6.3's `handoff_phase` advance** (`provisional_shape_emit` → `regulatory_exposure_populated`): UP-6 has completed, and the pre-step-05 re-check (`_pre_step_05_recheck.md`) requires `handoff_phase` to already read `regulatory_exposure_populated` per `shape_detection.md` § "Step 03 UP-6 completion." Then proceed to **UP-7 (authority profile)** — NOT directly to the synthesis step; UP-7 sits between UP-6 and synthesis and must still run.
 
 **If operator says any of #1-#6 apply:** continue to UP-6.2.
 
@@ -292,7 +296,7 @@ Propose a level from their UP-6 answer (regulated data) + project description, t
 >
 > From what you've told me so far, I'd guess **[proposed level + one-line why]**. Because this sets the system's safety limits, I'd like you to choose directly:
 >
-> 1. **High** — it touches money, regulated or sensitive data, or anything where a mistake is costly or hard to undo
+> 1. **High** — a mistake would be costly or hard to undo (for example: it touches money, handles regulated or sensitive data, takes irreversible actions, or acts outwardly on your behalf)
 > 2. **Medium** — everyday operations; mistakes are recoverable but still matter
 > 3. **Low** — experimental, low-stakes, or easily-reversed work
 >
@@ -345,6 +349,8 @@ After all five user-profile answers plus the three authority confirmations (UP-7
 > Before we continue, here's how I've understood your preferences — I want to make sure I've got this right:
 >
 > [One paragraph synthesizing UP-1 through UP-5 in plain language. Cover: how they like to receive information, how much detail they want, when they want to be asked vs. informed, their areas of expertise, and how hands-on they expect to be. Write this as a description of the person, not a list of attributes.]
+>
+> [Then a one-line bridge so the authority answers (UP-7a/b/c) aren't silently dropped from the read-back: acknowledge that the safety settings just captured — how high-stakes the work is, how reversible mistakes are, and the second-opinion option — are recorded but NOT being finalized here; they'll be shown as concrete "ask-first" rules at the execution-plan preview, for confirmation in context. Example: "I've also got your safety settings from a moment ago — how careful it should be, how reversible things are, and the second-opinion option. I'm not locking those in here; you'll see exactly how they turn into 'ask-first' rules when we lay out the plan, and you can confirm them then."]
 >
 > Does that sound right? Anything to adjust?
 
