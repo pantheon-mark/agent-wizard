@@ -12,6 +12,28 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-07 — spending & limits rebuilt around Claude's automation credit; clearer, more reliable "getting to know you" questions
+
+**Public-facing change:** the **Spending and limits** step has been rebuilt to match how Claude actually bills automated work, and several questions in the **getting-to-know-you** step are clearer and more dependable.
+
+- **The money step now matches reality.** From mid-June 2026, the work your system does on its own (scheduled/background runs) draws a **monthly "automation allowance" included with your Claude plan** — separate from your normal interactive use. The wizard now **works out all the dollar figures for you** from your plan; you just make plain choices: which plan you're on, whether this is your only system or one of a few (so it shares the allowance sensibly), and what it should do if it ever uses the allowance up — **wait** until next month, **keep helping when you're around** (no extra cost), or **keep going on its own** (which you cap, and it always warns you before spending). You set an actual dollar figure only at that one real-money point.
+- **Corrected plan facts.** Plan prices and limits are now accurate across Pro / Max 5x / Max 20x / Team Standard / Team Premium, and a previous incorrect statement that Team-plan limits are shared across the team has been removed — **Team usage limits are per member.**
+- **On a Team plan, turning on paid overflow needs an account admin.** If you're not the billing admin the wizard won't get stuck — it explains this and lets you pick one of the no-extra-cost options instead, noting that an admin can switch it on later.
+- **Clearer "getting to know you" questions.** Plain-language wording throughout; questions now draw on what you've already told the wizard (with examples from your own project) while still letting you answer freely. The "how high-stakes is the work" question now leads with what actually matters — could a mistake be costly or hard to undo — rather than only money.
+- **A reliability fix:** the short set of questions about how independently the system should act now **always runs**; previously, if you said your project handles no regulated data, the interview could skip past them.
+- **The wrap-up now reflects your safety choices.** When the wizard summarizes your preferences, it acknowledges the safety settings you just made and tells you they'll be confirmed — as concrete "ask-first" rules — when it lays out the plan.
+
+**Operator-facing notes:**
+
+- No operator action required. As before, your system is generated into a **staging location for your review** before it becomes a live project.
+- A couple of working-style inputs (whether you have a second AI assistant available, and how it could be used) are **recorded now and used in a later release** — they don't yet change a generated file.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** _pending — filled in the provenance-fill commit after publication_
+**Public repo commit:** _pending_
+
+---
+
 ## 2026-05-31 — the wizard now tailors how independently your system works to YOUR preferences
 
 **Public-facing change:** the wizard now asks a short, plain-language set of questions about **how you want to work with your system** and uses your answers to set how much the agent team does on its own versus checks with you first — instead of always falling back to the most cautious "ask me about everything" placeholder. This is the operator-facing half of the setup that earlier releases had stubbed out.
