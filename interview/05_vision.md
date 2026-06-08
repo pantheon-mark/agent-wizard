@@ -287,10 +287,10 @@ Scan the confirmed vision constraints. If any names a rule the system must **alw
 ### Step 3 — Render the preview to a reviewable file and show the operator
 
 ```
-python3 wizard/scripts/interview_cli.py preview-group --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --group vision --source-version v0.4.0 --build-repo-root <path to the wizard build repo root> --auto SYSTEM_SHAPE=markdown-CC --auto FOUNDATION_ONLY_MODE=<false|true> --auto WIZARD_VERSION=v0.4.0 --auto LAST_UPDATED_DATE=<today> --auto LAST_UPDATED_TRIGGER="initial build" --auto CURRENT_SPRINT_NUMBER=1
+python3 wizard/scripts/interview_cli.py preview-group --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --group vision --source-version v0.4.0 --build-repo-root <path to the wizard build repo root> --include-unconfirmed --out-file ~/claude-wizard-draft/vision_PREVIEW.md --auto SYSTEM_SHAPE=markdown-CC --auto FOUNDATION_ONLY_MODE=<false|true> --auto WIZARD_VERSION=v0.4.0 --auto LAST_UPDATED_DATE=<today> --auto LAST_UPDATED_TRIGGER="initial build" --auto CURRENT_SPRINT_NUMBER=1
 ```
 
-Write the **rendered vision markdown** the command prints to a reviewable file the operator can open in a markdown viewer — do NOT show it only as raw terminal or chat text. Write it to a clearly-named review copy in the draft directory (`~/claude-wizard-draft/vision_PREVIEW.md`) and surface that file so it renders for the operator. This is the actual document they will receive, not the field values. Do NOT write the canonical `vision.md` here — that is emitted by the generator at the end of the interview; this is a throwaway review copy for the one-round confirmation only.
+The command writes the **operator-clean rendered vision** to `~/claude-wizard-draft/vision_PREVIEW.md` (`--out-file` strips the CLI separators and wizard-internal frontmatter; `--include-unconfirmed` renders the just-derived draft so the operator reviews it *before* confirming — per Operator Interaction Contract § 4). Surface that file so it renders for the operator in a markdown viewer — never paste the content into chat as raw text. This is the actual document they will receive, not the field values. Do NOT write the canonical `vision.md` here — that is emitted by the generator at the end of the interview; this is a throwaway review copy for the one-round confirmation only.
 
 ### Step 4 — One round of changes, then confirm
 
@@ -301,7 +301,7 @@ Say exactly this before the operator responds:
 **Wait for answer.**
 
 - **No changes:** confirm each field — `python3 wizard/scripts/interview_cli.py confirm-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field <FIELD> --group vision --state accepted`.
-- **Changes:** incorporate them into the affected field(s), re-derive those fields (Step 1), then confirm with the edited value — add `--state accepted --value "<edited value>"`. Re-render the preview once (Step 3) to show the updated draft, then confirm. Do not open a second round.
+- **Changes:** incorporate them into the affected field(s), re-derive those fields (Step 1), re-render the preview once (Step 3) so the operator sees the updated draft, then confirm with the edited value — `--state accepted --value "<edited value>"`. Do not open a second round.
 
 The one-round limit is set before the operator responds — it cannot be renegotiated after the fact.
 

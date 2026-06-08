@@ -42,9 +42,14 @@ class BarrierError(Exception):
     """Raised when a group cannot be closed (fail-loud; never silently mark a group confirmed)."""
 
 
-def _projected_so_far(events: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Every field confirmed (or auto) up to now, value-only — the cumulative confirmed surface."""
-    return project(compile_transcript(read_derived_replay_events(events)))
+def _projected_so_far(events: List[Dict[str, Any]], *, include_unconfirmed: bool = False) -> Dict[str, Any]:
+    """Every field confirmed (or auto) up to now, value-only — the cumulative confirmed surface.
+
+    `include_unconfirmed` (PREVIEW-ONLY): also surface derived-but-unconfirmed drafts so
+    the operator can review BEFORE confirming. The close gate (ready_to_close) calls this with the
+    default, so previewing the draft never weakens the confirmed-only close/emit requirement."""
+    return project(compile_transcript(read_derived_replay_events(events)),
+                   include_unconfirmed=include_unconfirmed)
 
 
 def build_preview_inputs(
@@ -52,13 +57,17 @@ def build_preview_inputs(
     dg: DerivationGroups,
     *,
     auto_values: Dict[str, str],
+    include_unconfirmed: bool = False,
 ) -> Dict[str, str]:
     """Inputs for a barrier render: the auto/global fields overlaid by every field confirmed so
     far (confirmed fields win over an auto default of the same name). Stringified for placeholder
     substitution. The strict single-doc renderer scopes this down to each preview doc and fail-fasts
-    on anything that doc needs but this set lacks."""
+    on anything that doc needs but this set lacks.
+
+    `include_unconfirmed=True` (preview-the-draft) overlays the derived-but-unconfirmed surface
+    too, so the operator can see and review the draft before confirming."""
     inputs: Dict[str, str] = {k: str(v) for k, v in auto_values.items() if k in set(dg.auto_global_fields)}
-    for k, v in _projected_so_far(events).items():
+    for k, v in _projected_so_far(events, include_unconfirmed=include_unconfirmed).items():
         inputs[k] = str(v)
     return inputs
 
@@ -71,12 +80,18 @@ def render_group_previews(
     build_repo_root: Path,
     *,
     auto_values: Dict[str, str],
+    include_unconfirmed: bool = False,
 ) -> List[FoundationDocArtifact]:
     """The Partial Artifact Render. Render each of the group's preview_docs in memory from the
     cumulative-confirmed + auto inputs, and return the artifacts to SHOW the operator. No disk write.
     Fail-loud (GeneratorError) if a preview doc needs a field not yet derived — that is a barrier or
-    registry misconfiguration, never a silently half-filled draft."""
-    inputs = build_preview_inputs(events, dg, auto_values=auto_values)
+    registry misconfiguration, never a silently half-filled draft.
+
+    `include_unconfirmed=True` (preview-the-draft): render the DERIVED draft so the operator reviews it before
+    confirming. The strict renderer still fail-fasts on a field that is missing-or-empty, so a
+    genuinely half-derived doc never reaches the operator — only the not-yet-confirmed bar relaxes."""
+    inputs = build_preview_inputs(events, dg, auto_values=auto_values,
+                                  include_unconfirmed=include_unconfirmed)
     return [
         render_foundation_doc_preview(source_version, doc_name, inputs, build_repo_root)
         for doc_name in group.preview_docs

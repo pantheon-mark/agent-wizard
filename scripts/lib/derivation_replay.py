@@ -125,14 +125,21 @@ def compile_transcript(events: List[Dict[str, Any]]) -> Dict[str, Any]:
 _PROJECTABLE_STATES = {"accepted", "accepted_with_adjustments", "accepted_uncertain_for_now"}
 
 
-def project(record: Dict[str, Any]) -> Dict[str, Any]:
-    """Project a derived record into emission `foundation_doc_inputs` (values only).
+def project(record: Dict[str, Any], *, include_unconfirmed: bool = False) -> Dict[str, Any]:
+    """Project a derived record into `foundation_doc_inputs` (values only).
 
     WHITELIST (defense-in-depth; `project` is an independent public function, not gated by
     the validator): a field projects only if `_source == auto` (mechanical fill, no
     confirmation) OR its `_confirmation_state` is an accepted* state. `deferred_not_emittable`
     and unconfirmed mid-interview fields (a derivation event but no confirmation event yet)
     do NOT project.
+
+    `include_unconfirmed` (PREVIEW-ONLY): also include derived-but-not-yet-confirmed
+    fields so the operator can review the DRAFT before confirming (the documented
+    derive->preview->confirm UX). It NEVER changes emission — emission and the close gate call
+    project() with the default (confirmed-only). `deferred_not_emittable` stays excluded even in
+    preview (the operator explicitly parked it). A field present in `_audit` always has a value
+    in the record (the derivation event set it), so this surfaces the full derived draft.
     """
     audit = record.get(_META_KEY, {})
     out: Dict[str, Any] = {}
@@ -140,7 +147,7 @@ def project(record: Dict[str, Any]) -> Dict[str, Any]:
         cstate = env.get("_confirmation_state")
         if cstate == "deferred_not_emittable":
             continue
-        if env.get("_source") == "auto" or cstate in _PROJECTABLE_STATES:
+        if env.get("_source") == "auto" or cstate in _PROJECTABLE_STATES or include_unconfirmed:
             out[f] = record[f]
     return out
 

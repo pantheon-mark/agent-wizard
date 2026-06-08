@@ -457,6 +457,34 @@ def render_foundation_docs(
     return records
 
 
+_CLI_SEPARATOR_RE = re.compile(r"^=+\s*\S.*?\s*=+\s*$")
+
+
+def operator_clean_preview(content: str) -> str:
+    """Strip wizard-internal machinery from a rendered doc for OPERATOR review.
+
+    Two things a non-technical operator should never see in a review file: (a) the CLI debug
+    separator lines (`===== approach.md =====`) that raw stdout capture leaves above a doc, and
+    (b) the YAML frontmatter block (`---\\n...\\n---`) — wizard-internal contract metadata that,
+    sitting under a separator, also makes markdown viewers mis-parse the document. The EMITTED doc
+    keeps its frontmatter (the contract needs it); only the review preview is cleaned. Idempotent;
+    a doc with neither separator nor frontmatter passes through unchanged.
+    """
+    lines = content.splitlines()
+    i = 0
+    while i < len(lines) and (not lines[i].strip() or _CLI_SEPARATOR_RE.match(lines[i])):
+        i += 1
+    # Strip a leading YAML frontmatter block if present.
+    if i < len(lines) and lines[i].strip() == "---":
+        for j in range(i + 1, len(lines)):
+            if lines[j].strip() == "---":
+                i = j + 1
+                break
+    while i < len(lines) and not lines[i].strip():  # drop blank lines exposed above the first heading
+        i += 1
+    return "\n".join(lines[i:])
+
+
 def render_foundation_doc_preview(
     source_version: str,
     doc_name: str,

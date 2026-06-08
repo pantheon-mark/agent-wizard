@@ -40,4 +40,10 @@ When you record an answer, record only what the operator said, confirmed, correc
 
 ## 4. Preview UX
 
-When you show the operator a rendered document or preview to review, write it to a reviewable file the operator opens in a markdown viewer (and surface that file) — not only as terminal or chat text. The operator reviews these outside the terminal.
+When you put any document content in front of the operator to review — a rendered document, a preview, **or a draft/iteration of one** — write it to a reviewable file the operator opens in a markdown viewer (and surface that file). Never paste the content into chat or terminal text instead. **There is no "it's just a draft" exception:** the first draft, every re-derivation, and the final version all go to the file. The operator reviews these outside the terminal.
+
+Three rules make the file genuinely reviewable:
+
+- **Always the file, never a chat fallback.** If the render path is blocked (e.g. a field is not yet confirmed), do whatever it takes to still produce the file — do not fall back to chat text. The operator always reviews the file.
+- **Operator-clean content.** The review file must contain only what the operator should read — no CLI separators (`===== doc =====`), no wizard-internal YAML frontmatter. Use the preview command's `--out-file` (it strips both); never write raw CLI stdout to the review file. The emitted document keeps its frontmatter; only the review preview omits it.
+- **Show the draft before confirming.** The operator reviews the derived draft *before* confirming it. Use the preview command's `--include-unconfirmed` so a not-yet-confirmed derivation still renders for review. Confirmation follows the review; it does not gate it.

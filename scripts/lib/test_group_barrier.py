@@ -22,6 +22,9 @@ from derivation_groups import load_derivation_groups  # noqa: E402
 from group_barrier import (  # noqa: E402
     build_preview_inputs, render_group_previews, ready_to_close, close_group, BarrierError,
 )
+from generator import operator_clean_preview  # noqa: E402
+from derivation_replay import project, compile_transcript  # noqa: E402
+from transcript_recorder import read_derived_replay_events  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SOURCE_VERSION = "v0.4.0"
@@ -158,6 +161,80 @@ class GroupBarrierTests(unittest.TestCase):
             dg = load_derivation_groups("markdown-CC")
             with self.assertRaises(BarrierError):
                 close_group(r, dg.group_by_id("vision"))
+
+
+def _vision_recorder_one_unconfirmed(td, unconfirmed="VISION_SUCCESS_CRITERIA"):
+    """Vision group fully sourced + derived, but one field left DERIVED-not-confirmed (a draft)."""
+    r = TranscriptRecorder(Path(td) / "t.jsonl", clock=FIXED_CLOCK)
+    g = load_derivation_groups("markdown-CC").group_by_id("vision")
+    for q in g.input_question_ids:
+        if q == "V-7b":
+            r.record_source_skip(q, "vision", reason="n/a")
+        else:
+            r.record_source_answer(q, "vision", f"answer for {q}")
+    for f, v in VISION_FIELDS.items():
+        r.record_derived_field(f, "vision", v, _env())
+        if f != unconfirmed:
+            r.record_field_confirmation(f, "vision", "accepted")
+    return r
+
+
+class F05PreviewBeforeConfirmTests(unittest.TestCase):
+    """The operator must be able to PREVIEW the derived draft BEFORE confirming. The preview
+    path includes the unconfirmed-derived surface; emission (project) + close stay confirmed-only."""
+
+    def test_preview_includes_unconfirmed_derived_surface(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = _vision_recorder_one_unconfirmed(td)
+            dg = load_derivation_groups("markdown-CC")
+            arts = render_group_previews(r.events(), dg.group_by_id("vision"), dg, SOURCE_VERSION,
+                                         REPO_ROOT, auto_values=AUTO_VALUES, include_unconfirmed=True)
+            self.assertNotIn("{{", arts[0].content)
+            self.assertIn("the operator is helped", arts[0].content)  # the UNCONFIRMED draft shows
+
+    def test_default_preview_confirmed_only_fails_loud_on_unconfirmed(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = _vision_recorder_one_unconfirmed(td)
+            dg = load_derivation_groups("markdown-CC")
+            with self.assertRaises(GeneratorError):  # default include_unconfirmed=False: unchanged
+                render_group_previews(r.events(), dg.group_by_id("vision"), dg, SOURCE_VERSION,
+                                      REPO_ROOT, auto_values=AUTO_VALUES)
+
+    def test_ready_to_close_still_requires_confirmation(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = _vision_recorder_one_unconfirmed(td)
+            dg = load_derivation_groups("markdown-CC")
+            ready, reasons = ready_to_close(r.events(), dg.group_by_id("vision"))
+            self.assertFalse(ready)  # preview-the-draft must NOT weaken the close gate
+
+    def test_project_emission_excludes_unconfirmed_but_preview_includes(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = _vision_recorder_one_unconfirmed(td)
+            rec = compile_transcript(read_derived_replay_events(r.events()))
+            self.assertNotIn("VISION_SUCCESS_CRITERIA", project(rec))                      # emit: excluded
+            self.assertIn("VISION_SUCCESS_CRITERIA", project(rec, include_unconfirmed=True))  # preview: included
+
+
+class OperatorCleanPreviewTests(unittest.TestCase):
+    """The operator-review render must be operator-clean — no CLI separator, no wizard-internal
+    YAML frontmatter. The EMITTED doc keeps frontmatter; only the review preview omits it."""
+
+    def test_strips_leading_frontmatter(self):
+        raw = "---\nfoundation_doc_type: approach\nmanaged_by: wizard\n---\n# Approach\n\n## Solution Brief\nbody"
+        out = operator_clean_preview(raw)
+        self.assertFalse(out.lstrip().startswith("---"))
+        self.assertNotIn("foundation_doc_type", out)
+        self.assertTrue(out.startswith("# Approach"))
+
+    def test_strips_cli_separator_line(self):
+        raw = "===== approach.md =====\n---\nx: y\n---\n# Approach\nbody"
+        out = operator_clean_preview(raw)
+        self.assertNotIn("=====", out)
+        self.assertTrue(out.startswith("# Approach"))
+
+    def test_no_frontmatter_passthrough(self):
+        raw = "# Approach\n\nbody text"
+        self.assertEqual(operator_clean_preview(raw), "# Approach\n\nbody text")
 
 
 if __name__ == "__main__":

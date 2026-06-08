@@ -187,12 +187,23 @@ def cmd_record_agent_intent(transcript: str, group: str, *,
 
 
 def cmd_preview_group(transcript: str, shape: str, group_id: str, source_version: str,
-                      build_repo_root, *, auto_values: Dict[str, str]) -> List:
+                      build_repo_root, *, auto_values: Dict[str, str],
+                      include_unconfirmed: bool = False, out_file: Optional[str] = None) -> List:
+    """Render a group's preview doc(s). `include_unconfirmed` shows the DERIVED draft before
+    confirmation (preview-the-draft). `out_file`, when given, writes the OPERATOR-CLEAN render (CLI separators
+    + YAML frontmatter stripped) to that file so the operator opens a clean markdown file
+    (Operator Interaction Contract § 4) rather than reading raw CLI stdout."""
     events = TranscriptRecorder(Path(transcript)).events()
     dg = load_derivation_groups(shape)
     arts = render_group_previews(events, dg.group_by_id(group_id), dg, source_version,
-                                 Path(build_repo_root), auto_values=auto_values)
-    return [(a.doc_name, a.content) for a in arts]
+                                 Path(build_repo_root), auto_values=auto_values,
+                                 include_unconfirmed=include_unconfirmed)
+    pairs = [(a.doc_name, a.content) for a in arts]
+    if out_file:
+        from generator import operator_clean_preview  # type: ignore
+        body = "\n\n".join(operator_clean_preview(c) for _, c in pairs)
+        Path(out_file).write_text(body + "\n", encoding="utf-8")
+    return pairs
 
 
 def _append_marker(progress: str, line: str) -> None:
@@ -375,6 +386,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp.add_argument("--shape", default="markdown-CC"); sp.add_argument("--group", required=True)
     sp.add_argument("--source-version", required=True); sp.add_argument("--build-repo-root", required=True)
     sp.add_argument("--auto", action="append", default=[], help="auto-global as KEY=VALUE (repeatable)")
+    sp.add_argument("--include-unconfirmed", action="store_true",
+                    help="preview the DERIVED draft before confirmation; never used for emit")
+    sp.add_argument("--out-file", dest="out_file",
+                    help="write the operator-clean preview (frontmatter/separators stripped) here")
 
     sp = sub.add_parser("close-group"); add_transcript(sp)
     sp.add_argument("--progress", required=True); sp.add_argument("--shape", default="markdown-CC")
@@ -437,10 +452,15 @@ def main(argv: Optional[List[str]] = None) -> int:
                 source_spans=_split_semi(args.source_spans))
         elif args.cmd == "preview-group":
             autos = dict(kv.split("=", 1) for kv in args.auto)
-            for doc, content in cmd_preview_group(args.transcript, args.shape, args.group,
-                                                  args.source_version, args.build_repo_root,
-                                                  auto_values=autos):
-                sys.stdout.write(f"===== {doc} =====\n{content}\n")
+            pairs = cmd_preview_group(args.transcript, args.shape, args.group,
+                                      args.source_version, args.build_repo_root, auto_values=autos,
+                                      include_unconfirmed=args.include_unconfirmed,
+                                      out_file=args.out_file)
+            if args.out_file:
+                sys.stdout.write(f"wrote operator-clean preview to {args.out_file}\n")
+            else:
+                for doc, content in pairs:
+                    sys.stdout.write(f"===== {doc} =====\n{content}\n")
         elif args.cmd == "close-group":
             ev = cmd_close_group(args.transcript, args.progress, args.shape, args.group)
             sys.stdout.write(json.dumps(ev, sort_keys=True) + "\n")
