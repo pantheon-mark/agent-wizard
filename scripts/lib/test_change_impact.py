@@ -10,6 +10,7 @@ import copy
 import unittest
 
 from field_manifest import FieldManifest, FieldSpec
+from derivation_groups import parse_progress_markers, group_confirmation_is_stale
 import change_impact as ci
 
 
@@ -309,6 +310,118 @@ class CascadeTest(unittest.TestCase):
                    changed_node=ci.Node("answer", "Q1"), record=record)
 
         self.assertEqual(record, before)
+
+
+class ReceiptTest(unittest.TestCase):
+    def _impacts(self):
+        return [
+            ci.ImpactNode(ci.Node("field", "FB"), ci.RULE_DECISION, ci.MODEL_UNSTABLE,
+                          ci.REQUIRES_DISPOSITION),
+            ci.ImpactNode(ci.Node("field", "FA"), ci.CONTENT_ONLY, ci.MODEL_UNSTABLE,
+                          ci.REQUIRES_DISPOSITION),
+        ]
+
+    def test_impact_set_hash_is_order_independent(self):
+        """The impact-set hash is a stable function of the SET of surfaced impacts, not
+        their order."""
+        a = ci.impact_set_hash(self._impacts())
+        b = ci.impact_set_hash(list(reversed(self._impacts())))
+        self.assertEqual(a, b)
+
+    def test_impact_set_hash_changes_with_membership(self):
+        impacts = self._impacts()
+        fewer = impacts[:1]
+        self.assertNotEqual(ci.impact_set_hash(impacts), ci.impact_set_hash(fewer))
+
+    def test_make_receipt_carries_four_part_fingerprint(self):
+        """The receipt is fingerprinted by graph_version + source_hash + engine_version +
+        impact_set_hash, so a stale approval cannot unblock emit after any of them changes."""
+        receipt = ci.make_receipt(
+            change_detected_on=ci.Node("answer", "Q1"),
+            graph_version="gv-1", source_hash="sha256:src",
+            impacts=self._impacts(),
+            dispositions={ci.Node("field", "FB"): ci.APPLY},
+            recorded_at="2026-01-01T00:00:00Z",
+        )
+        fp = receipt["fingerprint"]
+        self.assertEqual(fp["graph_version"], "gv-1")
+        self.assertEqual(fp["source_hash"], "sha256:src")
+        self.assertEqual(fp["engine_version"], ci.ENGINE_VERSION)
+        self.assertEqual(fp["impact_set_hash"], ci.impact_set_hash(self._impacts()))
+
+    def test_make_receipt_records_implicated_classes_and_dispositions(self):
+        receipt = ci.make_receipt(
+            change_detected_on=ci.Node("answer", "Q1"),
+            graph_version="gv-1", source_hash="sha256:src",
+            impacts=self._impacts(),
+            dispositions={ci.Node("field", "FB"): ci.APPLY},
+            recorded_at="2026-01-01T00:00:00Z",
+        )
+        self.assertEqual(receipt["implicated"]["field:FB"], ci.RULE_DECISION)
+        self.assertEqual(receipt["implicated"]["field:FA"], ci.CONTENT_ONLY)
+        self.assertEqual(receipt["dispositions"]["field:FB"], ci.APPLY)
+
+
+class PendingDispositionsGateTest(unittest.TestCase):
+    def _impact(self, fid, klass):
+        return ci.ImpactNode(ci.Node("field", fid), klass, ci.MODEL_UNSTABLE,
+                             ci.REQUIRES_DISPOSITION)
+
+    def test_undispositioned_rule_decision_is_pending(self):
+        impacts = [self._impact("FB", ci.RULE_DECISION)]
+        pending = ci.pending_dispositions(impacts, dispositions={})
+        self.assertEqual([p.node for p in pending], [ci.Node("field", "FB")])
+
+    def test_applied_rule_decision_is_not_pending(self):
+        impacts = [self._impact("FB", ci.RULE_DECISION)]
+        pending = ci.pending_dispositions(impacts, {ci.Node("field", "FB"): ci.APPLY})
+        self.assertEqual(pending, [])
+
+    def test_deferred_rule_decision_stays_pending(self):
+        """`defer` does NOT resolve a rule/decision implication — emit stays blocked."""
+        impacts = [self._impact("FB", ci.RULE_DECISION)]
+        pending = ci.pending_dispositions(impacts, {ci.Node("field", "FB"): ci.DEFER})
+        self.assertEqual([p.node for p in pending], [ci.Node("field", "FB")])
+
+    def test_content_only_never_blocks(self):
+        """An un-dispositioned content-only impact is guided, not blocking — never pending."""
+        impacts = [self._impact("FA", ci.CONTENT_ONLY)]
+        self.assertEqual(ci.pending_dispositions(impacts, {}), [])
+
+    def test_intentional_divergence_resolves(self):
+        impacts = [self._impact("FB", ci.RULE_DECISION)]
+        pending = ci.pending_dispositions(
+            impacts, {ci.Node("field", "FB"): ci.INTENTIONAL_DIVERGENCE})
+        self.assertEqual(pending, [])
+
+    def test_emit_blocked_predicate(self):
+        self.assertTrue(ci.emit_blocked_by_pending([self._impact("FB", ci.RULE_DECISION)]))
+        self.assertFalse(ci.emit_blocked_by_pending([]))
+
+
+class FreshnessTest(unittest.TestCase):
+    def test_node_with_pending_implication_is_not_fresh(self):
+        """Freshness is a validation input at EVERY boundary: a node with a pending blocking
+        implication is not fresh, so it cannot be used as a derivation input / rendered /
+        closed / emitted until dispositioned."""
+        pending = [ci.ImpactNode(ci.Node("field", "FB"), ci.RULE_DECISION,
+                                 ci.MODEL_UNSTABLE, ci.REQUIRES_DISPOSITION)]
+        self.assertFalse(ci.is_fresh(ci.Node("field", "FB"), pending))
+        self.assertTrue(ci.is_fresh(ci.Node("field", "FOTHER"), pending))
+
+
+class TombstoneTest(unittest.TestCase):
+    def test_tombstoned_marker_triggers_existing_stale_gate(self):
+        """A tombstoned confirmation marker drops its source_hash, so the substrate's
+        group_confirmation_is_stale fires automatically (no change to that ratified module)."""
+        line = ci.tombstone_marker_line("group_vision_confirmed",
+                                        reason="upstream change applied",
+                                        recorded_at="2026-06-08T00:00:00Z")
+        parsed = parse_progress_markers(line)
+        marker = parsed["group_vision_confirmed"]
+        self.assertEqual(marker["status"], "tombstoned")
+        # Any current hash -> stale, because the tombstone removed the stored source_hash.
+        self.assertTrue(group_confirmation_is_stale(marker, "sha256:whatever-current"))
 
 
 if __name__ == "__main__":

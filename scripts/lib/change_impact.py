@@ -43,12 +43,35 @@ from derivation_replay import (
 _FINGERPRINT_ENVELOPE_KEYS = tuple(_ENVELOPE_DRIFT_KEYS) + tuple(_PROTOCOL_KEYS) + tuple(_LIST_ENVELOPE_KEYS)
 
 
+# Engine version — part of the receipt fingerprint, so an approval recorded under an older
+# engine cannot silently unblock emit after the engine changes.
+ENGINE_VERSION = "change-impact-v0"
+
+
 # --- impact classes (v0 = the decision/document boundary) --------------------
 # behavior-code is the DEFERRED edge (field -> emitted-behavior-code; un-defer triggers
 # T1/T2/T3); it is intentionally NOT a value here. When un-deferred it joins this enum as
 # the strongest class (behavior-code > rule-decision > content-only).
 CONTENT_ONLY = "content-only"
 RULE_DECISION = "rule-decision"
+
+# Enforcement tier: which impact classes BLOCK emit when left un-dispositioned. content-only
+# is guided (operator may proceed); rule-decision blocks (a generated-system-invariant
+# boundary). behavior-code will join the blocking set when un-deferred.
+_BLOCKING_CLASSES = {RULE_DECISION}
+
+# --- operator dispositions (the batched "impact transaction") ----------------
+# apply = accept the re-derived change; revise = operator edits it; defer = decide later
+# (does NOT clear the pending gate); intentional_divergence = a durable, recorded fork
+# (upstream and downstream deliberately disagree); freeze = pin this branch, stop propagating.
+APPLY = "apply"
+REVISE = "revise"
+DEFER = "defer"
+INTENTIONAL_DIVERGENCE = "intentional_divergence"
+FREEZE = "freeze"
+# Dispositions that RESOLVE a pending implication (clear it from the emit gate). `defer`
+# deliberately does NOT resolve — a deferred rule/decision implication keeps emit blocked.
+_RESOLVING_DISPOSITIONS = {APPLY, REVISE, INTENTIONAL_DIVERGENCE, FREEZE}
 
 
 # --- determinism kind (a separate axis from derivation_class) ----------------
@@ -260,6 +283,84 @@ def cascade(graph: ImpactGraph, changed_node: Node, record: Dict[str, Any],
             frontier.append(succ)
 
     return CascadeResult(surfaced=surfaced, auto_halted=auto_halted)
+
+
+# --- receipt + enforcement primitives ----------------------------------------
+
+def _node_str(node: Node) -> str:
+    """Stable string id for a node ("kind:id") — used as a dict key in receipts/indexes."""
+    return "{}:{}".format(node.kind, node.id)
+
+
+def impact_set_hash(impacts: List[ImpactNode]) -> str:
+    """A stable, order-independent hash of the SET of surfaced impacts (node + class + status).
+
+    Part of the receipt fingerprint: it changes when the surfaced impact set changes, so a
+    disposition recorded against one impact set cannot unblock emit for a different one.
+    """
+    canonical = sorted([n.node.kind, n.node.id, n.impact_class or "", n.status] for n in impacts)
+    return content_hash(canonical)
+
+
+def make_receipt(change_detected_on: Node, graph_version: str, source_hash: str,
+                 impacts: List[ImpactNode], dispositions: Dict[Node, str],
+                 recorded_at: str) -> Dict[str, Any]:
+    """Build a durable, machine-readable disposition receipt (anti-fiction).
+
+    Fingerprinted by graph_version + source_hash + engine_version + impact_set_hash so a stale
+    approval cannot unblock emit after the graph, the source answers, or the engine changed.
+    """
+    return {
+        "change_detected_on": _node_str(change_detected_on),
+        "recorded_at": recorded_at,
+        "fingerprint": {
+            "graph_version": graph_version,
+            "source_hash": source_hash,
+            "engine_version": ENGINE_VERSION,
+            "impact_set_hash": impact_set_hash(impacts),
+        },
+        "implicated": {_node_str(i.node): i.impact_class for i in impacts},
+        "dispositions": {_node_str(n): d for n, d in dispositions.items()},
+    }
+
+
+def pending_dispositions(impacts: List[ImpactNode],
+                         dispositions: Dict[Node, str]) -> List[ImpactNode]:
+    """Project the index of BLOCKING implications still awaiting a resolving disposition.
+
+    Only blocking-class impacts (rule-decision; behavior-code when un-deferred) can block
+    emit; content-only is guided and never pending. An impact is resolved only by a resolving
+    disposition (apply / revise / intentional_divergence / freeze) — `defer` and a missing
+    disposition both leave it pending. The emit gate checks this list is empty.
+    """
+    return [i for i in impacts
+            if i.impact_class in _BLOCKING_CLASSES
+            and dispositions.get(i.node) not in _RESOLVING_DISPOSITIONS]
+
+
+def emit_blocked_by_pending(pending: List[ImpactNode]) -> bool:
+    """The fail-closed emit predicate: emit is blocked iff any blocking implication is pending."""
+    return len(pending) > 0
+
+
+def is_fresh(node: Node, pending: List[ImpactNode]) -> bool:
+    """Freshness as a validation input usable at EVERY boundary (group close, use as a
+    derivation input, dependent preview render, emit): a node is fresh iff it carries no
+    pending blocking implication."""
+    return node not in {p.node for p in pending}
+
+
+def tombstone_marker_line(confirmation_marker: str, reason: str, recorded_at: str) -> str:
+    """Produce a progress-file line that TOMBSTONES a group's confirmation marker.
+
+    The line drops the stored source_hash, so the substrate's group_confirmation_is_stale
+    fires automatically (fail-closed on a missing hash) — no change to that ratified module.
+    Appended after the original `complete` line, it overwrites the marker (last occurrence
+    wins on parse). `reason` must not contain '|' (the marker field separator); pipes are
+    replaced with '/' defensively.
+    """
+    safe_reason = reason.replace("|", "/")
+    return "{}: tombstoned | reason={} | {}".format(confirmation_marker, safe_reason, recorded_at)
 
 
 def sources(graph: ImpactGraph, point_of_notice: Node) -> List[Node]:
