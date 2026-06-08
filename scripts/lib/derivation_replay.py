@@ -134,12 +134,14 @@ def project(record: Dict[str, Any], *, include_unconfirmed: bool = False) -> Dic
     and unconfirmed mid-interview fields (a derivation event but no confirmation event yet)
     do NOT project.
 
-    `include_unconfirmed` (PREVIEW-ONLY): also include derived-but-not-yet-confirmed
-    fields so the operator can review the DRAFT before confirming (the documented
-    derive->preview->confirm UX). It NEVER changes emission — emission and the close gate call
-    project() with the default (confirmed-only). `deferred_not_emittable` stays excluded even in
-    preview (the operator explicitly parked it). A field present in `_audit` always has a value
-    in the record (the derivation event set it), so this surfaces the full derived draft.
+    `include_unconfirmed` (PREVIEW-ONLY): also include a derived-but-not-yet-confirmed DRAFT
+    (a field with NO `_confirmation_state` yet) so the operator can review it before confirming
+    (the documented derive->preview->confirm UX). It NEVER changes emission — emission and the
+    close gate call project() with the default (confirmed-only). It admits ONLY genuine drafts
+    (no confirmation state): an explicitly non-accepted state (e.g. a future `rejected` /
+    `superseded`, or today's `deferred_not_emittable`) is still excluded, so the relaxation can
+    never widen to "any non-deferred state." A field present in `_audit` always has a value in the
+    record (the derivation event set it), so this surfaces the full derived draft.
     """
     audit = record.get(_META_KEY, {})
     out: Dict[str, Any] = {}
@@ -147,7 +149,8 @@ def project(record: Dict[str, Any], *, include_unconfirmed: bool = False) -> Dic
         cstate = env.get("_confirmation_state")
         if cstate == "deferred_not_emittable":
             continue
-        if env.get("_source") == "auto" or cstate in _PROJECTABLE_STATES or include_unconfirmed:
+        is_unconfirmed_draft = cstate is None  # derived, no confirmation event yet
+        if env.get("_source") == "auto" or cstate in _PROJECTABLE_STATES or (include_unconfirmed and is_unconfirmed_draft):
             out[f] = record[f]
     return out
 

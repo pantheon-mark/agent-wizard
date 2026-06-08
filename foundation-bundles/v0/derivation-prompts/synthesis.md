@@ -27,13 +27,15 @@ Produce a value that:
 1. Accurately represents the combined inputs — no content is added that contradicts or exceeds what the inputs support.
 2. Is written in the operator's voice — match the level of formality, the sentence length, and the word choices visible in their vision answers.
 3. Is self-contained — a reader who has not seen the interview answers can understand what the field says without needing to cross-reference other fields.
+4. **Develops every distinct strand the inputs support — do not clip.** When the inputs cover several distinct areas (e.g. an approach that keeps a master list AND moves accounts to a family member AND prepares for advisors), develop each one; do not compress a multi-faceted brief into a single thin paragraph that names the areas without saying anything about them. Use structure — short paragraphs, or a list when there are genuinely parallel items — where it makes the value readable. This is a completeness bar, not a length bar: the test is whether each thing the inputs support is actually said, not how many words it takes. The reference bar for a field like `APPROACH_SOLUTION_BRIEF` is a developed multi-part brief, not a one-line summary.
+5. **Keeps thin inputs honestly thin (the other direction).** If the inputs genuinely give little, say the little there is plainly. Do not pad a sparse input into a paragraph or invent strands to reach the reference bar — that is fabrication. A short true value beats a long padded one. Completeness means developing what the inputs DO support, never manufacturing what they do not.
 
 Audit envelope requirements:
 - `_source`: `claude-derived-operator-confirmed`
 - `_derivation_class`: `synthesis`
 - `_decision_field`: `false` (unless the field is also a decision — if so, follow the policy prompt rules instead)
 - `_decision_kind`: `none`
-- `_derivation_inputs`: non-empty list of the field keys and question IDs combined
+- `_derivation_inputs`: non-empty list of the prior **payload field keys** combined (the validator rejects anything that is not a payload key); any raw interview answers the value also drew on go in `_source_question_ids`, never here
 - `_confirmation_state`: set after the operator confirms
 
 **Never fabricate.** If the inputs do not provide enough information to synthesize a complete value, do not invent the missing parts. Instead, write the value up to the point where evidence runs out, mark the gap with "(insufficient input — needs operator input on: [what is missing])", and set `_revisit_trigger` accordingly.
