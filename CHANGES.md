@@ -12,6 +12,26 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-08 — your documents stay consistent when you change an answer; you review a clean draft of each before confirming
+
+**Public-facing change:** Two things got better about how the wizard keeps your documents right.
+
+First, your documents are now kept consistent with each other. Your answers build on each other — your vision shapes your approach, which shapes what your helpers do. If you go back and change an earlier answer, the wizard now works out exactly what that affects later on, brings you each affected item showing what it says now and what it would become, and lets you decide each one: accept it, reword it, decide later, keep the two different on purpose, or stop. It never changes your vision or goals on its own, and it will not build your system while a change that affects how your helpers behave is left undecided. The next-to-last interview step is where any leftover changes get settled.
+
+Second, before you confirm any document, you now reliably see a clean, readable draft of it — the actual document, opened in a viewer — instead of raw internal text or a wall of separate fields. You see the real draft and then confirm it; drafts and re-drafts are always shown the same way.
+
+Also in this release: your approach summary and helper roster are written more completely (every part your answers support is developed, while genuinely brief answers stay brief), some architecture questions that a non-technical operator can't reasonably answer are now worked out and shown to you rather than asked, and the wizard's questions throughout are plainer, grounded in what you already told it, and free of filler and "most people prefer…" nudges.
+
+**Operator-facing notes:**
+
+- No operator action required; these improve the build experience and the consistency of what the wizard produces.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** <filled at publication>
+**Public repo commit:** <filled after subtree push>
+
+---
+
 ## 2026-06-07 — internal: provenance-tag correctness (no operator-facing change)
 
 **Public-facing change:** none — this is an internal correctness fix with no effect on what you see, what you do, or the system the wizard builds. For its own records, the wizard tags how each value in your documents was produced (your own words versus something the wizard worked out for you). One derived value — your plan's included monthly automation credit — was being tagged as if you'd typed it, when the wizard actually looks it up from your plan. That internal tag is now correct.
