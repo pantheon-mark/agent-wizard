@@ -27,8 +27,8 @@ Also in this release: your approach summary and helper roster are written more c
 - No operator action required; these improve the build experience and the consistency of what the wizard produces.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** <filled at publication>
-**Public repo commit:** <filled after subtree push>
+**Source-Meta-Commit:** f23bb3e
+**Public repo commit:** 0b1a829
 
 ---
 
