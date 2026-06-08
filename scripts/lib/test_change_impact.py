@@ -424,5 +424,42 @@ class TombstoneTest(unittest.TestCase):
         self.assertTrue(group_confirmation_is_stale(marker, "sha256:whatever-current"))
 
 
+class PendingFromEventsTest(unittest.TestCase):
+    def _change_event(self, change_id, impacts):
+        return {"event_type": "impact_change", "change_id": change_id,
+                "impacts": impacts, "detected_at": "2026-06-08T00:00:00Z"}
+
+    def _disp_event(self, change_id, fid, disposition):
+        return {"event_type": "impact_disposition", "change_id": change_id,
+                "node_kind": "field", "node_id": fid, "disposition": disposition,
+                "recorded_at": "2026-06-08T00:00:01Z"}
+
+    def test_undispositioned_rule_decision_change_is_pending(self):
+        events = [self._change_event("c1", [
+            {"node_kind": "field", "node_id": "FB", "impact_class": ci.RULE_DECISION},
+        ])]
+        pending = ci.pending_from_events(events)
+        self.assertEqual([p.node for p in pending], [ci.Node("field", "FB")])
+
+    def test_disposition_for_matching_change_id_resolves(self):
+        events = [
+            self._change_event("c1", [{"node_kind": "field", "node_id": "FB",
+                                       "impact_class": ci.RULE_DECISION}]),
+            self._disp_event("c1", "FB", ci.APPLY),
+        ]
+        self.assertEqual(ci.pending_from_events(events), [])
+
+    def test_disposition_for_different_change_id_does_not_resolve(self):
+        """A new upstream change yields a new change_id; an old change's disposition does not
+        unblock it (this is how 'a stale approval cannot unblock emit' falls out)."""
+        events = [
+            self._change_event("c2", [{"node_kind": "field", "node_id": "FB",
+                                       "impact_class": ci.RULE_DECISION}]),
+            self._disp_event("c1", "FB", ci.APPLY),  # disposition for the OLD change
+        ]
+        self.assertEqual([p.node for p in ci.pending_from_events(events)],
+                         [ci.Node("field", "FB")])
+
+
 if __name__ == "__main__":
     unittest.main()

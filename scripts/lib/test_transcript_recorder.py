@@ -76,7 +76,8 @@ class RecordReadTests(unittest.TestCase):
         self.assertEqual(
             KNOWN_EVENT_TYPES,
             {"source_answer", "source_skip", "derived_field", "field_confirmation",
-             "group_proposed", "group_confirmed", "agent_intent"},
+             "group_proposed", "group_confirmed", "agent_intent",
+             "impact_change", "impact_disposition"},
         )
 
 

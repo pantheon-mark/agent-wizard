@@ -24,6 +24,7 @@ sys.path.insert(0, str(_SCRIPTS))
 import interview_cli as cli  # noqa: E402
 from derivation_replay import compile_transcript, project  # noqa: E402
 from transcript_recorder import TranscriptRecorder, read_derived_replay_events, read_agent_intents  # noqa: E402
+import change_impact as ci  # noqa: E402
 import derived_record  # noqa: E402
 from derivation_groups import load_derivation_groups, parse_progress_markers, validate_marker_invariant  # noqa: E402
 
@@ -537,6 +538,55 @@ class EmitSystemCLITests(unittest.TestCase):
                 cli.cmd_emit_system(str(tpath), SHAPE, str(target), str(REPO_ROOT),
                                     generator_version_override="0" * 40)
             self.assertFalse(target.exists(), "emit must fail closed BEFORE writing on a stale group")
+
+    def _emittable_recorder(self, td, env):
+        """A full, otherwise-emittable rich transcript (the proven neutral field set + one agent)."""
+        from test_emission_plan import _FOUNDATION_DOC_INPUTS
+        from test_interview_bridge import _ai
+        tpath = Path(td) / "t.jsonl"
+        r = TranscriptRecorder(tpath, clock=lambda: CLOCK)
+        for k, v in _FOUNDATION_DOC_INPUTS.items():
+            r.record_derived_field(k, "vision", v, dict(env))
+            r.record_field_confirmation(k, "vision", "accepted")
+        r.record_agent_intent("approach_roster", _ai())
+        return r, tpath
+
+    def test_emit_system_fails_closed_on_undispositioned_rule_decision(self):
+        # The new enforcement dimension: an otherwise-emittable transcript that carries a
+        # detected change with an un-dispositioned RULE-DECISION implication must fail closed
+        # before any write (never silently ship a system with an undecided rule/decision change).
+        env = {"_source": "operator-content", "_derivation_class": "extraction",
+               "_decision_field": False, "_decision_kind": "none", "_prompt_version": "sha256:p1"}
+        with tempfile.TemporaryDirectory() as td:
+            r, tpath = self._emittable_recorder(td, env)
+            r.record_impact_change("chg-1", [
+                {"node_kind": "field", "node_id": "AUTONOMY_LEVEL",
+                 "impact_class": ci.RULE_DECISION},
+            ])
+            target = Path(td) / "operator-project"
+            with self.assertRaises(cli.InterviewCLIError):
+                cli.cmd_emit_system(str(tpath), SHAPE, str(target), str(REPO_ROOT),
+                                    generator_version_override="0" * 40)
+            self.assertFalse(target.exists(),
+                             "emit must fail closed BEFORE writing on an un-dispositioned implication")
+
+    def test_emit_system_proceeds_when_rule_decision_dispositioned(self):
+        # Positive control (guards against over-blocking): once the rule-decision implication is
+        # dispositioned (apply), emit proceeds normally.
+        env = {"_source": "operator-content", "_derivation_class": "extraction",
+               "_decision_field": False, "_decision_kind": "none", "_prompt_version": "sha256:p1"}
+        with tempfile.TemporaryDirectory() as td:
+            r, tpath = self._emittable_recorder(td, env)
+            r.record_impact_change("chg-1", [
+                {"node_kind": "field", "node_id": "AUTONOMY_LEVEL",
+                 "impact_class": ci.RULE_DECISION},
+            ])
+            r.record_impact_disposition("chg-1", "field", "AUTONOMY_LEVEL", ci.APPLY)
+            target = Path(td) / "operator-project"
+            rec = cli.cmd_emit_system(str(tpath), SHAPE, str(target), str(REPO_ROOT),
+                                      generator_version_override="0" * 40)
+            self.assertFalse(rec["foundation_only_mode"])
+            self.assertTrue(target.exists())
 
     def test_emit_system_fails_closed_on_unconfirmed_sourced_group(self):
         # Cross-vendor close R2 (codex blocker): a LIVE group that recorded source answers but was

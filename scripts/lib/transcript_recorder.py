@@ -43,6 +43,9 @@ from build_intent import AgentIntent, ResourceClaims  # type: ignore
 KNOWN_EVENT_TYPES: Set[str] = {
     "source_answer", "source_skip", "derived_field", "field_confirmation",
     "group_proposed", "group_confirmed", "agent_intent",
+    # change-propagation engine (NOT replay events — the replay view drops them):
+    "impact_change",       # a detected change + its surfaced impacts, keyed by change_id
+    "impact_disposition",  # the operator's disposition of one surfaced impact
 }
 
 # Sentinel hashed in place of a value for a validly-skipped source question, so an
@@ -156,6 +159,31 @@ class TranscriptRecorder:
             "event_seq": self._next_seq(), "event_type": "group_confirmed",
             "group_id": group_id, "source_event_range": list(source_event_range),
             "source_hash": source_hash, "confirmed_at": confirmed_at or self._clock(),
+        })
+
+    def record_impact_change(self, change_id: str, impacts: List[Dict[str, Any]],
+                             fingerprint: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Persist a detected change + its surfaced impacts (the change-propagation engine's
+        output), keyed by `change_id` (the impact fingerprint). The emit gate projects the
+        pending index from these + the matching impact_disposition events."""
+        ev: Dict[str, Any] = {
+            "event_seq": self._next_seq(), "event_type": "impact_change",
+            "change_id": change_id, "impacts": [dict(i) for i in impacts],
+            "detected_at": self._clock(),
+        }
+        if fingerprint is not None:
+            ev["fingerprint"] = dict(fingerprint)
+        return self._append(ev)
+
+    def record_impact_disposition(self, change_id: str, node_kind: str, node_id: str,
+                                  disposition: str) -> Dict[str, Any]:
+        """Persist the operator's disposition of one surfaced impact, keyed by the SAME
+        change_id as its impact_change (so a new change's implications are never cleared by an
+        old change's disposition)."""
+        return self._append({
+            "event_seq": self._next_seq(), "event_type": "impact_disposition",
+            "change_id": change_id, "node_kind": node_kind, "node_id": node_id,
+            "disposition": disposition, "recorded_at": self._clock(),
         })
 
     def record_agent_intent(self, group_id: str, intent: "AgentIntent") -> Dict[str, Any]:

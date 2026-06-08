@@ -255,6 +255,7 @@ def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_roo
     from interview_bridge import build_operator_system_from_transcript  # type: ignore
     from derivation_groups import group_confirmation_is_stale  # type: ignore
     from transcript_recorder import group_source_hash  # type: ignore
+    from change_impact import pending_from_events  # type: ignore
     events = TranscriptRecorder(Path(transcript)).events()
     # Fail-closed (defense-in-depth): a group confirmed earlier whose upstream source answers
     # changed since (stale group_source_hash) must NOT emit stale derived content. The carrier
@@ -277,6 +278,16 @@ def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_roo
             raise InterviewCLIError(
                 f"cannot emit: group {_g.group_id!r} confirmation is stale — an upstream answer "
                 f"changed after the group was confirmed; re-confirm the group before emitting")
+    # Fail-closed (the change-propagation enforcement dimension): refuse to emit while any
+    # detected change implies a rule/decision node that the operator has not dispositioned.
+    # content-only implications are guided (non-blocking); only blocking-class ones gate emit.
+    _pending = pending_from_events(events)
+    if _pending:
+        _names = ", ".join(sorted({"{}:{}".format(p.node.kind, p.node.id) for p in _pending}))
+        raise InterviewCLIError(
+            "cannot emit: {} change implication(s) on a rule/decision node are un-dispositioned "
+            "({}) — disposition each (apply / revise / intentional_divergence / freeze) before "
+            "emitting".format(len(_pending), _names))
     res = build_operator_system_from_transcript(
         read_derived_replay_events(events), read_agent_intents(events),
         system_shape=shape, target_dir=Path(target_dir), build_repo_root=Path(build_repo_root),

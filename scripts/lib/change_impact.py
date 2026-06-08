@@ -343,6 +343,30 @@ def emit_blocked_by_pending(pending: List[ImpactNode]) -> bool:
     return len(pending) > 0
 
 
+def pending_from_events(events: List[Dict[str, Any]]) -> List[ImpactNode]:
+    """Project the emit-gate pending index from the recorded transcript events.
+
+    Reads `impact_change` events (a detected change + its surfaced impacts, keyed by
+    `change_id` = the impact fingerprint) and `impact_disposition` events (the operator's
+    disposition, keyed by the SAME change_id). A blocking implication is pending unless a
+    resolving disposition was recorded for its own change_id — so a NEW upstream change
+    (new change_id) is never accidentally cleared by an OLD change's disposition.
+    """
+    pending: List[ImpactNode] = []
+    for ch in [e for e in events if e.get("event_type") == "impact_change"]:
+        change_id = ch.get("change_id")
+        impacts = [ImpactNode(Node(i["node_kind"], i["node_id"]), i.get("impact_class"),
+                              None, i.get("status"))
+                   for i in ch.get("impacts", [])]
+        dispositions = {
+            Node(e["node_kind"], e["node_id"]): e["disposition"]
+            for e in events
+            if e.get("event_type") == "impact_disposition" and e.get("change_id") == change_id
+        }
+        pending.extend(pending_dispositions(impacts, dispositions))
+    return pending
+
+
 def is_fresh(node: Node, pending: List[ImpactNode]) -> bool:
     """Freshness as a validation input usable at EVERY boundary (group close, use as a
     derivation input, dependent preview render, emit): a node is fresh iff it carries no
