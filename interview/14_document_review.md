@@ -1,7 +1,7 @@
 # 14 — Document Artifacts
 
 ## What this file does
-Deliver two plain-language explanations of how the system keeps its own documents in sync and how it communicates document changes to the user. No questions, no configuration — both entries are informational only. User does not configure document update behavior; it is fully automatic.
+Two parts. DOC-1 is ACTIVE: surface any change-implications left unresolved from earlier in the interview (an edited answer or decision whose downstream effects were not yet reconciled), let the operator decide each (apply / revise / defer / intentional_divergence / freeze), and close the loop. DOC-2 is a plain-language explanation of how document changes work after the system is built (build-time propagation now; run-time detect-and-reconcile later — the system tells the operator about drift, it does not silently rewrite documents). The operator does not configure a document-update engine; they decide the specific changes surfaced to them.
 
 ## When this file runs
 After `13_operations.md` completes and OPERATIONS_CONFIGURED = true in the staging file.
@@ -66,41 +66,60 @@ Before the two explanations below, read `wizard/interview/_operator_interaction_
 
 **Say:**
 
-> **Step 15 of 16 — Document management**
-> A quick overview of how your system keeps its own documentation current. Almost there.
+> **Step 15 of 16 — Keeping your documents consistent**
+> Your answers connect to each other — your vision shapes your approach, which shapes what your agents do. This step makes sure that if anything changed during the interview, the documents that depend on it stay consistent. Almost there.
 
 ---
 
-## DOC-1 — Impact map [EXPLANATION]
+## DOC-1 — Review any changes that need your decision [ACTIVE]
 
-**Say:**
+Your documents are built from your answers, and some answers feed others. When you go back and change an earlier answer (for example, you revise your vision after seeing the approach), the things that were built from it can become inconsistent. The wizard catches that automatically and brings it to you here — it never changes a decision on its own, and it will not build your system while a decision that affects how your agents behave is left undecided.
 
-> As your system runs, things will change — agents will be added, integrations will be updated, your goals may evolve. When that happens, your supporting documents need to stay current.
->
-> Here's how that works:
->
-> **When something changes, the system knows which documents to update.** If a new agent is added, the architecture document is updated. If a data source changes, the source registry is updated. If your goals shift, the vision document is flagged for your review. The system has a built-in map of which events trigger which updates — you don't manage this.
->
-> **Vision and roadmap updates are always surfaced to you first.** Those documents are anchors — the system will never change them autonomously. It will flag what it thinks should change and wait for your confirmation.
->
-> Would you like me to explain any specific part of how document updates work, or are you ready to move on?
+**Do this:**
 
-**Wait for answer.**
+1. **Check for unresolved changes.** If, earlier in the interview, you flagged a change to an answer or a decision and the downstream effects were not yet resolved, they are recorded against this transcript. Re-derive the affected items and identify which ones actually changed. (Items that did not actually change are not shown — you only see real changes.)
 
-- If the user wants more detail on any part: provide a plain-language explanation. Keep it grounded in examples specific to their system (from the vision document).
-- If the user is ready to move on: proceed to DOC-2.
+2. **If there are no unresolved changes:** tell the operator plainly and move on:
+
+   > Nothing changed earlier that needs a decision here — your documents are consistent. Moving on.
+
+   Then write the sub-step marker and proceed to DOC-2.
+
+3. **If there ARE unresolved changes:** render the change summary to a reviewable file the operator opens in a viewer (per the Operator Interaction Contract § 4), grouped by kind — wording changes versus rules your system follows. For each item, show what it is in plain language (use the operator-facing label, never the raw field name), how it would change, and ask the operator to choose one:
+
+   - **apply** — accept the change
+   - **revise** — you edit it yourself
+   - **defer** — decide later (note: a rule/decision left deferred will stop your system from being built until you decide)
+   - **intentional_divergence** — you want the two to stay different on purpose (recorded with your reason)
+   - **freeze** — leave this part as it is and stop here
+
+   Record each decision with the exact command (one per item; fill in the bracketed values):
+
+   ```
+   python3 wizard/scripts/interview_cli.py record-impact-disposition --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --change-id [CHANGE_ID] --node-kind field --node-id [FIELD] --disposition [apply|revise|defer|intentional_divergence|freeze]
+   ```
+
+4. **Close the loop.** After the operator decides, confirm their original concern is resolved:
+
+   > Does that resolve what you wanted to fix?
+
+   If not, trace it back to the answer it came from (the change summary lists the contributing answers), correct it at the source, and re-run this review from the corrected answer.
+
+> **Why this matters (say only if asked):** Your vision and goals are anchors. The wizard will flag what it thinks should change because of an edit, but it will not change those anchors on its own — you decide every time.
 
 Write sub-step marker: Append `step_14_DOC-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
-## DOC-2 — Change summary [EXPLANATION]
+## DOC-2 — How changes work after your system is built [EXPLANATION]
 
 **Say:**
 
-> Every time the system updates one of your documents, your digest will include a plain-language note — what changed, why it changed, and what the document says now that's different from before.
+> Two honest notes about documents once your system is running:
 >
-> You'll never open a document and wonder why it looks different from the last time you saw it. The system always explains itself.
+> **While we build (now):** if you change an earlier answer, I catch what depends on it and bring the real changes to you to decide — that is what we just did. Your system will not be built with a decision left undecided.
+>
+> **After it is built:** if a document gets edited later, your system can notice that it no longer matches what it was built from and tell you, so you can reconcile it. It does not silently rewrite your documents on its own, and it does not run unattended in the background rewriting things — noticing and telling you is the honest limit today.
 
 No response required. Proceed directly to the success condition.
 

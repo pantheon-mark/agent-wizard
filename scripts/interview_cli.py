@@ -297,6 +297,25 @@ def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_roo
             "derived_record_hash": res.derived_record_hash, "transcript_hash": res.transcript_hash}
 
 
+def cmd_record_impact_change(transcript: str, change_id: str, impacts: List[Dict[str, Any]],
+                             *, fingerprint: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Record a detected change + its surfaced impacts (the change-propagation engine output)."""
+    return TranscriptRecorder(Path(transcript)).record_impact_change(change_id, impacts, fingerprint)
+
+
+def cmd_record_impact_disposition(transcript: str, change_id: str, node_kind: str, node_id: str,
+                                  disposition: str) -> Dict[str, Any]:
+    """Record the operator's disposition of one surfaced impact. Fail-closed on an unknown
+    disposition (only the contract's options are accepted)."""
+    from change_impact import DISPOSITION_OPTIONS  # type: ignore
+    if disposition not in DISPOSITION_OPTIONS:
+        raise InterviewCLIError(
+            "unknown disposition {!r}; must be one of {}".format(
+                disposition, ", ".join(DISPOSITION_OPTIONS)))
+    return TranscriptRecorder(Path(transcript)).record_impact_disposition(
+        change_id, node_kind, node_id, disposition)
+
+
 # --- argparse layer ----------------------------------------------------------
 
 def _split(csv: Optional[str]) -> Optional[List[str]]:
@@ -373,6 +392,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp.add_argument("--expect-recheck-step", dest="expect_recheck_step", type=int)
     sp.add_argument("--require-field", dest="require_fields", action="append", default=[])
 
+    sp = sub.add_parser("record-impact-change"); add_transcript(sp)
+    sp.add_argument("--change-id", dest="change_id", required=True)
+    sp.add_argument("--impacts", required=True, help="JSON list of {node_kind,node_id,impact_class}")
+    sp.add_argument("--fingerprint", help="optional JSON fingerprint object")
+
+    sp = sub.add_parser("record-impact-disposition"); add_transcript(sp)
+    sp.add_argument("--change-id", dest="change_id", required=True)
+    sp.add_argument("--node-kind", dest="node_kind", required=True)
+    sp.add_argument("--node-id", dest="node_id", required=True)
+    sp.add_argument("--disposition", required=True)
+
     sp = sub.add_parser("emit-system"); add_transcript(sp)
     sp.add_argument("--shape", default="markdown-CC")
     sp.add_argument("--target-dir", dest="target_dir", required=True)
@@ -425,6 +455,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                 args.draft, expect_phase=args.expect_phase,
                 expect_recheck_step=args.expect_recheck_step, require_fields=args.require_fields)
             sys.stdout.write("shape-state OK: " + json.dumps(state, sort_keys=True) + "\n")
+        elif args.cmd == "record-impact-change":
+            fp = json.loads(args.fingerprint) if args.fingerprint else None
+            cmd_record_impact_change(args.transcript, args.change_id,
+                                     json.loads(args.impacts), fingerprint=fp)
+        elif args.cmd == "record-impact-disposition":
+            cmd_record_impact_disposition(args.transcript, args.change_id,
+                                          args.node_kind, args.node_id, args.disposition)
         elif args.cmd == "emit-system":
             rec = cmd_emit_system(args.transcript, args.shape, args.target_dir, args.build_repo_root,
                                   project_name=args.project_name,

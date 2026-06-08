@@ -539,6 +539,27 @@ class EmitSystemCLITests(unittest.TestCase):
                                     generator_version_override="0" * 40)
             self.assertFalse(target.exists(), "emit must fail closed BEFORE writing on a stale group")
 
+    def test_record_impact_disposition_cli_resolves_pending(self):
+        # The carrier records a detected change + the operator's disposition via the CLI; the
+        # emit-gate projection then sees no pending implication.
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "t.jsonl")
+            cli.cmd_record_impact_change(
+                tpath, "chg-9",
+                [{"node_kind": "field", "node_id": "AUTONOMY_LEVEL",
+                  "impact_class": ci.RULE_DECISION}])
+            events = TranscriptRecorder(Path(tpath)).events()
+            self.assertEqual(len(ci.pending_from_events(events)), 1)  # before disposition
+            cli.cmd_record_impact_disposition(tpath, "chg-9", "field", "AUTONOMY_LEVEL", ci.APPLY)
+            events = TranscriptRecorder(Path(tpath)).events()
+            self.assertEqual(ci.pending_from_events(events), [])     # resolved
+
+    def test_record_impact_disposition_cli_rejects_unknown_disposition(self):
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "t.jsonl")
+            with self.assertRaises(cli.InterviewCLIError):
+                cli.cmd_record_impact_disposition(tpath, "chg-9", "field", "X", "banana")
+
     def _emittable_recorder(self, td, env):
         """A full, otherwise-emittable rich transcript (the proven neutral field set + one agent)."""
         from test_emission_plan import _FOUNDATION_DOC_INPUTS

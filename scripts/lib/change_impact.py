@@ -72,6 +72,8 @@ FREEZE = "freeze"
 # Dispositions that RESOLVE a pending implication (clear it from the emit gate). `defer`
 # deliberately does NOT resolve — a deferred rule/decision implication keeps emit blocked.
 _RESOLVING_DISPOSITIONS = {APPLY, REVISE, INTENTIONAL_DIVERGENCE, FREEZE}
+# The choices offered for every surfaced impact in the batched transaction (operator surface).
+DISPOSITION_OPTIONS = (APPLY, REVISE, DEFER, INTENTIONAL_DIVERGENCE, FREEZE)
 
 
 # --- determinism kind (a separate axis from derivation_class) ----------------
@@ -385,6 +387,65 @@ def tombstone_marker_line(confirmation_marker: str, reason: str, recorded_at: st
     """
     safe_reason = reason.replace("|", "/")
     return "{}: tombstoned | reason={} | {}".format(confirmation_marker, safe_reason, recorded_at)
+
+
+# --- operator surface (the batched "impact transaction") ---------------------
+
+def build_impact_transaction(surfaced: List[ImpactNode],
+                             sources: Optional[List[Node]] = None,
+                             labels: Optional[Dict[Node, str]] = None) -> Dict[str, Any]:
+    """Build the structured batched "impact transaction" the operator reviews and signs off.
+
+    Groups the surfaced impacts by class (so the operator sees "this touches N wording changes
+    and M rules your system follows" rather than a raw dependency dump), gives each item an
+    operator-facing label (falling back to the field key only when no label is provided) and
+    the full disposition option set, and carries the bidirectional `sources` trace. The exact
+    per-item prose ("how it would change") is filled by the carrier at runtime; this builder
+    fixes the STRUCTURE so the surface is consistent and the gate's contract is honoured.
+    """
+    labels = labels or {}
+    summary: Dict[str, int] = {CONTENT_ONLY: 0, RULE_DECISION: 0}
+    items: List[Dict[str, Any]] = []
+    for imp in surfaced:
+        cls = imp.impact_class or CONTENT_ONLY
+        summary[cls] = summary.get(cls, 0) + 1
+        items.append({
+            "node": imp.node,
+            "ref": _node_str(imp.node),
+            "label": labels.get(imp.node, imp.node.id),
+            "impact_class": cls,
+            "status": imp.status,
+            "options": list(DISPOSITION_OPTIONS),
+        })
+    return {"summary": summary, "items": items, "sources": list(sources or [])}
+
+
+def render_impact_transaction_md(transaction: Dict[str, Any]) -> str:
+    """Render the structured transaction to operator-facing markdown for the reviewable file.
+
+    A thin, deterministic template — the carrier may enrich each item's "how it would change"
+    prose, but the structure (summary, per-item choices, contributing answers) is fixed here.
+    """
+    s = transaction["summary"]
+    lines: List[str] = ["# Changes that need your decision", ""]
+    lines.append("This change touches **{} wording item(s)** and **{} rule(s) your system "
+                 "follows**. For each item below, choose what to do.".format(
+                     s.get(CONTENT_ONLY, 0), s.get(RULE_DECISION, 0)))
+    lines.append("")
+    for item in transaction["items"]:
+        kind = "rule your system follows" if item["impact_class"] == RULE_DECISION else "wording"
+        lines.append("## {}".format(item["label"]))
+        lines.append("- Type: {} (`{}`)".format(kind, item["ref"]))
+        lines.append("- Your choices: {}".format(", ".join(item["options"])))
+        lines.append("")
+    if transaction.get("sources"):
+        lines.append("## Where this came from")
+        lines.append("This was generated from your earlier answers — review them if the change "
+                     "looks wrong at the source:")
+        for src in transaction["sources"]:
+            lines.append("- `{}`".format(_node_str(src)))
+        lines.append("")
+    return "\n".join(lines)
 
 
 def sources(graph: ImpactGraph, point_of_notice: Node) -> List[Node]:

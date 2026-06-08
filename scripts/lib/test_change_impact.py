@@ -461,5 +461,53 @@ class PendingFromEventsTest(unittest.TestCase):
                          [ci.Node("field", "FB")])
 
 
+class ImpactTransactionTest(unittest.TestCase):
+    def _surfaced(self):
+        return [
+            ci.ImpactNode(ci.Node("field", "VISION_PURPOSE"), ci.CONTENT_ONLY,
+                          ci.MODEL_UNSTABLE, ci.REQUIRES_DISPOSITION),
+            ci.ImpactNode(ci.Node("field", "AUTONOMY_LEVEL"), ci.RULE_DECISION,
+                          ci.MODEL_UNSTABLE, ci.REQUIRES_DISPOSITION),
+        ]
+
+    def test_summary_counts_by_class(self):
+        txn = ci.build_impact_transaction(self._surfaced())
+        self.assertEqual(txn["summary"][ci.CONTENT_ONLY], 1)
+        self.assertEqual(txn["summary"][ci.RULE_DECISION], 1)
+
+    def test_items_carry_operator_labels_and_options(self):
+        """Each item shows an operator-facing label (never the raw field key when a label is
+        provided) and the full disposition option set."""
+        labels = {ci.Node("field", "AUTONOMY_LEVEL"): "How much your system may do on its own"}
+        txn = ci.build_impact_transaction(self._surfaced(), labels=labels)
+        item = next(i for i in txn["items"] if i["node"] == ci.Node("field", "AUTONOMY_LEVEL"))
+        self.assertEqual(item["label"], "How much your system may do on its own")
+        self.assertEqual(set(item["options"]), set(ci.DISPOSITION_OPTIONS))
+
+    def test_label_falls_back_to_field_id(self):
+        txn = ci.build_impact_transaction(self._surfaced())
+        item = next(i for i in txn["items"] if i["node"] == ci.Node("field", "VISION_PURPOSE"))
+        self.assertEqual(item["label"], "VISION_PURPOSE")
+
+    def test_sources_section_carried_for_bidirectional_trace(self):
+        sources_list = [ci.Node("answer", "V-1"), ci.Node("answer", "V-7b")]
+        txn = ci.build_impact_transaction(self._surfaced(), sources=sources_list)
+        self.assertEqual(txn["sources"], sources_list)
+
+
+class RenderTransactionMarkdownTest(unittest.TestCase):
+    def test_markdown_has_summary_items_and_options(self):
+        surfaced = [ci.ImpactNode(ci.Node("field", "AUTONOMY_LEVEL"), ci.RULE_DECISION,
+                                  ci.MODEL_UNSTABLE, ci.REQUIRES_DISPOSITION)]
+        labels = {ci.Node("field", "AUTONOMY_LEVEL"): "How much your system may do on its own"}
+        md = ci.render_impact_transaction_md(
+            ci.build_impact_transaction(surfaced, labels=labels))
+        self.assertIn("How much your system may do on its own", md)
+        self.assertIn(ci.APPLY, md)
+        self.assertIn(ci.INTENTIONAL_DIVERGENCE, md)
+        # the raw field key is not the operator-facing label, but appears as a machine ref
+        self.assertIn("rule", md.lower())
+
+
 if __name__ == "__main__":
     unittest.main()
