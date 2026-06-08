@@ -131,6 +131,10 @@ This rule mirrors the build project's adopted rule. The wizard's own use of cons
 
 Every interview file writes a sub-step marker to `~/claude-wizard-draft/wizard_progress.md` after each question is answered or each section completes (e.g., `step_04_NOTIF-2: complete | <timestamp>`). This extends the step-level completion markers to sub-step granularity. If a session ends mid-step, the next session's sub-step resume check in each file reads these markers and skips to the first incomplete question rather than restarting the entire step. This ensures no answered question is re-asked after a crash or autocompaction event.
 
+### Operator Interaction Contract (voice, grounding, recording, preview)
+
+Every operator-facing question, proposal, confirmation, review prompt, and Claude-authored operator-facing document is governed by the **Operator Interaction Contract** at `wizard/interview/_operator_interaction_contract.md`. Each interview step reads that file before its first operator-facing question and applies it. It extends rules #3 / #4 / #5 / #9 and takes precedence over a step file's local prompt wording — conversational wording only; commands and file paths stay copy-paste-exact per #3. If you have not read the contract this session, read it now.
+
 ---
 
 ## What the wizard produces

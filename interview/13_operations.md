@@ -56,6 +56,12 @@ Before doing anything else in this step:
 
 ---
 
+## Operator Interaction Contract
+
+Before the operations questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it — ground each question in what the operator already told you, keep the ask balanced, plain voice, no filler.
+
+---
+
 ## Step opening — progress and preview
 
 **Say:**

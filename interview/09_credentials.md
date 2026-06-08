@@ -56,6 +56,12 @@ Before doing anything else in this step:
 
 ---
 
+## Operator Interaction Contract
+
+Before the credential questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it — propose the credential inventory grounded in the operator's vision and architecture, plain voice, no filler. This step has copy-paste-exact commands and file contents (`.env`, `.gitignore`) that stay verbatim per rule #3; the contract's "intent, not script" latitude covers conversational wording only.
+
+---
+
 ## Step opening — progress and preview
 
 **Say:**

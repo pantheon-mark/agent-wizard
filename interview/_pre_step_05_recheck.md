@@ -4,6 +4,8 @@
 
 Re-evaluates the provisional `shape_hypothesis` produced at step 01 or step 02 against accumulated context (steps 02-04 answers + step 03 UP-6 regulatory exposure). Evaluates the 4 stop conditions (regulation × shape mismatch). Halts the wizard if a stop condition fires (foundation state preserved). Triggers the unsupported-shape transition if shape revises to non-v1-supported.
 
+**This re-check MUTATES state — it is not a verbal pass/fail.** Its completion is the *persisted* write to the session draft (the `recheck_log` entry + the `handoff_phase` advance), confirmed by a verification receipt — never a narrated "gates passed." A re-check whose state-write is skipped leaves the next consumer (the pre-step-08 re-check) reading stale state with no failing signal. Step 6 below runs the deterministic receipt that proves the write landed; treat that receipt as the actual completion of this module.
+
 ## When this file runs
 
 Reached from `wizard/interview/05_vision.md` opening, BEFORE any step-05 user-facing question fires. This is the **hard stop point** F-1 — shape detection must be resolved here before vision generation begins.
@@ -12,6 +14,14 @@ Reached from `wizard/interview/05_vision.md` opening, BEFORE any step-05 user-fa
 
 - `~/claude-wizard-draft/wizard_session_draft.md` contains `shape_hypothesis` (emitted at end of step 01 or step 02) AND `regulatory_exposure` (populated at step 03 UP-6)
 - Steps 02 (financial) + 03 (user profile) + 04 (notifications) all marked `complete` in `~/claude-wizard-draft/wizard_progress.md`
+
+**Deterministic prerequisite check (run this — do not eyeball the draft):**
+
+```
+python3 wizard/scripts/interview_cli.py check-shape-state --draft ~/claude-wizard-draft/wizard_session_draft.md --expect-phase regulatory_exposure_populated
+```
+
+A non-zero exit means step 03's `handoff_phase` advance (UP-6.3) did not persist — that is the "regulatory_exposure missing / UP-6 not completed" prerequisite failure below. Re-run step 03's UP-6.3 advance before proceeding; do NOT continue on stale state.
 
 **If prerequisites are NOT met:** this is a wizard-internal state error, NOT a recoverable condition. the relevant product spec section F-1 mandates a hard stop before step 05 vision generation; silently defaulting to markdown-agents would violate that contract. Halt with internal-error message; foundation state preserved:
 
@@ -301,6 +311,14 @@ Append step-marker to `~/claude-wizard-draft/wizard_progress.md`:
 ```
 step_05_pre_recheck: complete | <timestamp>
 ```
+
+**Write receipt (run this — it is the real completion of this module):**
+
+```
+python3 wizard/scripts/interview_cli.py check-shape-state --draft ~/claude-wizard-draft/wizard_session_draft.md --expect-phase pre_step_05_evaluated --expect-recheck-step 5
+```
+
+A non-zero exit means the `handoff_phase` advance or the `recheck_log` `step: 05` entry above did not persist — the write was narrated but not saved. Do NOT proceed to step 05: re-apply the writes and re-run this receipt until it passes. (On the terminal HALT / scope-out path, the receipt still applies — `handoff_phase` reads `pre_step_05_evaluated` and a `step: 05` recheck_log entry was appended even when the outcome was terminal.)
 
 Proceed to `wizard/interview/05_vision.md`.
 

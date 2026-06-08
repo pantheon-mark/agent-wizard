@@ -54,7 +54,7 @@ These are five conversational questions, not a form. Ask them in order, but let 
 
 The goal is a genuine sense of this person: how they think, what they need, where they want to be hands-on vs. hands-off. Listen for signals beyond the literal answer — someone who describes a complex multi-stakeholder operation probably has high domain expertise even if they say they're "not technical."
 
-**Ground each question in what the operator has already told you.** Where it helps, frame the question and any examples using their project, working definition, and earlier answers — concrete to *their* system, not generic script text or the system's internal vocabulary (avoid words like "agent"/"task" when a plain phrase works). But keep the *ask* balanced: present both readings, never pre-fill the answer — examples frame, they don't lead. Keep questions short; a rambling personalized question is worse than a plain one. (This is the balanced-elicitation rule — the same guardrail the shape-detection capabilities beat uses.)
+**Apply the Operator Interaction Contract** (`wizard/interview/_operator_interaction_contract.md`) to every question in this section — ground each one in what the operator already told you (project, working definition, earlier answers), keep the ask balanced (examples frame, never pre-fill), keep it plain (no internal vocabulary like "agent"/"task" where a plain phrase works), and keep it short. Read the contract now if you have not this session.
 
 **If the user says "I don't know" or gives a vague/uncertain answer to any question:** propose a reasonable default based on what you know so far — their project purpose, their answers to earlier questions, and the context from Phase 1. Say: "Based on what you've told me so far, I'd suggest [proposed characterization]. Does that sound about right, or would you describe it differently?" This follows the wizard question design principle: Claude proposes, user confirms. No question should stall because the user can't articulate a preference from scratch.
 
@@ -84,7 +84,7 @@ Write sub-step marker: Append `step_03_UP-1: complete | <timestamp>` to `~/claud
 
 > When the system tells you something happened — say it finished a piece of work you'd asked for, or it ran into something it needs your input on — do you generally want the reasoning and context behind it, or just the short version: what happened and what to do?
 
-*(Ground the examples in the operator's own system where it helps — e.g. for an estate helper, "it updated your task list" / "it found a deadline coming up" — per the balanced-elicitation rule: examples frame, keep both readings open, never pre-fill.)*
+*(Ground the examples in the operator's own system where it helps — e.g. for an estate helper, "it updated your task list" / "it found a deadline coming up" — per the Operator Interaction Contract § 2: examples frame, keep both readings open, never pre-fill.)*
 
 **Wait for answer.** Common responses: "short version", "I like to understand why", "depends on the situation". If "depends," ask a quick follow-up: "When does the longer version feel useful to you?"
 

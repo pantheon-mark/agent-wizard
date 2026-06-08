@@ -44,12 +44,12 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 ## Grounding — open every question from what you already know
 
-Per operating rules #5 (propose from what you already know) + #9 (use forward-captured early mentions): **do not ask these questions cold.** Before each one, check the working definition, `## Early mentions`, and prior steps' answers, and open from that context:
+Apply the Operator Interaction Contract § 2 (Grounding) to every question in this step (`wizard/interview/_operator_interaction_contract.md`; read it now if you have not this session). **Do not ask these questions cold** — before each one, check the working definition, `## Early mentions`, and prior steps' answers, and open from that context:
 - **NOTIF-7** from any co-executor / partner / advisor already named — e.g. "you mentioned [name/role] earlier — should the system send them their own updates, or is it just you (and you keep them in the loop the way you do now)?"
 - **NOTIF-1** from the digest cadence the operator described at UP-5 — e.g. "you said you'd want a daily summary early, easing to weekly as it earns your trust — here's how I'd set that up."
 - **NOTIF-3** from the always-ask actions they already gave at UP-3 (money / external comms / deletions) — acknowledge those are already in the baseline rather than re-presenting them as new.
 
-Keep the *ask* balanced (examples frame, never pre-fill); fall back to a question's cold phrasing only when nothing relevant was mentioned earlier. The question texts below are the **content + neutral fallback wording**, not a script to read verbatim.
+Keep the ask balanced and fall back to a question's neutral phrasing only when nothing relevant was mentioned earlier — the question texts below are content plus fallback wording, not a script (contract § 2).
 
 ---
 

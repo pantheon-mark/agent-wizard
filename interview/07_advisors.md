@@ -56,6 +56,12 @@ Before doing anything else in this step:
 
 ---
 
+## Operator Interaction Contract
+
+Before you propose the advisor list below, read `wizard/interview/_operator_interaction_contract.md` and apply it — ground the proposed advisors in the operator's vision and earlier answers, keep the ask balanced, plain voice, no filler. Record only advisors the operator confirms (contract § 3).
+
+---
+
 ## Step opening — progress and preview
 
 **Say:**
@@ -120,13 +126,15 @@ Proceed directly to the success condition.
 
 After the advisor list is confirmed, explain how the system will work with those advisors.
 
+**Tune the application promise to the operator's autonomy level (Operator Interaction Contract § 1; UP-3 / UP-7).** Recording and surfacing saved advisor guidance — with provenance (who said it, when, under what conditions) — is the same at every level. *Application* differs: at ask-first / low-autonomy settings the system surfaces the saved rule and still asks; only at higher autonomy does it apply routine saved rules on its own. Do NOT promise "automatic judgment," "it already knows how they think," or "you'll consult them less often" to a low-autonomy operator — that over-claims what they will actually get, and significant decisions always return to the operator regardless of level.
+
 **Say:**
 
 > When your system reaches a decision that needs outside expertise — something your accountant, lawyer, or another advisor should weigh in on — there are two ways to handle it.
 >
 > **The quick way:** you ask your advisor, get their answer, and just tell me what they said. I'll record it and move on. This works fine for simple questions with clear answers.
 >
-> **The better way** — and the one I'll suggest for anything significant: before you talk to them, I'll prepare a set of questions so the conversation covers everything relevant. You have the meeting, bring me the transcript or your notes from the conversation, and I'll pull out not just the answers but the reasoning behind them — the rules your advisor is actually applying — and save those so your system can use that judgment automatically in the future. Over time, this means you need to consult advisors less often because the system already knows how they think.
+> **The thorough way** — the one I'll suggest for anything significant: before you talk to them, I'll prepare a set of questions so the conversation covers what matters. You have the meeting, bring me the transcript or your notes, and I'll record the answer and the reasoning behind it — the rule your advisor is applying — with a note of who said it and when. The next time a similar decision comes up, I'll surface that saved guidance so you're not starting from scratch. Whether the system acts on a saved rule on its own or checks with you first follows the same rules you set for everything else — anything significant always comes to you.
 >
 > I'll always tell you which approach I'm recommending for each decision.
 

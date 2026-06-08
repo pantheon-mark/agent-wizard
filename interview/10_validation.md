@@ -56,6 +56,12 @@ Before doing anything else in this step:
 
 ---
 
+## Operator Interaction Contract
+
+Before the validation questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it — ground the proposed input inventory and sensitivity settings in the operator's vision, approach, and architecture, keep the ask balanced, plain voice, no filler.
+
+---
+
 ## Step opening — progress and preview
 
 **Say:**

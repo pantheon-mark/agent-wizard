@@ -42,6 +42,12 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 ---
 
+## Operator Interaction Contract
+
+Before the questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it — ground the framing in what the operator told you about their system, keep the ask balanced, plain voice, no filler. This step has copy-paste-exact elements (plan names, the `claude.ai/settings/billing` URL) that stay verbatim per rule #3; the contract's "intent, not script" latitude covers conversational wording only.
+
+---
+
 ## How the credit model works (wizard-internal — do NOT recite to the operator)
 
 Read this; do not read it aloud. From 2026-06-15, work the system does **headlessly/on a schedule** (the Agent SDK / `claude -p` path the Orchestrator uses for unattended runs) draws a **separate monthly dollar "automation credit"** included with the operator's plan — distinct from their interactive 5h/7d Claude use, which it cannot touch. Pool size by plan (per-user, NOT pooled across teammates, no rollover):
@@ -125,7 +131,7 @@ Note the answer in the staging file under `## Setup reminders` if yes (`[→ set
 
 > Your plan includes some "runs on its own" time each month — work your system does in the background when you're not around — at no extra cost, up to a point. Two quick choices about that.
 
-*(Ground the framing in what the operator told you about their system where it helps — per the balanced-elicitation rule: frame with their context, keep the ask neutral, never pre-fill the answer.)*
+*(Ground the framing in what the operator told you about their system where it helps — per the Operator Interaction Contract § 2: frame with their context, keep the ask neutral, never pre-fill the answer.)*
 
 ---
 

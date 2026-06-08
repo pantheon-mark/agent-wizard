@@ -56,6 +56,12 @@ Before doing anything else in this step:
 
 ---
 
+## Operator Interaction Contract
+
+Before you present the approach proposal below, read `wizard/interview/_operator_interaction_contract.md` and apply it — ground the proposal in the operator's confirmed vision and the approach-level content buffer, plain voice, no filler. Because this step records the operator's reaction, record only what they confirm or adopt, not your own proposed specifics (contract § 3).
+
+---
+
 ## Step opening — progress and preview
 
 **Say:**

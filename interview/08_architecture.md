@@ -68,20 +68,31 @@ Before any step-08 user-facing question fires:
 
 ---
 
+## Operator Interaction Contract
+
+Before any architecture question below, read `wizard/interview/_operator_interaction_contract.md` and apply it — derive and present the orchestration model, agent roster, and approach document grounded in what the operator confirmed; plain voice; record only what they adopt (§ 3). When you render the approach document for confirmation, show it as a reviewable file the operator opens in a viewer (§ 4).
+
+---
+
 ## Step opening — progress and preview
 
 **Say:**
 
-> **Step 9 of 16 — System architecture**
-> I'll show you how the pieces fit together — agents, workflows, and permissions.
+> **Step 9 of 16 — How your system is put together**
+> I'll walk you through the parts that do the work, how they fit together, and what the system always checks with you about before acting.
 
 ---
 
 ## How to run this phase
 
-All five steps in this phase follow the same pattern: Claude derives and presents, the user confirms or adjusts. The user is not asked to make architectural decisions — only to confirm that Claude's understanding of their work matches reality. When the user corrects something, update the model and continue.
+This phase has two kinds of step, run differently:
 
-**Recording (event transcript).** Record each architecture answer to `~/claude-wizard-draft/wizard_transcript.jsonl`, tagged to the group it feeds: ARCH-1 (orchestration model) → `orchestration_build`; ARCH-2 (agent roster) + ARCH-3 (criticality tiers) → `approach_roster`; ARCH-4 (permission/always-ask summary) → `hitl_autonomy`; ARCH-5 (task completion conditions) → `tests_audit`. The record-answer line is shown at the end of each ARCH step below. Do **not** maintain or write a `technical_architecture.md` file here — the architecture is emitted by the generator at the end from the confirmed transcript. After ARCH-5, this step closes the `approach_roster` group (derive → render approach.md preview → confirm → close).
+- **Operator confirm-beats — ARCH-2 (the helpers) and ARCH-4 (what the system does on its own vs. always asks about).** These are about the operator's own work and their control preferences — things a non-technical operator can actually judge. Present them; let the operator confirm, add, or correct.
+- **Derive-and-show — ARCH-1 (how the work runs), ARCH-3 (which helpers are most critical), ARCH-5 (how the system knows each is done).** These are engineering judgments a non-technical first-timer has no basis to validate (live evidence: the operator answers "I don't know" / "beats me" to all three). Claude DERIVES and RECORDS them exactly as before — the generator needs them — but does **not** present them as confirm-questions. They are surfaced read-only inside the approach-document preview at the end of this step, where the operator still gets one round to flag anything plainly wrong. Never ask the operator to confirm, rank, or design any of the three.
+
+The operator is never asked to make an architectural decision. When the operator corrects something in a confirm-beat, update the model and continue.
+
+**Recording (event transcript).** Record each architecture value to `~/claude-wizard-draft/wizard_transcript.jsonl`, tagged to the group it feeds: ARCH-1 (orchestration model) → `orchestration_build`; ARCH-2 (agent roster) + ARCH-3 (criticality tiers) → `approach_roster`; ARCH-4 (permission/always-ask summary) → `hitl_autonomy`; ARCH-5 (task completion conditions) → `tests_audit`. The derive-and-show values (ARCH-1/3/5) are recorded the same way — Claude records the value it derived, with no operator-confirmation gate. The record line is shown at the end of each ARCH step below. Do **not** maintain or write a `technical_architecture.md` file here — the architecture is emitted by the generator at the end from the transcript. After ARCH-5, this step closes the `approach_roster` group (derive → render approach.md preview → confirm → close).
 
 ---
 
@@ -115,33 +126,11 @@ Write sub-step marker: Append `step_08_Pre-ARCH: complete | <timestamp>` to `~/c
 
 ---
 
-## ARCH-1 — Orchestration model [DYNAMIC]
+## ARCH-1 — Orchestration model [DERIVE-AND-SHOW — internal; no operator question]
 
-Before speaking, read the vision document and approach document. Identify:
-- Which workflows are independent — tasks that different agents can run without waiting on each other
-- Which workflows are dependency-linked — tasks where one agent must finish before another can start
+Read the vision and approach. **Derive — do NOT ask the operator about — how the work coordinates:** which work is independent (can run in the same cycle) and which is dependency-linked (one part must finish before another), and from that the coordination model — a coordinator runs on the operator's schedule, routes work to the helpers, sequences changes to the shared master list so they don't collide, and brings decisions to the operator.
 
-**Do not ask the user to make an architectural call.** Present your reading of how their work flows, and ask them to confirm whether it's accurate.
-
-**Say:**
-
-> Before we go through the agents themselves, I want to show you how they'll be organized.
->
-> Based on what you've described, here's how the work will flow:
->
-> **[Workflow name or description]:** [Plain-language description — e.g., "These steps can run at the same time — each agent works independently and doesn't need to wait for the others."]
->
-> **[Workflow name or description]:** [Plain-language description — e.g., "These steps run in sequence — [Agent A] finishes first, then [Agent B] picks up from where it left off."]
->
-> Does that match how you'd expect the work to happen?
-
-**Wait for answer.**
-
-- If the user confirms: note the orchestration model as confirmed and proceed.
-- If the user corrects the workflow description: update your model to match, restate the corrected description, confirm, and proceed.
-- If the user asks what the difference matters: explain in plain terms — independent workflows run faster because agents work simultaneously; sequential workflows ensure earlier results are available when later steps need them.
-
-The architectural conclusion (whether a scoped orchestrator is needed, which workflows it manages) follows from the confirmed workflow description. Do not present this conclusion to the user — it is an internal implementation detail. The user only confirms the workflow description.
+This is an engineering judgment, not an operator decision. Do NOT present it as a confirm-question — a non-technical first-timer cannot validate work sequencing (live evidence: "I don't know"). Record the derived coordination model. It is surfaced read-only inside the approach-document preview at the close of this step, where the operator can still flag anything plainly wrong. Never name internal parts, collision-handling, or "which part runs when" to the operator at any point in this step.
 
 Write sub-step marker: Append `step_08_ARCH-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -155,13 +144,13 @@ Present the proposed agent roster derived from the vision document, approach doc
 
 **Say:**
 
-> Here are the agents your system will need. For each one I'll tell you what it does, why it exists, and what would break without it.
+> Here are the helpers your system will need. For each one I'll tell you what it does, why it's there, and what you'd lose without it.
 >
-> **[Agent name]**
-> [One sentence: what it does.] It exists because [why — what gap it fills]. Without it, [what would break or be missing].
+> **[helper name]**
+> [One sentence: what it does.] It's there because [why — what gap it fills]. Without it, [what would break or be missing].
 >
-> **[Agent name]**
-> [Repeat for each agent.]
+> **[helper name]**
+> [Repeat for each helper.]
 >
 > Do any of these not make sense? Is there anything you'd expect the system to do that isn't covered here?
 
@@ -180,32 +169,17 @@ Write sub-step marker: Append `step_08_ARCH-2: complete | <timestamp>` to `~/cla
 
 ---
 
-## ARCH-3 — Criticality tier assignment [DYNAMIC]
+## ARCH-3 — Criticality tier assignment [DERIVE-AND-SHOW — internal; no operator question]
 
-Assign each confirmed agent a criticality tier. Present the assignments with a plain-language explanation of what each tier means.
+**Derive — do NOT ask the operator to rank — each helper's criticality tier:**
 
-**Say:**
+- **Critical** — if it doesn't finish, the system stops; its work is required before anything else continues.
+- **Standard** — if it hits a problem, it flags it and the system keeps going where it can.
+- **Supporting** — partial results are fine; the main work completes without it.
 
-> Each agent has a criticality level — this tells the system how to handle it if something goes wrong.
->
-> - **Critical** — if this agent doesn't finish completely, the system stops. The work it does is required before anything else can continue.
-> - **Standard** — if this agent hits a problem, it flags it and the system keeps going where it can. Gaps are noted but don't stop everything.
-> - **Supporting** — partial results are fine. This agent adds value but the main work completes without it.
->
-> Here's what I'm proposing for your system:
->
-> | Agent | Tier | Why |
-> |-------|------|-----|
-> | [Agent name] | Critical | [One sentence reason] |
-> | [Agent name] | Standard | [One sentence reason] |
-> | [Agent name] | Supporting | [One sentence reason] |
->
-> Does this match your expectations? If any of these feel off, let me know.
+Assign conservatively from the confirmed roster + vision: the coordinator and the master-list keeper (the system's backbone) are **Critical**; helpers whose failure should flag-and-continue are **Standard**; helpers that only add value are **Supporting**.
 
-**Wait for answer.**
-
-- If the user confirms: proceed.
-- If the user disagrees with a tier: discuss the implication (e.g., moving an agent to Critical means the system halts if it fails), update the assignment, confirm.
+This is a judgment a non-technical first-timer cannot make (live evidence: "beats me"), and it has a mild safety dimension (Critical = halt-on-fail), so the conservative default is deliberate. Do NOT present it as a confirm-question. Record the derived tiers. They appear read-only in the approach-document preview (the roster shows each helper's level), where the operator can still flag anything that looks wrong.
 
 Write sub-step marker: Append `step_08_ARCH-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -241,22 +215,11 @@ Write sub-step marker: Append `step_08_ARCH-4: complete | <timestamp>` to `~/cla
 
 ---
 
-## ARCH-5 — Task completion checklists [DYNAMIC]
+## ARCH-5 — Task completion checklists [DERIVE-AND-SHOW — internal; no operator question]
 
-For each agent in the confirmed roster, present how the system will know when that agent has finished its work.
+**Derive — do NOT ask the operator to define — each helper's completion condition:** how the system knows that helper has finished, so it doesn't stop early or keep running with nothing left. Draw each from the helper's role + the operator's own words (e.g., the call-notes helper is done when the call is written up with its reference numbers and the candidate follow-up tasks are queued for the operator's okay).
 
-**Say:**
-
-> Last step in the architecture review. For each agent, here's how the system will know its work is done. Tell me if any of these don't match what you'd expect.
-
-For each agent:
-
-> **[Agent name]:** [Agent name]'s work is done when [plain-language completion condition — e.g., "the report has been generated and saved, all data sources have been checked, and no errors were flagged."]. Does that sound right?
-
-**Wait for answer after each agent, or present the full list and ask for any corrections.**
-
-- If the user confirms: note the checklist as confirmed.
-- If the user adjusts a completion condition: update it and confirm.
+This is a judgment a non-technical first-timer cannot make (live evidence: "looks right but I don't really know"). Do NOT present it as a confirm-question. Record the derived completion conditions. They appear read-only in the approach-document preview, where the operator can still flag anything that looks wrong.
 
 Write sub-step marker: Append `step_08_ARCH-5: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -267,6 +230,8 @@ Write sub-step marker: Append `step_08_ARCH-5: complete | <timestamp>` to `~/cla
 ## Close the approach_roster group — derive the agents, render the approach, confirm, close
 
 All of the `approach_roster` group's inputs are now captured (UP-4 at step 03, AP-1/2/3 at step 06, ADV-1 at step 07, ARCH-2/3 here). **Instead of writing `technical_architecture.md` or `approach.md` to disk, derive the approach-group fields, derive the agents as structured intents, show the operator the rendered approach document, take one round of changes, and close the group.** The architecture answers ARCH-1/4/5 belong to groups that close later (at step 13) — they were recorded above and are consumed there. No foundation-doc file is written here; the generator emits them at the end.
+
+The **derive-and-show** values (ARCH-1 coordination, ARCH-3 criticality tiers, ARCH-5 completion conditions) are surfaced **read-only** in the rendered approach document below — the roster shows each helper's level, and the brief reflects how the work runs and how each helper knows it's done. The operator reads them as part of the one-round review and can flag anything wrong, but was never asked to confirm them as standalone questions.
 
 ### Step 1 — Derive the agents as structured intents
 
@@ -306,7 +271,7 @@ Show the operator the **rendered approach markdown** the command prints — the 
 
 Say exactly this before the operator responds:
 
-> Here's your approach — how your system will work and the agents it'll need, based on everything so far. Take a look and tell me anything that's wrong or missing — you have one round of changes here. The system keeps this current as things evolve, so good enough to build from is the right standard. What would you like to change, if anything?
+> Here's your approach — how your system will work and the helpers it'll need, based on everything so far. It also lays out how the work runs, which helpers matter most, and how the system knows each one is done. Take a look and tell me anything that's wrong or missing — you have one round of changes here. The system keeps this current as things evolve, so good enough to build from is the right standard. What would you like to change, if anything?
 
 **Wait for answer.**
 

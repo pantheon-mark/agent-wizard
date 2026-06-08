@@ -56,6 +56,12 @@ Before doing anything else in this step:
 
 ---
 
+## Operator Interaction Contract
+
+Before the two explanations below, read `wizard/interview/_operator_interaction_contract.md` and apply it — plain voice, no filler. If you show the operator any rendered document or change summary to review, write it to a reviewable file they open in a viewer (§ 4).
+
+---
+
 ## Step opening — progress and preview
 
 **Say:**

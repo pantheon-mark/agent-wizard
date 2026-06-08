@@ -20,6 +20,9 @@ Subcommands:
   mark-step       append a step-completion marker (refused upstream by the marker invariant
                   unless every group closing at that step is confirmed)
   resume          print the resume cursor (highest completed step + confirmed groups)
+  check-shape-state  read-only assert that the session draft's shape-lifecycle state
+                  (handoff_phase + recheck_log) was persisted — the fail-closed consumer
+                  check the re-check entry guards + completion receipts call
 
 The transcript (an event log) is the derivation+emission authority; the progress file
 (wizard_progress.md markers) is the control-flow cursor only.
@@ -222,6 +225,24 @@ def cmd_resume(progress: str, shape: str) -> Dict[str, Any]:
     return resume_point(parse_progress_markers(text), dg)
 
 
+def cmd_check_shape_state(draft: str, *, expect_phase: Optional[str] = None,
+                          expect_recheck_step: Optional[int] = None,
+                          require_fields: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Read-only fail-closed check on the session draft's shape-lifecycle state. Raises
+    InterviewCLIError (-> non-zero exit, the carrier-visible receipt) when an expectation is
+    unmet — e.g. a re-check's handoff_phase advance / recheck_log entry never persisted."""
+    from shape_state import check_shape_state  # type: ignore
+    path = Path(draft)
+    if not path.exists() or not path.read_text(encoding="utf-8").strip():
+        raise InterviewCLIError(f"session draft not found or empty: {draft}")
+    failures, state = check_shape_state(
+        path.read_text(encoding="utf-8"), expect_phase=expect_phase,
+        expect_recheck_step=expect_recheck_step, require_fields=tuple(require_fields or ()))
+    if failures:
+        raise InterviewCLIError("shape-state check failed:\n  - " + "\n  - ".join(failures))
+    return state  # type: ignore[return-value]
+
+
 def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_root: str, *,
                     project_name: str = "operator-system",
                     generator_version_override: Optional[str] = None) -> Dict[str, Any]:
@@ -335,6 +356,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp = sub.add_parser("resume")
     sp.add_argument("--progress", required=True); sp.add_argument("--shape", default="markdown-CC")
 
+    sp = sub.add_parser("check-shape-state")
+    sp.add_argument("--draft", required=True)
+    sp.add_argument("--expect-phase", dest="expect_phase")
+    sp.add_argument("--expect-recheck-step", dest="expect_recheck_step", type=int)
+    sp.add_argument("--require-field", dest="require_fields", action="append", default=[])
+
     sp = sub.add_parser("emit-system"); add_transcript(sp)
     sp.add_argument("--shape", default="markdown-CC")
     sp.add_argument("--target-dir", dest="target_dir", required=True)
@@ -382,6 +409,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             rp = cmd_resume(args.progress, args.shape)
             rp = {**rp, "confirmed_groups": sorted(rp["confirmed_groups"])}
             sys.stdout.write(json.dumps(rp, sort_keys=True) + "\n")
+        elif args.cmd == "check-shape-state":
+            state = cmd_check_shape_state(
+                args.draft, expect_phase=args.expect_phase,
+                expect_recheck_step=args.expect_recheck_step, require_fields=args.require_fields)
+            sys.stdout.write("shape-state OK: " + json.dumps(state, sort_keys=True) + "\n")
         elif args.cmd == "emit-system":
             rec = cmd_emit_system(args.transcript, args.shape, args.target_dir, args.build_repo_root,
                                   project_name=args.project_name,

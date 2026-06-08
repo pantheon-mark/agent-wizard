@@ -4,6 +4,8 @@
 
 Final re-check of the provisional `shape_hypothesis` against accumulated context (steps 05-07 vision + approach + advisors content). Especially important for emergent-architecture projects (the relevant product spec section; J6 anchored) where the architecture phase reveals shape signals that earlier steps did not surface.
 
+**This re-check MUTATES state — it is not a verbal pass/fail.** Its completion is the *persisted* write to the session draft (the `recheck_log` entry + the `handoff_phase` advance), confirmed by a verification receipt — never a narrated "gates passed." This module is also the fail-closed *consumer* of the pre-step-05 re-check: its prerequisite check below refuses to proceed unless that earlier re-check actually persisted its state. Step 6 then runs the receipt that proves this module's own write landed.
+
 ## When this file runs
 
 Reached from `wizard/interview/08_architecture.md` opening, BEFORE any step-08 user-facing question fires. This is the second re-check point F-1.
@@ -13,6 +15,14 @@ Reached from `wizard/interview/08_architecture.md` opening, BEFORE any step-08 u
 - `~/claude-wizard-draft/wizard_session_draft.md` contains `shape_hypothesis` with `recheck_log` showing `step: 05` entry (pre-step-05 re-check completed)
 - Steps 05 (vision) + 06 (approach) + 07 (advisors) all marked `complete` in `~/claude-wizard-draft/wizard_progress.md`
 - Vision document confirmed on disk; approach document confirmed on disk
+
+**Deterministic prerequisite check (run this — do not eyeball the draft):**
+
+```
+python3 wizard/scripts/interview_cli.py check-shape-state --draft ~/claude-wizard-draft/wizard_session_draft.md --expect-phase pre_step_05_evaluated --expect-recheck-step 5
+```
+
+A non-zero exit means the pre-step-05 re-check never persisted its state (its `handoff_phase` advance to `pre_step_05_evaluated` and/or its `recheck_log` `step: 05` entry are missing) — it was narrated but not saved. Do NOT proceed on stale state: re-run `wizard/interview/_pre_step_05_recheck.md` (and its write receipt) until this check passes. This is the fail-closed consumer gate that catches a skipped upstream re-check.
 
 ## Reference spec
 
@@ -206,6 +216,14 @@ Append step-marker:
 ```
 step_08_pre_recheck: complete | <timestamp>
 ```
+
+**Write receipt (run this — it is the real completion of this module):**
+
+```
+python3 wizard/scripts/interview_cli.py check-shape-state --draft ~/claude-wizard-draft/wizard_session_draft.md --expect-phase pre_step_08_evaluated --expect-recheck-step 8
+```
+
+A non-zero exit means the `handoff_phase` advance or the `recheck_log` `step: 08` entry above did not persist. Do NOT proceed to step 08: re-apply the writes and re-run this receipt until it passes.
 
 Proceed to `wizard/interview/08_architecture.md`.
 
