@@ -11,12 +11,22 @@ Stdlib-only test (unittest + tempfile + subprocess); creates ephemeral git
 repos under tempfile.TemporaryDirectory for isolated testing.
 """
 
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from wizard.scripts.lib.generator_version import (
+# Self-contained import (matches the other lib test modules): put this file's dir on
+# sys.path so the bare module import resolves under `python3 -m unittest discover -s lib`
+# (there is no importable `wizard` namespace package on the path in that mode). This still
+# works under the repo-root `python3 -m unittest wizard.scripts.lib.test_generator_version`
+# invocation. The module under test is stdlib-only, so it has no `wizard.scripts` dependency
+# that would require the absolute-root import.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from generator_version import (
     GeneratorVersionError,
     current_generator_version,
     is_worktree_dirty,
