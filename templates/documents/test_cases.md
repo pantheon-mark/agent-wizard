@@ -530,7 +530,7 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 | MA-F-10 | Staged findings incorporated at next phase-gate | No staged finding missed in next phase-gate review |
 | MA-F-11 | Phase-gate retrospective runs | Calibration signal captured as part of every phase-gate |
 | MA-F-12 | Calibration feedback writes rules library entry | Rules library entry written for affected finding type after feedback |
-| MA-F-13 | Per-agent session budget set at invocation | Budget amount derived from spend ceiling and agent workload fraction |
+| MA-F-13 | Per-agent session budget set at invocation | Budget amount derived from the monthly automation budget and agent workload fraction |
 | MA-F-14 | Agent approaching budget initiates wrap-up mode | Progress summarized, state persisted, remaining work reported |
 | MA-F-15 | Agent exceeding budget terminates gracefully | Graceful termination with state preserved |
 | MA-F-16 | First budget-exceeded triggers auto-continue | New session started automatically — informational notification sent, no operator action required |

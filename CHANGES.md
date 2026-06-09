@@ -12,6 +12,20 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-09 — internal: corrected a leftover cost-model reference in an internal test-criteria template (no operator-facing change)
+
+**Public-facing change:** none — an internal, build-side test-criteria template had a single leftover reference to the wizard's previous cost model (a fixed "spend ceiling") in a row about per-agent work budgets. That model was already replaced by the monthly automation-credit model, so the row's wording is now consistent. No effect on what you see, what you do, or the system the wizard builds.
+
+**Operator-facing notes:**
+
+- No operator action required.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** _(filled post-push)_
+**Public repo commit:** _(filled post-push)_
+
+---
+
 ## 2026-06-09 — internal: derivation-guide citation correctness + test-suite hygiene (no operator-facing change)
 
 **Public-facing change:** none — these are internal correctness and hygiene fixes with no effect on what you see, what you do, or the system the wizard builds.
