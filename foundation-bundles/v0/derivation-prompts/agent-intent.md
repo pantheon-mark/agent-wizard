@@ -42,7 +42,7 @@ Audit envelope requirements (for the `AGENT_ROSTER_ROWS` field as a whole):
 - `_derivation_class`: `synthesis` (agent-intent is a sub-type of synthesis)
 - `_decision_field`: `false` (the intent objects are input to decisions, not decisions themselves — except criticality tier, which is a classification)
 - `_decision_kind`: `none`
-- `_derivation_inputs`: non-empty — list AP-2, AP-3, ARCH-2, ARCH-3 and any vision fields used
+- `_derivation_inputs`: non-empty list of the prior **payload field keys** combined — the derived vision fields used (`VISION_PURPOSE`, `VISION_GOALS`, `VISION_SCOPE_BOUNDARY`, `CORE_PURPOSE`). The validator rejects anything that is not a payload key, so the raw roster question IDs (AP-2, AP-3, ARCH-2, ARCH-3) do NOT go here — those are recorded per sub-field in `source_spans` (and as the field's `_source_question_ids` provenance), never in `_derivation_inputs`
 
 **Never fabricate.** If an agent is named but its purpose is not described, produce a skeleton object with `confidence: low` and all substantive sub-fields in `insufficiency_flags`. Do not invent a plausible role.
 

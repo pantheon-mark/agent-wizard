@@ -16,7 +16,7 @@ For autonomous-action lists and asks-first lists: draw from the same sources, pl
 
 For vision-originated constraints elevated to policy: draw from `VISION_CONSTRAINTS` (derived) and V-6, V-7.
 
-List every input used in `_derivation_inputs` — policy fields have the strictest traceability requirement because a wrong rule causes real-world harm.
+List every prior derived field key used in `_derivation_inputs` — policy fields have the strictest traceability requirement because a wrong rule causes real-world harm. `_derivation_inputs` holds prior **payload field keys** only (the validator rejects anything that is not a payload key — raw interview question IDs such as UP-1, ARCH-4, or ERR-1 are NOT payload keys). For a policy field those inputs are the derived fields it builds on (`AUTONOMY_LEVEL`, `EXHAUSTION_BEHAVIOR`, `PROJECT_AUTOMATION_BUDGET`, `VISION_CONSTRAINTS`); the raw interview answers a rule traces to are cited in `_source_question_ids`, not in `_derivation_inputs`.
 
 ## Output contract
 
@@ -34,7 +34,7 @@ Audit envelope requirements:
 - `_derivation_class`: `policy`
 - `_decision_field`: `true`
 - `_decision_kind`: `policy_rule`
-- `_derivation_inputs`: non-empty
+- `_derivation_inputs`: non-empty list of the prior **payload field keys** combined (the validator rejects anything that is not a payload key); any raw interview answers the rule also traces to go in `_source_question_ids`, never here
 - `_confirmation_state`: set after the operator confirms (forced — see below)
 
 **Never fabricate.** Do not add a permission rule that the operator did not express, imply, or authorize. If an action type is not addressed in the inputs, do not assign it a behavior — add it as an open row flagged for operator input.
