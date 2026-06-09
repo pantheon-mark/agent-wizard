@@ -12,6 +12,23 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-09 — internal: derivation-guide citation correctness + test-suite hygiene (no operator-facing change)
+
+**Public-facing change:** none — these are internal correctness and hygiene fixes with no effect on what you see, what you do, or the system the wizard builds.
+
+- For its own records, the wizard tracks how each value in your documents is worked out and which earlier material it draws on. Two of the internal guides that direct this had described citing the wrong kind of reference for a worked-out value — a raw interview question instead of an already-worked-out field — which the wizard's own internal check would reject. That guidance is now correct and consistent across all of the guides.
+- An internal test inconsistency was corrected so the wizard's full self-test suite runs in a single standard command.
+
+**Operator-facing notes:**
+
+- No operator action required.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** _(filled post-push)_
+**Public repo commit:** _(filled post-push)_
+
+---
+
 ## 2026-06-08 — your documents stay consistent when you change an answer; you review a clean draft of each before confirming
 
 **Public-facing change:** Two things got better about how the wizard keeps your documents right.
