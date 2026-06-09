@@ -24,8 +24,8 @@ Entries appear newest-first.
 - No operator action required.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** _(filled post-push)_
-**Public repo commit:** _(filled post-push)_
+**Source-Meta-Commit:** 14a5816
+**Public repo commit:** f1ae866
 
 ---
 
