@@ -119,6 +119,11 @@ class DeterminismKindTest(unittest.TestCase):
         """`auto` fields are computed by deterministic code -> pure_code (auto-halt eligible)."""
         self.assertEqual(ci.determinism_kind_for("auto"), ci.PURE_CODE)
 
+    def test_projection_class_is_pure_code(self):
+        """`projection` fields are a deterministic role-filter/reshape of prior fields ->
+        pure_code, so an unchanged projected role-subset auto-halts instead of re-surfacing."""
+        self.assertEqual(ci.determinism_kind_for("projection"), ci.PURE_CODE)
+
     def test_model_classes_are_model_unstable(self):
         """Every model-derived class is model_unstable at v0: re-derivation of model
         output is non-idempotent, so its fingerprint is unreliable -> never auto-halts."""

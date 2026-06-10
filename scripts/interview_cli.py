@@ -116,6 +116,19 @@ def _envelope_for(spec: FieldSpec, prompt_version: str,
         else:
             raise InterviewCLIError(f"{spec.field}: a classification field requires --sources or --inputs")
         return env
+    if cls == "projection":
+        # A projection is a deterministic role-filter/reshape of PRIOR payload fields (the canonical
+        # record). It derives from fields (like synthesis) but is pure code, not model authoring, so
+        # its provenance is `auto` ("mechanically computed from trusted prior fields"). Forbids
+        # source-question citation (DR-5); requires _derivation_inputs (the canonical field keys).
+        if not inputs:
+            raise InterviewCLIError(
+                f"{spec.field}: a projection field is a deterministic view of prior fields — "
+                f"pass --inputs (prior field keys), not --sources"
+            )
+        env["_source"] = override or "auto"
+        env["_derivation_inputs"] = list(inputs)
+        return env
     raise InterviewCLIError(f"{spec.field}: unhandled derivation_class {cls!r}")
 
 

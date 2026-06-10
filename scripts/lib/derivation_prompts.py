@@ -17,8 +17,9 @@ from typing import Dict, Optional
 
 from derivation_replay import content_hash  # type: ignore
 
-# The five derivation classes (mirror the derived-record contract enum) plus the agent-intent prompt.
-PROMPT_NAMES = {"extraction", "synthesis", "classification", "policy", "auto", "authoring", "agent-intent"}
+# The derivation classes (mirror the derived-record contract enum) plus the agent-intent prompt.
+PROMPT_NAMES = {"extraction", "synthesis", "classification", "policy", "auto", "authoring",
+                "projection", "agent-intent"}
 
 
 class DerivationPromptError(Exception):

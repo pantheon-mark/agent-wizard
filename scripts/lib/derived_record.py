@@ -168,6 +168,13 @@ def validate_envelope(field: str, env: Dict[str, Any], value: Any,
                  f"{where} derivation_class=authoring requires non-empty _source_question_ids")
         _require("_derivation_inputs" not in env, "DR-5",
                  f"{where} derivation_class=authoring must not carry _derivation_inputs at v0 (answer-only)")
+    if cls == "projection":
+        # deterministic role-filter/reshape of prior payload fields: inputs required, never raw answers.
+        _require(_nonempty_list(env.get("_derivation_inputs")), "DR-5",
+                 f"{where} derivation_class=projection requires non-empty _derivation_inputs")
+        _require("_source_question_ids" not in env, "DR-5",
+                 f"{where} derivation_class=projection must NOT carry _source_question_ids "
+                 f"(projects from prior payload fields, not raw answers)")
 
     # DR-6: decision-ness coupling (one-way to class; biconditional with kind)
     if cls in ("classification", "policy"):

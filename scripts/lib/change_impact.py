@@ -86,15 +86,20 @@ PURE_CODE = "pure_code"
 RECORDED_REPLAY_ONLY = "recorded_replay_only"
 MODEL_UNSTABLE = "model_unstable"
 
-_PURE_CODE_CLASSES = {"auto"}
+# `auto` (code-computed globals) and `projection` (a deterministic role-filter/reshape of prior
+# payload fields — pure code over confirmed inputs, never model authoring) are the pure_code
+# classes that may auto-halt. Every model-derived class stays model_unstable.
+_PURE_CODE_CLASSES = {"auto", "projection"}
 
 
 def determinism_kind_for(derivation_class: str) -> str:
     """Map a field's derivation_class to its determinism_kind (conservative at v0).
 
-    `auto` (code-computed globals) -> pure_code; every model class -> model_unstable.
-    The conservative default means almost nothing auto-halts -> over-surface, never
-    under-surface (the safe direction for a non-technical operator)."""
+    `auto` (code-computed globals) + `projection` (deterministic filter/reshape of prior fields)
+    -> pure_code; every model class -> model_unstable. The conservative default means almost
+    nothing auto-halts -> over-surface, never under-surface (the safe direction for a
+    non-technical operator). pure_code lets an unchanged projected role-subset auto-halt instead
+    of re-surfacing on every unrelated narrative edit to the canonical record (no alert fatigue)."""
     return PURE_CODE if derivation_class in _PURE_CODE_CLASSES else MODEL_UNSTABLE
 
 

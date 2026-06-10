@@ -22,10 +22,11 @@ class LoaderTests(unittest.TestCase):
     def test_prompt_names(self):
         self.assertEqual(
             PROMPT_NAMES,
-            {"extraction", "synthesis", "classification", "policy", "auto", "authoring", "agent-intent"},
+            {"extraction", "synthesis", "classification", "policy", "auto", "authoring",
+             "projection", "agent-intent"},
         )
 
-    def test_loads_all_six(self):
+    def test_loads_all_prompts(self):
         prompts = load_all_prompts()
         self.assertEqual(set(prompts), PROMPT_NAMES)
         for name, p in prompts.items():

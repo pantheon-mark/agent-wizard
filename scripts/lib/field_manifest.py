@@ -26,7 +26,7 @@ EXPECTED_CONTRACT_ID = "field-manifest"
 EXPECTED_CONTRACT_VERSIONS = {"field-manifest-v1"}
 
 # Mirror the derived-record contract enums (the manifest couples to that contract).
-DERIVATION_CLASSES = {"extraction", "synthesis", "classification", "policy", "auto", "authoring"}
+DERIVATION_CLASSES = {"extraction", "synthesis", "classification", "policy", "auto", "authoring", "projection"}
 DECISION_KINDS = {"none", "closed_value", "policy_rule", "schedule", "threshold",
                   "spend_limit", "integration_boundary"}
 # Provenance source classes (mirror the derived-record contract `source` enum). A field
@@ -148,10 +148,13 @@ def load_field_manifest(system_shape: str, manifests_dir: Optional[Path] = None)
                      "policy_negative_permissions",
                      f"{name}: policy fields must set requires_explicit_negative_permissions: true")
         # non-auto fields must declare at least one source question (the static analog of the
-        # derived-record contract's input-citation requirements); auto fields take no source.
-        if dclass == "auto":
-            _require(raw["source_question_ids"] == [], "auto_no_source",
-                     f"{name}: auto fields take no source_question_ids")
+        # derived-record contract's input-citation requirements). auto fields take no source;
+        # projection fields take no source either — a projection is a deterministic role-filter/
+        # reshape of PRIOR PAYLOAD FIELDS (declared at derive time via _derivation_inputs), never
+        # raw answers, so it carries no source_question_ids (derived-record contract DR-5).
+        if dclass in ("auto", "projection"):
+            _require(raw["source_question_ids"] == [], "no_source_questions",
+                     f"{name}: {dclass} fields take no source_question_ids")
         else:
             _require(len(raw["source_question_ids"]) > 0, "source_required",
                      f"{name}: {dclass} field must declare at least one source question-ID")
