@@ -67,11 +67,14 @@ class LoaderTests(unittest.TestCase):
         m = load_field_manifest(SHAPE)
         self.assertTrue(m.spec_for("HITL_MAP_ROWS").constraints.get("requires_explicit_negative_permissions"))
 
-    def test_auto_fields_have_no_source_questions_others_do(self):
+    def test_auto_and_projection_have_no_source_questions_others_do(self):
         m = load_field_manifest(SHAPE)
         for name, spec in m.fields.items():
-            if spec.derivation_class == "auto":
-                self.assertEqual(spec.source_question_ids, [], name)
+            # auto fields are code-computed globals; projection fields derive from PRIOR PAYLOAD
+            # FIELDS (via _derivation_inputs at derive time), never raw answers — both carry no
+            # source_question_ids. Every other class cites at least one source question.
+            if spec.derivation_class in ("auto", "projection"):
+                self.assertEqual(spec.source_question_ids, [], f"{name} ({spec.derivation_class})")
             else:
                 self.assertTrue(spec.source_question_ids, f"{name} ({spec.derivation_class}) has no source questions")
 

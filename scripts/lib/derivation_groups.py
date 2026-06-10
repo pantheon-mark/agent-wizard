@@ -160,7 +160,11 @@ def load_derivation_groups(
             _require(isinstance(raw[list_field], list), list_field, f"{gid}.{list_field} must be a list")
         _require(bool(raw["input_question_ids"]), "input_question_ids", f"{gid} input_question_ids must be non-empty")
         _require(bool(raw["target_fields"]), "target_fields", f"{gid} target_fields must be non-empty")
-        _require(bool(raw["preview_docs"]), "preview_docs", f"{gid} preview_docs must be non-empty")
+        # preview_docs MAY be empty: a group whose targets render into NO foundation document
+        # (e.g. a structured inventory the operator reviews inline via propose-confirm, not as a
+        # rendered narrative doc) has no barrier preview to show — render_group_previews returns
+        # nothing and the carrier shows the structured target inline. The list TYPE is still
+        # required (checked above). Groups that DO drive a foundation doc still list it here.
         _require(
             isinstance(raw["close_after"], str) and _STEP_RE.match(raw["close_after"] or ""),
             "close_after", f"{gid}.close_after must look like 'step_NN'; got {raw['close_after']!r}",

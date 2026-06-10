@@ -28,8 +28,13 @@ from derivation_groups import (  # noqa: E402
 
 SHAPE = "markdown-CC"
 EXPECTED_GROUP_IDS = {
-    "vision", "approach_roster", "orchestration_build", "hitl_autonomy", "tests_audit",
+    "vision", "approach_roster", "dependency_inventory", "orchestration_build",
+    "hitl_autonomy", "tests_audit",
 }
+
+# Groups reviewed inline (propose-confirm of a structured inventory), not via a rendered
+# foundation-doc preview, so they legitimately carry no preview_docs.
+INLINE_REVIEW_GROUP_IDS = {"dependency_inventory"}
 
 
 class LoaderTests(unittest.TestCase):
@@ -44,7 +49,12 @@ class LoaderTests(unittest.TestCase):
             self.assertTrue(g.target_fields, f"{g.group_id} has no target fields")
             self.assertTrue(g.close_after.startswith("step_"), g.close_after)
             self.assertEqual(g.confirmation_marker, f"group_{g.group_id}_confirmed")
-            self.assertTrue(g.preview_docs, f"{g.group_id} has no preview_docs")
+            self.assertIsInstance(g.preview_docs, list)
+            # Every group EXCEPT an inline-review group drives at least one foundation-doc preview.
+            if g.group_id not in INLINE_REVIEW_GROUP_IDS:
+                self.assertTrue(g.preview_docs, f"{g.group_id} has no preview_docs")
+            else:
+                self.assertEqual(g.preview_docs, [], f"{g.group_id} is inline-reviewed (no preview_docs)")
 
     def test_unknown_shape_fails_closed(self):
         with self.assertRaises(DerivationGroupsError):

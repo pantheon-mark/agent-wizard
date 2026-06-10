@@ -11,6 +11,7 @@ full vision-group flow through the CLI command functions and asserts the T4 acce
 RED->GREEN.
 """
 
+import json
 import sys
 import tempfile
 import unittest
@@ -155,16 +156,44 @@ def _derive_confirm(transcript, field, group, value, *, sources=None, inputs=Non
     cli.cmd_confirm_field(transcript, field, group, state, revisit_trigger=revisit, clock=lambda: CLOCK)
 
 
-def _drive_orchestration_build_group(transcript, progress):
-    """Drive orchestration_build atop approach_roster. Extraction/classification fields first so
-    the synthesis fields can cite them as prior derived field keys (DR-5/DR-8)."""
+# A canonical dependency record with one dependency that plays all three roles, so each of the
+# three projections produces a row. JSON values (the identity/annotation fields render into no
+# foundation doc, so a machine-parseable shape is free and is what makes the projection pure code).
+_IDENTITY_VALUE = json.dumps([
+    {"id": "google_sheet", "name": "Google Sheet task tracker", "type": "Spreadsheet",
+     "roles": ["boundary_input", "health_monitored", "needs_credential"],
+     "credential_facet": {"env_var": "GOOGLE_SHEETS_API_KEY", "cred_type": "API key",
+                          "provider": "Google", "provisional_expiry": "Unknown"}},
+])
+_ANNOTATION_VALUE = json.dumps([
+    {"id": "google_sheet", "purpose": "the master task list", "what_stops": "tracking stops",
+     "boundary_input_facet": {"input_risk": "malformed rows mis-route work"}, "health_facet": {}},
+])
+
+
+def _drive_dependency_inventory_group(transcript, progress):
+    """Drive the canonical dependency_inventory group atop approach_roster: capture the external
+    dependencies ONCE as EXTERNAL_DEPENDENCY_IDENTITY (the integration-boundary decision surface).
+    Closes at step_09; the three tabular registries are projections of it, derived later."""
     _drive_approach_roster_group(transcript, progress)
+    _record_sources(transcript, "dependency_inventory", {"DEP-1"})
+    _derive_confirm(transcript, "EXTERNAL_DEPENDENCY_IDENTITY", "dependency_inventory",
+                    _IDENTITY_VALUE, sources=["DEP-1"])
+    return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
+
+
+def _drive_orchestration_build_group(transcript, progress):
+    """Drive orchestration_build atop the dependency_inventory group. Extraction/classification
+    fields first so the synthesis fields can cite them as prior derived field keys (DR-5/DR-8).
+    INTEGRATIONS authors prose from the canonical record; CREDENTIAL_REGISTRY_ROWS is a projection."""
+    _drive_dependency_inventory_group(transcript, progress)
     _record_sources(transcript, "orchestration_build",
-                    {"P1-4", "ARCH-1", "CRED-1", "CRED-2", "CRED-3", "CRED-4", "SCALE-1", "SCALE-2", "SCALE-3", "SCALE-4", "CONC-2"})
-    _derive_confirm(transcript, "INTEGRATIONS", "orchestration_build", "- a calendar feed", sources=["CRED-1", "CRED-2"])
-    _derive_confirm(transcript, "CREDENTIAL_REGISTRY_ROWS", "orchestration_build",
-                    "| Calendar feed | CALENDAR_API_KEY | API key | Provider | Unknown | | manual | Never | Pending |",
-                    sources=["CRED-1", "CRED-2"])
+                    {"P1-4", "ARCH-1", "DEP-1", "CRED-3", "CRED-4", "SCALE-1", "SCALE-2", "SCALE-3", "SCALE-4", "CONC-2"})
+    _derive_confirm(transcript, "INTEGRATIONS", "orchestration_build", "- a Google Sheet task tracker",
+                    inputs=["EXTERNAL_DEPENDENCY_IDENTITY"])
+    # CREDENTIAL_REGISTRY_ROWS is a projection: computed deterministically from the canonical record
+    # (the needs_credential subset), not hand-authored, and not separately confirmed (auto-projects).
+    cli.cmd_derive_projection(transcript, SHAPE, "CREDENTIAL_REGISTRY_ROWS", clock=lambda: CLOCK)
     _derive_confirm(transcript, "CREDENTIAL_CHECK_CADENCE", "orchestration_build", "quarterly", sources=["CRED-4"])
     _derive_confirm(transcript, "ROTATION_LEAD_TIME_DAYS", "orchestration_build", "14", sources=["CRED-3"])
     _derive_confirm(transcript, "SCALE_TIER", "orchestration_build", "small", sources=["SCALE-1", "SCALE-2"])
@@ -218,22 +247,22 @@ def _drive_hitl_autonomy_group(transcript, progress):
 def _drive_tests_audit_group(transcript, progress):
     """Drive tests_audit atop hitl_autonomy. Two preview docs (test_cases.md + audit_framework.md)."""
     _drive_hitl_autonomy_group(transcript, progress)
-    _record_sources(transcript, "tests_audit", {"GATE-1", "GATE-2", "QA-1", "QA-3", "ARCH-5", "DRIFT-1"})
+    _record_sources(transcript, "tests_audit", {"DEP-1", "GATE-1", "GATE-2", "QA-1", "QA-3", "ARCH-5", "DRIFT-1"})
     _derive_confirm(transcript, "AGENT_SPECIFIC_TESTS", "tests_audit",
                     "- monitor surfaces a known item", inputs=["APPROACH_SOLUTION_BRIEF"])
     _derive_confirm(transcript, "DRIFT_ANALYSIS_CADENCE", "tests_audit", "weekly", sources=["DRIFT-1"])
-    # Validation gate: GATE-1 -> INPUT_TYPE_INVENTORY (extraction; mandatory target) and GATE-2 ->
-    # DOMAIN_SENSITIVITY_SETTINGS (classification-from-question; operator-preference branch).
-    _derive_confirm(transcript, "INPUT_TYPE_INVENTORY", "tests_audit",
-                    "| Spreadsheet rows | Google Sheet | task list | reports break | (runtime) | Active |",
-                    sources=["GATE-1"])
+    # The content-only annotation of the canonical record (purpose/what-stops + per-role facets),
+    # enriched here from the dependencies already in the identity record (no orphaned facets).
+    _derive_confirm(transcript, "EXTERNAL_DEPENDENCY_ANNOTATION", "tests_audit",
+                    _ANNOTATION_VALUE, sources=["DEP-1", "GATE-1", "QA-3"])
+    # GATE-2 -> DOMAIN_SENSITIVITY_SETTINGS (classification-from-question; NOT a dependency facet).
     _derive_confirm(transcript, "DOMAIN_SENSITIVITY_SETTINGS", "tests_audit",
                     "| Financial | High | money is involved | 2026-06-10 |", sources=["GATE-2"])
-    # QA source registry: QA-3 -> SOURCE_REGISTRY_ROWS (extraction; mandatory target). Rows-only;
-    # runtime cells carry placeholders, Status=Pending (RW-40).
-    _derive_confirm(transcript, "SOURCE_REGISTRY_ROWS", "tests_audit",
-                    "| Google Sheet | API | the master task list | tracking stops | (set at runtime) | Pending | (set at runtime) | Pending |",
-                    sources=["QA-3"])
+    # The validation-gate input inventory + QA source registry are now deterministic PROJECTIONS of
+    # the canonical record (boundary_input / health_monitored subsets), computed from the confirmed
+    # IDENTITY + ANNOTATION, not hand-authored. They auto-project (no separate confirmation).
+    cli.cmd_derive_projection(transcript, SHAPE, "INPUT_TYPE_INVENTORY", clock=lambda: CLOCK)
+    cli.cmd_derive_projection(transcript, SHAPE, "SOURCE_REGISTRY_ROWS", clock=lambda: CLOCK)
     return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
 
 

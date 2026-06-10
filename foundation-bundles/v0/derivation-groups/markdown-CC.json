@@ -36,15 +36,26 @@
       "special_behaviors": ["voice-and-style seeding (synthesis class; from literacy/info-preference/verbosity/style answers + the operator's vision voice)", "agent-intent derivation (agent roster answers -> agent intents + resource claims)", "name-consistency (extraction; names used verbatim everywhere)", "advisor knowledge base seeding (extraction; the confirmed advisor list -> ADVISOR_ENTRIES, emitted into the advisor knowledge base; empty when no advisors)"]
     },
     {
+      "group_id": "dependency_inventory",
+      "input_question_ids": ["DEP-1"],
+      "target_fields": ["EXTERNAL_DEPENDENCY_IDENTITY"],
+      "close_after": "step_09",
+      "confirmation_marker": "group_dependency_inventory_confirmed",
+      "preview_docs": [],
+      "skip_satisfied_if": [],
+      "barrier_stakes": "high",
+      "special_behaviors": ["THE single canonical capture of the system's external dependencies (DEP-1), asked once at step 09 and reviewed inline (it renders into no foundation document, so the operator confirms the proposed dependency list directly rather than a rendered preview). Closes at step_09 — BEFORE the validation (step 11) and QA (step 13) steps that enrich its annotation and before the projections that read it, so the canonical record exists when its consumers evaluate. The identity record (name/type/roles + credential facet) is the integration-boundary decision surface; the three tabular registries are non-authoritative projection views that the operator never edits directly. Reframed step 09: System boundaries & external dependencies first, credential metadata as a sub-pass for the needs_credential dependencies (a 'Credentials'-only frame loses non-secret dependencies like manual uploads and public sources)."]
+    },
+    {
       "group_id": "orchestration_build",
-      "input_question_ids": ["P1-4", "ARCH-1", "CRED-1", "CRED-2", "CRED-3", "CRED-4", "CRED-5", "SCALE-1", "SCALE-2", "SCALE-3", "SCALE-4", "CONC-2"],
+      "input_question_ids": ["P1-4", "ARCH-1", "DEP-1", "CRED-3", "CRED-4", "CRED-5", "SCALE-1", "SCALE-2", "SCALE-3", "SCALE-4", "CONC-2"],
       "target_fields": ["ORCHESTRATION_MODEL", "INTEGRATIONS", "CREDENTIAL_REGISTRY_ROWS", "CREDENTIAL_CHECK_CADENCE", "ROTATION_LEAD_TIME_DAYS", "SCALE_TIER", "SCALE_TIER_BASIS", "SCALE_TIER_RATIONALE", "COMPLIANCE_GAPS_CONTENT", "TASK_COMPLETION_CHECKLISTS", "BUILD_PHASES_ROWS", "EXECUTION_SEQUENCE", "MVP_CORE_FUNCTION", "MVP_MINIMUM_VIABLE_STATE", "MVP_SUCCESS_CONDITION"],
       "close_after": "step_13",
       "confirmation_marker": "group_orchestration_build_confirmed",
       "preview_docs": ["technical_architecture.md"],
       "skip_satisfied_if": ["CRED-5"],
       "barrier_stakes": "medium",
-      "special_behaviors": ["RW-37: CRED-1 (inventory) + CRED-2 (per-credential metadata: ENV variable / type / provider / provisional expiry, Claude-proposed + operator-confirmed) feed INTEGRATIONS + the pre-populated CREDENTIAL_REGISTRY_ROWS (Status: Pending); CRED-3 -> ROTATION_LEAD_TIME_DAYS, CRED-4 -> CREDENTIAL_CHECK_CADENCE (wired to the emitted credential-check mechanism); CRED-5 (session-lifetime explanation) is the only skip-satisfiable input. Credential VALUES are obtained/pasted/verified at first boot by the credential-setup skill, never mid-interview."]
+      "special_behaviors": ["The credential surfaces now derive from the canonical dependency record (DEP-1, captured at step 09 in the dependency_inventory group): INTEGRATIONS is authored prose from EXTERNAL_DEPENDENCY_IDENTITY (synthesis), and CREDENTIAL_REGISTRY_ROWS is the needs_credential projection of it (Status: Pending). DEP-1 is also in this group's input_question_ids so a later edit to the dependency record re-flags this group as stale (cross-group freshness). CRED-3 -> ROTATION_LEAD_TIME_DAYS, CRED-4 -> CREDENTIAL_CHECK_CADENCE (the global lifecycle prefs, wired to the emitted credential-check mechanism); CRED-5 (session-lifetime explanation) is the only skip-satisfiable input. Credential VALUES are obtained/pasted/verified at first boot by the credential-setup skill, never mid-interview."]
     },
     {
       "group_id": "hitl_autonomy",
@@ -59,14 +70,14 @@
     },
     {
       "group_id": "tests_audit",
-      "input_question_ids": ["GATE-1", "GATE-2", "GATE-3", "GATE-4", "QA-1", "QA-3", "QA-4", "ARCH-5", "DRIFT-1"],
-      "target_fields": ["AGENT_SPECIFIC_TESTS", "DRIFT_ANALYSIS_CADENCE", "INPUT_TYPE_INVENTORY", "DOMAIN_SENSITIVITY_SETTINGS", "SOURCE_REGISTRY_ROWS"],
+      "input_question_ids": ["DEP-1", "GATE-1", "GATE-2", "GATE-3", "GATE-4", "QA-1", "QA-3", "QA-4", "ARCH-5", "DRIFT-1"],
+      "target_fields": ["AGENT_SPECIFIC_TESTS", "DRIFT_ANALYSIS_CADENCE", "INPUT_TYPE_INVENTORY", "DOMAIN_SENSITIVITY_SETTINGS", "SOURCE_REGISTRY_ROWS", "EXTERNAL_DEPENDENCY_ANNOTATION"],
       "close_after": "step_13",
       "confirmation_marker": "group_tests_audit_confirmed",
       "preview_docs": ["test_cases.md", "audit_framework.md"],
       "skip_satisfied_if": ["GATE-3", "GATE-4", "QA-4"],
       "barrier_stakes": "medium",
-      "special_behaviors": ["deferred-items population (extraction/classification)", "Validation gate: GATE-1 (input-type inventory) -> INPUT_TYPE_INVENTORY (extraction; decision_field, integration_boundary) and GATE-2 (per-domain sensitivity) -> DOMAIN_SENSITIVITY_SETTINGS (classification; decision_field, threshold), both scaffold-rendered into quality/validation_gate_config.md (INPUT_TYPE_INVENTORY also into project_instructions.md). Both are mandatory group targets (always derived); a zero-external-input system (INPUT_TYPE_COUNT=0) records GATE-1='none' + GATE-2='none' and derives EMPTY tables (valid empty bodies), mirroring the zero-credential case. Previously the wizard wrote validation_gate_config.md mid-interview and the emit shipped empty tables; now captured-at-interview / derived-at-barrier / emitted-at-close like the credentials registry. QA source registry: QA-3 (external-source inventory) -> SOURCE_REGISTRY_ROWS (extraction; decision_field, integration_boundary), scaffold-rendered into quality/source_registry.md; mandatory group target (a no-external-source system records QA-3='none' and derives an EMPTY table); derives Source name/Type/Purpose/What-stops + Status='Pending', runtime-fill for Expected behavior/Last verified/Health flag. Previously QA-3 was a dead input written mid-interview."]
+      "special_behaviors": ["deferred-items population (extraction/classification)", "External-dependency projections: the validation-gate input inventory (INPUT_TYPE_INVENTORY) and the QA source registry (SOURCE_REGISTRY_ROWS) are now deterministic projection-class views of the canonical dependency record, NOT independent extractions. INPUT_TYPE_INVENTORY = the boundary_input subset; SOURCE_REGISTRY_ROWS = the health_monitored subset; both scaffold-rendered into their distinct files (quality/validation_gate_config.md + project_instructions.md; quality/source_registry.md). The integration-boundary decision lives on EXTERNAL_DEPENDENCY_IDENTITY (the dependency_inventory group); these are generated caches. EXTERNAL_DEPENDENCY_ANNOTATION (content-only) closes here: purpose/what-stops captured at step 09, the boundary_input facet enriched at step 11 (GATE-1) and the health facet at step 13 (QA-3), scoped to the dependencies already in the identity record (no orphaned facets). DEP-1 is in this group's input_question_ids so a later edit to the dependency record re-flags this group as stale (cross-group freshness). GATE-2 (per-domain sensitivity) -> DOMAIN_SENSITIVITY_SETTINGS (classification; decision_field, threshold) is NOT a dependency facet and is unchanged. Zero dependencies / zero-of-a-role -> the corresponding projection emits an empty table body (valid)."]
     }
   ]
 }
