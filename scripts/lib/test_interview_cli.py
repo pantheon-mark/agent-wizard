@@ -160,8 +160,13 @@ def _drive_orchestration_build_group(transcript, progress):
     the synthesis fields can cite them as prior derived field keys (DR-5/DR-8)."""
     _drive_approach_roster_group(transcript, progress)
     _record_sources(transcript, "orchestration_build",
-                    {"P1-4", "ARCH-1", "CRED-1", "SCALE-1", "SCALE-2", "SCALE-3", "SCALE-4", "CONC-2"})
-    _derive_confirm(transcript, "INTEGRATIONS", "orchestration_build", "- a calendar feed", sources=["CRED-1"])
+                    {"P1-4", "ARCH-1", "CRED-1", "CRED-2", "CRED-3", "CRED-4", "SCALE-1", "SCALE-2", "SCALE-3", "SCALE-4", "CONC-2"})
+    _derive_confirm(transcript, "INTEGRATIONS", "orchestration_build", "- a calendar feed", sources=["CRED-1", "CRED-2"])
+    _derive_confirm(transcript, "CREDENTIAL_REGISTRY_ROWS", "orchestration_build",
+                    "| Calendar feed | CALENDAR_API_KEY | API key | Provider | Unknown | | manual | Never | Pending |",
+                    sources=["CRED-1", "CRED-2"])
+    _derive_confirm(transcript, "CREDENTIAL_CHECK_CADENCE", "orchestration_build", "quarterly", sources=["CRED-4"])
+    _derive_confirm(transcript, "ROTATION_LEAD_TIME_DAYS", "orchestration_build", "14", sources=["CRED-3"])
     _derive_confirm(transcript, "SCALE_TIER", "orchestration_build", "small", sources=["SCALE-1", "SCALE-2"])
     _derive_confirm(transcript, "ORCHESTRATION_MODEL", "orchestration_build",
                     "A single orchestrator routes work to specialists.", inputs=["INTEGRATIONS"])

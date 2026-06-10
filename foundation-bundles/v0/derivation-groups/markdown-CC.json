@@ -37,13 +37,14 @@
     },
     {
       "group_id": "orchestration_build",
-      "input_question_ids": ["P1-4", "ARCH-1", "CRED-1", "CRED-1a", "CRED-2", "CRED-3", "CRED-4", "CRED-5", "SCALE-1", "SCALE-2", "SCALE-3", "SCALE-4", "CONC-2"],
-      "target_fields": ["ORCHESTRATION_MODEL", "INTEGRATIONS", "SCALE_TIER", "SCALE_TIER_BASIS", "SCALE_TIER_RATIONALE", "COMPLIANCE_GAPS_CONTENT", "TASK_COMPLETION_CHECKLISTS", "BUILD_PHASES_ROWS", "EXECUTION_SEQUENCE", "MVP_CORE_FUNCTION", "MVP_MINIMUM_VIABLE_STATE", "MVP_SUCCESS_CONDITION"],
+      "input_question_ids": ["P1-4", "ARCH-1", "CRED-1", "CRED-2", "CRED-3", "CRED-4", "CRED-5", "SCALE-1", "SCALE-2", "SCALE-3", "SCALE-4", "CONC-2"],
+      "target_fields": ["ORCHESTRATION_MODEL", "INTEGRATIONS", "CREDENTIAL_REGISTRY_ROWS", "CREDENTIAL_CHECK_CADENCE", "ROTATION_LEAD_TIME_DAYS", "SCALE_TIER", "SCALE_TIER_BASIS", "SCALE_TIER_RATIONALE", "COMPLIANCE_GAPS_CONTENT", "TASK_COMPLETION_CHECKLISTS", "BUILD_PHASES_ROWS", "EXECUTION_SEQUENCE", "MVP_CORE_FUNCTION", "MVP_MINIMUM_VIABLE_STATE", "MVP_SUCCESS_CONDITION"],
       "close_after": "step_13",
       "confirmation_marker": "group_orchestration_build_confirmed",
       "preview_docs": ["technical_architecture.md"],
-      "skip_satisfied_if": ["CRED-1a", "CRED-2", "CRED-3", "CRED-4", "CRED-5"],
-      "barrier_stakes": "medium"
+      "skip_satisfied_if": ["CRED-5"],
+      "barrier_stakes": "medium",
+      "special_behaviors": ["RW-37: CRED-1 (inventory) + CRED-2 (per-credential metadata: ENV variable / type / provider / provisional expiry, Claude-proposed + operator-confirmed) feed INTEGRATIONS + the pre-populated CREDENTIAL_REGISTRY_ROWS (Status: Pending); CRED-3 -> ROTATION_LEAD_TIME_DAYS, CRED-4 -> CREDENTIAL_CHECK_CADENCE (wired to the emitted credential-check mechanism); CRED-5 (session-lifetime explanation) is the only skip-satisfiable input. Credential VALUES are obtained/pasted/verified at first boot by the credential-setup skill, never mid-interview."]
     },
     {
       "group_id": "hitl_autonomy",
