@@ -1,7 +1,7 @@
 # 12 — Quality Preferences
 
 ## What this file does
-Configure how the QA system works: investigation reporting style, preferred future alert channel, external source registry, and how often the system checks uncertain outputs with the user. Claude proposes the source registry from the confirmed vision and approach content (read from the transcript; the docs are not on disk yet). The confirmed sources are recorded to the transcript and emitted as `/quality/source_registry.md` at close — nothing is written mid-interview; quality preference values are written to the staging file.
+Configure how the QA system works: investigation reporting style, preferred future alert channel, the monitored-source health detail, and how often the system checks uncertain outputs with the user. The sources themselves were captured once at step 09 (the dependency record); this step confirms which of them are health-monitored and captures any health detail — it does not re-enumerate. The QA-3 answer is recorded to the transcript and the source registry is emitted as `/quality/source_registry.md` at close (a projection of the canonical record) — nothing is written mid-interview; quality preference values are written to the staging file.
 
 ## When this file runs
 After `11_error_handling.md` completes: `step_11: complete` is in `~/claude-wizard-draft/wizard_progress.md`. The staging-file `ERROR_HANDLING_CONFIGURED` mirror is a human-readable convenience, not the gate.
@@ -146,34 +146,32 @@ Write sub-step marker: Append `step_12_QA-2: complete | <timestamp>` to `~/claud
 
 ---
 
-## QA-3 — Source registry initialization [DYNAMIC]
+## QA-3 — Confirm the monitored sources + capture their health detail [DYNAMIC]
 
-Read the confirmed vision and approach content from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`) — the foundation documents are not emitted to disk until close. Identify every external data dependency the system will rely on — specific named sources, services, APIs, and integrations.
+The operator already described their external dependencies once, at step 09. Read the confirmed `EXTERNAL_DEPENDENCY_IDENTITY` record from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`) and take the dependencies tagged with the **`health_monitored`** role — the ones whose uptime and behavior the QA agent watches. **Do NOT re-enumerate sources from scratch.** This step confirms that subset is complete and captures any health detail worth noting.
 
-**Note:** the source registry records specific external sources (e.g., "Salesforce CRM API", "company website"), not input categories. It tracks whether each source is healthy, when it was last verified, and what the system expects from it.
+**Note:** not every dependency is monitored — a manual file upload can't be pinged, so it carries `boundary_input` but not `health_monitored`. You're confirming the watched subset, not re-listing everything.
 
 **Say:**
 
-> Your QA agent monitors every external source your system depends on — so if a connection breaks or a data format changes, the system catches it before it causes problems.
+> Your QA agent keeps an eye on the outside systems yours depends on — so if a connection breaks or a data format changes, it catches it before it causes problems. From what you told me earlier, these are the ones worth watching:
 >
-> Here are all the external sources I see your system relying on:
+> **[Dependency name — from the step-09 list, the health_monitored ones]**
+> [What it is — one sentence.] If it goes down or changes, [what stops or degrades].
 >
-> **[Source plain-language name]**
-> [What it is — one sentence.] Your system needs it to [what it provides]. Without it, [what stops or degrades].
+> **[Repeat for each health_monitored dependency.]**
 >
-> **[Repeat for each source.]**
->
-> Does this list look complete? Is there anything your system will pull from that isn't here?
+> Did I miss anything your system depends on staying up — or is anything here not really worth monitoring?
 
 **Wait for answer.**
 
-- If the user confirms: proceed.
-- If the user removes a source: note the implication and update the list.
-- If the user adds a source: add it with a proposed name, description, and dependency statement. Confirm before proceeding.
+- If the user confirms: capture any health detail (the `health_facet` of the canonical record's annotation) and proceed.
+- If the user says something is NOT worth monitoring: that is a role correction — note it (the `health_monitored` role comes off that dependency) and update the list.
+- If the user names something to monitor that is NOT in the step-09 list: that is a new dependency (or a new role on an existing one) for the canonical record — capture it (name + what-stops + the `health_monitored` role) so it is added to `EXTERNAL_DEPENDENCY_IDENTITY`; it then flows into the source registry automatically.
 - If a source is uncertain: mark it as pending.
-- **If your analysis produces zero external sources** (the system has no external data dependencies — it processes only local or internally generated data): present this to the user: "Based on your vision and architecture, your system doesn't rely on any external data sources — it works with internal data only. Is that right?" If confirmed, in the Recording section below record GATE-style `QA-3 = "none (no external sources)"` (NOT a skip — `SOURCE_REGISTRY_ROWS` is a mandatory `tests_audit` target, and a "none" answer derives to a valid EMPTY table; a skip would leave the target unprojected and the group could not close). Set `SOURCE_COUNT = 0` in the staging file (a convenience flag). Proceed to QA-4. Sources can be added later when integrations are expanded.
+- **If no dependency plays the `health_monitored` role** (nothing external is monitored — the system works with internal data only, or its dependencies can't be pinged): confirm with the user ("Based on what you told me, there's no outside source whose health your system needs to watch. Is that right?"). If confirmed, in the Recording section record `QA-3 = "none (no monitored sources)"` (NOT a skip). The `SOURCE_REGISTRY_ROWS` projection then renders a valid EMPTY table (no health_monitored rows). Set `SOURCE_COUNT = 0` in the staging file (a convenience flag). Proceed to QA-4.
 
-The confirmed source list is *recorded* to the transcript in the Recording section below as the QA-3 source answer — nothing is written to a project directory mid-interview. The `quality/source_registry.md` file is generated at close from the recorded QA-3 answer via the `SOURCE_REGISTRY_ROWS` derived field (which pre-populates the emitted registry's source rows).
+The confirmed health detail is *recorded* to the transcript in the Recording section below as the QA-3 source answer (it enriches the canonical record's annotation `health_facet`, which the `SOURCE_REGISTRY_ROWS` projection reshapes at the barrier) — nothing is written to a project directory mid-interview. The `quality/source_registry.md` file is generated at close.
 
 Write sub-step marker: Append `step_12_QA-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -237,7 +235,7 @@ Record this step's derivation-group source answers to `~/claude-wizard-draft/wiz
 ```
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-1 --group tests_audit --value "<investigation reporting style>"
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-2 --group hitl_autonomy --value "<future feedback channel preference>"
-python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-3 --group tests_audit --value "<external-source registry: ONE structured row per confirmed source, carrying Source name | Type (use 'Unknown' if unconfirmed) | Purpose (what it provides) | What stops without it. Record the structured facts, not just source names — the SOURCE_REGISTRY_ROWS derivation needs them and will otherwise have to fabricate. Use 'none (no external sources)' if zero.>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-3 --group tests_audit --value "<health detail for the health_monitored dependencies from the step-09 record (enriches the annotation health_facet); + any monitored dependency the operator added here. Use 'none (no monitored sources)' if zero. Name/type/purpose/what-stops already live in the canonical record — do NOT re-state them; the SOURCE_REGISTRY_ROWS projection reshapes them.>"
 python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-4 --group tests_audit --reason "confidence flagging threshold; not a foundation-doc source"
 ```
 
@@ -265,7 +263,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-QA-1 through QA-4 complete. QA-3 recorded to the transcript as the `tests_audit` source for `SOURCE_REGISTRY_ROWS` (it derives at the group barrier and pre-populates the generated `/quality/source_registry.md` at close); nothing written to a project directory mid-interview. QA_REPORTING_STYLE, FUTURE_ALERT_CHANNEL, and CONFIDENCE_FLAGGING_THRESHOLD written to staging file. QA_CONFIGURED = true in the staging file (a convenience flag).
+QA-1 through QA-4 complete. QA-3 confirms the `health_monitored` subset of the step-09 dependency record and captures each one's health detail (enriching the annotation that the `SOURCE_REGISTRY_ROWS` projection reshapes at the barrier into the generated `/quality/source_registry.md`); nothing written to a project directory mid-interview. QA_REPORTING_STYLE, FUTURE_ALERT_CHANNEL, and CONFIDENCE_FLAGGING_THRESHOLD written to staging file. QA_CONFIGURED = true in the staging file (a convenience flag).
 
 **Write completion marker:** Append `step_12: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

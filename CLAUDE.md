@@ -47,7 +47,7 @@ The wizard runs as a state machine through 16 numbered files. Each file specifie
 | `wizard/interview/06_approach.md` | Approach document derivation and confirmation |
 | `wizard/interview/07_advisors.md` | Advisor identification and knowledge base seeding |
 | `wizard/interview/08_architecture.md` | Orchestration model, agent roster, tiers, permissions |
-| `wizard/interview/09_credentials.md` | Credential inventory, .env and .gitignore setup, rotation preferences |
+| `wizard/interview/09_credentials.md` | System boundaries & external dependencies — capture every external dependency once with its role(s); credentials sub-pass for the ones that need a login or key |
 | `wizard/interview/10_validation.md` | Input type inventory, domain sensitivity, pushback behavior |
 | `wizard/interview/11_error_handling.md` | Notification verbosity, three-strikes threshold |
 | `wizard/interview/12_qa_settings.md` | QA reporting style, source registry, confidence flagging |

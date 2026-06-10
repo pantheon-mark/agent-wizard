@@ -73,38 +73,36 @@ Before the validation questions below, read `wizard/interview/_operator_interact
 
 ## How to run this phase
 
-Read the confirmed vision, approach, and architecture content from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`) before speaking — the foundation documents are not emitted to disk until close, so the transcript is the source. Build a complete candidate list of input types and domain areas from everything you find — every source of data, every user action, every external feed the agents will receive.
+The operator already described their external dependencies once, at step 09. Read the confirmed `EXTERNAL_DEPENDENCY_IDENTITY` record from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`) and take the dependencies tagged with the **`boundary_input`** role — the ones that send data into the system. **Do NOT re-enumerate inputs from scratch.** This step confirms that subset is the complete set of inputs the validation gate should check, and captures one new detail per input: what could go wrong with it (the validation risk). Domain sensitivity (GATE-2) is a separate, per-domain setting and is captured fresh.
 
-**The user does not design the validation configuration.** You propose it. They confirm, remove, or adjust.
+**The user does not design the validation configuration.** You present the `boundary_input` subset they already confirmed and the validation detail; they confirm or adjust.
 
 Note: agent-to-agent handoffs are not routed through the validation gate. This gate governs inputs arriving at the system boundary — from external sources, users, and integrations.
 
 ---
 
-## GATE-1 — Input type inventory [DYNAMIC]
+## GATE-1 — Confirm the inputs + capture their validation risk [DYNAMIC]
 
-Present the proposed input type inventory. For each input: what it is, why it needs to be checked, and what could go wrong without the check.
+Present the `boundary_input` subset of the dependencies the operator already confirmed at step 09 — the ones that send data in. Do not re-ask what they are; confirm the subset is complete and capture, per input, what could go wrong with it.
 
 **Say:**
 
-> Before your agents start working, everything coming into the system gets checked — to catch problems before they cause bad outputs.
+> Before your agents start working, everything coming into the system gets checked — to catch problems before they cause bad outputs. From what you told me earlier, these are the things your system takes data from:
 >
-> Here's every type of input I see your system receiving, based on your vision, approach, and architecture:
+> **[Dependency name — from the step-09 list, the boundary_input ones]**
+> What could go wrong here: [specific risk — e.g., "customer names can contain formatting that breaks downstream reports" or "dates can be ambiguous without a format check"]. So on the way in, the system checks for that.
 >
-> **[Input type plain-language name]**
-> [What it is — one sentence.] It needs to be checked because [specific risk — e.g., "customer names can contain formatting that breaks downstream reports" or "dates can be ambiguous without a format check"]. Without the check, [what could go wrong].
+> **[Repeat for each boundary_input dependency.]**
 >
-> **[Repeat for each input type.]**
->
-> Does this list look complete? Is there anything you'd expect the system to receive that isn't here?
+> Did I miss anything that sends data into your system — or is anything here actually not an input? And for each one, does that risk sound right?
 
 **Wait for answer.**
 
-- If the user confirms: proceed to GATE-2.
-- If the user removes an input type: note the implication briefly ("Understood — that source won't be checked on the way in") and update the list.
-- If the user adds an input type: add it with a proposed name, description, and check rationale. Confirm before proceeding.
+- If the user confirms: capture the per-input validation risk (this becomes the `boundary_input_facet` of the canonical record's annotation) and proceed to GATE-2.
+- If the user says something is NOT actually an input: that is a role correction to the dependency record — note it (the `boundary_input` role comes off that dependency) and update the list.
+- If the user names something that sends data in but is NOT in the step-09 list: that is a new dependency (or a new role on an existing one) for the canonical record — capture it (name + what-stops + the `boundary_input` role) so it is added to `EXTERNAL_DEPENDENCY_IDENTITY`; it then flows into the validation gate automatically.
 - If an input source is uncertain: mark it as pending. Note it clearly. It must be resolved before the system runs fully.
-- **If your analysis produces zero external input types** (the system processes only internally generated data with no external sources or user inputs at the system boundary): present this to the user: "Based on your vision and architecture, your system receives all data internally — no external sources or user-provided inputs cross the system boundary. Is that right?" If confirmed, write `VALIDATION_CONFIGURED = true` and `INPUT_TYPE_COUNT = 0` to the staging file. There are no domain areas to configure, so in the Recording section below record GATE-1 = `"none (internal-only system; no external inputs)"` and GATE-2 = `"none (no external input domains)"` (NOT skips — the `tests_audit` group derives `INPUT_TYPE_INVENTORY` + `DOMAIN_SENSITIVITY_SETTINGS` as mandatory targets, and these "none" answers derive to valid EMPTY tables; a skip would leave the targets unprojected and the group could not close). Proceed to GATE-3 and GATE-4 (the override and pushback explanations still apply to internal validation). Note that input types can be added later when integrations are expanded.
+- **If no dependency plays the `boundary_input` role** (the system receives all data internally — nothing crosses the boundary inward): confirm with the user ("Based on what you told me, nothing sends data into your system from outside — it all comes from inside. Is that right?"). If confirmed, write `VALIDATION_CONFIGURED = true` and `INPUT_TYPE_COUNT = 0`. In the Recording section record GATE-1 = `"none (no inbound dependencies)"` and GATE-2 = `"none (no external input domains)"` (NOT skips). The `INPUT_TYPE_INVENTORY` projection then renders a valid EMPTY table (no boundary_input rows). Proceed to GATE-3 and GATE-4 (the override and pushback explanations still apply to internal validation).
 
 Write sub-step marker: Append `step_10_GATE-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -200,10 +198,10 @@ Write sub-step marker: Append `step_10_WRITE: complete | <timestamp>` to `~/clau
 
 ## Recording answers (event transcript)
 
-Record this step's `tests_audit` source answers to `~/claude-wizard-draft/wizard_transcript.jsonl`. GATE-1 (input-type inventory) and GATE-2 (domain sensitivity) carry operator content that feeds the agent-specific tests; GATE-3 (override behavior) and GATE-4 (hard vs soft pushback) are explanations with no derivation source content, recorded as skips (registry skip-satisfied):
+Record this step's `tests_audit` source answers to `~/claude-wizard-draft/wizard_transcript.jsonl`. GATE-1 now carries the per-input validation risk for the `boundary_input` dependencies (it enriches the canonical record's annotation `boundary_input_facet`, which the `INPUT_TYPE_INVENTORY` projection reshapes at the barrier) plus any inbound dependency the operator added here; GATE-2 (domain sensitivity) feeds `DOMAIN_SENSITIVITY_SETTINGS`. GATE-3 (override behavior) and GATE-4 (hard vs soft pushback) are explanations with no derivation source content, recorded as skips (registry skip-satisfied):
 
 ```
-python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid GATE-1 --group tests_audit --value "<input type inventory>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid GATE-1 --group tests_audit --value "<per-boundary_input-dependency validation risk; + any inbound dependency added here>"
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid GATE-2 --group tests_audit --value "<domain sensitivity configuration>"
 python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid GATE-3 --group tests_audit --reason "override behavior explanation; no derivation source content"
 python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid GATE-4 --group tests_audit --reason "hard vs soft pushback explanation; no derivation source content"
@@ -233,7 +231,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-GATE-1 through GATE-4 complete. GATE-1 (input type inventory) and GATE-2 (domain sensitivity) recorded to the transcript as `tests_audit` source answers (they derive into `INPUT_TYPE_INVENTORY` + `DOMAIN_SENSITIVITY_SETTINGS` at the group barrier and pre-populate the generated `quality/validation_gate_config.md` at close); GATE-3/GATE-4 recorded as skips. VALIDATION_CONFIGURED = true in the staging file (convenience flag). Nothing written to a project directory mid-interview.
+GATE-1 through GATE-4 complete. GATE-1 confirms the `boundary_input` subset of the step-09 dependency record and captures each input's validation risk (enriching the annotation that the `INPUT_TYPE_INVENTORY` projection reshapes); GATE-2 (domain sensitivity) feeds `DOMAIN_SENSITIVITY_SETTINGS`. Both are recorded as `tests_audit` source answers and pre-populate the generated `quality/validation_gate_config.md` at close; GATE-3/GATE-4 recorded as skips. VALIDATION_CONFIGURED = true in the staging file (convenience flag). Nothing written to a project directory mid-interview.
 
 **Write completion marker:** Append `step_10: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

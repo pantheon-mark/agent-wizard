@@ -1,9 +1,11 @@
-# 09 — Credentials
+# 09 — System boundaries & external dependencies
 
 ## What this file does
-**Capture-only.** Identify every credential the system will need, capture light metadata for each (type, provider, expiry behavior), and capture the operator's two global expiry preferences (warning lead time, no-expiry check cadence). Claude proposes the full credential inventory + per-credential metadata from the confirmed vision, approach, and architecture content — the operator confirms and adjusts but is never asked to enumerate credentials from scratch, and is never asked to know each provider's expiry rules.
+**Capture-only.** Identify every external dependency the system relies on — anything it receives data from, sends data to, monitors the health of, or needs a login/key for — and capture each one ONCE with the role(s) it plays. Claude proposes the full dependency inventory from the confirmed vision, approach, and architecture content; the operator confirms and adjusts but is never asked to enumerate dependencies from scratch. For the dependencies that need a login or key, a short credential sub-pass captures light metadata (type, provider, expiry behavior). The operator also sets two global credential-expiry preferences (warning lead time, no-expiry check cadence).
 
-No files are created here and no credential values are collected. The deterministic generator emits the protection files at close (`.gitignore`, an empty `.env`, the pre-populated `/security/credentials_registry.md` with `Status: Pending` rows, `/security/gitignore_manifest.md`). The operator obtains, pastes, and verifies each value **after the build, at first boot**, guided by the generated system's credential-setup skill — that is the right place for it: the `.env` exists, the system can verify, and the operator is walked through it interactively rather than left with static instructions. This step's job is to capture what the build + first-boot setup need.
+This is the single place the operator describes their external dependencies. Later steps (input validation, QA monitoring) reuse this same list — they confirm which dependencies play their role and add a detail, but they never re-ask "what are your external systems."
+
+No files are created here and no credential values are collected. The deterministic generator emits everything at close from the confirmed inventory: the validation gate, the source registry, the credentials registry (`Status: Pending` rows), the protection files (`.gitignore`, an empty `.env`, `/security/gitignore_manifest.md`). The operator obtains, pastes, and verifies each credential value **after the build, at first boot**, guided by the generated system's credential-setup skill — the right place for it, where the `.env` exists and the system can verify interactively.
 
 ## When this file runs
 After `08_architecture.md` completes: `step_08: complete` is in `~/claude-wizard-draft/wizard_progress.md` and `group_approach_roster_confirmed` is recorded in the transcript. These are the authoritative completion signals; the staging-file `ARCHITECTURE_CONFIRMED` mirror is a human-readable convenience, not the gate.
@@ -23,13 +25,13 @@ If it is: write the current staging file to disk, give the user the following in
 >
 > "Resume wizard from 09_credentials.md. Step 9 (architecture) is complete. Read the staging file and the confirmed interview transcript, then continue from where you left off."
 
-Do not begin CRED-1 until you are confident the full phase will complete before compaction risk.
+Do not begin DEP-1 until you are confident the full phase will complete before compaction risk.
 
 ---
 
 ## Sub-step resume check
 
-Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_09_*` (e.g., `step_09_CRED-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_09_*` (e.g., `step_09_DEP-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
 
 If all sub-step markers for this step are present but the step-level marker (`step_09: complete`) is not, proceed directly to the success condition.
 
@@ -60,7 +62,7 @@ Before doing anything else in this step:
 
 ## Operator Interaction Contract
 
-Before the credential questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it — propose the credential inventory grounded in the operator's vision and architecture, plain voice, no filler. This step has copy-paste-exact commands and file contents (`.env`, `.gitignore`) that stay verbatim per rule #3; the contract's "intent, not script" latitude covers conversational wording only.
+Before the questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it — propose the dependency inventory grounded in the operator's vision and architecture, plain voice, no filler. This step has copy-paste-exact commands and file contents (`.env`, `.gitignore`) that stay verbatim per rule #3; the contract's "intent, not script" latitude covers conversational wording only.
 
 ---
 
@@ -68,89 +70,95 @@ Before the credential questions below, read `wizard/interview/_operator_interact
 
 **Say:**
 
-> **Step 10 of 16 — Credentials**
-> We'll set up the keys and logins your system needs to connect to external services.
+> **Step 10 of 16 — System boundaries & external dependencies**
+> Every system touches the outside world somewhere — a spreadsheet it reads, a service it sends mail through, a site it logs into. Let's list those once, so the rest of the setup can reuse the list instead of asking you again.
 
 ---
 
 ## How to run this phase
 
-Read the confirmed vision and approach/architecture content from the transcript before speaking (those foundation documents are emitted at close, not on disk yet). Build a complete candidate credential list from everything you find — data sources, APIs, integrations, external services, any system the agents will connect to.
+Read the confirmed vision and approach/architecture content from the transcript before speaking (those foundation documents are emitted at close, not on disk yet). Build ONE complete candidate list of external dependencies from everything you find — data sources, files, APIs, integrations, outbound services, any system the agents connect to, monitor, or sign into.
 
-**The operator does not design the credential list.** You propose it — the inventory and the per-credential metadata. They confirm, remove, or add.
+**The operator does not design this list.** You propose it — the dependencies, what each one is for, and which relationship(s) the system has with it. They confirm, remove, or add.
 
-No credential value is collected here; values are pasted at first boot, not during the interview. For each credential you capture metadata only: plain-language name, ENV-variable name, type, provider, and provisional expiry behavior. Expiry behavior you PROPOSE from what you know about the provider, **marked as provisional** ("I believe this is a key that doesn't expire on its own — I haven't checked your account; the system will confirm by watching it"); **default to Unknown when you're not sure**. Never ask the operator to state a provider's expiry rules — ask only what they can actually know (which service, whether they have an account / admin access, whether it's a key vs. a login).
+For each dependency, the relationship is one or more of three **roles**:
+
+- **It sends data in** — the system reads from it, so what comes in needs checking (a spreadsheet of tasks, an inbound form, a file upload).
+- **Its health is watched** — the system depends on it staying up and behaving, so it's worth monitoring (an API that can go down, a feed that can go stale).
+- **It needs a login or key** — the system has to authenticate to use it (an API key, a username/password login).
+
+A dependency can play several roles (an inbound CRM API does all three) or just one (a manual file upload only sends data in; an outbound mail server is watched and needs a login but takes no input). You propose the roles from what the dependency is; the operator corrects.
+
+Do NOT ask the operator to state a provider's expiry rules or anything technical they can't know — ask only what they can actually know (which service, whether they have an account, whether it's a key or a login).
 
 ---
 
-## CRED-1 — Credential inventory [DYNAMIC]
+## DEP-1 — External-dependency inventory [DYNAMIC]
 
-Present the proposed credential inventory. For each credential: what it is, what the system needs it for, and what stops working without it.
+Present the proposed dependency inventory. For each: a plain-language name, what it is, what the system uses it for, what stops without it, and which role(s) it plays.
 
 **Say:**
 
-> Before we start collecting anything, I want to show you every credential your system will need — so nothing surprises you later.
+> Based on your vision, approach, and architecture, here's every outside system I think yours depends on — so nothing surprises you later:
 >
-> Based on your vision, approach, and architecture documents, here's what I'm seeing:
+> **[Dependency plain-language name]**
+> [What it is — one sentence in plain language.] Your system uses it to [what it does]. Without it, [what stops or degrades].
+> Relationship: [it sends data in / its health is watched / it needs a login or key — one or more, in plain words].
 >
-> **[Credential plain-language name]**
-> [What it is — one sentence in plain language.] Your system needs it to [what it does]. Without it, [what stops or degrades].
+> **[Repeat for each dependency.]**
 >
-> **[Repeat for each credential.]**
->
-> Does this list look complete? Is there anything here you know you don't have access to yet, or anything missing that you'd expect to need?
+> Does this list look complete? Anything here you don't actually use, or anything missing you'd expect to need? And for each one — did I get the relationship right?
 
 **Wait for answer.**
 
-- If the operator confirms: proceed to CRED-2.
-- If the operator removes a credential: note what capability is affected, confirm, and remove it from the list.
-- If the operator adds a credential: add it with a proposed name, function, and impact statement. Confirm before proceeding.
-- If the operator doesn't have a credential yet: that's expected — none are obtained during the interview. Every credential is obtained at first-boot setup; just confirm it belongs on the list.
+- If the operator confirms: proceed to the credential sub-pass.
+- If the operator removes a dependency: note what capability is affected, confirm, and remove it.
+- If the operator adds one: add it with a proposed name, purpose, impact, and role(s). Confirm before proceeding.
+- If the operator corrects a role: use their correction. Every dependency must end with at least one role.
+- If the operator doesn't have a dependency set up yet: that's expected — nothing is obtained during the interview. Just confirm it belongs on the list.
 
-Store: CREDENTIAL_COUNT = number of confirmed credentials.
+Store: DEPENDENCY_COUNT = number of confirmed dependencies. For each, hold its name, type (use "Unknown" if unclear), purpose, what-stops, and confirmed role(s).
 
-Write sub-step marker: Append `step_09_CRED-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+Write sub-step marker: Append `step_09_DEP-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
-**If zero credentials confirmed (operator removed all proposed credentials or none are needed):** Skip the CRED-2 metadata pass and the CRED-3/CRED-4 prompts. Store CREDENTIAL_COUNT = 0 and CREDENTIALS_CONFIRMED = true in the staging file. The generator still emits the protection files (`.gitignore` + empty `.env`) at close regardless. **Still record the group inputs so the `orchestration_build` group can close** — in the Recording section below, record CRED-1 = `"none"`, CRED-2 = `"none (no credentials)"`, CRED-3 = `"14"`, CRED-4 = `"quarterly"` (defaults; they only matter if a credential is added later), and skip CRED-5. Say:
+**If zero dependencies confirmed (the system is fully self-contained):** Skip the credential sub-pass and the CRED-3/CRED-4 prompts. Store DEPENDENCY_COUNT = 0 and CREDENTIALS_CONFIRMED = true. The generator still emits the protection files (`.gitignore` + empty `.env`) and empty registries at close. In the Recording section below, record DEP-1 = `"none"`, CRED-3 = `"14"`, CRED-4 = `"quarterly"` (defaults; they only matter if a dependency is added later), skip CRED-5, and derive `EXTERNAL_DEPENDENCY_IDENTITY` as an empty list (`[]`). Say:
 
-> No credentials needed right now — that's fine. Your system still ships with secrets protected, in case you add a credential later. You can add one at any time by telling the system "add a credential."
+> No outside dependencies right now — that's fine. Your system still ships with secrets protected, in case you add one later. You can add a dependency at any time by telling the system about it.
 
 Then run the Recording section with those values and proceed to the success condition.
 
 ---
 
-## Protection files (emitted at close — nothing is written here)
+## Credential sub-pass [DYNAMIC]
 
-The protection files are NOT created during the interview (there is no project directory yet — the system is assembled at close). At close, the deterministic generator emits, in the correct order: `.gitignore` (with `.env` and `/security/session_cookies/` excluded), an empty `.env`, the pre-populated `/security/credentials_registry.md` (rows ship `Status: Pending`, derived from the inventory + per-credential metadata captured below), and `/security/gitignore_manifest.md`. The `.env`-is-gitignored guarantee holds structurally: the generator emits `.gitignore` (excluding `.env`) and the empty `.env` together, and the operator only adds real values later, at first-boot setup. **Do not write any of these files now.** Proceed to CRED-2 to capture the per-credential metadata.
+*Run this only for the dependencies the operator confirmed play the **needs a login or key** role. Skip it entirely if none do.*
 
----
-
-## CRED-2 — Per-credential metadata [DYNAMIC]
-
-Work through each confirmed credential in turn and capture its metadata. **No obtaining, no pasting, no testing here** — all of that happens at first-boot setup, walked by the credential-setup skill. For each credential you propose the metadata and the operator confirms or corrects:
+Work through each login/key dependency in turn and capture its credential metadata. **No obtaining, no pasting, no testing here** — all of that happens at first boot, walked by the credential-setup skill. For each you propose the metadata and the operator confirms or corrects:
 
 - **ENV-variable name** — the name the system reads it from (e.g. `CALENDAR_API_KEY`). Propose a clear one.
-- **Type** — API key / OAuth token / username+password login / other. You can usually tell from the provider; confirm with the operator only the part they'd actually know (e.g. "you sign into this one with a username and password, right?").
+- **Type** — API key / OAuth token / username+password login / other. You can usually tell from the provider; confirm only the part the operator would actually know (e.g. "you sign into this one with a username and password, right?").
 - **Provider** — the service it comes from.
-- **Expiry behavior (PROVISIONAL — your proposal, never an assertion).** From what you know about the provider, propose whether it expires and how it renews, said honestly. **Default to Unknown when unsure.** Never ask the operator to state a provider's expiry rules — that's not something they can know.
+- **Expiry behavior (PROVISIONAL — your proposal, never an assertion).** From what you know about the provider, propose whether it expires and how it renews, said honestly. **Default to Unknown when unsure.** Never ask the operator to state a provider's expiry rules.
 
-**For each credential, say:**
+**For each login/key dependency, say:**
 
-> **[Credential plain-language name]** — this comes from [provider], and it's [a key the system uses / a login you sign into].
+> **[Dependency name]** — this comes from [provider], and it's [a key the system uses / a login you sign into].
 > The system will store it under the name `[ENV_VAR_NAME]`.
 > [Provisional expiry, said honestly — e.g. "I believe this kind of key doesn't expire on its own; I haven't checked your account, so the system will keep an eye on it and tell you if that changes." OR "I'm not certain how this one expires — the system will watch it and confirm."]
 >
 > Does that look right? Anything to correct?
 
-**Wait for answer.** Record the confirmed metadata (ENV-variable name, type, provider, provisional expiry). You are NOT collecting the value and NOT testing anything here — that is the first-boot setup step. If the operator corrects the type, provider, or expiry, use their correction; if they don't know, leave expiry as Unknown.
+**Wait for answer.** Record the confirmed metadata (ENV-variable name, type, provider, provisional expiry) against that dependency. You are NOT collecting the value and NOT testing anything here. If the operator corrects the type, provider, or expiry, use their correction; if they don't know, leave expiry as Unknown.
 
-This metadata is what pre-populates the credentials registry (`Status: Pending`, no values) at close, and what the first-boot credential-setup skill uses to walk the operator through obtaining each value. Capture it for every confirmed credential, then proceed to CRED-3.
+This metadata is what pre-populates the credentials registry (`Status: Pending`, no values) at close, and what the first-boot credential-setup skill uses to walk the operator through obtaining each value.
 
-Write sub-step marker: Append `step_09_CRED-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+Write sub-step marker: Append `step_09_CRED-META: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
 ## CRED-3 — Rotation lead time [FIXED — topic]
+
+*Skip if no dependency needs a login or key.*
 
 **Say:**
 
@@ -158,7 +166,7 @@ Write sub-step marker: Append `step_09_CRED-2: complete | <timestamp>` to `~/cla
 >
 > How many days' notice do you want before a credential expires?
 >
-> I'd suggest **14 days** — that's enough time to handle it without urgency, even if you're busy. But if you want more or less buffer, tell me.
+> I'd suggest **14 days** — enough time to handle it without urgency, even if you're busy. But if you want more or less buffer, tell me.
 
 **Wait for answer.**
 
@@ -172,6 +180,8 @@ Write sub-step marker: Append `step_09_CRED-3: complete | <timestamp>` to `~/cla
 ---
 
 ## CRED-4 — No-expiry confirmation cadence [FIXED — topic]
+
+*Skip if no dependency needs a login or key.*
 
 **Say:**
 
@@ -196,7 +206,7 @@ Write sub-step marker: Append `step_09_CRED-4: complete | <timestamp>` to `~/cla
 
 ## CRED-5 — Session lifetime [EXPLANATION]
 
-*Show this section only if the confirmed credential list includes any username/password credentials.*
+*Show this section only if the confirmed login/key dependencies include any username/password login.*
 
 **Say:**
 
@@ -214,23 +224,28 @@ Write sub-step marker: Append `step_09_CRED-5: complete | <timestamp>` to `~/cla
 
 ---
 
+## Protection files (emitted at close — nothing is written here)
+
+The protection files are NOT created during the interview (there is no project directory yet — the system is assembled at close). At close, the deterministic generator emits, in the correct order: `.gitignore` (with `.env` and `/security/session_cookies/` excluded), an empty `.env`, the pre-populated `/security/credentials_registry.md` (rows ship `Status: Pending`, derived from the login/key dependencies), and `/security/gitignore_manifest.md`. The `.env`-is-gitignored guarantee holds structurally: the generator emits `.gitignore` (excluding `.env`) and the empty `.env` together, and the operator only adds real values later, at first-boot setup. **Do not write any of these files now.**
+
+---
+
 ## Capture complete (nothing written to disk)
 
-After CRED-1 through CRED-5, there are no files to write or verify here — the generator emits the protection files (`.gitignore`, empty `.env`, `/security/gitignore_manifest.md`) and the pre-populated `/security/credentials_registry.md` (rows `Status: Pending`) at close. Confirm the capture is complete and summarize for the operator.
+After DEP-1, the credential sub-pass, and CRED-3/4/5, there are no files to write or verify here — the generator emits the protection files and the pre-populated registries at close. Confirm the capture is complete and summarize for the operator.
 
 Update staging file: CREDENTIALS_CONFIRMED = true
 
 **Say:**
 
-> Your credentials are captured. When your system is built, it ships with secrets already protected — an empty, git-excluded `.env`, and a credential checklist that lists exactly what's needed.
+> Your external dependencies are captured — once, with the role each one plays. When your system is built, this one list becomes everything that needs it: what the system checks on the way in, what it keeps an eye on, and what it needs a login or key for. Here's what we captured:
 >
-> Here's what we captured:
->
-> - **[n] credentials** your system will need — you'll add the actual values at first-boot setup, and the system walks you through getting each one
+> - **[n] external dependencies**, each tagged with how your system uses it
+> - **[m] of them need a login or key** — you'll add the actual values at first-boot setup, and the system walks you through getting each one
 > - Expiry warnings set to **[n] days** before a credential expires
 > - Credentials that don't expire re-checked **[cadence]**
 >
-> Next we'll set up the input validation layer — the guardrails that check what goes into your system.
+> Next we'll set up the input validation layer — the guardrails that check what comes into your system.
 
 Write sub-step marker: Append `step_09_WRITE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -238,15 +253,24 @@ Write sub-step marker: Append `step_09_WRITE: complete | <timestamp>` to `~/clau
 
 ## Recording answers (event transcript)
 
-Record the credential captures to `~/claude-wizard-draft/wizard_transcript.jsonl` as `orchestration_build` source answers. CRED-1 (inventory) + CRED-2 (per-credential metadata) feed `INTEGRATIONS` + the pre-populated `CREDENTIAL_REGISTRY_ROWS`; CRED-3 feeds `ROTATION_LEAD_TIME_DAYS`; CRED-4 feeds `CREDENTIAL_CHECK_CADENCE` — all derived at the step-13 `orchestration_build` barrier. CRED-5 (the session-lifetime explanation) carries no derivation source and is recorded as a skip:
+Record the dependency inventory + global credential prefs to `~/claude-wizard-draft/wizard_transcript.jsonl`, then derive and confirm the canonical identity record and close the dependency group. DEP-1 (the role-tagged inventory) is the single source the canonical record is built from; it also feeds the validation (step 11) and QA (step 13) groups so a later edit re-flags them. CRED-3 feeds `ROTATION_LEAD_TIME_DAYS`, CRED-4 feeds `CREDENTIAL_CHECK_CADENCE` (both derived at the step-13 `orchestration_build` barrier). CRED-5 (the session-lifetime explanation) carries no derivation source and is recorded as a skip.
 
 ```
-python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CRED-1 --group orchestration_build --value "<the credential / integration inventory>"
-python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CRED-2 --group orchestration_build --value "<per-credential metadata: ENV variable / type / provider / provisional expiry, one block per credential>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid DEP-1 --group dependency_inventory --value "<the role-tagged external-dependency inventory: per dependency, name / what it is / purpose / what stops without it / role(s) / login-or-key metadata>"
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CRED-3 --group orchestration_build --value "<rotation warning lead time in days, e.g. 14>"
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CRED-4 --group orchestration_build --value "<no-expiry check cadence: monthly / quarterly / biannual>"
 python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CRED-5 --group orchestration_build --reason "session-lifetime explanation; no derivation source content"
 ```
+
+Now derive the canonical identity record — a JSON array, one object per confirmed dependency: `id` (a short stable slug, e.g. `google_sheet`), `name`, `type` (or `"Unknown"`), `roles` (the confirmed subset of `boundary_input` / `health_monitored` / `needs_credential`), and a `credential_facet` (`env_var` / `cred_type` / `provider` / `provisional_expiry`) for the `needs_credential` ones. Then confirm it (the operator already confirmed the inventory inline above) and close the dependency group so step 09 can complete:
+
+```
+python3 wizard/scripts/interview_cli.py derive-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field EXTERNAL_DEPENDENCY_IDENTITY --sources DEP-1 --value '<JSON array of {id, name, type, roles, credential_facet?}>'
+python3 wizard/scripts/interview_cli.py confirm-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field EXTERNAL_DEPENDENCY_IDENTITY --group dependency_inventory --state accepted
+python3 wizard/scripts/interview_cli.py close-group --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --progress ~/claude-wizard-draft/wizard_progress.md --group dependency_inventory
+```
+
+The annotation (purpose / what-stops / per-role detail) and the three tabular registries are NOT derived here — they are built later: the annotation closes at step 13 after the validation and QA steps enrich its per-role detail, and the registries are deterministic projections computed at close. This step's job is the canonical identity record.
 
 ---
 
@@ -272,9 +296,9 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-CRED-1 through CRED-5 complete — **captured, not written to disk** (the protection files + the pre-populated registry emit at close). The inventory (CRED-1) + per-credential metadata (CRED-2) + rotation lead time (CRED-3) + no-expiry cadence (CRED-4) are recorded as `orchestration_build` source answers; CRED-5 recorded as a skip. CREDENTIALS_CONFIRMED = true in the staging file.
+DEP-1, the credential sub-pass, and CRED-3/4/5 complete — **captured, not written to disk** (the protection files + the pre-populated registries emit at close). DEP-1 is recorded as a `dependency_inventory` source answer; CRED-3/CRED-4 as `orchestration_build` source answers; CRED-5 as a skip. `EXTERNAL_DEPENDENCY_IDENTITY` is derived, confirmed, and the `dependency_inventory` group is closed (`group_dependency_inventory_confirmed` recorded). CREDENTIALS_CONFIRMED = true in the staging file.
 
-**Write completion marker:** Append `step_09: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+**Write completion marker:** Append `step_09: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`. (This is refused upstream unless `group_dependency_inventory_confirmed` is recorded first — close the group before marking the step.)
 
 Proceed to `10_validation.md`.
 
@@ -282,15 +306,15 @@ Proceed to `10_validation.md`.
 
 ## Foundation-only adapted path
 
-**Disposition: ADAPT — capture credential inventory as foundation section; skip implementation file writes.**
+**Disposition: ADAPT — capture the external-dependency inventory as a foundation section; skip implementation file writes.**
 
-Conduct the credential identification interview from the existing step content above (CRED-1 through CRED-5; Claude proposes credential inventory from vision + approach + architecture; operator confirms / adjusts).
+Conduct the dependency identification interview from the existing step content above (DEP-1 + the credential sub-pass; Claude proposes the inventory from vision + approach + architecture; operator confirms / adjusts).
 
 **Difference from normal behavior:**
 
 DO NOT:
 
-- Walk operator through obtaining each credential (no `.env` to populate in foundation-only mode)
+- Walk the operator through obtaining each credential (no `.env` to populate in foundation-only mode)
 - Write `.env` to disk
 - Write `.gitignore` to disk (no git init in foundation-only mode)
 - Write `/security/credentials_registry.md` (security directory is implementation-specific)
@@ -298,14 +322,14 @@ DO NOT:
 
 DO:
 
-- Conduct the credential identification (name + purpose + acquisition path per credential)
-- Append captured credential inventory to the staging file under `## Foundation-only-mode captures > Credential inventory` (credential NAMES + purposes + acquisition paths only; NOT actual credential values)
+- Conduct the dependency identification (name + purpose + role(s) + acquisition path per dependency)
+- Append the captured inventory to the staging file under `## Foundation-only-mode captures > External dependency inventory` (dependency NAMES + purposes + roles + acquisition paths only; NOT actual credential values)
 
-At step 15 close, the captured credential inventory extracts to `technical_architecture.md` § "Operational requirements" > "Credential inventory" per `_foundation_only_mode_gate.md` § 5.
+At step 15 close, the captured inventory extracts to `technical_architecture.md` § "Operational requirements" > "External dependencies" per `_foundation_only_mode_gate.md` § 5.
 
 **Important note for the operator (deliver verbatim):**
 
-> In foundation-only mode, I'm capturing your credential inventory as a foundation-level list — what credentials a future implementation will need. I'm not walking you through obtaining each credential or generating a `.env` file. Those steps happen at implementation time, either when you take these foundation docs to Claude Code directly OR when you re-run the wizard once v2 adds support for your project's shape.
+> In foundation-only mode, I'm capturing your external-dependency inventory as a foundation-level list — what a future implementation will connect to, monitor, and need credentials for. I'm not walking you through obtaining each credential or generating a `.env` file. Those steps happen at implementation time, either when you take these foundation docs to Claude Code directly OR when you re-run the wizard once v2 adds support for your project's shape.
 
 **Write completion marker:** Append `step_09: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

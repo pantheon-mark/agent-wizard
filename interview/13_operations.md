@@ -264,13 +264,19 @@ Throughout: synthesis/policy fields cite prior **confirmed field keys** via `--i
 
 ### Barrier 1 — orchestration_build (preview `technical_architecture.md`)
 
-Derive the extraction/classification fields first so the synthesis fields can cite them:
+Derive the extraction/classification fields first so the synthesis fields can cite them. The
+credential + integration surfaces now derive from the canonical dependency record captured at step
+09 (`EXTERNAL_DEPENDENCY_IDENTITY`), NOT from raw credential answers:
 
 ```
 # extraction + classification (cite question-IDs)
-interview_cli derive-field --field INTEGRATIONS --value "<integrations list>" --sources CRED-1
 interview_cli derive-field --field SCALE_TIER --value "<small|medium|large>" --sources SCALE-1,SCALE-2,SCALE-3,SCALE-4   # decision: forced confirm
+interview_cli derive-field --field CREDENTIAL_CHECK_CADENCE --value "<monthly|quarterly|biannual>" --sources CRED-4   # decision: forced confirm
+interview_cli derive-field --field ROTATION_LEAD_TIME_DAYS --value "<days, e.g. 14>" --sources CRED-3
+# projection (deterministic role-filter of the canonical record — no --value, no separate confirm):
+interview_cli derive-projection --field CREDENTIAL_REGISTRY_ROWS   # the needs_credential subset -> credentials_registry.md (Status: Pending)
 # synthesis (cite prior confirmed field keys)
+interview_cli derive-field --field INTEGRATIONS --value "<prose list of the integrations / data sources>" --inputs EXTERNAL_DEPENDENCY_IDENTITY
 interview_cli derive-field --field ORCHESTRATION_MODEL --value "<...>" --inputs INTEGRATIONS
 interview_cli derive-field --field SCALE_TIER_BASIS --value "<...>" --inputs SCALE_TIER
 interview_cli derive-field --field SCALE_TIER_RATIONALE --value "<...>" --inputs SCALE_TIER
@@ -283,7 +289,7 @@ interview_cli derive-field --field MVP_MINIMUM_VIABLE_STATE --value "<...>" --in
 interview_cli derive-field --field MVP_SUCCESS_CONDITION --value "<...>" --inputs VISION_SUCCESS_CRITERIA
 ```
 
-(`interview_cli` = `python3 wizard/scripts/interview_cli.py ... --transcript ~/claude-wizard-draft/wizard_transcript.jsonl` — `--shape markdown-CC` for derive-field.) Confirm each field (`confirm-field --group orchestration_build --state accepted`; forced confirm on SCALE_TIER). Render `technical_architecture.md` via `preview-group --group orchestration_build`, show the operator the rendered markdown, one round of changes, then `close-group --group orchestration_build`.
+(`interview_cli` = `python3 wizard/scripts/interview_cli.py ... --transcript ~/claude-wizard-draft/wizard_transcript.jsonl` — `--shape markdown-CC` for derive-field/derive-projection.) Confirm each derived field (`confirm-field --group orchestration_build --state accepted`; forced confirm on the decision fields SCALE_TIER + CREDENTIAL_CHECK_CADENCE). **`derive-projection` fields are NOT separately confirmed** — a projection is a deterministic view of the already-confirmed canonical record (it auto-projects). Render `technical_architecture.md` via `preview-group --group orchestration_build`, show the operator the rendered markdown, one round of changes, then `close-group --group orchestration_build`.
 
 ### Barrier 2 — hitl_autonomy (preview `execution_plan.md`)
 
@@ -305,6 +311,17 @@ interview_cli derive-field --field AGENT_SPECIFIC_TESTS --value "<markdown list 
 interview_cli confirm-field --field AGENT_SPECIFIC_TESTS --group tests_audit --state accepted
 interview_cli derive-field --field DRIFT_ANALYSIS_CADENCE --value "<DRIFT_CADENCE>" --sources DRIFT-1   # decision: forced confirm
 interview_cli confirm-field --field DRIFT_ANALYSIS_CADENCE --group tests_audit --state accepted
+interview_cli derive-field --field DOMAIN_SENSITIVITY_SETTINGS --value "<table: Domain | Sensitivity level | Rationale | Last reviewed>" --sources GATE-2   # decision: forced confirm
+interview_cli confirm-field --field DOMAIN_SENSITIVITY_SETTINGS --group tests_audit --state accepted
+# The content-only annotation of the canonical dependency record (purpose / what-stops + the
+# per-role detail enriched at steps 11 and 13). MUST be derived + confirmed BEFORE the two
+# projections below, which read it. Build the JSON array from the dependencies already in the
+# step-09 identity record (no orphaned facets — only ids present there).
+interview_cli derive-field --field EXTERNAL_DEPENDENCY_ANNOTATION --value '<JSON array of {id, purpose, what_stops, boundary_input_facet?, health_facet?}>' --sources DEP-1,GATE-1,QA-3
+interview_cli confirm-field --field EXTERNAL_DEPENDENCY_ANNOTATION --group tests_audit --state accepted
+# projections (deterministic role-filter of the canonical record — no --value, no separate confirm):
+interview_cli derive-projection --field INPUT_TYPE_INVENTORY    # the boundary_input subset -> validation_gate_config.md
+interview_cli derive-projection --field SOURCE_REGISTRY_ROWS    # the health_monitored subset -> source_registry.md
 ```
 
 **Deferred-items capture (WI-013):** while in this group, scan the interview for items the operator explicitly deferred ("not now", "later", "phase 2") and capture them as deferred-item content. NOTE (build-side): the emitted `future_items.md` target for these is not yet a manifest field — its re-home is owed before close-assembly retirement (tracked with the advisor-KB gap); do not block the tests_audit close on it at v0. Render both `test_cases.md` and `audit_framework.md` via `preview-group --group tests_audit` (two docs), show the operator, one round, then `close-group --group tests_audit`.
