@@ -87,6 +87,7 @@ def _default_scaffold_inputs() -> Dict[str, str]:
         "CHUNK_CONFIRMATION": "enabled",
         "BASH_AUTHORIZATION": "ask-first (Level 2 default)",
         "CREDENTIAL_CHECK_CADENCE": "quarterly",
+        "ROTATION_LEAD_TIME_DAYS": "14",
         # --- scale tier ---
         "SCALE_TIER": "small",
         "SCALE_TIER_RATIONALE": CONFIGURE,
@@ -154,6 +155,7 @@ def _default_scaffold_inputs() -> Dict[str, str]:
         # --- table-body / list-body placeholders -> empty (valid empty tables/lists) ---
         "AGENT_PERMISSION_ROWS": "",
         "CREDENTIAL_REFERENCE_ROWS": "",
+        "CREDENTIAL_REGISTRY_ROWS": "",
         "VERSION_PIN_ROWS": "",
         "CRON_SCHEDULE_ROWS": "",
         "ADDITIONAL_MONITORING_ROWS": "",

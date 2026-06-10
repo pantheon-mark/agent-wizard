@@ -4,10 +4,10 @@
 Identify every credential the system needs, walk the user through obtaining each one, write them safely to disk, and configure expiry and rotation preferences. Claude proposes the full credential inventory from the vision, approach, and architecture documents — the user confirms and adjusts but is never asked to enumerate credentials from scratch. Produces `.gitignore`, `.env`, `/security/credentials_registry.md`, and `/security/gitignore_manifest.md`.
 
 ## When this file runs
-After `08_architecture.md` completes and ARCHITECTURE_CONFIRMED = true in the staging file.
+After `08_architecture.md` completes: `step_08: complete` is in `~/claude-wizard-draft/wizard_progress.md` and `group_approach_roster_confirmed` is recorded in the transcript. These are the authoritative completion signals; the staging-file `ARCHITECTURE_CONFIRMED` mirror is a human-readable convenience, not the gate.
 
 ## Prerequisites
-ARCHITECTURE_CONFIRMED = true in the staging file. Vision document, approach document, and technical architecture document confirmed on disk.
+`step_08: complete` in `~/claude-wizard-draft/wizard_progress.md`, and `group_vision_confirmed` + `group_approach_roster_confirmed` recorded in `~/claude-wizard-draft/wizard_transcript.jsonl`. The vision and approach/architecture content is confirmed in the transcript; the foundation documents themselves are emitted by the generator at close (`15_close.md`), so they are not on disk yet — read the confirmed content from the transcript, not from disk files.
 
 ---
 
@@ -19,7 +19,7 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 09_credentials.md. ARCHITECTURE_CONFIRMED = true. Read the staging file and technical architecture document, then continue from where you left off."
+> "Resume wizard from 09_credentials.md. Step 9 (architecture) is complete. Read the staging file and the confirmed interview transcript, then continue from where you left off."
 
 Do not begin CRED-1 until you are confident the full phase will complete before compaction risk.
 
@@ -73,7 +73,7 @@ Before the credential questions below, read `wizard/interview/_operator_interact
 
 ## How to run this phase
 
-Read the vision document, approach document, and technical architecture document before speaking. Build a complete candidate credential list from everything you find — data sources, APIs, integrations, external services, any system the agents will connect to.
+Read the confirmed vision and approach/architecture content from the transcript before speaking (those foundation documents are emitted at close, not on disk yet). Build a complete candidate credential list from everything you find — data sources, APIs, integrations, external services, any system the agents will connect to.
 
 **The user does not design the credential list.** You propose it. They confirm, remove, or add.
 

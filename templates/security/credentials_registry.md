@@ -6,10 +6,11 @@
 
 ---
 
-| Name | Type | Provider | Expiry type | Expiry date | Rotation method | Last verified | Status |
-|------|------|----------|------------|------------|----------------|--------------|--------|
+| Name | ENV variable | Type | Provider | Expiry type | Expiry date | Rotation method | Last verified | Status |
+|------|-------------|------|----------|------------|------------|----------------|--------------|--------|
+{{CREDENTIAL_REGISTRY_ROWS}}
 
-*Credentials are added here during wizard setup (CRED-2) as each credential is confirmed and verified.*
+*Pre-populated from the interview as `Pending` rows — metadata only, never values. At first boot the credential-setup skill walks you through obtaining each one, you paste the value into `.env`, the system verifies it, and the row moves to `Active`. The `ENV variable` column is the join key between this metadata and the matching line in `.env`.*
 
 ---
 

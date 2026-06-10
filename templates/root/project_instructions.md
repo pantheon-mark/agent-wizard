@@ -178,6 +178,8 @@ This system's autonomous (unattended/scheduled) work draws on the separate month
 |------------|-------------|-----------------|
 {{CREDENTIAL_REFERENCE_ROWS}}
 
+*Expiry handling: the system warns you {{ROTATION_LEAD_TIME_DAYS}} days before a credential expires, and re-checks credentials that don't expire on their own {{CREDENTIAL_CHECK_CADENCE}}. You don't track expiry yourself — the system tracks each credential and alerts you in time to act.*
+
 ---
 
 ## Version Pins
