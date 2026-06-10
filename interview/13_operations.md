@@ -4,10 +4,10 @@
 Configure how the system behaves during operation. Three technical thresholds (retry threshold, gate conflict timeout, deferred alert limit) are set as **silent defaults** from the system profile — the user has no basis for choosing these values. User-facing questions cover chunk confirmation preference, drift analysis cadence, and scale tier. This step records its operations answers to the event transcript and, at its end, **closes the three operational logical groups** — `orchestration_build`, then `hitl_autonomy`, then `tests_audit` (in that order; the order is load-bearing — see "How to run this phase"). It does **not** write `technical_architecture.md`, `execution_plan.md`, `test_cases.md`, `audit_framework.md`, or `project_instructions.md` — those are emitted by the generator at the end of the interview from the confirmed transcript.
 
 ## When this file runs
-After `12_qa_settings.md` completes and QA_CONFIGURED = true in the staging file.
+After `12_qa_settings.md` completes: `step_12: complete` is in `~/claude-wizard-draft/wizard_progress.md`. The staging-file `QA_CONFIGURED` mirror is a human-readable convenience, not the gate.
 
 ## Prerequisites
-QA_CONFIGURED = true in the staging file.
+`step_12: complete` in `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -89,7 +89,7 @@ The remaining topics require genuine user input: chunk confirmation preference (
 
 *These values are set automatically from the system profile. Do not ask the user — a non-technical user has no basis for choosing between these technical thresholds, and the recommendations are accepted >90% of the time.*
 
-**Before presenting:** Read the vision document and confirmed agent roster. Assess workflow complexity for CONC-2:
+**Before presenting:** Read the confirmed vision content and agent roster from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`) — the foundation documents are not on disk until close. Assess workflow complexity for CONC-2:
 - **Simple** (few agents, mostly sequential handoffs, low concurrency): set `GATE_CONFLICT_TIMEOUT = 30 seconds`
 - **Moderate** (several agents, some parallel activity, shared resources): set `GATE_CONFLICT_TIMEOUT = 2 minutes`
 - **Complex** (many agents, high concurrency, shared databases or external APIs): set `GATE_CONFLICT_TIMEOUT = 5 minutes`
@@ -153,7 +153,7 @@ Write sub-step marker: Append `step_13_START-2: complete | <timestamp>` to `~/cl
 
 ## DRIFT-1 — Drift analysis cadence [FIXED — topic]
 
-**Before asking:** Read the vision document. Assess system complexity and how frequently the user's domain evolves:
+**Before asking:** Read the confirmed vision content from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`) — the foundation documents are not on disk until close. Assess system complexity and how frequently the user's domain evolves:
 - **Simple system or stable domain:** Recommend **monthly**.
 - **Moderate complexity or moderately evolving domain:** Recommend **biweekly**.
 - **Complex system, multiple integrations, or rapidly changing domain:** Recommend **weekly**.

@@ -4,10 +4,10 @@
 Configure how the QA system works: investigation reporting style, preferred future alert channel, external source registry, and how often the system checks uncertain outputs with the user. Claude proposes the source registry from the vision and approach documents. Produces `/quality/source_registry.md` and writes quality preference values to the staging file.
 
 ## When this file runs
-After `11_error_handling.md` completes and ERROR_HANDLING_CONFIGURED = true in the staging file.
+After `11_error_handling.md` completes: `step_11: complete` is in `~/claude-wizard-draft/wizard_progress.md`. The staging-file `ERROR_HANDLING_CONFIGURED` mirror is a human-readable convenience, not the gate.
 
 ## Prerequisites
-ERROR_HANDLING_CONFIGURED = true in the staging file.
+`step_11: complete` in `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -148,7 +148,7 @@ Write sub-step marker: Append `step_12_QA-2: complete | <timestamp>` to `~/claud
 
 ## QA-3 — Source registry initialization [DYNAMIC]
 
-Read the vision document and approach document. Identify every external data dependency the system will rely on — specific named sources, services, APIs, and integrations.
+Read the confirmed vision and approach content from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`) — the foundation documents are not emitted to disk until close. Identify every external data dependency the system will rely on — specific named sources, services, APIs, and integrations.
 
 **Note:** the source registry records specific external sources (e.g., "Salesforce CRM API", "company website"), not input categories. It tracks whether each source is healthy, when it was last verified, and what the system expects from it.
 

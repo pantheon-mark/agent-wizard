@@ -222,6 +222,13 @@ def _drive_tests_audit_group(transcript, progress):
     _derive_confirm(transcript, "AGENT_SPECIFIC_TESTS", "tests_audit",
                     "- monitor surfaces a known item", inputs=["APPROACH_SOLUTION_BRIEF"])
     _derive_confirm(transcript, "DRIFT_ANALYSIS_CADENCE", "tests_audit", "weekly", sources=["DRIFT-1"])
+    # Validation gate: GATE-1 -> INPUT_TYPE_INVENTORY (extraction; mandatory target) and GATE-2 ->
+    # DOMAIN_SENSITIVITY_SETTINGS (classification-from-question; operator-preference branch).
+    _derive_confirm(transcript, "INPUT_TYPE_INVENTORY", "tests_audit",
+                    "| Spreadsheet rows | Google Sheet | task list | reports break | (runtime) | Active |",
+                    sources=["GATE-1"])
+    _derive_confirm(transcript, "DOMAIN_SENSITIVITY_SETTINGS", "tests_audit",
+                    "| Financial | High | money is involved | 2026-06-10 |", sources=["GATE-2"])
     return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
 
 
@@ -480,6 +487,44 @@ class EmitSystemCLITests(unittest.TestCase):
             self.assertTrue(any(t.endswith("CLAUDE.md") for t in tree))
             self.assertTrue(any(t.startswith("agents/prompts/") for t in tree))
             self.assertIn("quality/advisor_knowledge_base.md", tree)
+
+    def test_emit_projects_gate_answers_into_validation_config(self):
+        # Validation-gate regression: GATE-1/GATE-2 derivations must reach the EMITTED
+        # quality/validation_gate_config.md (not just be present as a file with EMPTY tables).
+        # Before the fix the scaffold hardcoded both placeholders to "" so this assertion would fail.
+        from test_emission_plan import _FOUNDATION_DOC_INPUTS
+        from test_interview_bridge import _ai
+        base_env = {"_source": "operator-content", "_derivation_class": "extraction",
+                    "_decision_field": False, "_decision_kind": "none", "_prompt_version": "sha256:p1"}
+        with tempfile.TemporaryDirectory() as td:
+            tpath = Path(td) / "t.jsonl"
+            r = TranscriptRecorder(tpath, clock=lambda: CLOCK)
+            for k, v in _FOUNDATION_DOC_INPUTS.items():
+                r.record_derived_field(k, "vision", v, dict(base_env))
+                r.record_field_confirmation(k, "vision", "accepted")
+            r.record_agent_intent("approach_roster", _ai())
+            # The two validation-gate fields with their real envelopes (extraction decision / classification decision).
+            inv_env = {"_source": "operator-content", "_derivation_class": "extraction",
+                       "_decision_field": True, "_decision_kind": "integration_boundary",
+                       "_source_question_ids": ["GATE-1"], "_prompt_version": "sha256:p1"}
+            sens_env = {"_source": "operator-preference", "_derivation_class": "classification",
+                        "_decision_field": True, "_decision_kind": "threshold",
+                        "_source_question_ids": ["GATE-2"], "_prompt_version": "sha256:p1"}
+            r.record_derived_field("INPUT_TYPE_INVENTORY", "tests_audit",
+                                   "| Spreadsheet rows | Google Sheet | the task list | reports break | (runtime) | Active |",
+                                   inv_env)
+            r.record_field_confirmation("INPUT_TYPE_INVENTORY", "tests_audit", "accepted")
+            r.record_derived_field("DOMAIN_SENSITIVITY_SETTINGS", "tests_audit",
+                                   "| Financial | High | money is involved | 2026-06-10 |", sens_env)
+            r.record_field_confirmation("DOMAIN_SENSITIVITY_SETTINGS", "tests_audit", "accepted")
+            target = Path(td) / "operator-project"
+            cli.cmd_emit_system(str(tpath), SHAPE, str(target), str(REPO_ROOT),
+                                generator_version_override="0" * 40)
+            vgc = (target / "quality/validation_gate_config.md").read_text()
+            self.assertIn("Spreadsheet rows", vgc, "GATE-1 inventory did not reach validation_gate_config.md")
+            self.assertIn("Financial", vgc, "GATE-2 sensitivity did not reach validation_gate_config.md")
+            self.assertNotIn("{{INPUT_TYPE_INVENTORY}}", vgc)
+            self.assertNotIn("{{DOMAIN_SENSITIVITY_SETTINGS}}", vgc)
 
     def test_emit_system_foundation_only_from_a_transcript_file(self):
         # The other e2e branch: a foundation-only transcript (FOUNDATION_ONLY_MODE=true, zero

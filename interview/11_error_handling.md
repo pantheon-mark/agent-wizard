@@ -4,10 +4,10 @@
 Configure how the system communicates when something goes wrong: notification verbosity (user choice) and the three-strikes threshold (silent default — auto-configured at 3 attempts). Includes a plain-language explanation of the difference between build-time and runtime errors. Writes configured values to the staging file for use in `project_instructions.md`.
 
 ## When this file runs
-After `10_validation.md` completes and VALIDATION_CONFIGURED = true in the staging file.
+After `10_validation.md` completes: `step_10: complete` is in `~/claude-wizard-draft/wizard_progress.md`. The staging-file `VALIDATION_CONFIGURED` mirror is a human-readable convenience, not the gate.
 
 ## Prerequisites
-VALIDATION_CONFIGURED = true in the staging file.
+`step_10: complete` in `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 

@@ -164,8 +164,10 @@ This system's autonomous (unattended/scheduled) work draws on the separate month
 
 ## Input Type Inventory
 
-*Confirmed during wizard input validation phase. Updated when new input types are identified or existing ones change.*
+*Confirmed during wizard input validation phase. Updated when new input types are identified or existing ones change. Full validation behavior (sensitivity, override log) lives in `/quality/validation_gate_config.md`.*
 
+| Input type | Source | What it is | What stops without it | Structural rules | Status |
+|------------|--------|------------|----------------------|------------------|--------|
 {{INPUT_TYPE_INVENTORY}}
 
 ---

@@ -1,13 +1,13 @@
 # 10 — Input Validation
 
 ## What this file does
-Configure the validation gate — the layer that checks everything coming into the system before agents act on it. Claude proposes the input type inventory and domain sensitivity settings from the vision, approach, and architecture documents. The user confirms and adjusts but does not design. Produces `/quality/validation_gate_config.md`.
+Configure the validation gate — the layer that checks everything coming into the system before agents act on it. Claude proposes the input type inventory and domain sensitivity settings from the confirmed vision, approach, and architecture content (read from the transcript; the docs are not on disk yet). The user confirms and adjusts but does not design. The answers are recorded to the transcript and pre-populate the generated `quality/validation_gate_config.md` at close — nothing is written mid-interview.
 
 ## When this file runs
-After `09_credentials.md` completes and CREDENTIALS_CONFIRMED = true in the staging file.
+After `09_credentials.md` completes: `step_09: complete` is in `~/claude-wizard-draft/wizard_progress.md`. The staging-file `CREDENTIALS_CONFIRMED` mirror is a human-readable convenience, not the gate.
 
 ## Prerequisites
-CREDENTIALS_CONFIRMED = true in the staging file. Vision document, approach document, and technical architecture document confirmed on disk.
+`step_09: complete` in `~/claude-wizard-draft/wizard_progress.md`, and `group_vision_confirmed` + `group_approach_roster_confirmed` recorded in `~/claude-wizard-draft/wizard_transcript.jsonl`. The vision and approach/architecture content is confirmed in the transcript; the foundation documents themselves are emitted by the generator at close (`15_close.md`), so they are not on disk yet — read the confirmed content from the transcript, not from disk files.
 
 ---
 
@@ -19,7 +19,7 @@ If it is: write the current staging file to disk, give the user the following in
 
 > Your project files are saved. Before we continue, run `/clear` in Claude Code, then paste this prompt to resume:
 >
-> "Resume wizard from 10_validation.md. CREDENTIALS_CONFIRMED = true. Read the staging file and technical architecture document, then continue from where you left off."
+> "Resume wizard from 10_validation.md. Confirm `step_09: complete` in `~/claude-wizard-draft/wizard_progress.md`. Read the staging file and the confirmed vision/approach/architecture content from `~/claude-wizard-draft/wizard_transcript.jsonl` (the foundation docs are not on disk yet — they emit at close), then continue from where you left off."
 
 Do not begin GATE-1 until you are confident the full phase will complete before compaction risk.
 
@@ -73,7 +73,7 @@ Before the validation questions below, read `wizard/interview/_operator_interact
 
 ## How to run this phase
 
-Read the vision document, approach document, and technical architecture document before speaking. Build a complete candidate list of input types and domain areas from everything you find — every source of data, every user action, every external feed the agents will receive.
+Read the confirmed vision, approach, and architecture content from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`) before speaking — the foundation documents are not emitted to disk until close, so the transcript is the source. Build a complete candidate list of input types and domain areas from everything you find — every source of data, every user action, every external feed the agents will receive.
 
 **The user does not design the validation configuration.** You propose it. They confirm, remove, or adjust.
 
@@ -104,7 +104,7 @@ Present the proposed input type inventory. For each input: what it is, why it ne
 - If the user removes an input type: note the implication briefly ("Understood — that source won't be checked on the way in") and update the list.
 - If the user adds an input type: add it with a proposed name, description, and check rationale. Confirm before proceeding.
 - If an input source is uncertain: mark it as pending. Note it clearly. It must be resolved before the system runs fully.
-- **If your analysis produces zero external input types** (the system processes only internally generated data with no external sources or user inputs at the system boundary): present this to the user: "Based on your vision and architecture, your system receives all data internally — no external sources or user-provided inputs cross the system boundary. Is that right?" If confirmed, write `VALIDATION_CONFIGURED = true` and `INPUT_TYPE_COUNT = 0` to the staging file. Skip GATE-2 (no domain areas to configure sensitivity for). Proceed to GATE-3 and GATE-4 (the override and pushback explanations still apply to internal validation). Note that input types can be added later when integrations are expanded.
+- **If your analysis produces zero external input types** (the system processes only internally generated data with no external sources or user inputs at the system boundary): present this to the user: "Based on your vision and architecture, your system receives all data internally — no external sources or user-provided inputs cross the system boundary. Is that right?" If confirmed, write `VALIDATION_CONFIGURED = true` and `INPUT_TYPE_COUNT = 0` to the staging file. There are no domain areas to configure, so in the Recording section below record GATE-1 = `"none (internal-only system; no external inputs)"` and GATE-2 = `"none (no external input domains)"` (NOT skips — the `tests_audit` group derives `INPUT_TYPE_INVENTORY` + `DOMAIN_SENSITIVITY_SETTINGS` as mandatory targets, and these "none" answers derive to valid EMPTY tables; a skip would leave the targets unprojected and the group could not close). Proceed to GATE-3 and GATE-4 (the override and pushback explanations still apply to internal validation). Note that input types can be added later when integrations are expanded.
 
 Write sub-step marker: Append `step_10_GATE-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -138,7 +138,7 @@ For each domain area in the confirmed vision, approach, and agent roster: propos
 - If the user adjusts a sensitivity level: update it and note the user's reasoning in the config. Confirm before proceeding.
 - If the user asks what a sensitivity level means in practice: give a concrete example using their domain ("At High, if your system receives a client name that contains characters it hasn't seen before, it will pause and ask you before using it in a report. At Low, it would use it and flag it in the log.").
 
-Write all confirmed settings to `/quality/validation_gate_config.md` after GATE-2 is complete (see disk write section below).
+The confirmed input inventory (GATE-1) and domain sensitivity (GATE-2) are *recorded* to the transcript in the Recording section at the end of this step — nothing is written to a project directory mid-interview. The `quality/validation_gate_config.md` file is generated at close (`15_close.md`), pre-populated from these recorded answers via the `INPUT_TYPE_INVENTORY` + `DOMAIN_SENSITIVITY_SETTINGS` derived fields.
 
 Write sub-step marker: Append `step_10_GATE-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -178,35 +178,9 @@ Write sub-step marker: Append `step_10_GATE-4: complete | <timestamp>` to `~/cla
 
 ---
 
-## Write validation configuration to disk
+## Confirm validation configuration (no mid-interview disk write)
 
-After GATE-1 through GATE-4, write the validation gate configuration file.
-
-**File:** `[PROJECT_DIR]/quality/validation_gate_config.md`
-
-**Structure:**
-
-```markdown
-# Validation Gate Configuration
-
-## Input Type Inventory
-
-| Input type | Description | Check rationale | Status |
-|------------|-------------|-----------------|--------|
-| [name] | [what it is] | [why it's checked] | Active / Pending |
-
-## Domain Sensitivity Settings
-
-| Domain area | Sensitivity | Rationale | Last updated |
-|-------------|-------------|-----------|--------------|
-| [domain] | Low / Medium / High | [rationale] | [date] |
-
-## Override Log
-
-*Populated at runtime — each user override recorded here with input type, date, and context.*
-```
-
-Write an audit trail entry: `Input type inventory confirmed during wizard setup — [n] input types active, [n] pending`.
+After GATE-1 through GATE-4, do NOT write any file to a project directory. The project directory does not exist yet (it is created at close), and writing one here would crash the close-emit's non-empty-target guard. The `quality/validation_gate_config.md` file is generated at close from the GATE-1/GATE-2 answers you record in the next section — the `INPUT_TYPE_INVENTORY` and `DOMAIN_SENSITIVITY_SETTINGS` derived fields pre-populate the emitted file's input-type inventory and domain-sensitivity tables. (The emitted file's structural rules column and an Override Log section populate at runtime.)
 
 **Say:**
 
@@ -218,7 +192,7 @@ Write an audit trail entry: `Input type inventory confirmed during wizard setup 
 >
 > Next we'll configure how the system handles errors and quality issues.
 
-Update staging file: VALIDATION_CONFIGURED = true
+Update staging file: VALIDATION_CONFIGURED = true (a staging convenience flag; the configuration itself lives in the recorded GATE-1/GATE-2 answers and is emitted at close).
 
 Write sub-step marker: Append `step_10_WRITE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -259,7 +233,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-GATE-1 through GATE-4 complete. `/quality/validation_gate_config.md` written to disk with confirmed input type inventory and domain sensitivity settings. VALIDATION_CONFIGURED = true in the staging file.
+GATE-1 through GATE-4 complete. GATE-1 (input type inventory) and GATE-2 (domain sensitivity) recorded to the transcript as `tests_audit` source answers (they derive into `INPUT_TYPE_INVENTORY` + `DOMAIN_SENSITIVITY_SETTINGS` at the group barrier and pre-populate the generated `quality/validation_gate_config.md` at close); GATE-3/GATE-4 recorded as skips. VALIDATION_CONFIGURED = true in the staging file (convenience flag). Nothing written to a project directory mid-interview.
 
 **Write completion marker:** Append `step_10: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
