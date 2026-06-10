@@ -12,6 +12,8 @@ Subcommands:
   skip-answer     record a validly-skipped (conditional) question
   derive-field    record a derived field — the audit envelope is assembled from the field
                   manifest (class / decision coupling) + the class prompt (version hash)
+  derive-projection  derive a projection-class field DETERMINISTICALLY (pure code) from the
+                  confirmed canonical record — the wizard computes it, the model never authors it
   confirm-field   record the operator's confirmation of a derived field
   preview-group   render a group's foundation-doc preview(s) in memory and print them (the
                   operator validates rendered prose, not JSON)
@@ -152,6 +154,43 @@ def cmd_derive_field(transcript: str, shape: str, field: str, value: str, *,
     envelope = _envelope_for(spec, prompt.prompt_version, sources, inputs)
     return TranscriptRecorder(Path(transcript), clock=clock).record_derived_field(
         field, spec.group_id, value, envelope)
+
+
+def cmd_derive_projection(transcript: str, shape: str, field: str, *,
+                          clock: Optional[Callable[[], str]] = None) -> Dict[str, Any]:
+    """Derive a `projection`-class field DETERMINISTICALLY from the confirmed canonical record.
+
+    A projection is pure code (role-filter + reshape of prior payload fields), not a judgment call:
+    the value is COMPUTED here from the canonical dependency fields, never authored by the model.
+    This keeps determinism_kind=pure_code honest (an unchanged role-subset auto-halts in the
+    change-propagation engine). Fail-loud if the field is not a projection, if a required canonical
+    field is not yet derived, or if the canonical record is malformed."""
+    from derivation_replay import compile_transcript  # type: ignore
+    from dependency_projection import (  # type: ignore
+        project as project_dependency, derivation_inputs_for,
+        IDENTITY_FIELD, ANNOTATION_FIELD, DependencyProjectionError,
+    )
+    spec = load_field_manifest(shape).spec_for(field)
+    if spec.derivation_class != "projection":
+        raise InterviewCLIError(
+            f"{field}: derive-projection is only for projection-class fields "
+            f"(this field is {spec.derivation_class!r})")
+    recorder = TranscriptRecorder(Path(transcript), clock=clock)
+    record = compile_transcript(read_derived_replay_events(recorder.events()))
+    inputs = derivation_inputs_for(field)
+    identity = record.get(IDENTITY_FIELD)
+    if identity is None:
+        raise InterviewCLIError(
+            f"{field}: {IDENTITY_FIELD} is not yet derived — capture + confirm the canonical "
+            f"dependency record (step 09) before projecting")
+    annotation = record.get(ANNOTATION_FIELD, "[]") if ANNOTATION_FIELD in inputs else "[]"
+    try:
+        value = project_dependency(field, identity, annotation)
+    except DependencyProjectionError as e:
+        raise InterviewCLIError(f"{field}: projection failed: {e}") from e
+    prompt = load_derivation_prompt(spec.derivation_class)   # "projection"
+    envelope = _envelope_for(spec, prompt.prompt_version, None, inputs)
+    return recorder.record_derived_field(field, spec.group_id, value, envelope)
 
 
 def cmd_confirm_field(transcript: str, field: str, group: str, state: str, *,
@@ -375,6 +414,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp.add_argument("--shape", default="markdown-CC"); sp.add_argument("--field", required=True)
     sp.add_argument("--value", required=True); sp.add_argument("--sources"); sp.add_argument("--inputs")
 
+    sp = sub.add_parser("derive-projection"); add_transcript(sp)
+    sp.add_argument("--shape", default="markdown-CC"); sp.add_argument("--field", required=True)
+
     sp = sub.add_parser("confirm-field"); add_transcript(sp)
     sp.add_argument("--field", required=True); sp.add_argument("--group", required=True)
     sp.add_argument("--state", default="accepted"); sp.add_argument("--value")
@@ -447,6 +489,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         elif args.cmd == "derive-field":
             cmd_derive_field(args.transcript, args.shape, args.field, args.value,
                              sources=_split(args.sources), inputs=_split(args.inputs))
+        elif args.cmd == "derive-projection":
+            ev = cmd_derive_projection(args.transcript, args.shape, args.field)
+            sys.stdout.write(json.dumps(ev, sort_keys=True) + "\n")
         elif args.cmd == "confirm-field":
             cmd_confirm_field(args.transcript, args.field, args.group, args.state,
                               value=args.value, revisit_trigger=args.revisit_trigger)
