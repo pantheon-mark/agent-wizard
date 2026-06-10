@@ -12,6 +12,23 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-10 — credentials: set them up after the build, with the system walking you through each one
+
+**Public-facing change:** The credentials step of the interview is now **capture-only**. It still identifies every credential your system will need and notes what each one is (which service, what type), but it no longer creates files or asks you to paste secrets during the interview. Instead, your built system ships with secrets already protected (an empty, git-ignored `.env`) plus a **credential checklist**, and at first boot a new **credential-setup helper walks you through getting each credential one at a time** — pointing you to the provider's official instructions, telling you exactly where the value goes, verifying it where it can, and stopping to help (or drafting a request to your account admin) if a screen doesn't match or a provider needs admin access. For tricky providers (work email, Google sign-ins) it leads with the provider's current official page rather than guessing at steps that may be out of date.
+
+Two credential-upkeep preferences you set — how many days before expiry to warn you, and how often to re-check credentials that don't expire — now actually drive the built system (previously they were collected but had no effect). The system tracks each credential's expiry and warns you ahead of time, so you never have to track it yourself.
+
+**Operator-facing notes:**
+
+- You now add your credential values at first-boot setup (guided, one at a time), not during the interview.
+- Mid-interview, your only credential actions are confirming the credential list and two upkeep preferences.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** <filled at publish>
+**Public repo commit:** <filled after subtree push>
+
+---
+
 ## 2026-06-09 — internal: corrected a leftover cost-model reference in an internal test-criteria template (no operator-facing change)
 
 **Public-facing change:** none — an internal, build-side test-criteria template had a single leftover reference to the wizard's previous cost model (a fixed "spend ceiling") in a row about per-agent work budgets. That model was already replaced by the monthly automation-credit model, so the row's wording is now consistent. No effect on what you see, what you do, or the system the wizard builds.

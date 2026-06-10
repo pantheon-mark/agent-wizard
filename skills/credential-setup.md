@@ -40,6 +40,8 @@ Point the operator at the provider's **official documentation page** for creatin
 - **What success looks like:** what they should see when it worked (e.g. "the page shows a long string starting with `sk-`").
 - **If something looks different:** "If the screen doesn't match, or you can't find where to create it, or it asks for something I haven't mentioned — stop and tell me what you see, and I'll help. Don't guess."
 
+**For OAuth logins and managed or enterprise accounts** (e.g. Microsoft 365 / Outlook for work, Google Workspace, anything behind an organization's admin): do **not** improvise the auth steps from memory. These vary by account and tenant, they change often, and older methods (basic SMTP passwords, "app passwords") are frequently deprecated or switched off — guidance from memory is likely to be wrong and send the operator down a dead end. Instead: lead with the provider's **current official documentation link**, tell the operator to follow that page over anything you describe from memory, and prefer the simplest method the provider documents today. Surface the "this may need your account's admin, or a few minutes with someone technical" path **early** — and offer to draft the exact request they can send their admin — rather than after they're stuck. Improvised click-paths are for simple, stable, self-service key creation only.
+
 ### 3. Wait for them to paste it into `.env`
 They edit `.env` directly and tell you when it's in. Do not accept the value in chat; if they paste it in chat, tell them plainly to remove it and put it in the file instead, and do not record or repeat it.
 
