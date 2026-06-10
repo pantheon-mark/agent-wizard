@@ -87,6 +87,7 @@ ALLOWLIST_UNIFIED_ADDITIONS = {
     ".wizard/UPGRADING.md": "upgrade command surface; legacy had none",
     "decisions/_index.md": "ADR/decisions core emitted by the corpus layer; legacy did not emit it",
     "decisions/decision_record_template.md": "ADR/decisions core; legacy did not emit it",
+    "wizard/skills/credential-setup.md": "first-boot credential-setup skill; a pre-built operational skill the legacy close-assembly had no equivalent of",
     "agents/prompts/orchestrator_prompt.md": "control-plane agent prompt emitted deterministically; legacy built agents post-wizard",
     "agents/prompts/qa_agent_prompt.md": "QA agent prompt emitted deterministically; legacy built agents post-wizard",
     "agents/prompts/researcher_prompt.md": "per-agent prompt emitted deterministically; legacy built agents post-wizard",

@@ -99,6 +99,9 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 | AC-C-6 | Credential expiry alert fires at lead time | Expiry alert fires at configured lead time — not after expiry |
 | AC-C-7 | Rotation alert includes provider-specific instructions | Rotation alert instructions match the credential type and provider |
 | AC-C-8 | No-expiry check fires at configured cadence | Confirmation check fires at configured cadence without being triggered manually |
+| AC-C-9 | First-boot setup walks every pending credential | The credential-setup skill presents obtaining guidance + collects a value for every `Pending` registry row; none is silently skipped |
+| AC-C-10 | Setup records a credential only once it is in place | Registry `Status` advances to `Active` only after the value is present (and verified where a check exists); otherwise the row stays `Pending` (stored, awaiting first-use verification) — never `Active` without the value |
+| AC-C-11 | Setup states expiry honestly and never leaks values | Provisional expiry is presented as provisional (not asserted), `Unknown` is retained when unconfirmed, and no credential value is ever written outside `.env` |
 
 #### PII Redaction
 

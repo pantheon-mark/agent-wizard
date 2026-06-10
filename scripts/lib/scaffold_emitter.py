@@ -141,7 +141,7 @@ def _default_scaffold_inputs() -> Dict[str, str]:
         "CURRENT_PHASE": "setup",
         "LAST_AGENT_RUN": NONE_YET,
         "LAST_SESSION_SUMMARY": NONE_YET,
-        "NEXT_RECOMMENDED_ACTION": "Complete operator configuration in project_instructions.md",
+        "NEXT_RECOMMENDED_ACTION": "First-boot setup: run the credential-setup skill to add the credentials your system needs (it will tell you if there are none), then start your first agent build.",
         "ITEMS_LEFT_INCOMPLETE": "(none)",
         "WORK_QUEUE_TOP_ITEM": NONE_YET,
         "CRITICAL_ALERT_NOTE": "(none)",

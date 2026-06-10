@@ -31,6 +31,7 @@ class OperatorFillEmitterTests(unittest.TestCase):
                         "wizard/skills/_index.md",
                         "wizard/skills/skill_template_external.md",
                         "wizard/skills/skill_template_internal.md",
+                        "wizard/skills/credential-setup.md",
                         ".env"):
                 self.assertIn(rel, rels, f"missing emitted operator-fill artifact: {rel}")
 
