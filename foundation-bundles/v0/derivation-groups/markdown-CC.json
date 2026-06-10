@@ -60,13 +60,13 @@
     {
       "group_id": "tests_audit",
       "input_question_ids": ["GATE-1", "GATE-2", "GATE-3", "GATE-4", "QA-1", "QA-3", "QA-4", "ARCH-5", "DRIFT-1"],
-      "target_fields": ["AGENT_SPECIFIC_TESTS", "DRIFT_ANALYSIS_CADENCE", "INPUT_TYPE_INVENTORY", "DOMAIN_SENSITIVITY_SETTINGS"],
+      "target_fields": ["AGENT_SPECIFIC_TESTS", "DRIFT_ANALYSIS_CADENCE", "INPUT_TYPE_INVENTORY", "DOMAIN_SENSITIVITY_SETTINGS", "SOURCE_REGISTRY_ROWS"],
       "close_after": "step_13",
       "confirmation_marker": "group_tests_audit_confirmed",
       "preview_docs": ["test_cases.md", "audit_framework.md"],
       "skip_satisfied_if": ["GATE-3", "GATE-4", "QA-4"],
       "barrier_stakes": "medium",
-      "special_behaviors": ["deferred-items population (extraction/classification)", "Validation gate: GATE-1 (input-type inventory) -> INPUT_TYPE_INVENTORY (extraction; decision_field, integration_boundary) and GATE-2 (per-domain sensitivity) -> DOMAIN_SENSITIVITY_SETTINGS (classification; decision_field, threshold), both scaffold-rendered into quality/validation_gate_config.md (INPUT_TYPE_INVENTORY also into project_instructions.md). Both are mandatory group targets (always derived); a zero-external-input system (INPUT_TYPE_COUNT=0) records GATE-1='none' + GATE-2='none' and derives EMPTY tables (valid empty bodies), mirroring the zero-credential case. Previously the wizard wrote validation_gate_config.md mid-interview and the emit shipped empty tables; now captured-at-interview / derived-at-barrier / emitted-at-close like the credentials registry."]
+      "special_behaviors": ["deferred-items population (extraction/classification)", "Validation gate: GATE-1 (input-type inventory) -> INPUT_TYPE_INVENTORY (extraction; decision_field, integration_boundary) and GATE-2 (per-domain sensitivity) -> DOMAIN_SENSITIVITY_SETTINGS (classification; decision_field, threshold), both scaffold-rendered into quality/validation_gate_config.md (INPUT_TYPE_INVENTORY also into project_instructions.md). Both are mandatory group targets (always derived); a zero-external-input system (INPUT_TYPE_COUNT=0) records GATE-1='none' + GATE-2='none' and derives EMPTY tables (valid empty bodies), mirroring the zero-credential case. Previously the wizard wrote validation_gate_config.md mid-interview and the emit shipped empty tables; now captured-at-interview / derived-at-barrier / emitted-at-close like the credentials registry. QA source registry: QA-3 (external-source inventory) -> SOURCE_REGISTRY_ROWS (extraction; decision_field, integration_boundary), scaffold-rendered into quality/source_registry.md; mandatory group target (a no-external-source system records QA-3='none' and derives an EMPTY table); derives Source name/Type/Purpose/What-stops + Status='Pending', runtime-fill for Expected behavior/Last verified/Health flag. Previously QA-3 was a dead input written mid-interview."]
     }
   ]
 }

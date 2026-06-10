@@ -229,6 +229,11 @@ def _drive_tests_audit_group(transcript, progress):
                     sources=["GATE-1"])
     _derive_confirm(transcript, "DOMAIN_SENSITIVITY_SETTINGS", "tests_audit",
                     "| Financial | High | money is involved | 2026-06-10 |", sources=["GATE-2"])
+    # QA source registry: QA-3 -> SOURCE_REGISTRY_ROWS (extraction; mandatory target). Rows-only;
+    # runtime cells carry placeholders, Status=Pending (RW-40).
+    _derive_confirm(transcript, "SOURCE_REGISTRY_ROWS", "tests_audit",
+                    "| Google Sheet | API | the master task list | tracking stops | (set at runtime) | Pending | (set at runtime) | Pending |",
+                    sources=["QA-3"])
     return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
 
 
@@ -525,6 +530,37 @@ class EmitSystemCLITests(unittest.TestCase):
             self.assertIn("Financial", vgc, "GATE-2 sensitivity did not reach validation_gate_config.md")
             self.assertNotIn("{{INPUT_TYPE_INVENTORY}}", vgc)
             self.assertNotIn("{{DOMAIN_SENSITIVITY_SETTINGS}}", vgc)
+
+    def test_emit_projects_qa3_into_source_registry(self):
+        # RW-40 regression: QA-3 (source registry) must reach the EMITTED quality/source_registry.md.
+        # Before the fix the template carried NO placeholder and QA-3 was a dead input, so the
+        # emitted registry shipped with an EMPTY table. Mirrors the validation-gate regression above.
+        from test_emission_plan import _FOUNDATION_DOC_INPUTS
+        from test_interview_bridge import _ai
+        base_env = {"_source": "operator-content", "_derivation_class": "extraction",
+                    "_decision_field": False, "_decision_kind": "none", "_prompt_version": "sha256:p1"}
+        with tempfile.TemporaryDirectory() as td:
+            tpath = Path(td) / "t.jsonl"
+            r = TranscriptRecorder(tpath, clock=lambda: CLOCK)
+            for k, v in _FOUNDATION_DOC_INPUTS.items():
+                r.record_derived_field(k, "vision", v, dict(base_env))
+                r.record_field_confirmation(k, "vision", "accepted")
+            r.record_agent_intent("approach_roster", _ai())
+            # QA-3 source registry: extraction decision (integration_boundary). Rows-only; runtime
+            # cells (Expected behavior / Last verified / Health flag) carry placeholders, Status=Pending.
+            src_env = {"_source": "operator-content", "_derivation_class": "extraction",
+                       "_decision_field": True, "_decision_kind": "integration_boundary",
+                       "_source_question_ids": ["QA-3"], "_prompt_version": "sha256:p1"}
+            r.record_derived_field("SOURCE_REGISTRY_ROWS", "tests_audit",
+                                   "| Google Sheet | API | the master task list | tracking stops | (set at runtime) | Pending | (set at runtime) | Pending |",
+                                   src_env)
+            r.record_field_confirmation("SOURCE_REGISTRY_ROWS", "tests_audit", "accepted")
+            target = Path(td) / "operator-project"
+            cli.cmd_emit_system(str(tpath), SHAPE, str(target), str(REPO_ROOT),
+                                generator_version_override="0" * 40)
+            sr = (target / "quality/source_registry.md").read_text()
+            self.assertIn("Google Sheet", sr, "QA-3 source did not reach source_registry.md")
+            self.assertNotIn("{{SOURCE_REGISTRY_ROWS}}", sr)
 
     def test_emit_system_foundation_only_from_a_transcript_file(self):
         # The other e2e branch: a foundation-only transcript (FOUNDATION_ONLY_MODE=true, zero

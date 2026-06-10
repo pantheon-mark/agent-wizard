@@ -1,7 +1,7 @@
 # 12 — Quality Preferences
 
 ## What this file does
-Configure how the QA system works: investigation reporting style, preferred future alert channel, external source registry, and how often the system checks uncertain outputs with the user. Claude proposes the source registry from the vision and approach documents. Produces `/quality/source_registry.md` and writes quality preference values to the staging file.
+Configure how the QA system works: investigation reporting style, preferred future alert channel, external source registry, and how often the system checks uncertain outputs with the user. Claude proposes the source registry from the confirmed vision and approach content (read from the transcript; the docs are not on disk yet). The confirmed sources are recorded to the transcript and emitted as `/quality/source_registry.md` at close — nothing is written mid-interview; quality preference values are written to the staging file.
 
 ## When this file runs
 After `11_error_handling.md` completes: `step_11: complete` is in `~/claude-wizard-draft/wizard_progress.md`. The staging-file `ERROR_HANDLING_CONFIGURED` mirror is a human-readable convenience, not the gate.
@@ -79,7 +79,7 @@ QA-1, QA-3, and QA-4 require specific user choices. QA-2 is a brief preference c
 
 ## QA-1 — Investigation workflow reporting style [FIXED — topic]
 
-Present the same quality issue handled two ways. **Use the user's actual system context** — pick one agent and a realistic quality issue from the user's domain, grounded in the vision and approach documents. The user makes a better choice when they see how QA notifications will actually look in their system. The examples below are fallback structure — replace with the user's real system context.
+Present the same quality issue handled two ways. **Use the user's actual system context** — pick one agent and a realistic quality issue from the user's domain, grounded in the confirmed vision and approach content read from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`); the foundation documents emit at close, so they are not on disk yet. The user makes a better choice when they see how QA notifications will actually look in their system. The examples below are fallback structure — replace with the user's real system context.
 
 **Say:**
 
@@ -171,9 +171,9 @@ Read the confirmed vision and approach content from the transcript (`~/claude-wi
 - If the user removes a source: note the implication and update the list.
 - If the user adds a source: add it with a proposed name, description, and dependency statement. Confirm before proceeding.
 - If a source is uncertain: mark it as pending.
-- **If your analysis produces zero external sources** (the system has no external data dependencies — it processes only local or internally generated data): present this to the user: "Based on your vision and architecture, your system doesn't rely on any external data sources — it works with internal data only. Is that right?" If confirmed, write the source registry with a note "No external sources configured — sources can be added later when integrations are expanded." Set `SOURCE_COUNT = 0` in the staging file. Proceed to QA-4.
+- **If your analysis produces zero external sources** (the system has no external data dependencies — it processes only local or internally generated data): present this to the user: "Based on your vision and architecture, your system doesn't rely on any external data sources — it works with internal data only. Is that right?" If confirmed, in the Recording section below record GATE-style `QA-3 = "none (no external sources)"` (NOT a skip — `SOURCE_REGISTRY_ROWS` is a mandatory `tests_audit` target, and a "none" answer derives to a valid EMPTY table; a skip would leave the target unprojected and the group could not close). Set `SOURCE_COUNT = 0` in the staging file (a convenience flag). Proceed to QA-4. Sources can be added later when integrations are expanded.
 
-Write `/quality/source_registry.md` after the list is confirmed (see disk write section below).
+The confirmed source list is *recorded* to the transcript in the Recording section below as the QA-3 source answer — nothing is written to a project directory mid-interview. The `quality/source_registry.md` file is generated at close from the recorded QA-3 answer via the `SOURCE_REGISTRY_ROWS` derived field (which pre-populates the emitted registry's source rows).
 
 Write sub-step marker: Append `step_12_QA-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -209,23 +209,9 @@ Write sub-step marker: Append `step_12_QA-4: complete | <timestamp>` to `~/claud
 
 ---
 
-## Write source registry to disk
+## Confirm quality configuration (no mid-interview disk write)
 
-After QA-3, write the source registry.
-
-**File:** `[PROJECT_DIR]/quality/source_registry.md`
-
-**Structure:**
-
-```markdown
-# Source Registry
-
-| Source | Description | What depends on it | Expected behavior | Last verified | Status |
-|--------|-------------|-------------------|-------------------|---------------|--------|
-| [Plain-language name] | [What it is] | [Which agents use it] | [What normal looks like] | [Date] | Active / Pending |
-```
-
-Write an audit trail entry: `Source registry initialized during wizard setup — [n] sources active, [n] pending`.
+After QA-1 through QA-4, do NOT write any file to a project directory. The project directory does not exist yet (it is created at close), and writing one here would crash the close-emit's non-empty-target guard. The `quality/source_registry.md` file is generated at close from the QA-3 answer you record in the next section — the `SOURCE_REGISTRY_ROWS` derived field pre-populates the emitted registry's source rows (Source name / Type / Purpose / What stops without it, with Status = Pending). The Expected behavior, Last verified, and Health flag columns fill in at runtime — they describe observed health, which is not known at setup.
 
 **Say:**
 
@@ -251,7 +237,7 @@ Record this step's derivation-group source answers to `~/claude-wizard-draft/wiz
 ```
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-1 --group tests_audit --value "<investigation reporting style>"
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-2 --group hitl_autonomy --value "<future feedback channel preference>"
-python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-3 --group tests_audit --value "<source registry initialization>"
+python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-3 --group tests_audit --value "<external-source registry: ONE structured row per confirmed source, carrying Source name | Type (use 'Unknown' if unconfirmed) | Purpose (what it provides) | What stops without it. Record the structured facts, not just source names — the SOURCE_REGISTRY_ROWS derivation needs them and will otherwise have to fabricate. Use 'none (no external sources)' if zero.>"
 python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid QA-4 --group tests_audit --reason "confidence flagging threshold; not a foundation-doc source"
 ```
 
@@ -279,7 +265,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-QA-1 through QA-4 complete. `/quality/source_registry.md` written to disk. QA_REPORTING_STYLE, FUTURE_ALERT_CHANNEL, and CONFIDENCE_FLAGGING_THRESHOLD written to staging file. QA_CONFIGURED = true in the staging file.
+QA-1 through QA-4 complete. QA-3 recorded to the transcript as the `tests_audit` source for `SOURCE_REGISTRY_ROWS` (it derives at the group barrier and pre-populates the generated `/quality/source_registry.md` at close); nothing written to a project directory mid-interview. QA_REPORTING_STYLE, FUTURE_ALERT_CHANNEL, and CONFIDENCE_FLAGGING_THRESHOLD written to staging file. QA_CONFIGURED = true in the staging file (a convenience flag).
 
 **Write completion marker:** Append `step_12: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -297,7 +283,7 @@ Conduct the QA interview from the existing step content above (QA-1 through QA-4
 
 DO NOT:
 
-- Write `/quality/source_registry.md` (quality directory is implementation-specific in foundation-only mode)
+- Emit `/quality/source_registry.md` (the quality directory is implementation-specific; in foundation-only mode it is not emitted at close — and nothing is written mid-interview in any mode)
 - Write QA_REPORTING_STYLE, FUTURE_ALERT_CHANNEL, or CONFIDENCE_FLAGGING_THRESHOLD to `project_instructions.md` as wizard-runtime config
 
 DO:

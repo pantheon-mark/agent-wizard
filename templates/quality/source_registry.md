@@ -2,14 +2,13 @@
 
 *Record of all external dependencies — data sources, APIs, and integrations. Every external dependency this system relies on is registered here with its expected behavior and current health status.*
 
-*Pre-populated during wizard setup (QA-3) with confirmed sources. Updated when sources are added, changed, or resolved from stubs.*
+*Pre-populated during wizard setup (QA-3) with confirmed sources, if any. Updated when sources are added, changed, or resolved from stubs. The Expected behavior, Last verified, and Health flag columns are filled in at runtime — they describe observed health, which is not known at setup time.*
 
 ---
 
 | Source name | Type | Purpose | What stops without it | Expected behavior | Status | Last verified | Health flag |
 |------------|------|---------|----------------------|------------------|--------|--------------|------------|
-
-*Sources are confirmed and added here during wizard setup (QA-3).*
+{{SOURCE_REGISTRY_ROWS}}
 
 ---
 

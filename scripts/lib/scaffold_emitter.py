@@ -163,6 +163,7 @@ def _default_scaffold_inputs() -> Dict[str, str]:
         "DATE_TRIGGERED_ROWS": "",
         "INPUT_TYPE_INVENTORY": "",
         "DOMAIN_SENSITIVITY_SETTINGS": "",
+        "SOURCE_REGISTRY_ROWS": "",
         "ADVISOR_ENTRIES": "",
         "AUTONOMOUS_ACTIONS": "",
         "TIER_1_ADDITIONS": "",

@@ -79,7 +79,7 @@ ERR-1 is a genuine personal preference — the user chooses notification verbosi
 
 ## ERR-1 — Notification verbosity [FIXED — topic]
 
-Present three rendered examples of the same hypothetical error at each verbosity level. **Use the user's actual system context** — pick one of the agents from the confirmed roster and create a realistic error scenario grounded in the user's domain from the vision and approach documents. Do not use generic examples. The user makes a better choice when they see how notifications will actually look in their system.
+Present three rendered examples of the same hypothetical error at each verbosity level. **Use the user's actual system context** — pick one of the agents from the confirmed roster and create a realistic error scenario grounded in the user's domain, read from the confirmed vision and approach content in the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`); the foundation documents emit at close, so they are not on disk yet. Do not use generic examples. The user makes a better choice when they see how notifications will actually look in their system.
 
 **Say:**
 
