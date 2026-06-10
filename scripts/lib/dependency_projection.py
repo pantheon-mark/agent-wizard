@@ -38,7 +38,7 @@ ROLE_HEALTH_MONITORED = "health_monitored"
 ROLE_NEEDS_CREDENTIAL = "needs_credential"
 VALID_ROLES = frozenset({ROLE_BOUNDARY_INPUT, ROLE_HEALTH_MONITORED, ROLE_NEEDS_CREDENTIAL})
 
-# Setup-time-honest literals (RW-40 fabrication discipline): nothing about observed runtime health
+# Setup-time-honest literals (the fabrication discipline): nothing about observed runtime health
 # is known when the wizard runs, so it is never derived.
 RUNTIME_PLACEHOLDER = "(set at runtime)"
 STATUS_PENDING = "Pending"

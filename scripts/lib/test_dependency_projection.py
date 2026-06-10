@@ -76,7 +76,7 @@ class FilterTest(unittest.TestCase):
 
 class ReshapeTest(unittest.TestCase):
     def test_source_registry_hardcodes_pending_and_runtime_placeholders(self):
-        """RW-40 fabrication discipline: never synthesize observed health. Status=Pending,
+        """Fabrication discipline: never synthesize observed health. Status=Pending,
         Expected behavior / Last verified are runtime placeholders, Health flag=Pending."""
         body = dp.project("SOURCE_REGISTRY_ROWS", _IDENTITY, _ANNOTATION)
         row = [ln for ln in body.splitlines() if "Google Sheet task tracker" in ln][0]
