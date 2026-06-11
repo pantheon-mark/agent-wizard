@@ -9,7 +9,7 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 
 # Execution Plan
 
-*Living document — updated as the system is built and evolves. Read this document before any sprint planning or work sequencing decision.*
+*Living document — updated as the system is built and evolves. Read this document before any work-planning or work-sequencing decision.*
 
 *Last updated: {{LAST_UPDATED_DATE}} | Trigger: {{LAST_UPDATED_TRIGGER}}*
 
@@ -61,15 +61,10 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 
 ---
 
-## Sprint Planning
+## Work Tracking
 
-*Active work plans. Each sprint is recorded at `/work/sprint_[n]_plan.md`. Sprint files are created by the system at the start of each work sprint and archived on completion.*
+*Where the system keeps what it's working on and what's left — all created and updated by the system as it runs.*
 
-**Current sprint:** {{CURRENT_SPRINT_NUMBER}}
-**Sprint file:** `/work/sprint_{{CURRENT_SPRINT_NUMBER}}_plan.md`
-
----
-
-## Work Plans
-
-*Active work items are in `/work/work_queue.md`. Completed items are archived in `/archive/work_archive.md`. Sprint-level plans are at `/work/sprint_[n]_plan.md`.*
+- **Open work** — `/work/work_queue.md`: the current list of open items, with priority. Starts empty; the system adds and updates items as work comes in.
+- **A plan in progress** — `/work/execution_plan_state.md`: when the system is working through a multi-step task, it records the plan and which step is underway here, so if a session ends partway it resumes from the right step. Empty when nothing is in progress.
+- **Finished work** — archived in `/archive/work_archive.md`.

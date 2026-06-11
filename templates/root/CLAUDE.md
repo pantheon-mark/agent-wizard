@@ -41,7 +41,7 @@ Five documents govern this system. Read the relevant document before acting on a
 | `vision.md` | Purpose, goals, scope, constraints, success criteria |
 | `approach.md` | How the vision becomes a solution; agent roster and roles |
 | `technical_architecture.md` | Data sources, integrations, security, logging, scale assumptions |
-| `execution_plan.md` | Work sequencing, sprint plans, context management, human-in-the-loop map |
+| `execution_plan.md` | Work sequencing, MVP and roadmap boundary, work tracking, human-in-the-loop map |
 | `project_instructions.md` | Autonomy authorizations, notification preferences, thresholds, model tier mapping, automation budget |
 
 These are living documents — maintained by the system as the project evolves. Never modify them outside the system's document update mechanism.

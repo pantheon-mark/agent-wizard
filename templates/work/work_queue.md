@@ -21,5 +21,5 @@
 |-------|---------|
 | Critical | Blocks system operation — address immediately |
 | High | Significant impact — address before next session |
-| Medium | Should be addressed — schedule within current sprint |
+| Medium | Should be addressed — schedule in the current batch of work |
 | Low | Nice to have — address when capacity allows |

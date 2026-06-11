@@ -262,7 +262,7 @@ Carry the operator's voice/style (their literacy + information preference + thei
 ### Step 3 — Render the approach preview and show the operator
 
 ```
-python3 wizard/scripts/interview_cli.py preview-group --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --group approach_roster --source-version v0.4.0 --build-repo-root <path to the wizard build repo root> --include-unconfirmed --out-file ~/claude-wizard-draft/approach_PREVIEW.md --auto SYSTEM_SHAPE=markdown-CC --auto FOUNDATION_ONLY_MODE=<false|true> --auto WIZARD_VERSION=v0.4.0 --auto LAST_UPDATED_DATE=<today> --auto LAST_UPDATED_TRIGGER="initial build" --auto CURRENT_SPRINT_NUMBER=1
+python3 wizard/scripts/interview_cli.py preview-group --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --group approach_roster --source-version v0.4.0 --build-repo-root <path to the wizard build repo root> --include-unconfirmed --out-file ~/claude-wizard-draft/approach_PREVIEW.md --auto SYSTEM_SHAPE=markdown-CC --auto FOUNDATION_ONLY_MODE=<false|true> --auto WIZARD_VERSION=v0.4.0 --auto LAST_UPDATED_DATE=<today> --auto LAST_UPDATED_TRIGGER="initial build"
 ```
 
 The command writes the **operator-clean rendered approach** to `~/claude-wizard-draft/approach_PREVIEW.md` (`--out-file` strips CLI separators + frontmatter; `--include-unconfirmed` renders the just-derived draft for review before confirming — Operator Interaction Contract § 4). Surface that file so it renders for the operator — never paste the content into chat. This is the actual document they will receive, not the field values.

@@ -4,7 +4,7 @@
 
 Auto fields are filled mechanically at generation time. Their values come from system state or fixed constants — not from the operator's answers and not from any judgment call. Once recorded, they are not re-evaluated or re-confirmed.
 
-Example target fields this class produces: `WIZARD_VERSION`, `LAST_UPDATED_DATE`, `LAST_UPDATED_TRIGGER`, `FOUNDATION_ONLY_MODE`, `SYSTEM_SHAPE`, `CURRENT_SPRINT_NUMBER`.
+Example target fields this class produces: `WIZARD_VERSION`, `LAST_UPDATED_DATE`, `LAST_UPDATED_TRIGGER`, `FOUNDATION_ONLY_MODE`, `SYSTEM_SHAPE`.
 
 ## Inputs
 

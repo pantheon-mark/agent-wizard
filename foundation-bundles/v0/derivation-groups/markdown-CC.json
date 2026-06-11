@@ -8,8 +8,7 @@
     "FOUNDATION_ONLY_MODE",
     "WIZARD_VERSION",
     "LAST_UPDATED_DATE",
-    "LAST_UPDATED_TRIGGER",
-    "CURRENT_SPRINT_NUMBER"
+    "LAST_UPDATED_TRIGGER"
   ],
   "auto_global_fields_note": "auto-class fields (mechanical fill at generation time) that are available early and are included in EVERY group's barrier preview inputs, so the strict single-doc preview renderer does not fail-fast on a global placeholder. These are NOT owned by any group.",
   "groups": [

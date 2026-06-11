@@ -35,7 +35,7 @@ SOURCE_VERSION = "v0.4.0"
 CLOCK = "2026-05-30T12:00:00Z"
 
 AUTO = {"SYSTEM_SHAPE": "markdown-CC", "FOUNDATION_ONLY_MODE": "false", "WIZARD_VERSION": "v0.4.0",
-        "LAST_UPDATED_DATE": "2026-05-30", "LAST_UPDATED_TRIGGER": "initial build", "CURRENT_SPRINT_NUMBER": "1"}
+        "LAST_UPDATED_DATE": "2026-05-30", "LAST_UPDATED_TRIGGER": "initial build"}
 
 # field -> (value, sources answered)  (V-7/V-7b skipped, so VISION_PURPOSE/GOALS cite V-1/V-2 only)
 VISION = {
