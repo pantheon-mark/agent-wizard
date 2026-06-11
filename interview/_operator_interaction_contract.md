@@ -47,6 +47,7 @@ Three rules make the file genuinely reviewable:
 - **Always the file, never a chat fallback.** If the render path is blocked (e.g. a field is not yet confirmed), do whatever it takes to still produce the file — do not fall back to chat text. The operator always reviews the file.
 - **Operator-clean content.** The review file must contain only what the operator should read — no CLI separators (`===== doc =====`), no wizard-internal YAML frontmatter. Use the preview command's `--out-file` (it strips both); never write raw CLI stdout to the review file. The emitted document keeps its frontmatter; only the review preview omits it.
 - **Show the draft before confirming.** The operator reviews the derived draft *before* confirming it. Use the preview command's `--include-unconfirmed` so a not-yet-confirmed derivation still renders for review. Confirmation follows the review; it does not gate it.
+- **Frame what the review is for.** Open every document review with one plain line that orients the operator: this is their answers assembled into a document the system will actually follow, and the parts most worth their attention are the ones you *composed* from their answers — name those concretely (the newly-written rules, checks, or descriptions). Distinguish them from the parts that simply restate what the operator already confirmed earlier, so the review does not read as redundant ceremony. A non-technical operator should never have to guess what they are checking or why. Keep it short.
 
 ## 5. Pacing (one decision at a time)
 

@@ -460,15 +460,36 @@ def render_foundation_docs(
 _CLI_SEPARATOR_RE = re.compile(r"^=+\s*\S.*?\s*=+\s*$")
 
 
+def _is_italic_scaffold_note(block: str) -> bool:
+    """A standalone, fully-italic paragraph (``*...*``) is wizard-internal template scaffolding —
+    section descriptions, ``Population status: deferred`` notes, audience / cross-reference
+    commentary. These are authored into the templates for the wizard/developer and are never
+    grounded in operator answers (no derived field value is authored as a fully-italic paragraph),
+    so a non-technical operator should not have to wade through them in a review file. Distinguished
+    from a ``**bold**`` key-value line (kept) and from a ``* item`` / ``- item`` bullet (kept)."""
+    s = block.strip()
+    if len(s) < 3 or not s.startswith("*") or not s.endswith("*"):
+        return False
+    if s.startswith("**") or s.endswith("**"):   # a bold line/paragraph, not an italic note
+        return False
+    if s[1] in " \t":                            # "* item" — a bullet, not *italic*
+        return False
+    return True
+
+
 def operator_clean_preview(content: str) -> str:
     """Strip wizard-internal machinery from a rendered doc for OPERATOR review.
 
-    Two things a non-technical operator should never see in a review file: (a) the CLI debug
-    separator lines (`===== approach.md =====`) that raw stdout capture leaves above a doc, and
-    (b) the YAML frontmatter block (`---\\n...\\n---`) — wizard-internal contract metadata that,
-    sitting under a separator, also makes markdown viewers mis-parse the document. The EMITTED doc
-    keeps its frontmatter (the contract needs it); only the review preview is cleaned. Idempotent;
-    a doc with neither separator nor frontmatter passes through unchanged.
+    Three things a non-technical operator should not have to wade through in a review file:
+    (a) the CLI debug separator lines (``===== approach.md =====``) that raw stdout capture leaves
+    above a doc; (b) the YAML frontmatter block (``---\\n...\\n---``) — wizard-internal contract
+    metadata that, sitting under a separator, also makes markdown viewers mis-parse the document;
+    and (c) the template's standalone italic SCAFFOLDING notes (section descriptions /
+    ``Population status: deferred`` placeholders / developer cross-reference commentary) plus any
+    ``##`` section those notes leave empty. The operator reviews the content grounded in their own
+    answers, not the authoring scaffolding. The EMITTED doc keeps all of it (the contract +
+    downstream readers need it); only the review preview is cleaned. Idempotent; a doc with none of
+    these passes through unchanged.
     """
     lines = content.splitlines()
     i = 0
@@ -482,7 +503,36 @@ def operator_clean_preview(content: str) -> str:
                 break
     while i < len(lines) and not lines[i].strip():  # drop blank lines exposed above the first heading
         i += 1
-    return "\n".join(lines[i:])
+    body = lines[i:]
+
+    # Group the remaining body into paragraphs (maximal runs of non-blank lines).
+    paras = []
+    cur = []
+    for ln in body:
+        if ln.strip():
+            cur.append(ln)
+        elif cur:
+            paras.append(cur); cur = []
+    if cur:
+        paras.append(cur)
+
+    # Pass 2 — drop standalone italic scaffolding paragraphs.
+    paras = [p for p in paras if not _is_italic_scaffold_note("\n".join(p))]
+
+    # Pass 3 — drop any `## ` section heading left with no content before the next heading / EOF.
+    def _is_heading(par):
+        h = par[0].lstrip()
+        return h.startswith("# ") or h.startswith("## ") or h.startswith("### ")
+
+    kept = []
+    for idx, p in enumerate(paras):
+        if p[0].lstrip().startswith("## ") and not any(ln.strip() for ln in p[1:]):
+            nxt = paras[idx + 1] if idx + 1 < len(paras) else None
+            if nxt is None or _is_heading(nxt):
+                continue  # heading-only paragraph with no following content — omit the empty section
+        kept.append(p)
+
+    return "\n\n".join("\n".join(p) for p in kept)
 
 
 def render_foundation_doc_preview(

@@ -236,6 +236,35 @@ class OperatorCleanPreviewTests(unittest.TestCase):
         raw = "# Approach\n\nbody text"
         self.assertEqual(operator_clean_preview(raw), "# Approach\n\nbody text")
 
+    def test_drops_italic_scaffold_note_keeps_derived_content(self):
+        raw = ("# Doc\n\n## Orchestration Model\n\n"
+               "*This is wizard-internal scaffolding describing the section.*\n\n"
+               "A single coordinator runs the system and routes work.")
+        out = operator_clean_preview(raw)
+        self.assertNotIn("wizard-internal scaffolding", out)
+        self.assertIn("## Orchestration Model", out)
+        self.assertIn("A single coordinator runs the system", out)
+
+    def test_omits_section_left_empty_after_scaffold_strip(self):
+        raw = ("# Doc\n\n## Agent Architecture Detail\n\n*See approach.md; NOT duplicated here.*\n\n"
+               "*Population status: deferred. Not captured at v0.4.0.*\n\n"
+               "## Task Completion Checklists\n\n- done check")
+        out = operator_clean_preview(raw)
+        self.assertNotIn("Agent Architecture Detail", out)   # empty deferred section omitted
+        self.assertNotIn("Population status", out)
+        self.assertIn("## Task Completion Checklists", out)   # section with real content kept
+        self.assertIn("- done check", out)
+
+    def test_keeps_bold_keyvalue_and_bullets(self):
+        raw = ("# Doc\n\n## Scale Tier\n\n**Provisional tier:** small\n"
+               "**Status:** Provisional — set during setup.\n\n"
+               "## Integrations\n\n- **Google Sheet:** read/write")
+        out = operator_clean_preview(raw)
+        self.assertIn("**Provisional tier:** small", out)
+        self.assertIn("**Status:** Provisional", out)
+        self.assertIn("- **Google Sheet:** read/write", out)
+        self.assertIn("## Scale Tier", out)
+
 
 if __name__ == "__main__":
     unittest.main()

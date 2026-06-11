@@ -32,7 +32,7 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 
 ## Integrations
 
-*Populated from the credentials and integrations phase. Each entry corresponds to a credential in `/security/credentials_registry.md`.*
+*Every external dependency this system relies on. The ones that need a login or key are also listed in `/security/credentials_registry.md`; the rest — read-only sources and outbound alerts — do not require a credential.*
 
 {{INTEGRATIONS}}
 
@@ -43,8 +43,8 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 **Basis:** {{SCALE_TIER_BASIS}}
 **Status:** Provisional — set during wizard setup. Will be reviewed after first production run and checked weekly from that point. Requires explicit user confirmation to change.
 
-## Regulatory & compliance gaps (foundation-only mode)
+## Regulatory & compliance considerations
 
-*Populated when DOCUMENT-path stop conditions are documented during the shape-detection reevaluate loop. This section renders in `foundation_only` mode only (schema `render_modes: [foundation_only]`); in `complete` render mode it does not appear. If no compliance gaps were documented during the loop, the wizard may omit this section or emit "No compliance gaps documented during shape-detection."*
+*How this system handles personal, financial, and any regulated information, and where the limits are. Reflects the dependencies and data the system was set up to work with. If nothing of note was identified, this reads as "no regulatory exposure identified."*
 
 {{COMPLIANCE_GAPS_CONTENT}}

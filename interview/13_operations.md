@@ -196,7 +196,9 @@ Ask each question in sequence. Wait for the answer before moving to the next.
 
 **SCALE-1:**
 
-> How many people, records, or items will your system need to keep track of? This could be clients, patients, properties, cases, family members — whatever applies to your situation.
+**Before asking:** From the confirmed transcript, identify the operator's largest single category of tracked items — the primary working set the system spends most of its effort on (e.g., the master task list). Ground the question in that example per the Operator Interaction Contract. Do NOT ask the operator to total unlike categories together: tasks, advisors, accounts, and properties are different kinds of things at different orders of magnitude, and a non-technical operator cannot meaningfully combine them into one number. Ask for the size of the *biggest single group*, since that is the volume that drives sizing.
+
+> Of all the things your system keeps track of, what's the biggest single group — and roughly how many are in it? Most setups have one main set the system works through (tasks, clients, cases, records, properties — whatever fits yours), and that's the one that matters for sizing the system. Smaller groups, like a few advisors or a couple of accounts, don't change it. A rough number is fine.
 
 **Wait for answer.**
 
