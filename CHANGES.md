@@ -27,8 +27,8 @@ Entries appear newest-first.
 - No foundation-bundle version change in this release.
 - The dollar figures the system computes are shown for transparency, not for you to set — you choose the plan and the sharing / overflow behavior; the wizard does the arithmetic.
 
-**Source-Meta-Commit:** `<filled at publish>`
-**Public repo commit:** `<filled at publish>`
+**Source-Meta-Commit:** 597f0fd
+**Public repo commit:** dd3a5fa
 
 ---
 
