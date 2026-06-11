@@ -12,6 +12,23 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-10 — your interview now asks about your outside systems once, in plain language
+
+**Public-facing change:** The interview used to ask about the systems you connect to in three separate places — once for logins, once for what it checks coming in, once for what it monitors — so you described the same spreadsheet or service several times, and those lists could drift apart. Now there is a single **"System boundaries & external dependencies"** step: you describe each outside system **once** and say how your system uses it — it takes data in; your system sends out through it (a notification channel, outgoing mail, a sheet it writes back to); its health is watched; and/or it needs a login. Later steps reuse that one list instead of re-asking, and the validation checklist, the monitored-source registry, and the credentials checklist your built system ships with are all generated from it, so they stay consistent with each other. A system you depend on only to send things out (like push notifications) stays on the list even if you choose not to monitor it.
+
+Two interview-experience improvements came with this: the dependency questions are asked in plain language (no internal jargon), and the quality-settings questions are now asked one at a time rather than all at once.
+
+**Operator-facing notes:**
+
+- You describe each outside system once, with the role(s) it plays; the wizard proposes the list from what you've already told it, and you confirm or adjust.
+- "Don't monitor this one" narrows how the system treats it — it does not drop it from your setup.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** <filled at publish>
+**Public repo commit:** <filled after subtree push>
+
+---
+
 ## 2026-06-10 — credentials: set them up after the build, with the system walking you through each one
 
 **Public-facing change:** The credentials step of the interview is now **capture-only**. It still identifies every credential your system will need and notes what each one is (which service, what type), but it no longer creates files or asks you to paste secrets during the interview. Instead, your built system ships with secrets already protected (an empty, git-ignored `.env`) plus a **credential checklist**, and at first boot a new **credential-setup helper walks you through getting each credential one at a time** — pointing you to the provider's official instructions, telling you exactly where the value goes, verifying it where it can, and stopping to help (or drafting a request to your account admin) if a screen doesn't match or a provider needs admin access. For tricky providers (work email, Google sign-ins) it leads with the provider's current official page rather than guessing at steps that may be out of date.
