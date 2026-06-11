@@ -12,6 +12,21 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-11 — a reliability fix (and a small simplification) for how helpers that use outside systems are set up
+
+**Public-facing change:** A fix to how the wizard records each helper (agent) during the architecture step, plus a small simplification to what it asks you. Previously, when the wizard noted that a helper works with an outside system — like keeping a spreadsheet in sync or researching from the web — it could mark that helper in a way that (a) prevented your system from being built at the very end, and (b) asked you to confirm technical capabilities ("needs network access," "needs broad file access") you had no real basis to judge. Now the wizard records only whether a helper runs on a schedule; a helper's connection to an outside system is captured once, in plain language, at the dependencies step. This removes a way the final build step could fail and drops a confusing confirmation.
+
+**Operator-facing notes:**
+
+- Your system behaves the same once built; this corrects an internal mismatch between the interview and the build step, and removes one question you couldn't meaningfully answer.
+- The systems your helpers connect to are still captured — at the "System boundaries & external dependencies" step, where you describe each one once.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** <pending dual-push>
+**Public repo commit:** <pending subtree push>
+
+---
+
 ## 2026-06-11 — clearer money limits, an MVP-and-roadmap view, and lighter reviews near the end
 
 **Public-facing change:** A set of improvements to the final stretch of the interview (the operations and document-review steps):
