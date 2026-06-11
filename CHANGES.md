@@ -24,8 +24,8 @@ Two interview-experience improvements came with this: the dependency questions a
 - "Don't monitor this one" narrows how the system treats it — it does not drop it from your setup.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** <filled at publish>
-**Public repo commit:** <filled after subtree push>
+**Source-Meta-Commit:** 5929c9b
+**Public repo commit:** 02ed9df
 
 ---
 
@@ -41,8 +41,8 @@ Two credential-upkeep preferences you set — how many days before expiry to war
 - Mid-interview, your only credential actions are confirming the credential list and two upkeep preferences.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** <filled at publish>
-**Public repo commit:** <filled after subtree push>
+**Source-Meta-Commit:** 5929c9b
+**Public repo commit:** 02ed9df
 
 ---
 
