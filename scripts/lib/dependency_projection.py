@@ -4,7 +4,7 @@ The wizard captures the system's external dependencies ONCE as a canonical recor
 confirms — two payload fields:
 
   EXTERNAL_DEPENDENCY_IDENTITY   (JSON array; the integration-boundary decision surface):
-      [{id, name, type, roles:[boundary_input|health_monitored|needs_credential],
+      [{id, name, type, roles:[boundary_input|boundary_output|health_monitored|needs_credential],
         credential_facet?:{env_var, cred_type, provider, provisional_expiry}}]
   EXTERNAL_DEPENDENCY_ANNOTATION (JSON array; content-only):
       [{id, purpose, what_stops, boundary_input_facet?:{input_risk}, health_facet?:{}}]
@@ -26,17 +26,39 @@ every dependency plays every role (an outbound mail server is health_monitored +
 but not a validated input; a manual upload is boundary_input only). Each view is the subset that
 plays its role.
 
+A dependency may also play `boundary_output` (the system sends data/notifications OUT through it —
+the symmetric partner to boundary_input; e.g. a push-notification channel the system assumes works,
+or a sheet it writes back to). `boundary_output` drives NO emitted registry at v0; it keeps an
+output-only dependency in the canonical record and lets it appear in INTEGRATIONS. A dependency
+that plays only `boundary_output` is therefore valid even though it projects into none of the three
+tables.
+
 Stdlib-only, pip-install-free.
 """
 
 import json
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 ROLE_BOUNDARY_INPUT = "boundary_input"
+ROLE_BOUNDARY_OUTPUT = "boundary_output"
 ROLE_HEALTH_MONITORED = "health_monitored"
 ROLE_NEEDS_CREDENTIAL = "needs_credential"
-VALID_ROLES = frozenset({ROLE_BOUNDARY_INPUT, ROLE_HEALTH_MONITORED, ROLE_NEEDS_CREDENTIAL})
+
+# Each role is a canonical RELATIONSHIP the system has with a dependency. Most roles drive a
+# deterministic projection (an emitted role-subset view); a role mapped to None drives no emitted
+# artifact. `boundary_output` (the system sends data/notifications OUT through the dependency — the
+# symmetric partner to boundary_input) is such a role at v0: it has no registry of its own, but it
+# keeps an output-only dependency in the canonical record and surfaces it in INTEGRATIONS (the
+# architecture doc's external-systems list). Validity is "declares >=1 relationship role", NOT
+# "projects somewhere" — so a boundary_output-only dependency is valid though it projects nowhere.
+ROLE_PROJECTION: Dict[str, Optional[str]] = {
+    ROLE_BOUNDARY_INPUT: "INPUT_TYPE_INVENTORY",
+    ROLE_HEALTH_MONITORED: "SOURCE_REGISTRY_ROWS",
+    ROLE_NEEDS_CREDENTIAL: "CREDENTIAL_REGISTRY_ROWS",
+    ROLE_BOUNDARY_OUTPUT: None,
+}
+VALID_ROLES = frozenset(ROLE_PROJECTION)
 
 # Setup-time-honest literals (the fabrication discipline): nothing about observed runtime health
 # is known when the wizard runs, so it is never derived.
@@ -58,7 +80,9 @@ class DependencyProjectionError(Exception):
 
 def parse_identity(identity_json: str) -> List[Dict[str, Any]]:
     """Parse + validate the IDENTITY record. Every dependency needs an id, a name, and >=1 role
-    drawn from the closed role set (a zero-role record is INVALID — it would project nowhere)."""
+    drawn from the closed role set. A zero-role dependency is INVALID — it declares no relationship
+    to the system. (Validity is "declares a relationship", NOT "projects into a registry": a
+    boundary_output-only dependency projects nowhere yet is valid.)"""
     rows = _load_array(identity_json, IDENTITY_FIELD)
     seen_ids = set()
     for r in rows:
@@ -73,8 +97,8 @@ def parse_identity(identity_json: str) -> List[Dict[str, Any]]:
         roles = r.get("roles")
         if not (isinstance(roles, list) and len(roles) >= 1):
             raise DependencyProjectionError(
-                f"{IDENTITY_FIELD}: dependency {rid!r} must declare at least one role "
-                f"(a zero-role dependency is invalid)")
+                f"{IDENTITY_FIELD}: dependency {rid!r} must declare at least one relationship role "
+                f"(a zero-role dependency declares no relationship to the system)")
         for role in roles:
             if role not in VALID_ROLES:
                 raise DependencyProjectionError(

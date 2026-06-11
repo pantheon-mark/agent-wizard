@@ -81,13 +81,14 @@ Read the confirmed vision and approach/architecture content from the transcript 
 
 **The operator does not design this list.** You propose it — the dependencies, what each one is for, and which relationship(s) the system has with it. They confirm, remove, or add.
 
-For each dependency, the relationship is one or more of three **roles**:
+For each dependency, the relationship is one or more of four **roles**:
 
 - **It sends data in** — the system reads from it, so what comes in needs checking (a spreadsheet of tasks, an inbound form, a file upload).
+- **The system sends out through it** — the system depends on it to deliver something outward (a push-notification channel, an outbound mail server, a sheet it writes back to). This holds even when there is nothing to check coming in and nothing to monitor.
 - **Its health is watched** — the system depends on it staying up and behaving, so it's worth monitoring (an API that can go down, a feed that can go stale).
 - **It needs a login or key** — the system has to authenticate to use it (an API key, a username/password login).
 
-A dependency can play several roles (an inbound CRM API does all three) or just one (a manual file upload only sends data in; an outbound mail server is watched and needs a login but takes no input). You propose the roles from what the dependency is; the operator corrects.
+A dependency can play several roles (an inbound CRM API sends data in, is watched, and needs a login) or just one (a manual file upload only sends data in; a push-notification channel the operator is happy to assume works only sends out; an outbound mail server sends out, is watched, and needs a login but takes no input). You propose the roles from what the dependency is; the operator corrects. Every dependency the system relies on belongs on the list, even one that is only a delivery channel — "we don't need to monitor it" removes the watch role, not the dependency.
 
 Do NOT ask the operator to state a provider's expiry rules or anything technical they can't know — ask only what they can actually know (which service, whether they have an account, whether it's a key or a login).
 
@@ -99,15 +100,14 @@ Present the proposed dependency inventory. For each: a plain-language name, what
 
 **Say:**
 
-> Based on your vision, approach, and architecture, here's every outside system I think yours depends on — so nothing surprises you later:
+> Based on your vision, approach, and architecture, here's every outside thing I think your system depends on — so nothing surprises you later:
 >
 > **[Dependency plain-language name]**
-> [What it is — one sentence in plain language.] Your system uses it to [what it does]. Without it, [what stops or degrades].
-> Relationship: [it sends data in / its health is watched / it needs a login or key — one or more, in plain words].
+> [What it is and what your system uses it for, in one or two plain sentences, ending with what stops or degrades without it. Work the relationship into those sentences in plain words — whether the system takes data in from it, signs into it with a login or key, keeps an eye on whether it stays up, or some combination — instead of labeling it. For example: "reads your task list and writes updates back, and signs in with your Google account to do it; it also watches the connection, since a changed format would quietly throw the list off," or "only sends mail out, and keeps an eye on whether sending is working."]
 >
 > **[Repeat for each dependency.]**
 >
-> Does this list look complete? Anything here you don't actually use, or anything missing you'd expect to need? And for each one — did I get the relationship right?
+> Does this list look complete? Anything here you don't actually use, or anything missing you'd expect to need? And for each one — did I get how your system uses it right?
 
 **Wait for answer.**
 
@@ -262,7 +262,7 @@ python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wiza
 python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CRED-5 --group orchestration_build --reason "session-lifetime explanation; no derivation source content"
 ```
 
-Now derive the canonical identity record — a JSON array, one object per confirmed dependency: `id` (a short stable slug, e.g. `google_sheet`), `name`, `type` (or `"Unknown"`), `roles` (the confirmed subset of `boundary_input` / `health_monitored` / `needs_credential`), and a `credential_facet` (`env_var` / `cred_type` / `provider` / `provisional_expiry`) for the `needs_credential` ones. Then confirm it (the operator already confirmed the inventory inline above) and close the dependency group so step 09 can complete:
+Now derive the canonical identity record — a JSON array, one object per confirmed dependency: `id` (a short stable slug, e.g. `google_sheet`), `name`, `type` (or `"Unknown"`), `roles` (the confirmed subset of `boundary_input` / `boundary_output` / `health_monitored` / `needs_credential` — `boundary_output` is a dependency the system only sends out through, e.g. a notification channel it assumes works), and a `credential_facet` (`env_var` / `cred_type` / `provider` / `provisional_expiry`) for the `needs_credential` ones. Then confirm it (the operator already confirmed the inventory inline above) and close the dependency group so step 09 can complete:
 
 ```
 python3 wizard/scripts/interview_cli.py derive-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field EXTERNAL_DEPENDENCY_IDENTITY --sources DEP-1 --value '<JSON array of {id, name, type, roles, credential_facet?}>'

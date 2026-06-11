@@ -132,5 +132,54 @@ class DeterminismTest(unittest.TestCase):
         self.assertEqual(before, after)
 
 
+class BoundaryOutputRoleTest(unittest.TestCase):
+    """`boundary_output` is a canonical relationship that drives NO projection at v0: an output-only
+    dependency (e.g. a push channel the operator is happy to assume works) stays in the record and is
+    excluded from all three role-filtered tables. Regression: declining health-monitoring on a
+    notification channel must narrow its role set, not drop the dependency from the record."""
+
+    _OUTPUT_ONLY = json.dumps([
+        {"id": "ntfy", "name": "NTFY push channel", "type": "Notification service",
+         "roles": ["boundary_output"]},
+    ])
+
+    def test_boundary_output_is_a_valid_role(self):
+        self.assertIn("boundary_output", dp.VALID_ROLES)
+
+    def test_output_only_dependency_is_valid(self):
+        rows = dp.parse_identity(self._OUTPUT_ONLY)
+        self.assertEqual([r["id"] for r in rows], ["ntfy"])
+
+    def test_output_only_excluded_from_all_three_projections(self):
+        for field in ("INPUT_TYPE_INVENTORY", "SOURCE_REGISTRY_ROWS", "CREDENTIAL_REGISTRY_ROWS"):
+            self.assertEqual(dp.project(field, self._OUTPUT_ONLY, "[]"), "")
+
+    def test_output_plus_other_roles_still_projects_for_those(self):
+        ident = json.dumps([
+            {"id": "outlook", "name": "Outlook email", "type": "M365",
+             "roles": ["boundary_output", "health_monitored", "needs_credential"],
+             "credential_facet": {"env_var": "OUTLOOK", "cred_type": "OAuth",
+                                  "provider": "Microsoft", "provisional_expiry": "Unknown"}},
+        ])
+        ann = json.dumps([{"id": "outlook", "purpose": "sends mail", "what_stops": "no mail"}])
+        self.assertNotEqual(dp.project("SOURCE_REGISTRY_ROWS", ident, ann), "")
+        self.assertNotEqual(dp.project("CREDENTIAL_REGISTRY_ROWS", ident, ann), "")
+        self.assertEqual(dp.project("INPUT_TYPE_INVENTORY", ident, ann), "")  # outbound is not an input
+
+    def test_role_projection_map_consistent_with_surfaces(self):
+        """Guard against the 'unprojected role becomes ad-hoc' drift the consult flagged: the
+        role->projection map and the surface table must agree, and boundary_output maps to None."""
+        projecting_roles = {role for role, _cols in dp._SURFACES.values()}
+        for role, proj in dp.ROLE_PROJECTION.items():
+            self.assertIn(role, dp.VALID_ROLES)
+            if proj is None:
+                self.assertNotIn(role, projecting_roles)
+            else:
+                self.assertIn(proj, dp._SURFACES)
+        for field, (role, _cols) in dp._SURFACES.items():
+            self.assertEqual(dp.ROLE_PROJECTION[role], field)
+        self.assertIsNone(dp.ROLE_PROJECTION["boundary_output"])
+
+
 if __name__ == "__main__":
     unittest.main()

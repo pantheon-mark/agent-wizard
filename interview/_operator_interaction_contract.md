@@ -47,3 +47,9 @@ Three rules make the file genuinely reviewable:
 - **Always the file, never a chat fallback.** If the render path is blocked (e.g. a field is not yet confirmed), do whatever it takes to still produce the file — do not fall back to chat text. The operator always reviews the file.
 - **Operator-clean content.** The review file must contain only what the operator should read — no CLI separators (`===== doc =====`), no wizard-internal YAML frontmatter. Use the preview command's `--out-file` (it strips both); never write raw CLI stdout to the review file. The emitted document keeps its frontmatter; only the review preview omits it.
 - **Show the draft before confirming.** The operator reviews the derived draft *before* confirming it. Use the preview command's `--include-unconfirmed` so a not-yet-confirmed derivation still renders for review. Confirmation follows the review; it does not gate it.
+
+## 5. Pacing (one decision at a time)
+
+Ask one decision per turn and wait for the answer before asking the next. A step that carries several independent choices — a reporting style, then a channel preference, then a threshold — asks them one at a time, never as a single batched list. Batching independent questions forces the operator to scroll back and track which question is which, and a non-technical operator answers in the moment, in immediate context.
+
+The one exception is a single multi-item **proposal** the operator confirms or adjusts as a whole — a derived inventory, a settings table, a roster. That is one decision (accept or tweak the set) and belongs in one turn. The test is the number of independent decisions, not the number of items on screen.
