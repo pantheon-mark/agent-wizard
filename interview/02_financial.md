@@ -61,7 +61,7 @@ Read this; do not read it aloud. From 2026-06-15, work the system does **headles
 | Team Premium (per seat) | $100 |
 | Free | none |
 
-`last_verified: 2026-06-07` against `support.claude.com/articles/15036540`. **Version-dependent** (effective 2026-06-15; re-verify these figures before relying — pricing/credit facts rot). The credit is a **one-time opt-in the operator must claim once** ("your plan includes…" is false until claimed). **There is no programmatic balance read**, so the generated system meters its OWN estimated spend (tokens × API rate; already counted in `cost_efficiency_log.md`) with a conservative safety margin — a documented v0 bridge. The included pool is a platform hard-boundary: at $0, unattended requests stop unless the operator has enabled paid overflow ("usage credits").
+`last_verified: 2026-06-11` against `support.claude.com/articles/15036540`. **Version-dependent** (effective 2026-06-15; re-verify these figures before relying — pricing/credit facts rot). *(Enterprise plans also carry a credit — $20 usage-based / $200 seat-Premium — but are not yet a FIN-1 option; if an operator is on Enterprise, treat as Max-tier sizing and note the gap.)* The credit is a **one-time opt-in the operator must claim once** ("your plan includes…" is false until claimed). **There is no programmatic balance read**, so the generated system meters its OWN estimated spend (tokens × API rate; already counted in `cost_efficiency_log.md`) with a conservative safety margin — a documented v0 bridge. The included pool is a platform hard-boundary: at $0, unattended requests stop unless the operator has enabled paid overflow ("usage credits").
 
 **Budget arithmetic (wizard computes; operator never sets it):**
 - `PROJECT_AUTOMATION_BUDGET` = `AUTOMATION_CREDIT_POOL` × share fraction, where share = ~0.9 if `PROJECT_SHARE_POSTURE = sole`, ~0.4 if `one-of-several` (conservative, leaves room for the operator's other systems). Express as a rounded dollar figure.
@@ -210,7 +210,7 @@ Write sub-step marker: Append `step_02_FIN-5: complete | <timestamp>` to `~/clau
 
 > Got it. Your system will do its own background work within what your plan includes, and if it ever reaches that point it'll **[wait for next month / keep helping when you're around / keep going at up to $[PAYG_CAP]]**. I'll also pause for your OK before any unusually large single task. You can change any of this later just by telling me.
 
-Internally store `PROJECT_AUTOMATION_BUDGET` and `INTENSIVE_OPERATION_THRESHOLD` per the arithmetic above. Update the staging file with all stored values.
+This step **captures the operator's plain choices only** (plan, sharing posture, exhaustion behavior, and the paid-overflow cap if chosen) — recorded as the FIN source answers below. Do **not** compute or store `PROJECT_AUTOMATION_BUDGET` or `INTENSIVE_OPERATION_THRESHOLD` here: those dollar values are derived deterministically at the operations step where the financial guardrail group closes, from these same source answers. (The arithmetic above is wizard-internal context so you can answer honestly if the operator asks how the limit is kept — it is not a compute-to-staging instruction.)
 
 ---
 

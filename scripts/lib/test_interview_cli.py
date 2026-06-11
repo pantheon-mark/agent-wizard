@@ -228,19 +228,22 @@ def _drive_hitl_autonomy_group(transcript, progress):
     # AUTONOMY_LEVEL: now a classification (operator-preference) derived from the authority answers.
     _derive_confirm(transcript, "AUTONOMY_LEVEL", "hitl_autonomy", "2",
                     sources=["UP-3", "UP-5", "DR", "REV"], state="accepted")
-    # HITL_MAP_ROWS: policy citing prior fields, with explicit negative permissions in the rows.
+    # HITL_MAP_ROWS: policy citing prior FIELDS (the authority posture + vision elevations), with
+    # explicit negative permissions in the rows. (RW-46: reconciled from VISION_CONSTRAINTS to the
+    # real field-level inputs; ARCH-4 is the answer-level edge declared in the manifest.)
     _derive_confirm(transcript, "HITL_MAP_ROWS", "hitl_autonomy",
                     "| Action | System behavior | Rationale |\n|---|---|---|\n"
                     "| Spend money | Always stop and ask; never spends autonomously | Irreversible |",
-                    inputs=["VISION_CONSTRAINTS"])
-    # Financial guardrail (FIN-1/FIN-3/FIN-4): extraction/classification first, then synthesis citing them per DR-5/DR-8.
+                    inputs=["AUTONOMY_LEVEL"])  # + TIER_1_ADDITIONS when the vision barrier produced it (optional)
+    # Financial guardrail: POOL (extraction lookup) + SHARE/EXHAUSTION (classification) are the
+    # operator's plain choices; BUDGET + THRESHOLD are DETERMINISTIC projections computed in pure
+    # code (financial_projection.py via derive-projection) — never model-authored. POOL=$20 sole ->
+    # budget round(20*0.9)=$18 -> threshold max(1, round(0.1*18))=$2.
     _derive_confirm(transcript, "AUTOMATION_CREDIT_POOL", "hitl_autonomy", "$20", sources=["FIN-1"])
     _derive_confirm(transcript, "PROJECT_SHARE_POSTURE", "hitl_autonomy", "sole", sources=["FIN-3"])
     _derive_confirm(transcript, "EXHAUSTION_BEHAVIOR", "hitl_autonomy", "wait", sources=["FIN-4"])
-    _derive_confirm(transcript, "PROJECT_AUTOMATION_BUDGET", "hitl_autonomy", "$18",
-                    inputs=["AUTOMATION_CREDIT_POOL", "PROJECT_SHARE_POSTURE"])
-    _derive_confirm(transcript, "INTENSIVE_OPERATION_THRESHOLD", "hitl_autonomy", "$1.80",
-                    inputs=["PROJECT_AUTOMATION_BUDGET"])
+    cli.cmd_derive_projection(transcript, SHAPE, "PROJECT_AUTOMATION_BUDGET", clock=lambda: CLOCK)
+    cli.cmd_derive_projection(transcript, SHAPE, "INTENSIVE_OPERATION_THRESHOLD", clock=lambda: CLOCK)
     return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
 
 
@@ -590,6 +593,47 @@ class EmitSystemCLITests(unittest.TestCase):
             sr = (target / "quality/source_registry.md").read_text()
             self.assertIn("Google Sheet", sr, "QA-3 source did not reach source_registry.md")
             self.assertNotIn("{{SOURCE_REGISTRY_ROWS}}", sr)
+
+    def test_emit_projects_financial_guardrail_into_instructions_and_cost_log(self):
+        # RW-46 / D-EMIT regression (the IS-1 closure this guardrail claimed): the DETERMINISTIC
+        # financial projection (pool x share -> budget; 10% -> threshold) must reach the emitted
+        # project_instructions.md + cost_efficiency_log.md as real dollars, not the CONFIGURE
+        # fallbacks. Drives the real derive-projection path so the value is pure-code, not authored.
+        from test_emission_plan import _FOUNDATION_DOC_INPUTS
+        from test_interview_bridge import _ai
+        base_env = {"_source": "operator-content", "_derivation_class": "extraction",
+                    "_decision_field": False, "_decision_kind": "none", "_prompt_version": "sha256:p1"}
+        with tempfile.TemporaryDirectory() as td:
+            tpath = Path(td) / "t.jsonl"
+            r = TranscriptRecorder(tpath, clock=lambda: CLOCK)
+            for k, v in _FOUNDATION_DOC_INPUTS.items():
+                r.record_derived_field(k, "vision", v, dict(base_env))
+                r.record_field_confirmation(k, "vision", "accepted")
+            r.record_agent_intent("approach_roster", _ai())
+            # Plain operator choices: pool (extraction lookup) + sharing posture (classification).
+            pool_env = {"_source": "claude-derived-operator-confirmed", "_derivation_class": "extraction",
+                        "_decision_field": False, "_decision_kind": "none",
+                        "_source_question_ids": ["FIN-1"], "_prompt_version": "sha256:p1"}
+            share_env = {"_source": "operator-preference", "_derivation_class": "classification",
+                         "_decision_field": True, "_decision_kind": "closed_value",
+                         "_source_question_ids": ["FIN-3"], "_prompt_version": "sha256:p1"}
+            r.record_derived_field("AUTOMATION_CREDIT_POOL", "hitl_autonomy", "$100", pool_env)
+            r.record_field_confirmation("AUTOMATION_CREDIT_POOL", "hitl_autonomy", "accepted")
+            r.record_derived_field("PROJECT_SHARE_POSTURE", "hitl_autonomy", "one-of-several", share_env)
+            r.record_field_confirmation("PROJECT_SHARE_POSTURE", "hitl_autonomy", "accepted")
+            # The money is computed by pure code, not authored: $100 x 0.4 = $40; 10% -> $4.
+            cli.cmd_derive_projection(str(tpath), SHAPE, "PROJECT_AUTOMATION_BUDGET", clock=lambda: CLOCK)
+            cli.cmd_derive_projection(str(tpath), SHAPE, "INTENSIVE_OPERATION_THRESHOLD", clock=lambda: CLOCK)
+            target = Path(td) / "operator-project"
+            cli.cmd_emit_system(str(tpath), SHAPE, str(target), str(REPO_ROOT),
+                                generator_version_override="0" * 40)
+            pi = (target / "project_instructions.md").read_text()
+            self.assertIn("$40", pi, "deterministic budget did not reach project_instructions.md")
+            self.assertNotIn("{{PROJECT_AUTOMATION_BUDGET}}", pi)
+            self.assertNotIn("{{INTENSIVE_OPERATION_THRESHOLD}}", pi)
+            cel = (target / "logs/cost_efficiency_log.md").read_text()
+            self.assertIn("$40", cel, "deterministic budget did not reach cost_efficiency_log.md")
+            self.assertNotIn("{{PROJECT_AUTOMATION_BUDGET}}", cel)
 
     def test_emit_system_foundation_only_from_a_transcript_file(self):
         # The other e2e branch: a foundation-only transcript (FOUNDATION_ONLY_MODE=true, zero

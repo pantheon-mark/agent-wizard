@@ -158,18 +158,18 @@ def cmd_derive_field(transcript: str, shape: str, field: str, value: str, *,
 
 def cmd_derive_projection(transcript: str, shape: str, field: str, *,
                           clock: Optional[Callable[[], str]] = None) -> Dict[str, Any]:
-    """Derive a `projection`-class field DETERMINISTICALLY from the confirmed canonical record.
+    """Derive a `projection`-class field DETERMINISTICALLY from prior confirmed payload fields.
 
-    A projection is pure code (role-filter + reshape of prior payload fields), not a judgment call:
-    the value is COMPUTED here from the canonical dependency fields, never authored by the model.
-    This keeps determinism_kind=pure_code honest (an unchanged role-subset auto-halts in the
-    change-propagation engine). Fail-loud if the field is not a projection, if a required canonical
-    field is not yet derived, or if the canonical record is malformed."""
+    A projection is pure code (filter/reshape or arithmetic over prior payload fields), not a
+    judgment call: the value is COMPUTED here, never authored by the model. This keeps
+    determinism_kind=pure_code honest (an unchanged subset auto-halts in the change-propagation
+    engine). Dispatch is by field: the external-dependency role-filter views go to
+    `dependency_projection`; the financial safety-envelope arithmetic (budget / intensive-op
+    threshold) goes to `financial_projection`. Fail-loud if the field is not a projection, if a
+    required prior field is not yet derived, or if a record is malformed."""
     from derivation_replay import compile_transcript  # type: ignore
-    from dependency_projection import (  # type: ignore
-        project as project_dependency, derivation_inputs_for,
-        IDENTITY_FIELD, ANNOTATION_FIELD, DependencyProjectionError,
-    )
+    import dependency_projection as dep  # type: ignore
+    import financial_projection as fin  # type: ignore
     spec = load_field_manifest(shape).spec_for(field)
     if spec.derivation_class != "projection":
         raise InterviewCLIError(
@@ -177,17 +177,40 @@ def cmd_derive_projection(transcript: str, shape: str, field: str, *,
             f"(this field is {spec.derivation_class!r})")
     recorder = TranscriptRecorder(Path(transcript), clock=clock)
     record = compile_transcript(read_derived_replay_events(recorder.events()))
-    inputs = derivation_inputs_for(field)
-    identity = record.get(IDENTITY_FIELD)
-    if identity is None:
+
+    if field in fin.PROJECTION_FIELDS:
+        # Financial safety-envelope arithmetic: pure-code over prior CONFIRMED money fields.
+        inputs = fin.derivation_inputs_for(field)
+        input_values: Dict[str, str] = {}
+        for key in inputs:
+            val = record.get(key)
+            if val is None:
+                raise InterviewCLIError(
+                    f"{field}: required input {key!r} is not yet derived — derive its prior fields "
+                    f"(plan pool / sharing posture / budget) before projecting")
+            input_values[key] = val
+        try:
+            value = fin.project(field, input_values)
+        except fin.FinancialProjectionError as e:
+            raise InterviewCLIError(f"{field}: financial projection failed: {e}") from e
+    elif field in dep.PROJECTION_FIELDS:
+        # External-dependency role-filter view: pure-code over the canonical dependency record.
+        inputs = dep.derivation_inputs_for(field)
+        identity = record.get(dep.IDENTITY_FIELD)
+        if identity is None:
+            raise InterviewCLIError(
+                f"{field}: {dep.IDENTITY_FIELD} is not yet derived — capture + confirm the canonical "
+                f"dependency record (step 09) before projecting")
+        annotation = record.get(dep.ANNOTATION_FIELD, "[]") if dep.ANNOTATION_FIELD in inputs else "[]"
+        try:
+            value = dep.project(field, identity, annotation)
+        except dep.DependencyProjectionError as e:
+            raise InterviewCLIError(f"{field}: projection failed: {e}") from e
+    else:
         raise InterviewCLIError(
-            f"{field}: {IDENTITY_FIELD} is not yet derived — capture + confirm the canonical "
-            f"dependency record (step 09) before projecting")
-    annotation = record.get(ANNOTATION_FIELD, "[]") if ANNOTATION_FIELD in inputs else "[]"
-    try:
-        value = project_dependency(field, identity, annotation)
-    except DependencyProjectionError as e:
-        raise InterviewCLIError(f"{field}: projection failed: {e}") from e
+            f"{field}: no projector registered for this projection field "
+            f"(known: {sorted(set(fin.PROJECTION_FIELDS) | set(dep.PROJECTION_FIELDS))})")
+
     prompt = load_derivation_prompt(spec.derivation_class)   # "projection"
     envelope = _envelope_for(spec, prompt.prompt_version, None, inputs)
     return recorder.record_derived_field(field, spec.group_id, value, envelope)

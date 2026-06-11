@@ -295,16 +295,43 @@ interview_cli derive-field --field MVP_SUCCESS_CONDITION --value "<...>" --input
 
 ### Barrier 2 — hitl_autonomy (preview `execution_plan.md`)
 
+This group derives **seven** fields: the autonomy level, the human-in-the-loop policy map, and the **five financial-guardrail fields** that govern what the system spends on its own (the included monthly automation credit, this project's budget, the sharing posture, the exhaustion behavior, and the intensive-operation threshold). The financial source answers (FIN-1 plan / FIN-3 sharing / FIN-4 exhaustion) were captured at step 02; the dollar values are derived **here**, where the group closes — the wizard computes every dollar (the operator never set one).
+
 ```
-# AUTONOMY_LEVEL: provisional auto-default (the operator authority profile does not exist yet).
-interview_cli derive-field --field AUTONOMY_LEVEL --value "<conservative default, e.g. 2>"
-interview_cli confirm-field --field AUTONOMY_LEVEL --group hitl_autonomy --state accepted_uncertain_for_now --revisit-trigger "operator-authority-profile-available"
-# HITL_MAP_ROWS: policy — consume the vision-barrier Tier-1 additions + the ARCH-4 always-ask summary.
-interview_cli derive-field --field HITL_MAP_ROWS --value "<markdown table: Action | System behavior | Rationale; state BOTH what is permitted AND what is forbidden>" --inputs VISION_CONSTRAINTS
+# --- Financial guardrail (the cost safety-envelope) ---
+# Plan -> included monthly automation-credit pool (extraction lookup; the operator confirmed their
+# plan at step 02, and confirms the dollar pool against the plan table there). Pro $20 / Max5x $100 /
+# Max20x $200 / Team-Std $20 / Team-Premium $100 (unknown -> $20).
+interview_cli derive-field --field AUTOMATION_CREDIT_POOL --value "<$pool for the operator's plan>" --sources FIN-1
+# Sharing posture + exhaustion behavior (classification of the operator's plain step-02 choices; forced confirm):
+interview_cli derive-field --field PROJECT_SHARE_POSTURE --value "<sole|one-of-several>" --sources FIN-3
+interview_cli confirm-field --field PROJECT_SHARE_POSTURE --group hitl_autonomy --state accepted
+interview_cli derive-field --field EXHAUSTION_BEHAVIOR --value "<wait|interactive-fallback|paid-overflow>" --sources FIN-4
+interview_cli confirm-field --field EXHAUSTION_BEHAVIOR --group hitl_autonomy --state accepted
+# Budget + intensive-operation threshold are DETERMINISTIC projections (pure code: budget =
+# round(pool x share; sole 0.9 / one-of-several 0.4); threshold = max(1, round(10% of budget)).
+# No --value and no separate confirm — the wizard computes the money, it is never authored here:
+interview_cli derive-projection --field PROJECT_AUTOMATION_BUDGET
+interview_cli derive-projection --field INTENSIVE_OPERATION_THRESHOLD
+
+# --- AUTONOMY_LEVEL (classification, from the operator authority profile; forced confirm) ---
+# Compute the level deterministically with the authority-profile ceiling/min model:
+#   level = max(1, min(desired_level, domain_risk_cap, reversibility_cap, trust_cap))
+# where desired_level comes from the operator's decision preference + involvement (UP-3, UP-5),
+# domain_risk_cap from DR, reversibility_cap from REV, and trust_cap from the trust posture
+# (auto 'probationary' at first build -> cap 2). Routine action classes stay autonomous even at
+# level 1. Use authority_profile.py's mapping; do not eyeball it.
+interview_cli derive-field --field AUTONOMY_LEVEL --value "<1|2|3 from the ceiling/min above>" --sources UP-3,UP-5,DR,REV
+interview_cli confirm-field --field AUTONOMY_LEVEL --group hitl_autonomy --state accepted
+
+# --- HITL_MAP_ROWS (policy; forced confirm) ---
+# Consume the authority posture + the vision-barrier always-stop-and-ask elevations. Cite
+# AUTONOMY_LEVEL (always present); add TIER_1_ADDITIONS only if the vision barrier produced it.
+interview_cli derive-field --field HITL_MAP_ROWS --value "<markdown table: Action | System behavior | Rationale; state BOTH what is permitted AND what is forbidden>" --inputs AUTONOMY_LEVEL
 interview_cli confirm-field --field HITL_MAP_ROWS --group hitl_autonomy --state accepted
 ```
 
-`AUTONOMY_LEVEL` is a decision field auto-defaulted at this wizard version (no authority-profile probes yet) — it is confirmed `accepted_uncertain_for_now` with a neutral revisit trigger, so when the authority profile is added later the field gains question-ID sources + becomes a classification, which is envelope drift that forces re-confirmation. `HITL_MAP_ROWS` is a policy rule set: it MUST state explicit negative permissions, and it consumes the `TIER_1_ADDITIONS` derived at the vision barrier plus the ARCH-4 always-ask additions. Render `execution_plan.md` via `preview-group --group hitl_autonomy` (it renders orchestration_build's MVP/build-phase fields too — that is why orchestration_build closed first), show the operator, one round, then `close-group --group hitl_autonomy`.
+`AUTONOMY_LEVEL` is a decision field derived from the operator's confirmed authority answers (it is no longer a provisional placeholder). Surface the basis in the rationale you record — including that the trust posture is `probationary` at first build (which caps the level at 2) and lifts over time. `HITL_MAP_ROWS` is a policy rule set: it MUST state explicit negative permissions; it derives from `AUTONOMY_LEVEL` (the per-class autonomous-vs-ask-first posture) plus the always-stop-and-ask elevations the operator confirmed at the vision step (cite `TIER_1_ADDITIONS` in `--inputs` only when that field exists), plus the operator's always-ask summary from the architecture step. The budget and threshold do **not** render into this preview (`execution_plan.md`) — they land in the system's instructions and cost log at emission; the operator confirmed the plain choices that produce them at step 02, and the dollar values are deterministic. The paid-overflow cap is only present if the operator chose paid overflow, and it was handled at step 02 — it is not derived here. Render `execution_plan.md` via `preview-group --group hitl_autonomy` (it renders orchestration_build's MVP/build-phase fields too — that is why orchestration_build closed first), show the operator, one round, then `close-group --group hitl_autonomy`.
 
 ### Barrier 3 — tests_audit (preview `test_cases.md` + `audit_framework.md`)
 
