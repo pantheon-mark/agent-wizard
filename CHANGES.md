@@ -22,8 +22,8 @@ Entries appear newest-first.
 - The systems your helpers connect to are still captured — at the "System boundaries & external dependencies" step, where you describe each one once.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** <pending dual-push>
-**Public repo commit:** <pending subtree push>
+**Source-Meta-Commit:** 085175a
+**Public repo commit:** e52d302
 
 ---
 
