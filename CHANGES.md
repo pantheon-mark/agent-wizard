@@ -12,6 +12,26 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-11 — clearer money limits, an MVP-and-roadmap view, and lighter reviews near the end
+
+**Public-facing change:** A set of improvements to the final stretch of the interview (the operations and document-review steps):
+
+- **Your spending limits are now shown to you plainly.** From the plan you told it about, the wizard works out how much of your monthly automation allowance this project may use and the point at which it flags a costly operation, and shows you a short summary ("here's how this came out from your setup; adjustable anytime") instead of asking you to approve numbers you have no basis to set. When the month's allowance runs low, the system does what you chose earlier — check with you, wait until next month, or use paid overflow up to your cap.
+- **Your execution plan now spells out what comes first versus later.** A new "MVP and Roadmap Boundary" section states plainly what the system delivers first (the smallest version worth trusting), what is in scope but planned for after that (your roadmap), and what is only a possibility for later — and points to your vision document for what is out of scope entirely. The build-phase list and the first-version description are now generated from one source, so they cannot disagree.
+- **The plan's work-tracking section is now accurate.** It describes the real files your system uses to track open work and to resume a task it was partway through, replacing an earlier section that referred to a "sprint plan" file the system never actually created.
+- **Reviews near the end are lighter and clearer.** The "what it does on its own versus what it checks with you about first" review is now a plain walk-through with a single question, not a permissions table to audit. The technical testing and audit documents are no longer put in front of you to review — they are still generated for your built system, but since there is nothing in them a non-technical operator can meaningfully change, the wizard simply tells you in one line how your system will be tested and how often it re-checks itself against your vision.
+- **A reliability fix** so the operations step always completes cleanly regardless of which spending option you chose.
+
+**Operator-facing notes:**
+
+- No foundation-bundle version change in this release.
+- The dollar figures the system computes are shown for transparency, not for you to set — you choose the plan and the sharing / overflow behavior; the wizard does the arithmetic.
+
+**Source-Meta-Commit:** `<filled at publish>`
+**Public repo commit:** `<filled at publish>`
+
+---
+
 ## 2026-06-10 — your interview now asks about your outside systems once, in plain language
 
 **Public-facing change:** The interview used to ask about the systems you connect to in three separate places — once for logins, once for what it checks coming in, once for what it monitors — so you described the same spreadsheet or service several times, and those lists could drift apart. Now there is a single **"System boundaries & external dependencies"** step: you describe each outside system **once** and say how your system uses it — it takes data in; your system sends out through it (a notification channel, outgoing mail, a sheet it writes back to); its health is watched; and/or it needs a login. Later steps reuse that one list instead of re-asking, and the validation checklist, the monitored-source registry, and the credentials checklist your built system ships with are all generated from it, so they stay consistent with each other. A system you depend on only to send things out (like push notifications) stays on the list even if you choose not to monitor it.
