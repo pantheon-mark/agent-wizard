@@ -14,7 +14,7 @@ This class produces one intent object per agent. All intent objects together for
 | `acceptance_signals` | What "done well" looks like for this agent — drawn from the operator's language |
 | `output_purpose` | What the agent's output is used for (by a human, another agent, or a downstream system) |
 | `criticality_tier` | One of the allowed criticality values defined in the field manifest |
-| `resource_claims` | Three booleans: `requires_cron`, `requires_external_network`, `requires_broad_fs_read` |
+| `resource_claims` | Whether the agent must run on a schedule (`requires_cron`). This is the only resource claim recorded for this system shape — an agent's relationship to external systems (and any login or key it needs) is captured separately at the dependencies step, not as a per-agent claim here. |
 | `confidence` | `high`, `medium`, or `low` — your confidence that this intent object accurately reflects what the operator described |
 | `insufficiency_flags` | List of sub-fields where operator input was too thin to produce a reliable value |
 | `source_spans` | For each sub-field, the question ID(s) the value was drawn from |
@@ -51,7 +51,7 @@ Audit envelope requirements (for the `AGENT_ROSTER_ROWS` field as a whole):
 Show the operator one agent at a time (or all agents together if the roster is small — three or fewer):
 1. The intent object — formatted readably, not as raw data.
 2. The answers it was drawn from — one line per sub-field showing the source.
-3. The resource claims — call these out explicitly: "I am flagging this agent as needing [external network / scheduled runs / broad file access] based on what you described. Is that right?"
+3. Whether it runs on a schedule — if the agent must wake and run on its own (rather than only when the operator asks), call that out explicitly: "I'm flagging this agent as one that runs on a schedule based on what you described. Is that right?"
 4. The impact if it is wrong — for example: "The function summary and role intent are what the agent reads at the start of every session to understand its own job. If they are off, the agent will make misaligned decisions from the very first run."
 
 **Forced confirmation when criticality is at the highest tier.** If any agent's `criticality_tier` is set to the highest allowed value (as defined in the manifest), do not proceed past that agent's confirmation without an explicit operator acknowledgment. State clearly: "I have marked [agent name] as your most critical agent. That means failures here have the highest business impact. Please confirm you agree before we move on."

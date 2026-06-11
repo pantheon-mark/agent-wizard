@@ -240,10 +240,10 @@ For each confirmed agent (from ARCH-2 + the criticality tiers from ARCH-3), deri
 Record one intent per agent:
 
 ```
-python3 wizard/scripts/interview_cli.py record-agent-intent --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --group approach_roster --display-name "<agent name>" --function-summary "<one sentence>" --role-intent "<2-4 sentences: why it exists>" --acceptance-signals "<signal 1>;<signal 2>" --output-purpose "<what its output is for>" --criticality-tier <critical|standard|supporting> --confidence <high|medium|low> --source-spans "ARCH-2;ARCH-3" [--requires-cron] [--requires-external-network] [--requires-broad-fs-read] [--insufficiency-flags "<subfield>;..."]
+python3 wizard/scripts/interview_cli.py record-agent-intent --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --group approach_roster --display-name "<agent name>" --function-summary "<one sentence>" --role-intent "<2-4 sentences: why it exists>" --acceptance-signals "<signal 1>;<signal 2>" --output-purpose "<what its output is for>" --criticality-tier <critical|standard|supporting> --confidence <high|medium|low> --source-spans "ARCH-2;ARCH-3" [--requires-cron] [--insufficiency-flags "<subfield>;..."]
 ```
 
-Add a resource-claim flag only when the operator's description actually implies it (e.g. `--requires-cron` for an agent that must run on a schedule). **Forced confirmation for the highest tier:** before recording any agent as `critical`, state plainly — "I've marked [agent] as your most critical agent; failures here have the highest impact — please confirm" — and only proceed on explicit acknowledgment (per the agent-intent prompt's confirmation hooks). Surface low-confidence agents explicitly.
+Add `--requires-cron` only when the operator's description implies the agent must run on a schedule (rather than only when the operator asks). An agent's need to reach external systems is captured separately at the dependencies step, not as a per-agent flag here. **Forced confirmation for the highest tier:** before recording any agent as `critical`, state plainly — "I've marked [agent] as your most critical agent; failures here have the highest impact — please confirm" — and only proceed on explicit acknowledgment (per the agent-intent prompt's confirmation hooks). Surface low-confidence agents explicitly.
 
 ### Step 2 — Derive the approach solution brief, the agent roster, and the advisor entries
 

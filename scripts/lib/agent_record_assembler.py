@@ -71,9 +71,11 @@ def assemble_agent_records(intents: List[AgentIntent], scaffold_plan: ScaffoldPl
             if claim not in allowed:
                 raise ConstraintViolation(
                     kind="resource_claim_forbidden", subject=ai.display_name,
-                    detail=f"the {scaffold_plan.system_shape} shape does not permit {claim}",
-                    operator_options=[f"drop {claim} from this agent",
-                                      "choose a system shape that supports it"],
+                    detail=f"{claim} is not a recorded resource claim for the "
+                           f"{scaffold_plan.system_shape} shape — this shape does not provision "
+                           f"or gate it (recorded claims: {sorted(allowed)})",
+                    operator_options=[f"do not record {claim} for this shape",
+                                      "use a shape that provisions this resource"],
                 )
             if claim not in CLAIM_EFFECTS:
                 raise ConstraintViolation(

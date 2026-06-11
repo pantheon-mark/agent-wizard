@@ -472,8 +472,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp.add_argument("--criticality-tier", dest="criticality_tier", required=True)
     sp.add_argument("--acceptance-signals", dest="acceptance_signals", help="';'-separated")
     sp.add_argument("--requires-cron", dest="requires_cron", action="store_true")
-    sp.add_argument("--requires-external-network", dest="requires_external_network", action="store_true")
-    sp.add_argument("--requires-broad-fs-read", dest="requires_broad_fs_read", action="store_true")
     sp.add_argument("--confidence", default="high")
     sp.add_argument("--insufficiency-flags", dest="insufficiency_flags", help="';'-separated")
     sp.add_argument("--source-spans", dest="source_spans", help="';'-separated")
@@ -544,8 +542,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 criticality_tier=args.criticality_tier,
                 acceptance_signals=_split_semi(args.acceptance_signals),
                 requires_cron=args.requires_cron,
-                requires_external_network=args.requires_external_network,
-                requires_broad_fs_read=args.requires_broad_fs_read,
                 confidence=args.confidence,
                 insufficiency_flags=_split_semi(args.insufficiency_flags),
                 source_spans=_split_semi(args.source_spans))
