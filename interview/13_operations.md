@@ -322,6 +322,7 @@ This group derives **seven** fields: the autonomy level, the human-in-the-loop p
 # plan at step 02, and confirms the dollar pool against the plan table there). Pro $20 / Max5x $100 /
 # Max20x $200 / Team-Std $20 / Team-Premium $100 (unknown -> $20).
 interview_cli derive-field --field AUTOMATION_CREDIT_POOL --value "<$pool for the operator's plan>" --sources FIN-1
+interview_cli confirm-field --field AUTOMATION_CREDIT_POOL --group hitl_autonomy --state accepted   # extraction target field — the barrier requires it confirmed/projected; reflects the operator's confirmed plan + the pool shown in the recap
 # Sharing posture + exhaustion behavior (classification of the operator's plain step-02 choices; forced confirm):
 interview_cli derive-field --field PROJECT_SHARE_POSTURE --value "<sole|one-of-several>" --sources FIN-3
 interview_cli confirm-field --field PROJECT_SHARE_POSTURE --group hitl_autonomy --state accepted

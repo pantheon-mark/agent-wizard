@@ -172,7 +172,7 @@ Write sub-step marker: Append `step_02_FIN-4: complete | <timestamp>` to `~/clau
 
 ## FIN-5 — Paid-overflow setup (CONDITIONAL — only if FIN-4 == "paid-overflow")
 
-**If `EXHAUSTION_BEHAVIOR != "paid-overflow"`: skip this entire section.**
+**If `EXHAUSTION_BEHAVIOR != "paid-overflow"`: skip the questions in this section** — but FIN-5 is still **recorded as a skip** in the recording block below. The `hitl_autonomy` barrier lists FIN-5 in `skip_satisfied_if`, so it must be answered OR explicitly skipped, never simply absent (an absent FIN-5 blocks the barrier close).
 
 **Team-plan billing-authority gate (only if `PLAN_TYPE == "team"`):**
 
@@ -398,10 +398,16 @@ python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wiza
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid FIN-4 --group hitl_autonomy --value "<exhaustion behavior: wait | interactive-fallback | paid-overflow>"
 ```
 
-If `EXHAUSTION_BEHAVIOR == "paid-overflow"`, also record FIN-5:
+FIN-5 must be recorded **either way** — the `hitl_autonomy` barrier lists it in `skip_satisfied_if`, so it must be answered or explicitly skipped, never simply absent (absence blocks the barrier close for every operator who does not set a cap). If `EXHAUSTION_BEHAVIOR == "paid-overflow"` AND a cap was set, record the cap:
 
 ```
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid FIN-5 --group hitl_autonomy --value "<payg cap, e.g. $20>"
+```
+
+Otherwise — the operator chose `wait` or `interactive-fallback`, or chose paid overflow but a Team admin must enable it later (so no cap was set now) — record FIN-5 as a skip:
+
+```
+python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid FIN-5 --group hitl_autonomy --reason "no paid-overflow cap set; not applicable"
 ```
 
 ---
@@ -428,7 +434,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-FIN-1 (plan identified — or hard-gated on Free), FIN-3 (sharing posture), and FIN-4 (exhaustion behavior) answered and stored; FIN-5 (paid-overflow cap) stored if and only if `EXHAUSTION_BEHAVIOR == "paid-overflow"`.
+FIN-1 (plan identified — or hard-gated on Free), FIN-3 (sharing posture), and FIN-4 (exhaustion behavior) answered and stored; FIN-5 recorded **either** as an answer (the paid-overflow cap, when `EXHAUSTION_BEHAVIOR == "paid-overflow"` and a cap was set) **or** as an explicit skip (otherwise) — never simply absent, since the `hitl_autonomy` barrier requires FIN-5 answered-or-skipped to close.
 
 **Write completion marker:** Append `step_02: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
