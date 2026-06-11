@@ -25,9 +25,19 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 
 ---
 
+## MVP and Roadmap Boundary
+
+*What the system delivers in the MVP, what is in scope but planned for after the MVP (your roadmap), and what is only a possibility for later. This is the authoritative split between MVP and deferred work. What is out of scope entirely — things the system is not meant to do at all — lives in the Scope Boundary section of your vision document, not here.*
+
+{{MVP_ROADMAP_BOUNDARY}}
+
+**Not included:** anything outside the system's stated purpose. See the **Scope Boundary** section of `vision.md` for what is out of scope.
+
+---
+
 ## Build Phases
 
-*Logical build sequence — agents are built in this order, with each phase delivering a working capability increment.*
+*The build order — agents are built in this sequence, each phase delivering a working capability increment. The MVP and Roadmap Boundary above is authoritative for what belongs to the MVP versus the roadmap; this table is the order in which the committed work gets built.*
 
 | Phase | Agents | Capability delivered | Depends on |
 |-------|--------|---------------------|------------|

@@ -28,7 +28,7 @@ EXPECTED_CONTRACT_VERSIONS = {"field-manifest-v1"}
 # Mirror the derived-record contract enums (the manifest couples to that contract).
 DERIVATION_CLASSES = {"extraction", "synthesis", "classification", "policy", "auto", "authoring", "projection"}
 DECISION_KINDS = {"none", "closed_value", "policy_rule", "schedule", "threshold",
-                  "spend_limit", "integration_boundary"}
+                  "spend_limit", "integration_boundary", "release_boundary"}
 # Provenance source classes (mirror the derived-record contract `source` enum). A field
 # MAY declare an explicit `source` to override the class-default the envelope assembler picks
 # (e.g. a lookup-extraction field whose value is plan-derived, not the operator's words).

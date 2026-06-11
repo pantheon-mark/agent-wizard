@@ -10,7 +10,7 @@
   "enums": {
     "source": ["operator-content", "operator-preference", "claude-derived-operator-confirmed", "auto", "ambiguous"],
     "derivation_class": ["extraction", "synthesis", "classification", "policy", "auto", "authoring", "projection"],
-    "decision_kind": ["none", "closed_value", "policy_rule", "schedule", "threshold", "spend_limit", "integration_boundary"],
+    "decision_kind": ["none", "closed_value", "policy_rule", "schedule", "threshold", "spend_limit", "integration_boundary", "release_boundary"],
     "confirmation_state": ["accepted", "accepted_with_adjustments", "accepted_uncertain_for_now", "deferred_not_emittable"]
   },
   "top_level_meta_keys": ["_provenance", "_audit", "_schema_extension_points", "_source_taxonomy"],

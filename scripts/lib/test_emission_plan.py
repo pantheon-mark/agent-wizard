@@ -53,6 +53,7 @@ _FOUNDATION_DOC_INPUTS = {
     "WIZARD_VERSION": "v0.4.0",
     "EXECUTION_SEQUENCE": "1. Triage the queue. 2. Summarize. 3. Notify the operator.",
     "BUILD_PHASES_ROWS": "| 1 | Stand up the queue and agents | done |",
+    "MVP_ROADMAP_BOUNDARY": "**Delivered in the MVP**\n- Triage and summarize the queue (coordinator)\n\n**On the roadmap — in scope, planned after the MVP**\n- Nothing is deferred — everything currently in scope is delivered in the MVP.",
     "CURRENT_SPRINT_NUMBER": "1",
     "LAST_UPDATED_DATE": "(set at operator setup)",
     "LAST_UPDATED_TRIGGER": "operator setup",

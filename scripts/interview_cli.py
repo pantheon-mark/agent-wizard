@@ -170,6 +170,7 @@ def cmd_derive_projection(transcript: str, shape: str, field: str, *,
     from derivation_replay import compile_transcript  # type: ignore
     import dependency_projection as dep  # type: ignore
     import financial_projection as fin  # type: ignore
+    import capability_projection as cap  # type: ignore
     spec = load_field_manifest(shape).spec_for(field)
     if spec.derivation_class != "projection":
         raise InterviewCLIError(
@@ -206,10 +207,27 @@ def cmd_derive_projection(transcript: str, shape: str, field: str, *,
             value = dep.project(field, identity, annotation)
         except dep.DependencyProjectionError as e:
             raise InterviewCLIError(f"{field}: projection failed: {e}") from e
+    elif field in cap.PROJECTION_FIELDS:
+        # MVP<->roadmap views: pure-code over the canonical CAPABILITY_INCREMENTS record (the
+        # phase table + the MVP/roadmap boundary are deterministic views of the one confirmed
+        # source, so the emitted execution_plan cannot contradict itself).
+        inputs = cap.derivation_inputs_for(field)
+        input_values = {}
+        for key in inputs:
+            val = record.get(key)
+            if val is None:
+                raise InterviewCLIError(
+                    f"{field}: required input {key!r} is not yet derived — derive + confirm "
+                    f"CAPABILITY_INCREMENTS before projecting the phase table / roadmap boundary")
+            input_values[key] = val
+        try:
+            value = cap.project(field, input_values)
+        except cap.CapabilityProjectionError as e:
+            raise InterviewCLIError(f"{field}: capability projection failed: {e}") from e
     else:
         raise InterviewCLIError(
             f"{field}: no projector registered for this projection field "
-            f"(known: {sorted(set(fin.PROJECTION_FIELDS) | set(dep.PROJECTION_FIELDS))})")
+            f"(known: {sorted(set(fin.PROJECTION_FIELDS) | set(dep.PROJECTION_FIELDS) | set(cap.PROJECTION_FIELDS))})")
 
     prompt = load_derivation_prompt(spec.derivation_class)   # "projection"
     envelope = _envelope_for(spec, prompt.prompt_version, None, inputs)

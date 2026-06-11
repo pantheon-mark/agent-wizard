@@ -188,7 +188,8 @@ def _drive_orchestration_build_group(transcript, progress):
     INTEGRATIONS authors prose from the canonical record; CREDENTIAL_REGISTRY_ROWS is a projection."""
     _drive_dependency_inventory_group(transcript, progress)
     _record_sources(transcript, "orchestration_build",
-                    {"P1-4", "ARCH-1", "DEP-1", "CRED-3", "CRED-4", "SCALE-1", "SCALE-2", "SCALE-3", "SCALE-4", "CONC-2"})
+                    {"P1-4", "ARCH-1", "ARCH-2", "AP-1", "V-4", "V-6", "DEP-1", "CRED-3", "CRED-4",
+                     "SCALE-1", "SCALE-2", "SCALE-3", "SCALE-4", "CONC-2"})
     _derive_confirm(transcript, "INTEGRATIONS", "orchestration_build", "- a Google Sheet task tracker",
                     inputs=["EXTERNAL_DEPENDENCY_IDENTITY"])
     # CREDENTIAL_REGISTRY_ROWS is a projection: computed deterministically from the canonical record
@@ -205,16 +206,32 @@ def _drive_orchestration_build_group(transcript, progress):
                     "No regulated data in scope.", inputs=["INTEGRATIONS"])
     _derive_confirm(transcript, "TASK_COMPLETION_CHECKLISTS", "orchestration_build",
                     "- output written\n- handoff recorded", inputs=["ORCHESTRATION_MODEL"])
-    _derive_confirm(transcript, "BUILD_PHASES_ROWS", "orchestration_build",
-                    "| Phase | Goal |\n|---|---|\n| 1 | first agent |", inputs=["ORCHESTRATION_MODEL"])
+    # CAPABILITY_INCREMENTS: THE release-boundary decision (synthesis, decision_field -> forced
+    # confirm). Derived FIRST among the execution-plan fields, from the approach brief + roster +
+    # orchestration model + vision scope/success. BUILD_PHASES_ROWS + MVP_ROADMAP_BOUNDARY are then
+    # deterministic projection views of it, and MVP_* prose derives from it (so they cannot
+    # contradict each other). One increment in the MVP, one deferred to the roadmap.
+    _derive_confirm(transcript, "CAPABILITY_INCREMENTS", "orchestration_build",
+                    json.dumps([
+                        {"capability": "first agent", "agents": "Monitor", "phase": 1, "release_bucket": "mvp"},
+                        {"capability": "drafting helper", "agents": "Drafter", "phase": 2,
+                         "release_bucket": "post_mvp_roadmap", "depends_on": "Phase 1",
+                         "rationale": "after the spine is reliable"},
+                    ]),
+                    inputs=["APPROACH_SOLUTION_BRIEF", "AGENT_ROSTER_ROWS", "ORCHESTRATION_MODEL",
+                            "VISION_SCOPE_BOUNDARY", "VISION_SUCCESS_CRITERIA"], state="accepted")
+    # BUILD_PHASES_ROWS + MVP_ROADMAP_BOUNDARY are projections of CAPABILITY_INCREMENTS (pure code,
+    # no separate confirm — auto-project from the confirmed source).
+    cli.cmd_derive_projection(transcript, SHAPE, "BUILD_PHASES_ROWS", clock=lambda: CLOCK)
+    cli.cmd_derive_projection(transcript, SHAPE, "MVP_ROADMAP_BOUNDARY", clock=lambda: CLOCK)
     _derive_confirm(transcript, "EXECUTION_SEQUENCE", "orchestration_build",
                     "- build the monitor first", inputs=["ORCHESTRATION_MODEL"])
     _derive_confirm(transcript, "MVP_CORE_FUNCTION", "orchestration_build",
-                    "Surface what needs attention.", inputs=["APPROACH_SOLUTION_BRIEF"])
+                    "Surface what needs attention.", inputs=["CAPABILITY_INCREMENTS", "APPROACH_SOLUTION_BRIEF"])
     _derive_confirm(transcript, "MVP_MINIMUM_VIABLE_STATE", "orchestration_build",
-                    "One agent runs daily.", inputs=["APPROACH_SOLUTION_BRIEF"])
+                    "One agent runs daily.", inputs=["CAPABILITY_INCREMENTS", "APPROACH_SOLUTION_BRIEF"])
     _derive_confirm(transcript, "MVP_SUCCESS_CONDITION", "orchestration_build",
-                    "The operator misses nothing important.", inputs=["VISION_SUCCESS_CRITERIA"])
+                    "The operator misses nothing important.", inputs=["CAPABILITY_INCREMENTS", "VISION_SUCCESS_CRITERIA"])
     return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
 
 
@@ -289,8 +306,24 @@ class FullFiveGroupAcceptanceTests(unittest.TestCase):
             derived_record.validate_derived_record(record, contract)   # raises on failure
             projected = project(record)
             for f in ("AUTONOMY_LEVEL", "HITL_MAP_ROWS", "MVP_CORE_FUNCTION",
-                      "AGENT_SPECIFIC_TESTS", "DRIFT_ANALYSIS_CADENCE", "SCALE_TIER"):
+                      "AGENT_SPECIFIC_TESTS", "DRIFT_ANALYSIS_CADENCE", "SCALE_TIER",
+                      "CAPABILITY_INCREMENTS", "MVP_ROADMAP_BOUNDARY"):
                 self.assertIn(f, projected, f"{f} did not project")
+
+    def test_execution_plan_preview_renders_mvp_roadmap_boundary(self):
+        # The anti-contradiction guarantee, observable in the emitted doc: execution_plan.md carries
+        # the MVP-and-Roadmap-Boundary section, the deferred increment shows on the roadmap (not the
+        # MVP), and no placeholder is left unresolved.
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "t.jsonl"); ppath = str(Path(td) / "p.md")
+            _drive_tests_audit_group(tpath, ppath)
+            previews = dict(cli.cmd_preview_group(tpath, SHAPE, "hitl_autonomy",
+                                                  SOURCE_VERSION, REPO_ROOT, auto_values=AUTO))
+            content = previews["execution_plan.md"]
+            self.assertIn("MVP and Roadmap Boundary", content)
+            self.assertIn("On the roadmap", content)
+            self.assertIn("drafting helper", content)   # the post_mvp_roadmap increment, on the roadmap
+            self.assertNotIn("{{", content)
 
     def test_autonomy_level_is_profile_derived_classification(self):
         # Post-flip: AUTONOMY_LEVEL is no longer a provisional auto-default — it is an
