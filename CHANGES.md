@@ -12,6 +12,26 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-15 — your system now launches and runs its agents on the first try
+
+**Public-facing change:** The first time a built system was run for real, it could not start: the session launcher and every agent script passed command-line options the Claude CLI does not accept, so the launcher failed with an "unknown option" error and no agent could run. This release fixes the commands the wizard generates:
+
+- **Session launcher (`start-session.sh`)** now launches cleanly and runs your session at high reasoning effort (it previously passed a setting the CLI doesn't have).
+- **Agent scripts** now load each agent's instructions correctly, have the agent read your foundation documents from disk, run from your project folder so file paths resolve, and are allowed to write their working files without stopping for a prompt that no one is there to answer.
+- **Each agent's permitted-write list** now covers every place its own instructions tell it to write — its task checkpoints, its handoff notes, and its error/issue logs — not just its output folder. Previously the agent would have been halted by its own safety gate the first time it tried to save a checkpoint.
+- **The autonomy level in your system-config file (`project_instructions.md`)** now matches the level set everywhere else and lists, in plain language, what the system may do without asking. Previously it showed a fixed default that could disagree with your actual level, and the "may do without asking" list was blank.
+
+**Operator-facing notes:**
+
+- These are launch-and-run reliability fixes. What your built system *does* is unchanged — it now actually starts and runs its agents.
+- The wizard's own release checks now validate every command it generates against the *real* Claude CLI (not a stand-in that accepts anything), confirm each agent's permissions cover everything its instructions require it to write, and confirm the autonomy level is consistent across all of your system's documents — so this class of "passes the wizard's checks but won't run on your machine" problem is caught before release.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** TBD
+**Public repo commit:** TBD
+
+---
+
 ## 2026-06-15 — the closing build prompt now points at your generated agent files
 
 **Public-facing change:** At the very end, the wizard hands you a prompt to start building your first agent. That prompt referred to a file location the system does not actually use and described writing the agent from scratch — but the wizard now generates a complete starting prompt for every agent during the build step. The closing prompt now points at the real generated file (`agents/prompts/<agent>_prompt.md`) and frames your first session as reviewing that agent and bringing it into operation against your foundation documents, rather than authoring it from a blank file. It also creates the build-prompts folder if it is missing, and reads your agent roster from the approach document, where it is the canonical list.
