@@ -22,8 +22,8 @@ Entries appear newest-first.
 - Internal cleanup also shipped in this release (documentation-comment tidy-up in the wizard's own files); no functional effect.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** PENDING
-**Public repo commit:** PENDING
+**Source-Meta-Commit:** a8e4803
+**Public repo commit:** e1f1ac9
 
 ---
 
