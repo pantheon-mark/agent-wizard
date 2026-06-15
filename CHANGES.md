@@ -12,6 +12,21 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-15 — a reliability fix so building your project at the very end always completes
+
+**Public-facing change:** The final step of the wizard — where it builds your whole project from your interview and writes it to disk — could stop before writing anything the first time it ran end to end on a real interview. A handful of internal setup values the build needs (your system's type, the wizard version, today's date, and whether this is an initial build or a foundation-only build) were not being supplied at that step. The wizard now supplies them automatically at build time, so the final step completes and your project is written. The same fix makes the "foundation documents only" path build correctly too — that choice is now passed explicitly when you build.
+
+**Operator-facing notes:**
+
+- Nothing about your built system changes. This corrects the build step itself so it does not fail at the very end; everything your interview produced is written exactly as before.
+- The wizard's own build step now has an end-to-end safety check that runs a full recorded interview all the way through to a built project, so this class of last-step failure is caught before release rather than on your machine.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** PENDING
+**Public repo commit:** PENDING
+
+---
+
 ## 2026-06-11 — a reliability fix (and a small simplification) for how helpers that use outside systems are set up
 
 **Public-facing change:** A fix to how the wizard records each helper (agent) during the architecture step, plus a small simplification to what it asks you. Previously, when the wizard noted that a helper works with an outside system — like keeping a spreadsheet in sync or researching from the web — it could mark that helper in a way that (a) prevented your system from being built at the very end, and (b) asked you to confirm technical capabilities ("needs network access," "needs broad file access") you had no real basis to judge. Now the wizard records only whether a helper runs on a schedule; a helper's connection to an outside system is captured once, in plain language, at the dependencies step. This removes a way the final build step could fail and drops a confusing confirmation.
