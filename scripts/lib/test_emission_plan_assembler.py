@@ -104,6 +104,34 @@ class EmissionPlanAssemblerTests(unittest.TestCase):
         self.assertTrue(plan["foundation_only_mode"])
         self.assertEqual(plan["agents"], [])
 
+    def test_auto_values_gap_fill_supplies_missing_global_and_routes(self):
+        # The auto-global overlay fills a global project() left out (no interview step records the
+        # auto-class config) AND drives routing: a record missing FOUNDATION_ONLY_MODE + the overlay
+        # = foundation-only. This is the emission-boundary supply the live emit path now performs.
+        bi = BuildIntent(derived_record=_dr(defer={"FOUNDATION_ONLY_MODE"}), agent_intents=[])
+        plan = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers,
+                                      auto_values={"FOUNDATION_ONLY_MODE": "true"})
+        validate_emission_plan(plan, EP_CONTRACT)
+        self.assertTrue(plan["foundation_only_mode"])
+        self.assertEqual(plan["foundation_doc_inputs"]["FOUNDATION_ONLY_MODE"], "true")
+
+    def test_auto_values_do_not_override_projected(self):
+        # Precedence mirror of the preview path: a value project() produced from the transcript WINS;
+        # the auto overlay is a gap-fill default, never an override.
+        bi = BuildIntent(derived_record=_dr(), agent_intents=[_ai()])   # _dr carries SYSTEM_SHAPE
+        plan = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers,
+                                      auto_values={"SYSTEM_SHAPE": "WRONG-SHAPE"})
+        self.assertEqual(plan["foundation_doc_inputs"]["SYSTEM_SHAPE"], "markdown-CC")
+
+    def test_auto_values_rejects_non_auto_global_key(self):
+        # Fail-closed backdoor guard: a key outside the shape's declared auto_global_fields must NOT
+        # be injectable into foundation_doc_inputs — this is what keeps the overlay from reopening
+        # the retired raw-foundation_doc_inputs injection path.
+        bi = BuildIntent(derived_record=_dr(), agent_intents=[_ai()])
+        with self.assertRaises(ValueError):
+            assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers,
+                                   auto_values={"VISION_PURPOSE": "smuggled content"})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,9 +14,13 @@ operator system. It is fail-closed end to end:
 
 There is NO direct staging->output path and NO parameter to inject raw
 foundation_doc_inputs — the only field input is the transcript, and the projected
-inputs are produced by project() inside the assembler. The legacy mid-interview /
-close-assembly path is retired once the System-A transform inventory is fully
-re-homed (a later phase); this gate is its replacement.
+inputs are produced by project() inside the assembler. The single bounded exception is
+`auto_values`: the `auto`-class config globals (SYSTEM_SHAPE / FOUNDATION_ONLY_MODE /
+WIZARD_VERSION / LAST_UPDATED_DATE / LAST_UPDATED_TRIGGER) that no interview step records.
+The assembler restricts these to the shape's declared auto_global_fields (fail-closed) and
+only gap-fills them (projected values win), so this is not a raw-fdi backdoor — it mirrors the
+preview path's auto_values. The legacy mid-interview / close-assembly path is retired once the
+System-A transform inventory is fully re-homed (a later phase); this gate is its replacement.
 
 The dispatch functions are module-level so the assembly path can be tested in
 isolation from the (file-writing) sinks.
@@ -78,9 +82,12 @@ def build_operator_system_from_transcript(
     project_name: str = "operator-system",
     bundle_version: str = "v0.4.0",
     model_tiers_override: Optional[Dict[str, str]] = None,
+    auto_values: Optional[Dict[str, str]] = None,
 ) -> BridgeResult:
     """The fail-closed gate. See module docstring. There is intentionally NO
-    foundation_doc_inputs parameter — inputs are projector-produced from the transcript.
+    foundation_doc_inputs parameter — inputs are projector-produced from the transcript. The one
+    bounded exception is `auto_values` (the auto-class config globals the emission boundary
+    supplies because no step records them; gap-fill only, restricted to auto_global_fields).
 
     Tier->model resolution: by default the maintained model-tiers registry for the shape
     (real Claude ids, so the emitted start-session.sh carries a real --model — the
@@ -107,6 +114,7 @@ def build_operator_system_from_transcript(
         intent, scaffold, corpus,
         model_tiers=tiers,
         project_name=project_name, bundle_version=bundle_version, generator_version=generator_version,
+        auto_values=auto_values,
     )
     plan = validate_emission_plan(plan_dict, load_contract(default_contract_path()))
 

@@ -12,6 +12,7 @@ RED->GREEN.
 """
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -730,6 +731,69 @@ class EmitSystemCLITests(unittest.TestCase):
                 cli.cmd_emit_system(str(tpath), SHAPE, str(target), str(REPO_ROOT),
                                     generator_version_override="0" * 40)
             self.assertFalse(target.exists(), "emit must fail closed BEFORE writing on a stale group")
+
+    def test_real_transcript_emits_and_passes_close_verification(self):
+        # THE headline coverage gap: the production close path — drive a REAL transcript through
+        # the CLI drivers, close every group, then emit-system — had NO end-to-end test. Every
+        # pre-existing emit test builds from _FOUNDATION_DOC_INPUTS, which
+        # PRE-BAKES the 5 auto-class globals (SYSTEM_SHAPE / FOUNDATION_ONLY_MODE / WIZARD_VERSION /
+        # LAST_UPDATED_DATE / LAST_UPDATED_TRIGGER) that a real transcript NEVER records — so those
+        # tests could never catch emit failing on the missing auto-globals. This drives the real
+        # _drive_* path (autos supplied to PREVIEW only, never the transcript), closes all groups,
+        # emits, and asserts the 15_close.md verification block. RED before the auto-global supply
+        # fix (derivation-input fail-fast on the 5 missing globals); GREEN after.
+        with tempfile.TemporaryDirectory() as td:
+            tpath = str(Path(td) / "t.jsonl"); ppath = str(Path(td) / "p.md")
+            _drive_tests_audit_group(tpath, ppath)
+            # Every group that recorded source answers must be confirmed or emit fails closed;
+            # close them in registry/derivation order.
+            for g in load_derivation_groups(SHAPE).groups:
+                cli.cmd_close_group(tpath, ppath, SHAPE, g.group_id, clock=lambda: CLOCK)
+            target = Path(td) / "estate-assistant"
+            rec = cli.cmd_emit_system(str(tpath), SHAPE, str(target), str(REPO_ROOT),
+                                      project_name="Estate Settlement Tracker",
+                                      generator_version_override="0" * 40)
+            self.assertFalse(rec["foundation_only_mode"])
+            # --- 15_close.md Part-1 verification block, asserted as code ---
+            # 1. project dir exists + non-empty
+            self.assertTrue(target.is_dir())
+            files = [p for p in target.rglob("*") if p.is_file()]
+            self.assertTrue(files, "emitted project is empty")
+            # 2. critical files present + non-empty
+            for crit in ("CLAUDE.md", "project_instructions.md", "session_bootstrap.md",
+                         "SESSION_STATE.md", "vision.md", "approach.md",
+                         "technical_architecture.md", ".gitignore",
+                         "docs/how_your_system_works.md"):
+                fp = target / crit
+                self.assertTrue(fp.is_file(), f"missing critical file {crit}")
+                self.assertTrue(fp.read_text(encoding="utf-8").strip(), f"{crit} is empty")
+            # 3. start-session.sh executable + carries a REAL --model (not a tier name) — the
+            # programmatic-model rule. The script resolves the tier->model map (MODEL="claude-...";
+            # claude --model "$MODEL"), so assert a resolved real model id is wired in and no bare
+            # tier name is used as the model. Pull the truth from the registry so it survives id bumps.
+            from model_tiers import load_model_tiers  # noqa: PLC0415
+            sss = target / "start-session.sh"
+            self.assertTrue(sss.is_file(), "start-session.sh missing")
+            self.assertTrue(os.access(sss, os.X_OK), "start-session.sh not executable")
+            sss_text = sss.read_text(encoding="utf-8")
+            tier_map = load_model_tiers(SHAPE)
+            self.assertIn("--model", sss_text, "start-session.sh does not pass --model")
+            self.assertTrue(any(m in sss_text for m in tier_map.values()),
+                            "start-session.sh has no resolved real model id")
+            for tier_name in tier_map:
+                self.assertNotIn(f'MODEL="{tier_name}"', sss_text,
+                                 "start-session.sh carries a tier name as the model, not a real id")
+            # 4. no unresolved {{...}} survive — except inside the operator-fill template dirs
+            operator_fill = ("wizard/review_prompts/", "wizard/skills/")
+            for fp in files:
+                rel = str(fp.relative_to(target))
+                if rel.startswith(operator_fill):
+                    continue
+                try:
+                    txt = fp.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    continue
+                self.assertNotIn("{{", txt, f"unresolved placeholder survived in {rel}")
 
     def test_record_impact_disposition_cli_resolves_pending(self):
         # The carrier records a detected change + the operator's disposition via the CLI; the

@@ -349,14 +349,36 @@ def cmd_check_shape_state(draft: str, *, expect_phase: Optional[str] = None,
 
 def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_root: str, *,
                     project_name: str = "operator-system",
+                    foundation_only_mode: bool = False,
+                    bundle_version: str = "v0.4.0",
+                    clock: Optional[Callable[[], str]] = None,
                     generator_version_override: Optional[str] = None) -> Dict[str, Any]:
     """Emit the complete operator system from the recorded transcript via the fail-closed bridge
     (compile -> assemble -> validate -> dispatch -> generator). The recorder stores the rich event
     vocabulary; map it to the replay view the bridge compiles (read_derived_replay_events) and read
     the agent intents from the same store. The bridge resolves the maintained tier->model map (real
     --model) and fails closed BEFORE any write on a stale generator identity / non-empty target /
-    missing-or-empty derived input. Returns the receipt (foundation-only flag + the two hashes)."""
+    missing-or-empty derived input. Returns the receipt (foundation-only flag + the two hashes).
+
+    The five `auto`-class config globals are supplied HERE at the emission boundary, because no
+    interview step records them (inject-at-emit, the same model as the preview overlay): SYSTEM_SHAPE
+    from --shape; WIZARD_VERSION from the bundle the generator runs from; LAST_UPDATED_DATE from the
+    clock; LAST_UPDATED_TRIGGER = "initial build" (this IS the initial build); FOUNDATION_ONLY_MODE
+    from the explicit `foundation_only_mode` decision the carrier already computed at the step-15
+    entry guard (so foundation-only routing is an explicit command-boundary input, not a transcript
+    field nothing writes). The bridge gap-fills these, restricted to the shape's auto_global_fields;
+    a value a step ever recorded wins. Mirrors `preview-group --auto`."""
     from interview_bridge import build_operator_system_from_transcript  # type: ignore
+    from datetime import date  # local: only the emit boundary stamps the build date
+
+    last_updated = clock() if clock else date.today().isoformat()
+    auto_values = {
+        "SYSTEM_SHAPE": shape,
+        "FOUNDATION_ONLY_MODE": "true" if foundation_only_mode else "false",
+        "WIZARD_VERSION": bundle_version,
+        "LAST_UPDATED_DATE": last_updated,
+        "LAST_UPDATED_TRIGGER": "initial build",
+    }
     from derivation_groups import group_confirmation_is_stale  # type: ignore
     from transcript_recorder import group_source_hash  # type: ignore
     from change_impact import pending_from_events  # type: ignore
@@ -395,7 +417,8 @@ def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_roo
     res = build_operator_system_from_transcript(
         read_derived_replay_events(events), read_agent_intents(events),
         system_shape=shape, target_dir=Path(target_dir), build_repo_root=Path(build_repo_root),
-        project_name=project_name, generator_version_override=generator_version_override,
+        project_name=project_name, bundle_version=bundle_version,
+        auto_values=auto_values, generator_version_override=generator_version_override,
     )
     return {"foundation_only_mode": res.plan.foundation_only_mode, "target_dir": str(target_dir),
             "derived_record_hash": res.derived_record_hash, "transcript_hash": res.transcript_hash}
@@ -517,6 +540,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp.add_argument("--target-dir", dest="target_dir", required=True)
     sp.add_argument("--build-repo-root", dest="build_repo_root", required=True)
     sp.add_argument("--project-name", dest="project_name", default="operator-system")
+    sp.add_argument("--foundation-only", dest="foundation_only_mode", action="store_true",
+                    help="emit the foundation-only branch (carrier sets this from the step-15 "
+                         "entry guard; supplies FOUNDATION_ONLY_MODE=true)")
+    sp.add_argument("--bundle-version", dest="bundle_version", default="v0.4.0",
+                    help="the foundation bundle to emit from; also stamped as WIZARD_VERSION")
     sp.add_argument("--generator-version-override", dest="generator_version_override")
 
     args = p.parse_args(argv)
@@ -580,6 +608,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         elif args.cmd == "emit-system":
             rec = cmd_emit_system(args.transcript, args.shape, args.target_dir, args.build_repo_root,
                                   project_name=args.project_name,
+                                  foundation_only_mode=args.foundation_only_mode,
+                                  bundle_version=args.bundle_version,
                                   generator_version_override=args.generator_version_override)
             sys.stdout.write(json.dumps(rec, sort_keys=True) + "\n")
     except InterviewCLIError as e:

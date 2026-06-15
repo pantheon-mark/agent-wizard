@@ -50,12 +50,24 @@ def assemble_emission_plan(
     project_name: str = "operator-system",
     bundle_version: str = "v0.4.0",
     generator_version: str = _TEST_GENERATOR_VERSION,
+    auto_values: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Assemble a complete emission-plan dict from a BuildIntent. See module docstring.
 
+    `auto_values` is the bounded auto-global overlay (the `auto` derivation class — machine
+    -determined config the operator never answers: SYSTEM_SHAPE / FOUNDATION_ONLY_MODE /
+    WIZARD_VERSION / LAST_UPDATED_DATE / LAST_UPDATED_TRIGGER). It is NOT a raw foundation_doc_inputs
+    injection: every key is restricted to the shape's declared `auto_global_fields` (fail-closed on
+    any other key), and it only FILLS GAPS — a value project() produced from the transcript always
+    wins. This mirrors the preview path's auto_values (group_barrier.build_preview_inputs, where the
+    projected/confirmed value wins over an auto default of the same name). It exists because no
+    interview step records these globals, so a real transcript reaches emit without them; the
+    emission boundary supplies them (inject-at-emit, the same model as the preview overlay).
+
     Raises NotImplementedError if current_state is not None (Day-2 merge is a later slice);
     DerivedRecordError if the derived record is invalid; ConstraintViolation on an
-    unmappable agent intent or an uncovered control-plane/agent path.
+    unmappable agent intent or an uncovered control-plane/agent path; ValueError on an
+    auto_values key that is not a declared auto-global for the shape.
     """
     # Day-2 seam (R11): merge-from-prior-state is a later slice; v0 builds from scratch only.
     if current_state is not None:
@@ -72,6 +84,24 @@ def assemble_emission_plan(
 
     # foundation_doc_inputs is projector-produced by construction (whitelist excludes deferred).
     fdi = project(intent.derived_record)
+
+    # Bounded auto-global overlay: fill the machine-determined config globals the operator never
+    # answers and no step records. Keys are restricted to the shape's declared auto_global_fields
+    # (fail-closed) so this can never become the retired raw-fdi injection backdoor; and a value
+    # project() already produced from the transcript wins (gap-fill only), mirroring the preview
+    # path. So FOUNDATION_ONLY_MODE routing below still reads a single source — the projected value
+    # if a step ever recorded it, else the emit-supplied default.
+    if auto_values:
+        from derivation_groups import load_derivation_groups  # type: ignore  # canonical registry
+        legal = set(load_derivation_groups(scaffold_plan.system_shape).auto_global_fields)
+        for k, v in auto_values.items():
+            if k not in legal:
+                raise ValueError(
+                    f"auto_values key {k!r} is not a declared auto-global for shape "
+                    f"{scaffold_plan.system_shape!r} (legal: {sorted(legal)}) — refusing to inject "
+                    "a non-auto field into foundation_doc_inputs")
+            if k not in fdi:
+                fdi[k] = str(v)
 
     # Routing reads ONLY the projected inputs (a deferred FOUNDATION_ONLY_MODE must not route).
     foundation_only = str(fdi.get("FOUNDATION_ONLY_MODE", "false")).strip().lower() == "true"

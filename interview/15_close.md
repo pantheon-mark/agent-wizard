@@ -375,11 +375,11 @@ The interview sequence is complete. The wizard has produced a running project di
 
 **Disposition: ADAPT — emit foundation docs via the dispatcher; foundation-only close ceremony.**
 
-In foundation-only mode, step 15 close does NOT execute the full normal close path (no git init, no first build prompt, no implementation files). The foundation-doc emission STILL goes through the unified generator — the bridge auto-dispatches to the foundation-only branch from `FOUNDATION_ONLY_MODE = true` in the transcript (no separate hand-assembly) — and the foundation-only-specific ceremony docs are written post-emission.
+In foundation-only mode, step 15 close does NOT execute the full normal close path (no git init, no first build prompt, no implementation files). The foundation-doc emission STILL goes through the unified generator — the bridge dispatches to the foundation-only branch from the `--foundation-only` flag you pass on the emit command (it sets `FOUNDATION_ONLY_MODE = true`; no separate hand-assembly) — and the foundation-only-specific ceremony docs are written post-emission.
 
 ### CLOSE-EMIT (foundation-only)
 
-Run the same emit command as the normal path:
+Run the same emit command as the normal path, plus the `--foundation-only` flag (this is what tells the generator to take the foundation-only branch — you determined `produce_system_implementation == false` at the entry guard above):
 
 ```bash
 python3 wizard/scripts/interview_cli.py emit-system \
@@ -387,10 +387,11 @@ python3 wizard/scripts/interview_cli.py emit-system \
   --shape markdown-CC \
   --target-dir ~/[PROJECT_FOLDER_NAME] \
   --build-repo-root <the wizard directory root> \
-  --project-name [PROJECT_NAME]
+  --project-name [PROJECT_NAME] \
+  --foundation-only
 ```
 
-Because the transcript carries `FOUNDATION_ONLY_MODE = true`, the bridge dispatches to the generator's foundation-only branch: it emits the foundation doc set (`vision.md`, `approach.md`, `technical_architecture.md`, `execution_plan.md`) and the operator manifest, and SKIPS the agent layer, permission-tier files, and per-agent task checklists (`agents == []`). If the command raises, STOP and surface the error.
+Because you pass `--foundation-only` (it sets `FOUNDATION_ONLY_MODE = true` at the emission boundary), the bridge dispatches to the generator's foundation-only branch: it emits the foundation doc set (`vision.md`, `approach.md`, `technical_architecture.md`, `execution_plan.md`) and the operator manifest, and SKIPS the agent layer, permission-tier files, and per-agent task checklists (`agents == []`). If the command raises, STOP and surface the error.
 
 ### Post-emission foundation-only ceremony (write by hand — these are not generator artifacts)
 
@@ -469,7 +470,7 @@ Tell operator (verbatim):
 
 ### Step 15 close write progression (foundation-only)
 
-1. Run `emit-system` (above) — the bridge dispatches foundation-only from the transcript; the foundation docs + operator manifest are emitted, the agent layer skipped.
+1. Run `emit-system` (above, with `--foundation-only`) — the bridge dispatches to the foundation-only branch from that flag; the foundation docs + operator manifest are emitted, the agent layer skipped.
 2. Write `project_instructions.md` in foundation-only voice per `_foundation_only_mode_gate.md` § 4 (post-emission)
 3. Write `manual.md` as a pointer doc (post-emission)
 4. Write `next_steps.md` per the content template above (post-emission)
