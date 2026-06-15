@@ -22,8 +22,8 @@ Entries appear newest-first.
 - The wizard's own build step now has an end-to-end safety check that runs a full recorded interview all the way through to a built project, so this class of last-step failure is caught before release rather than on your machine.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** PENDING
-**Public repo commit:** PENDING
+**Source-Meta-Commit:** 3f77292
+**Public repo commit:** ac0adc7
 
 ---
 
