@@ -85,7 +85,7 @@ def _default_scaffold_inputs() -> Dict[str, str]:
         "NOTIFICATION_VERBOSITY": "standard",
         "QA_REPORTING_STYLE": "summary",
         "CHUNK_CONFIRMATION": "enabled",
-        "BASH_AUTHORIZATION": "ask-first (Level 2 default)",
+        "BASH_AUTHORIZATION": "ask-first",
         "CREDENTIAL_CHECK_CADENCE": "quarterly",
         "ROTATION_LEAD_TIME_DAYS": "14",
         # --- scale tier ---
@@ -121,11 +121,9 @@ def _default_scaffold_inputs() -> Dict[str, str]:
         "MODEL_STANDARD_NOTES": "balanced tier",
         "MODEL_FAST_NOTES": "fast/low-cost tier",
         "MODEL_MAPPING_VERIFIED_DATE": AT_SETUP,
-        "THINKING_BUDGET_HIGH": "16000",
         # --- dates / triggers (deterministic strings; no clock) ---
         "LAST_UPDATED_DATE": AT_SETUP,
         "LAST_UPDATED_TRIGGER": "wizard setup",
-        "WIZARD_COMPLETION_DATE": AT_SETUP,
         "MANUAL_LAST_UPDATED": AT_SETUP,
         "LAST_SESSION_DATE": AT_SETUP,
         "FIRST_CONTEXT_CHECK_DATE": AT_SETUP,

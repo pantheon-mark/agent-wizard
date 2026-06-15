@@ -101,7 +101,12 @@ def _valid_plan() -> dict:
             {
                 "id": "researcher", "role_description": "Gathers source material.",
                 "criticality_tier": "standard", "primary_model_tier": "standard",
-                "status_model_tier": "fast", "permitted_write_directories": ["work/agent_outputs"],
+                "status_model_tier": "fast",
+                "permitted_write_directories": [
+                    "work/agent_outputs", "agents/checkpoints", "agents/handoffs",
+                    "logs/error_log.md", "logs/session_log.md", "logs/audit_log.md",
+                    "work/issues_log.md",
+                ],
                 "additional_context_files": ["approach.md"], "step_completion_criteria": "step done",
                 "task_completion_criteria": "task done", "output_format_specification": "markdown",
                 "output_directory": "work/agent_outputs",

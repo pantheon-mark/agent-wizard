@@ -82,26 +82,16 @@ mkdir -p "$HANDOFF_DIR"
 mkdir -p "$PROJECT_ROOT/agents/checkpoints"
 
 # ============================================================
-# Build context argument list
-# Claude reads these files in the session before acting.
-# Foundational documents are passed as context — not optional.
+# Build the from-disk context file list
+# The agent reads these files itself in the session before acting (foundational
+# document integrity — read this session, never recalled). They are NAMED in the
+# task prompt below; there is no CLI flag that loads files into the session, so the
+# agent reads them from disk relative to the project root (we cd there before the run).
 # ============================================================
 
-CONTEXT_ARGS=()
-
-# Always include the agent's prompt file first
-CONTEXT_ARGS+=("--context" "$PROMPT_FILE")
-
-# Foundational documents — always passed
-for f in "$SESSION_BOOTSTRAP" "$PROJECT_INSTRUCTIONS" "$VISION_FILE"; do
-  CONTEXT_ARGS+=("--context" "$f")
-done
-
-# Additional agent-specific context files (if any)
+CONTEXT_FILES=("$SESSION_BOOTSTRAP" "$PROJECT_INSTRUCTIONS" "$VISION_FILE")
 for f in "${ADDITIONAL_CONTEXT_FILES[@]+"${ADDITIONAL_CONTEXT_FILES[@]}"}"; do
-  if [[ -n "$f" && -f "$f" ]]; then
-    CONTEXT_ARGS+=("--context" "$f")
-  fi
+  [[ -n "$f" ]] && CONTEXT_FILES+=("$f")
 done
 
 # ============================================================
@@ -111,24 +101,34 @@ done
 # downstream agents if the run is interrupted.
 # ============================================================
 
+# Run from the project root so the agent's relative reads/writes (and the from-disk
+# foundational-document reads named in the task prompt) resolve correctly.
+cd "$PROJECT_ROOT"
+
 TEMP_OUTPUT=$(mktemp "${OUTPUT_DIR}/.${AGENT_NAME}_${TASK_ID}.tmp.XXXXXX")
 FINAL_OUTPUT="${OUTPUT_DIR}/${AGENT_NAME}_${TASK_ID}_output.md"
 
 echo "[${TIMESTAMP}] ${AGENT_NAME} [START]: task ${TASK_ID}"
 echo "| ${TIMESTAMP} | ${AGENT_NAME} | STARTED | task:${TASK_ID} |" >> "$SESSION_LOG"
 
+# --append-system-prompt loads the agent's prompt file as its system prompt; the agent
+# reads its foundational documents from disk (named below). --permission-mode acceptEdits
+# lets the headless agent write its outputs/checkpoints without an interactive prompt
+# (there is no TTY in -p mode); the agent's own prompt still enforces the Tier-1 ask-first
+# gates. The agent's foundational-document-integrity constraint lives in its prompt file.
 EXIT_CODE=0
 claude \
   --model "$AGENT_MODEL" \
-  "${CONTEXT_ARGS[@]}" \
+  --permission-mode acceptEdits \
+  --append-system-prompt "$(cat "$PROMPT_FILE")" \
   --print \
-  "You are ${AGENT_NAME}. Your prompt file, foundational documents, and task context have been loaded above.
+  "You are ${AGENT_NAME}. Your role, permission boundary, and completion criteria are in your system prompt (your prompt file, appended above). You are running with the project root as your working directory.
 
 Task ID: ${TASK_ID}
 Checkpoint file: ${CHECKPOINT_FILE}
 
 Before doing anything:
-1. Confirm you have read the foundational documents loaded in this session.
+1. Read your foundational documents from disk this session — do not operate from memory: ${CONTEXT_FILES[*]}
 2. Declare your blast radius — list every file and directory you intend to write to.
 3. Verify all declared write targets are within your permitted directories.
 4. Write a step-by-step plan to ${CHECKPOINT_FILE} before beginning.

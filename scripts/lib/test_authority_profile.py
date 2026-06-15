@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from authority_profile import (  # noqa: E402
     AuthorityDimensions, AuthorityProfile, derive_authority, AuthorityProfileError,
+    autonomous_actions_summary,
 )
 from derivation_replay import compute_drift  # noqa: E402
 
@@ -29,6 +30,33 @@ def _dims(**over):
     )
     base.update(over)
     return AuthorityDimensions(**base)
+
+
+class AutonomousActionsSummaryTests(unittest.TestCase):
+    """The 'may do without asking' body wired into project_instructions.md — derived from the
+    level (never hardcoded), non-empty at every level, deterministic, and never over-claiming."""
+
+    def test_nonempty_and_deterministic_at_every_level(self):
+        for lvl in ("1", "2", "3"):
+            body = autonomous_actions_summary(lvl)
+            self.assertTrue(body.strip())
+            self.assertEqual(body, autonomous_actions_summary(lvl))  # pure / replayable
+            self.assertIn("execution_plan.md", body)  # points to the authoritative HITL map
+
+    def test_routine_classes_present_at_every_level(self):
+        # #4 (quality checks) + #5 (workflow housekeeping) are autonomous at every level.
+        for lvl in ("1", "2", "3"):
+            body = autonomous_actions_summary(lvl).lower()
+            self.assertIn("quality", body)
+            self.assertIn("housekeeping", body)
+
+    def test_higher_levels_widen_the_body(self):
+        self.assertNotEqual(autonomous_actions_summary("1"), autonomous_actions_summary("2"))
+        self.assertNotEqual(autonomous_actions_summary("2"), autonomous_actions_summary("3"))
+
+    def test_unparseable_level_falls_back_conservatively(self):
+        # A non-{1,2,3} value must not crash and must yield the most-restrictive (level-1) body.
+        self.assertEqual(autonomous_actions_summary("banana"), autonomous_actions_summary("1"))
 
 
 class AutonomyLevelTests(unittest.TestCase):

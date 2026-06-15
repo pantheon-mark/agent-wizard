@@ -6,6 +6,7 @@ and the duplicate / critical-insufficiency lints. Validates against the REAL
 distributed scaffold plan (markdown-CC.json).
 """
 
+import re
 import sys
 import unittest
 from dataclasses import replace
@@ -18,6 +19,33 @@ from build_intent import AgentIntent, ResourceClaims, ConstraintViolation  # noq
 from agent_record_assembler import assemble_agent_records  # noqa: E402
 
 SP = load_scaffold_plan("markdown-CC")
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_PROMPT_TEMPLATE = _REPO_ROOT / "wizard" / "agents" / "agent_prompt_template.md"
+
+
+def mandated_writes(prompt_text):
+    """The backtick-quoted write targets a prompt MANDATES (a write/log verb followed,
+    on the same line, by a backtick path). Parsed from the prompt text itself — NOT a
+    hardcoded dir list — so the invariant is rule-based and holds for any agent. Leading
+    slashes are normalized away; runtime placeholders ({{AGENT_NAME}}, [task_id]) are kept
+    (they sit inside a permitted directory, so directory coverage still holds)."""
+    out = set()
+    for m in re.finditer(r"\b(?:write|log)\b[^`\n]*`([^`]+)`", prompt_text, re.I):
+        p = m.group(1).strip()
+        if "/" in p:  # a path, not a bare token/filename mention
+            out.add(p.lstrip("/"))
+    return out
+
+
+def write_target_covered(target, permitted):
+    """A mandated write target is covered if it equals a permitted file or sits within a
+    permitted directory (both normalized: leading/trailing slashes stripped)."""
+    t = target.lstrip("/").rstrip("/")
+    for p in permitted:
+        pp = p.lstrip("/").rstrip("/")
+        if t == pp or t.startswith(pp + "/"):
+            return True
+    return False
 
 
 def _ai(**kw):
@@ -43,7 +71,11 @@ class AgentRecordAssemblerTests(unittest.TestCase):
         self.assertEqual(r["primary_model_tier"], "standard")         # code-owned: criticality policy
         self.assertEqual(r["status_model_tier"], "fast")
         self.assertEqual(r["output_directory"], "work/agent_outputs")
-        self.assertEqual(r["permitted_write_directories"], ["work/agent_outputs"])
+        self.assertEqual(r["permitted_write_directories"], [
+            "work/agent_outputs", "agents/checkpoints", "agents/handoffs",
+            "logs/error_log.md", "logs/session_log.md", "logs/audit_log.md",
+            "work/issues_log.md",
+        ])  # output dir + the control-plane operational paths the prompt mandates
         self.assertEqual(r["additional_context_files"], ["approach.md"])
         self.assertEqual(r["output_format_specification"], "markdown")
         self.assertTrue(r["step_completion_criteria"])
@@ -81,6 +113,26 @@ class AgentRecordAssemblerTests(unittest.TestCase):
     def test_records_sorted_by_id(self):
         recs = assemble_agent_records([_ai(display_name="Zeta"), _ai(display_name="Alpha")], SP)
         self.assertEqual([r["id"] for r in recs], ["alpha", "zeta"])
+
+    def test_permitted_writes_cover_every_prompt_mandated_write(self):
+        """PERMISSION-BOUNDARY GUARD (anti-overfit, derivation-level): every write the agent
+        PROMPT TEMPLATE mandates (checkpoints / handoffs / logs / issues_log) must be inside
+        the permitted-write set the assembler produces — otherwise the agent's own blast-radius
+        hard gate halts it on its first checkpoint write. The mandated set is parsed from the
+        template (the rule), and the check runs across DIVERGENT agents so it can't pass by
+        matching one roster's dirs."""
+        mandated = mandated_writes(_PROMPT_TEMPLATE.read_text(encoding="utf-8"))
+        self.assertTrue(mandated, "expected the prompt template to mandate operational writes")
+        for ai in [_ai(display_name="Researcher", criticality_tier="standard"),
+                   _ai(display_name="Notifier", criticality_tier="supporting"),
+                   _ai(display_name="Master List Keeper", criticality_tier="critical")]:
+            rec = assemble_agent_records([ai], SP)[0]
+            permitted = rec["permitted_write_directories"]
+            uncovered = sorted(m for m in mandated if not write_target_covered(m, permitted))
+            self.assertEqual(
+                uncovered, [],
+                f"agent {rec['id']!r}: prompt mandates writes outside its permitted set: "
+                f"{uncovered}; permitted={permitted}")
 
 
 if __name__ == "__main__":

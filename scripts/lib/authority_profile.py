@@ -183,3 +183,44 @@ def derive_authority(dims: AuthorityDimensions) -> AuthorityProfile:
         ask_first_classes=ask_first,
         source_question_ids=sources,
     )
+
+
+# Plain-language description of the routine action classes that are autonomous at EVERY level
+# (artifact-quality #4 + workflow-hygiene #5) — these are never bounded by operator expertise,
+# so they are the concrete, always-true "may do without asking" items.
+_ROUTINE_AUTONOMOUS_TEXT = {
+    4: "Run its routine quality and consistency checks on its own work.",
+    5: "Handle its own workflow housekeeping — writing logs, status updates, task checkpoints, "
+       "and handoff notes, and reading the project's documents.",
+}
+# Level-scaled additions, phrased as "where your HITL map allows it" so the summary never
+# over-claims a class that the expertise bound may have masked (e.g. #8 for a non-technical
+# operator). The authoritative per-action split is HITL_MAP_ROWS in execution_plan.md.
+_LEVEL_EXTRA_TEXT = {
+    1: "",
+    2: "\n\nAt your current level it may also try an alternative approach on its own working files "
+       "when a first attempt needs revision, where your human-in-the-loop map allows it.",
+    3: "\n\nAt your current level it may also try alternative approaches on its own working files "
+       "and make routine adjustments that keep its internal structure consistent, where your "
+       "human-in-the-loop map allows it.",
+}
+
+
+def autonomous_actions_summary(autonomy_level) -> str:
+    """The 'What the system may do without asking' body for project_instructions.md, DERIVED
+    from the autonomy level (not hardcoded) so it can never contradict the emitted level. The
+    routine classes #4/#5 (autonomous at every level, never expertise-masked) are the concrete
+    items; higher levels add a "where your HITL map allows it" sentence rather than asserting an
+    expertise-sensitive class as definitely automatic. Ends with a pointer to the authoritative
+    human-in-the-loop map and a reminder that the always-ask items are never automatic. Pure and
+    deterministic — replayable from the recorded AUTONOMY_LEVEL.
+
+    Fuller per-class / expertise-aware wiring of this body is deferred (the HITL map already
+    carries the authoritative, expertise-correct split)."""
+    s = str(autonomy_level).strip()
+    level = int(s) if s.isdigit() and int(s) in _LEVEL_EXTRA_TEXT else 1
+    bullets = "\n".join(f"- {_ROUTINE_AUTONOMOUS_TEXT[c]}" for c in (4, 5))
+    return (bullets + _LEVEL_EXTRA_TEXT[level] +
+            "\n\nThe authoritative, action-by-action list of what runs automatically versus what "
+            "waits for your approval is the human-in-the-loop map in `execution_plan.md`. The items "
+            'under "What the system always asks first" below are never automatic, at any level.')

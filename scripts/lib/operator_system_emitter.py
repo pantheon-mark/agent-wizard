@@ -38,6 +38,7 @@ from emission_plan import EmissionPlan  # type: ignore
 from generator import GeneratorError  # type: ignore
 from corpus_loader import load_corpus_pack  # type: ignore
 from scaffold_emitter import emit_scaffold  # type: ignore
+from authority_profile import autonomous_actions_summary  # type: ignore
 from agent_emitter import emit_agent_layer  # type: ignore
 from foundation_doc_emitter import emit_foundation_docs  # type: ignore
 from operator_fill_emitter import emit_operator_fill_templates  # type: ignore
@@ -208,10 +209,15 @@ def emit_operator_system(plan: EmissionPlan, staging_dir: Path,
     written: List[Path] = []
 
     # 1-2. base scaffold, with the rendered inherited-principles block fed into
-    # CLAUDE.md's {{INHERITED_OPERATING_PRINCIPLES}} placeholder.
+    # CLAUDE.md's {{INHERITED_OPERATING_PRINCIPLES}} placeholder, and the autonomy "may do
+    # without asking" body DERIVED from the plan's AUTONOMY_LEVEL (so project_instructions.md's
+    # autonomy section agrees with the derived level instead of shipping a hardcoded default).
     block = render_claude_md_block(plan, records)
-    written += emit_scaffold(plan, staging_dir, build_repo_root,
-                             extra_inputs={"INHERITED_OPERATING_PRINCIPLES": block})
+    autonomy_level = plan.foundation_doc_inputs.get("AUTONOMY_LEVEL", "1")
+    written += emit_scaffold(plan, staging_dir, build_repo_root, extra_inputs={
+        "INHERITED_OPERATING_PRINCIPLES": block,
+        "AUTONOMOUS_ACTIONS": autonomous_actions_summary(autonomy_level),
+    })
 
     # 3. agent execution layer.
     written += emit_agent_layer(plan, staging_dir, build_repo_root)

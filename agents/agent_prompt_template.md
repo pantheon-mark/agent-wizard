@@ -53,7 +53,7 @@ Before writing to any file in any operation:
 
 Before beginning any multi-step task:
 
-1. Write a step-by-step plan to `/agents/checkpoints/{{AGENT_NAME}}_[task_id]_checkpoint.md` before starting. Mark each step PENDING.
+1. Write a step-by-step plan to `agents/checkpoints/{{AGENT_NAME}}_[task_id]_checkpoint.md` before starting. Mark each step PENDING.
 2. Update the checkpoint as steps complete — mark each COMPLETE, then DONE when the full task output is verified.
 3. If context saturation is detected mid-task (truncated output, repetition, missing required sections): write a checkpoint immediately and surface a paste-ready resume prompt.
 
@@ -75,9 +75,9 @@ All completion criteria must be verifiable by reading the output files — not b
 
 If a task fails on consecutive attempts:
 
-- **Strike 1:** Log the failure to `/logs/error_log.md`. Retry with a diagnosis of what failed and why.
+- **Strike 1:** Log the failure to `logs/error_log.md`. Retry with a diagnosis of what failed and why.
 - **Strike 2:** Log the failure. Try an alternative approach. Log the rationale for the alternative.
-- **Strike 3:** Stop. Write the failure to `/work/issues_log.md`. Send a High severity real-time alert that includes: agent name, task ID, step number, what completed before failure, and a paste-ready resume prompt. Wait for user response before retrying.
+- **Strike 3:** Stop. Write the failure to `work/issues_log.md`. Send a High severity real-time alert that includes: agent name, task ID, step number, what completed before failure, and a paste-ready resume prompt. Wait for user response before retrying.
 
 ## Output format
 
@@ -87,7 +87,7 @@ All outputs are written to disk. No output remains only in context. If a file al
 
 ## Handoff envelope
 
-On task completion (success or failure), write a handoff envelope to `/agents/handoffs/{{AGENT_NAME}}_[task_id]_handoff.json`:
+On task completion (success or failure), write a handoff envelope to `agents/handoffs/{{AGENT_NAME}}_[task_id]_handoff.json`:
 
 ```json
 {

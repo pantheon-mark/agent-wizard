@@ -20,11 +20,11 @@
 
 ## Autonomy Level
 
-**Current level:** 2
-**Set:** {{WIZARD_COMPLETION_DATE}}
+**Current level:** {{AUTONOMY_LEVEL}}
+**Set:** {{LAST_UPDATED_DATE}}
 **Advancement:** Autonomy level advances only when the user explicitly expands authorization in this file. Claude never self-promotes its own authority level.
 
-### What the system may do without asking (Level 2)
+### What the system may do without asking (Level {{AUTONOMY_LEVEL}})
 
 {{AUTONOMOUS_ACTIONS}}
 

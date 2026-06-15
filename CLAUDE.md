@@ -103,7 +103,7 @@ Every agent prompt file the wizard produces must include this constraint verbati
 
 > "Before making any decision or producing any output, read the relevant foundational documents from disk in this session. Do not operate from a recalled or summarized version. If a foundational document has not been read in this session, read it before proceeding."
 
-Every agent invocation script must pass foundational document paths as explicit context inputs. An agent missing either the constraint or the invocation path is incomplete.
+Every agent invocation script must name the foundational document paths in the agent's task prompt as files to read from disk this session, and must run from the project root so those paths resolve. There is no CLI flag that loads files into a session — the agent reads them itself, and the prompt's foundational-document-integrity constraint (above) is what guarantees it does. An agent invocation missing either the constraint in its prompt file or the named from-disk document paths in its task prompt is incomplete.
 
 ### 9. Forward-offered information capture
 
