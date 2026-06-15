@@ -247,7 +247,7 @@ def _drive_hitl_autonomy_group(transcript, progress):
     _derive_confirm(transcript, "AUTONOMY_LEVEL", "hitl_autonomy", "2",
                     sources=["UP-3", "UP-5", "DR", "REV"], state="accepted")
     # HITL_MAP_ROWS: policy citing prior FIELDS (the authority posture + vision elevations), with
-    # explicit negative permissions in the rows. (RW-46: reconciled from VISION_CONSTRAINTS to the
+    # explicit negative permissions in the rows. (Reconciled from VISION_CONSTRAINTS to the
     # real field-level inputs; ARCH-4 is the answer-level edge declared in the manifest.)
     _derive_confirm(transcript, "HITL_MAP_ROWS", "hitl_autonomy",
                     "| Action | System behavior | Rationale |\n|---|---|---|\n"
@@ -598,7 +598,7 @@ class EmitSystemCLITests(unittest.TestCase):
             self.assertNotIn("{{DOMAIN_SENSITIVITY_SETTINGS}}", vgc)
 
     def test_emit_projects_qa3_into_source_registry(self):
-        # RW-40 regression: QA-3 (source registry) must reach the EMITTED quality/source_registry.md.
+        # Source-registry regression: QA-3 (source registry) must reach the EMITTED quality/source_registry.md.
         # Before the fix the template carried NO placeholder and QA-3 was a dead input, so the
         # emitted registry shipped with an EMPTY table. Mirrors the validation-gate regression above.
         from test_emission_plan import _FOUNDATION_DOC_INPUTS
@@ -629,7 +629,7 @@ class EmitSystemCLITests(unittest.TestCase):
             self.assertNotIn("{{SOURCE_REGISTRY_ROWS}}", sr)
 
     def test_emit_projects_financial_guardrail_into_instructions_and_cost_log(self):
-        # RW-46 / D-EMIT regression (the IS-1 closure this guardrail claimed): the DETERMINISTIC
+        # Financial-guardrail emission regression (the inert-guardrail closure this guardrail claimed): the DETERMINISTIC
         # financial projection (pool x share -> budget; 10% -> threshold) must reach the emitted
         # project_instructions.md + cost_efficiency_log.md as real dollars, not the CONFIGURE
         # fallbacks. Drives the real derive-projection path so the value is pure-code, not authored.

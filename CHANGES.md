@@ -12,6 +12,21 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-15 — the closing build prompt now points at your generated agent files
+
+**Public-facing change:** At the very end, the wizard hands you a prompt to start building your first agent. That prompt referred to a file location the system does not actually use and described writing the agent from scratch — but the wizard now generates a complete starting prompt for every agent during the build step. The closing prompt now points at the real generated file (`agents/prompts/<agent>_prompt.md`) and frames your first session as reviewing that agent and bringing it into operation against your foundation documents, rather than authoring it from a blank file. It also creates the build-prompts folder if it is missing, and reads your agent roster from the approach document, where it is the canonical list.
+
+**Operator-facing notes:**
+
+- This affects only the closing handoff. Nothing about your built system changes.
+- Internal cleanup also shipped in this release (documentation-comment tidy-up in the wizard's own files); no functional effect.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** PENDING
+**Public repo commit:** PENDING
+
+---
+
 ## 2026-06-15 — a reliability fix so building your project at the very end always completes
 
 **Public-facing change:** The final step of the wizard — where it builds your whole project from your interview and writes it to disk — could stop before writing anything the first time it ran end to end on a real interview. A handful of internal setup values the build needs (your system's type, the wizard version, today's date, and whether this is an initial build or a foundation-only build) were not being supplied at that step. The wizard now supplies them automatically at build time, so the final step completes and your project is written. The same fix makes the "foundation documents only" path build correctly too — that choice is now passed explicitly when you build.

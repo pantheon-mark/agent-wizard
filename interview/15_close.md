@@ -275,7 +275,7 @@ Then deliver CLOSE-14 immediately (the build prompt).
 
 ### CLOSE-14 — First build prompt [INTERNAL]
 
-**Before producing the prompt:** Read the confirmed agent roster from `technical_architecture.md` (now emitted by the generator). Identify the first agent to build — this should be the agent at the foundation of the system (typically the orchestrator or the primary data-access agent, whichever the roster designates as the starting point).
+**Before producing the prompt:** Read the confirmed agent roster from `approach.md` (the canonical roster — agent / function / criticality; `technical_architecture.md` cross-references it). Identify the first agent to build — this should be the agent at the foundation of the system (typically the orchestrator or the primary data-access agent, whichever the roster designates as the starting point; the `execution_plan.md` build order names the first phase). Note: the generator already emits a complete prompt file for every agent at `agents/prompts/<agent>_prompt.md`, so the first build session reviews and brings that agent into operation against the foundation docs — it does not author the agent from a blank file.
 
 **Produce the following prompt** (exact wording — this becomes the paste-ready content):
 
@@ -290,20 +290,20 @@ Then deliver CLOSE-14 immediately (the build prompt).
 > - `project_instructions.md`
 > - `session_bootstrap.md`
 >
-> You are building the **[AGENT NAME]** agent. This agent's role is: [one sentence from the roster].
+> You are bringing the **[AGENT NAME]** agent into operation. This agent's role is: [one sentence from the roster].
 >
-> Using the documents above as your specification:
+> The wizard already generated this agent's prompt file at `agents/prompts/[agent_filename]_prompt.md`. Using the documents above as your specification:
 >
-> 1. Confirm your understanding of this agent's role, permissions, and completion criteria before writing anything.
-> 2. Build the agent file at `/agents/[agent_filename].md` — including role definition, operating instructions, permission boundary, and task completion checklist.
-> 3. Verify the agent file is complete and internally consistent with the technical architecture.
+> 1. Confirm your understanding of this agent's role, permission boundary, and completion criteria before changing anything. Read `agents/prompts/[agent_filename]_prompt.md` and check it against the vision, approach, and architecture.
+> 2. Make the agent runnable: verify its prompt file is complete and internally consistent with the technical architecture and its permission boundary, fill in anything the architecture requires that is missing, and confirm its invocation script at `agents/scripts/[agent_filename].sh` is correct.
+> 3. Verify the agent never does anything the vision forbids (nothing irreversible, nothing outgoing, no spending) without bringing it to you first.
 > 4. Confirm completion and tell me what to review before the next agent is built.
 >
-> **To start this session:** Run `./start-session.sh` from your project directory — it is already configured to use the correct model. Do not build any other agents in this session — one agent at a time.
+> **To start this session:** Run `./start-session.sh` from your project directory — it is already configured to use the correct model. Build only this one agent in this session — one agent at a time.
 
 ---
 
-**Write this prompt to disk:** `[PROJECT_DIR]/wizard/build_prompts/agent_01_build_prompt.md`
+**Write this prompt to disk:** `[PROJECT_DIR]/wizard/build_prompts/agent_01_build_prompt.md`. The generator does not create this directory, so create `[PROJECT_DIR]/wizard/build_prompts/` first if it does not exist (`mkdir -p`).
 
 ---
 
