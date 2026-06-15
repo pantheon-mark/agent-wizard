@@ -27,8 +27,8 @@ Entries appear newest-first.
 - The wizard's own release checks now validate every command it generates against the *real* Claude CLI (not a stand-in that accepts anything), confirm each agent's permissions cover everything its instructions require it to write, and confirm the autonomy level is consistent across all of your system's documents — so this class of "passes the wizard's checks but won't run on your machine" problem is caught before release.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** TBD
-**Public repo commit:** TBD
+**Source-Meta-Commit:** 564389e
+**Public repo commit:** 2c47963
 
 ---
 
