@@ -302,5 +302,106 @@ class BuildProgressOnDiskTests(unittest.TestCase):
         self.assertTrue(bp.exists(), "build_progress.md must be emitted even with no phases")
 
 
+class NextPhaseSkillEmitTests(unittest.TestCase):
+    """next-phase.md is emitted into the operator project and carries required prose."""
+
+    def _assemble_and_emit(self):
+        from operator_system_emitter import emit_operator_system  # noqa: E402
+        dr = _dr_with_increments()
+        bi = BuildIntent(derived_record=dr, agent_intents=[_ai_collector(), _ai_summariser()])
+        plan_dict = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        typed_plan = validate_emission_plan(plan_dict, EP_CONTRACT)
+        staging_dir = Path(tempfile.mkdtemp())
+        emit_operator_system(typed_plan, staging_dir, REPO_ROOT)
+        return staging_dir
+
+    def test_next_phase_skill_present_in_operator_project(self):
+        """wizard/skills/next-phase.md is emitted into the operator project."""
+        staging_dir = self._assemble_and_emit()
+        skill_path = staging_dir / "wizard/skills/next-phase.md"
+        self.assertTrue(
+            skill_path.exists(),
+            f"wizard/skills/next-phase.md not found in staging dir {staging_dir}",
+        )
+
+    def test_next_phase_skill_reads_build_progress(self):
+        """next-phase.md references build_progress.md."""
+        staging_dir = self._assemble_and_emit()
+        content = (staging_dir / "wizard/skills/next-phase.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "build_progress.md",
+            content,
+            "next-phase.md must reference build_progress.md",
+        )
+
+    def test_next_phase_skill_has_refusing_precondition(self):
+        """next-phase.md describes refusing to start the next phase until the prior is accepted."""
+        staging_dir = self._assemble_and_emit()
+        content = (staging_dir / "wizard/skills/next-phase.md").read_text(encoding="utf-8")
+        # Must mention both blocking states by name.
+        self.assertIn(
+            "accepted",
+            content,
+            "next-phase.md must mention 'accepted' state (refusing precondition)",
+        )
+        self.assertIn(
+            "provisionally-accepted",
+            content,
+            "next-phase.md must mention 'provisionally-accepted' state (refusing precondition)",
+        )
+
+    def test_next_phase_skill_reads_live_foundation_docs(self):
+        """next-phase.md instructs reading live foundation docs + phase acceptance contract."""
+        staging_dir = self._assemble_and_emit()
+        content = (staging_dir / "wizard/skills/next-phase.md").read_text(encoding="utf-8")
+        for doc in ("execution_plan.md", "approach.md", "technical_architecture.md"):
+            self.assertIn(
+                doc,
+                content,
+                f"next-phase.md must reference live foundation doc {doc}",
+            )
+        self.assertIn(
+            "acceptance",
+            content,
+            "next-phase.md must reference the phase acceptance contract",
+        )
+
+    def test_next_phase_skill_has_stop_condition(self):
+        """next-phase.md contains the plan-changed stop-condition."""
+        staging_dir = self._assemble_and_emit()
+        content = (staging_dir / "wizard/skills/next-phase.md").read_text(encoding="utf-8")
+        # The stop-condition tells the operator to re-run the wizard or use upgrade flow.
+        self.assertTrue(
+            "wizard" in content.lower() or "upgrade" in content.lower(),
+            "next-phase.md must reference re-running the wizard or upgrade flow (stop-condition)",
+        )
+
+    def test_next_phase_skill_no_build_ids(self):
+        """next-phase.md must not contain build-provenance tokens (RW-/IDQ-/ADR-/S2./AR-/W-)."""
+        import re
+        staging_dir = self._assemble_and_emit()
+        content = (staging_dir / "wizard/skills/next-phase.md").read_text(encoding="utf-8")
+        pattern = re.compile(r'S2\.[0-9]|RW-[0-9]|ADR-[0-9]|IDQ-[0-9]|AR-[0-9]|W-[0-9]')
+        self.assertIsNone(
+            pattern.search(content),
+            f"build ID found in next-phase.md: {pattern.search(content)}",
+        )
+
+    def test_next_phase_skill_no_awb_reference(self):
+        """next-phase.md must not reference agent-wizard-build or AWB (self-contained invariant)."""
+        staging_dir = self._assemble_and_emit()
+        content = (staging_dir / "wizard/skills/next-phase.md").read_text(encoding="utf-8")
+        self.assertNotIn(
+            "agent-wizard-build",
+            content,
+            "next-phase.md must not reference the build project (self-contained invariant)",
+        )
+        self.assertNotIn(
+            "AWB",
+            content,
+            "next-phase.md must not reference AWB (self-contained invariant)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
