@@ -2,6 +2,8 @@
 
 *This guide explains how your agent team manages itself. Everything described here is already configured and will happen automatically once your agents are built and running. Read it at your own pace — there's nothing you need to do right now.*
 
+*This guide covers what your system does on its own. For your part (getting started, your role, and day-to-day operating), see `manual.md`.*
+
 ---
 
 ## When the system finds a problem

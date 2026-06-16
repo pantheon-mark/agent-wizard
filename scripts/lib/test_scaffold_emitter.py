@@ -157,5 +157,27 @@ class ManualMdContentTests(unittest.TestCase):
         self.assertIn("2026-01-01", self.text)
 
 
+class HowItWorksCrossLinkTests(unittest.TestCase):
+    """Assert that the emitted how_your_system_works.md cross-links to manual.md."""
+
+    @classmethod
+    def setUpClass(cls):
+        contract = load_contract(default_contract_path())
+        plan = validate_emission_plan(_valid_plan(), contract)
+        cls._tmp = tempfile.TemporaryDirectory()
+        staging = Path(cls._tmp.name)
+        emit_scaffold(plan, staging, REPO_ROOT,
+                      extra_inputs={"MANUAL_LAST_UPDATED": "2026-01-01"})
+        cls.text = (staging / "docs" / "how_your_system_works.md").read_text(encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_cross_links_to_manual(self):
+        self.assertIn("manual.md", self.text)
+        self.assertIn("what your system does on its own", self.text)
+
+
 if __name__ == "__main__":
     unittest.main()
