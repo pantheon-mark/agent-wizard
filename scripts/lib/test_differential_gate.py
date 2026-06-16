@@ -93,6 +93,7 @@ ALLOWLIST_UNIFIED_ADDITIONS = {
     "agents/prompts/researcher_prompt.md": "per-agent prompt emitted deterministically; legacy built agents post-wizard",
     "agents/scripts/researcher.sh": "per-agent invocation script emitted deterministically; legacy built agents post-wizard",
     "wizard_feedback.md": "operator feedback file the generator seeds; legacy did not emit it",
+    "build_progress.md": "per-phase acceptance ledger the generator seeds; legacy had no build-progress tracking",
 }
 
 CRITICAL_FILES = (

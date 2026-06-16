@@ -99,6 +99,62 @@ def _render_acceptance_contract(contract: PhaseAcceptanceContract) -> str:
     return "\n".join(lines)
 
 
+def _build_progress_rows(fdi: Dict[str, Any]) -> str:
+    """Render one markdown table row per committed phase for the build_progress.md ledger.
+
+    Seeded from the same CAPABILITY_INCREMENTS source as the acceptance contracts (committed
+    phases only; candidate_conditional excluded). Each row carries: phase number, capability
+    name, current state (seeded to 'built' as the opening state), Layer-A result stub,
+    Layer-B verdict stub, open-fix-items stub, deferred-core-precondition stub, and date stub.
+
+    Returns an empty string when CAPABILITY_INCREMENTS is absent, empty, or all-candidate.
+    Single source: does NOT re-derive the phase list independently.
+    """
+    raw = fdi.get("CAPABILITY_INCREMENTS")
+    if not raw or not str(raw).strip():
+        return ""
+
+    try:
+        increments = parse_increments(str(raw))
+    except CapabilityProjectionError:
+        return ""
+
+    if not increments:
+        return ""
+
+    # Collect committed phases (mvp + post_mvp_roadmap), ascending.
+    phase_groups: Dict[int, List[Any]] = {}
+    for inc in increments:
+        bucket = inc.get("release_bucket", "")
+        if bucket not in ("mvp", "post_mvp_roadmap"):
+            continue
+        phase = inc.get("phase")
+        if not isinstance(phase, int) or isinstance(phase, bool):
+            continue
+        if phase not in phase_groups:
+            phase_groups[phase] = []
+        phase_groups[phase].append(inc)
+
+    if not phase_groups:
+        return ""
+
+    lines: List[str] = []
+    for phase in sorted(phase_groups.keys()):
+        incs = phase_groups[phase]
+        caps = "; ".join(
+            inc["capability"].strip()
+            for inc in incs
+            if isinstance(inc.get("capability"), str) and inc["capability"].strip()
+        )
+        capability = caps if caps else f"Phase {phase}"
+        # Seed state to 'built' (the opening state); stubs for remaining columns.
+        lines.append(
+            f"| {phase} | {capability} | built | — | — | — | — | — |"
+        )
+
+    return "\n".join(lines)
+
+
 def _assemble_acceptance_contracts(
     fdi: Dict[str, Any],
     agent_intents: list,
@@ -273,6 +329,13 @@ def assemble_emission_plan(
             "merge_strategy": defaults["merge_strategy"],
             "source_refs": list(defaults["source_refs"]),
         })
+
+    # Build-progress ledger row projection: one row per committed phase, same source as
+    # acceptance contracts. Injected into fdi so the scaffold emitter fills
+    # {{BUILD_PROGRESS_ROWS}} in wizard/templates/root/build_progress.md verbatim.
+    # Single-source: _build_progress_rows reads the same CAPABILITY_INCREMENTS already
+    # in fdi — it never re-derives the phase list from a different source.
+    fdi["BUILD_PROGRESS_ROWS"] = _build_progress_rows(fdi)
 
     return {
         "schema_version": _SCHEMA_VERSION,

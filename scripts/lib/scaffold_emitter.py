@@ -170,6 +170,9 @@ def _default_scaffold_inputs() -> Dict[str, str]:
         "OUTPUT_TEMPLATES": "",
         "APPROVED_EXAMPLES": "",
         "ANTI_PATTERNS": "",
+        # --- build-progress ledger (seeded from capability increments at assembly time;
+        # defaults to empty so the template resolves when no increments are present) ---
+        "BUILD_PROGRESS_ROWS": "",
     }
 
 

@@ -111,6 +111,7 @@ _EXACT_LIFECYCLE = {
     "pending_decisions.md": "runtime_state",
     "wizard_feedback.md": "runtime_state",
     "SESSION_STATE.md": "runtime_state",
+    "build_progress.md": "runtime_state",  # acceptance ledger; operator updates after each phase
     ".gitignore": "operator_config",
     ".env": "operator_config",   # operator-owned secrets file, emitted empty; never wizard-overwritten
     COMMAND_SURFACE_REL: "inherited_content",
