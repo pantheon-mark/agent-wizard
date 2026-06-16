@@ -1,0 +1,87 @@
+# Foundation bundle v0.5.0 migration manifest (target-owned per § 3 of the canonical
+# foundation-versioning specification)
+#
+# This file lives at wizard/foundation-bundles/v0.5.0/migration-manifest.yaml per § 8.3
+# per-version layout (decoupled from v1.0.0 stability commitment per § 1.3
+# layout-vs-stability decoupling).
+#
+# Target-owned discipline (§ 3.3): v0.5.0 (this release) declares what it migrates FROM
+# and how. Prior v0.x → v0.x+1 schema-layer transitions remain tracked in their respective
+# per-version manifests (v0.4.0/migration-manifest.yaml carries v0.3.0 → v0.4.0).
+#
+# THIS IS A MINOR-ADDITIVE RELEASE over v0.4.0. v0.5.0 adds ONE additive section
+# (vision.md § Vision Recap) that reuses the existing VISION_PURPOSE input — no new
+# placeholder KEY is introduced, no section is removed or renamed, and no managed-file
+# boundary changes. Operator projects on v0.4.x can adopt the new section through the
+# merge-apply mutator: the section clean-adopts into vision.md when the operator has not
+# edited it, and is offered as a review sidecar (live file untouched) when the operator
+# has. The migration carries real preflight / rollback / migration_steps because — unlike
+# the v0.3.0 → v0.4.0 stabilization-exempted transition — this release exists to be applied
+# to live operator projects via the apply path.
+
+target_version: v0.5.0
+release_date: 2026-06-16
+schema_version: v1  # this manifest's own schema version (§ 3.1)
+release_classification: minor_additive_single_section_prerelease
+
+migrations:
+  - from: "v0.4.x"  # matches any v0.4.* operator project (e.g. v0.4.0) per upgrade._is_semver_match `.x` wildcard
+    class: minor-additive  # per § 2.3 4-tier; additive section only — no removal/rename; backward-compatible public API surface
+    requires_operator_approval: true  # apply is operator-explicit; standing auto-approval stays disabled
+    preflight: |
+      Verify the operator project carries a .wizard/replay-capsule.json and a
+      .wizard/manifest.json whose foundation_bundle_version is v0.4.x. The apply path
+      runs a replay-conformance gate (re-render the current version from the capsule and
+      confirm each foundation doc hashes to the manifest base_hash) BEFORE any write; if
+      that gate fails, the upgrade is refused and no files are changed.
+    rollback: |
+      The apply path snapshots the touched foundation docs and the whole .wizard/ control
+      plane to .wizard/backups/pre-v0.5.0/ before writing. To roll back, restore the files
+      from that backup directory and set .wizard/manifest.json foundation_bundle_version
+      back to v0.4.0. No schema removal occurred, so a rolled-back project is byte-identical
+      to its pre-upgrade state.
+    migration_steps: |
+      1. Run the upgrade check (plan-only) to confirm v0.4.x -> v0.5.0 is offered.
+      2. Run the apply path (operator-explicit). For each managed foundation doc:
+         - vision.md (three_way): if unedited, the new Vision Recap section is adopted
+           automatically; if the operator edited vision.md, the new version is saved under
+           .wizard/upgrade-review/v0.4.0-to-v0.5.0/ for the operator to copy edits by hand
+           (the live file is left exactly as the operator left it).
+         - operator_review / warn_on_drift docs: unchanged by this release (their rendered
+           content is identical at v0.5.0), so they are reported unchanged.
+      3. Review anything routed to .wizard/upgrade-review/ and copy wanted wording by hand.
+    breaking_changes_summary: ""  # none — minor-additive; no section removed/renamed, no placeholder KEY added, no managed-file boundary change
+    supported: true
+    stop_condition: not_applicable
+    notes: |
+      Minor-additive release cut to exercise the foundation-bundle merge-apply mutator
+      end-to-end: a real additive section migrated into a real emitted operator project
+      while preserving operator edits. Adds vision.md § Vision Recap (id: vision_recap;
+      title: "Vision Recap"; applies_to: [all]; render_modes: [complete]; source: template;
+      population_status: populated). The section reuses the existing VISION_PURPOSE input;
+      no new placeholder KEY is introduced, so it renders for any operator project that
+      already answered the vision interview (the apply path correctly refuses migrations
+      that would require an unanswered new input).
+
+      Package self-contained (same pattern as v0.4.0):
+        - own schemas/section-schema.yaml (section_schema_version v0.4; one additive section)
+        - own templates/ (6 .md files; vision.md gains one H2; 5 others verbatim aside from
+          the foundation_schema_version frontmatter bump to match the bundle schema revision)
+        - own baselines/ (6 .hash.yaml files; vision.md.hash.yaml regenerated for the new
+          section; 5 others carry schema_revision: v0.4 with unchanged content hashes)
+        - own manifest.yaml + this migration-manifest.yaml + JSON sidecars
+
+inventory_check_result:
+  date: 2026-06-16
+  scope: |
+    A real markdown-agents-on-claude-code operator project (emitted from the preserved
+    pilot transcript) is the held-out end-to-end fixture for this release; it is emitted
+    fresh per test run and is not a persisted operator bundle in the build repo.
+  result: minor_additive_release_safe_to_apply_to_v0_4_x_projects
+  classification_confirmed: |
+    minor_additive_single_section_prerelease stands; the change is additive-only and the
+    merge-apply mutator preserves operator edits (clean-adopt or review sidecar). No
+    operator-project migration debt accrues from this release.
+
+# Future migrations append below per target-owned discipline: each target release declares
+# what it migrates FROM. Source projects do not predict future compatibility.

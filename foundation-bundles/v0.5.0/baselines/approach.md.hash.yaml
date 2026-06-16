@@ -1,0 +1,13 @@
+# Hash baseline for approach.md (bundle v0.5.0)
+# Enforced-path drift detection mechanism for this foundation bundle's templates.
+# Regeneration rationale: render-contract baseline for new minor-additive bundle
+template: approach.md
+schema_revision: v0.4
+sections_hash:
+- id: solution_brief
+  heading: Solution Brief
+  heading_hash: 5a7e8488cad8679d0300dad661a92ca8184f610b
+- id: agent_roster
+  heading: Agent Roster
+  heading_hash: f8632f44266b34fe006bfac5cc83fa51dd7e557e
+base_hash: b41716f42317d9701bce587a16454917d25dee66

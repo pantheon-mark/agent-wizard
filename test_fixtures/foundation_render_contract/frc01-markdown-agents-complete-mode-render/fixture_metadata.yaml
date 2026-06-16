@@ -29,9 +29,9 @@ expected_outcome:
     - prd.md  # deferred until wizard supports PRD authoring; not in foundation_only either; absent at v1
   per_doc_sections:
     vision.md:
-      sections_present: [purpose, goals_objectives_priorities, audience_and_outputs, scope_boundary, constraints, success_criteria]
+      sections_present: [purpose, goals_objectives_priorities, audience_and_outputs, scope_boundary, constraints, success_criteria, vision_recap]
       sections_skipped: []
-      notes: "All universal sections; render in complete mode"
+      notes: "All universal sections; render in complete mode. vision_recap added at foundation-bundle-v0.5 (minor-additive; complete-mode only; applies_to all)."
     approach.md:
       sections_present: [solution_brief, agent_roster]
       sections_skipped: [component_roster]

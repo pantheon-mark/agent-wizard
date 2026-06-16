@@ -1,0 +1,27 @@
+{
+  "_note": "JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing companion. Both files MUST stay in sync.",
+  "inventory_check_result": {
+    "classification_confirmed": "minor_additive_single_section_prerelease stands; the change is additive-only and the merge-apply mutator preserves operator edits (clean-adopt or review sidecar). No operator-project migration debt accrues from this release.",
+    "date": "2026-06-16",
+    "result": "minor_additive_release_safe_to_apply_to_v0_4_x_projects",
+    "scope": "A real markdown-agents-on-claude-code operator project (emitted from the preserved pilot transcript) is the held-out end-to-end fixture for this release; it is emitted fresh per test run and is not a persisted operator bundle in the build repo."
+  },
+  "migrations": [
+    {
+      "breaking_changes_summary": "",
+      "class": "minor-additive",
+      "from": "v0.4.x",
+      "migration_steps": "1. Run the upgrade check (plan-only) to confirm v0.4.x -> v0.5.0 is offered. 2. Run the apply path (operator-explicit). For each managed foundation doc: vision.md (three_way) clean-adopts the new Vision Recap section when unedited, or saves the new version under .wizard/upgrade-review/v0.4.0-to-v0.5.0/ when the operator edited it (live file left untouched); operator_review / warn_on_drift docs are reported unchanged (identical rendered content at v0.5.0). 3. Review anything routed to .wizard/upgrade-review/ and copy wanted wording by hand.",
+      "notes": "Minor-additive release cut to exercise the foundation-bundle merge-apply mutator end-to-end: a real additive section migrated into a real emitted operator project while preserving operator edits. Adds vision.md vision_recap section (title: Vision Recap; applies_to: [all]; render_modes: [complete]; source: template; population_status: populated). Reuses the existing VISION_PURPOSE input; no new placeholder KEY introduced, so it renders for any operator project that already answered the vision interview. Package self-contained (same pattern as v0.4.0): own schema (section_schema_version v0.4), own templates (vision.md gains one H2; 5 others bump foundation_schema_version frontmatter to v0.4), own baselines (vision regenerated; 5 others schema_revision v0.4 content-hash unchanged), own manifest + this migration manifest + JSON sidecars.",
+      "preflight": "Verify the operator project carries a .wizard/replay-capsule.json and a .wizard/manifest.json whose foundation_bundle_version is v0.4.x. The apply path runs a replay-conformance gate (re-render the current version from the capsule and confirm each foundation doc hashes to the manifest base_hash) BEFORE any write; if that gate fails, the upgrade is refused and no files are changed.",
+      "requires_operator_approval": true,
+      "rollback": "The apply path snapshots the touched foundation docs and the whole .wizard/ control plane to .wizard/backups/pre-v0.5.0/ before writing. To roll back, restore the files from that backup directory and set .wizard/manifest.json foundation_bundle_version back to v0.4.0. No schema removal occurred, so a rolled-back project is byte-identical to its pre-upgrade state.",
+      "stop_condition": "not_applicable",
+      "supported": true
+    }
+  ],
+  "release_classification": "minor_additive_single_section_prerelease",
+  "release_date": "2026-06-16",
+  "schema_version": "v1",
+  "target_version": "v0.5.0"
+}

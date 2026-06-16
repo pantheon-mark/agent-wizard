@@ -1,0 +1,28 @@
+# Hash baseline for technical_architecture.md (bundle v0.5.0)
+# Enforced-path drift detection mechanism for this foundation bundle's templates.
+# Regeneration rationale: render-contract baseline for new minor-additive bundle
+template: technical_architecture.md
+schema_revision: v0.4
+sections_hash:
+- id: orchestration_model
+  heading: Orchestration Model
+  heading_hash: 497c7e52e078f04ebe2c66f57f48529fa0c0c27a
+- id: agent_architecture_detail
+  heading: Agent Architecture Detail
+  heading_hash: 53b143349356c9be7281c0354018f5c63facb9b9
+- id: permission_boundary_architecture
+  heading: Permission Boundary Architecture
+  heading_hash: 1ebd587711ffd994917f9c99065b3eadac9e9994
+- id: task_completion_checklists
+  heading: Task Completion Checklists
+  heading_hash: 86637060d32b3b9ca1c32bcac78a149504d6cfa2
+- id: integrations
+  heading: Integrations
+  heading_hash: a7881cac6e64abca5eafd172df6eb31fe0b84c88
+- id: scale_tier
+  heading: Scale Tier
+  heading_hash: 776fea16cdae17f5ce29dc3b6dba9aa21c697fda
+- id: regulatory_compliance_gaps_foundation_only
+  heading: Regulatory & compliance considerations
+  heading_hash: c870c01abbc2b8de8f4c992a71f13792cca74d7e
+base_hash: 26d51421e153c48dd752975572d395e67e2f949b
