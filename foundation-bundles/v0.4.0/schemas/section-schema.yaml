@@ -183,7 +183,7 @@ section_schema:
         population_status: populated
         source: template
       - id: regulatory_compliance_gaps_foundation_only
-        title: "Regulatory & compliance gaps (foundation-only mode)"
+        title: "Regulatory & compliance considerations"
         required: false
         applies_to: [all]
         render_modes: [foundation_only]
@@ -223,6 +223,14 @@ section_schema:
         operator_visible: true
         population_status: populated
         source: template
+      - id: mvp_and_roadmap_boundary
+        title: MVP and Roadmap Boundary
+        required: false
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
       - id: build_phases
         title: Build Phases
         required: false
@@ -247,18 +255,10 @@ section_schema:
         operator_visible: true
         population_status: populated
         source: template
-      - id: sprint_planning
-        title: Sprint Planning
+      - id: work_tracking
+        title: Work Tracking
         required: false
         applies_to: [all]
-        render_modes: [complete]
-        operator_visible: true
-        population_status: populated
-        source: template
-      - id: work_plans
-        title: Work Plans
-        required: false
-        applies_to_shapes: [markdown-agents-on-claude-code]
         render_modes: [complete]
         operator_visible: true
         population_status: populated
@@ -333,6 +333,15 @@ section_schema:
         population_status: populated
         source: template
         notes: "Houses markdown-agents-on-claude-code-shape-specific test categories from prior disposition: H handoff/coordination, A-6..A-52 agent identity/permissions (excluding universal sub-concepts), M MCP resilience, S session startup, D document update mechanism, AC auto-correct, G git/version control, R rationale propagation, O operational self-analysis, REV model-as-reviewer reviews, FI future items register, SCE session close enforcement, VS voice/style; plus shape-specific subsets from mixed categories (Q-1..Q-8 QA-agent specific; EN-18..EN-19 manual.md; MT-3..MT-11 agent prompts + scripts tier names; F-6..F-8 + F-10..F-26 markdown-specific cost/budget impl; A-row-level markdown-specific subset)."
+      - id: test_maintenance
+        title: Test maintenance
+        required: false
+        applies_to: [all]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+        notes: "Universal narrative on how the test inventory is maintained over the system's life (wizard-shipped updates, operator-discovered scenarios, failing-test review). Shape-neutral; renders in complete mode only (test_cases is foundation_only SKIP)."
 
   # ============================================================
   # audit_framework.md — Security + Drift universal; Log + Architecture shape-specific
@@ -373,6 +382,24 @@ section_schema:
         operator_visible: true
         population_status: populated
         source: template
+      - id: rules_library
+        title: Rules library
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+        notes: "Describes /quality/rules_library.md, QA-agent writes, and agent reads — markdown-agents-on-claude-code agent infrastructure."
+      - id: system_lifecycle
+        title: System lifecycle
+        required: false
+        applies_to_shapes: [markdown-agents-on-claude-code]
+        render_modes: [complete]
+        operator_visible: true
+        population_status: populated
+        source: template
+        notes: "Maintenance + upgrade lifecycle writes referencing markdown-agents-on-claude-code filesystem conventions (/archive/logs/, work_archive, session-bootstrap state)."
 
   # ============================================================
   # prd.md — required public API filename but not currently template-generated

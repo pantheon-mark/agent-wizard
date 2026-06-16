@@ -52,23 +52,31 @@ expected_outcome:
         regulatory_compliance_gaps_foundation_only only renders in foundation_only mode;
         deployment_topology + data_model deferred for other shapes.
     execution_plan.md:
-      sections_present: [mvp_definition, build_phases, execution_sequence, human_in_the_loop_map, sprint_planning, work_plans]
+      sections_present: [mvp_definition, mvp_and_roadmap_boundary, build_phases, execution_sequence, human_in_the_loop_map, work_tracking]
       sections_skipped: [deployment_pipeline]
-      notes: "All markdown-agents + universal sections render; deployment_pipeline deferred"
+      notes: |
+        All markdown-agents + universal sections render; deployment_pipeline deferred.
+        Reconciled to the latest bundle template: sprint_planning + work_plans were removed
+        from the template (no longer H2s); mvp_and_roadmap_boundary + work_tracking are the
+        current template sections.
     test_cases.md:
-      sections_present: [acceptance_criteria, test_pyramid, validation_method, markdown_agent_validation_matrix]
+      sections_present: [acceptance_criteria, test_pyramid, validation_method, markdown_agent_validation_matrix, test_maintenance]
       sections_skipped: [requirements_anchor]
       notes: |
-        Updated at foundation-bundle-v0.2 release 2026-05-20 per the-relevant-slice-decision
-        the target structure. requirements_anchor is source: schema_only + population_status:
-        deferred (un-defer trigger: wizard supports PRD authoring + prd.md populated for shape)
-        so it does NOT render at v0.2; the 4 sections that render are acceptance_criteria +
-        test_pyramid + validation_method + markdown_agent_validation_matrix for markdown-agents-
-        on-claude-code in complete mode. coverage_by_shape.markdown-agents-on-claude-code: populated.
+        requirements_anchor is source: schema_only + population_status: deferred (un-defer
+        trigger: wizard supports PRD authoring + prd.md populated for shape) so it does NOT
+        render; the 5 sections that render are acceptance_criteria + test_pyramid +
+        validation_method + markdown_agent_validation_matrix + test_maintenance for
+        markdown-agents-on-claude-code in complete mode. test_maintenance is the universal
+        test-maintenance narrative present in the latest bundle template.
+        coverage_by_shape.markdown-agents-on-claude-code: populated.
     audit_framework.md:
-      sections_present: [security_audits, log_audits, architecture_audits, drift_audits]
+      sections_present: [security_audits, log_audits, architecture_audits, drift_audits, rules_library, system_lifecycle]
       sections_skipped: []
-      notes: "All sections markdown-agents or universal; render in complete mode"
+      notes: |
+        All sections markdown-agents or universal; render in complete mode. rules_library +
+        system_lifecycle are markdown-agents-on-claude-code sections present in the latest
+        bundle template (rules library + system maintenance/upgrade lifecycle).
 
 coverage_intent:
   - "Validates v1 ship path: markdown-agents-on-claude-code shape; complete render mode"

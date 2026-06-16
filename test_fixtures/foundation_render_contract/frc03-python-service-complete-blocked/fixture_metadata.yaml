@@ -50,6 +50,7 @@ expected_outcome:
         - acceptance_criteria  # applies_to: [all]
         - test_pyramid         # applies_to: [all]
         - validation_method    # applies_to: [all]
+        - test_maintenance     # applies_to: [all] — universal test-maintenance narrative in the latest bundle template
       sections_skipped:
         - requirements_anchor              # source: schema_only + population_status: deferred at v0.2; does not render in any shape
         - markdown_agent_validation_matrix  # applies_to_shapes: [markdown-agents-on-claude-code] only

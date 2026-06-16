@@ -1,6 +1,6 @@
-# Hash baseline for technical_architecture.md
-# Enforced-path drift detection mechanism per the foundation-versioning specification
-# Regeneration rationale: Foundation bundle v0.4.0 release (2026-05-28): technical_architecture.md sections refactored to single-home + cross-reference + deferred-state discipline. agent_roster section moved to canonical home (approach.md); permission_boundaries projection moved to canonical home (execution_plan.md HITL Map). Two new deferred-state sections added.
+# Hash baseline for technical_architecture.md (bundle v0.4.0)
+# Enforced-path drift detection mechanism for this foundation bundle's templates.
+# Regeneration rationale: render-contract reconcile: schema + baseline aligned to template
 template: technical_architecture.md
 schema_revision: v0.3
 sections_hash:
@@ -23,6 +23,6 @@ sections_hash:
   heading: Scale Tier
   heading_hash: 776fea16cdae17f5ce29dc3b6dba9aa21c697fda
 - id: regulatory_compliance_gaps_foundation_only
-  heading: Regulatory & compliance gaps (foundation-only mode)
-  heading_hash: 80ba689601c37b9189b2980056777eaeade1fa95
-base_hash: 63934f347820c96330cbd2f941ba1e61e79130d7
+  heading: Regulatory & compliance considerations
+  heading_hash: c870c01abbc2b8de8f4c992a71f13792cca74d7e
+base_hash: 26d51421e153c48dd752975572d395e67e2f949b

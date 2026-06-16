@@ -1,7 +1,6 @@
-# Hash baseline for test_cases.md
-# Enforced-path drift detection mechanism per the foundation-versioning policy
-# Regeneration rationale: foundation-bundle-v0.2 release post-R2 thematic refactor (gemini R2 recommendation TAKE-APPLIED-AT-CLOSE): test_cases.md restructured with 4 pillars (Correctness/Reliability/Security/Operability) for universal Acceptance Criteria + 4 functional areas (Session Lifecycle/Agent Capabilities/System Coordination/Quality+Safety Guardrails) for Markdown Agent Validation Matrix; no AC row content changes; H3 -> H4 hierarchy reorganization
-# NOTE (financial-guardrail redesign, 2026-06-07): the Cost Controls AC rows (AC-F-1..F-4, MA-F-13) + their § intros were re-based from the retired "spend ceiling / unconditional stop" model onto the automation-budget + exhaustion-behavior model. Section HEADINGS are unchanged, so the per-section heading_hash values below still hold. base_hash (full-file) is now STALE and must be regenerated via the canonical release-time baseline tool — NOT hand-computed (the recipe is a normalized form, not raw-file sha1; an unverified hand value would be a fabrication). base_hash regen is OWED at the next foundation-bundle release; the heading-level structural drift detection remains valid in the interim.
+# Hash baseline for test_cases.md (bundle v0.4.0)
+# Enforced-path drift detection mechanism for this foundation bundle's templates.
+# Regeneration rationale: render-contract reconcile: schema + baseline aligned to template
 template: test_cases.md
 schema_revision: v0.3
 sections_hash:
@@ -17,4 +16,7 @@ sections_hash:
 - id: markdown_agent_validation_matrix
   heading: Markdown Agent Validation Matrix
   heading_hash: 4273c4711b0836fd8fde17524713c9cd359f37c2
-base_hash: ae285c2223fed9decb2452032e34eeed0cac2134
+- id: test_maintenance
+  heading: Test maintenance
+  heading_hash: b9694aa65524dd3da833e7bcd55a1ec8c9426881
+base_hash: 79d495632fa14a31004ff126a19bf6fcd33f33f6

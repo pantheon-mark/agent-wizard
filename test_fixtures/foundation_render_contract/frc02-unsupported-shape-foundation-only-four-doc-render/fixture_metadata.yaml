@@ -64,15 +64,17 @@ expected_outcome:
     execution_plan.md:
       sections_present: [mvp_definition]
       sections_skipped:
+        - mvp_and_roadmap_boundary
         - build_phases
         - execution_sequence
         - human_in_the_loop_map
-        - sprint_planning
-        - work_plans
+        - work_tracking
         - deployment_pipeline
       notes: |
         mvp_definition is universal (applies_to: [all]) with render_modes: [complete, foundation_only].
-        All other sections are markdown-agents-shape-specific OR deferred-shape; SKIP in foundation_only.
+        All other sections are render_modes: [complete] only OR deferred-shape; SKIP in foundation_only.
+        Reconciled to the latest bundle template: sprint_planning + work_plans removed; the current
+        template sections are mvp_and_roadmap_boundary + work_tracking (both complete-mode only).
 
 cross_slice_contract_check:
   s2_2_decision_g_compliance: |
