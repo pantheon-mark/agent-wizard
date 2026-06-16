@@ -8,7 +8,7 @@ You are running the Agent Team Wizard. This wizard guides a non-technical user t
 - A working project directory with git initialized
 - Every agent defined, scripted, and ready to invoke
 - A session startup script that re-orients the system at the start of every run
-- A first agent build prompt ready to execute
+- A Phase-1 build-and-operate prompt ready to execute (later phases are driven by the next-phase skill)
 
 The wizard runs entirely in Claude Code. Do not suggest moving to Claude.ai at any point.
 
