@@ -34,7 +34,7 @@ class PhaseAcceptanceContract:
     operator_questions: List[str]
     required_evidence: List[str]
     core_checks: List[str]
-    defer_trigger: Optional[str]
+    defer_trigger: str
 
 
 def _agent_name(record: dict) -> str:
@@ -131,26 +131,24 @@ def _compose_defer_trigger(
     capability: str,
     agent_names: List[str],
     agent_index: Dict[str, List[str]],
-) -> Optional[str]:
-    """Return a generic defer condition if the phase cannot yet be exercised on real work.
+) -> str:
+    """Return a uniform, capability-scoped acceptance-time deferral instruction.
 
-    A phase is considered un-exercisable if none of its assigned agents has a matching
-    record in agent_index (i.e. the agent is not yet configured). In that case we set
-    a descriptive trigger; otherwise None.
+    Deferral is an acceptance-time operator verdict — "I can't exercise this capability
+    on real work yet" — not a build-time determination. This instruction is present on
+    EVERY committed phase regardless of agent-roster state.
+
+    The agent_index parameter is accepted for API compatibility (it is used elsewhere for
+    core_checks) but plays no role in the deferral decision here.
     """
-    if not agent_names:
-        # No agents assigned — cannot exercise this phase at all.
-        return f"No agents are assigned to '{capability}' yet; exercise this phase after the agents are configured."
-
-    # Check if at least one assigned agent is present in the index.
-    matched = [a for a in agent_names if a in agent_index]
-    if not matched:
-        return (
-            f"The agent(s) for '{capability}' ({', '.join(agent_names)}) "
-            f"are not yet configured; exercise this phase once they are set up."
-        )
-
-    return None
+    return (
+        f"Only defer accepting '{capability}' if you have no real work to exercise this "
+        f"capability on yet. When you do have real work, run the phase supervised and come "
+        f"back to accept it. If a core check for '{capability}' cannot be exercised yet, "
+        f"the phase is provisionally-accepted — not fully accepted — and clearing that "
+        f"core check becomes a required precondition before the next phase can be accepted. "
+        f"A non-core deferred check is recorded for later and revisited at first real use."
+    )
 
 
 def assemble_phase_acceptance(

@@ -48,7 +48,7 @@ def _render_acceptance_contract(contract: PhaseAcceptanceContract) -> str:
     """Render one PhaseAcceptanceContract as operator-readable markdown.
 
     Shape: H1 title (phase + capability), agents line, ## What to confirm (checklist),
-    ## What you should see, ## Core checks, and optionally ## If you can't try this yet.
+    ## What you should see, ## Core checks, ## If you can't try this yet (always present).
     Plain voice; no build IDs or internal jargon tokens.
     """
     lines: List[str] = []
@@ -89,12 +89,11 @@ def _render_acceptance_contract(contract: PhaseAcceptanceContract) -> str:
         lines.append("- No specific acceptance signals recorded for this phase.")
     lines.append("")
 
-    # Defer trigger (only if present)
-    if contract.defer_trigger is not None:
-        lines.append("## If you can't try this yet")
-        lines.append("")
-        lines.append(contract.defer_trigger)
-        lines.append("")
+    # Defer trigger (always present — uniform acceptance-time deferral instruction)
+    lines.append("## If you can't try this yet")
+    lines.append("")
+    lines.append(contract.defer_trigger)
+    lines.append("")
 
     return "\n".join(lines)
 

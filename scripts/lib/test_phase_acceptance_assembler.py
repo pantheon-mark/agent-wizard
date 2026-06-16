@@ -5,7 +5,11 @@ Covers:
   (b) multi-agent phase lists all its agents AND has a combined/handoff operator_question
   (c) core_checks aggregate the phase agents' acceptance_signals
   (d) operator_questions are plain language (known internal tokens absent)
-  (e) defer_trigger is None for always-exercisable phase; set for one that cannot be
+  (e) defer_trigger is a uniform, non-None acceptance-time instruction on EVERY committed
+      phase; it references the phase's capability; it contains provisional-acceptance /
+      forced-precondition language; it does NOT contain agent-roster-match proxy text;
+      and across two fixtures with different capabilities the text differs only by the
+      interpolated capability (templated, not hardcoded).
   (f) anti-overfit: fixture with different roster/phase-count than the 6-agent estate
   (g) required_evidence is present and non-empty for every contract
   (h) field types match the PhaseAcceptanceContract dataclass spec
@@ -135,9 +139,12 @@ class PhaseAcceptanceContractShapeTest(unittest.TestCase):
             for chk in c.core_checks:
                 self.assertIsInstance(chk, str)
 
-    def test_defer_trigger_is_str_or_none(self):
+    def test_defer_trigger_is_str(self):
+        # defer_trigger is now always a non-None, non-empty string for every committed phase.
         for c in self.contracts:
-            self.assertTrue(c.defer_trigger is None or isinstance(c.defer_trigger, str))
+            self.assertIsInstance(c.defer_trigger, str)
+            self.assertTrue(c.defer_trigger.strip(),
+                            f"phase {c.phase} defer_trigger is empty")
 
 
 class PhaseFilterAndOrderTest(unittest.TestCase):
@@ -334,20 +341,24 @@ class OperatorQuestionsTest(unittest.TestCase):
 
 
 class DeferTriggerTest(unittest.TestCase):
-    """(e) defer_trigger is None for always-exercisable phases; set when it can't be."""
+    """(e) defer_trigger is a uniform, non-None acceptance-time instruction on every
+    committed phase — regardless of whether the phase's agents are present in the index.
+    """
 
-    def test_always_exercisable_phase_has_none_defer_trigger(self):
-        # Phase 1 (Research) — always exercisable if you have topics to research.
-        # The fixture agent has non-empty acceptance_signals and a plain capability.
+    def test_defer_trigger_always_non_none_for_matched_phase(self):
+        # Phase 1 (Research) — agents ARE in the index; defer_trigger must still be non-None.
         contracts = assemble_phase_acceptance(
             _INCREMENTS_STANDARD, _AGENT_RECORDS_STANDARD
         )
-        phase1 = next(c for c in contracts if c.phase == 1)
-        self.assertIsNone(phase1.defer_trigger)
+        for c in contracts:
+            self.assertIsNotNone(
+                c.defer_trigger,
+                f"phase {c.phase} has None defer_trigger — must always be set",
+            )
 
-    def test_phase_with_no_agent_match_has_defer_trigger(self):
-        # If the increment's agents string names an agent not in agent_records,
-        # the phase cannot be exercised — defer_trigger must be set (not None).
+    def test_defer_trigger_always_non_none_for_unmatched_phase(self):
+        # Agent not present in records — defer_trigger must still be a non-None string
+        # (and must not depend on the roster-match result for the instruction text).
         increments = [
             _incr("Integrate with legacy system", "mvp", phase=1, agents="LegacyConnector"),
         ]
@@ -355,14 +366,97 @@ class DeferTriggerTest(unittest.TestCase):
         contracts = assemble_phase_acceptance(increments, agents)
         self.assertEqual(len(contracts), 1)
         self.assertIsNotNone(contracts[0].defer_trigger)
+        self.assertIsInstance(contracts[0].defer_trigger, str)
+        self.assertTrue(contracts[0].defer_trigger.strip())
 
-    def test_anti_overfit_newsletter_phase4_always_exercisable(self):
+    def test_defer_trigger_references_capability(self):
+        # The instruction must be scoped to the phase's own capability string.
+        contracts = assemble_phase_acceptance(
+            _INCREMENTS_STANDARD, _AGENT_RECORDS_STANDARD
+        )
+        for c in contracts:
+            self.assertIn(
+                c.capability,
+                c.defer_trigger,
+                f"phase {c.phase} defer_trigger does not reference its capability",
+            )
+
+    def test_defer_trigger_contains_provisional_acceptance_language(self):
+        # Must convey the "provisionally-accepted" / forced-precondition concept.
+        # Assert on a stable substring rather than the whole sentence.
+        contracts = assemble_phase_acceptance(
+            _INCREMENTS_STANDARD, _AGENT_RECORDS_STANDARD
+        )
+        for c in contracts:
+            dt_lower = c.defer_trigger.lower()
+            has_provisional = (
+                "provisional" in dt_lower
+                or "precondition" in dt_lower
+                or "provisionally" in dt_lower
+            )
+            self.assertTrue(
+                has_provisional,
+                f"phase {c.phase} defer_trigger lacks provisional/precondition language: "
+                f"{c.defer_trigger!r}",
+            )
+
+    def test_defer_trigger_does_not_contain_roster_match_proxy(self):
+        # The old proxy language ("not yet configured", "are not yet configured") must
+        # not appear — deferral is an operator verdict, not a build-time roster check.
+        contracts = assemble_phase_acceptance(
+            _INCREMENTS_STANDARD, _AGENT_RECORDS_STANDARD
+        )
+        for c in contracts:
+            dt_lower = c.defer_trigger.lower()
+            self.assertNotIn(
+                "not yet configured",
+                dt_lower,
+                f"phase {c.phase} defer_trigger still uses agent-roster proxy: {c.defer_trigger!r}",
+            )
+
+    def test_defer_trigger_is_templated_not_hardcoded(self):
+        # Anti-overfit: the instruction text for two fixtures with different capabilities
+        # must differ only by the interpolated capability string (i.e., it's a template).
+        # Strip the capability from each and assert the surrounding template text matches.
+        contracts_std = assemble_phase_acceptance(
+            _INCREMENTS_STANDARD, _AGENT_RECORDS_STANDARD
+        )
+        contracts_nl = assemble_phase_acceptance(
+            _INCREMENTS_NEWSLETTER, _AGENT_RECORDS_NEWSLETTER
+        )
+
+        phase1_std = next(c for c in contracts_std if c.phase == 1)
+        phase1_nl = next(c for c in contracts_nl if c.phase == 1)
+
+        # The two capabilities must differ (fixture integrity check).
+        self.assertNotEqual(phase1_std.capability, phase1_nl.capability)
+
+        # The defer_trigger texts must differ (because capability is interpolated).
+        self.assertNotEqual(
+            phase1_std.defer_trigger,
+            phase1_nl.defer_trigger,
+            "defer_trigger identical across different capabilities — looks hardcoded",
+        )
+
+        # The template skeleton (text with capability replaced) must be the same.
+        # This confirms it's a template, not two independently authored strings.
+        skeleton_std = phase1_std.defer_trigger.replace(phase1_std.capability, "__CAP__")
+        skeleton_nl = phase1_nl.defer_trigger.replace(phase1_nl.capability, "__CAP__")
+        self.assertEqual(
+            skeleton_std,
+            skeleton_nl,
+            "defer_trigger template skeletons differ — text is not a consistent template",
+        )
+
+    def test_anti_overfit_newsletter_all_phases_have_defer_trigger(self):
         contracts = assemble_phase_acceptance(
             _INCREMENTS_NEWSLETTER, _AGENT_RECORDS_NEWSLETTER
         )
-        phase4 = next(c for c in contracts if c.phase == 4)
-        # Sender has matching agent record — should be exercisable.
-        self.assertIsNone(phase4.defer_trigger)
+        for c in contracts:
+            self.assertIsNotNone(c.defer_trigger,
+                                 f"newsletter phase {c.phase} has None defer_trigger")
+            self.assertIsInstance(c.defer_trigger, str)
+            self.assertTrue(c.defer_trigger.strip())
 
 
 class RequiredEvidenceTest(unittest.TestCase):
