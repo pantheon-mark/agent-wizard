@@ -149,7 +149,7 @@ By the time `15_close.md` finishes, the user's system project contains:
 
 **Operations:** `/quality/`, `/work/`, `/logs/`, `/docs/`, `/security/`, `/archive/` — all populated with correct structure and headers
 
-**Wizard-produced build prompts:** `/wizard/build_prompts/` — one build prompt per agent, written to disk at the time each is produced
+**Wizard-produced build prompts:** `/wizard/build_prompts/` — the wizard writes one file here at close: `phase_01_build_prompt.md` (the Phase-1 build-and-operate prompt). Phases 2 and later are driven by the next-phase skill in `wizard/skills/`, not by pre-written prompts per agent.
 
 ---
 

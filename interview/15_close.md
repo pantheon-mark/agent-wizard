@@ -267,21 +267,23 @@ The closing has three layers. Deliver them in order. The first layer is what mat
 > Your project is at:
 > `~/[PROJECT_FOLDER_NAME]/`
 >
-> **Here is the prompt to start your first agent build.** It's also saved at `wizard/build_prompts/agent_01_build_prompt.md` — so if you close this window, you won't lose it.
+> **Here is the prompt to bring your first phase into operation.** It's also saved at `wizard/build_prompts/phase_01_build_prompt.md`, so if you close this window you won't lose it.
+>
+> Before running it: the prompt will walk you through setting up your credentials first (if any are pending). That step needs to happen before the first supervised run.
 
 Then deliver CLOSE-14 immediately (the build prompt).
 
 ---
 
-### CLOSE-14 — First build prompt [INTERNAL]
+### CLOSE-14 — Phase-1 build-and-operate prompt [INTERNAL]
 
-**Before producing the prompt:** Read the confirmed agent roster from `approach.md` (the canonical roster — agent / function / criticality; `technical_architecture.md` cross-references it). Identify the first agent to build — this should be the agent at the foundation of the system (typically the orchestrator or the primary data-access agent, whichever the roster designates as the starting point; the `execution_plan.md` build order names the first phase). Note: the generator already emits a complete prompt file for every agent at `agents/prompts/<agent>_prompt.md`, so the first build session reviews and brings that agent into operation against the foundation docs — it does not author the agent from a blank file.
+**Before producing the prompt:** Read `execution_plan.md` in the project directory and identify the first phase in the build order. Note the agent(s) that belong to Phase 1. The generator has already written a complete prompt file for every agent at `agents/prompts/<agent>_prompt.md`. Phase 1 means bringing those already-emitted agents into operation and running them supervised against a copy of external state, then getting operator acceptance on the business result. There is no authoring from a blank file.
 
 **Produce the following prompt** (exact wording — this becomes the paste-ready content):
 
 ---
 
-> **First agent build — [AGENT NAME]**
+> **Phase 1 build and operate: [PHASE-1 NAME from execution_plan.md]**
 >
 > Read these files in the project directory before doing anything:
 > - `vision.md`
@@ -289,21 +291,45 @@ Then deliver CLOSE-14 immediately (the build prompt).
 > - `technical_architecture.md`
 > - `project_instructions.md`
 > - `session_bootstrap.md`
+> - `execution_plan.md`
 >
-> You are bringing the **[AGENT NAME]** agent into operation. This agent's role is: [one sentence from the roster].
+> You are bringing **Phase 1** into operation. Phase 1 is: [one sentence from execution_plan.md describing what Phase 1 covers and its agents].
 >
-> The wizard already generated this agent's prompt file at `agents/prompts/[agent_filename]_prompt.md`. Using the documents above as your specification:
+> The wizard already generated prompt files for every Phase 1 agent at `agents/prompts/`. This session does NOT author agents from scratch. It brings what was generated into operation and confirms the business result works.
 >
-> 1. Confirm your understanding of this agent's role, permission boundary, and completion criteria before changing anything. Read `agents/prompts/[agent_filename]_prompt.md` and check it against the vision, approach, and architecture.
-> 2. Make the agent runnable: verify its prompt file is complete and internally consistent with the technical architecture and its permission boundary, fill in anything the architecture requires that is missing, and confirm its invocation script at `agents/scripts/[agent_filename].sh` is correct.
-> 3. Verify the agent never does anything the vision forbids (nothing irreversible, nothing outgoing, no spending) without bringing it to you first.
-> 4. Confirm completion and tell me what to review before the next agent is built.
+> Work through these steps in order:
 >
-> **To start this session:** Run `./start-session.sh` from your project directory — it is already configured to use the correct model. Build only this one agent in this session — one agent at a time.
+> **Step 1: Credential Setup (if any credentials are pending)**
+>
+> Read `security/credentials_registry.md`. If any row has `Status: Pending`, run the Credential Setup skill before going further. That skill walks through pasting and verifying each credential so the system can reach its external dependencies. Do not proceed to the supervised run until all credentials the Phase 1 agents need are in place.
+>
+> **Step 2: Technical verification (silent)**
+>
+> Read each Phase 1 agent's prompt file at `agents/prompts/<agent>_prompt.md`. Verify that each one is complete and consistent with the foundation docs you read above. If anything is missing or misaligned, fix it silently before running. Do not surface technical architecture details to the operator; bring the agents to a runnable state on your own.
+>
+> **Step 3: Supervised run against a copy**
+>
+> Set up a copy or dummy target of any external state the agents will write to (for example, a copy of the master-list Sheet, not the live one). External state is not git-revertable, so the first run always goes against a copy. Run the Phase 1 agents with the operator present, narrating what each agent is doing and why.
+>
+> During this run, inject one clearly labelled, inert dummy Tier-1 action, like this:
+>
+> > [DRILL -- NOT A REAL ACTION] I am pausing here to show you how approval works. In a real run, I would need your sign-off before taking this action: [brief description of what kind of action this is, e.g. "send this message" or "update this live record"]. This is a drill. No action was taken. Please confirm you see the approval prompt and type "continue drill" to proceed.
+>
+> The drill must be unmistakably labelled so the operator never thinks a real action was attempted. Its purpose is to demonstrate the guardrail once, visibly, before the operator accepts Phase 1.
+>
+> **Step 4: Business acceptance**
+>
+> Read `agents/acceptance/phase_01_acceptance.md`. Walk the operator through each question in that file (what the phase did, what changed, what it held back, residual risks, artifacts touched). Do not re-list the questions here; read and follow the acceptance packet. Capture the operator's answers as you go.
+>
+> If the operator accepts: record the verdict to `build_progress.md` in the project root with the date and a one-sentence summary of what was accepted.
+>
+> If the operator does not accept: note what needs to change, fix it in this session if possible, and re-run the supervised cycle before asking again. Do not move to Phase 2 until Phase 1 is accepted.
+>
+> **To start this session:** Run `./start-session.sh` from your project directory. The script is already configured to use the correct model.
 
 ---
 
-**Write this prompt to disk:** `[PROJECT_DIR]/wizard/build_prompts/agent_01_build_prompt.md`. The generator does not create this directory, so create `[PROJECT_DIR]/wizard/build_prompts/` first if it does not exist (`mkdir -p`).
+**Write this prompt to disk:** `[PROJECT_DIR]/wizard/build_prompts/phase_01_build_prompt.md`. The generator does not create this directory, so create `[PROJECT_DIR]/wizard/build_prompts/` first if it does not exist (`mkdir -p`).
 
 ---
 
@@ -315,15 +341,17 @@ Then deliver CLOSE-14 immediately (the build prompt).
 
 **Say:**
 
-> **Here's the road ahead:** Your agent roster has **[n] agents** planned. We build them one at a time — each agent is its own session, and you'll review each one before the next begins. Once all [n] are built and tested, the system moves into regular operation and you'll start receiving your digests.
+> **Here's how building works:** You bring one phase into operation at a time. For each phase: run it supervised against a copy of your data, confirm the business result looks right, then accept it. Only after you accept a phase do you move to the next one. Your `execution_plan.md` lists the phases in order.
+>
+> Phase 1 is covered by the prompt above. Phases 2 and later are driven by a "next phase" skill that lives in `wizard/skills/` in your project directory, so you always have it on hand.
 >
 > **Three things to know:**
 >
-> - All your build prompts are saved at `wizard/build_prompts/` — if you ever close a session before copying a prompt, you'll find it there.
-> - Your project's `manual.md` covers setup basics and troubleshooting if you need them later.
-> - `docs/how_your_system_works.md` explains everything your system does automatically — how it handles errors, updates, security, and more. Read it whenever you're curious.
+> - Your Phase 1 build prompt is saved at `wizard/build_prompts/phase_01_build_prompt.md`. If you close this window before copying it, open that file.
+> - Your project's `manual.md` covers setup, troubleshooting, and what to do if something goes wrong.
+> - `docs/how_your_system_works.md` explains what your system does automatically: how it handles errors, what it holds for your approval, and more. Read it whenever you're curious.
 >
-> You're ready to go. Paste the prompt above into a new session to start building your first agent.
+> You're ready. Paste the prompt above into a new Claude Code session to bring Phase 1 into operation.
 
 ---
 
@@ -333,7 +361,7 @@ There is no Layer 3 delivery. The system guide (`docs/how_your_system_works.md`)
 
 ---
 
-Write an audit trail entry: `Wizard setup complete. First build prompt written for [AGENT NAME]. System guide written to docs/how_your_system_works.md. Closing sequence delivered.`
+Write an audit trail entry: `Wizard setup complete. Phase 1 build-and-operate prompt written to wizard/build_prompts/phase_01_build_prompt.md. System guide written to docs/how_your_system_works.md. Closing sequence delivered.`
 
 Write sub-step marker: Append `step_15_CLOSE-14: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -361,13 +389,13 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-CLOSE-EMIT complete — the generator emitted the complete operator system from the transcript to the project directory, verification passed (critical files present, real `--model`, no stray placeholders), the system guide is at `docs/how_your_system_works.md`, and any per-advisor interview guides were written post-emission. CLOSE-4 git initialized and initial commit made. GH-1 complete (remote connected or user opted out, preference recorded). CLOSE-13 layered closing delivered — build prompt front and center, reference pointers provided, briefings on disk. First build prompt written to `/wizard/build_prompts/agent_01_build_prompt.md` and handed off to user. Audit trail entry written.
+CLOSE-EMIT complete — the generator emitted the complete operator system from the transcript to the project directory, verification passed (critical files present, real `--model`, no stray placeholders), the system guide is at `docs/how_your_system_works.md`, and any per-advisor interview guides were written post-emission. CLOSE-4 git initialized and initial commit made. GH-1 complete (remote connected or user opted out, preference recorded). CLOSE-13 layered closing delivered — Phase-1 build-and-operate prompt front and center, loop framing provided, briefings on disk. Phase-1 build-and-operate prompt written to `/wizard/build_prompts/phase_01_build_prompt.md` and handed off to user. Audit trail entry written.
 
 Update staging file: `WIZARD_COMPLETE = true`
 
 **Write completion marker:** Append `step_15: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
-The interview sequence is complete. The wizard has produced a running project directory, a configured system, and the user's first build prompt. The user's next action is to paste the first build prompt into Claude Code.
+The interview sequence is complete. The wizard has produced a running project directory, a configured system, and the Phase-1 build-and-operate prompt. The user's next action is to paste that prompt into a new Claude Code session.
 
 ---
 
