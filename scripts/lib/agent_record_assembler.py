@@ -30,6 +30,15 @@ CLAIM_EFFECTS = {
     "requires_cron": "agent_cron_cadence",
 }
 
+# Slugs the emitter reserves for the control plane: every emitted system writes an
+# Orchestrator (agents/prompts/orchestrator_prompt.md) and a QA agent, and the roster
+# hardcodes both rows. A specialist whose slug equals one of these would OVERWRITE the
+# control-plane orchestrator prompt ('orchestrator') or duplicate the built-in QA roster
+# row ('qa') — so a specialist resolving to a reserved id is rejected fail-loud here,
+# before any emit. (The markdown-CC control plane; per-shape — other shapes realize the
+# control plane differently and would declare their own reserved set.)
+RESERVED_AGENT_IDS = {"orchestrator", "qa"}
+
 
 def _slug(name: str) -> str:
     """Deterministic id from a display name: lowercase, non-alnum -> '-', trimmed."""
@@ -90,6 +99,16 @@ def assemble_agent_records(intents: List[AgentIntent], scaffold_plan: ScaffoldPl
                 kind="empty_agent_id", subject=ai.display_name,
                 detail="display_name did not produce a non-empty id",
                 operator_options=["give the agent an alphanumeric name"],
+            )
+        if agent_id in RESERVED_AGENT_IDS:
+            raise ConstraintViolation(
+                kind="reserved_agent_id", subject=ai.display_name,
+                detail=f"agent id {agent_id!r} is reserved for the control plane — the "
+                       f"{scaffold_plan.system_shape} shape always emits an Orchestrator and a "
+                       f"QA agent, so a specialist with this id would overwrite the control-plane "
+                       f"prompt or duplicate the built-in roster row",
+                operator_options=[f"rename the agent so it does not resolve to one of "
+                                  f"{sorted(RESERVED_AGENT_IDS)}"],
             )
         if agent_id in seen_ids:
             raise ConstraintViolation(
