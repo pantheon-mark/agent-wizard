@@ -12,6 +12,26 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-16 — your built system can now apply foundation-document upgrades (not just detect them)
+
+**Public-facing change:** When the wizard releases a newer version of its foundation-document set, your built system could already tell you an upgrade was available and whether you'd edited any of the managed documents — but it could not actually take the upgrade. It can now, with `wizard upgrade --to <version> --apply`. The upgrade is always something you ask for explicitly; nothing upgrades itself in the background.
+
+The upgrade is careful with your work:
+
+- **It never overwrites your edits.** If you've changed one of the managed documents, the upgrade does not touch your live file. Instead it places the new version (and a side-by-side comparison) in a `.wizard/upgrade-review/` folder and tells you where to look, so you can copy across anything you want to keep. Documents you haven't edited get the new version applied cleanly.
+- **It checks itself before it changes anything.** Before applying, it re-creates your documents exactly as they were first built and confirms they still match — if anything is out of sync, it refuses and changes nothing. It also takes a full backup of the affected files first, and applies all the changes together or not at all.
+- **It only touches the foundation documents** a new version actually changes; your agents, scripts, and other files are left alone.
+
+To make faithful upgrade previews possible, every newly built system now also saves a small local file, `.wizard/replay-capsule.json`, holding the answers you gave during setup so the wizard can show you what a new version of each document would look like *for your system*. This file stays on your machine only (it is git-ignored by default), and the wizard refuses to write it if any of your answers look like a password or key — credentials belong in your `.env` file, never in setup answers.
+
+**Operator-facing notes:**
+
+- Existing built systems gain the replay-capsule file and the upgrade ability the next time they are generated; there is no action for you to take.
+- No foundation-document version change ships to operators in this release (a test version was used internally to validate the upgrade path end to end).
+
+**Source-Meta-Commit:** PENDING
+**Public repo commit:** PENDING
+
 ## 2026-06-16 — clearer agent-handoff records, a name-collision guard, and honest "reserved section" wording
 
 **Public-facing change:** Three fixes surfaced by running a real built system end to end:
