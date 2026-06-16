@@ -378,6 +378,7 @@ def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_roo
         "WIZARD_VERSION": bundle_version,
         "LAST_UPDATED_DATE": last_updated,
         "LAST_UPDATED_TRIGGER": "initial build",
+        "MANUAL_LAST_UPDATED": last_updated,
     }
     from derivation_groups import group_confirmation_is_stale  # type: ignore
     from transcript_recorder import group_source_hash  # type: ignore

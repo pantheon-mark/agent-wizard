@@ -101,5 +101,61 @@ class ScaffoldEmitterTests(unittest.TestCase):
         self.assertTrue(sess.stat().st_mode & stat.S_IXUSR, "start-session.sh is not executable")
 
 
+class ManualMdContentTests(unittest.TestCase):
+    """Assert that the emitted manual.md carries the operator's Operating Manual
+    shape: correct title, build-and-operate loop section, role section, operating
+    rhythm section, setup steps demoted to an appendix, and no unfilled date
+    placeholder."""
+
+    @classmethod
+    def setUpClass(cls):
+        contract = load_contract(default_contract_path())
+        plan = validate_emission_plan(_valid_plan(), contract)
+        cls._tmp = tempfile.TemporaryDirectory()
+        staging = Path(cls._tmp.name)
+        # Supply a real-date MANUAL_LAST_UPDATED via extra_inputs so the test
+        # exercises the real-date wiring path (same mechanism as LAST_UPDATED_DATE).
+        emit_scaffold(plan, staging, REPO_ROOT,
+                      extra_inputs={"MANUAL_LAST_UPDATED": "2026-01-01"})
+        cls.text = (staging / "manual.md").read_text(encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_title_is_operating_manual_not_setup_guide(self):
+        self.assertIn("Operating Manual", self.text)
+        self.assertNotIn("Setup Guide", self.text)
+
+    def test_contains_build_and_operate_loop_section(self):
+        lower = self.text.lower()
+        self.assertIn("loop", lower)
+
+    def test_contains_your_role_section(self):
+        lower = self.text.lower()
+        self.assertIn("your role", lower)
+
+    def test_contains_operating_rhythm_section(self):
+        lower = self.text.lower()
+        self.assertIn("operating rhythm", lower)
+
+    def test_install_steps_are_under_appendix_heading(self):
+        # The appendix heading must appear before the install content.
+        appendix_pos = self.text.lower().find("appendix")
+        homebrew_pos = self.text.lower().find("homebrew")
+        self.assertGreater(appendix_pos, 0, "no appendix heading found")
+        self.assertGreater(homebrew_pos, 0, "homebrew content missing")
+        self.assertLess(appendix_pos, homebrew_pos,
+                        "Homebrew install content must appear after the appendix heading")
+
+    def test_no_literal_set_at_operator_setup(self):
+        self.assertNotIn("(set at operator setup)", self.text)
+
+    def test_manual_last_updated_renders_to_real_date(self):
+        # The placeholder must be replaced by the value we supplied, not left as {{...}}.
+        self.assertNotIn("{{MANUAL_LAST_UPDATED}}", self.text)
+        self.assertIn("2026-01-01", self.text)
+
+
 if __name__ == "__main__":
     unittest.main()
