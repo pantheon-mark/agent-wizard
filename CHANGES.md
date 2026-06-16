@@ -29,8 +29,8 @@ Entries appear newest-first.
 - Honest limit: because this is a markdown-and-Claude-Code system, the "don't start the next phase until this one is accepted" rule is a strong guided check, not an unbreakable lock. A future system type could make it a hard block.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** TBD-after-push
-**Public repo commit:** TBD-after-push
+**Source-Meta-Commit:** d1929e9
+**Public repo commit:** 1096049
 
 ---
 
