@@ -47,6 +47,19 @@ ERROR_LOG="$PROJECT_ROOT/logs/error_log.md"
 OUTPUT_DIR="$PROJECT_ROOT/{{OUTPUT_DIRECTORY}}"
 HANDOFF_DIR="$PROJECT_ROOT/agents/handoffs"
 CHECKPOINT_FILE="$PROJECT_ROOT/agents/checkpoints/${AGENT_NAME}_${TASK_ID}_checkpoint.md"
+# The agent self-reports HOW its session ended into this sentinel; this script reads it to
+# compose the one authoritative handoff envelope (single writer). Hidden + .stop_reason suffix
+# so it is never mistaken for a *_handoff.json the Orchestrator consumes.
+STOP_SENTINEL="$HANDOFF_DIR/.${AGENT_NAME}_${TASK_ID}.stop_reason"
+
+# The six allowed stop reasons (the emitted-system handoff contract). A sentinel value outside
+# this set is treated as "no valid report" and the script defaults to completed (+ a flag).
+valid_stop_reason() {
+  case "$1" in
+    completed|budget_exceeded|error|timeout|user_cancelled|deferred) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 # --- Additional context files specific to this agent ---
 # Add paths to files this agent needs beyond the three foundational documents.
@@ -80,6 +93,9 @@ done
 mkdir -p "$OUTPUT_DIR"
 mkdir -p "$HANDOFF_DIR"
 mkdir -p "$PROJECT_ROOT/agents/checkpoints"
+
+# Clear any stale stop-reason sentinel so only THIS run's report is read.
+rm -f "$STOP_SENTINEL"
 
 # ============================================================
 # Build the from-disk context file list
@@ -126,6 +142,7 @@ claude \
 
 Task ID: ${TASK_ID}
 Checkpoint file: ${CHECKPOINT_FILE}
+Stop-reason sentinel: ${STOP_SENTINEL}
 
 Before doing anything:
 1. Read your foundational documents from disk this session — do not operate from memory: ${CONTEXT_FILES[*]}
@@ -133,12 +150,20 @@ Before doing anything:
 3. Verify all declared write targets are within your permitted directories.
 4. Write a step-by-step plan to ${CHECKPOINT_FILE} before beginning.
 
-Then execute your task. Write all outputs to disk. Update the checkpoint file as each step completes." \
+Then execute your task. Write all outputs to disk. Update the checkpoint file as each step completes.
+
+When your session ends — success or failure — write your stop reason, and nothing else, to the stop-reason sentinel file named above. Its entire contents must be exactly one of: completed, budget_exceeded, error, timeout, user_cancelled, deferred. The invocation script reads it to record how your session ended; you do not write the handoff envelope yourself." \
   > "$TEMP_OUTPUT" 2>&1 || EXIT_CODE=$?
 
 # ============================================================
 # Handle exit status — rename temp file to final or .failed
 # ============================================================
+
+# This script is the SINGLE writer of the handoff envelope (the Orchestrator's record of how
+# the run ended). It composes the envelope from the process exit status + the agent's
+# self-reported stop reason, and publishes it atomically (temp -> rename) so the Orchestrator
+# never reads a half-written file. The agent never writes the envelope itself.
+FINAL_HANDOFF="${HANDOFF_DIR}/${AGENT_NAME}_${TASK_ID}_handoff.json"
 
 if [[ $EXIT_CODE -eq 0 ]]; then
   # Atomic rename: temp → final
@@ -147,20 +172,39 @@ if [[ $EXIT_CODE -eq 0 ]]; then
   echo "[${TIMESTAMP}] ${AGENT_NAME} [COMPLETE]: task ${TASK_ID} → $FINAL_OUTPUT"
   echo "| ${TIMESTAMP} | ${AGENT_NAME} | COMPLETED | task:${TASK_ID} | output:${FINAL_OUTPUT} |" >> "$SESSION_LOG"
 
-  # Write handoff envelope
-  cat > "${HANDOFF_DIR}/${AGENT_NAME}_${TASK_ID}_handoff.json" << HANDOFF_EOF
+  # Clean exit: honor the agent's self-reported stop reason if it wrote a valid one (so a
+  # "deferred"/"budget_exceeded" session is NOT silently recorded as "completed"); otherwise
+  # default to completed and flag that the agent did not report. A clean exit never overrides
+  # a valid agent report.
+  STOP_REASON="completed"
+  FLAGS=""
+  if [[ -f "$STOP_SENTINEL" ]]; then
+    REPORTED="$(tr -d '[:space:]' < "$STOP_SENTINEL")"
+    if valid_stop_reason "$REPORTED"; then
+      STOP_REASON="$REPORTED"
+    else
+      FLAGS='"script_default_stop_reason_invalid_report"'
+    fi
+  else
+    FLAGS='"script_default_stop_reason_no_report"'
+  fi
+
+  HANDOFF_TMP=$(mktemp "${HANDOFF_DIR}/.${AGENT_NAME}_${TASK_ID}.handoff.XXXXXX")
+  cat > "$HANDOFF_TMP" << HANDOFF_EOF
 {
   "task_id": "${TASK_ID}",
   "agent": "${AGENT_NAME}",
   "status": "COMPLETE",
-  "stop_reason": "completed",
+  "stop_reason": "${STOP_REASON}",
   "output_location": "${FINAL_OUTPUT}",
   "inputs_consumed": ["${PROMPT_FILE}", "${SESSION_BOOTSTRAP}", "${PROJECT_INSTRUCTIONS}", "${VISION_FILE}"],
   "outputs_produced": ["${FINAL_OUTPUT}"],
-  "flags": [],
+  "flags": [${FLAGS}],
   "audit_trail_ref": "${TIMESTAMP}"
 }
 HANDOFF_EOF
+  mv "$HANDOFF_TMP" "$FINAL_HANDOFF"
+  rm -f "$STOP_SENTINEL"
 
 else
   # Preserve the failed output for diagnosis — rename with .failed extension
@@ -170,8 +214,10 @@ else
   echo "[${TIMESTAMP}] ${AGENT_NAME} [FAILED]: task ${TASK_ID} (exit code ${EXIT_CODE}) → $FAILED_OUTPUT" >&2
   echo "| ${TIMESTAMP} | ${AGENT_NAME} | FAILED | task:${TASK_ID} | exit:${EXIT_CODE} | output:${FAILED_OUTPUT} |" >> "$ERROR_LOG"
 
-  # Write failed handoff envelope
-  cat > "${HANDOFF_DIR}/${AGENT_NAME}_${TASK_ID}_handoff.json" << HANDOFF_EOF
+  # Process failure is authoritative: a nonzero exit publishes FAILED/error regardless of any
+  # stop reason the agent reported — the sentinel cannot mask a crash.
+  HANDOFF_TMP=$(mktemp "${HANDOFF_DIR}/.${AGENT_NAME}_${TASK_ID}.handoff.XXXXXX")
+  cat > "$HANDOFF_TMP" << HANDOFF_EOF
 {
   "task_id": "${TASK_ID}",
   "agent": "${AGENT_NAME}",
@@ -184,6 +230,8 @@ else
   "audit_trail_ref": "${TIMESTAMP}"
 }
 HANDOFF_EOF
+  mv "$HANDOFF_TMP" "$FINAL_HANDOFF"
+  rm -f "$STOP_SENTINEL"
 
   exit $EXIT_CODE
 fi

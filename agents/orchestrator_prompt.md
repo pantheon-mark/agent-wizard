@@ -94,7 +94,7 @@ If a task fails on consecutive attempts:
 
 **Dependency-linked workflows:** If task B requires the output of task A, run them sequentially. Identify the dependency explicitly in the checkpoint file before beginning either task.
 
-**Handoff envelope:** Every agent invocation receives a handoff envelope and produces one on completion. The envelope is a JSON file written to `/agents/handoffs/[task_id]_handoff.json`:
+**Handoff envelope:** Every specialist you invoke produces a handoff envelope when it finishes. The envelope is written by the specialist's invocation script — the single authoritative writer — which composes it from the agent's reported stop reason plus the run's exit status (the agent does not write the envelope itself). It is a JSON file at `/agents/handoffs/[agent]_[task_id]_handoff.json`:
 
 ```json
 {

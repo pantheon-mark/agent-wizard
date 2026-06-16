@@ -142,9 +142,18 @@ def _permitted_writes_in_prompt(prompt_text):
 
 MOCK_CLAUDE = """#!/usr/bin/env bash
 # Mock `claude` CLI: record argv (one arg per line) and emit a dummy response.
+# Simulates the agent's stop-reason self-report: when $MOCK_STOP_REASON is set, it
+# extracts the sentinel path the invocation script named in the task prompt
+# ("Stop-reason sentinel: <path>") and writes the stop reason there, exactly as a
+# real agent would. Exit code is $MOCK_EXIT_CODE (default 0) so a test can drive the
+# process-failure branch.
 printf '%s\\n' "$@" >> "$MOCK_CLAUDE_ARGV_LOG"
+if [[ -n "${MOCK_STOP_REASON:-}" ]]; then
+  sentinel="$(printf '%s\\n' "$@" | sed -n 's/.*Stop-reason sentinel: //p' | head -1)"
+  [[ -n "$sentinel" ]] && printf '%s' "$MOCK_STOP_REASON" > "$sentinel"
+fi
 echo "MOCK_RESPONSE: dummy agent output for smoke test"
-exit 0
+exit "${MOCK_EXIT_CODE:-0}"
 """
 
 
@@ -216,6 +225,59 @@ class RuntimeSmokeTests(unittest.TestCase):
         self.assertEqual(env_doc["status"], "COMPLETE")
         self.assertEqual(env_doc["stop_reason"], "completed")
         self.assertEqual(env_doc["agent"], "researcher")
+
+    def _run_emitted_script(self, staging, agent="researcher", task_id="smoke001", extra_env=None):
+        """Run an emitted invocation script under the mock claude; return (proc, handoff_doc_or_None)."""
+        mockdir = self._mock_bin()
+        argv_log = Path(tempfile.mkdtemp()) / "argv.log"
+        self.addCleanup(lambda: shutil.rmtree(argv_log.parent, ignore_errors=True))
+        env = dict(os.environ)
+        env["PATH"] = f"{mockdir}{os.pathsep}{env['PATH']}"
+        env["MOCK_CLAUDE_ARGV_LOG"] = str(argv_log)
+        if extra_env:
+            env.update(extra_env)
+        script = staging / "agents" / "scripts" / f"{agent}.sh"
+        proc = subprocess.run([BASH, str(script), task_id], cwd=str(staging),
+                              env=env, capture_output=True, text=True)
+        handoff = staging / "agents" / "handoffs" / f"{agent}_{task_id}_handoff.json"
+        doc = json.loads(handoff.read_text(encoding="utf-8")) if handoff.exists() else None
+        return proc, doc
+
+    def test_invocation_script_publishes_agent_reported_stop_reason(self):
+        """SINGLE-OWNER + FIDELITY: on a clean exit, the script publishes the stop reason the
+        agent self-reported via the sentinel (here 'deferred') — NOT a hardcoded 'completed'.
+        This is the core false-positive-completion fix: an agent that defers/exceeds-budget and
+        exits 0 must NOT be stamped 'completed', or the Orchestrator's defer/budget logic never
+        fires."""
+        staging = self._emit()
+        proc, doc = self._run_emitted_script(staging, extra_env={"MOCK_STOP_REASON": "deferred"})
+        self.assertEqual(proc.returncode, 0, f"script failed: {proc.stderr}")
+        self.assertIsNotNone(doc, "handoff envelope not written")
+        self.assertEqual(doc["stop_reason"], "deferred",
+                         "agent-reported stop reason must survive into the envelope")
+        self.assertEqual(doc["agent"], "researcher")
+
+    def test_invocation_script_defaults_stop_reason_when_agent_silent(self):
+        """When the agent writes no (or an invalid) stop-reason sentinel on a clean exit, the
+        script writes a deterministic 'completed' envelope AND flags that it defaulted, so a
+        silent agent is distinguishable from a genuine 'completed' self-report."""
+        staging = self._emit()
+        proc, doc = self._run_emitted_script(staging)  # no MOCK_STOP_REASON -> agent silent
+        self.assertEqual(proc.returncode, 0, f"script failed: {proc.stderr}")
+        self.assertEqual(doc["stop_reason"], "completed")
+        self.assertTrue(any("default" in str(f).lower() or "fallback" in str(f).lower()
+                            for f in doc.get("flags", [])),
+                        f"expected a script-default marker flag, got flags={doc.get('flags')}")
+
+    def test_invocation_script_failure_is_authoritative_over_sentinel(self):
+        """PROCESS FAILURE IS GROUND TRUTH: even if the agent reported 'completed', a nonzero
+        exit must publish status FAILED / stop_reason error — the sentinel cannot mask a crash."""
+        staging = self._emit()
+        proc, doc = self._run_emitted_script(
+            staging, extra_env={"MOCK_STOP_REASON": "completed", "MOCK_EXIT_CODE": "3"})
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual(doc["status"], "FAILED")
+        self.assertEqual(doc["stop_reason"], "error")
 
     def test_bash_n_on_every_emitted_script(self):
         staging = self._emit()
@@ -300,6 +362,36 @@ class RuntimeSmokeTests(unittest.TestCase):
                                 f"level {level}: inert hardcoded-level literal remains in project_instructions.md")
             self.assertTrue(_autonomous_actions_body(pi).strip(),
                             f"level {level}: the 'may do without asking' body is empty (unwired)")
+
+
+class HandoffContractTests(unittest.TestCase):
+    """Static contract guards on the handoff-envelope ownership model (no bash needed).
+
+    The envelope has ONE owner: the invocation script writes it (deterministically, from the
+    agent's reported stop reason + the process exit status). The agent reports its stop reason
+    via a sentinel, and does NOT itself write a competing JSON envelope at the canonical path.
+    The Orchestrator's documented read path must match the writer's path (agent-prefixed)."""
+
+    def test_orchestrator_documents_agent_prefixed_handoff_path(self):
+        """The Orchestrator's documented handoff read path must carry the agent-name prefix —
+        the writer emits {agent}_{task_id}_handoff.json, so a bare [task_id]_handoff.json path
+        sends the Orchestrator looking where no file exists."""
+        text = (REPO_ROOT / "wizard" / "agents" / "orchestrator_prompt.md").read_text(encoding="utf-8")
+        self.assertNotRegex(text, r"handoffs/\[task_id\]_handoff\.json",
+                            "orchestrator documents the bare [task_id] path (missing agent prefix)")
+        self.assertRegex(text, r"\[agent[_a-z]*\]_\[task_id\]_handoff\.json",
+                         "orchestrator should document the agent-prefixed handoff path")
+
+    def test_agent_prompt_reports_stop_reason_not_full_envelope(self):
+        """The specialist prompt must instruct the agent to report its stop reason (sentinel),
+        and must NOT instruct it to write a full JSON handoff envelope at the canonical
+        {AGENT_NAME}_[task_id]_handoff.json path — that path has a single owner (the script)."""
+        text = (REPO_ROOT / "wizard" / "agents" / "agent_prompt_template.md").read_text(encoding="utf-8")
+        self.assertIn("stop reason", text.lower(),
+                      "agent prompt should instruct the agent to report its stop reason")
+        self.assertNotRegex(
+            text, r"write a handoff envelope to[^\n]*\{\{AGENT_NAME\}\}_\[task_id\]_handoff\.json",
+            "agent prompt must not write the canonical handoff envelope (single-owner = the script)")
 
 
 if __name__ == "__main__":

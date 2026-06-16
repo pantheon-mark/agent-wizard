@@ -85,31 +85,21 @@ If a task fails on consecutive attempts:
 
 All outputs are written to disk. No output remains only in context. If a file already exists at the target path, use the atomic write pattern: write to a temporary file first, then rename to the final path. Never write directly to the final path.
 
-## Handoff envelope
+## Reporting your stop reason
 
-On task completion (success or failure), write a handoff envelope to `agents/handoffs/{{AGENT_NAME}}_[task_id]_handoff.json`:
+You do **not** write the handoff envelope yourself. The invocation script that ran you is the single writer of the authoritative handoff envelope — it composes it from your reported stop reason plus the run's exit status, so there is exactly one envelope per task and no two writers can disagree.
 
-```json
-{
-  "task_id": "[task_id]",
-  "agent": "{{AGENT_NAME}}",
-  "status": "COMPLETE | FAILED | ESCALATED",
-  "stop_reason": "[completed | budget_exceeded | error | timeout | user_cancelled | deferred]",
-  "output_location": "[path to primary output file]",
-  "inputs_consumed": ["[list of input files read]"],
-  "outputs_produced": ["[list of output files written]"],
-  "flags": [],
-  "audit_trail_ref": "[timestamp of session_log entry]"
-}
-```
+Your job is to report **how** your session ended. When your session ends — success or failure — write your stop reason, and nothing else, to the stop-reason sentinel file your invocation names in the task prompt (`agents/handoffs/.{{AGENT_NAME}}_[task_id].stop_reason`). The file's entire contents must be exactly one of the six values below.
 
-**Stop reason** is a required field — every session must log exactly one. The six stop reasons:
+**Stop reason** — report exactly one. The six stop reasons:
 - `completed` — task finished successfully
 - `budget_exceeded` — session hit token budget cap; wrap up gracefully, persist state, report what remains
 - `error` — unrecoverable error after three-strikes escalation
 - `timeout` — time limit exceeded
 - `user_cancelled` — user or orchestrator cancelled the session
-- `deferred` — agent identified work that should be deferred (this is a stop reason, not just a task status — the session ended because the agent chose to stop)
+- `deferred` — you identified work that should be deferred (this is a stop reason, not just a task status — the session ended because you chose to stop)
+
+If you do not report a stop reason, the script records `completed` by default and flags that you did not report one.
 
 ## Model tier
 

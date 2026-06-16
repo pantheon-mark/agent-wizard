@@ -433,7 +433,7 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 
 | # | Test | Pass condition |
 |---|---|---|
-| MA-H-1 | Handoff envelope format validation | Each agent produces a correctly structured handoff envelope |
+| MA-H-1 | Handoff envelope format validation | The invocation script writes a correctly structured handoff envelope (one per task), composed from the agent's reported stop reason and the run's exit status |
 | MA-H-2 | Gate claim and release behavior | Gate is claimed before work begins and released after — no orphaned claims |
 | MA-H-3 | Gate conflict detection and resolution | Two agents attempting simultaneous access produce a conflict, one is queued |
 | MA-H-4 | Idempotency — agent does not re-execute completed work | Re-running a completed task produces the same output without re-executing |
@@ -545,7 +545,7 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 
 | # | Test | Pass condition |
 |---|---|---|
-| MA-Q-1 | Agent local quality gate before handoff | Each agent runs its quality gate before writing the handoff envelope |
+| MA-Q-1 | Agent local quality gate before handoff | Each agent runs its quality gate before reporting its stop reason (the invocation script then writes the handoff envelope) |
 | MA-Q-2 | QA agent independence from production pipeline | QA agent cannot modify production outputs — read access only |
 | MA-Q-3 | Confidence flagging on uncertain outputs | Uncertain outputs flagged per configured threshold |
 | MA-Q-4 | Confidence flagging threshold reads from project_instructions.md | Threshold not hardcoded; default applied correctly when no operator setting present |
