@@ -35,7 +35,7 @@ from build_intent import BuildIntent, ConstraintViolation, validate_build_intent
 from scaffold_plan import ScaffoldPlan  # type: ignore
 from agent_record_assembler import assemble_agent_records  # type: ignore
 from corpus_loader import resolve_for_shape, to_plan_corpus_cells  # type: ignore
-from capability_projection import parse_increments, CapabilityProjectionError  # type: ignore
+from capability_projection import parse_increments, CapabilityProjectionError, BUCKET_MVP, BUCKET_ROADMAP  # type: ignore
 from phase_acceptance_assembler import assemble_phase_acceptance, PhaseAcceptanceContract  # type: ignore
 
 _SCHEMA_VERSION = "emission-plan-v1"
@@ -126,7 +126,7 @@ def _build_progress_rows(fdi: Dict[str, Any]) -> str:
     phase_groups: Dict[int, List[Any]] = {}
     for inc in increments:
         bucket = inc.get("release_bucket", "")
-        if bucket not in ("mvp", "post_mvp_roadmap"):
+        if bucket not in (BUCKET_MVP, BUCKET_ROADMAP):
             continue
         phase = inc.get("phase")
         if not isinstance(phase, int) or isinstance(phase, bool):

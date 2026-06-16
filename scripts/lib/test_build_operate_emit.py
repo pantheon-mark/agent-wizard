@@ -34,6 +34,7 @@ from corpus_loader import load_corpus_pack  # noqa: E402
 from emission_plan_assembler import assemble_emission_plan  # noqa: E402
 from emission_plan import validate_emission_plan, load_contract, default_contract_path  # noqa: E402
 from scaffold_emitter import emit_scaffold  # noqa: E402
+from capability_projection import BUCKET_MVP, BUCKET_ROADMAP  # noqa: E402
 
 SP = load_scaffold_plan("markdown-CC")
 CORPUS = load_corpus_pack()
@@ -91,7 +92,7 @@ _THREE_PHASE_INCREMENTS = [
 
 _COMMITTED_COUNT = sum(
     1 for inc in _THREE_PHASE_INCREMENTS
-    if inc["release_bucket"] in ("mvp", "post_mvp_roadmap")
+    if inc["release_bucket"] in (BUCKET_MVP, BUCKET_ROADMAP)
 )  # 3
 
 
@@ -271,6 +272,8 @@ class BuildProgressOnDiskTests(unittest.TestCase):
         # Column header presence (case-insensitive friendly — just check key words).
         self.assertIn("Layer-A", content, "Layer-A column missing")
         self.assertIn("Layer-B", content, "Layer-B column missing")
+        self.assertIn("Open fix items", content, "Open fix items column missing")
+        self.assertIn("Deferred core precondition", content, "Deferred core precondition column missing")
         self.assertIn("Date", content, "Date column missing")
 
     def test_build_progress_md_no_unsubstituted_placeholders(self):
