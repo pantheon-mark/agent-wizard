@@ -25,8 +25,8 @@ Entries appear newest-first.
 - These are correctness and clarity fixes to the systems the wizard builds; nothing you do changes.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** PENDING
-**Public repo commit:** PENDING
+**Source-Meta-Commit:** bcdf105
+**Public repo commit:** ffa79b3
 
 ---
 
