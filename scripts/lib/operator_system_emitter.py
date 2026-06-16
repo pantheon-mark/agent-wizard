@@ -46,6 +46,7 @@ from corpus_emitter import (  # type: ignore
     render_claude_md_block, emit_rules_library, emit_decisions, inject_target_hooks,
 )
 from upgrade_scaffold_emitter import emit_upgrade_scaffold, MANIFEST_REL  # type: ignore
+from acceptance_contract_emitter import emit_acceptance_contracts  # type: ignore
 
 
 class OperatorSystemResult(NamedTuple):
@@ -239,6 +240,11 @@ def emit_operator_system(plan: EmissionPlan, staging_dir: Path,
     #     verbatim with their operator-fill {{}} intact) + an empty .env — parity with the
     #     legacy close-assembly. Before the upgrade scaffold so the full-tree manifest enrolls them.
     written += emit_operator_fill_templates(plan, staging_dir, build_repo_root)
+
+    # 6c. per-phase acceptance contracts — one markdown file per committed phase, written
+    #     into agents/acceptance/. Paths are registered in emitted_files by the assembler;
+    #     content is derived here from CAPABILITY_INCREMENTS in foundation_doc_inputs.
+    written += emit_acceptance_contracts(plan, staging_dir)
 
     # 7. upgrade scaffold LAST — manifest-v2 (folds corpus authority + hashes the
     #    final tree, foundation docs included) + upgrade policy/history + command surface.

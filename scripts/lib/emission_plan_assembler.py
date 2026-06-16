@@ -35,9 +35,114 @@ from build_intent import BuildIntent, ConstraintViolation, validate_build_intent
 from scaffold_plan import ScaffoldPlan  # type: ignore
 from agent_record_assembler import assemble_agent_records  # type: ignore
 from corpus_loader import resolve_for_shape, to_plan_corpus_cells  # type: ignore
+from capability_projection import parse_increments, CapabilityProjectionError  # type: ignore
+from phase_acceptance_assembler import assemble_phase_acceptance, PhaseAcceptanceContract  # type: ignore
 
 _SCHEMA_VERSION = "emission-plan-v1"
 _TEST_GENERATOR_VERSION = "0" * 40  # placeholder for unit tests; the gate supplies the real identity
+
+_ACCEPTANCE_DIR = "agents/acceptance"
+
+
+def _render_acceptance_contract(contract: PhaseAcceptanceContract) -> str:
+    """Render one PhaseAcceptanceContract as operator-readable markdown.
+
+    Shape: H1 title (phase + capability), agents line, ## What to confirm (checklist),
+    ## What you should see, ## Core checks, and optionally ## If you can't try this yet.
+    Plain voice; no build IDs or internal jargon tokens.
+    """
+    lines: List[str] = []
+
+    # Title
+    lines.append(f"# Phase {contract.phase}: {contract.capability}")
+    lines.append("")
+
+    # Agents line
+    if contract.agents:
+        agents_str = ", ".join(contract.agents)
+        lines.append(f"**Agents in this phase:** {agents_str}")
+    else:
+        lines.append("**Agents in this phase:** (none assigned yet)")
+    lines.append("")
+
+    # What to confirm (operator questions as checklist)
+    lines.append("## What to confirm")
+    lines.append("")
+    for q in contract.operator_questions:
+        lines.append(f"- [ ] {q}")
+    lines.append("")
+
+    # What you should see (required evidence)
+    lines.append("## What you should see")
+    lines.append("")
+    for e in contract.required_evidence:
+        lines.append(f"- {e}")
+    lines.append("")
+
+    # Core checks
+    lines.append("## Core checks")
+    lines.append("")
+    if contract.core_checks:
+        for c in contract.core_checks:
+            lines.append(f"- {c}")
+    else:
+        lines.append("- No specific acceptance signals recorded for this phase.")
+    lines.append("")
+
+    # Defer trigger (only if present)
+    if contract.defer_trigger is not None:
+        lines.append("## If you can't try this yet")
+        lines.append("")
+        lines.append(contract.defer_trigger)
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _assemble_acceptance_contracts(
+    fdi: Dict[str, Any],
+    agent_intents: list,
+) -> List[Dict[str, str]]:
+    """Parse CAPABILITY_INCREMENTS from projected inputs and return a list of
+    {path, content} dicts — one per committed phase. Returns an empty list when
+    CAPABILITY_INCREMENTS is absent or the increment list is empty or all-candidate.
+
+    Converts agent intents to the dicts phase_acceptance_assembler expects
+    (keys: display_name, acceptance_signals).
+    """
+    raw = fdi.get("CAPABILITY_INCREMENTS")
+    if not raw or not str(raw).strip():
+        return []
+
+    try:
+        increments = parse_increments(str(raw))
+    except CapabilityProjectionError:
+        return []
+
+    if not increments:
+        return []
+
+    # Convert AgentIntent objects (or plain dicts) to the dicts the assembler expects.
+    agent_dicts = []
+    for ai in agent_intents:
+        if hasattr(ai, "display_name"):
+            agent_dicts.append({
+                "display_name": ai.display_name,
+                "acceptance_signals": list(ai.acceptance_signals),
+            })
+        elif isinstance(ai, dict):
+            agent_dicts.append(ai)
+
+    contracts = assemble_phase_acceptance(increments, agent_dicts)
+
+    result: List[Dict[str, str]] = []
+    for c in contracts:
+        filename = f"phase_{c.phase:02d}_acceptance.md"
+        path = f"{_ACCEPTANCE_DIR}/{filename}"
+        content = _render_acceptance_contract(c)
+        result.append({"path": path, "content": content})
+
+    return result
 
 
 def assemble_emission_plan(
@@ -155,6 +260,20 @@ def assemble_emission_plan(
                 operator_options=["add the agent output directory to control_plane_runtime_created"],
             )
 
+    # Per-phase acceptance contracts: one rendered markdown file per committed phase.
+    # Derived from CAPABILITY_INCREMENTS (JSON string in fdi) + agent intents.
+    # Stored in plan["acceptance_contracts"] for test inspection and emitter consumption.
+    # Paths are also registered in emitted_files (same shape as other wizard-managed files).
+    acceptance_contracts = _assemble_acceptance_contracts(fdi, intent.agent_intents)
+    for ac in acceptance_contracts:
+        emitted_files.append({
+            "path": ac["path"],
+            "managed_by": defaults["managed_by"],
+            "local_modifications": defaults["local_modifications"],
+            "merge_strategy": defaults["merge_strategy"],
+            "source_refs": list(defaults["source_refs"]),
+        })
+
     return {
         "schema_version": _SCHEMA_VERSION,
         "system_shape": shape,
@@ -171,5 +290,6 @@ def assemble_emission_plan(
         "foundation_doc_inputs": dict(fdi),
         "corpus_cells": corpus_cells,
         "emitted_files": emitted_files,
+        "acceptance_contracts": acceptance_contracts,
         "template_variants": [],
     }
