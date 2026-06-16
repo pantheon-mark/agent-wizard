@@ -51,6 +51,34 @@
 
 ---
 
+## Build and Operate
+
+The system is built and operated as one continuous loop: build a capability (a phase), run it supervised, accept the business result, then build the next. One phase at a time.
+
+**Do not build on top of a capability you have not accepted.** If something is not working correctly, fix it before moving on. Building a new phase on top of a broken or unconfirmed one compounds problems and makes them harder to trace. This is the anti-log-and-move-on principle: do not mark something acceptable and continue when you have not actually confirmed it works for your purposes.
+
+**Supervised until accepted, always against a copy.** Until a phase is accepted, every run uses a copy or dummy of external state, never live external data. External state (emails sent, records updated, messages posted) is not git-revertable. The phase goes live only after the operator has accepted it.
+
+**Fix in the same session.** If the operator flags a problem during acceptance, fix it in the same session, re-run the supervised cycle, and re-confirm. The fix is logged in `build_progress.md`.
+
+### Acceptance state machine
+
+Each phase moves through the following sequence:
+
+1. **Built** -- the phase's agents and configuration are written.
+2. **Technically-reviewed** -- automated technical reviews run (MA-REV per component, MA-F phase-gate). These are preconditions. They confirm the system is structurally sound. They do not constitute acceptance.
+3. **Supervised** -- the phase runs against a copy/dummy of external state, with one labelled inert demo cycle. The operator observes the actual business result.
+4. **Operator business acceptance** -- the operator reviews what the phase actually did and confirms the result meets the business need. This is the one acceptance the operator makes per phase. Only this step flips the phase to `accepted`.
+5. **Accepted** -- recorded in `build_progress.md`. The capability goes live or is scheduled.
+
+The technical reviews (MA-REV, MA-F) are preconditions the build session runs before the supervised cycle. The operator sees one acceptance decision, not two. Only operator business-acceptance flips a phase to `accepted` in `build_progress.md`.
+
+**Scheduled runs are non-blocking after interactive acceptance.** Once the operator accepts a phase interactively, the phase is accepted and the next phase can be built. Verifying that a scheduled or cron run later fired correctly is a separate, non-blocking digest confirmation -- unless the scheduling itself is the capability being accepted for that phase.
+
+See `build_progress.md` (the acceptance ledger, updated each session) and `wizard/skills/next-phase.md` (the skill for building phases 2 and later).
+
+---
+
 ## Financial Configuration
 
 This system's autonomous (unattended/scheduled) work draws on the separate monthly **automation credit** included with your Claude plan — not your everyday interactive Claude use, which is unaffected.

@@ -23,6 +23,16 @@
 
 ---
 
+## Build progress
+
+Read `build_progress.md` and `execution_plan.md` at the start of every session. Identify the next unbuilt phase from `execution_plan.md` and check its current state in `build_progress.md`.
+
+**Refusing precondition:** do not start the next phase until the prior phase is `accepted` (or `provisionally-accepted` with its deferred core precondition cleared). If the prior phase is not yet accepted, do not proceed with building -- surface what remains to close acceptance first.
+
+To build the next phase, use the `wizard/skills/next-phase.md` skill.
+
+---
+
 ## Last session
 
 **Summary:** {{LAST_SESSION_SUMMARY}}  

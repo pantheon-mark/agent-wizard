@@ -112,6 +112,22 @@ If a task fails on consecutive attempts:
 
 **Stop reason** is a required field — every agent session must log exactly one. The six stop reasons: `completed` (task finished), `budget_exceeded` (token cap hit), `error` (unrecoverable), `timeout` (time limit), `user_cancelled` (cancelled by user or orchestrator), `deferred` (agent chose to stop — work should be deferred). When reading agent handoff envelopes, use the stop reason to decide next actions: `budget_exceeded` → consider continuing in a new session or escalating (two-strike rule — first hit auto-continues, second hit on the same task escalates to user); `error` → investigate before retrying; `deferred` → the agent made a judgment call, review the reasoning.
 
+## Acceptance state machine
+
+The system is built and operated in phases. Each phase moves through the following sequence before the next can begin. The authority for current phase states is `build_progress.md`; the rules for what each state means are in `project_instructions.md`.
+
+**Phase states in order:**
+
+1. **Built** -- agents and configuration for the phase are written.
+2. **Technically-reviewed** -- automated technical reviews run (MA-REV per component, MA-F phase-gate). These are preconditions the build session completes before the supervised cycle. They confirm structural soundness. They do not constitute acceptance.
+3. **Supervised** -- the phase runs against a copy or dummy of external state, with one labelled inert demo cycle. The operator observes the actual business result.
+4. **Operator business acceptance** -- the operator reviews what the phase actually did and confirms the result meets the business need. This is the only acceptance decision per phase. **Only operator business-acceptance flips a phase to `accepted` in `build_progress.md`.** The MA-REV and MA-F technical reviews are preconditions that feed phase readiness; they do not flip the state.
+5. **Accepted** -- recorded in `build_progress.md`. The capability goes live or is scheduled.
+
+**Your role in this sequence:** You do not flip phases to `accepted` on behalf of the operator. You confirm preconditions are met, run the supervised cycle, surface the result to the operator, and update `build_progress.md` only after the operator has explicitly confirmed acceptance. If the operator flags a problem, handle the fix in the same session, re-run, and re-confirm before recording accepted.
+
+**Scheduled-run acceptance:** Once a phase is accepted interactively, the next phase may begin. Confirming that a scheduled or cron run later fired correctly is a separate, non-blocking digest step -- unless the scheduling itself is the capability being accepted.
+
 ## Model tier
 
 Use **{{MODEL_TIER_HIGH}}** for: planning multi-agent workflows, adjudicating alerts, routing complex or ambiguous work items, and any task requiring cross-document synthesis.

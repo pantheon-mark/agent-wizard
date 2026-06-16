@@ -403,5 +403,246 @@ class NextPhaseSkillEmitTests(unittest.TestCase):
         )
 
 
+class ProjectInstructionsBuildAndOperateTests(unittest.TestCase):
+    """E1: project_instructions.md carries the build-and-operate loop section."""
+
+    @classmethod
+    def setUpClass(cls):
+        from emission_plan import load_contract, default_contract_path, validate_emission_plan
+        from scaffold_emitter import emit_scaffold
+        contract = load_contract(default_contract_path())
+        dr = _dr_with_increments()
+        bi = BuildIntent(derived_record=dr, agent_intents=[_ai_collector(), _ai_summariser()])
+        plan_dict = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        typed_plan = validate_emission_plan(plan_dict, contract)
+        cls._tmp = tempfile.TemporaryDirectory()
+        staging = Path(cls._tmp.name)
+        emit_scaffold(typed_plan, staging, REPO_ROOT)
+        cls.text = (staging / "project_instructions.md").read_text(encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_build_and_operate_section_present(self):
+        """project_instructions.md has a Build and Operate section."""
+        self.assertIn("Build and Operate", self.text,
+                      "project_instructions.md must contain a 'Build and Operate' section")
+
+    def test_one_phase_at_a_time_loop_rule(self):
+        """project_instructions.md states the one-phase-at-a-time loop rule."""
+        lower = self.text.lower()
+        self.assertTrue(
+            "one phase at a time" in lower or "one phase" in lower,
+            "project_instructions.md must state the one-phase-at-a-time loop rule",
+        )
+
+    def test_anti_log_and_move_on_principle(self):
+        """project_instructions.md states the anti-log-and-move-on principle."""
+        lower = self.text.lower()
+        self.assertTrue(
+            "not accepted" in lower or "not yet accepted" in lower
+            or "do not build" in lower or "have not accepted" in lower,
+            "project_instructions.md must state the anti-log-and-move-on principle",
+        )
+
+    def test_supervised_copy_target_rule(self):
+        """project_instructions.md states the supervised/copy-target rule."""
+        lower = self.text.lower()
+        self.assertTrue(
+            "copy" in lower or "dummy" in lower,
+            "project_instructions.md must reference running supervised against a copy/dummy of external state",
+        )
+        self.assertIn(
+            "supervised", lower,
+            "project_instructions.md must state the supervised-until-accepted rule",
+        )
+
+    def test_in_session_fix_and_reconfirm_rule(self):
+        """project_instructions.md states the in-session fix-and-reconfirm rule."""
+        lower = self.text.lower()
+        self.assertTrue(
+            "fix" in lower and ("same session" in lower or "re-run" in lower or "reconfirm" in lower),
+            "project_instructions.md must state the in-session fix-and-reconfirm rule",
+        )
+
+    def test_state_machine_sequence_present(self):
+        """project_instructions.md contains the acceptance state-machine sequence."""
+        lower = self.text.lower()
+        for token in ("built", "technically-reviewed", "supervised", "accepted"):
+            self.assertIn(token, lower,
+                          f"project_instructions.md must contain state-machine token '{token}'")
+
+    def test_operator_acceptance_flips_accepted(self):
+        """project_instructions.md states operator business-acceptance flips the phase to accepted."""
+        lower = self.text.lower()
+        self.assertTrue(
+            "operator" in lower and "accepted" in lower,
+            "project_instructions.md must state that operator acceptance flips a phase to accepted",
+        )
+
+    def test_technical_reviews_are_preconditions(self):
+        """project_instructions.md states that MA-REV/MA-F technical reviews are preconditions."""
+        self.assertTrue(
+            "MA-REV" in self.text or "MA-F" in self.text or "precondition" in self.text.lower(),
+            "project_instructions.md must state that technical reviews are preconditions",
+        )
+
+    def test_scheduled_acceptance_non_blocking_rule(self):
+        """project_instructions.md states that scheduled-acceptance is non-blocking."""
+        lower = self.text.lower()
+        self.assertTrue(
+            "scheduled" in lower and ("non-blocking" in lower or "separate" in lower or "digest" in lower),
+            "project_instructions.md must state the scheduled-acceptance-non-blocking rule",
+        )
+
+    def test_references_build_progress_and_next_phase(self):
+        """project_instructions.md references build_progress.md and the next-phase skill."""
+        self.assertIn("build_progress.md", self.text,
+                      "project_instructions.md must reference build_progress.md")
+        self.assertTrue(
+            "next-phase" in self.text or "next-phase.md" in self.text,
+            "project_instructions.md must reference the next-phase skill",
+        )
+
+    def test_no_build_ids(self):
+        """project_instructions.md must not contain build-provenance tokens in the new section."""
+        import re
+        pattern = re.compile(r'S2\.[0-9]|RW-[0-9]|ADR-[0-9]|IDQ-[0-9]|AR-[0-9]|W-[0-9]')
+        self.assertIsNone(
+            pattern.search(self.text),
+            f"build ID found in project_instructions.md: {pattern.search(self.text)}",
+        )
+
+
+class SessionBootstrapBuildProgressTests(unittest.TestCase):
+    """E2: session_bootstrap.md carries the build-progress section."""
+
+    @classmethod
+    def setUpClass(cls):
+        from emission_plan import load_contract, default_contract_path, validate_emission_plan
+        from scaffold_emitter import emit_scaffold
+        contract = load_contract(default_contract_path())
+        dr = _dr_with_increments()
+        bi = BuildIntent(derived_record=dr, agent_intents=[_ai_collector(), _ai_summariser()])
+        plan_dict = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        typed_plan = validate_emission_plan(plan_dict, contract)
+        cls._tmp = tempfile.TemporaryDirectory()
+        staging = Path(cls._tmp.name)
+        emit_scaffold(typed_plan, staging, REPO_ROOT)
+        cls.text = (staging / "session_bootstrap.md").read_text(encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_build_progress_section_present(self):
+        """session_bootstrap.md has a Build progress section."""
+        lower = self.text.lower()
+        self.assertIn("build progress", lower,
+                      "session_bootstrap.md must contain a 'Build progress' section")
+
+    def test_reads_build_progress_md(self):
+        """session_bootstrap.md instructs reading build_progress.md."""
+        self.assertIn("build_progress.md", self.text,
+                      "session_bootstrap.md must instruct reading build_progress.md")
+
+    def test_refusing_precondition_present(self):
+        """session_bootstrap.md states the refusing precondition."""
+        lower = self.text.lower()
+        self.assertTrue(
+            "accepted" in lower
+            and ("prior" in lower or "previous" in lower or "precondition" in lower or "not start" in lower),
+            "session_bootstrap.md must state the refusing precondition (do not start next phase until prior is accepted)",
+        )
+
+    def test_next_phase_skill_referenced(self):
+        """session_bootstrap.md references the next-phase skill."""
+        self.assertTrue(
+            "next-phase" in self.text or "next-phase.md" in self.text,
+            "session_bootstrap.md must reference the next-phase skill",
+        )
+
+    def test_no_build_ids(self):
+        """session_bootstrap.md must not contain build-provenance tokens."""
+        import re
+        pattern = re.compile(r'S2\.[0-9]|RW-[0-9]|ADR-[0-9]|IDQ-[0-9]|AR-[0-9]|W-[0-9]')
+        self.assertIsNone(
+            pattern.search(self.text),
+            f"build ID found in session_bootstrap.md: {pattern.search(self.text)}",
+        )
+
+
+class OrchestratorAcceptanceStateMachineTests(unittest.TestCase):
+    """E3: orchestrator_prompt.md carries the acceptance state machine."""
+
+    @classmethod
+    def setUpClass(cls):
+        from emission_plan import load_contract, default_contract_path, validate_emission_plan
+        contract = load_contract(default_contract_path())
+        dr = _dr_with_increments()
+        bi = BuildIntent(derived_record=dr, agent_intents=[_ai_collector(), _ai_summariser()])
+        plan_dict = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        typed_plan = validate_emission_plan(plan_dict, contract)
+        cls._tmp = tempfile.TemporaryDirectory()
+        staging = Path(cls._tmp.name)
+        from agent_emitter import emit_agent_layer
+        emit_agent_layer(typed_plan, staging, REPO_ROOT)
+        cls.text = (staging / "agents/prompts/orchestrator_prompt.md").read_text(encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_acceptance_state_machine_present(self):
+        """orchestrator_prompt.md has an acceptance state machine section."""
+        lower = self.text.lower()
+        self.assertTrue(
+            "acceptance state machine" in lower or "acceptance" in lower,
+            "orchestrator_prompt.md must contain an acceptance state machine section",
+        )
+
+    def test_state_machine_tokens_present(self):
+        """orchestrator_prompt.md contains the full state-machine sequence tokens."""
+        lower = self.text.lower()
+        for token in ("built", "technically-reviewed", "supervised", "accepted"):
+            self.assertIn(token, lower,
+                          f"orchestrator_prompt.md must contain state-machine token '{token}'")
+
+    def test_operator_acceptance_flips_accepted(self):
+        """orchestrator_prompt.md makes explicit that operator business-acceptance flips accepted."""
+        lower = self.text.lower()
+        self.assertTrue(
+            "operator" in lower and "accepted" in lower,
+            "orchestrator_prompt.md must state operator business-acceptance flips a phase to accepted",
+        )
+
+    def test_technical_reviews_are_preconditions_not_authority(self):
+        """orchestrator_prompt.md states technical reviews (MA-REV/MA-F) are preconditions."""
+        self.assertTrue(
+            "MA-REV" in self.text or "MA-F" in self.text or "precondition" in self.text.lower(),
+            "orchestrator_prompt.md must state technical reviews are preconditions",
+        )
+
+    def test_references_build_progress_md(self):
+        """orchestrator_prompt.md references build_progress.md."""
+        self.assertIn("build_progress.md", self.text,
+                      "orchestrator_prompt.md must reference build_progress.md")
+
+    def test_references_project_instructions_for_authority(self):
+        """orchestrator_prompt.md still references project_instructions.md for authority."""
+        self.assertIn("project_instructions.md", self.text,
+                      "orchestrator_prompt.md must still reference project_instructions.md")
+
+    def test_no_build_ids(self):
+        """orchestrator_prompt.md must not contain build-provenance tokens."""
+        import re
+        pattern = re.compile(r'S2\.[0-9]|RW-[0-9]|ADR-[0-9]|IDQ-[0-9]|AR-[0-9]|W-[0-9]')
+        self.assertIsNone(
+            pattern.search(self.text),
+            f"build ID found in orchestrator_prompt.md: {pattern.search(self.text)}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
