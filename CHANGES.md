@@ -12,6 +12,28 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-16 — you now build and run your system one capability at a time, and accept each before building the next
+
+**Public-facing change:** The end of the wizard used to hand you a plan to build every agent first and "review each one" before the system started operating. That asked you to judge things only a builder can judge, and it never let you do the one thing that actually matters: watch the system do your real work before you commit to it. This release replaces that with a single build-and-operate loop:
+
+- **Build one capability, run it, accept it, then build the next.** Your system is built in phases (the order is in `execution_plan.md`). For each phase, the system is brought up, run on your real work *while you watch*, and only moves forward once you say the result is right.
+- **You run it against a copy first.** Until you have accepted a phase, it runs against a copy or stand-in of your real data (your live spreadsheet, email, and so on are never touched), because those actions cannot be undone. It goes live only after you accept it.
+- **You see the guardrails work.** During the supervised run, the system pauses on a clearly-labelled practice action (a drill, never a real action) so you can see it stop and ask for your approval before doing anything significant.
+- **You make one acceptance decision per phase.** The system's own technical checks run first, behind the scenes; then you judge the business result using a short, plain-language acceptance checklist for that phase. Your "yes" is what moves the system forward.
+- **A progress ledger tracks it.** A new `build_progress.md` file records each phase's status. The system will not start the next phase until the previous one is accepted.
+- **New onboarding docs.** `manual.md` is now your Operating Manual ("what you do"), and `how_your_system_works.md` explains "what the system does on its own." A reusable skill drives building each later phase, reading your own living documents each time.
+
+**Operator-facing notes:**
+
+- This is about how you bring your system into operation. What the agents do is unchanged; how you build up to a running system is now performable by a non-technical operator.
+- Honest limit: because this is a markdown-and-Claude-Code system, the "don't start the next phase until this one is accepted" rule is a strong guided check, not an unbreakable lock. A future system type could make it a hard block.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** TBD-after-push
+**Public repo commit:** TBD-after-push
+
+---
+
 ## 2026-06-15 — your system now launches and runs its agents on the first try
 
 **Public-facing change:** The first time a built system was run for real, it could not start: the session launcher and every agent script passed command-line options the Claude CLI does not accept, so the launcher failed with an "unknown option" error and no agent could run. This release fixes the commands the wizard generates:
