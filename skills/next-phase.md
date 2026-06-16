@@ -64,7 +64,11 @@ Once all credentials the phase needs are in place, continue.
 
 ## Step 4: Technical verification (silent)
 
-Read each agent prompt file for this phase at `agents/prompts/<agent>_prompt.md`. Verify each one is complete and consistent with `approach.md` and `technical_architecture.md`. If anything is missing or misaligned, fix it before running. Do not surface the technical details to the operator -- bring the agents to a runnable state quietly.
+Read each agent prompt file for this phase at `agents/prompts/<agent>_prompt.md`. Verify each one is complete and consistent with the live foundation docs: the roster and approach in `approach.md`, the orchestration model and integrations in `technical_architecture.md`, and the autonomy boundary in `execution_plan.md`. If anything is missing or misaligned, fix it before running.
+
+Some `technical_architecture.md` sections are intentionally reserved and say so ("Your system does not use this section ... Leave this section as is"). Those are not gaps -- do not populate them or treat them as inconsistencies. Verify only against the populated sections.
+
+Do not surface the technical details to the operator -- bring the agents to a runnable state quietly.
 
 ## Step 5: Supervised run against a copy
 
