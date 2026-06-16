@@ -19,4 +19,8 @@ Thumbs.db
 # Node.js
 node_modules/
 
+# Replay capsule — holds your setup answers so the wizard can preview upgrades.
+# Stays local by default. Remove this line only if you want it committed.
+.wizard/replay-capsule.json
+
 {{ADDITIONAL_GITIGNORE_ENTRIES}}

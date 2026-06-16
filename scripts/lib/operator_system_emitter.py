@@ -46,6 +46,7 @@ from corpus_emitter import (  # type: ignore
     render_claude_md_block, emit_rules_library, emit_decisions, inject_target_hooks,
 )
 from upgrade_scaffold_emitter import emit_upgrade_scaffold, MANIFEST_REL  # type: ignore
+from replay_capsule import emit_replay_capsule  # type: ignore
 from acceptance_contract_emitter import emit_acceptance_contracts  # type: ignore
 
 
@@ -246,6 +247,13 @@ def emit_operator_system(plan: EmissionPlan, staging_dir: Path,
     #     content is pre-rendered ONCE by the assembler and carried on plan.acceptance_contracts
     #     (single source) — the emitter writes it verbatim, it is NOT re-derived here.
     written += emit_acceptance_contracts(plan, staging_dir)
+
+    # 6d. replay capsule — persist the operator's foundation-doc inputs + provenance
+    #     so a future upgrade can deterministically re-render the foundation docs.
+    #     Fail-closed secret scan runs before the write; the capsule is a control file
+    #     (inventoried by the manifest, excluded from the hashed managed set) so it must
+    #     exist BEFORE the upgrade scaffold (which writes the manifest LAST).
+    written.append(emit_replay_capsule(plan, staging_dir, build_repo_root))
 
     # 7. upgrade scaffold LAST — manifest-v2 (folds corpus authority + hashes the
     #    final tree, foundation docs included) + upgrade policy/history + command surface.

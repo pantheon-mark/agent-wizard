@@ -57,11 +57,15 @@ UPGRADE_POLICY_REL = ".wizard/upgrade-policy.yaml"
 UPGRADE_HISTORY_REL = ".wizard/upgrade-history.log"
 COMMAND_SURFACE_REL = ".wizard/UPGRADING.md"
 
+# Imported (not re-declared) so there is ONE canonical relpath for the capsule.
+from replay_capsule import REPLAY_CAPSULE_REL  # type: ignore  # noqa: E402
+
 # Files present on disk but NOT merge-managed content (the control plane). They are
 # inventoried under the manifest's `control_files` block but excluded from
 # `managed_files` (and from the hashed set — manifest.json self-exclusion avoids a
-# circular self-hash; policy/history are operator/runtime state).
-CONTROL_FILES = (MANIFEST_REL, UPGRADE_POLICY_REL, UPGRADE_HISTORY_REL)
+# circular self-hash; policy/history are operator/runtime state; the replay capsule
+# holds the build-time inputs, not managed content, and is gitignored by default).
+CONTROL_FILES = (MANIFEST_REL, UPGRADE_POLICY_REL, UPGRADE_HISTORY_REL, REPLAY_CAPSULE_REL)
 _CONTROL_SET = set(CONTROL_FILES)
 
 # Lifecycle taxonomy -> non-destructive v0 merge policy.
