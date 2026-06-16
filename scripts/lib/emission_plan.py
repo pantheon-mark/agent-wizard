@@ -99,6 +99,17 @@ class TemplateVariant:
 
 
 @dataclass(frozen=True)
+class AcceptanceContractFile:
+    """A pre-rendered per-phase acceptance contract file (path + full content).
+
+    Carried on EmissionPlan so emitters write the assembler-rendered content
+    directly to disk — single source of truth, no re-derivation at emit time.
+    """
+    path: str
+    content: str
+
+
+@dataclass(frozen=True)
 class EmissionPlan:
     schema_version: str
     system_shape: str
@@ -116,6 +127,7 @@ class EmissionPlan:
     emitted_files: List[EmittedFile]
     template_variants: List[TemplateVariant]
     control_plane_runtime_created: List[str] = field(default_factory=list)
+    acceptance_contracts: List[AcceptanceContractFile] = field(default_factory=list)
 
 
 # --- contract loading --------------------------------------------------------
@@ -335,6 +347,22 @@ def validate_emission_plan(plan: Dict[str, Any], contract: Dict[str, Any]) -> Em
         _require(ar.output_directory in covered, "I9",
                  f"agent {ar.id!r} output_directory {ar.output_directory!r} is neither emitted nor runtime-created")
 
+    # acceptance_contracts — carry pre-rendered content from the assembler so emitters
+    # write the plan dict content directly (single source of truth, no re-derivation).
+    # Backward-compatible: absent or empty list is valid (no acceptance files emitted).
+    raw_contracts = plan.get("acceptance_contracts", [])
+    _require(isinstance(raw_contracts, list), "I1", "acceptance_contracts must be a list if present")
+    acceptance_contract_records: List[AcceptanceContractFile] = []
+    for i, ac in enumerate(raw_contracts):
+        _require(isinstance(ac, dict), "I1", f"acceptance_contracts[{i}] must be an object")
+        _require(isinstance(ac.get("path"), str) and ac.get("path") != "", "I1",
+                 f"acceptance_contracts[{i}].path must be a non-empty string")
+        _require(isinstance(ac.get("content"), str) and ac.get("content") != "", "I1",
+                 f"acceptance_contracts[{i}].content must be a non-empty string")
+        acceptance_contract_records.append(AcceptanceContractFile(
+            path=ac["path"], content=ac["content"]
+        ))
+
     return EmissionPlan(
         schema_version=plan["schema_version"], system_shape=plan["system_shape"],
         foundation_only_mode=plan["foundation_only_mode"], project_name=plan["project_name"],
@@ -346,6 +374,7 @@ def validate_emission_plan(plan: Dict[str, Any], contract: Dict[str, Any]) -> Em
         orchestrator=dict(orch), agents=agent_records, foundation_doc_inputs=dict(plan["foundation_doc_inputs"]),
         corpus_cells=cell_records, emitted_files=file_records, template_variants=variant_records,
         control_plane_runtime_created=list(runtime_created),
+        acceptance_contracts=acceptance_contract_records,
     )
 
 

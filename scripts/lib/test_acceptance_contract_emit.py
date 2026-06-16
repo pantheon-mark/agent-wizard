@@ -15,6 +15,7 @@ Stdlib-only, pip-install-free.
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from scaffold_plan import load_scaffold_plan  # noqa: E402
 from build_intent import BuildIntent, AgentIntent, ResourceClaims  # noqa: E402
 from corpus_loader import load_corpus_pack  # noqa: E402
 from emission_plan_assembler import assemble_emission_plan  # noqa: E402
+from emission_plan import validate_emission_plan, load_contract, default_contract_path  # noqa: E402
+from acceptance_contract_emitter import emit_acceptance_contracts  # noqa: E402
 
 SP = load_scaffold_plan("markdown-CC")
 CORPUS = load_corpus_pack()
@@ -319,6 +322,80 @@ class AcceptanceContractEmitTests(unittest.TestCase):
                 pattern.search(entry["content"]),
                 f"build ID found in {entry['path']}: {pattern.search(entry['content'])}"
             )
+
+
+EP_CONTRACT = load_contract(default_contract_path())
+
+
+class AcceptanceContractOnDiskTests(unittest.TestCase):
+    """On-disk emission: asserts that actual files written to a temp dir carry
+    the agent's real acceptance_signals text in the ## Core checks section.
+
+    This test catches the false-green where plan["acceptance_contracts"] has
+    correct content but the emitter re-derives content from the typed EmissionPlan
+    (which strips acceptance_signals), producing empty ## Core checks on disk.
+    """
+
+    def _assemble_and_emit(self):
+        """Assemble a plan with known acceptance_signals, validate it into a typed
+        EmissionPlan, emit to a temp dir, and return (staging_dir, typed_plan)."""
+        dr = _dr_with_increments()
+        bi = BuildIntent(derived_record=dr, agent_intents=[_ai_collector(), _ai_summariser()])
+        plan_dict = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        typed_plan = validate_emission_plan(plan_dict, EP_CONTRACT)
+        staging_dir = Path(tempfile.mkdtemp())
+        emit_acceptance_contracts(typed_plan, staging_dir)
+        return staging_dir, typed_plan
+
+    def test_on_disk_core_checks_contain_acceptance_signals(self):
+        """phase_01_acceptance.md on disk must contain Collector's acceptance_signals text.
+
+        Collector's acceptance_signals = ["items collected without error"].
+        Phase 1 is handled by Collector. If the emitter re-derives from the typed
+        EmissionPlan (which drops acceptance_signals), the ## Core checks section will
+        contain the placeholder fallback "No specific acceptance signals recorded for
+        this phase." — not the real signal. This test fails RED against pre-fix code.
+        """
+        staging_dir, _ = self._assemble_and_emit()
+        phase_01 = staging_dir / "agents" / "acceptance" / "phase_01_acceptance.md"
+        self.assertTrue(phase_01.exists(), f"phase_01_acceptance.md not written to {staging_dir}")
+        content = phase_01.read_text(encoding="utf-8")
+        # The real signal from _ai_collector().acceptance_signals
+        self.assertIn(
+            "items collected without error",
+            content,
+            "## Core checks section is missing the agent's acceptance_signals text on disk. "
+            "This indicates the emitter is re-deriving content from the typed EmissionPlan "
+            "(which drops acceptance_signals) instead of writing the pre-rendered content "
+            "from plan['acceptance_contracts'].",
+        )
+        # Confirm it does NOT fall back to the empty-signals placeholder
+        self.assertNotIn(
+            "No specific acceptance signals recorded for this phase.",
+            content,
+            "## Core checks contains the empty-signals placeholder — emitter re-derived "
+            "instead of carrying pre-rendered content through.",
+        )
+
+    def test_on_disk_phase_02_contains_summariser_signals(self):
+        """phase_02_acceptance.md on disk must contain Summariser's acceptance_signals text."""
+        staging_dir, _ = self._assemble_and_emit()
+        phase_02 = staging_dir / "agents" / "acceptance" / "phase_02_acceptance.md"
+        self.assertTrue(phase_02.exists(), f"phase_02_acceptance.md not written to {staging_dir}")
+        content = phase_02.read_text(encoding="utf-8")
+        # The real signal from _ai_summariser().acceptance_signals
+        self.assertIn(
+            "non-empty summary produced",
+            content,
+            "## Core checks missing Summariser's acceptance_signals on disk.",
+        )
+
+    def test_on_disk_three_files_written(self):
+        """Three committed phases -> three files on disk."""
+        staging_dir, _ = self._assemble_and_emit()
+        accept_dir = staging_dir / "agents" / "acceptance"
+        written = list(accept_dir.glob("phase_*_acceptance.md"))
+        self.assertEqual(len(written), 3, f"Expected 3 on-disk acceptance files, got {len(written)}")
 
 
 if __name__ == "__main__":
