@@ -5,22 +5,24 @@ Argparse-only shim; engine lives in `wizard/scripts/lib/upgrade.py` (library-fir
 
 Subcommands (per the foundation-versioning policy upgrade flow):
     upgrade-check          Inspect operator-project drift + available targets
-    upgrade                Plan-only upgrade (requires --plan-only at v0)
+    upgrade                Plan-only by default; --apply performs the merge-apply
     upgrade-plan           Synonym for `upgrade --plan-only`
 
 Usage:
     wizard_upgrade.py upgrade-check [--manifest-path PATH] [--registry-path PATH] [--json]
     wizard_upgrade.py upgrade --to VERSION --plan-only [--manifest-path PATH] [--registry-path PATH] [--json]
+    wizard_upgrade.py upgrade --to VERSION --apply [--ack] [--manifest-path PATH] [--registry-path PATH]
     wizard_upgrade.py upgrade-plan --to VERSION [--manifest-path PATH] [--registry-path PATH] [--json]
 
 Exit codes:
-    0  success
-    1  upgrade engine error (manifest / registry / target version / drift-class)
-    2  tooling error (invalid CLI arguments; --plan-only missing at v0)
-    3  reserved for future apply-path-blocked (next emission release lands)
+    0  success (plan emitted; or apply completed cleanly)
+    1  upgrade engine error (manifest / registry / target version / drift-class; or apply refused)
+    2  tooling error (invalid CLI arguments; neither --plan-only nor --apply given)
 
-NOTE: `wizard upgrade --to <version>` at v0 REQUIRES `--plan-only`. The apply path
-lands at the next foundation-bundle emission release.
+The apply path (`--apply`) changes ONLY the foundation documents the target bundle
+carries, gated on explicit operator action. There is no --latest; the operator
+names the target version. Standing auto-approval is fully disabled — every apply is
+operator-explicit.
 """
 
 from __future__ import annotations
@@ -33,6 +35,11 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
+# The apply engine (upgrade_apply) uses sibling imports (generator / upgrade /
+# replay_capsule), so lib/ must be importable as a flat directory too.
+_LIB = _HERE / "lib"
+if str(_LIB) not in sys.path:
+    sys.path.insert(0, str(_LIB))
 
 from lib.upgrade import (  # noqa: E402
     BundleNotFoundError,
@@ -50,6 +57,19 @@ from lib.upgrade import (  # noqa: E402
     upgrade_check_to_dict,
     upgrade_plan_to_dict,
 )
+from lib.upgrade_apply import (  # noqa: E402
+    apply_upgrade,
+    render_apply_result,
+    UpgradeApplyError,
+)
+
+
+def _resolve_build_repo_root(registry_path: Path) -> Path:
+    """Resolve the build-repo root that the apply path renders bundles from.
+
+    The registry lives at <root>/wizard/registry/foundation-bundles.json, so the
+    root is two levels above the registry directory."""
+    return registry_path.resolve().parent.parent.parent
 
 
 _DEFAULT_REGISTRY_PATH = Path("wizard/registry/foundation-bundles.json")
@@ -119,20 +139,60 @@ def _run_upgrade_plan(args: argparse.Namespace, plan_only_invoked_via_synonym: b
     return 0
 
 
-def cmd_upgrade(args: argparse.Namespace) -> int:
-    """`wizard upgrade --to VERSION --plan-only`.
+def cmd_apply(args: argparse.Namespace) -> int:
+    """`wizard upgrade --to VERSION --apply [--ack]` — the merge-apply path.
 
-    At v0: `--plan-only` is MANDATORY.
-    """
-    if not args.plan_only:
-        msg = (
-            "error: `wizard upgrade --to <version>` requires --plan-only at v0.\n"
-            "       Apply path lands at the next foundation-bundle emission release.\n"
-            "       Use `wizard upgrade-plan --to <version>` as a synonym, or pass --plan-only explicitly."
+    Changes ONLY the foundation documents the target bundle carries. Operator-edited
+    files are never clobbered: they are kept in place and the new version is saved
+    for review. Every apply is operator-explicit (no standing auto-approval)."""
+    manifest_path = _resolve_manifest_path(args.manifest_path)
+    registry_path = _resolve_registry_path(args.registry_path)
+    try:
+        manifest = load_operator_manifest(manifest_path)
+        registry = load_registry(registry_path)
+    except UpgradeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    operator_dir = manifest_path.parent.parent
+    build_repo_root = _resolve_build_repo_root(registry_path)
+    try:
+        result = apply_upgrade(
+            operator_dir, args.to, build_repo_root,
+            registry=registry, registry_path=registry_path,
+            manifest=manifest, manifest_path=manifest_path,
+            ack=args.ack,
         )
-        print(msg, file=sys.stderr)
+    except UpgradeApplyError as e:
+        # Refusal — no live writes. Surface the actionable message verbatim.
+        print(f"upgrade refused: {e}", file=sys.stderr)
+        return 1
+    except UpgradeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(render_apply_result(result), end="")
+    return 0
+
+
+def cmd_upgrade(args: argparse.Namespace) -> int:
+    """`wizard upgrade --to VERSION` — plan-only by default; `--apply` mutates.
+
+    Exactly one of `--plan-only` / `--apply` must be given (`--apply` performs the
+    merge-apply; `--plan-only` previews without changing anything)."""
+    if args.apply and args.plan_only:
+        print("error: pass only one of --plan-only / --apply, not both.", file=sys.stderr)
         return 2
-    return _run_upgrade_plan(args, plan_only_invoked_via_synonym=False)
+    if args.apply:
+        return cmd_apply(args)
+    if args.plan_only:
+        return _run_upgrade_plan(args, plan_only_invoked_via_synonym=False)
+    msg = (
+        "error: `wizard upgrade --to <version>` requires --plan-only (preview) or --apply (apply).\n"
+        "       --plan-only shows what would change without touching files.\n"
+        "       --apply performs the foundation-document upgrade (operator-explicit; add --ack to\n"
+        "       adopt the new version of any file you have edited under a warn-on-drift rule)."
+    )
+    print(msg, file=sys.stderr)
+    return 2
 
 
 def cmd_upgrade_plan(args: argparse.Namespace) -> int:
@@ -158,10 +218,16 @@ def build_parser() -> argparse.ArgumentParser:
     check_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON to stdout")
     check_p.set_defaults(func=cmd_upgrade_check)
 
-    upgrade_p = sub.add_parser("upgrade", help="Upgrade to a target version (plan-only at v0)")
+    upgrade_p = sub.add_parser("upgrade", help="Upgrade to a target version (plan-only preview or --apply)")
     upgrade_p.add_argument("--to", required=True, help="Target foundation_bundle_version (operator-explicit; no --latest)")
     upgrade_p.add_argument("--plan-only", action="store_true",
-                           help="REQUIRED at v0. Emits plan; performs no mutation. Apply path lands at the next emission release.")
+                           help="Preview the plan; performs no mutation.")
+    upgrade_p.add_argument("--apply", action="store_true",
+                           help="Apply the foundation-document upgrade (operator-explicit). "
+                                "Operator-edited files are kept and the new version saved for review.")
+    upgrade_p.add_argument("--ack", action="store_true",
+                           help="With --apply: acknowledge adopting the new version of a warn-on-drift "
+                                "file you have edited (your version is backed up first).")
     upgrade_p.add_argument("--manifest-path", default=None,
                            help="Path to operator-project `.wizard/manifest.json`")
     upgrade_p.add_argument("--registry-path", default=None,
