@@ -127,25 +127,18 @@ def _compose_required_evidence(
     return evidence
 
 
-def _compose_defer_trigger(
-    capability: str,
-    agent_names: List[str],
-    agent_index: Dict[str, List[str]],
-) -> str:
+def _compose_defer_trigger(capability: str) -> str:
     """Return a uniform, capability-scoped acceptance-time deferral instruction.
 
-    Deferral is an acceptance-time operator verdict — "I can't exercise this capability
-    on real work yet" — not a build-time determination. This instruction is present on
-    EVERY committed phase regardless of agent-roster state.
-
-    The agent_index parameter is accepted for API compatibility (it is used elsewhere for
-    core_checks) but plays no role in the deferral decision here.
+    Deferral is an acceptance-time operator verdict ("I can't exercise this capability
+    on real work yet"), not a build-time determination. This instruction is present on
+    EVERY committed phase regardless of agent-roster state, so it takes no roster inputs.
     """
     return (
         f"Only defer accepting '{capability}' if you have no real work to exercise this "
         f"capability on yet. When you do have real work, run the phase supervised and come "
         f"back to accept it. If a core check for '{capability}' cannot be exercised yet, "
-        f"the phase is provisionally-accepted — not fully accepted — and clearing that "
+        f"the phase is provisionally-accepted (not fully accepted), and clearing that "
         f"core check becomes a required precondition before the next phase can be accepted. "
         f"A non-core deferred check is recorded for later and revisited at first real use."
     )
@@ -215,7 +208,7 @@ def assemble_phase_acceptance(
                     seen_checks.add(signal)
 
         # defer_trigger.
-        defer_trigger = _compose_defer_trigger(capability_str, agent_names, agent_index)
+        defer_trigger = _compose_defer_trigger(capability_str)
 
         # operator_questions.
         operator_questions = _compose_operator_questions(
