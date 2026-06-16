@@ -59,6 +59,7 @@
     {"field": "FOUNDATION_ONLY_MODE", "group_id": "auto", "derivation_class": "auto", "decision_field": false, "decision_kind": "none", "value_shape": "boolean_string", "source_question_ids": [], "preview_doc": ""},
     {"field": "WIZARD_VERSION", "group_id": "auto", "derivation_class": "auto", "decision_field": false, "decision_kind": "none", "value_shape": "version_string", "source_question_ids": [], "preview_doc": ""},
     {"field": "LAST_UPDATED_DATE", "group_id": "auto", "derivation_class": "auto", "decision_field": false, "decision_kind": "none", "value_shape": "date", "source_question_ids": [], "preview_doc": ""},
-    {"field": "LAST_UPDATED_TRIGGER", "group_id": "auto", "derivation_class": "auto", "decision_field": false, "decision_kind": "none", "value_shape": "string", "source_question_ids": [], "preview_doc": ""}
+    {"field": "LAST_UPDATED_TRIGGER", "group_id": "auto", "derivation_class": "auto", "decision_field": false, "decision_kind": "none", "value_shape": "string", "source_question_ids": [], "preview_doc": ""},
+    {"field": "MANUAL_LAST_UPDATED", "group_id": "auto", "derivation_class": "auto", "decision_field": false, "decision_kind": "none", "value_shape": "date", "source_question_ids": [], "preview_doc": ""}
   ]
 }

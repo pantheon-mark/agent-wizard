@@ -129,7 +129,7 @@ class ManualMdContentTests(unittest.TestCase):
 
     def test_contains_build_and_operate_loop_section(self):
         lower = self.text.lower()
-        self.assertIn("loop", lower)
+        self.assertIn("build-and-operate loop", lower)
 
     def test_contains_your_role_section(self):
         lower = self.text.lower()

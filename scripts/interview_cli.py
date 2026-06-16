@@ -360,10 +360,10 @@ def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_roo
     --model) and fails closed BEFORE any write on a stale generator identity / non-empty target /
     missing-or-empty derived input. Returns the receipt (foundation-only flag + the two hashes).
 
-    The five `auto`-class config globals are supplied HERE at the emission boundary, because no
+    The six `auto`-class config globals are supplied HERE at the emission boundary, because no
     interview step records them (inject-at-emit, the same model as the preview overlay): SYSTEM_SHAPE
-    from --shape; WIZARD_VERSION from the bundle the generator runs from; LAST_UPDATED_DATE from the
-    clock; LAST_UPDATED_TRIGGER = "initial build" (this IS the initial build); FOUNDATION_ONLY_MODE
+    from --shape; WIZARD_VERSION from the bundle the generator runs from; LAST_UPDATED_DATE and
+    MANUAL_LAST_UPDATED from the clock; LAST_UPDATED_TRIGGER = "initial build" (this IS the initial build); FOUNDATION_ONLY_MODE
     from the explicit `foundation_only_mode` decision the carrier already computed at the step-15
     entry guard (so foundation-only routing is an explicit command-boundary input, not a transcript
     field nothing writes). The bridge gap-fills these, restricted to the shape's auto_global_fields;
