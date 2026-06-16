@@ -12,6 +12,24 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-16 — clearer agent-handoff records, a name-collision guard, and honest "reserved section" wording
+
+**Public-facing change:** Three fixes surfaced by running a real built system end to end:
+
+- **Your coordinator now records correctly how each agent's run ended.** Previously, when an agent stopped early on purpose — because it chose to defer work, or hit its usage budget — the run could still be recorded as a plain "completed," hiding the situation from the coordinator. The record of how a run ended is now written once, by the script that ran the agent, from the agent's own report plus whether the run actually succeeded. So "deferred" and "budget reached" are no longer silently turned into "completed," and a crash is always recorded as a failure. The coordinator reads these records to decide what to do next, so the fix restores its ability to continue, escalate, or review as intended.
+- **You can't accidentally name one of your helpers after a built-in control agent.** Every system has two built-in agents — an Orchestrator (the coordinator) and a QA agent. If you named one of your own helpers "Orchestrator" or "QA," the wizard now stops and asks you to choose a different name instead of silently overwriting the built-in one. Names that merely resemble these — for example "Coordinator" or "QA Reviewer" — are still allowed.
+- **Two reserved sections in `technical_architecture.md` now say plainly that your system doesn't use them.** They used to carry developer-facing "deferred / will be filled in later" wording that read like an unfinished document. They now state, in plain terms, that the real information lives in `approach.md` and `execution_plan.md` (and the agents' own prompt files), that there is nothing for you or the system to add, and that the section should be left as is. The skill that builds each later phase no longer treats these reserved sections as gaps to fill.
+
+**Operator-facing notes:**
+
+- These are correctness and clarity fixes to the systems the wizard builds; nothing you do changes.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** PENDING
+**Public repo commit:** PENDING
+
+---
+
 ## 2026-06-16 — internal cleanup (no functional change)
 
 **Public-facing change:** Documentation-only hygiene in the wizard's own instructions file (`wizard/CLAUDE.md`): removed two internal build-tracking identifiers from the advisor-consultation rule's provenance notes while preserving the rule and its configuration guidance verbatim. No behavior change for the wizard or any system it builds.
