@@ -25,11 +25,11 @@
       "path": "baselines/vision.md.hash.yaml"
     },
     {
-      "hash": "sha256:0b35b4834f56969744918a7faa29eb4c688e5cb4b827f03e1aa17f97e3a96704",
+      "hash": "sha256:f922d1634efa0beff3a1f7a97738c3858f1565131077595c6e45d7fb52ececc1",
       "path": "manifest.json"
     },
     {
-      "hash": "sha256:a7188af774f5e70769bfa481002394f7ee3ef3ed5b16c44b374601c5cc357d69",
+      "hash": "sha256:735185622331702f2f3e88a8dfaf689ffc3d930bcdbed917eb6822ac214c3b77",
       "path": "manifest.yaml"
     },
     {
@@ -70,12 +70,12 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-06-16T22:11:56Z",
-  "generator_version": "d36614d845e533b27d5b730d2583e65534b9a408",
+  "generated_at": "2026-06-16T22:12:21Z",
+  "generator_version": "cb2b7ad6f5da2784743d1f8f71c50d3fd58e7bd1",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.5.0",
-  "source_registry_entry_hash": "sha256:053829d3d3f888338d528087a45c5bdbed9ed768c42145fde6ee961a7d3d3c23",
+  "source_registry_entry_hash": "sha256:6b9283b8d288345a521fd3022337ece2115bb72219ea3b5505bc421128f3a444",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
   "template_tree_hash": "sha256:c6c6c3e8efeecfa84c9596ad807af4a0c1b1a65830c05899366a2f44d2044723",
