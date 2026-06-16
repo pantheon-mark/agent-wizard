@@ -21,8 +21,8 @@ Entries appear newest-first.
 - Nothing you do or receive changes.
 - No foundation-bundle version change in this release.
 
-**Source-Meta-Commit:** TBD-after-push
-**Public repo commit:** TBD-after-push
+**Source-Meta-Commit:** 725eec7
+**Public repo commit:** f12851c
 
 ---
 
