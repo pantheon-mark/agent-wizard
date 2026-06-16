@@ -12,6 +12,20 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-16 — internal cleanup (no functional change)
+
+**Public-facing change:** Documentation-only hygiene in the wizard's own instructions file (`wizard/CLAUDE.md`): removed two internal build-tracking identifiers from the advisor-consultation rule's provenance notes while preserving the rule and its configuration guidance verbatim. No behavior change for the wizard or any system it builds.
+
+**Operator-facing notes:**
+
+- Nothing you do or receive changes.
+- No foundation-bundle version change in this release.
+
+**Source-Meta-Commit:** TBD-after-push
+**Public repo commit:** TBD-after-push
+
+---
+
 ## 2026-06-16 — you now build and run your system one capability at a time, and accept each before building the next
 
 **Public-facing change:** The end of the wizard used to hand you a plan to build every agent first and "review each one" before the system started operating. That asked you to judge things only a builder can judge, and it never let you do the one thing that actually matters: watch the system do your real work before you commit to it. This release replaces that with a single build-and-operate loop:

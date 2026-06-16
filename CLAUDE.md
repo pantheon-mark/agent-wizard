@@ -115,7 +115,7 @@ When the user mentions something during any step that maps to a future wizard st
 
 This prevents the user from having to repeat themselves across steps and makes the wizard feel like it is actually listening — not just processing one step at a time.
 
-### 10.5 Advisor consultation rule (forward-looking, from build project W-016l 2026-04-30)
+### 10.5 Advisor consultation rule (forward-looking; adopted from the build project's advisor rule)
 
 This rule is install-pending until the wizard is ported to use consult-llm as an advisor. Once the wizard's interview / build flow includes calling out to an external advisor for design-uncertainty consults, this rule applies:
 
@@ -123,7 +123,7 @@ This rule is install-pending until the wizard is ported to use consult-llm as an
 - **What a good consult must include.** Decision to make, current leaning, relevant constraints, files or excerpts, specific kind of critique wanted, plus an FP escape valve ("say so if no flaw").
 - **For pre-commit critique specifically:** include both a regret-mode probe AND an alternative-framing probe — single-prompt critique misses framing-lock failures.
 - **How to handle advisor output.** Summarize into recommendation / reasons / risks / counterarguments / rejected / decision. **Do not adopt advisor claims without checking against source files. Advisor output is not authority.**
-- **Default config (when consult-llm is wired in; corrected 2026-05-01 per W-016m Finding 5):** `gpt-5.5` model with `reasoning_effort: high`. Pin via top-level `default_model: gpt-5.5` in `~/.config/consult-llm/config.yaml` (NOT `openai.model` — that field is invalid in the consult-llm v3.0.9 schema). The build project's W-016l-era pinning was nested under `openai.*` which the tool rejected with a config error on every invocation; the pin had never been operationally enforced until the v_final lock during W-016m. Verify with `consult-llm doctor`.
+- **Default config (when consult-llm is wired in):** `gpt-5.5` model with `reasoning_effort: high`. Pin via top-level `default_model: gpt-5.5` in `~/.config/consult-llm/config.yaml` (NOT `openai.model`; that field is invalid in the consult-llm v3.0.9 schema). An earlier pinning nested under `openai.*` was rejected by the tool with a config error on every invocation, so the pin was never operationally enforced until it was corrected to the top-level form. Verify with `consult-llm doctor`.
 
 This rule mirrors the build project's adopted rule. The wizard's own use of consult-llm is a separate downstream decision; this rule is documented here so it propagates when that integration happens.
 
