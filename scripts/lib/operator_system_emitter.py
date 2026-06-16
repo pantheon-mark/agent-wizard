@@ -243,7 +243,8 @@ def emit_operator_system(plan: EmissionPlan, staging_dir: Path,
 
     # 6c. per-phase acceptance contracts — one markdown file per committed phase, written
     #     into agents/acceptance/. Paths are registered in emitted_files by the assembler;
-    #     content is derived here from CAPABILITY_INCREMENTS in foundation_doc_inputs.
+    #     content is pre-rendered ONCE by the assembler and carried on plan.acceptance_contracts
+    #     (single source) — the emitter writes it verbatim, it is NOT re-derived here.
     written += emit_acceptance_contracts(plan, staging_dir)
 
     # 7. upgrade scaffold LAST — manifest-v2 (folds corpus authority + hashes the
