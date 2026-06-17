@@ -29,8 +29,8 @@ To make faithful upgrade previews possible, every newly built system now also sa
 - Existing built systems gain the replay-capsule file and the upgrade ability the next time they are generated; there is no action for you to take.
 - No foundation-document version change ships to operators in this release (a test version was used internally to validate the upgrade path end to end).
 
-**Source-Meta-Commit:** PENDING
-**Public repo commit:** PENDING
+**Source-Meta-Commit:** 0c622db
+**Public repo commit:** 3d4f04e
 
 ## 2026-06-16 — clearer agent-handoff records, a name-collision guard, and honest "reserved section" wording
 
