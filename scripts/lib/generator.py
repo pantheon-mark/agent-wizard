@@ -339,14 +339,23 @@ def _emit_manifest_text(
 # Canonical foundation-doc renderer (shared: legacy generate_bundle + full-system)
 # ============================================================================
 
-def _warn_unused_inputs(inputs: Dict[str, str], all_seen_keys: set) -> None:
-    """Warn (stderr) on operator-input keys that no template referenced — often a
-    sign of typos / stale inputs. Underscore-prefixed keys are documentation;
-    WIZARD_VERSION is consumed by the prd stub frontmatter (not via substitution)."""
+def warn_unused_inputs(inputs: Dict[str, str], consumed_keys: set) -> None:
+    """Warn (stderr) on operator-input keys that NO emitter in the full system
+    consumed — a sign of typos / stale inputs.
+
+    `consumed_keys` is the FULL consumed-key set aggregated at the orchestration
+    level across every emitter in the full-system emission (foundation-doc
+    templates + scaffold templates + the explicit assembler-/direct-consumed set).
+    This MUST NOT be called with only a single emitter's seen-keys: many fdi keys
+    are consumed by emitters other than the foundation-doc renderer (scaffold
+    template substitution, dependency/capability projections, direct reads like
+    AUTONOMY_LEVEL), so a partial consumed-set would falsely flag legitimately
+    consumed keys. Underscore-prefixed keys are documentation; WIZARD_VERSION is
+    consumed by the prd stub frontmatter (not via substitution)."""
     unused_keys = sorted(
         k
         for k in inputs
-        if k not in all_seen_keys
+        if k not in consumed_keys
         and not k.startswith("_")
         and k != "WIZARD_VERSION"
     )
@@ -453,7 +462,15 @@ def render_foundation_docs(
             )
         )
 
-    _warn_unused_inputs(inputs, all_seen_keys)
+    # NOTE: the unused-input warning is deliberately NOT emitted here. render_foundation_docs
+    # sees ONLY the foundation-doc templates, but the full operator system consumes most fdi keys
+    # via OTHER emitters (scaffold templates, dependency/capability projections, direct reads).
+    # Warning on the foundation-doc-only seen-set falsely flagged ~19 legitimately-consumed keys
+    # and (worse) fired spuriously on the upgrade-apply / foundation-only paths that reuse this
+    # renderer. The accurate warning belongs to the full-system emit, where the complete
+    # consumed-key set is knowable (operator_system_emitter.warn_unused_inputs). all_seen_keys is
+    # retained above only because _substitute_placeholders returns it; it is intentionally unused.
+    _ = all_seen_keys
     return records
 
 

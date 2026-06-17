@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from emission_plan import EmissionPlan  # type: ignore
-from generator import _substitute_placeholders  # type: ignore
+from generator import _substitute_placeholders, PLACEHOLDER_RE  # type: ignore
 
 
 # Operational directories emitted verbatim-with-substitution (flat one level each).
@@ -228,6 +228,25 @@ def _dest_for(src: Path, sub: str, staging_dir: Path) -> Path:
     if sub == "root":
         return staging_dir / name
     return staging_dir / sub / name
+
+
+def scaffold_template_placeholders(build_repo_root: Path) -> set:
+    """Union of {{KEY}} placeholders every scaffold template (the SCAFFOLD_SUBDIRS
+    template tree + start-session.sh) references.
+
+    This is the set of input keys the scaffold layer CAN consume: emit_scaffold
+    merges plan.foundation_doc_inputs into its substitution map, so any fdi key
+    that matches a scaffold-template placeholder is consumed by this emitter. The
+    orchestrator unions this with the foundation-doc placeholders + the explicit
+    assembler-consumed set to decide which fdi keys went genuinely unused (the
+    accurate full-system unused-input warning). Computed by static scan of the
+    template bodies so it stays correct as templates evolve — no hardcoded list."""
+    keys: set = set()
+    for src in _scaffold_sources(build_repo_root):
+        keys |= set(PLACEHOLDER_RE.findall(src.read_text(encoding="utf-8")))
+    sess_src = build_repo_root / START_SESSION_TEMPLATE
+    keys |= set(PLACEHOLDER_RE.findall(sess_src.read_text(encoding="utf-8")))
+    return keys
 
 
 def emit_scaffold(plan: EmissionPlan, staging_dir: Path, build_repo_root: Path,

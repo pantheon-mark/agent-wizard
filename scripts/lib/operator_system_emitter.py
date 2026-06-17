@@ -35,9 +35,11 @@ from pathlib import Path
 from typing import List, NamedTuple, Optional
 
 from emission_plan import EmissionPlan  # type: ignore
-from generator import GeneratorError  # type: ignore
+from generator import (  # type: ignore
+    GeneratorError, required_foundation_placeholders, warn_unused_inputs,
+)
 from corpus_loader import load_corpus_pack  # type: ignore
-from scaffold_emitter import emit_scaffold  # type: ignore
+from scaffold_emitter import emit_scaffold, scaffold_template_placeholders  # type: ignore
 from authority_profile import autonomous_actions_summary  # type: ignore
 from agent_emitter import emit_agent_layer  # type: ignore
 from foundation_doc_emitter import emit_foundation_docs  # type: ignore
@@ -200,6 +202,55 @@ def generate_operator_system(plan: EmissionPlan, target_dir: Path, build_repo_ro
     )
 
 
+def _full_system_consumed_keys(plan: EmissionPlan, build_repo_root: Path) -> set:
+    """The set of foundation_doc_inputs keys SOME emitter in the full-system emission
+    consumes. Aggregated across every consumption surface so the unused-input warning
+    means "consumed by NO emitter," not "absent from the foundation-doc templates."
+
+    Three sources, unioned:
+      1. foundation-doc template placeholders (the foundation_doc_emitter render),
+      2. scaffold template placeholders (emit_scaffold merges fdi into its substitution
+         map, so any fdi key matching a scaffold-template placeholder is consumed),
+      3. an explicit DECLARED set of assembler-/direct-consumed keys — fdi keys that are
+         legitimately consumed OUTSIDE template substitution and so would otherwise be
+         falsely flagged. Each is sourced to its canonical consumer's constant where one
+         exists (capability/dependency projections), with derivation-source fields and
+         direct emitter reads named explicitly:
+           - CAPABILITY_INCREMENTS  -> capability_projection.INCREMENTS_FIELD
+             (the assembler derives BUILD_PROGRESS_ROWS + per-phase acceptance contracts
+             from it; it is not itself a template placeholder),
+           - EXTERNAL_DEPENDENCY_IDENTITY / EXTERNAL_DEPENDENCY_ANNOTATION
+             -> dependency_projection.IDENTITY_FIELD / ANNOTATION_FIELD
+             (consumed to project INPUT_TYPE_INVENTORY / SOURCE_REGISTRY_ROWS /
+             CREDENTIAL_REGISTRY_ROWS, which ARE scaffold placeholders),
+           - CORE_PURPOSE: a vision-group extraction source field (feeds the derivation
+             of the VISION_* fields); recorded in fdi but rendered into no doc directly,
+           - CORPUS_INSTALLED_DATE / AUTONOMY_LEVEL / PROJECT_NAME: read directly by an
+             emitter/orchestrator (corpus_emitter install marker; the autonomy summary;
+             plan.project_name) rather than substituted from a template body.
+
+    Source 3 is intentionally a small, named declared set rather than threading a
+    consumed-key return through every emitter — see the slice's mechanism note. A
+    genuinely-unconsumed key (a typo / stale input) is in none of the three and STILL warns."""
+    from capability_projection import INCREMENTS_FIELD  # type: ignore
+    from dependency_projection import IDENTITY_FIELD, ANNOTATION_FIELD  # type: ignore
+    from corpus_emitter import INSTALLED_DATE_KEY  # type: ignore
+
+    consumed: set = set()
+    consumed |= required_foundation_placeholders(plan.bundle_version, build_repo_root)
+    consumed |= scaffold_template_placeholders(build_repo_root)
+    consumed |= {
+        INCREMENTS_FIELD,            # CAPABILITY_INCREMENTS (assembler derivation source)
+        IDENTITY_FIELD,              # EXTERNAL_DEPENDENCY_IDENTITY (dependency projection input)
+        ANNOTATION_FIELD,            # EXTERNAL_DEPENDENCY_ANNOTATION (dependency projection input)
+        INSTALLED_DATE_KEY,          # CORPUS_INSTALLED_DATE (corpus_emitter direct read)
+        "CORE_PURPOSE",              # vision-group extraction source (renders into no doc directly)
+        "AUTONOMY_LEVEL",            # orchestrator direct read (autonomy summary) + scaffold placeholder
+        "PROJECT_NAME",              # plan.project_name + scaffold/agent structural field
+    }
+    return consumed
+
+
 def emit_operator_system(plan: EmissionPlan, staging_dir: Path,
                          build_repo_root: Path) -> List[Path]:
     """Emit the complete runnable operator system for `plan` into `staging_dir`.
@@ -258,5 +309,15 @@ def emit_operator_system(plan: EmissionPlan, staging_dir: Path,
     # 7. upgrade scaffold LAST — manifest-v2 (folds corpus authority + hashes the
     #    final tree, foundation docs included) + upgrade policy/history + command surface.
     written += emit_upgrade_scaffold(plan, staging_dir, build_repo_root, records=records)
+
+    # Accurate unused-input warning — fires ONCE, at full-system emit, where the full
+    # consumed-key set across ALL emitters is knowable. (The foundation-doc renderer no
+    # longer warns; on its own it sees only the foundation-doc templates and would falsely
+    # flag the many fdi keys consumed by the scaffold / projections / direct reads.) A
+    # genuinely-unconsumed key still warns; a consumed one never does.
+    warn_unused_inputs(
+        dict(plan.foundation_doc_inputs),
+        _full_system_consumed_keys(plan, build_repo_root),
+    )
 
     return written

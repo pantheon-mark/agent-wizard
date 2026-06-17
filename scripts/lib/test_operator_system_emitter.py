@@ -316,5 +316,148 @@ class GenerateBundleCliFullSystemTests(unittest.TestCase):
         self.assertEqual(rc, 1, "full-system CLI must fail closed on provenance mismatch")
 
 
+# ============================================================================
+# Unused-input warning — accurate ("consumed by NO emitter"), full-system-only.
+# ============================================================================
+
+import contextlib  # noqa: E402
+import io  # noqa: E402
+
+# A few of the ~19 keys that were FALSELY flagged before the fix — each IS consumed
+# by some emitter (scaffold template substitution, capability/dependency projection,
+# or a direct read), so none must appear in any unused-input warning.
+_KNOWN_CONSUMED_KEYS = [
+    "PROJECT_NAME", "CORE_PURPOSE", "BUILD_PROGRESS_ROWS", "CAPABILITY_INCREMENTS",
+    "ADVISOR_ENTRIES", "CREDENTIAL_REGISTRY_ROWS", "INPUT_TYPE_INVENTORY",
+    "SOURCE_REGISTRY_ROWS", "EXTERNAL_DEPENDENCY_IDENTITY", "EXTERNAL_DEPENDENCY_ANNOTATION",
+]
+
+_UNUSED_WARNING_FRAGMENT = "not referenced by any template"
+
+
+def _emit_capturing_stderr(emit_callable):
+    """Run an emit callable, returning its captured stderr text."""
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        emit_callable()
+    return buf.getvalue()
+
+
+class RenderFoundationDocsDoesNotWarn(unittest.TestCase):
+    """The unused-input warning is no longer render_foundation_docs' job — it must
+    NOT fire there (it would fire spuriously on the upgrade-apply / foundation-only
+    paths that reuse the renderer)."""
+
+    def test_render_foundation_docs_emits_no_unused_warning(self):
+        from generator import render_foundation_docs  # noqa: E402
+        from test_emission_plan import _FOUNDATION_DOC_INPUTS  # noqa: E402
+        # Add a key the foundation templates do NOT reference (but the full system would
+        # consume). render_foundation_docs must stay SILENT regardless.
+        inputs = dict(_FOUNDATION_DOC_INPUTS)
+        inputs["CAPABILITY_INCREMENTS"] = "[]"
+        inputs["TOTALLY_UNUSED_TYPO_KEY"] = "x"
+        err = _emit_capturing_stderr(
+            lambda: render_foundation_docs("v0.4.0", inputs, REPO_ROOT)
+        )
+        self.assertNotIn(_UNUSED_WARNING_FRAGMENT, err,
+                         "render_foundation_docs must not emit the unused-input warning")
+
+
+class FullSystemUnusedInputWarning(unittest.TestCase):
+    """The warning fires ONLY at full-system emit, means 'consumed by NO emitter',
+    and still flags a genuinely-unconsumed key."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.contract = load_contract(default_contract_path())
+
+    def _emit(self, plan, capture=True):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name) / "out"
+        run = lambda: emit_operator_system(plan, staging, REPO_ROOT)
+        if capture:
+            return _emit_capturing_stderr(run)
+        run()
+        return ""
+
+    def test_planted_unconsumed_key_still_warns(self):
+        """An injected key no emitter consumes MUST still warn (proves the warning
+        was made accurate, not deleted)."""
+        p = _valid_plan()
+        p["foundation_doc_inputs"]["TOTALLY_UNUSED_TYPO_KEY"] = "stale-value"
+        plan = validate_emission_plan(p, self.contract)
+        err = self._emit(plan)
+        self.assertIn(_UNUSED_WARNING_FRAGMENT, err)
+        self.assertIn("TOTALLY_UNUSED_TYPO_KEY", err)
+
+    def test_consumed_keys_never_warn_synthetic(self):
+        """Keys consumed via scaffold/projection/direct-read are NOT flagged even when
+        present alongside a genuinely-unused one."""
+        p = _valid_plan()
+        # Inject a representative consumed set + one genuine typo.
+        p["foundation_doc_inputs"]["CORE_PURPOSE"] = "Keep the demo on track."
+        p["foundation_doc_inputs"]["CAPABILITY_INCREMENTS"] = "[]"
+        p["foundation_doc_inputs"]["EXTERNAL_DEPENDENCY_IDENTITY"] = "[]"
+        p["foundation_doc_inputs"]["EXTERNAL_DEPENDENCY_ANNOTATION"] = "[]"
+        p["foundation_doc_inputs"]["TOTALLY_UNUSED_TYPO_KEY"] = "stale"
+        plan = validate_emission_plan(p, self.contract)
+        err = self._emit(plan)
+        for k in ("CORE_PURPOSE", "CAPABILITY_INCREMENTS", "EXTERNAL_DEPENDENCY_IDENTITY",
+                  "EXTERNAL_DEPENDENCY_ANNOTATION", "PROJECT_NAME"):
+            self.assertNotIn(k, err, f"consumed key {k} was falsely flagged as unused")
+        # but the genuine typo is still surfaced
+        self.assertIn("TOTALLY_UNUSED_TYPO_KEY", err)
+
+
+# Real-transcript end-to-end: emit the whole real operator system on the preserved
+# pilot transcript (v0.4.0) via the emit path + generator_version_override seam, and
+# assert NO known-consumed key appears in any unused-input warning. This is the RED
+# test pre-fix: the warning fired from render_foundation_docs over the foundation-doc
+# templates only, falsely flagging the consumed keys below.
+_TRANSCRIPT = Path.home() / "wizard-pilot-2026-06-01" / "wizard_transcript.jsonl"
+_GEN_OVERRIDE = "c3b5609fbbe566d73f3097ff0d1cd087dfe19245"
+
+
+def _e2e_prereqs() -> bool:
+    if not _TRANSCRIPT.exists():
+        return False
+    reg = REPO_ROOT / "wizard" / "registry" / "foundation-bundles.json"
+    if not reg.exists():
+        return False
+    import json
+    versions = {b.get("foundation_bundle_version")
+                for b in json.loads(reg.read_text()).get("bundles", [])}
+    return "v0.4.0" in versions
+
+
+@unittest.skipUnless(_e2e_prereqs(),
+                     f"requires the preserved pilot transcript at {_TRANSCRIPT} and the v0.4.0 bundle")
+class RealTranscriptUnusedInputWarning(unittest.TestCase):
+    """Full real emission must not falsely flag any consumed fdi key."""
+
+    def test_no_known_consumed_key_warns_on_real_emit(self):
+        scripts_dir = REPO_ROOT / "wizard" / "scripts"
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        import interview_cli as cli  # noqa: E402
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        proj = Path(tmp.name) / "estate"
+        err = _emit_capturing_stderr(lambda: cli.cmd_emit_system(
+            str(_TRANSCRIPT), "markdown-CC", str(proj), str(REPO_ROOT),
+            bundle_version="v0.4.0", generator_version_override=_GEN_OVERRIDE,
+        ))
+        # Sanity: a real system was emitted.
+        self.assertTrue((proj / "vision.md").exists())
+        # The crux: none of the legitimately-consumed keys may appear in any warning.
+        warning_lines = [ln for ln in err.splitlines() if _UNUSED_WARNING_FRAGMENT in ln]
+        for ln in warning_lines:
+            for k in _KNOWN_CONSUMED_KEYS:
+                self.assertNotIn(k, ln,
+                    f"consumed key {k} falsely flagged as unused in: {ln!r}")
+        # On this real transcript every fdi key IS consumed, so ideally no warning at all.
+        self.assertEqual(warning_lines, [],
+                         f"unexpected unused-input warning(s) on real emit: {warning_lines}")
+
+
 if __name__ == "__main__":
     unittest.main()
