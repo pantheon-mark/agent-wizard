@@ -58,9 +58,17 @@ from upgrade import (  # type: ignore
     find_bundle_entry,
     find_migration_entry,
     load_migration_manifest,
+    normalize_for_content_hash,
     sha256_bytes,
     sha256_file,
 )
+
+
+def _content_hash(text: str) -> str:
+    """`sha256:`-prefixed hash of the CONTENT-normalized text (write-only
+    foundation_schema_version value blanked). Used for change-detection + drift, NOT
+    for the replay-conformance gate (which stays on the full-file base_hash)."""
+    return "sha256:" + sha256_bytes(normalize_for_content_hash(text).encode("utf-8"))
 
 
 # ===== Result classification =====
@@ -432,7 +440,6 @@ def apply_upgrade(
 
     for rel, meta in sorted(foundation_entries.items()):
         strategy = str(meta.get("merge_strategy", MERGE_STRATEGY_OPERATOR_REVIEW))
-        base_hash = str(meta.get("base_hash", ""))
         live = _read_live(operator_project_dir, rel)
         if live is None:
             # A declared managed foundation doc missing on disk is a refusal — we
@@ -443,8 +450,14 @@ def apply_upgrade(
                 "apply an upgrade over a missing file. Restore it (or run an upgrade "
                 "check) first. No files were changed."
             )
-        ours_hash = "sha256:" + sha256_bytes(live.encode("utf-8"))
-        drifted = (ours_hash != base_hash)
+        # Change-detection + drift use CONTENT hashes (write-only schema-version field
+        # blanked) so a pure foundation_schema_version bump is not a content change.
+        # base_content = manifest base_content_hash, OR back-compat backfill from the
+        # current-version re-render (SAFE: the replay-conformance gate just verified
+        # base_rendered reproduces the full-file base_hash).
+        base_content = str(meta.get("base_content_hash", "")) or _content_hash(base_rendered[rel])
+        ours_content = _content_hash(live)
+        drifted = (ours_content != base_content)
         theirs = theirs_rendered.get(rel)
         if theirs is None:
             # Target version dropped this doc from its render surface. v0 leaves it
@@ -453,8 +466,8 @@ def apply_upgrade(
                                           note="target version no longer renders this doc; left in place"))
             continue
 
-        theirs_hash = "sha256:" + sha256_bytes(theirs.encode("utf-8"))
-        target_changed = (theirs_hash != base_hash)
+        theirs_content = _content_hash(theirs)
+        target_changed = (theirs_content != base_content)
 
         if not target_changed:
             decisions.append(FileDecision(rel, strategy, FILE_UNCHANGED, drifted,
@@ -529,6 +542,7 @@ def apply_upgrade(
             new_manifest = _recompute_manifest(
                 manifest, target_entry, target_version, staged_writes,
                 foundation_entries, target_generator_version,
+                theirs_rendered=theirs_rendered,
             )
             sm = staging / MANIFEST_REL
             sm.parent.mkdir(parents=True, exist_ok=True)
@@ -655,15 +669,27 @@ def _recompute_manifest(
     staged_writes: Dict[str, str],
     foundation_entries: Dict[str, Dict[str, Any]],
     target_generator_version: Optional[str],
+    *,
+    theirs_rendered: Dict[str, str],
 ) -> Dict[str, Any]:
-    """Return a NEW manifest dict reflecting the apply.
+    """Return a NEW manifest dict reflecting the apply (Finding A dual-hash fix).
 
     - bump foundation_bundle_version + generator_version (+ source_commit) to the
       target bundle's provenance.
-    - for ADOPTED files (in staged_writes) advance base_hash + current_hash_last_seen
-      to the newly-written bytes' hash.
-    - for files left in review (foundation_entries not in staged_writes) DO NOT
-      advance base_hash — they still represent the prior version.
+    - DROPPED file (a managed foundation doc absent from theirs_rendered, i.e. the
+      target no longer renders it): POP it from managed_files. Leaving it stale would
+      fail the NEXT replay-conformance gate on "not produced by the current render
+      surface".
+    - SURVIVING file (still rendered by the target): advance BOTH base_hash (full
+      canonical render) AND base_content_hash (content-normalized) to the TARGET
+      render — for EVERY managed foundation doc (adopted, routed, AND
+      content-unchanged). This is what un-sticks the upgrade chain: the
+      replay-conformance gate verifies the capsule+generator reproduce the recorded
+      canonical bytes at current_version, not that the live file equals canonical, so
+      advancing routed files is correct.
+    - current_hash_last_seen advances ONLY for cleanly ADOPTED files (staged_writes),
+      preserving the true merge-ancestor pointer the deferred real-text-merge driver
+      needs for routed/unchanged files.
     """
     new_manifest = json.loads(json.dumps(manifest))  # deep copy, JSON-clean
     new_manifest["foundation_bundle_version"] = target_version
@@ -674,10 +700,21 @@ def _recompute_manifest(
     files_block = new_manifest.get("managed_files")
     if not isinstance(files_block, dict):
         files_block = new_manifest.get("files")
-    for rel, content in staged_writes.items():
-        digest = "sha256:" + sha256_bytes(content.encode("utf-8"))
+
+    for rel in list(foundation_entries.keys()):
+        target_text = theirs_rendered.get(rel)
+        if target_text is None:
+            # Dropped from the target's render surface — no longer managed.
+            files_block.pop(rel, None)
+            continue
         entry = files_block.get(rel, {})
-        entry["base_hash"] = digest
-        entry["current_hash_last_seen"] = digest
+        entry["base_hash"] = "sha256:" + sha256_bytes(target_text.encode("utf-8"))
+        entry["base_content_hash"] = _content_hash(target_text)
+        if rel in staged_writes:
+            # Cleanly adopted: the live file now equals the target render; advance the
+            # merge-ancestor pointer. (staged bytes == target render for adopted docs.)
+            entry["current_hash_last_seen"] = "sha256:" + sha256_bytes(
+                staged_writes[rel].encode("utf-8")
+            )
         files_block[rel] = entry
     return new_manifest

@@ -42,7 +42,7 @@ from typing import Dict, List, Optional
 from emission_plan import EmissionPlan  # type: ignore
 from corpus_loader import CorpusCellRecord, load_corpus_pack  # type: ignore
 from corpus_emitter import build_corpus_authority_doc  # type: ignore
-from upgrade import sha256_file  # type: ignore
+from upgrade import sha256_bytes, sha256_file, normalize_for_content_hash  # type: ignore
 
 
 class UpgradeScaffoldError(Exception):
@@ -215,12 +215,21 @@ def build_operator_manifest(plan: EmissionPlan, staging_dir: Path, build_repo_ro
     for rel in _staged_content_files(staging_dir):
         lifecycle = classify_lifecycle(rel)  # fail-closed
         policy = LIFECYCLE_POLICY[lifecycle]
+        rendered = (staging_dir / rel).read_text(encoding="utf-8")
         digest = f"sha256:{sha256_file(staging_dir / rel)}"
+        # base_content_hash = normalized hash (write-only foundation_schema_version
+        # value blanked) — the change-detection / drift surface. base_hash stays the
+        # full canonical render hash used by the replay-conformance gate. See
+        # upgrade.normalize_for_content_hash (single shared normalizer).
+        content_digest = "sha256:" + sha256_bytes(
+            normalize_for_content_hash(rendered).encode("utf-8")
+        )
         managed_files[rel] = {
             "managed": "true",
             "managed_by": policy["managed_by"],
             "lifecycle": lifecycle,
             "base_hash": digest,
+            "base_content_hash": content_digest,
             "current_hash_last_seen": digest,  # equals base_hash at emission (observational baseline)
             "local_modifications": policy["local_modifications"],
             "merge_strategy": policy["merge_strategy"],

@@ -148,6 +148,30 @@ def sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(canonicalize_bytes(b)).hexdigest()
 
 
+# Write-only managed frontmatter field whose VALUE the per-bundle render-contract
+# invariant forces to track the bundle's section_schema_version. No operator /
+# upgrade / runtime consumer reads it; only the build-time validator does. A pure
+# bump must NOT be treated as a content change by upgrade change-detection.
+_CONTENT_HASH_SCHEMA_VERSION_RE = re.compile(
+    r"^(foundation_schema_version:\s*).*$", flags=re.MULTILINE
+)
+
+
+def normalize_for_content_hash(text: str) -> str:
+    """Normalize a rendered foundation doc for CONTENT-level hashing (change
+    detection + drift), as distinct from the full canonical render hash used by the
+    replay-conformance gate.
+
+    SURGICAL: blanks ONLY the volatile write-only `foundation_schema_version` field
+    VALUE — it does NOT strip the whole frontmatter block (stripping all would blind
+    change-detection to legitimate metadata changes such as `managed_by`). Shared by
+    BOTH the producer (scaffold emitter, which writes base_content_hash) and the
+    consumer (mutator change-detection) so the two cannot drift.
+
+    The replay hash (base_hash) is NEVER passed through this; only the content hash is."""
+    return _CONTENT_HASH_SCHEMA_VERSION_RE.sub(r"\1<normalized>", text)
+
+
 # ===== Semver tier classification =====
 
 def parse_semver(version: str) -> Optional[Tuple[int, int, int]]:

@@ -414,28 +414,50 @@ class TransactionTests(_Base):
         hist = _read(proj / ".wizard" / "upgrade-history.log")
         self.assertIn("v0.4.0 -> v0.5.0", hist)
 
-    def test_manifest_base_hash_advanced_only_for_adopted(self):
+    def test_manifest_base_hash_advanced_for_all_surviving_incl_routed(self):
+        """Finding A dual-hash contract (was: '...advanced_only_for_adopted', which
+        encoded the stuck-chain BUG — it asserted a routed file's base_hash was NOT
+        advanced, which strands the file and fails the NEXT replay-conformance gate).
+
+        Post-fix: base_hash advances to the TARGET render for EVERY surviving managed
+        file (adopted AND routed). current_hash_last_seen advances ONLY for adopted —
+        a routed file keeps its merge-ancestor pointer."""
         build_root, reg = _write_build_repo(self.tmp)
         proj, mp, strat = _build_operator_project(self.tmp, build_root, roster="A")
         # Make the three_way doc drift so it routes to review (NOT adopted).
         tw_doc = next(d for d, s in strat.items() if s == "three_way")
         (proj / tw_doc).write_text("# drifted\n", encoding="utf-8")
         old_manifest = json.loads(_read(mp))
-        old_tw_hash = old_manifest["managed_files"][tw_doc]["base_hash"]
+        old_tw_chls = old_manifest["managed_files"][tw_doc]["current_hash_last_seen"]
 
         res = _apply(proj, mp, reg, build_root)
         new_manifest = json.loads(_read(mp))
         self.assertEqual(new_manifest["foundation_bundle_version"], "v0.5.0")
 
-        # The drifted three_way doc was routed to review -> base_hash NOT advanced.
-        self.assertEqual(new_manifest["managed_files"][tw_doc]["base_hash"], old_tw_hash,
-                         "base_hash advanced for a file left in review")
-        # An adopted file's base_hash == the freshly written theirs bytes.
+        # The routed doc was NOT adopted, BUT its base_hash advances to the TARGET
+        # render (the un-stuck-chain invariant), and base_content_hash too.
+        theirs_routed = render_foundation_docs("v0.5.0", _CAPSULE_INPUTS, build_root)
+        routed_target = next(r.content for r in theirs_routed if r.operator_relpath == tw_doc)
+        self.assertEqual(
+            new_manifest["managed_files"][tw_doc]["base_hash"],
+            "sha256:" + sha256_bytes(routed_target.encode("utf-8")),
+            "routed file's base_hash not advanced to the target render (stuck chain)",
+        )
+        self.assertIn("base_content_hash", new_manifest["managed_files"][tw_doc])
+        # current_hash_last_seen for the ROUTED file is preserved (merge ancestor),
+        # NOT advanced to the live drifted bytes or the target.
+        self.assertEqual(new_manifest["managed_files"][tw_doc]["current_hash_last_seen"],
+                         old_tw_chls,
+                         "routed file's current_hash_last_seen clobbered (lost merge ancestor)")
+        # An adopted file's base_hash == the freshly written theirs bytes; its
+        # current_hash_last_seen advances too.
         for adopted in res.files_written:
             theirs = _read(proj / adopted)
+            adopted_hash = "sha256:" + sha256_bytes(theirs.encode("utf-8"))
             self.assertEqual(new_manifest["managed_files"][adopted]["base_hash"],
-                             "sha256:" + sha256_bytes(theirs.encode("utf-8")),
-                             f"{adopted}: base_hash != written bytes")
+                             adopted_hash, f"{adopted}: base_hash != written bytes")
+            self.assertEqual(new_manifest["managed_files"][adopted]["current_hash_last_seen"],
+                             adopted_hash, f"{adopted}: current_hash_last_seen not advanced")
         # generator_version bumped to the target bundle's provenance value.
         self.assertNotEqual(new_manifest["generator_version"], "f" * 40)
 
@@ -471,6 +493,166 @@ class TransactionTests(_Base):
         for d in _TEMPLATE_DOCS:
             self.assertEqual(_read(proj / d), before[d], f"{d} mutated despite rollback")
         self.assertEqual(_read(mp), before_manifest, "manifest mutated despite rollback")
+
+
+class RecomputeManifestInvariantTests(unittest.TestCase):
+    """Direct unit tests of the dual-hash manifest recompute (Finding A). These do not
+    need a real dropped-file bundle — they call _recompute_manifest with synthetic
+    inputs to pin the input-independent invariants of the fix."""
+
+    def _manifest(self):
+        """A minimal manifest-v2 with three managed foundation docs at a base render."""
+        base_v = {
+            "a.md": "# a v1\nbody\n",
+            "b.md": "# b v1\nbody\n",
+            "c.md": "# c v1\nbody\n",
+        }
+        managed = {}
+        for rel, content in base_v.items():
+            digest = "sha256:" + sha256_bytes(content.encode("utf-8"))
+            cdigest = "sha256:" + sha256_bytes(content.encode("utf-8"))  # no schema field -> same
+            managed[rel] = {
+                "managed": "true",
+                "managed_by": "shared",
+                "base_hash": digest,
+                "base_content_hash": cdigest,
+                "current_hash_last_seen": digest,
+                "local_modifications": "expected",
+                "merge_strategy": "three_way",
+                "source_refs": [],
+            }
+        return {
+            "manifest_schema_version": "manifest-v2",
+            "foundation_bundle_version": "v0.4.0",
+            "source_commit": "aaa1111",
+            "generator_version": "f" * 40,
+            "managed_files": managed,
+        }, base_v
+
+    def _recompute(self, manifest, theirs_rendered, staged_writes):
+        import upgrade_apply as ua
+        foundation_entries = manifest["managed_files"]
+        return ua._recompute_manifest(
+            manifest, {"source_commit": "bbb2222"}, "v0.5.0",
+            staged_writes, foundation_entries, "g" * 40,
+            theirs_rendered=theirs_rendered,
+        )
+
+    def test_base_hash_advances_for_all_surviving_files(self):
+        """BOTH base_hash + base_content_hash advance to the target render for EVERY
+        surviving managed file — adopted, routed, AND content-unchanged."""
+        manifest, _ = self._manifest()
+        theirs = {
+            "a.md": "# a v2\nNEW body\n",   # adopted (in staged_writes)
+            "b.md": "# b v2\nNEW body\n",   # routed (NOT in staged_writes)
+            "c.md": "# c v1\nbody\n",       # content-unchanged
+        }
+        staged = {"a.md": theirs["a.md"]}  # only a.md cleanly adopted
+        nm = self._recompute(manifest, theirs, staged)
+        mf = nm["managed_files"]
+        for rel in ("a.md", "b.md", "c.md"):
+            exp_full = "sha256:" + sha256_bytes(theirs[rel].encode("utf-8"))
+            self.assertEqual(mf[rel]["base_hash"], exp_full,
+                             f"{rel}: base_hash not advanced to target render")
+            self.assertIn("base_content_hash", mf[rel])
+
+    def test_current_hash_last_seen_advances_only_for_adopted(self):
+        """current_hash_last_seen advances ONLY for cleanly adopted files (staged_writes);
+        the merge-ancestor pointer is preserved for routed/unchanged files."""
+        manifest, base_v = self._manifest()
+        theirs = {
+            "a.md": "# a v2\nNEW body\n",
+            "b.md": "# b v2\nNEW body\n",   # routed
+            "c.md": "# c v1\nbody\n",
+        }
+        staged = {"a.md": theirs["a.md"]}
+        old_b_chls = manifest["managed_files"]["b.md"]["current_hash_last_seen"]
+        old_c_chls = manifest["managed_files"]["c.md"]["current_hash_last_seen"]
+        nm = self._recompute(manifest, theirs, staged)
+        mf = nm["managed_files"]
+        self.assertEqual(mf["a.md"]["current_hash_last_seen"],
+                         "sha256:" + sha256_bytes(theirs["a.md"].encode("utf-8")))
+        self.assertEqual(mf["b.md"]["current_hash_last_seen"], old_b_chls,
+                         "routed file's current_hash_last_seen clobbered (lost merge ancestor)")
+        self.assertEqual(mf["c.md"]["current_hash_last_seen"], old_c_chls)
+
+    def test_dropped_file_is_popped(self):
+        """A managed file absent from theirs_rendered (the target dropped it) is POPPED
+        from the new manifest, so the next gate does not fail on 'not produced by the
+        current render surface'."""
+        manifest, _ = self._manifest()
+        theirs = {  # c.md dropped
+            "a.md": "# a v2\nNEW\n",
+            "b.md": "# b v2\nNEW\n",
+        }
+        staged = {"a.md": theirs["a.md"], "b.md": theirs["b.md"]}
+        nm = self._recompute(manifest, theirs, staged)
+        self.assertNotIn("c.md", nm["managed_files"], "dropped file not popped")
+        self.assertIn("a.md", nm["managed_files"])
+        self.assertIn("b.md", nm["managed_files"])
+
+    def test_legacy_manifest_without_base_content_hash_backfilled_not_false_routed(self):
+        """A legacy manifest entry lacking base_content_hash must, after recompute, gain
+        a base_content_hash (advanced to target) rather than being left absent. The
+        in-memory backfill at change-detection time is exercised separately via apply;
+        here we pin that recompute always WRITES base_content_hash for survivors."""
+        manifest, _ = self._manifest()
+        for rel in manifest["managed_files"]:
+            manifest["managed_files"][rel].pop("base_content_hash", None)
+        theirs = {
+            "a.md": "# a v2\nNEW\n",
+            "b.md": "# b v2\nNEW\n",
+            "c.md": "# c v1\nbody\n",
+        }
+        staged = {"a.md": theirs["a.md"]}
+        nm = self._recompute(manifest, theirs, staged)
+        from upgrade import normalize_for_content_hash
+        for rel in ("a.md", "b.md", "c.md"):
+            self.assertIn("base_content_hash", nm["managed_files"][rel],
+                          f"{rel}: base_content_hash not written on recompute")
+            exp = "sha256:" + sha256_bytes(
+                normalize_for_content_hash(theirs[rel]).encode("utf-8"))
+            self.assertEqual(nm["managed_files"][rel]["base_content_hash"], exp)
+
+
+class NormalizeForContentHashTests(unittest.TestCase):
+    """The shared normalizer surgically blanks ONLY the foundation_schema_version value."""
+
+    def test_only_schema_version_value_blanked(self):
+        from upgrade import normalize_for_content_hash
+        text = (
+            "---\n"
+            "foundation_schema_version: v0.4\n"
+            "managed_by: shared\n"
+            "---\n"
+            "# Title\n\nbody\n"
+        )
+        out = normalize_for_content_hash(text)
+        # The schema-version VALUE is normalized away...
+        self.assertIn("foundation_schema_version: <normalized>", out)
+        self.assertNotIn("v0.4", out)
+        # ...but everything else (incl. other frontmatter like managed_by) is preserved.
+        self.assertIn("managed_by: shared", out)
+        self.assertIn("# Title", out)
+        self.assertIn("body", out)
+
+    def test_schema_bump_only_yields_identical_normalized_content(self):
+        from upgrade import normalize_for_content_hash
+        v1 = "foundation_schema_version: v0.3\n# T\nbody\n"
+        v2 = "foundation_schema_version: v0.4\n# T\nbody\n"
+        self.assertEqual(normalize_for_content_hash(v1), normalize_for_content_hash(v2))
+
+    def test_body_change_is_not_masked(self):
+        from upgrade import normalize_for_content_hash
+        v1 = "foundation_schema_version: v0.3\n# T\nbody one\n"
+        v2 = "foundation_schema_version: v0.4\n# T\nbody TWO\n"
+        self.assertNotEqual(normalize_for_content_hash(v1), normalize_for_content_hash(v2))
+
+    def test_other_frontmatter_change_is_not_masked(self):
+        from upgrade import normalize_for_content_hash
+        v1 = "managed_by: shared\nfoundation_schema_version: v0.3\nbody\n"
+        v2 = "managed_by: operator\nfoundation_schema_version: v0.3\nbody\n"
+        self.assertNotEqual(normalize_for_content_hash(v1), normalize_for_content_hash(v2))
 
 
 class GuardTests(_Base):

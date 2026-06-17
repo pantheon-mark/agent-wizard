@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # wizard/scripts (interview_cli)
 
 import interview_cli as cli  # noqa: E402
+from generator import render_foundation_docs  # noqa: E402
 from upgrade import (  # noqa: E402
     load_operator_manifest,
     load_registry,
@@ -55,6 +56,7 @@ from upgrade_apply import (  # noqa: E402
     APPLY_RESULT_APPLIED,
     FILE_ADOPTED,
     FILE_REVIEW,
+    FILE_UNCHANGED,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -131,6 +133,13 @@ class UpgradeApplyE2E(unittest.TestCase):
     # ---- the main e2e ------------------------------------------------------
 
     def test_clean_estate_migrates_new_section_and_preserves_operator_edits(self):
+        """Reworked for the Finding A dual-hash fix. PREVIOUSLY this edited
+        execution_plan.md (operator_review) and asserted classification==PARTIAL with
+        execution_plan ROUTED — but execution_plan's ONLY delta at v0.5.0 is the
+        write-only foundation_schema_version bump (no body change), so routing it was
+        the A-TRIGGER bug. Post-fix it is content-UNCHANGED and must NOT route. The
+        route-and-preserve path is now exercised on vision.md (three_way), the doc that
+        genuinely gains the v0.5.0 Vision Recap section, by editing it before apply."""
         proj = self._emit_estate("estate-main")
 
         # The real estate's strategy roster (verifies the test's premise on real data).
@@ -138,14 +147,13 @@ class UpgradeApplyE2E(unittest.TestCase):
         self.assertEqual(self._strategy(proj, "execution_plan.md"), "operator_review")
         self.assertEqual(self._strategy(proj, "audit_framework.md"), "warn_on_drift")
 
-        # (a) hand-edit one operator_review doc so it diverges from base.
-        ep = proj / "execution_plan.md"
-        operator_text = ep.read_text() + "\n\n## My own notes\nHand-written by the operator.\n"
-        ep.write_text(operator_text, encoding="utf-8")
-
-        # (c) clean three_way (vision.md) left unedited; (b) warn_on_drift left unchanged.
-        vision_before = (proj / "vision.md").read_text()
+        # Edit the three_way doc that genuinely body-changes at v0.5.0 (vision.md) so it
+        # routes (drift + real target content delta) and the live edit is preserved.
+        vision = proj / "vision.md"
+        vision_before = vision.read_text()
         self.assertNotIn("## Vision Recap", vision_before)
+        operator_text = vision_before + "\n\n## My own notes\nHand-written by the operator.\n"
+        vision.write_text(operator_text, encoding="utf-8")
 
         # An untracked operator file that the upgrade must not touch.
         untracked = proj / "my_personal_notes.md"
@@ -155,46 +163,64 @@ class UpgradeApplyE2E(unittest.TestCase):
 
         # ---- replay-conformance passed (it didn't refuse on that ground) -----
         self.assertNotEqual(res.classification, "refused", res.refusal_reason)
-        # operator_review doc in review => partial (not "applied").
+        # An operator-edited doc with a genuine target change routes => partial.
         self.assertEqual(res.classification, APPLY_RESULT_PARTIAL)
 
-        # ---- the new v0.5.0 section is present in the clean-adopted three_way doc.
-        vision_after = (proj / "vision.md").read_text()
-        self.assertIn("## Vision Recap", vision_after)
-        self.assertIn("vision.md", res.files_written)
+        # ---- operator-edited three_way doc: routed to review, LIVE preserved.
+        self.assertIn("vision.md", res.files_in_review)
+        self.assertEqual(vision.read_text(), operator_text)  # NOT clobbered
+        self.assertNotIn("<<<<<<<", vision.read_text())       # NO git markers
         vdec = next(d for d in res.decisions if d.relpath == "vision.md")
-        self.assertEqual(vdec.disposition, FILE_ADOPTED)
-
-        # ---- operator-edited operator_review doc: routed to review, LIVE preserved.
-        self.assertIn("execution_plan.md", res.files_in_review)
-        self.assertEqual(ep.read_text(), operator_text)  # NOT clobbered
-        self.assertNotIn("<<<<<<<", ep.read_text())       # NO git markers
+        self.assertEqual(vdec.disposition, FILE_REVIEW)
         review_dir = proj / ".wizard" / "upgrade-review" / f"{SOURCE_VERSION}-to-{TARGET_VERSION}"
-        self.assertTrue((review_dir / "execution_plan.md.new").exists())
-        self.assertTrue((review_dir / "execution_plan.md.diff").exists())
-        self.assertTrue((review_dir / "execution_plan.md.ours").exists())
-        # the .ours sidecar is the operator's edited content
-        self.assertEqual((review_dir / "execution_plan.md.ours").read_text(), operator_text)
-        # NO git markers leaked into the .new sidecar either
-        self.assertNotIn("<<<<<<<", (review_dir / "execution_plan.md.new").read_text())
+        self.assertTrue((review_dir / "vision.md.new").exists())
+        self.assertTrue((review_dir / "vision.md.diff").exists())
+        self.assertTrue((review_dir / "vision.md.ours").exists())
+        # the .ours sidecar is the operator's edited content; the .new carries the
+        # additive v0.5.0 section.
+        self.assertEqual((review_dir / "vision.md.ours").read_text(), operator_text)
+        self.assertIn("## Vision Recap", (review_dir / "vision.md.new").read_text())
+        self.assertNotIn("<<<<<<<", (review_dir / "vision.md.new").read_text())
 
-        # ---- warn_on_drift doc with no operator edits: adopted (no ack needed).
+        # ---- execution_plan.md (operator_review, pure schema bump): NOT routed.
+        # Its only target delta is the write-only foundation_schema_version field, so
+        # the content hash is unchanged and there is nothing to review.
+        self.assertNotIn("execution_plan.md", res.files_in_review)
+
+        # ---- warn_on_drift doc with no operator edits and only a schema-version bump:
+        # content-UNCHANGED (was FILE_ADOPTED, which encoded the A-TRIGGER bug — a pure
+        # write-only foundation_schema_version bump was treated as a content change).
         audit_dec = next(d for d in res.decisions if d.relpath == "audit_framework.md")
-        self.assertEqual(audit_dec.disposition, FILE_ADOPTED)
+        self.assertEqual(audit_dec.disposition, FILE_UNCHANGED)
         self.assertFalse(audit_dec.drifted)
 
         # ---- untracked operator file untouched.
         self.assertEqual(untracked.read_text(), "nothing to do with the wizard\n")
 
-        # ---- manifest advanced to v0.5.0; base_hash advanced ONLY for adopted files.
+        # ---- manifest advanced to v0.5.0; base_hash advances for ALL surviving files
+        # (the un-stuck-chain invariant) to the TARGET render — adopted AND routed.
         nm = json.loads((proj / ".wizard" / "manifest.json").read_text())
         self.assertEqual(nm["foundation_bundle_version"], TARGET_VERSION)
-        # vision (adopted): base_hash == hash of the new live bytes.
-        vlive_hash = "sha256:" + sha256_bytes(vision_after.encode("utf-8"))
-        self.assertEqual(nm["managed_files"]["vision.md"]["base_hash"], vlive_hash)
-        # execution_plan (in review): base_hash NOT advanced to the operator's edited bytes.
-        ep_live_hash = "sha256:" + sha256_bytes(operator_text.encode("utf-8"))
-        self.assertNotEqual(nm["managed_files"]["execution_plan.md"]["base_hash"], ep_live_hash)
+        capsule = json.loads((proj / ".wizard" / "replay-capsule.json").read_text())
+        target_render = {
+            rec.operator_relpath: rec.content
+            for rec in render_foundation_docs(
+                TARGET_VERSION, capsule["foundation_doc_inputs"], REPO_ROOT
+            )
+        }
+        # vision (routed): base_hash advanced to the TARGET render (NOT the operator's
+        # live bytes) — so a next upgrade's gate passes; live file still = ours.
+        self.assertEqual(
+            nm["managed_files"]["vision.md"]["base_hash"],
+            "sha256:" + sha256_bytes(target_render["vision.md"].encode("utf-8")),
+        )
+        vlive_hash = "sha256:" + sha256_bytes(operator_text.encode("utf-8"))
+        self.assertNotEqual(nm["managed_files"]["vision.md"]["base_hash"], vlive_hash)
+        # execution_plan (content-unchanged): base_hash advanced to the target render too.
+        self.assertEqual(
+            nm["managed_files"]["execution_plan.md"]["base_hash"],
+            "sha256:" + sha256_bytes(target_render["execution_plan.md"].encode("utf-8")),
+        )
 
         # ---- history appended + backup exists.
         hist = proj / ".wizard" / "upgrade-history.log"
@@ -231,10 +257,113 @@ class UpgradeApplyE2E(unittest.TestCase):
         self.assertIn("did NOT change your file", new_body)
         self.assertNotIn("<<<<<<<", new_body)
 
-        # base_hash for vision NOT advanced (still represents the prior version).
+        # Dual-hash contract: base_hash for the ROUTED vision.md advances to the TARGET
+        # render (un-stuck-chain) — NOT to the operator's live edited bytes (live still
+        # = ours). (Previously this asserted base_hash was NOT advanced at all, which
+        # was the stuck-chain bug.)
         nm = json.loads((proj / ".wizard" / "manifest.json").read_text())
         live_hash = "sha256:" + sha256_bytes(edited.encode("utf-8"))
         self.assertNotEqual(nm["managed_files"]["vision.md"]["base_hash"], live_hash)
+        capsule = json.loads((proj / ".wizard" / "replay-capsule.json").read_text())
+        target_vision = next(
+            rec.content for rec in render_foundation_docs(
+                TARGET_VERSION, capsule["foundation_doc_inputs"], REPO_ROOT)
+            if rec.operator_relpath == "vision.md"
+        )
+        self.assertEqual(nm["managed_files"]["vision.md"]["base_hash"],
+                         "sha256:" + sha256_bytes(target_vision.encode("utf-8")))
+
+    def test_next_upgrade_replay_gate_would_pass_after_apply(self):
+        """REGRESSION (Finding A A-CORE, stuck-chain). After applying v0.5.0, the
+        replay-conformance gate a HYPOTHETICAL NEXT upgrade would run must PASS for
+        EVERY managed foundation doc — i.e. render(target, capsule.inputs) full-file
+        hash == manifest base_hash, for adopted AND routed files alike.
+
+        This is the input-independent invariant the bug violated: before the fix,
+        routed files (operator_review always; drifted three_way) keep their STALE
+        base_hash, so the next upgrade's gate fails closed and the project becomes
+        permanently un-upgradeable. The assertion is on the gate's contract, not on
+        any v0.5.0-specific content."""
+        proj = self._emit_estate("estate-stuck-chain")
+
+        # Edit the three_way doc that GENUINELY body-changes at the target (vision.md
+        # gains the Vision Recap section) so it ROUTES (drift + real content delta =
+        # the path that previously stranded base_hash). Other docs adopt or are
+        # unchanged. All must end gate-conformant regardless of disposition.
+        vision = proj / "vision.md"
+        vision.write_text(vision.read_text() + "\n\n## Operator note\nedited.\n", encoding="utf-8")
+
+        res = self._apply(proj)
+        self.assertNotEqual(res.classification, "refused", res.refusal_reason)
+        # The routed doc is genuinely in review (exercises the strand path).
+        self.assertIn("vision.md", res.files_in_review)
+
+        nm = json.loads((proj / ".wizard" / "manifest.json").read_text())
+        self.assertEqual(nm["foundation_bundle_version"], TARGET_VERSION)
+
+        # Simulate the NEXT upgrade's replay-conformance gate: re-render the (now
+        # current) target version from the capsule inputs and confirm every managed
+        # foundation doc's full-file hash matches its manifest base_hash.
+        capsule = json.loads((proj / ".wizard" / "replay-capsule.json").read_text())
+        rendered = {
+            rec.operator_relpath: rec.content
+            for rec in render_foundation_docs(
+                TARGET_VERSION, capsule["foundation_doc_inputs"], REPO_ROOT
+            )
+        }
+        managed = nm["managed_files"]
+        for rel in ("vision.md", "approach.md", "technical_architecture.md",
+                    "execution_plan.md", "test_cases.md", "audit_framework.md"):
+            if rel not in managed:
+                continue
+            self.assertIn(rel, rendered, f"{rel} not produced by target render surface")
+            expected = managed[rel]["base_hash"]
+            actual = "sha256:" + sha256_bytes(rendered[rel].encode("utf-8"))
+            self.assertEqual(
+                actual, expected,
+                f"NEXT upgrade's replay gate would FAIL on {rel} "
+                f"(base_hash not advanced to target render) -> stuck project",
+            )
+
+    def test_clean_project_pure_schema_bump_does_not_route(self):
+        """Finding A A-TRIGGER. A CLEAN project (zero operator edits) applying a
+        version whose only delta on a doc is the write-only foundation_schema_version
+        frontmatter bump must NOT route that doc to review. Content-unchanged docs are
+        not in files_in_review. Only genuinely body-changed docs flow through.
+
+        Input-independent: asserts every NON-body-changed managed doc is absent from
+        files_in_review (we do not hardcode which v0.5.0 docs changed body)."""
+        proj = self._emit_estate("estate-clean-trigger")
+
+        # Capture, per managed doc, whether its NORMALIZED content (write-only schema
+        # field blanked) actually changes across the version boundary. Docs whose only
+        # delta is the schema bump have IDENTICAL normalized content -> must not route.
+        from upgrade import normalize_for_content_hash  # local import: under test
+        capsule = json.loads((proj / ".wizard" / "replay-capsule.json").read_text())
+        inputs = capsule["foundation_doc_inputs"]
+        base = {rec.operator_relpath: rec.content
+                for rec in render_foundation_docs(SOURCE_VERSION, inputs, REPO_ROOT)}
+        theirs = {rec.operator_relpath: rec.content
+                  for rec in render_foundation_docs(TARGET_VERSION, inputs, REPO_ROOT)}
+
+        res = self._apply(proj)
+        self.assertNotEqual(res.classification, "refused", res.refusal_reason)
+
+        nm = json.loads((proj / ".wizard" / "manifest.json").read_text())
+        managed = set(nm["managed_files"])
+        content_unchanged = [
+            rel for rel in managed & set(base) & set(theirs)
+            if normalize_for_content_hash(base[rel]) == normalize_for_content_hash(theirs[rel])
+        ]
+        # Premise check: there IS at least one doc whose body is unchanged across the
+        # boundary (a pure schema bump) — otherwise the test asserts nothing.
+        self.assertTrue(content_unchanged,
+                        "test premise broken: no content-unchanged managed doc across the boundary")
+        for rel in content_unchanged:
+            self.assertNotIn(
+                rel, res.files_in_review,
+                f"{rel} routed to review on a pure schema-version bump (no body change)",
+            )
 
     def test_tampered_base_hash_refuses_with_no_live_writes(self):
         """Conflict case: corrupt a foundation doc's manifest base_hash so the
