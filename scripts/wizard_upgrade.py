@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wizard upgrade CLI — plan-only at v0.
+"""Wizard upgrade CLI.
 
 Argparse-only shim; engine lives in `wizard/scripts/lib/upgrade.py` (library-first split).
 
@@ -204,7 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wizard_upgrade",
         description=(
-            "Foundation-bundle upgrade CLI (plan-only at v0; apply path lands at the next emission release). "
+            "Foundation-bundle upgrade CLI (plan-only preview + operator-explicit apply). "
             "Per the foundation-versioning policy upgrade flow."
         ),
     )

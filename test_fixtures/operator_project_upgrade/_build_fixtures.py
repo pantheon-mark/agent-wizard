@@ -112,15 +112,15 @@ def build_pinned_at_older(root: Path) -> None:
 def build_excluded_when_permits(root: Path) -> None:
     """Operator at v0.3.0 with upgrade-policy.yaml that WOULD permit standing approval.
 
-    CLI must still report unavailable_idq_050_open + require explicit operator approval
+    CLI must still report requires_operator_approval + require explicit operator approval
     at v0.
     """
     build_clean(root, version="v0.3.0")
     upgrade_policy = root / ".wizard" / "upgrade-policy.yaml"
     upgrade_policy.parent.mkdir(parents=True, exist_ok=True)
     upgrade_policy.write_text(
-        "# Fixture upgrade-policy.yaml — would permit standing approval if operator-authority-profile generation were resolved.\n"
-        "# At v0 the CLI MUST ignore this and report unavailable_idq_050_open.\n"
+        "# Fixture upgrade-policy.yaml — would permit standing approval if it were enabled.\n"
+        "# At v0 the CLI MUST ignore this and report requires_operator_approval.\n"
         "standing_approval:\n"
         "  enabled: true\n"
         "  max_target: patch-mechanical\n"

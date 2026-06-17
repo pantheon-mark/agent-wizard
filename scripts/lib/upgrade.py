@@ -1,19 +1,24 @@
-"""Foundation-bundle upgrade engine — plan-only at v0.
+"""Foundation-bundle upgrade engine.
 
-Library module for `wizard upgrade-check` + `wizard upgrade --to <version> --plan-only`.
-Engine functions + data records; argparse shim lives in `wizard/scripts/wizard_upgrade.py`.
+Library module for `wizard upgrade-check`, `wizard upgrade --to <version> --plan-only`
+(preview), and the plan record consumed by the merge-apply path. Engine functions +
+data records; argparse shim lives in `wizard/scripts/wizard_upgrade.py`; the merge-apply
+mutator lives in the sibling `upgrade_apply.py`.
 
 Stdlib-only — no PyYAML, no third-party deps. JSON sidecars are the runtime contract
 surface; YAML manifests are human-facing companions. Operator-side CLI consumes
 `.wizard/manifest.json` only at v0 (YAML+JSON sync emitted by generator-side
-`wizard/scripts/generate_bundle.py`; emit-side `.wizard/` sidecar emission into
-operator projects lands at the next foundation-bundle emission release).
+`wizard/scripts/generate_bundle.py`).
 
 v0 scope:
-    - Plan-only at v0; no apply path; the next emission release lands apply.
-    - Non-destructive drift planning; no merge-apply at v0.
-    - Standing approval fully disabled at v0; CLI reports
-      `unavailable_idq_050_open` regardless of `excluded_when:` content.
+    - Both paths available: plan-only preview (this module) and apply
+      (sibling `upgrade_apply.py`, exposed as `wizard upgrade --to <version> --apply`).
+    - Standing auto-approval disabled at v0 (per the foundation-versioning policy's own
+      v0 deferral): every upgrade is operator-explicit; the CLI reports
+      `requires_operator_approval` regardless of `excluded_when:` content.
+    - No bespoke auto-merge engine at v0: apply either clean-adopts the new bundle
+      content or saves the new version to a review sidecar when the operator has edited
+      a file; it never silently merges conflicting edits.
     - Library-first split: engine here + argparse shim in wizard_upgrade.py.
 
 Authority: the foundation-versioning policy (canonical implementation reference).
@@ -41,9 +46,14 @@ PROVENANCE_SCHEMA_VERSION = "v1"
 """foundation-bundle.provenance.json schema version. Locked at v0; future expansion
 requires explicit minor-additive amendment per the foundation-versioning policy semver tier semantics."""
 
-STANDING_APPROVAL_STATUS_UNAVAILABLE = "unavailable_idq_050_open"
-"""v0 sentinel: CLI reports this regardless of `excluded_when:` content.
-Full normative § 6.2 eligibility evaluation activates when operator-authority-profile generation resolves."""
+STANDING_APPROVAL_STATUS_UNAVAILABLE = "requires_operator_approval"
+"""v0 status: the CLI reports this regardless of `excluded_when:` content.
+
+Standing auto-approval is disabled at v0 per the foundation-versioning policy's own
+v0 deferral of profile-gated standing approval. Until that policy section is activated,
+every upgrade is operator-explicit — there is no path by which an upgrade applies without
+the operator deciding to apply it. The full normative eligibility evaluation activates
+when the foundation-versioning policy lifts that deferral."""
 
 PROVENANCE_FILENAME = "foundation-bundle.provenance.json"
 """Namespaced filename avoids operator-side collisions."""
@@ -105,9 +115,10 @@ class BundleNotFoundError(UpgradeError):
 
 
 class PlanOnlyRequiredError(UpgradeError):
-    """Raised when `wizard upgrade --to <version>` invoked without `--plan-only` flag at v0.
+    """Raised when `wizard upgrade --to <version>` is invoked without a mode flag.
 
-    At v0: plan-only; apply path lands at the next foundation-bundle emission release.
+    `wizard upgrade --to <version>` requires exactly one of `--plan-only` (preview) or
+    `--apply` (perform the upgrade); neither given is an operator error.
     """
 
 
@@ -263,7 +274,11 @@ class MigrationEntry:
 
 @dataclass
 class UpgradePlan:
-    """Plan-only upgrade record. No apply path at v0."""
+    """Plan-only upgrade record: a non-mutating preview of what an upgrade would change.
+
+    This record makes no changes on disk. To perform the upgrade, run
+    `wizard upgrade --to <version> --apply` (the sibling merge-apply path). Every apply
+    is operator-explicit; standing auto-approval is disabled at v0."""
     operator_project_path: str
     from_version: str
     to_version: str
@@ -275,8 +290,9 @@ class UpgradePlan:
     requires_review: bool = True
     plan_only: bool = True
     apply_blocked_reason: str = (
-        "v0: apply path lands at the next foundation-bundle emission release; "
-        "--plan-only required at v0"
+        "This is a plan-only preview and changes nothing on disk. "
+        "To apply, run `wizard upgrade --to <version> --apply` (operator-explicit; "
+        "standing auto-approval is disabled at v0)."
     )
 
 
@@ -699,8 +715,8 @@ def compute_upgrade_check(
         )
     notes.append(
         f"standing_approval_status={STANDING_APPROVAL_STATUS_UNAVAILABLE} — "
-        "all upgrades require explicit operator approval at v0 "
-        "(operator-authority-profile generation unresolved)"
+        "every upgrade requires explicit operator approval at v0 "
+        "(standing auto-approval is disabled at v0 per the foundation-versioning policy)"
     )
 
     return UpgradeCheckResult(
@@ -775,7 +791,7 @@ def compute_upgrade_plan(
     steps.append("preflight check: REQUIRED (operator review of every file; no standing approval at v0)")
     steps.append("post-validation: REQUIRED (operator confirmation that target version applied cleanly)")
     steps.append(
-        f"APPLY PATH NOT AVAILABLE AT v0: {UpgradePlan.__dataclass_fields__['apply_blocked_reason'].default}"
+        f"TO APPLY: {UpgradePlan.__dataclass_fields__['apply_blocked_reason'].default}"
     )
 
     return UpgradePlan(
@@ -921,7 +937,7 @@ def render_upgrade_check(result: UpgradeCheckResult) -> str:
 def render_upgrade_plan(plan: UpgradePlan) -> str:
     """Human-readable CLI output for `wizard upgrade --to <version> --plan-only`."""
     lines = [
-        "Foundation bundle upgrade plan (v0 plan-only; no apply path)",
+        "Foundation bundle upgrade plan (plan-only preview; run with --apply to apply)",
         f"  operator_project_path: {plan.operator_project_path}",
         f"  from_version:          {plan.from_version}",
         f"  to_version:            {plan.to_version}",
