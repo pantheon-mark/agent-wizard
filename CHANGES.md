@@ -25,8 +25,8 @@ Entries appear newest-first.
 - Existing built systems pick these improvements up the next time they are generated; there is no action for you to take.
 - No foundation-document version change ships to operators in this release (an internal test version was used to validate the upgrade path end to end).
 
-**Source-Meta-Commit:** PENDING
-**Public repo commit:** PENDING
+**Source-Meta-Commit:** 5c5ee4e
+**Public repo commit:** 3cc81f7
 
 ## 2026-06-16 — your built system can now apply foundation-document upgrades (not just detect them)
 
