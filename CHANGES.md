@@ -12,6 +12,22 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-16 — foundation-document upgrades are now repeatable, quieter, and clearer
+
+**Public-facing change:** Running the brand-new upgrade ability end-to-end against a real built system surfaced three rough edges, now fixed before any of this reaches you:
+
+- **You can keep upgrading.** Previously, the first upgrade that set any document aside for your review could leave your system unable to take the *next* upgrade at all — its self-check would refuse from then on. Upgrades are now repeatable: applying one version no longer blocks the one after it.
+- **A routine update won't ask you to review documents you never touched.** A new version often bumps an internal version stamp on every document even when the words on the page are identical. The upgrade now compares the actual content, so documents whose wording hasn't changed are updated quietly in place — you're only asked to review a document when its real content changed *and* you had edited it.
+- **Clearer status, no jargon.** The upgrade status line now reads `requires_operator_approval` (every upgrade needs your explicit go-ahead) instead of an internal code, and a confusing technical `WARNING:` line that could appear during setup and upgrades — listing internal field names — no longer shows up when nothing is actually wrong.
+
+**Operator-facing notes:**
+
+- Existing built systems pick these improvements up the next time they are generated; there is no action for you to take.
+- No foundation-document version change ships to operators in this release (an internal test version was used to validate the upgrade path end to end).
+
+**Source-Meta-Commit:** PENDING
+**Public repo commit:** PENDING
+
 ## 2026-06-16 — your built system can now apply foundation-document upgrades (not just detect them)
 
 **Public-facing change:** When the wizard releases a newer version of its foundation-document set, your built system could already tell you an upgrade was available and whether you'd edited any of the managed documents — but it could not actually take the upgrade. It can now, with `wizard upgrade --to <version> --apply`. The upgrade is always something you ask for explicitly; nothing upgrades itself in the background.
