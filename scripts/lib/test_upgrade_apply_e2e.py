@@ -55,6 +55,7 @@ from upgrade_apply import (  # noqa: E402
     APPLY_RESULT_PARTIAL,
     APPLY_RESULT_APPLIED,
     FILE_ADOPTED,
+    FILE_MERGED,
     FILE_REVIEW,
     FILE_UNCHANGED,
 )
@@ -132,14 +133,13 @@ class UpgradeApplyE2E(unittest.TestCase):
 
     # ---- the main e2e ------------------------------------------------------
 
-    def test_clean_estate_migrates_new_section_and_preserves_operator_edits(self):
-        """Reworked for the Finding A dual-hash fix. PREVIOUSLY this edited
-        execution_plan.md (operator_review) and asserted classification==PARTIAL with
-        execution_plan ROUTED — but execution_plan's ONLY delta at v0.5.0 is the
-        write-only foundation_schema_version bump (no body change), so routing it was
-        the A-TRIGGER bug. Post-fix it is content-UNCHANGED and must NOT route. The
-        route-and-preserve path is now exercised on vision.md (three_way), the doc that
-        genuinely gains the v0.5.0 Vision Recap section, by editing it before apply."""
+    def test_clean_estate_clean_merges_appended_section_and_gains_new_section(self):
+        """The real text-merge driver on the real v0.4.0 -> v0.5.0 cut. v0.5.0's only
+        change to vision.md is the ADDITIVE Vision Recap section. An operator who appended
+        their OWN section made a NON-overlapping edit, so the section-aware merge cleanly
+        combines BOTH: the live file ends up with the operator's section AND the new Vision
+        Recap, no review hand-copy, no git markers. This is the exact 'frequent clean
+        non-overlapping operator edits' case the driver was un-deferred for."""
         proj = self._emit_estate("estate-main")
 
         # The real estate's strategy roster (verifies the test's premise on real data).
@@ -147,8 +147,6 @@ class UpgradeApplyE2E(unittest.TestCase):
         self.assertEqual(self._strategy(proj, "execution_plan.md"), "operator_review")
         self.assertEqual(self._strategy(proj, "audit_framework.md"), "warn_on_drift")
 
-        # Edit the three_way doc that genuinely body-changes at v0.5.0 (vision.md) so it
-        # routes (drift + real target content delta) and the live edit is preserved.
         vision = proj / "vision.md"
         vision_before = vision.read_text()
         self.assertNotIn("## Vision Recap", vision_before)
@@ -163,33 +161,28 @@ class UpgradeApplyE2E(unittest.TestCase):
 
         # ---- replay-conformance passed (it didn't refuse on that ground) -----
         self.assertNotEqual(res.classification, "refused", res.refusal_reason)
-        # An operator-edited doc with a genuine target change routes => partial.
-        self.assertEqual(res.classification, APPLY_RESULT_PARTIAL)
+        # No doc is routed to review -> a fully clean apply.
+        self.assertEqual(res.classification, APPLY_RESULT_APPLIED)
 
-        # ---- operator-edited three_way doc: routed to review, LIVE preserved.
-        self.assertIn("vision.md", res.files_in_review)
-        self.assertEqual(vision.read_text(), operator_text)  # NOT clobbered
-        self.assertNotIn("<<<<<<<", vision.read_text())       # NO git markers
+        # ---- operator-edited three_way doc: cleanly MERGED, live carries BOTH sections.
+        self.assertIn("vision.md", res.files_merged)
+        self.assertNotIn("vision.md", res.files_in_review)
+        merged_live = vision.read_text()
+        self.assertIn("## My own notes", merged_live)             # operator's edit kept
+        self.assertIn("Hand-written by the operator.", merged_live)
+        self.assertIn("## Vision Recap", merged_live)             # the new version's section
+        self.assertNotIn("<<<<<<<", merged_live)                  # NO git markers
         vdec = next(d for d in res.decisions if d.relpath == "vision.md")
-        self.assertEqual(vdec.disposition, FILE_REVIEW)
+        self.assertEqual(vdec.disposition, FILE_MERGED)
+        # No review sidecar dir for a fully clean apply.
         review_dir = proj / ".wizard" / "upgrade-review" / f"{SOURCE_VERSION}-to-{TARGET_VERSION}"
-        self.assertTrue((review_dir / "vision.md.new").exists())
-        self.assertTrue((review_dir / "vision.md.diff").exists())
-        self.assertTrue((review_dir / "vision.md.ours").exists())
-        # the .ours sidecar is the operator's edited content; the .new carries the
-        # additive v0.5.0 section.
-        self.assertEqual((review_dir / "vision.md.ours").read_text(), operator_text)
-        self.assertIn("## Vision Recap", (review_dir / "vision.md.new").read_text())
-        self.assertNotIn("<<<<<<<", (review_dir / "vision.md.new").read_text())
+        self.assertFalse(review_dir.exists(), "clean merge wrote a review sidecar")
 
         # ---- execution_plan.md (operator_review, pure schema bump): NOT routed.
-        # Its only target delta is the write-only foundation_schema_version field, so
-        # the content hash is unchanged and there is nothing to review.
         self.assertNotIn("execution_plan.md", res.files_in_review)
 
-        # ---- warn_on_drift doc with no operator edits and only a schema-version bump:
-        # content-UNCHANGED (was FILE_ADOPTED, which encoded the A-TRIGGER bug — a pure
-        # write-only foundation_schema_version bump was treated as a content change).
+        # ---- warn_on_drift doc, no operator edits, only a schema-version bump:
+        # content-UNCHANGED.
         audit_dec = next(d for d in res.decisions if d.relpath == "audit_framework.md")
         self.assertEqual(audit_dec.disposition, FILE_UNCHANGED)
         self.assertFalse(audit_dec.drifted)
@@ -197,8 +190,7 @@ class UpgradeApplyE2E(unittest.TestCase):
         # ---- untracked operator file untouched.
         self.assertEqual(untracked.read_text(), "nothing to do with the wizard\n")
 
-        # ---- manifest advanced to v0.5.0; base_hash advances for ALL surviving files
-        # (the un-stuck-chain invariant) to the TARGET render — adopted AND routed.
+        # ---- manifest: version + dual-hash + lineage semantics after a clean merge.
         nm = json.loads((proj / ".wizard" / "manifest.json").read_text())
         self.assertEqual(nm["foundation_bundle_version"], TARGET_VERSION)
         capsule = json.loads((proj / ".wizard" / "replay-capsule.json").read_text())
@@ -208,14 +200,19 @@ class UpgradeApplyE2E(unittest.TestCase):
                 TARGET_VERSION, capsule["foundation_doc_inputs"], REPO_ROOT
             )
         }
-        # vision (routed): base_hash advanced to the TARGET render (NOT the operator's
-        # live bytes) — so a next upgrade's gate passes; live file still = ours.
+        ventry = nm["managed_files"]["vision.md"]
+        # base_hash -> TARGET render (replay-conformance source; un-stuck-chain).
         self.assertEqual(
-            nm["managed_files"]["vision.md"]["base_hash"],
+            ventry["base_hash"],
             "sha256:" + sha256_bytes(target_render["vision.md"].encode("utf-8")),
         )
-        vlive_hash = "sha256:" + sha256_bytes(operator_text.encode("utf-8"))
-        self.assertNotEqual(nm["managed_files"]["vision.md"]["base_hash"], vlive_hash)
+        # current_hash_last_seen -> the MERGED live bytes (the true merge ancestor).
+        self.assertEqual(
+            ventry["current_hash_last_seen"],
+            "sha256:" + sha256_bytes(merged_live.encode("utf-8")),
+        )
+        # live_lineage_version -> target (lineage restored to current after a clean merge).
+        self.assertEqual(ventry["live_lineage_version"], TARGET_VERSION)
         # execution_plan (content-unchanged): base_hash advanced to the target render too.
         self.assertEqual(
             nm["managed_files"]["execution_plan.md"]["base_hash"],
@@ -228,25 +225,41 @@ class UpgradeApplyE2E(unittest.TestCase):
         self.assertIn(f"{SOURCE_VERSION} -> {TARGET_VERSION}", hist.read_text())
         self.assertTrue((proj / ".wizard" / "backups" / f"pre-{TARGET_VERSION}").exists())
 
-    def test_operator_edited_three_way_routes_to_sidecar_live_untouched(self):
-        """The new section lives in a three_way doc; when that doc is operator-edited the
-        upgrade must NOT clean-adopt — it overlays a review sidecar and leaves the live
-        file exactly as the operator left it (no git markers)."""
+    def test_overlapping_edit_conflicts_and_routes_to_sidecar_live_untouched(self):
+        """When the operator's edit OVERLAPS the release's own change to the same block,
+        the section-aware merge cannot resolve it and falls back to the review sidecar:
+        the live file is left exactly as the operator left it (no git markers, no
+        clobber). v0.5.0's non-additive change to vision.md is the frontmatter
+        foundation_schema_version bump (the leading preamble block); an operator who also
+        edited the frontmatter (adding their own key) collides on that block -> conflict.
+        This exercises the sidecar fallback end-to-end on the real release. (Body-section
+        conflicts are covered exhaustively by the synthetic suite, where the release can be
+        constructed to change a body section the operator also edits.)"""
         proj = self._emit_estate("estate-vision-edited")
         self.assertEqual(self._strategy(proj, "vision.md"), "three_way")
 
         vision = proj / "vision.md"
-        edited = vision.read_text() + "\n\n## Operator addendum\nI changed the vision.\n"
+        original = vision.read_text()
+        # The emitted foundation doc carries a YAML frontmatter block (the merge preamble).
+        # The operator inserts their own frontmatter key into it — overlapping the block
+        # the release also changes (its schema-version value) -> a genuine 3-way conflict.
+        self.assertTrue(original.startswith("---\n"), "expected YAML frontmatter on vision.md")
+        end = original.index("\n---\n", 4)
+        edited = original[:end] + "\noperator_annotation: my own note" + original[end:]
+        self.assertNotEqual(edited, original)
         vision.write_text(edited, encoding="utf-8")
 
         res = self._apply(proj)
         self.assertNotEqual(res.classification, "refused", res.refusal_reason)
 
-        # vision.md routed to review, NOT written, live preserved verbatim.
+        # vision.md routed to review, NOT written/merged, live preserved verbatim.
         self.assertIn("vision.md", res.files_in_review)
         self.assertNotIn("vision.md", res.files_written)
+        self.assertNotIn("vision.md", res.files_merged)
         self.assertEqual(vision.read_text(), edited)        # live untouched
         self.assertNotIn("<<<<<<<", vision.read_text())     # no git markers
+        vdec = next(d for d in res.decisions if d.relpath == "vision.md")
+        self.assertEqual(vdec.disposition, FILE_REVIEW)
 
         review_dir = proj / ".wizard" / "upgrade-review" / f"{SOURCE_VERSION}-to-{TARGET_VERSION}"
         new_sidecar = review_dir / "vision.md.new"
@@ -256,6 +269,11 @@ class UpgradeApplyE2E(unittest.TestCase):
         self.assertIn("## Vision Recap", new_body)
         self.assertIn("did NOT change your file", new_body)
         self.assertNotIn("<<<<<<<", new_body)
+
+        # A routed file keeps its prior lineage so it stays ineligible (keeps routing)
+        # until reconciled — NOT advanced to the target.
+        nm0 = json.loads((proj / ".wizard" / "manifest.json").read_text())
+        self.assertEqual(nm0["managed_files"]["vision.md"]["live_lineage_version"], SOURCE_VERSION)
 
         # Dual-hash contract: base_hash for the ROUTED vision.md advances to the TARGET
         # render (un-stuck-chain) — NOT to the operator's live edited bytes (live still
@@ -286,17 +304,19 @@ class UpgradeApplyE2E(unittest.TestCase):
         any v0.5.0-specific content."""
         proj = self._emit_estate("estate-stuck-chain")
 
-        # Edit the three_way doc that GENUINELY body-changes at the target (vision.md
-        # gains the Vision Recap section) so it ROUTES (drift + real content delta =
-        # the path that previously stranded base_hash). Other docs adopt or are
-        # unchanged. All must end gate-conformant regardless of disposition.
+        # Operator appends a NON-overlapping section to the three_way doc. v0.5.0's only
+        # change is the additive Vision Recap section, so this cleanly section-MERGES
+        # (the path that advances base_hash to the target render for the merged doc).
+        # All managed docs must end gate-conformant regardless of disposition.
         vision = proj / "vision.md"
         vision.write_text(vision.read_text() + "\n\n## Operator note\nedited.\n", encoding="utf-8")
 
         res = self._apply(proj)
         self.assertNotEqual(res.classification, "refused", res.refusal_reason)
-        # The routed doc is genuinely in review (exercises the strand path).
-        self.assertIn("vision.md", res.files_in_review)
+        # The operator-edited doc cleanly MERGES (additive section vs additive section,
+        # non-overlapping) — it is written, not stranded in review.
+        self.assertIn("vision.md", res.files_merged)
+        self.assertNotIn("vision.md", res.files_in_review)
 
         nm = json.loads((proj / ".wizard" / "manifest.json").read_text())
         self.assertEqual(nm["foundation_bundle_version"], TARGET_VERSION)

@@ -103,6 +103,21 @@ class UpgradeScaffoldEmitterTests(unittest.TestCase):
                          f"manifest reports drift on freshly-emitted tree: "
                          f"{[e.path for e in report.entries if e.status != 'no_drift']}")
 
+    def test_managed_files_carry_live_lineage_version_at_emit(self):
+        # Lineage guard: at emit the live file IS the current render, so every
+        # managed file's live_lineage_version == the emitted bundle version. The
+        # text-merge driver only auto-merges a file whose live descends from the
+        # current render (live_lineage_version == current_version); a freshly emitted
+        # tree must therefore be uniformly eligible.
+        plan, staging, _ = self._emit()
+        m = self._manifest(staging)
+        self.assertTrue(m["managed_files"], "no managed files emitted")
+        for rel, meta in m["managed_files"].items():
+            self.assertEqual(
+                meta.get("live_lineage_version"), plan.bundle_version,
+                f"{rel}: live_lineage_version not stamped to the emitted bundle version",
+            )
+
     def test_corpus_authority_folded_in_and_sidecar_retired(self):
         _, staging, _ = self._emit()
         m = self._manifest(staging)

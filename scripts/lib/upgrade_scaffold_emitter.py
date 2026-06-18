@@ -231,6 +231,14 @@ def build_operator_manifest(plan: EmissionPlan, staging_dir: Path, build_repo_ro
             "base_hash": digest,
             "base_content_hash": content_digest,
             "current_hash_last_seen": digest,  # equals base_hash at emission (observational baseline)
+            # live_lineage_version (lineage guard): the bundle version whose render
+            # the LIVE file descends from. At emit the live file IS the current render, so
+            # it equals the emitted bundle version. The text-merge driver only auto-merges
+            # a drifted three_way file whose live_lineage_version == the current version
+            # (otherwise the live file no longer descends from render(current) and a merge
+            # would run against the wrong base). Advanced to target on clean adopt/merge;
+            # left unchanged on a sidecar route (so a routed file keeps routing).
+            "live_lineage_version": plan.bundle_version,
             "local_modifications": policy["local_modifications"],
             "merge_strategy": policy["merge_strategy"],
             "source_refs": [],

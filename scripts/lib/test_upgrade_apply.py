@@ -32,6 +32,7 @@ from upgrade_apply import (  # noqa: E402
     APPLY_RESULT_APPLIED,
     APPLY_RESULT_PARTIAL,
     FILE_ADOPTED,
+    FILE_MERGED,
     FILE_REVIEW,
     FILE_UNCHANGED,
 )
@@ -63,17 +64,25 @@ _CAPSULE_INPUTS = {
 
 
 def _template_body(doc_name: str, version_label: str, *, extra_placeholder: bool = False) -> str:
-    """A small deterministic template body. `{{PROJECT_NAME}}` is the placeholder
-    fillable from the capsule. `version_label` distinguishes base vs theirs so the
-    rendered bytes differ between versions."""
+    """A small deterministic, MULTI-SECTION template body with STABLE ATX headings.
+
+    `{{PROJECT_NAME}}` is the placeholder fillable from the capsule. The version label
+    rides in the `## Overview` body only — the headings (`# {doc}`, `## Overview`,
+    `## Details`) are stable across versions, so the section-aware merge sees real
+    shared sections (not a heading rename every version). `## Details` is stable
+    across versions, so an operator edit there is a non-overlapping change the merge
+    can clean-resolve; `## Overview` changes between versions, so editing it conflicts."""
     body = (
-        f"# {doc_name} ({version_label})\n\n"
+        f"# {doc_name}\n\n"
         "Project: {{PROJECT_NAME}}\n\n"
-        f"This is the {version_label} body of {doc_name}.\n"
+        "## Overview\n\n"
+        f"This is the ({version_label}) overview of {doc_name}.\n\n"
+        "## Details\n\n"
+        f"Stable details for {doc_name}.\n"
     )
     if extra_placeholder:
         # A NEW placeholder a migration would have to supply; absent from the capsule.
-        body += "\nNew field: {{BRAND_NEW_KEY}}\n"
+        body += "\n## New\n\nNew field: {{BRAND_NEW_KEY}}\n"
     return body
 
 
@@ -173,7 +182,7 @@ def _strategy_roster(name: str):
 
 
 def _build_operator_project(tmp: Path, build_root: Path, *, base_version="v0.4.0",
-                            roster="A", extra_unmanaged=True):
+                            roster="A", extra_unmanaged=True, lineage="__current__"):
     """Render the base-version foundation docs into a synthetic operator project +
     write a manifest-v2 (base_hash = the canonical hash of the rendered bytes) + a
     replay capsule. Returns (proj_dir, manifest_path, strategies)."""
@@ -193,7 +202,7 @@ def _build_operator_project(tmp: Path, build_root: Path, *, base_version="v0.4.0
             continue
         (proj / rel).write_text(rec.content, encoding="utf-8")
         digest = "sha256:" + sha256_bytes(rec.content.encode("utf-8"))
-        managed_files[rel] = {
+        entry = {
             "managed": "true",
             "managed_by": "shared",
             "base_hash": digest,
@@ -202,6 +211,15 @@ def _build_operator_project(tmp: Path, build_root: Path, *, base_version="v0.4.0
             "merge_strategy": strategies[rel],
             "source_refs": [],
         }
+        # live_lineage_version: "__current__" sentinel => emit at the base
+        # version (a freshly emitted project is uniformly eligible); None => OMIT the
+        # field (a legacy manifest — not eligible, back-compat); any other value =>
+        # stamp it verbatim (e.g. a stale version to test ineligibility).
+        if lineage == "__current__":
+            entry["live_lineage_version"] = base_version
+        elif lineage is not None:
+            entry["live_lineage_version"] = lineage
+        managed_files[rel] = entry
 
     if extra_unmanaged:
         # An operator file NOT in the merge surface — must be left untouched.
@@ -692,6 +710,170 @@ class GuardTests(_Base):
         with self.assertRaises(UpgradeApplyError) as ctx:
             _apply(proj, mp, reg, build_root)
         self.assertIn("migration path", str(ctx.exception).lower())
+
+
+class SectionMergeIntegrationTests(_Base):
+    """The real section-aware text-merge driver wired into the drifted three_way
+    branch. A drifted three_way file whose live descends from the current render
+    (live_lineage_version == current_version) is section-merged: a clean merge writes the
+    merged content live and is treated as adopted; a conflicting/ambiguous merge falls
+    back to the existing review sidecar (live untouched, no git markers). A file that does
+    NOT descend from the current render keeps routing (never merged against a wrong base)."""
+
+    def _edit_details(self, proj: Path, doc: str, new_details: str) -> str:
+        """Edit ONLY the stable `## Details` section of a doc (a section the target does
+        not change), leaving the version-bearing `## Overview` as rendered. Returns the
+        edited text. This is a non-overlapping operator edit the merge can clean-resolve."""
+        live = _read(proj / doc)
+        edited = live.replace(
+            f"## Details\n\nStable details for {doc}.\n",
+            f"## Details\n\n{new_details}\n",
+        )
+        assert edited != live, f"details edit did not apply for {doc}"
+        (proj / doc).write_text(edited, encoding="utf-8")
+        return edited
+
+    def test_clean_section_merge_adopts_merged_when_eligible(self):
+        for roster in ("A", "B"):
+            build_root, reg = _write_build_repo(self.tmp / roster)
+            proj, mp, strat = _build_operator_project(self.tmp / roster, build_root, roster=roster)
+            tw = next(d for d, s in strat.items() if s == "three_way")
+            edited = self._edit_details(proj, tw, "Operator-customized details kept.")
+
+            res = _apply(proj, mp, reg, build_root)
+
+            dec = next(d for d in res.decisions if d.relpath == tw)
+            self.assertEqual(dec.disposition, FILE_MERGED,
+                             f"{roster}: clean non-overlapping edit not section-merged")
+            merged_live = _read(proj / tw)
+            # The merged live carries BOTH the operator's Details edit AND the target's
+            # new Overview — and never a git marker.
+            self.assertIn("Operator-customized details kept.", merged_live)
+            self.assertIn("(v0.5.0)", merged_live)
+            self.assertNotIn("<<<<<<<", merged_live)
+            # Merged files are written (not routed) -> not in review.
+            self.assertIn(tw, res.files_written)
+            self.assertNotIn(tw, res.files_in_review)
+            # The operator's original edit is preserved within the merge result.
+            self.assertIn("Operator-customized details kept.", edited)
+
+    def test_conflicting_section_routes_to_sidecar_live_untouched(self):
+        for roster in ("A", "B"):
+            build_root, reg = _write_build_repo(self.tmp / roster)
+            proj, mp, strat = _build_operator_project(self.tmp / roster, build_root, roster=roster)
+            tw = next(d for d, s in strat.items() if s == "three_way")
+            # Edit the SAME section the target changes (## Overview) differently -> conflict.
+            live = _read(proj / tw)
+            conflicting = live.replace(
+                f"This is the (v0.4.0) overview of {tw}.",
+                "Operator rewrote the overview entirely.",
+            )
+            self.assertNotEqual(conflicting, live)
+            (proj / tw).write_text(conflicting, encoding="utf-8")
+
+            res = _apply(proj, mp, reg, build_root)
+
+            dec = next(d for d in res.decisions if d.relpath == tw)
+            self.assertEqual(dec.disposition, FILE_REVIEW,
+                             f"{roster}: conflicting edit not routed to sidecar")
+            self.assertEqual(_read(proj / tw), conflicting, f"{roster}: live clobbered on conflict")
+            self.assertNotIn("<<<<<<<", _read(proj / tw))
+            self.assertNotIn(tw, res.files_written)
+            sidecar = proj / ".wizard" / "upgrade-review" / res.upgrade_id / (tw + ".new")
+            self.assertTrue(sidecar.exists())
+            self.assertEqual(res.classification, APPLY_RESULT_PARTIAL)
+
+    def test_stale_lineage_routes_never_merged(self):
+        """A file whose live_lineage_version != current version does NOT descend from the
+        current render, so a 3-way merge would run against the WRONG base. Even a
+        would-be-clean non-overlapping edit must route to the sidecar, never merge."""
+        for roster in ("A", "B"):
+            build_root, reg = _write_build_repo(self.tmp / roster)
+            proj, mp, strat = _build_operator_project(self.tmp / roster, build_root,
+                                                      roster=roster, lineage="v0.1.0")
+            tw = next(d for d, s in strat.items() if s == "three_way")
+            self._edit_details(proj, tw, "Operator-customized details kept.")
+
+            res = _apply(proj, mp, reg, build_root)
+
+            dec = next(d for d in res.decisions if d.relpath == tw)
+            self.assertEqual(dec.disposition, FILE_REVIEW,
+                             f"{roster}: stale-lineage file was merged (wrong base risk)")
+            self.assertNotIn(tw, res.files_written)
+
+    def test_legacy_manifest_without_lineage_routes_never_merged(self):
+        """A legacy manifest entry lacking live_lineage_version is treated as NOT eligible
+        (safe back-compat) — a drifted three_way routes to sidecar rather than merging."""
+        for roster in ("A", "B"):
+            build_root, reg = _write_build_repo(self.tmp / roster)
+            proj, mp, strat = _build_operator_project(self.tmp / roster, build_root,
+                                                      roster=roster, lineage=None)
+            tw = next(d for d, s in strat.items() if s == "three_way")
+            self._edit_details(proj, tw, "Operator-customized details kept.")
+
+            res = _apply(proj, mp, reg, build_root)
+
+            dec = next(d for d in res.decisions if d.relpath == tw)
+            self.assertEqual(dec.disposition, FILE_REVIEW,
+                             f"{roster}: legacy (no-lineage) file was merged")
+
+    def test_render_apply_result_names_merged_files_distinctly(self):
+        from upgrade_apply import render_apply_result
+        build_root, reg = _write_build_repo(self.tmp)
+        proj, mp, strat = _build_operator_project(self.tmp, build_root, roster="A")
+        tw = next(d for d, s in strat.items() if s == "three_way")
+        self._edit_details(proj, tw, "Operator-customized details kept.")
+        res = _apply(proj, mp, reg, build_root)
+        out = render_apply_result(res)
+        # The merged doc is reported as MERGED (operator edits combined), not silently
+        # lumped under a plain "updated" list, and never with git-marker jargon.
+        self.assertIn(tw, out)
+        self.assertIn("merged", out.lower())
+        self.assertNotIn("<<<<<<<", out)
+
+    def test_clean_merge_advances_hashes_and_lineage(self):
+        """Manifest semantics after a clean merge (design §4): base_hash + base_content_hash
+        advance to the TARGET render; current_hash_last_seen advances to the MERGED live
+        bytes; live_lineage_version advances to the target (lineage restored to current)."""
+        build_root, reg = _write_build_repo(self.tmp)
+        proj, mp, strat = _build_operator_project(self.tmp, build_root, roster="A")
+        tw = next(d for d, s in strat.items() if s == "three_way")
+        self._edit_details(proj, tw, "Operator-customized details kept.")
+
+        res = _apply(proj, mp, reg, build_root)
+        merged_live = _read(proj / tw)
+        nm = json.loads(_read(mp))
+        entry = nm["managed_files"][tw]
+
+        target = next(r.content for r in render_foundation_docs("v0.5.0", _CAPSULE_INPUTS, build_root)
+                      if r.operator_relpath == tw)
+        self.assertEqual(entry["base_hash"], "sha256:" + sha256_bytes(target.encode("utf-8")),
+                         "base_hash not advanced to target render after clean merge")
+        self.assertEqual(entry["current_hash_last_seen"],
+                         "sha256:" + sha256_bytes(merged_live.encode("utf-8")),
+                         "current_hash_last_seen not advanced to merged-live bytes")
+        self.assertEqual(entry["live_lineage_version"], "v0.5.0",
+                         "live_lineage_version not advanced to target after clean merge")
+
+    def test_routed_three_way_leaves_lineage_unchanged(self):
+        """A routed (conflicting) three_way file keeps its prior live_lineage_version so it
+        stays ineligible next upgrade (keeps routing until reconciled) — while base_hash
+        still advances (the un-stuck-chain invariant)."""
+        build_root, reg = _write_build_repo(self.tmp)
+        proj, mp, strat = _build_operator_project(self.tmp, build_root, roster="A")
+        tw = next(d for d, s in strat.items() if s == "three_way")
+        live = _read(proj / tw)
+        (proj / tw).write_text(
+            live.replace(f"This is the (v0.4.0) overview of {tw}.", "Operator overview rewrite."),
+            encoding="utf-8")
+
+        res = _apply(proj, mp, reg, build_root)
+        dec = next(d for d in res.decisions if d.relpath == tw)
+        self.assertEqual(dec.disposition, FILE_REVIEW)
+        nm = json.loads(_read(mp))
+        # lineage left at the pre-upgrade value (v0.4.0), NOT advanced to v0.5.0.
+        self.assertEqual(nm["managed_files"][tw]["live_lineage_version"], "v0.4.0",
+                         "routed file's lineage wrongly advanced (would re-enable a wrong-base merge)")
 
 
 if __name__ == "__main__":

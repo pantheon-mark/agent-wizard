@@ -49,6 +49,7 @@ from typing import Any, Dict, List, Optional
 
 from generator import render_foundation_docs  # type: ignore
 from replay_capsule import REPLAY_CAPSULE_REL  # type: ignore
+from section_merge import section_three_way_merge  # type: ignore
 from upgrade import (  # type: ignore
     MERGE_STRATEGY_FROZEN,
     MERGE_STRATEGY_OPERATOR_REVIEW,
@@ -79,8 +80,14 @@ APPLY_RESULT_REFUSED = "refused"      # no live writes (gate failed / rollback)
 
 # Per-file dispositions.
 FILE_ADOPTED = "adopted"              # live file replaced with theirs
+FILE_MERGED = "merged"               # live replaced with a clean section-aware 3-way merge
 FILE_UNCHANGED = "unchanged"          # theirs == base; nothing to do
 FILE_REVIEW = "routed_to_review"      # theirs written to sidecar; live left = ours
+
+# Operator-manifest per-file field: the bundle version whose render the LIVE file
+# descends from (set to target on clean adopt/merge; left unchanged on a route). The
+# lineage guard merges a drifted three_way file ONLY when this == the current version.
+LIVE_LINEAGE_VERSION_FIELD = "live_lineage_version"
 
 UPGRADE_REVIEW_DIR_REL = ".wizard/upgrade-review"
 BACKUPS_DIR_REL = ".wizard/backups"
@@ -120,6 +127,7 @@ class UpgradeApplyResult:
     upgrade_id: str = ""
     files_written: List[str] = field(default_factory=list)
     files_in_review: List[str] = field(default_factory=list)
+    files_merged: List[str] = field(default_factory=list)
 
     @property
     def applied(self) -> bool:
@@ -428,6 +436,10 @@ def apply_upgrade(
             "yet. No files were changed."
         ) from e
 
+    # Auto-merge is permitted for this release unless the migration opts out (e.g. a
+    # major/structural release that renames/reorders sections). Wired in Phase 4.
+    auto_merge_enabled = _auto_merge_enabled(migration, current_version, target_version)
+
     # --- 4. Per-file decisions ------------------------------------------------
     decisions: List[FileDecision] = []
     upgrade_id = f"{current_version}-to-{target_version}"
@@ -487,9 +499,32 @@ def apply_upgrade(
                 decisions.append(FileDecision(rel, strategy, FILE_ADOPTED, drifted,
                                               note="no operator edits; adopted the new version"))
             else:
-                review_writes.append((rel, live, theirs, True))
-                decisions.append(FileDecision(rel, strategy, FILE_REVIEW, drifted,
-                                              note="you edited this file; your version was kept and the new version was saved for review"))
+                # Drifted three_way: attempt a SECTION-AWARE 3-way merge, but ONLY when
+                # the live file descends from the current render (lineage guard) AND the
+                # release permits auto-merge. base = the current-version re-render the
+                # replay-conformance gate already verified (base_rendered[rel]); ours =
+                # live; theirs = the target render. A clean merge writes the merged
+                # content live (adopt-like); a conflict / structural ambiguity, an
+                # ineligible lineage, or a disabled release falls back to the review
+                # sidecar with the live file left exactly as the operator left it
+                # (NEVER git conflict markers).
+                eligible = str(meta.get(LIVE_LINEAGE_VERSION_FIELD, "")) == current_version
+                merge = (section_three_way_merge(base_rendered[rel], live, theirs)
+                         if (eligible and auto_merge_enabled) else None)
+                if merge is not None and merge.clean:
+                    staged_writes[rel] = merge.merged
+                    decisions.append(FileDecision(rel, strategy, FILE_MERGED, drifted,
+                                                  note="your edits were merged with the new version"))
+                else:
+                    if merge is not None and not merge.clean:
+                        note = ("your edits overlap with the new version, so they could not "
+                                "be merged automatically; your version was kept and the new "
+                                "version was saved for review")
+                    else:
+                        note = ("you edited this file; your version was kept and the new "
+                                "version was saved for review")
+                    review_writes.append((rel, live, theirs, True))
+                    decisions.append(FileDecision(rel, strategy, FILE_REVIEW, drifted, note=note))
         elif strategy == MERGE_STRATEGY_OPERATOR_REVIEW:
             review_writes.append((rel, live, theirs, False))
             decisions.append(FileDecision(rel, strategy, FILE_REVIEW, drifted,
@@ -539,10 +574,12 @@ def apply_upgrade(
                 sp.parent.mkdir(parents=True, exist_ok=True)
                 sp.write_text(content, encoding="utf-8")
 
+            routed_relpaths = {d.relpath for d in decisions if d.disposition == FILE_REVIEW}
             new_manifest = _recompute_manifest(
                 manifest, target_entry, target_version, staged_writes,
                 foundation_entries, target_generator_version,
                 theirs_rendered=theirs_rendered,
+                routed_relpaths=routed_relpaths,
             )
             sm = staging / MANIFEST_REL
             sm.parent.mkdir(parents=True, exist_ok=True)
@@ -589,6 +626,7 @@ def apply_upgrade(
     # --- 6. Classify ----------------------------------------------------------
     files_written = sorted(staged_writes)
     files_in_review = sorted(d.relpath for d in decisions if d.disposition == FILE_REVIEW)
+    files_merged = sorted(d.relpath for d in decisions if d.disposition == FILE_MERGED)
     classification = APPLY_RESULT_PARTIAL if files_in_review else APPLY_RESULT_APPLIED
 
     return UpgradeApplyResult(
@@ -601,6 +639,7 @@ def apply_upgrade(
         upgrade_id=upgrade_id,
         files_written=files_written,
         files_in_review=files_in_review,
+        files_merged=files_merged,
     )
 
 
@@ -617,9 +656,18 @@ def render_apply_result(result: UpgradeApplyResult) -> str:
     if result.backup_dir:
         lines.append(f"  backup:       {result.backup_dir}")
     lines.append("")
-    if result.files_written:
+    merged_set = set(result.files_merged)
+    adopted = [rel for rel in result.files_written if rel not in merged_set]
+    if adopted:
         lines.append("Updated to the new version:")
-        for rel in result.files_written:
+        for rel in adopted:
+            lines.append(f"  - {rel}")
+    if result.files_merged:
+        if adopted:
+            lines.append("")
+        lines.append("Merged your edits with the new version (your changes were kept "
+                     "and the new wording added around them):")
+        for rel in result.files_merged:
             lines.append(f"  - {rel}")
     if result.files_in_review:
         lines.append("")
@@ -637,6 +685,13 @@ def render_apply_result(result: UpgradeApplyResult) -> str:
     if not result.files_written and not result.files_in_review:
         lines.append("No files needed changing for this version.")
     return "\n".join(lines) + "\n"
+
+
+def _auto_merge_enabled(migration: Dict[str, Any], current_version: str, target_version: str) -> bool:
+    """Whether the section-aware text-merge driver may auto-merge drifted three_way docs
+    for this release. Phase 2: always enabled. (Phase 4 honors a migration opt-out for
+    major/structural releases.)"""
+    return True
 
 
 def _atomic_replace(src: Path, dest: Path) -> None:
@@ -671,6 +726,7 @@ def _recompute_manifest(
     target_generator_version: Optional[str],
     *,
     theirs_rendered: Dict[str, str],
+    routed_relpaths: Optional[set] = None,
 ) -> Dict[str, Any]:
     """Return a NEW manifest dict reflecting the apply (Finding A dual-hash fix).
 
@@ -687,10 +743,16 @@ def _recompute_manifest(
       replay-conformance gate verifies the capsule+generator reproduce the recorded
       canonical bytes at current_version, not that the live file equals canonical, so
       advancing routed files is correct.
-    - current_hash_last_seen advances ONLY for cleanly ADOPTED files (staged_writes),
-      preserving the true merge-ancestor pointer the deferred real-text-merge driver
-      needs for routed/unchanged files.
+    - current_hash_last_seen advances ONLY for cleanly written files (staged_writes —
+      adopted OR section-merged), preserving the true merge-ancestor pointer for
+      routed/unchanged files.
+    - live_lineage_version: advances to the target for every surviving file
+      EXCEPT those routed to the review sidecar. A routed file keeps its prior lineage
+      so it stays ineligible (keeps routing) until the operator reconciles it — its live
+      content does NOT descend from render(target). Adopted / merged / content-unchanged
+      live content DOES descend from render(target), so its lineage advances.
     """
+    routed = routed_relpaths or set()
     new_manifest = json.loads(json.dumps(manifest))  # deep copy, JSON-clean
     new_manifest["foundation_bundle_version"] = target_version
     if target_entry.get("source_commit"):
@@ -711,10 +773,17 @@ def _recompute_manifest(
         entry["base_hash"] = "sha256:" + sha256_bytes(target_text.encode("utf-8"))
         entry["base_content_hash"] = _content_hash(target_text)
         if rel in staged_writes:
-            # Cleanly adopted: the live file now equals the target render; advance the
-            # merge-ancestor pointer. (staged bytes == target render for adopted docs.)
+            # Cleanly written (adopted or section-merged): the live file now equals the
+            # staged bytes; advance the merge-ancestor pointer to what we actually wrote
+            # (== target render for adopted; == merged content for a clean merge).
             entry["current_hash_last_seen"] = "sha256:" + sha256_bytes(
                 staged_writes[rel].encode("utf-8")
             )
+        if rel not in routed:
+            # Live content descends from render(target) (adopted / merged / unchanged) —
+            # restore lineage to current so a future drift is merge-eligible. A routed
+            # file keeps its prior lineage (left absent if it had none) and stays
+            # ineligible until reconciled.
+            entry[LIVE_LINEAGE_VERSION_FIELD] = target_version
         files_block[rel] = entry
     return new_manifest
