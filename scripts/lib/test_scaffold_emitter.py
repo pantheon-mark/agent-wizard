@@ -122,7 +122,12 @@ class ScaffoldEmitterTests(unittest.TestCase):
             self.assertTrue(sp.stat().st_mode & stat.S_IXUSR, f".claude/{script} not executable")
         # The actual context signal comes from Claude Code's built-in statusline JSON
         # field (portable to any project), not an AWB-specific source.
-        self.assertIn("used_percentage", (staging / ".claude" / "statusline.sh").read_text())
+        statusline = (staging / ".claude" / "statusline.sh").read_text()
+        self.assertIn("used_percentage", statusline)
+        # The statusline also surfaces the plan usage limits (5h + 7d) — load-bearing
+        # for a non-technical operator on a budget.
+        self.assertIn("five_hour", statusline, "statusline omits the 5h usage limit")
+        self.assertIn("seven_day", statusline, "statusline omits the 7d usage limit")
 
     def test_start_session_launches_with_orientation_kickoff_not_bare(self):
         # A bare `claude` launch sits at a silent prompt — a non-technical operator who
