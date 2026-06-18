@@ -138,7 +138,9 @@ class ScaffoldEmitterTests(unittest.TestCase):
         import re
         staging, _ = self._emit()
         sess = (staging / "start-session.sh").read_text()
-        m = re.search(r'^\s*claude --model "\$MODEL" --effort high(.*)$', sess, re.M)
+        # Tolerate flags between --model and --effort (e.g. --fallback-model for the 1M
+        # high tier) — the captured tail after `--effort high` must still be the kickoff prompt.
+        m = re.search(r'^\s*claude --model "\$MODEL".*?--effort high(.*)$', sess, re.M)
         self.assertIsNotNone(m, "could not find the claude launch line")
         self.assertTrue(
             m.group(1).strip(),

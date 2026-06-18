@@ -2,9 +2,9 @@
   "contract_id": "model-tiers",
   "contract_version": "model-tiers-v1",
   "system_shape": "markdown-CC",
-  "maintained_note": "Maintained tier->model resolution for emitted operator systems. The scaffold-plan keeps shape-correct PLACEHOLDERS (model-high/standard/fast); this registry supplies the real generation-time --model resolution (the wizard's programmatic-model rule: an emitted start-session.sh must carry a real --model, never a manually-selected one) through the assembler's model_tiers override seam. UPDATE these strings when the prescribed Claude family changes; the update propagates to operator projects through the foundation-versioning upgrade path. Budget-conditioned tiering is intentionally OUT of v0 scope: one fixed family map, no budget-driven downgrade.",
+  "maintained_note": "Maintained tier->model resolution for emitted operator systems. The scaffold-plan keeps shape-correct PLACEHOLDERS (model-high/standard/fast); this registry supplies the real generation-time --model resolution (the wizard's programmatic-model rule: an emitted start-session.sh must carry a real --model, never a manually-selected one) through the assembler's model_tiers override seam. UPDATE these strings when the prescribed Claude family changes; the update propagates to operator projects through the foundation-versioning upgrade path. Budget-conditioned tiering is intentionally OUT of v0 scope: one fixed family map, no budget-driven downgrade. The HIGH tier carries the [1m] suffix to select the 1M-context window in Claude Code (the only scriptable selector; bare claude-opus-4-8 defaults to 200K); the emitted launch scripts name a graceful --fallback-model (the same id minus [1m]) so an account/plan without the 1M variant degrades to standard context instead of failing. standard/fast stay non-1M (Sonnet 1M costs subscription credits; Haiku has no 1M variant).",
   "model_tiers": {
-    "high": "claude-opus-4-8",
+    "high": "claude-opus-4-8[1m]",
     "standard": "claude-sonnet-4-6",
     "fast": "claude-haiku-4-5-20251001"
   }

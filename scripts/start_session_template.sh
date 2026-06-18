@@ -9,8 +9,14 @@
 
 set -euo pipefail
 
-# Model — resolved by the wizard from the tier mapping at setup time
+# Model — resolved by the wizard from the tier mapping at setup time.
+# The high tier carries a trailing [1m] suffix to select the 1-million-token context
+# window in Claude Code. That variant is not available on every account/plan, so we name
+# a graceful fallback: the same model id with [1m] stripped (the standard 200K window).
+# --fallback-model engages it if the 1M variant is unavailable. For a non-1M model id the
+# fallback equals the model (no degradation). ${MODEL%\[1m\]} removes a trailing literal "[1m]".
 MODEL="{{MODEL_HIGH}}"
+FALLBACK_MODEL="${MODEL%\[1m\]}"
 
 # Resolve project directory from the script's own location
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -106,6 +112,8 @@ echo ""
 # --effort high: this system's sessions reason at the high tier (the wizard resolved
 # MODEL_HIGH above). Extended-thinking budgets are not a CLI flag; --effort is the
 # supported knob for session reasoning effort (low|medium|high|xhigh|max).
+# --fallback-model: degrade to the standard-context model if the 1M-context [1m] variant
+# is unavailable on this account/plan, so launch never hard-fails over the context window.
 # The trailing positional argument is the kickoff prompt (the session's first message),
 # so the session orients + surfaces the next step instead of waiting at a blank prompt.
-claude --model "$MODEL" --effort high "$KICKOFF"
+claude --model "$MODEL" --fallback-model "$FALLBACK_MODEL" --effort high "$KICKOFF"

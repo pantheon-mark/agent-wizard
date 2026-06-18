@@ -279,6 +279,22 @@ class RuntimeSmokeTests(unittest.TestCase):
         self.assertEqual(doc["status"], "FAILED")
         self.assertEqual(doc["stop_reason"], "error")
 
+    def test_high_tier_launch_has_graceful_1m_fallback(self):
+        """F-05: the high tier resolves to the 1M-context variant (model-id [1m] suffix), which
+        is not available on every account/plan. The emitted launch scripts must therefore name
+        a graceful --fallback-model so a 1M-less account degrades to the standard context window
+        instead of failing at launch. Covers start-session.sh (the operator's main session) and
+        every emitted agent invocation script. (--fallback-model is a real claude flag, so the
+        flag-surface guard stays green.)"""
+        staging = self._emit()
+        targets = [staging / "start-session.sh"] + sorted((staging / "agents" / "scripts").glob("*.sh"))
+        missing = [t.name for t in targets
+                   if "--fallback-model" not in t.read_text(encoding="utf-8")]
+        self.assertEqual(missing, [],
+                         "F-05: emitted launch scripts must name a graceful --fallback-model for "
+                         f"the [1m] high tier (degrade to standard context if 1M unavailable); "
+                         f"missing in: {missing}")
+
     def test_bash_n_on_every_emitted_script(self):
         staging = self._emit()
         scripts = sorted(staging.rglob("*.sh"))

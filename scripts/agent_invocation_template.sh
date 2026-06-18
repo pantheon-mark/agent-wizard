@@ -132,9 +132,15 @@ echo "| ${TIMESTAMP} | ${AGENT_NAME} | STARTED | task:${TASK_ID} |" >> "$SESSION
 # lets the headless agent write its outputs/checkpoints without an interactive prompt
 # (there is no TTY in -p mode); the agent's own prompt still enforces the Tier-1 ask-first
 # gates. The agent's foundational-document-integrity constraint lives in its prompt file.
+# --fallback-model degrades to the standard-context model if this agent's tier resolves to
+# the 1M-context [1m] variant and that variant is unavailable on this account/plan. For a
+# non-1M tier the fallback equals the model (no degradation). ${AGENT_MODEL%\[1m\]} strips a
+# trailing literal "[1m]" suffix.
+FALLBACK_MODEL="${AGENT_MODEL%\[1m\]}"
 EXIT_CODE=0
 claude \
   --model "$AGENT_MODEL" \
+  --fallback-model "$FALLBACK_MODEL" \
   --permission-mode acceptEdits \
   --append-system-prompt "$(cat "$PROMPT_FILE")" \
   --print \

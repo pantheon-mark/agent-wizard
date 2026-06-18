@@ -36,6 +36,19 @@ class LoaderTests(unittest.TestCase):
     def test_exactly_the_three_tiers(self):
         self.assertEqual(set(load_model_tiers(SHAPE).keys()), {"high", "standard", "fast"})
 
+    def test_high_tier_selects_1m_context_variant(self):
+        """F-05: the high tier must select the 1M-context model variant. On the Claude Code
+        CLI the 1M window is chosen by the [1m] model-id suffix (the only scriptable selector;
+        bare claude-opus-4-8 defaults to the 200K window). standard/fast stay non-1M
+        (F-05 scope = high only: Sonnet 1M costs subscription credits; Haiku has no 1M variant)."""
+        mt = load_model_tiers(SHAPE)
+        self.assertTrue(mt["high"].endswith("[1m]"),
+                        f"high tier {mt['high']!r} must select the 1M variant via the [1m] suffix")
+        self.assertFalse(mt["standard"].endswith("[1m]"),
+                         f"standard-tier 1M is out of F-05 scope; got {mt['standard']!r}")
+        self.assertFalse(mt["fast"].endswith("[1m]"),
+                         f"fast tier has no 1M variant; got {mt['fast']!r}")
+
     def test_unknown_shape_fails_closed(self):
         with self.assertRaises(ModelTiersError):
             load_model_tiers("no-such-shape")
