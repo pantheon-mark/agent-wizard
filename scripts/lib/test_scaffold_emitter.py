@@ -100,6 +100,30 @@ class ScaffoldEmitterTests(unittest.TestCase):
         sess = staging / "start-session.sh"
         self.assertTrue(sess.stat().st_mode & stat.S_IXUSR, "start-session.sh is not executable")
 
+    def test_claude_config_emitted_with_statusline_and_context_hook(self):
+        # F-04: every emitted operator system ships a .claude/ config so it can SEE its
+        # actual context (the operator via the statusline, the session via the context-
+        # monitor hook) instead of guessing — making the CLAUDE.md context-integrity
+        # protocol runnable on real data.
+        import json as _json
+        staging, _ = self._emit()
+        settings_path = staging / ".claude" / "settings.json"
+        self.assertTrue(settings_path.exists(), ".claude/settings.json not emitted")
+        settings = _json.loads(settings_path.read_text())
+        self.assertIn("statusLine", settings, "settings.json has no statusLine")
+        hooks = settings.get("hooks", {})
+        self.assertTrue(
+            any("context_monitor" in _json.dumps(hooks).lower() for _ in [0]),
+            "settings.json hooks do not wire the context monitor",
+        )
+        for script in ("statusline.sh", "context_monitor.sh"):
+            sp = staging / ".claude" / script
+            self.assertTrue(sp.exists(), f".claude/{script} not emitted")
+            self.assertTrue(sp.stat().st_mode & stat.S_IXUSR, f".claude/{script} not executable")
+        # The actual context signal comes from Claude Code's built-in statusline JSON
+        # field (portable to any project), not an AWB-specific source.
+        self.assertIn("used_percentage", (staging / ".claude" / "statusline.sh").read_text())
+
     def test_start_session_launches_with_orientation_kickoff_not_bare(self):
         # A bare `claude` launch sits at a silent prompt — a non-technical operator who
         # runs ./start-session.sh sees "nothing happened" and the CLAUDE.md

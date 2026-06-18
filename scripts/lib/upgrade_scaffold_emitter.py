@@ -141,6 +141,7 @@ _DIR_LIFECYCLE = {
     "quality/": "inherited_content",
     "security/": "operator_config",
     "wizard/": "operator_fill_template",   # operator's build-session materials (review prompts / skill templates)
+    ".claude/": "inherited_content",       # Claude Code config (statusline + context-monitor hook + settings); wizard-authored
 }
 
 

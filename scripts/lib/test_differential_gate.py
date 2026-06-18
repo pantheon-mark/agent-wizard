@@ -96,6 +96,9 @@ ALLOWLIST_UNIFIED_ADDITIONS = {
     "agents/scripts/researcher.sh": "per-agent invocation script emitted deterministically; legacy built agents post-wizard",
     "wizard_feedback.md": "operator feedback file the generator seeds; legacy did not emit it",
     "build_progress.md": "per-phase acceptance ledger the generator seeds; legacy had no build-progress tracking",
+    ".claude/settings.json": "Claude Code config wiring the statusline + context-monitor hook so the system runs on real context data; legacy emitted no .claude/ config",
+    ".claude/statusline.sh": "statusline showing actual context % (Claude Code built-in field) to operator + session; legacy had none",
+    ".claude/context_monitor.sh": "context-monitor hook surfacing actual context % so the context-integrity protocol runs on real data, not guesses; legacy had none",
 }
 
 CRITICAL_FILES = (

@@ -42,6 +42,11 @@ SCAFFOLD_SUBDIRS = ("root", "logs", "quality", "work", "docs", "security", "arch
 
 TEMPLATES_REL = "wizard/templates"
 START_SESSION_TEMPLATE = "wizard/scripts/start_session_template.sh"
+# Claude Code config emitted into the operator project's .claude/ so the system can SEE
+# its actual context (statusline + context-monitor hook) instead of guessing. Static
+# files (no {{placeholders}}); the .sh scripts are emitted executable.
+CLAUDE_CONFIG_REL = "wizard/templates/claude_config"
+CLAUDE_CONFIG_SCRIPTS = ("statusline.sh", "context_monitor.sh")
 
 # Files the scaffold layer must NOT emit (owned elsewhere or wizard-internal).
 EXCLUDE_BASENAMES = {"_index.md"}
@@ -272,5 +277,17 @@ def emit_scaffold(plan: EmissionPlan, staging_dir: Path, build_repo_root: Path,
     sess_dest.write_text(result, encoding="utf-8")
     sess_dest.chmod(SCRIPT_MODE)
     written.append(sess_dest)
+
+    # .claude/ config (statusline + context-monitor hook + settings) — emitted verbatim
+    # (static, no placeholders); the shell scripts are made executable.
+    claude_src = build_repo_root / CLAUDE_CONFIG_REL
+    claude_dir = staging_dir / ".claude"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("settings.json",) + CLAUDE_CONFIG_SCRIPTS:
+        dest = claude_dir / name
+        dest.write_text((claude_src / name).read_text(encoding="utf-8"), encoding="utf-8")
+        if name.endswith(".sh"):
+            dest.chmod(SCRIPT_MODE)
+        written.append(dest)
 
     return written
