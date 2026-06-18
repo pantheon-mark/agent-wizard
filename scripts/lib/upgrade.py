@@ -585,6 +585,7 @@ def compute_drift_report(
         if not isinstance(meta, dict):
             raise OperatorManifestError(f"managed_files['{rel_path}'] must be a dict")
         base_hash = meta.get("base_hash", "")
+        base_content_hash = meta.get("base_content_hash", "")
         merge_strategy = meta.get("merge_strategy", MERGE_STRATEGY_OPERATOR_REVIEW)
         local_mods = meta.get("local_modifications", "")
         abs_path = operator_project_dir / rel_path
@@ -598,7 +599,17 @@ def compute_drift_report(
             continue
         current_hash_hex = sha256_file(abs_path)
         current_hash = f"sha256:{current_hash_hex}"
-        if base_hash.startswith("sha256:") and base_hash[len("sha256:"):] == current_hash_hex:
+        if base_content_hash.startswith("sha256:"):
+            # Reconciled with apply_upgrade (which keys drift off base_content_hash):
+            # compare the CONTENT-normalized hash (write-only foundation_schema_version
+            # value blanked) so a pure schema-version frontmatter bump — left on the live
+            # file when an upgrade advances base_hash to a content-unchanged target
+            # render — is NOT reported as operator drift. Falls back to the full base_hash
+            # for legacy manifests that predate base_content_hash.
+            current_content_hash = "sha256:" + sha256_bytes(
+                normalize_for_content_hash(abs_path.read_text(encoding="utf-8")).encode("utf-8"))
+            status = DRIFT_NONE if current_content_hash == base_content_hash else DRIFT_DETECTED
+        elif base_hash.startswith("sha256:") and base_hash[len("sha256:"):] == current_hash_hex:
             status = DRIFT_NONE
         elif base_hash == "" or base_hash == current_hash:
             status = DRIFT_NONE

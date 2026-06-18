@@ -55,7 +55,9 @@ from upgrade import (  # type: ignore
     MERGE_STRATEGY_OPERATOR_REVIEW,
     MERGE_STRATEGY_THREE_WAY,
     MERGE_STRATEGY_WARN_ON_DRIFT,
+    TIER_MAJOR_BREAKING,
     UpgradeError,
+    classify_tier,
     find_bundle_entry,
     find_migration_entry,
     load_migration_manifest,
@@ -443,7 +445,6 @@ def apply_upgrade(
     # --- 4. Per-file decisions ------------------------------------------------
     decisions: List[FileDecision] = []
     upgrade_id = f"{current_version}-to-{target_version}"
-    review_dir = operator_project_dir / UPGRADE_REVIEW_DIR_REL / upgrade_id
 
     # Plan the staged writes: relpath -> bytes-to-write-into-live.
     staged_writes: Dict[str, str] = {}
@@ -602,26 +603,49 @@ def apply_upgrade(
                         "files were changed."
                     )
 
-            # All staged + validated. Commit: write review sidecars, atomic-replace
-            # content + manifest, append history.
+            # Stage the review sidecars into the temp tree too (hardening, design §5): a
+            # sidecar write failure then happens in staging, never in the live tree. The
+            # staged review dir mirrors the operator layout, so the returned relpaths are
+            # the live relpaths to os.replace into place during commit.
+            staging_review_dir = staging / UPGRADE_REVIEW_DIR_REL / upgrade_id
+            review_rel_paths: List[str] = []
             for rel, ours, theirs, overlay in review_writes:
-                review_paths_written.extend(
-                    _write_review_sidecar(review_dir, rel, ours, theirs, overlay_note=overlay)
+                review_rel_paths.extend(
+                    _write_review_sidecar(staging_review_dir, rel, ours, theirs, overlay_note=overlay)
                 )
 
+            # All staged + validated. Commit: per-file atomic os.replace of content +
+            # sidecars + manifest, then append history. Any OSError here triggers the
+            # broadened rollback below.
             for rel in staged_writes:
                 _atomic_replace(staging / rel, operator_project_dir / rel)
+            for rrel in review_rel_paths:
+                _atomic_replace(staging / rrel, operator_project_dir / rrel)
+                review_paths_written.append(rrel)
             _atomic_replace(staging / MANIFEST_REL, manifest_path)
 
             hist = operator_project_dir / UPGRADE_HISTORY_REL
             with hist.open("a", encoding="utf-8") as f:
                 f.write(history_line)
 
-    except UpgradeApplyError:
+    except (UpgradeApplyError, OSError) as e:
         if backup and backup_dir:
             _restore_backup(operator_project_dir, Path(backup_dir),
                             sorted(staged_writes))
-        raise
+        # Remove any review sidecars committed before the failure — they did not exist
+        # before this upgrade and are not part of the backup snapshot.
+        live_review = operator_project_dir / UPGRADE_REVIEW_DIR_REL / upgrade_id
+        if live_review.exists():
+            shutil.rmtree(live_review, ignore_errors=True)
+        review_parent = operator_project_dir / UPGRADE_REVIEW_DIR_REL
+        if review_parent.exists() and not any(review_parent.iterdir()):
+            shutil.rmtree(review_parent, ignore_errors=True)
+        if isinstance(e, UpgradeApplyError):
+            raise
+        raise UpgradeApplyError(
+            f"the upgrade could not be completed due to a filesystem error: {e}. Your "
+            "files were restored from the pre-upgrade backup; no changes were kept."
+        ) from e
 
     # --- 6. Classify ----------------------------------------------------------
     files_written = sorted(staged_writes)
@@ -689,9 +713,19 @@ def render_apply_result(result: UpgradeApplyResult) -> str:
 
 def _auto_merge_enabled(migration: Dict[str, Any], current_version: str, target_version: str) -> bool:
     """Whether the section-aware text-merge driver may auto-merge drifted three_way docs
-    for this release. Phase 2: always enabled. (Phase 4 honors a migration opt-out for
-    major/structural releases.)"""
-    return True
+    for this release.
+
+    An explicit migration `auto_merge` flag wins (a release can force sidecar-only with
+    `auto_merge: false`, or force merging on with `auto_merge: true`). With no explicit
+    flag, the default is ON for minor/patch releases and OFF for major-breaking releases —
+    a major/structural release may rename/reorder/rewrite sections, where a section-keyed
+    merge could silently combine content across a structural change; routing theirs to the
+    review sidecar is the safe default there. The operator can still hand-apply from the
+    sidecar."""
+    flag = migration.get("auto_merge")
+    if isinstance(flag, bool):
+        return flag
+    return classify_tier(current_version, target_version) != TIER_MAJOR_BREAKING
 
 
 def _atomic_replace(src: Path, dest: Path) -> None:

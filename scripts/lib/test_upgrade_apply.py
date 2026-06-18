@@ -88,7 +88,7 @@ def _template_body(doc_name: str, version_label: str, *, extra_placeholder: bool
 
 def _write_bundle(build_root: Path, version: str, *, doc_version_labels=None,
                   extra_placeholder_doc=None, migration_from="v0.4.0",
-                  migration_class="minor-additive", stop_condition=""):
+                  migration_class="minor-additive", stop_condition="", migration_extra=None):
     """Create a synthetic foundation bundle under build_root."""
     labels = doc_version_labels or {d: version for d in _TEMPLATE_DOCS}
     bundle_dir = build_root / "wizard" / "foundation-bundles" / version
@@ -106,17 +106,20 @@ def _write_bundle(build_root: Path, version: str, *, doc_version_labels=None,
         encoding="utf-8",
     )
     # migration manifest
+    migration = {
+        "from": migration_from,
+        "class": migration_class,
+        "requires_operator_approval": True,
+        "stop_condition": stop_condition,
+        "breaking_changes_summary": "",
+        "supported": True,
+    }
+    if migration_extra:
+        migration.update(migration_extra)
     (bundle_dir / "migration-manifest.json").write_text(
         json.dumps({
             "target_version": version,
-            "migrations": [{
-                "from": migration_from,
-                "class": migration_class,
-                "requires_operator_approval": True,
-                "stop_condition": stop_condition,
-                "breaking_changes_summary": "",
-                "supported": True,
-            }],
+            "migrations": [migration],
         }, indent=2) + "\n",
         encoding="utf-8",
     )
@@ -125,7 +128,8 @@ def _write_bundle(build_root: Path, version: str, *, doc_version_labels=None,
 
 def _write_build_repo(tmp: Path, *, target_extra_placeholder_doc=None,
                       target_stop_condition="", base_version="v0.4.0",
-                      target_version="v0.5.0"):
+                      target_version="v0.5.0", target_migration_class="minor-additive",
+                      target_migration_extra=None):
     """Build a synthetic build repo with registry + contract + two bundles.
     Returns (build_root, registry_path)."""
     build_root = tmp / "build_repo"
@@ -138,8 +142,9 @@ def _write_build_repo(tmp: Path, *, target_extra_placeholder_doc=None,
     _write_bundle(build_root, base_version, migration_from=base_version)
     _write_bundle(build_root, target_version,
                   extra_placeholder_doc=target_extra_placeholder_doc,
-                  migration_from=base_version, migration_class="minor-additive",
-                  stop_condition=target_stop_condition)
+                  migration_from=base_version, migration_class=target_migration_class,
+                  stop_condition=target_stop_condition,
+                  migration_extra=target_migration_extra)
 
     registry = {
         "schema_version": "v1",
@@ -874,6 +879,164 @@ class SectionMergeIntegrationTests(_Base):
         # lineage left at the pre-upgrade value (v0.4.0), NOT advanced to v0.5.0.
         self.assertEqual(nm["managed_files"][tw]["live_lineage_version"], "v0.4.0",
                          "routed file's lineage wrongly advanced (would re-enable a wrong-base merge)")
+
+
+class TransactionHardeningTests2(_Base):
+    """Design §5 hardening: an OSError mid-commit (after review sidecars + content are
+    already in the live tree) must roll back EVERYTHING — restore the live docs + manifest
+    from the backup AND remove the partially-written review sidecars — and surface a
+    refusal, never leave a half-applied tree."""
+
+    def test_oserror_during_commit_rolls_back_and_removes_sidecars(self):
+        build_root, reg = _write_build_repo(self.tmp)
+        proj, mp, strat = _build_operator_project(self.tmp, build_root, roster="A")
+        # Conflict one three_way doc (operator replaces the heading the target edits) so a
+        # review sidecar is written; other docs adopt (content writes).
+        tw = next(d for d, s in strat.items() if s == "three_way")
+        (proj / tw).write_text("# operator total rewrite\nno shared sections\n", encoding="utf-8")
+        before = {d: _read(proj / d) for d in _TEMPLATE_DOCS}
+        before_manifest = _read(mp)
+
+        import upgrade_apply as ua
+        real = ua._atomic_replace
+
+        def flaky(src, dest):
+            # Fail when committing the manifest — by then sidecars + content are in live.
+            if str(dest).endswith("manifest.json"):
+                raise OSError("disk full (injected)")
+            return real(src, dest)
+
+        ua._atomic_replace = flaky
+        try:
+            with self.assertRaises(UpgradeApplyError):
+                _apply(proj, mp, reg, build_root)
+        finally:
+            ua._atomic_replace = real
+
+        # All live docs + manifest rolled back to their pre-apply bytes.
+        for d in _TEMPLATE_DOCS:
+            self.assertEqual(_read(proj / d), before[d], f"{d} not rolled back after OSError")
+        self.assertEqual(_read(mp), before_manifest, "manifest not rolled back after OSError")
+        # The conflicting operator edit is preserved (live = ours).
+        self.assertEqual(_read(proj / tw), "# operator total rewrite\nno shared sections\n")
+        # No review sidecars left behind.
+        self.assertFalse((proj / ".wizard" / "upgrade-review").exists(),
+                         "review sidecars left behind after rollback")
+
+
+class MigrationOptOutTests(_Base):
+    """Design §6: a release may force sidecar-only (disable auto-merge) — e.g. a
+    major/structural release that renames/reorders/rewrites sections, where a
+    section-keyed merge could silently combine across a structural change. An explicit
+    migration `auto_merge: false` forces routing; major-breaking releases default OFF;
+    minor/patch releases default ON."""
+
+    def _edit_details(self, proj: Path, doc: str) -> str:
+        live = _read(proj / doc)
+        edited = live.replace(f"## Details\n\nStable details for {doc}.\n",
+                              "## Details\n\nOperator-customized details kept.\n")
+        assert edited != live, f"details edit did not apply for {doc}"
+        (proj / doc).write_text(edited, encoding="utf-8")
+        return edited
+
+    def test_explicit_auto_merge_false_forces_sidecar(self):
+        for roster in ("A", "B"):
+            build_root, reg = _write_build_repo(self.tmp / roster,
+                                                target_migration_extra={"auto_merge": False})
+            proj, mp, strat = _build_operator_project(self.tmp / roster, build_root, roster=roster)
+            tw = next(d for d, s in strat.items() if s == "three_way")
+            self._edit_details(proj, tw)
+            res = _apply(proj, mp, reg, build_root)
+            dec = next(d for d in res.decisions if d.relpath == tw)
+            self.assertEqual(dec.disposition, FILE_REVIEW,
+                             f"{roster}: auto_merge:false did not force the sidecar")
+
+    def test_major_breaking_defaults_to_sidecar(self):
+        build_root, reg = _write_build_repo(self.tmp, target_version="v1.0.0",
+                                            target_migration_class="major-breaking")
+        proj, mp, strat = _build_operator_project(self.tmp, build_root, roster="A")
+        tw = next(d for d, s in strat.items() if s == "three_way")
+        self._edit_details(proj, tw)
+        res = _apply(proj, mp, reg, build_root, target_version="v1.0.0")
+        dec = next(d for d in res.decisions if d.relpath == tw)
+        self.assertEqual(dec.disposition, FILE_REVIEW,
+                         "major-breaking release auto-merged by default (should default off)")
+
+    def test_major_breaking_explicit_auto_merge_true_merges(self):
+        build_root, reg = _write_build_repo(self.tmp, target_version="v1.0.0",
+                                            target_migration_class="major-breaking",
+                                            target_migration_extra={"auto_merge": True})
+        proj, mp, strat = _build_operator_project(self.tmp, build_root, roster="A")
+        tw = next(d for d, s in strat.items() if s == "three_way")
+        self._edit_details(proj, tw)
+        res = _apply(proj, mp, reg, build_root, target_version="v1.0.0")
+        dec = next(d for d in res.decisions if d.relpath == tw)
+        self.assertEqual(dec.disposition, FILE_MERGED,
+                         "explicit auto_merge:true on a major release did not merge")
+
+    def test_minor_additive_merges_by_default(self):
+        build_root, reg = _write_build_repo(self.tmp)
+        proj, mp, strat = _build_operator_project(self.tmp, build_root, roster="A")
+        tw = next(d for d, s in strat.items() if s == "three_way")
+        self._edit_details(proj, tw)
+        res = _apply(proj, mp, reg, build_root)
+        dec = next(d for d in res.decisions if d.relpath == tw)
+        self.assertEqual(dec.disposition, FILE_MERGED)
+
+
+class DriftReportReconciliationTests(_Base):
+    """compute_drift_report (plan-only upgrade-check) must agree with apply_upgrade on what
+    counts as operator drift. Both key off the content-normalized hash (base_content_hash)
+    so a pure foundation_schema_version frontmatter difference — which arises after an
+    upgrade advances base_hash to a target render whose only delta on a content-unchanged
+    doc is the write-only schema-version bump — is NOT reported as drift by the plan while
+    the apply treats it as clean."""
+
+    def _manifest(self, *, with_content_hash: bool):
+        from upgrade import sha256_bytes, normalize_for_content_hash
+        # Live file: schema v0.3 + body. base_hash = the FULL hash of a render whose only
+        # difference is the bumped schema value (v0.4) -> mismatches the live full hash.
+        live = "---\nfoundation_schema_version: v0.3\n---\n# T\n\nbody\n"
+        (self.tmp / "vision.md").write_text(live, encoding="utf-8")
+        target_render = "---\nfoundation_schema_version: v0.4\n---\n# T\n\nbody\n"
+        base_hash = "sha256:" + sha256_bytes(target_render.encode("utf-8"))
+        base_content = "sha256:" + sha256_bytes(
+            normalize_for_content_hash(target_render).encode("utf-8"))
+        entry = {
+            "managed": "true", "managed_by": "shared",
+            "base_hash": base_hash, "current_hash_last_seen": base_hash,
+            "local_modifications": "expected", "merge_strategy": "operator_review",
+            "source_refs": [],
+        }
+        if with_content_hash:
+            entry["base_content_hash"] = base_content
+        return {
+            "manifest_schema_version": "manifest-v2",
+            "foundation_bundle_version": "v0.5.0",
+            "generator_version": "f" * 40,
+            "managed_files": {"vision.md": entry},
+        }
+
+    def test_schema_only_difference_not_drift_when_content_hash_present(self):
+        from upgrade import compute_drift_report, DRIFT_NONE
+        report = compute_drift_report(self.tmp, self._manifest(with_content_hash=True))
+        self.assertEqual(report.entries[0].status, DRIFT_NONE,
+                         "plan-only reports a pure schema-version diff as drift (disagrees with apply)")
+
+    def test_real_body_edit_still_reported_as_drift(self):
+        from upgrade import compute_drift_report, DRIFT_DETECTED
+        m = self._manifest(with_content_hash=True)
+        (self.tmp / "vision.md").write_text(
+            "---\nfoundation_schema_version: v0.3\n---\n# T\n\nEDITED body\n", encoding="utf-8")
+        report = compute_drift_report(self.tmp, m)
+        self.assertEqual(report.entries[0].status, DRIFT_DETECTED)
+
+    def test_legacy_manifest_without_content_hash_uses_full_hash(self):
+        # No base_content_hash -> legacy full-hash comparison (back-compat); the live full
+        # hash != base_hash (schema differs) -> DRIFT_DETECTED under the legacy path.
+        from upgrade import compute_drift_report, DRIFT_DETECTED
+        report = compute_drift_report(self.tmp, self._manifest(with_content_hash=False))
+        self.assertEqual(report.entries[0].status, DRIFT_DETECTED)
 
 
 if __name__ == "__main__":
