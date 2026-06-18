@@ -12,6 +12,25 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-17 — upgrades now merge your edits with the new version automatically
+
+**Public-facing change:** When you apply a foundation-document upgrade, the wizard now *combines* a new version's changes with your own edits automatically, as long as the two don't touch the same section. Previously, editing any part of a document meant the whole new version was set aside in the review folder for you to copy across by hand — even when the new version only added a section somewhere else.
+
+Now, when you upgrade an editable document (such as your vision):
+
+- **Non-overlapping changes are merged for you.** If the new version adds or changes one section and you edited a *different* section, the upgrade keeps your section and folds in the new one — in place, with no hand-copying. The result is reported as "merged."
+- **Overlapping changes are still kept safe.** If your edit and the new version change the *same* section, the wizard does not guess: it keeps your version exactly as-is and saves the new version (plus a side-by-side comparison) in the `.wizard/upgrade-review/` folder for you to reconcile by hand. Your live file is never overwritten and never contains confusing merge markers.
+- **It only merges documents that came from the current version.** If a document was previously set aside for review and not reconciled, the wizard keeps setting it aside (rather than risk merging against the wrong starting point) until you've brought it back in line.
+- **A release can switch automatic merging off** for a large, restructuring update, in which case the new versions are saved for review instead — so a major rewrite never gets silently blended into your edits.
+
+**Operator-facing notes:**
+
+- Existing built systems gain this the next time they are generated; there is no action for you to take.
+- No foundation-document version change ships to operators in this release (an internal test version was used to validate the upgrade path end to end).
+
+**Source-Meta-Commit:** PENDING
+**Public repo commit:** PENDING
+
 ## 2026-06-16 — foundation-document upgrades are now repeatable, quieter, and clearer
 
 **Public-facing change:** Running the brand-new upgrade ability end-to-end against a real built system surfaced three rough edges, now fixed before any of this reaches you:
