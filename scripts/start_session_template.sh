@@ -78,19 +78,20 @@ fi
 # ── Banner ────────────────────────────────────────────────────────────────────
 
 # Kickoff prompt — the FIRST message handed to the session so it orients itself and
-# tells you what to do, instead of opening to a silent, blank prompt. (Claude Code does
-# not take a turn until it receives a message; without this, running this script just
-# launches Claude and waits, with no sign of what to do next.) The session follows the
-# startup sequence in CLAUDE.md, reads its current state, and surfaces the next step in
-# plain language before acting.
-KICKOFF="Begin this session. Follow the session startup sequence in CLAUDE.md now: read session_bootstrap.md and the other startup files it lists, orient yourself to the current state, then tell me in plain language what to do next and wait for my go-ahead before doing it."
+# greets you, instead of opening to a silent, blank prompt. (Claude Code does not take a
+# turn until it receives a message; without this, running this script just launches Claude
+# and waits, with no sign of what to do next.) The session orients SILENTLY from the
+# startup files, then presents a plain-language lay of the land and the single next step —
+# no internal file names, no internal state labels, no menu of options, no flagging that
+# internal files disagree (that goes to the logs, not to you).
+KICKOFF="Begin this session. First, SILENTLY follow the session startup sequence in CLAUDE.md (read session_bootstrap.md and the other startup files it lists) to orient yourself -- do NOT narrate which files you read. Then greet me in plain, non-technical language: in one or two sentences say what this system is for, tell me whether anything needs my attention right now, and give me the SINGLE recommended next step. Do NOT show internal details (file names, internal state labels like 'built' or 'Layer-A', or notes that internal files disagree with each other) -- if you notice an internal inconsistency, record it in the logs and reconcile it yourself, do not raise it to me. Do NOT give me a menu of choices; lead with the one next step. End by asking me a simple yes/no to go ahead, and wait for my answer before doing anything."
 
 echo ""
 if $ALERT; then
     echo "{{PROJECT_NAME}} — Alert response"
     echo "Loading system state. This will take a moment."
     echo "─────────────────────────────────────────────────────────"
-    KICKOFF="This is an alert-response session. Read /logs/notification_log.md FIRST, identify what triggered the alert, and tell me in plain language what it is and the recommended response before doing anything else. Then follow the session startup sequence in CLAUDE.md and wait for my go-ahead."
+    KICKOFF="This is an alert-response session. Read /logs/notification_log.md FIRST, identify what triggered the alert, and tell me in plain, non-technical language what it is and the single recommended response before doing anything else. Do NOT show internal file names or state labels, and do not give me a menu. Then wait for my go-ahead before acting."
 elif $RESUME; then
     echo "{{PROJECT_NAME}} — Resuming session"
     echo "─────────────────────────────────────────────────────────"

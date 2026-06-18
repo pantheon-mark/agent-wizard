@@ -267,10 +267,19 @@ def emit_operator_system(plan: EmissionPlan, staging_dir: Path,
     # autonomy section agrees with the derived level instead of shipping a hardcoded default).
     block = render_claude_md_block(plan, records)
     autonomy_level = plan.foundation_doc_inputs.get("AUTONOMY_LEVEL", "1")
-    written += emit_scaffold(plan, staging_dir, build_repo_root, extra_inputs={
+    # PROJECT_PURPOSE (CLAUDE.md + session_bootstrap "Purpose") is FILLED from the vision's
+    # concise CORE_PURPOSE when captured, so a freshly emitted system states what it is for
+    # instead of shipping the operator-fill placeholder (which made a fresh operator session
+    # report its own identity as unconfigured). Absent/empty CORE_PURPOSE keeps the
+    # scaffold's placeholder default.
+    scaffold_extra = {
         "INHERITED_OPERATING_PRINCIPLES": block,
         "AUTONOMOUS_ACTIONS": autonomous_actions_summary(autonomy_level),
-    })
+    }
+    core_purpose = str(plan.foundation_doc_inputs.get("CORE_PURPOSE", "")).strip()
+    if core_purpose:
+        scaffold_extra["PROJECT_PURPOSE"] = core_purpose
+    written += emit_scaffold(plan, staging_dir, build_repo_root, extra_inputs=scaffold_extra)
 
     # 3. agent execution layer.
     written += emit_agent_layer(plan, staging_dir, build_repo_root)

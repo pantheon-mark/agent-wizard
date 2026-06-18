@@ -182,6 +182,24 @@ class BuildProgressRowsAssemblerTests(unittest.TestCase):
             f"expected {_COMMITTED_COUNT} ledger rows, got {len(rows)}: {rows_text!r}",
         )
 
+    def test_build_progress_rows_open_state_is_not_started(self):
+        """Option A: a freshly emitted ledger opens every phase as 'not-started', NOT
+        'built' — the operator hasn't brought any phase into operation yet; 'built' (and
+        the later states) are earned through the build-and-operate loop. This keeps the
+        ledger consistent with session_bootstrap ('nothing built yet') instead of
+        contradicting it (the cross-file discrepancy a fresh operator session flagged)."""
+        plan = self._assemble(_dr_with_increments())
+        rows_text = plan["foundation_doc_inputs"]["BUILD_PROGRESS_ROWS"]
+        rows = [l for l in rows_text.splitlines() if l.strip().startswith("|")]
+        self.assertTrue(rows, "no ledger rows emitted")
+        for r in rows:
+            cells = [c.strip() for c in r.strip().strip("|").split("|")]
+            state = cells[2]  # phase | capability | STATE | Layer-A | ...
+            self.assertEqual(
+                state, "not-started",
+                f"ledger row opens in {state!r}, expected 'not-started' (Option A)",
+            )
+
     def test_build_progress_rows_contains_phase_one_capability(self):
         """Phase 1 capability text appears in BUILD_PROGRESS_ROWS."""
         plan = self._assemble(_dr_with_increments())

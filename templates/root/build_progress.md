@@ -18,7 +18,8 @@ what is already accepted.*
 
 Each phase moves forward through these states in order:
 
-- **built** — the capability has been implemented and the agents are in place; not yet reviewed.
+- **not-started** — the opening state for every phase on a freshly set-up system. The phase's agent files exist, but you have not yet brought the phase into operation, reviewed it, or run it on real work.
+- **built** — you have brought the capability into operation (the agents are running) for this phase; not yet reviewed.
 - **technically-reviewed** — Layer-A automated reviews have passed for this phase.
 - **supervised** — the operator has watched the agents run on real work for this phase.
 - **provisionally-accepted** — Layer-B acceptance is complete except for one or more core checks

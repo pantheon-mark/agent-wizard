@@ -117,10 +117,14 @@ class ScaffoldEmitterTests(unittest.TestCase):
             "a silent prompt and the startup-sequence orientation never fires",
         )
         low = sess.lower()
-        self.assertTrue(
-            any(k in low for k in ("next step", "what to do", "next action")),
-            "the launch kickoff does not orient the operator toward their next step",
-        )
+        # The kickoff must produce a gentle, plain-language lay of the land that leads to a
+        # SINGLE next step — not a technical orientation dump or a menu of internal options
+        # (the over-asking a fresh non-technical operator hit).
+        self.assertTrue(any(k in low for k in ("next step", "what to do", "next action")),
+                        "kickoff does not orient toward a next step")
+        self.assertIn("plain", low, "kickoff does not require plain (non-technical) language")
+        self.assertIn("silently", low, "kickoff does not orient silently (it narrates internals)")
+        self.assertIn("menu", low, "kickoff does not forbid presenting a menu of options")
 
 
 class ManualMdContentTests(unittest.TestCase):

@@ -103,7 +103,7 @@ def _build_progress_rows(fdi: Dict[str, Any]) -> str:
 
     Seeded from the same CAPABILITY_INCREMENTS source as the acceptance contracts (committed
     phases only; candidate_conditional excluded). Each row carries: phase number, capability
-    name, current state (seeded to 'built' as the opening state), Layer-A result stub,
+    name, current state (seeded to 'not-started' as the opening state), Layer-A result stub,
     Layer-B verdict stub, open-fix-items stub, deferred-core-precondition stub, and date stub.
 
     Returns an empty string when CAPABILITY_INCREMENTS is absent, empty, or all-candidate.
@@ -146,9 +146,13 @@ def _build_progress_rows(fdi: Dict[str, Any]) -> str:
             if isinstance(inc.get("capability"), str) and inc["capability"].strip()
         )
         capability = caps if caps else f"Phase {phase}"
-        # Seed state to 'built' (the opening state); stubs for remaining columns.
+        # Seed state to 'not-started' (the opening state): a freshly emitted system has
+        # not brought any phase into operation yet. 'built' and the later states are
+        # earned as the operator goes through the build-and-operate loop. Seeding 'built'
+        # would contradict session_bootstrap ("nothing built yet") and make a fresh
+        # operator session flag a cross-file state discrepancy.
         lines.append(
-            f"| {phase} | {capability} | built | — | — | — | — | — |"
+            f"| {phase} | {capability} | not-started | — | — | — | — | — |"
         )
 
     return "\n".join(lines)

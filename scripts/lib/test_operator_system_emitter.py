@@ -95,6 +95,25 @@ class OperatorSystemEmitterTests(unittest.TestCase):
         self.assertEqual(mf["prd.md"]["merge_strategy"], "operator_review")
         self.assertEqual(mf["audit_framework.md"]["merge_strategy"], "warn_on_drift")
 
+    def test_project_purpose_filled_from_core_purpose(self):
+        # Identity fix: CLAUDE.md + session_bootstrap Purpose must be FILLED from the
+        # vision's CORE_PURPOSE, not left as the operator-fill placeholder. The placeholder
+        # made a fresh operator session report its own identity as unconfigured.
+        raw = _valid_plan()
+        raw["foundation_doc_inputs"]["CORE_PURPOSE"] = "SENTINEL keep the estate on track."
+        plan = validate_emission_plan(raw, self.contract)
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name)
+        emit_operator_system(plan, staging, REPO_ROOT)
+        claude = (staging / "CLAUDE.md").read_text()
+        boot = (staging / "session_bootstrap.md").read_text()
+        self.assertIn("SENTINEL keep the estate on track.", claude,
+                      "CLAUDE.md Purpose not filled from CORE_PURPOSE")
+        self.assertIn("SENTINEL keep the estate on track.", boot,
+                      "session_bootstrap Purpose not filled from CORE_PURPOSE")
+        self.assertNotIn("describe what this system is for", claude,
+                         "CLAUDE.md still carries the unfilled purpose placeholder")
+
     def test_claude_md_carries_rendered_corpus_block(self):
         staging, _ = self._emit()
         claude = (staging / "CLAUDE.md").read_text()
