@@ -28,8 +28,8 @@ Now, when you upgrade an editable document (such as your vision):
 - Existing built systems gain this the next time they are generated; there is no action for you to take.
 - No foundation-document version change ships to operators in this release (an internal test version was used to validate the upgrade path end to end).
 
-**Source-Meta-Commit:** PENDING
-**Public repo commit:** PENDING
+**Source-Meta-Commit:** c6ecaaa
+**Public repo commit:** adef69d
 
 ## 2026-06-16 — foundation-document upgrades are now repeatable, quieter, and clearer
 
