@@ -77,11 +77,20 @@ fi
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 
+# Kickoff prompt — the FIRST message handed to the session so it orients itself and
+# tells you what to do, instead of opening to a silent, blank prompt. (Claude Code does
+# not take a turn until it receives a message; without this, running this script just
+# launches Claude and waits, with no sign of what to do next.) The session follows the
+# startup sequence in CLAUDE.md, reads its current state, and surfaces the next step in
+# plain language before acting.
+KICKOFF="Begin this session. Follow the session startup sequence in CLAUDE.md now: read session_bootstrap.md and the other startup files it lists, orient yourself to the current state, then tell me in plain language what to do next and wait for my go-ahead before doing it."
+
 echo ""
 if $ALERT; then
     echo "{{PROJECT_NAME}} — Alert response"
     echo "Loading system state. This will take a moment."
     echo "─────────────────────────────────────────────────────────"
+    KICKOFF="This is an alert-response session. Read /logs/notification_log.md FIRST, identify what triggered the alert, and tell me in plain language what it is and the recommended response before doing anything else. Then follow the session startup sequence in CLAUDE.md and wait for my go-ahead."
 elif $RESUME; then
     echo "{{PROJECT_NAME}} — Resuming session"
     echo "─────────────────────────────────────────────────────────"
@@ -96,4 +105,6 @@ echo ""
 # --effort high: this system's sessions reason at the high tier (the wizard resolved
 # MODEL_HIGH above). Extended-thinking budgets are not a CLI flag; --effort is the
 # supported knob for session reasoning effort (low|medium|high|xhigh|max).
-claude --model "$MODEL" --effort high
+# The trailing positional argument is the kickoff prompt (the session's first message),
+# so the session orients + surfaces the next step instead of waiting at a blank prompt.
+claude --model "$MODEL" --effort high "$KICKOFF"

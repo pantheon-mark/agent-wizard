@@ -100,6 +100,28 @@ class ScaffoldEmitterTests(unittest.TestCase):
         sess = staging / "start-session.sh"
         self.assertTrue(sess.stat().st_mode & stat.S_IXUSR, "start-session.sh is not executable")
 
+    def test_start_session_launches_with_orientation_kickoff_not_bare(self):
+        # A bare `claude` launch sits at a silent prompt — a non-technical operator who
+        # runs ./start-session.sh sees "nothing happened" and the CLAUDE.md
+        # read-at-start-and-act sequence never fires (Claude Code takes no turn until the
+        # user types). The launch must seed a kickoff prompt so the session orients on its
+        # first turn and tells the operator the next step without them knowing what to type.
+        import re
+        staging, _ = self._emit()
+        sess = (staging / "start-session.sh").read_text()
+        m = re.search(r'^\s*claude --model "\$MODEL" --effort high(.*)$', sess, re.M)
+        self.assertIsNotNone(m, "could not find the claude launch line")
+        self.assertTrue(
+            m.group(1).strip(),
+            "start-session.sh launches `claude` with no kickoff prompt — the operator faces "
+            "a silent prompt and the startup-sequence orientation never fires",
+        )
+        low = sess.lower()
+        self.assertTrue(
+            any(k in low for k in ("next step", "what to do", "next action")),
+            "the launch kickoff does not orient the operator toward their next step",
+        )
+
 
 class ManualMdContentTests(unittest.TestCase):
     """Assert that the emitted manual.md carries the operator's Operating Manual
