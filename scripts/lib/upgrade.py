@@ -552,7 +552,9 @@ def _plan_action_for(status: str, merge_strategy: str) -> str:
         return f"managed file missing; merge_strategy={merge_strategy}; operator must restore or accept removal (review required)"
     # status == DRIFT_DETECTED
     if merge_strategy == MERGE_STRATEGY_THREE_WAY:
-        return "drift detected; v0 reports candidate diff; refuses automatic apply (full three_way merge semantics deferred to follow-on slice)"
+        return ("drift detected; the apply path section-merges your non-overlapping edits "
+                "with the new version automatically and saves any conflicting section to a "
+                "review folder (your version is never overwritten)")
     if merge_strategy == MERGE_STRATEGY_OPERATOR_REVIEW:
         return "drift detected; operator review required; no automatic resolution at v0"
     if merge_strategy == MERGE_STRATEGY_WARN_ON_DRIFT:

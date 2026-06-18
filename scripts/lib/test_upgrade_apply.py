@@ -1038,6 +1038,16 @@ class DriftReportReconciliationTests(_Base):
         report = compute_drift_report(self.tmp, self._manifest(with_content_hash=False))
         self.assertEqual(report.entries[0].status, DRIFT_DETECTED)
 
+    def test_three_way_drift_plan_action_reflects_landed_merge_driver(self):
+        # The plan-only action text for a drifted three_way doc must reflect that the
+        # apply path now section-merges (the driver landed) — not the stale "deferred to
+        # follow-on slice" wording the upgrade-check surfaced to operators.
+        from upgrade import _plan_action_for, DRIFT_DETECTED, MERGE_STRATEGY_THREE_WAY
+        action = _plan_action_for(DRIFT_DETECTED, MERGE_STRATEGY_THREE_WAY)
+        self.assertIn("merge", action.lower())
+        self.assertNotIn("deferred", action.lower())
+        self.assertNotIn("follow-on", action.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
