@@ -26,6 +26,8 @@ Entries appear newest-first.
 - Existing built systems gain this the next time they are generated. A system already running can have it added without rebuilding.
 - No foundation-document version change ships in this release.
 
+`Source-Meta-Commit:` `dbe7ac7` (private build repo) · public repo commit `7b9cb8a`
+
 ---
 
 ## 2026-06-17 — upgrades now merge your edits with the new version automatically
