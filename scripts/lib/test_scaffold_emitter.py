@@ -138,6 +138,12 @@ class ScaffoldEmitterTests(unittest.TestCase):
         self.assertIn("five_hour", statusline, "statusline omits the 5h usage limit")
         self.assertIn("seven_day", statusline, "statusline omits the 7d usage limit")
 
+    def test_stop_hook_idle_guard_present(self):
+        staging, _ = self._emit()
+        text = (staging / ".claude" / "context_monitor.sh").read_text()
+        self.assertIn("stop_hook_active", text)   # loop-safe guard present
+        self.assertIn("build_progress.md", text)  # checks pending acceptance
+
     def test_settings_self_protect_permissions_and_receipt_gate(self):
         # The receipt-gate PreToolUse hook + anti-self-bypass deny-rules
         # (project-scope, honestly bounded) must be present in the emitted settings.
