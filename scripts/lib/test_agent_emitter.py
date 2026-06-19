@@ -58,6 +58,20 @@ class AgentEmitterTests(unittest.TestCase):
             leftover = PLACEHOLDER_RE.findall(text)
             self.assertEqual(leftover, [], f"unsubstituted placeholder(s) in {p.name}: {leftover}")
 
+    def test_high_risk_protective_sequence_in_prompts(self):
+        # The high-risk protective sequence must live IN the agent prompts themselves
+        # (self-contained — LLMs ignore referenced files under load), not only in a
+        # referenced doctrine doc. Assert it carries through emission unchanged into
+        # BOTH the orchestrator (verbatim copy) and a sample specialist (substituted).
+        staging, _ = self._emit(_valid_plan())
+        orchestrator_text = (staging / "agents/prompts/orchestrator_prompt.md").read_text()
+        sample_agent_text = (staging / "agents/prompts/researcher_prompt.md").read_text()
+        for prompt_text in (orchestrator_text, sample_agent_text):
+            low = prompt_text.lower()
+            for anchor in ["protective sequence", "back up", "confirm the real state",
+                           "pre-write receipt", "verify afterward"]:
+                self.assertIn(anchor, low, f"missing protective-sequence anchor: {anchor!r}")
+
     def test_project_name_substituted(self):
         staging, _ = self._emit(_valid_plan())
         orch = (staging / "agents/prompts/orchestrator_prompt.md").read_text()
