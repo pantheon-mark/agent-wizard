@@ -102,6 +102,7 @@ ALLOWLIST_UNIFIED_ADDITIONS = {
     ".claude/settings.json": "Claude Code config wiring the statusline + context-monitor hook so the system runs on real context data; legacy emitted no .claude/ config",
     ".claude/statusline.sh": "statusline showing actual context % (Claude Code built-in field) to operator + session; legacy had none",
     ".claude/context_monitor.sh": "context-monitor hook surfacing actual context % so the context-integrity protocol runs on real data, not guesses; legacy had none",
+    ".claude/receipt_gate.sh": "PreToolUse hook enforcing the high-risk-write protection: requires a fresh valid pre-write receipt (backup + evidence-bound verification + plan + operator approval) before a high-risk/irreversible action, else forces the operator approval dialog (ask); legacy had no enforcement of the protective sequence",
 }
 
 CRITICAL_FILES = (

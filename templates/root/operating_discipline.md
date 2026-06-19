@@ -56,6 +56,36 @@ You should not approve an irreversible action until you are comfortable with wha
 
 ---
 
+## Pre-write receipt (machine-checkable)
+
+The protections above are not just prose the agents are asked to follow. Before any high-risk action, the agent must write a small record to disk — a **pre-write receipt** — that captures the backup, the evidence-bound verification, the plan, and your verbatim approval. A check built into the system (a hook that runs before the action's tool call) looks for a fresh, valid receipt; if one is not present, the system stops and asks you to approve the action in a dialog rather than letting it run silently. This makes the four protections enforceable rather than advisory.
+
+The agent writes the receipt to `agents/handoffs/.prewrite_receipt.json` BEFORE the high-risk action, in exactly this shape:
+
+```json
+{
+  "schema": "prewrite-receipt-v1",
+  "action_class": "<financial|external-communications|irreversible-data|guardrail|legal>",
+  "target_id": "<stable id of the exact target>",
+  "operation": "<what will be done>",
+  "backup_ref": "<path to backup, or 'none' with justification>",
+  "verifications": [
+    {"claim": "<a fact being relied on>", "status": "verified|unverifiable_locally|not-observable", "evidence": "<raw command output, or 'delegated-to-operator'>"}
+  ],
+  "operator_confirmation": "<the operator's verbatim approval>",
+  "created_at": "<ISO8601 UTC>",
+  "expires_after_seconds": 900
+}
+```
+
+Rules the receipt must obey:
+
+- **A `verified` claim needs raw evidence.** Prose-only "evidence" is invalid for a claim marked `verified` — the `evidence` field must carry the actual raw command output that establishes the fact. A claim that says "verified" with only a description of what was checked is not a verified claim.
+- **A fact that cannot be checked from here is `unverifiable_locally`.** If the agent cannot confirm a fact locally, the claim's `status` is `unverifiable_locally` and its `evidence` is `"delegated-to-operator"` — meaning you confirm that fact yourself in the tool or service where it lives. The agent never marks such a fact `verified`.
+- **The receipt is invalid if it is missing any required field, has the wrong `schema` value, or is expired.** It is expired when `created_at + expires_after_seconds` is earlier than now. An invalid or expired receipt is treated the same as no receipt: the system stops and asks for your approval before the action runs.
+
+---
+
 ## As the system earns a track record
 
 After the system has done a particular kind of action successfully, on your real work, a few times, it gets less wordy about that kind of action. It calls this reducing its **narration** — the running explanation it gives as it works.

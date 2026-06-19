@@ -4,6 +4,16 @@
     "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/statusline.sh\""
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/receipt_gate.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/receipt_gate.sh\" || true"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

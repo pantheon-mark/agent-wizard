@@ -138,6 +138,13 @@ class ScaffoldEmitterTests(unittest.TestCase):
         self.assertIn("five_hour", statusline, "statusline omits the 5h usage limit")
         self.assertIn("seven_day", statusline, "statusline omits the 7d usage limit")
 
+    def test_receipt_gate_script_emitted_executable(self):
+        import os
+        staging, _ = self._emit()
+        sp = staging / ".claude" / "receipt_gate.sh"
+        self.assertTrue(sp.exists(), "receipt_gate.sh not emitted")
+        self.assertTrue(os.access(sp, os.X_OK), "receipt_gate.sh not executable")
+
     def test_start_session_launches_with_orientation_kickoff_not_bare(self):
         # A bare `claude` launch sits at a silent prompt — a non-technical operator who
         # runs ./start-session.sh sees "nothing happened" and the CLAUDE.md
