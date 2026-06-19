@@ -178,6 +178,9 @@ def _default_scaffold_inputs() -> Dict[str, str]:
         # --- build-progress ledger (seeded from capability increments at assembly time;
         # defaults to empty so the template resolves when no increments are present) ---
         "BUILD_PROGRESS_ROWS": "",
+        # --- ceremony-maturity seed (one probationary row per high-risk action class,
+        # injected at assembly time; defaults to empty so the template resolves) ---
+        "CEREMONY_MATURITY_ROWS": "",
     }
 
 

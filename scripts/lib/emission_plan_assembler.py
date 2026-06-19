@@ -98,6 +98,21 @@ def _render_acceptance_contract(contract: PhaseAcceptanceContract) -> str:
     return "\n".join(lines)
 
 
+_HIGH_RISK_ACTION_CLASSES = (
+    "financial", "external-communications",
+    "irreversible-data", "guardrail", "legal",
+)
+
+
+def _ceremony_maturity_rows(fdi: Dict[str, Any]) -> str:
+    """Seed one ceremony_maturity row per high-risk action class, all probationary
+    (count 0) at emit -- a fresh system has earned no track record. Compression of
+    NARRATION only is gated on this; functional safety steps never compress."""
+    return "\n".join(
+        f"| {cls} | probationary | 0 | — |" for cls in _HIGH_RISK_ACTION_CLASSES
+    )
+
+
 def _build_progress_rows(fdi: Dict[str, Any]) -> str:
     """Render one markdown table row per committed phase for the build_progress.md ledger.
 
@@ -339,6 +354,12 @@ def assemble_emission_plan(
     # Single-source: _build_progress_rows reads the same CAPABILITY_INCREMENTS already
     # in fdi — it never re-derives the phase list from a different source.
     fdi["BUILD_PROGRESS_ROWS"] = _build_progress_rows(fdi)
+
+    # Ceremony-maturity seed: one probationary row per high-risk action class (fixed list,
+    # NOT per-phase) so the table exists even for foundation-only systems. Injected into fdi
+    # so the scaffold emitter fills {{CEREMONY_MATURITY_ROWS}} in operating_discipline.md.
+    # Gates NARRATION wordiness only — never whether the safety steps run.
+    fdi["CEREMONY_MATURITY_ROWS"] = _ceremony_maturity_rows(fdi)
 
     return {
         "schema_version": _SCHEMA_VERSION,

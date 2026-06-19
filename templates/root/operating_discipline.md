@@ -70,3 +70,11 @@ Becoming less wordy NEVER means cutting corners. Even after it quiets down, the 
 Those four protections never go away.
 
 When the system starts being less wordy about a kind of action, it tells you it is doing so. And you can ask it to go back to the full explanation any time — just say so in your own words, and it returns to full narration for that kind of action.
+
+## Ceremony maturity (system-maintained)
+
+| Action class | Maturity | Clean runs | Last graduated |
+| --- | --- | --- | --- |
+{{CEREMONY_MATURITY_ROWS}}
+
+The system updates this as it earns a track record; it changes only how wordy it is, never the safety steps.

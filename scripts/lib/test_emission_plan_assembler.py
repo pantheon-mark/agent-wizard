@@ -132,6 +132,14 @@ class EmissionPlanAssemblerTests(unittest.TestCase):
             assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers,
                                    auto_values={"VISION_PURPOSE": "smuggled content"})
 
+    def test_ceremony_maturity_rows_seed_probationary(self):
+        from emission_plan_assembler import _ceremony_maturity_rows
+        rows = _ceremony_maturity_rows({})
+        self.assertIn("financial", rows)
+        self.assertIn("external-communications", rows)
+        self.assertIn("| probationary |", rows)
+        self.assertNotIn("graduated", rows)
+
 
 if __name__ == "__main__":
     unittest.main()
