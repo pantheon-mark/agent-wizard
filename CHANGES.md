@@ -12,6 +12,22 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-19 — your system now keeps you oriented and protects risky actions
+
+**Public-facing change:** Your system is now clearer about where you are, and more careful before it does anything that can't be undone.
+
+- **It always tells you the next step.** At any point you can type "what now", "I'm stuck", "what's next", "pause", or "resume", and the system tells you in plain language where things stand and the single recommended next thing to do — never a bare menu. It also will not quietly stop while it is waiting on a decision from you (such as accepting a build phase); it says exactly what to type to continue.
+- **Pause and resume cleanly.** Say "pause" or "I'm stopping for the day" and the system saves a short note of where you left off, so a later session picks up exactly there.
+- **Risky actions get a protective routine.** Before anything that cannot be undone — sending a message, updating live data, a payment, deleting something — the system backs up what it can, checks the real state instead of assuming, tells you the plan, asks your approval, and verifies afterward. It states a fact about your live data or permissions only if it actually checked; otherwise it says so plainly and asks you to confirm it yourself. It writes a small checkpoint before acting, and a built-in check holds the action until that checkpoint is in place.
+- **It gets less wordy as it earns your trust — but never less careful.** After it has done a kind of action successfully on your real work a few times, it explains less as it goes. The safety steps (back up, check, your approval, verify) never go away, and it tells you when it starts being briefer.
+
+**Operator-facing notes:**
+
+- Existing built systems gain this the next time they are generated. A system already running can have it added without rebuilding.
+- No foundation-document version change ships in this release.
+
+---
+
 ## 2026-06-17 — upgrades now merge your edits with the new version automatically
 
 **Public-facing change:** When you apply a foundation-document upgrade, the wizard now *combines* a new version's changes with your own edits automatically, as long as the two don't touch the same section. Previously, editing any part of a document meant the whole new version was set aside in the review folder for you to copy across by hand — even when the new version only added a section somewhere else.
