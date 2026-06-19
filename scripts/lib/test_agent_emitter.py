@@ -72,6 +72,38 @@ class AgentEmitterTests(unittest.TestCase):
                            "pre-write receipt", "verify afterward"]:
                 self.assertIn(anchor, low, f"missing protective-sequence anchor: {anchor!r}")
 
+    def test_never_compress_invariant_structural_in_both_prompts(self):
+        # Anti-overfit / negative test: the four safety steps and the never-skip /
+        # never-compress-step-4 language must be present as PROSE in BOTH emitted agent
+        # prompts. The maturity ceremony only quiets NARRATION; it must never be able to
+        # drop a safety step or the mandatory operator-approval (step 4). That guarantee
+        # is structural in the prompt text, not a runtime decision — so assert the exact
+        # load-bearing phrases survive emission verbatim into both prompts.
+        staging, _ = self._emit(_valid_plan())
+        orchestrator_text = (staging / "agents/prompts/orchestrator_prompt.md").read_text()
+        sample_agent_text = (staging / "agents/prompts/researcher_prompt.md").read_text()
+        for label, prompt_text in (("orchestrator", orchestrator_text),
+                                    ("specialist", sample_agent_text)):
+            low = prompt_text.lower()
+            # All four functional safety steps name the action they take.
+            for step_phrase in ("back up", "confirm the real state",
+                                "get explicit operator approval", "verify afterward"):
+                self.assertIn(step_phrase, low,
+                              f"{label} prompt missing safety step phrase: {step_phrase!r}")
+            # Never-skip-any-step language.
+            self.assertIn("never skip", low,
+                          f"{label} prompt missing the never-skip-a-step guarantee")
+            # Step 4 (operator approval) must be called out as non-compressible /
+            # always-required at every maturity level.
+            self.assertIn("never compress step 4", low,
+                          f"{label} prompt missing the explicit never-compress-step-4 guarantee")
+            self.assertIn("at every maturity level", low,
+                          f"{label} prompt does not bind approval to every maturity level")
+            # The narration-only nature of maturity quieting is stated (it reduces
+            # wordiness on steps 1/3/5, never the approval).
+            self.assertIn("less wordy", low,
+                          f"{label} prompt does not scope maturity to narration (wordiness) only")
+
     def test_project_name_substituted(self):
         staging, _ = self._emit(_valid_plan())
         orch = (staging / "agents/prompts/orchestrator_prompt.md").read_text()

@@ -200,6 +200,87 @@ class ScaffoldEmitterTests(unittest.TestCase):
         self.assertIn("menu", low, "kickoff does not forbid presenting a menu of options")
 
 
+class FoundationOnlyDisciplineLayerTests(unittest.TestCase):
+    """Anti-overfit: the operating-discipline layer must be present even for a
+    foundation-only system that defines NO agents and does NO high-risk writes.
+
+    The receipt gate / R2 sequence stay dormant for such a system (no agents to run
+    them), but the doctrine doc, the ceremony-maturity table, and the operator skills
+    must still ship — the layer is not contingent on the system having a high-risk
+    capability. This builds a real foundation-only plan through the assembler (the
+    genuine path that seeds the ceremony rows), not a hand-tweaked dict, so the test
+    cannot pass by accident on a foundation_doc_inputs default."""
+
+    @classmethod
+    def setUpClass(cls):
+        from build_intent import BuildIntent
+        from scaffold_plan import load_scaffold_plan
+        from corpus_loader import load_corpus_pack
+        from emission_plan_assembler import assemble_emission_plan
+        from test_emission_plan_assembler import _dr  # foundation-doc record builder
+
+        sp = load_scaffold_plan("markdown-CC")
+        corpus = load_corpus_pack()
+        # FOUNDATION_ONLY_MODE true + zero agents == a system with no high-risk capability.
+        bi = BuildIntent(derived_record=_dr(overrides={"FOUNDATION_ONLY_MODE": "true"}),
+                         agent_intents=[])
+        cls.plan = assemble_emission_plan(bi, sp, corpus, model_tiers=sp.model_tiers)
+        contract = load_contract(default_contract_path())
+        plan = validate_emission_plan(cls.plan, contract)
+        cls._tmp = tempfile.TemporaryDirectory()
+        staging = Path(cls._tmp.name)
+        emit_scaffold(plan, staging, REPO_ROOT)
+        cls.staging = staging
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_is_actually_foundation_only(self):
+        # Guard the premise of this whole class: the assembled plan really is
+        # foundation-only with no agents.
+        self.assertTrue(self.plan["foundation_only_mode"])
+        self.assertEqual(self.plan["agents"], [])
+
+    def test_operating_discipline_doc_still_emitted(self):
+        p = self.staging / "operating_discipline.md"
+        self.assertTrue(p.exists(), "operating_discipline.md not emitted for a foundation-only system")
+        text = p.read_text()
+        for anchor in ["Verified", "Not verified", "Not observable",
+                       "UNVERIFIABLE_LOCALLY", "co-protected-workflows.md", "narration"]:
+            self.assertIn(anchor, text, f"foundation-only operating_discipline.md missing anchor: {anchor}")
+
+    def test_ceremony_maturity_table_seeds_all_five_classes(self):
+        # The five fixed high-risk action classes are seeded probationary even though
+        # this system has no high-risk capability — the table is a fixed list, not
+        # derived per-phase, so it never spuriously gates and never silently omits.
+        text = (self.staging / "operating_discipline.md").read_text()
+        # The {{CEREMONY_MATURITY_ROWS}} placeholder must be filled (not left raw).
+        self.assertNotIn("{{CEREMONY_MATURITY_ROWS}}", text)
+        for cls_name in ("financial", "external-communications",
+                         "irreversible-data", "guardrail", "legal"):
+            self.assertIn(f"| {cls_name} | probationary |", text,
+                          f"ceremony table missing probationary seed for action class: {cls_name}")
+        # No action-class ROW may carry a graduated maturity (the column header
+        # "Last graduated" legitimately uses the word, so scan the data rows only).
+        self.assertNotIn("| graduated |", text,
+                         "a fresh foundation-only system must have no graduated action class")
+
+    def test_operator_skills_still_emitted(self):
+        # The orientation + pause skills are static operator capabilities; they ship for
+        # every system including a foundation-only one. Emitted by the operator-fill
+        # layer; assert here that the foundation-only plan does not strip them.
+        from operator_fill_emitter import emit_operator_fill_templates
+        contract = load_contract(default_contract_path())
+        plan = validate_emission_plan(self.plan, contract)
+        with tempfile.TemporaryDirectory() as td:
+            staging = Path(td)
+            emit_operator_fill_templates(plan, staging, REPO_ROOT)
+            for skill in ("orientation.md", "pause.md"):
+                self.assertTrue((staging / "wizard" / "skills" / skill).exists(),
+                                f"operator skill not emitted for a foundation-only system: {skill}")
+
+
 class ManualMdContentTests(unittest.TestCase):
     """Assert that the emitted manual.md carries the operator's Operating Manual
     shape: correct title, build-and-operate loop section, role section, operating
