@@ -138,6 +138,20 @@ class ScaffoldEmitterTests(unittest.TestCase):
         self.assertIn("five_hour", statusline, "statusline omits the 5h usage limit")
         self.assertIn("seven_day", statusline, "statusline omits the 7d usage limit")
 
+    def test_settings_self_protect_permissions_and_receipt_gate(self):
+        # The receipt-gate PreToolUse hook + anti-self-bypass deny-rules
+        # (project-scope, honestly bounded) must be present in the emitted settings.
+        import json as _json
+        staging, _ = self._emit()
+        s = _json.loads((staging / ".claude" / "settings.json").read_text())
+        self.assertIn("receipt_gate.sh", _json.dumps(s.get("hooks", {})),
+                      "PreToolUse does not invoke receipt_gate.sh")
+        perms = s.get("permissions", {})
+        deny = perms.get("deny", [])
+        self.assertIn("Edit(.claude/**)", deny, "missing .claude Edit deny-rule")
+        self.assertIn("Write(.claude/**)", deny, "missing .claude Write deny-rule")
+        self.assertEqual(perms.get("disableBypassPermissionsMode"), "disable")
+
     def test_receipt_gate_script_emitted_executable(self):
         import os
         staging, _ = self._emit()

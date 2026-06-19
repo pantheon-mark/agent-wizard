@@ -3,6 +3,10 @@
     "type": "command",
     "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/statusline.sh\""
   },
+  "permissions": {
+    "deny": ["Edit(.claude/**)", "Write(.claude/**)"],
+    "disableBypassPermissionsMode": "disable"
+  },
   "hooks": {
     "PreToolUse": [
       {
