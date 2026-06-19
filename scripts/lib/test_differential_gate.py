@@ -90,6 +90,8 @@ ALLOWLIST_UNIFIED_ADDITIONS = {
     "decisions/decision_record_template.md": "ADR/decisions core; legacy did not emit it",
     "wizard/skills/credential-setup.md": "first-boot credential-setup skill; a pre-built operational skill the legacy close-assembly had no equivalent of",
     "wizard/skills/next-phase.md": "universal next-phase build-and-operate skill; drives phases 2+ with a refusing precondition, live-docs-driven flow, and stop-condition; legacy close-assembly had no equivalent",
+    "wizard/skills/orientation.md": "operator orientation skill; reads state from disk and tells the operator where they are, whether the system is waiting on them, and the single next step; legacy close-assembly had no equivalent",
+    "wizard/skills/pause.md": "operator pause/resume skill; writes a disk-first resume handoff so the operator can stop cleanly and pick up later; legacy close-assembly had no equivalent",
     "agents/prompts/orchestrator_prompt.md": "control-plane agent prompt emitted deterministically; legacy built agents post-wizard",
     "agents/prompts/qa_agent_prompt.md": "QA agent prompt emitted deterministically; legacy built agents post-wizard",
     "agents/prompts/researcher_prompt.md": "per-agent prompt emitted deterministically; legacy built agents post-wizard",
