@@ -94,6 +94,7 @@ ALLOWLIST_UNIFIED_ADDITIONS = {
     "agents/prompts/qa_agent_prompt.md": "QA agent prompt emitted deterministically; legacy built agents post-wizard",
     "agents/prompts/researcher_prompt.md": "per-agent prompt emitted deterministically; legacy built agents post-wizard",
     "agents/scripts/researcher.sh": "per-agent invocation script emitted deterministically; legacy built agents post-wizard",
+    "operating_discipline.md": "single-home operating-discipline doctrine doc (orientation + high-risk-action protection) emitted into the operator-project root; legacy had no equivalent",
     "wizard_feedback.md": "operator feedback file the generator seeds; legacy did not emit it",
     "build_progress.md": "per-phase acceptance ledger the generator seeds; legacy had no build-progress tracking",
     ".claude/settings.json": "Claude Code config wiring the statusline + context-monitor hook so the system runs on real context data; legacy emitted no .claude/ config",

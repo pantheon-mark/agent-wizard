@@ -48,6 +48,15 @@ class ScaffoldEmitterTests(unittest.TestCase):
                     "pending_decisions.md", "manual.md", ".gitignore", "start-session.sh"]:
             self.assertTrue((staging / rel).exists(), f"missing scaffold file: {rel}")
 
+    def test_operating_discipline_doc_emitted(self):
+        staging, _ = self._emit()
+        p = staging / "operating_discipline.md"
+        self.assertTrue(p.exists(), "operating_discipline.md not emitted")
+        text = p.read_text()
+        for anchor in ["Verified", "Not verified", "Not observable",
+                       "UNVERIFIABLE_LOCALLY", "co-protected-workflows.md", "narration"]:
+            self.assertIn(anchor, text, f"operating_discipline.md missing anchor: {anchor}")
+
     def test_emits_operational_dir_files(self):
         staging, _ = self._emit()
         for rel in ["logs/audit_log.md", "logs/session_log.md", "logs/error_log.md",

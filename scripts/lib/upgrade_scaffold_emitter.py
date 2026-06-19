@@ -110,6 +110,7 @@ _EXACT_LIFECYCLE = {
     "CLAUDE.md": "inherited_content",
     "project_instructions.md": "inherited_content",
     "manual.md": "inherited_content",
+    "operating_discipline.md": "inherited_content",
     "start-session.sh": "inherited_content",
     "session_bootstrap.md": "runtime_state",
     "pending_decisions.md": "runtime_state",
