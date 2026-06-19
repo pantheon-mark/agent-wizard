@@ -57,6 +57,12 @@ class ScaffoldEmitterTests(unittest.TestCase):
                        "UNVERIFIABLE_LOCALLY", "co-protected-workflows.md", "narration"]:
             self.assertIn(anchor, text, f"operating_discipline.md missing anchor: {anchor}")
 
+    def test_operating_discipline_referenced(self):
+        staging, _ = self._emit()
+        for rel in ["CLAUDE.md", "project_instructions.md", "session_bootstrap.md"]:
+            self.assertIn("operating_discipline.md", (staging / rel).read_text(),
+                          f"{rel} does not reference operating_discipline.md")
+
     def test_emits_operational_dir_files(self):
         staging, _ = self._emit()
         for rel in ["logs/audit_log.md", "logs/session_log.md", "logs/error_log.md",

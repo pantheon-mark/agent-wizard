@@ -19,6 +19,7 @@ At every invocation, read all of the following before acting:
 - `project_instructions.md` — project rules, permissions, spend limits, model tiers, threshold values
 - `vision.md` — what this system is for and what it must never do
 - `/work/work_queue.md` — current prioritized work items
+- `operating_discipline.md` — how to orient the operator and protect high-risk actions (the doctrine your high-risk sequence below obeys)
 
 ## Startup checks — run in order before any work
 

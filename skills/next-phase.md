@@ -76,6 +76,8 @@ Set up a copy or dummy version of any external state the agents in this phase wi
 
 Narrate what each agent is doing and why as it runs, in plain terms. The operator should understand what is happening without needing to interpret logs.
 
+Any high-risk action during the run follows the protective sequence in `operating_discipline.md` (back up, confirm real state, plan, get approval, verify afterward).
+
 During the run, inject one clearly labelled, inert dummy Tier-1 action, using this exact format:
 
 > [DRILL -- NOT A REAL ACTION] I am pausing here to show you how approval works. In a real run, I would need your sign-off before taking this action: [brief description of what kind of action this is, for example "send this message" or "update this live record"]. This is a drill. No action was taken. Please confirm you see the approval prompt and type "continue drill" to proceed.

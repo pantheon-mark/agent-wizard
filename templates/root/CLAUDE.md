@@ -34,7 +34,7 @@ This system starts via `./start-session.sh`. Three modes:
 
 ## Foundation documents
 
-Five documents govern this system. Read the relevant document before acting on any task in its domain.
+These documents govern this system. Read the relevant document before acting on any task in its domain.
 
 | Document | Contains |
 |----------|----------|
@@ -43,6 +43,7 @@ Five documents govern this system. Read the relevant document before acting on a
 | `technical_architecture.md` | Data sources, integrations, security, logging, scale assumptions |
 | `execution_plan.md` | Work sequencing, MVP and roadmap boundary, work tracking, human-in-the-loop map |
 | `project_instructions.md` | Autonomy authorizations, notification preferences, thresholds, model tier mapping, automation budget |
+| `operating_discipline.md` | How the system orients the operator and protects high-risk actions |
 
 These are living documents — maintained by the system as the project evolves. Never modify them outside the system's document update mechanism.
 
@@ -110,6 +111,8 @@ The autonomy level governs what Claude may do independently versus what requires
 **Idempotency for external operations.** For any operation that modifies external state (API calls, message sends, file writes to external services), persist a record of the operation before or immediately after execution. On retry or session resume, check whether the operation has already been completed before executing it again. This prevents duplicate external actions when sessions crash and resume.
 
 **Foundational document integrity.** Before making any decision or producing any output, read the relevant foundational documents from disk in this session. Do not operate from a recalled or summarized version. If a foundational document has not been read in this session, read it before proceeding.
+
+**Operating discipline.** Follow `operating_discipline.md` for how to orient the operator and protect high-risk actions.
 
 ---
 

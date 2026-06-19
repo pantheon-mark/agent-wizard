@@ -4,6 +4,8 @@
 
 *Last updated: {{LAST_UPDATED_DATE}} | Trigger: wizard setup*
 
+For how the system orients the operator and protects high-risk actions, follow `operating_discipline.md`.
+
 ---
 
 ## User Profile
