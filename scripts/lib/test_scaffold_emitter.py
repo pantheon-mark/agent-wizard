@@ -224,7 +224,9 @@ class FoundationOnlyDisciplineLayerTests(unittest.TestCase):
         # FOUNDATION_ONLY_MODE true + zero agents == a system with no high-risk capability.
         bi = BuildIntent(derived_record=_dr(overrides={"FOUNDATION_ONLY_MODE": "true"}),
                          agent_intents=[])
-        cls.plan = assemble_emission_plan(bi, sp, corpus, model_tiers=sp.model_tiers)
+        # v0.6.0: the first coherent system-bundle (foundation docs + operating layer).
+        cls.plan = assemble_emission_plan(bi, sp, corpus, model_tiers=sp.model_tiers,
+                                          bundle_version="v0.6.0")
         contract = load_contract(default_contract_path())
         plan = validate_emission_plan(cls.plan, contract)
         cls._tmp = tempfile.TemporaryDirectory()

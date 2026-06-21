@@ -350,7 +350,7 @@ def cmd_check_shape_state(draft: str, *, expect_phase: Optional[str] = None,
 def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_root: str, *,
                     project_name: str = "operator-system",
                     foundation_only_mode: bool = False,
-                    bundle_version: str = "v0.4.0",
+                    bundle_version: str = "v0.6.0",
                     clock: Optional[Callable[[], str]] = None,
                     generator_version_override: Optional[str] = None) -> Dict[str, Any]:
     """Emit the complete operator system from the recorded transcript via the fail-closed bridge
@@ -544,7 +544,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp.add_argument("--foundation-only", dest="foundation_only_mode", action="store_true",
                     help="emit the foundation-only branch (carrier sets this from the step-15 "
                          "entry guard; supplies FOUNDATION_ONLY_MODE=true)")
-    sp.add_argument("--bundle-version", dest="bundle_version", default="v0.4.0",
+    sp.add_argument("--bundle-version", dest="bundle_version", default="v0.6.0",
                     help="the foundation bundle to emit from; also stamped as WIZARD_VERSION")
     sp.add_argument("--generator-version-override", dest="generator_version_override")
 

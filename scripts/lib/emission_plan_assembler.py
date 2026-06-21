@@ -227,7 +227,7 @@ def assemble_emission_plan(
     model_tiers: Optional[Dict[str, str]] = None,
     current_state: Optional[Any] = None,
     project_name: str = "operator-system",
-    bundle_version: str = "v0.4.0",
+    bundle_version: str = "v0.6.0",
     generator_version: str = _TEST_GENERATOR_VERSION,
     auto_values: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:

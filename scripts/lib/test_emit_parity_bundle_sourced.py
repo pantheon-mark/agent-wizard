@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))        # wizard/scr
 from upgrade import sha256_file  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-BUNDLE_VERSION = "v0.5.0"
+BUNDLE_VERSION = "v0.6.0"
 CONTRACT_PATH = REPO_ROOT / "wizard" / "foundation-bundles" / BUNDLE_VERSION / "system-artifacts.json"
 BASELINE_PATH = Path(__file__).resolve().parent / "emit_parity_baseline.json"
 TRANSCRIPT = Path.home() / "wizard-pilot-2026-06-01" / "wizard_transcript.jsonl"

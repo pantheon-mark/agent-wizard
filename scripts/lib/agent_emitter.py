@@ -16,12 +16,12 @@ the operator never picks a model).
 """
 
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from emission_plan import EmissionPlan  # type: ignore
 from generator import _substitute_placeholders  # type: ignore
 from bundle_templates import (  # type: ignore
-    operating_layer_source_version, _bundle_dir,
+    operating_layer_source_version, _bundle_dir, bundle_has_operating_layer,
 )
 
 
@@ -44,9 +44,13 @@ _BUNDLE_CRON_REL = "agents/cron_config.md"
 SCRIPT_MODE = 0o755
 
 
-def _bundle_agent_templates_root(build_repo_root: Path) -> Path:
-    """The frozen bundle templates/ tree that homes the agent-layer templates."""
-    version = operating_layer_source_version(str(build_repo_root))
+def _bundle_agent_templates_root(build_repo_root: Path, version: Optional[str] = None) -> Path:
+    """The frozen bundle templates/ tree that homes the agent-layer templates.
+
+    `version` pins the bundle to use; if omitted the legacy
+    operating_layer_source_version() discovery is used."""
+    if version is None:
+        version = operating_layer_source_version(str(build_repo_root))
     return _bundle_dir(version, build_repo_root) / "templates"
 
 
@@ -132,10 +136,16 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
 
     Skips the agent IMPLEMENTATION layer entirely when foundation_only_mode is set
     (only the foundation-doc set is produced in that mode; this matches the loader's
-    I7 invariant which forbids agents in foundation-only mode)."""
+    I7 invariant which forbids agents in foundation-only mode).
+
+    Also skips when the emitted bundle_version carries no operating-layer templates (no
+    system-artifacts.json — e.g. v0.4.0 or v0.5.0), producing a foundation-only system
+    where agent files are absent."""
     written: List[Path] = []
     if plan.foundation_only_mode:
         return written  # no implementation layer in foundation-only mode
+    if not bundle_has_operating_layer(plan.bundle_version, build_repo_root):
+        return written  # foundation-only bundle: agent files absent
 
     agents_dir = staging_dir / "agents"
     prompts_dir = agents_dir / "prompts"
@@ -144,7 +154,7 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
     for d in (prompts_dir, scripts_dir, cron_dir):
         d.mkdir(parents=True, exist_ok=True)
 
-    bt = _bundle_agent_templates_root(build_repo_root)
+    bt = _bundle_agent_templates_root(build_repo_root, plan.bundle_version)
 
     # --- Orchestrator (control plane) — tier NAMES in the prompt ---
     orch = plan.orchestrator

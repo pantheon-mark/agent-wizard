@@ -70,14 +70,14 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-06-16T22:12:21Z",
+  "generated_at": "2026-06-21T00:00:00Z",
   "generator_version": "cb2b7ad6f5da2784743d1f8f71c50d3fd58e7bd1",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.5.0",
-  "source_registry_entry_hash": "sha256:6b9283b8d288345a521fd3022337ece2115bb72219ea3b5505bc421128f3a444",
+  "source_registry_entry_hash": "",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
-  "template_tree_hash": "sha256:c6c6c3e8efeecfa84c9596ad807af4a0c1b1a65830c05899366a2f44d2044723",
+  "template_tree_hash": "sha256:3214943d5ee26b496ca35989db4ffdb0d2ffa29cdfaadf7acbe9d52ce4e1413f",
   "worktree_clean": false
 }

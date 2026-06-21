@@ -35,7 +35,7 @@ from typing import Dict, List, Optional
 from emission_plan import EmissionPlan  # type: ignore
 from generator import _substitute_placeholders, PLACEHOLDER_RE  # type: ignore
 from bundle_templates import (  # type: ignore
-    operating_layer_source_version, _bundle_dir,
+    operating_layer_source_version, _bundle_dir, bundle_has_operating_layer,
 )
 
 
@@ -225,19 +225,26 @@ def build_scaffold_inputs(plan: EmissionPlan,
     return merged
 
 
-def _bundle_templates_root(build_repo_root: Path) -> Path:
+def _bundle_templates_root(build_repo_root: Path, version: Optional[str] = None) -> Path:
     """The bundle templates/ tree that is the single frozen home for the scaffold +
-    operating-layer templates (the contract-bearing bundle, not the live working tree)."""
-    version = operating_layer_source_version(str(build_repo_root))
+    operating-layer templates (the contract-bearing bundle, not the live working tree).
+
+    When `version` is supplied (the plan's bundle_version), templates are sourced from
+    that specific bundle.  When omitted the function falls back to the legacy
+    operating_layer_source_version() discovery for callers (e.g. scaffold_template_placeholders)
+    that do not have a plan at hand."""
+    if version is None:
+        version = operating_layer_source_version(str(build_repo_root))
     return _bundle_dir(version, build_repo_root) / "templates"
 
 
-def _scaffold_sources(build_repo_root: Path) -> List[Path]:
+def _scaffold_sources(build_repo_root: Path, version: Optional[str] = None) -> List[Path]:
     """Collect the scaffold template files to emit (excluding the never-emit set).
 
     Sourced from the bundle's frozen templates/ tree (single home), not the live
-    working tree."""
-    templates_root = _bundle_templates_root(build_repo_root)
+    working tree. `version` pins the bundle to use; if omitted the legacy
+    operating_layer_source_version() discovery is used."""
+    templates_root = _bundle_templates_root(build_repo_root, version)
     sources: List[Path] = []
     for sub in SCAFFOLD_SUBDIRS:
         d = templates_root / sub
@@ -285,11 +292,20 @@ def scaffold_template_placeholders(build_repo_root: Path) -> set:
 
 def emit_scaffold(plan: EmissionPlan, staging_dir: Path, build_repo_root: Path,
                   extra_inputs: Optional[Dict[str, str]] = None) -> List[Path]:
-    """Emit the base operator scaffold for `plan` into `staging_dir`. Returns paths written."""
+    """Emit the base operator scaffold for `plan` into `staging_dir`. Returns paths written.
+
+    When the emitted bundle_version carries no operating-layer templates (no
+    system-artifacts.json — e.g. v0.4.0 or v0.5.0), the scaffold files are simply
+    absent from the emitted tree (foundation-only fallback). Foundation docs are emitted
+    separately via emit_foundation_docs and are always present."""
+    if not bundle_has_operating_layer(plan.bundle_version, build_repo_root):
+        # Foundation-only bundle: scaffold files are absent; nothing to emit here.
+        return []
+
     inputs = build_scaffold_inputs(plan, extra_inputs)
     written: List[Path] = []
 
-    for src in _scaffold_sources(build_repo_root):
+    for src in _scaffold_sources(build_repo_root, plan.bundle_version):
         sub = src.parent.name
         dest = _dest_for(src, sub, staging_dir)
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -299,7 +315,7 @@ def emit_scaffold(plan: EmissionPlan, staging_dir: Path, build_repo_root: Path,
         written.append(dest)
 
     # start-session.sh (from the frozen bundle templates/scripts/), resolved-model + executable.
-    bundle_templates_root = _bundle_templates_root(build_repo_root)
+    bundle_templates_root = _bundle_templates_root(build_repo_root, plan.bundle_version)
     sess_src = bundle_templates_root / _BUNDLE_START_SESSION_REL
     sess_dest = staging_dir / "start-session.sh"
     content = sess_src.read_text(encoding="utf-8")

@@ -153,8 +153,8 @@ class UpgradeScaffoldEmitterTests(unittest.TestCase):
 
     def test_source_commit_resolved_from_registry(self):
         _, staging, _ = self._emit()
-        # plan.bundle_version == v0.4.0 -> registry source_commit d4fbf73
-        self.assertEqual(self._manifest(staging)["source_commit"], "d4fbf73")
+        # plan.bundle_version == v0.6.0 -> registry source_commit 7ba3f48
+        self.assertEqual(self._manifest(staging)["source_commit"], "7ba3f48")
 
     def test_emission_deterministic(self):
         a = Path(tempfile.mkdtemp())

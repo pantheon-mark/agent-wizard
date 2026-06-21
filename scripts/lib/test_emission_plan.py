@@ -69,7 +69,7 @@ def _valid_plan() -> dict:
         "system_shape": "markdown-CC",
         "foundation_only_mode": False,
         "project_name": "demo",
-        "bundle_version": "v0.4.0",
+        "bundle_version": "v0.6.0",
         "generator_version": "0" * 40,
         "authority_profile": {
             "id": "operator_profile_derived_v0",

@@ -26,7 +26,7 @@ from typing import List
 
 from emission_plan import EmissionPlan  # type: ignore
 from bundle_templates import (  # type: ignore
-    operating_layer_source_version, _bundle_dir,
+    operating_layer_source_version, _bundle_dir, bundle_has_operating_layer,
 )
 
 # (build-repo source dir, operator-project dest dir) — copied VERBATIM (no substitution).
@@ -61,9 +61,21 @@ def is_operator_fill_path(relpath: str) -> bool:
 def emit_operator_fill_templates(plan: EmissionPlan, staging_dir: Path,
                                  build_repo_root: Path) -> List[Path]:
     """Copy the operator-fill helper templates verbatim + write an empty .env.
-    Returns the paths written."""
+    Returns the paths written.
+
+    When the emitted bundle_version carries no operating-layer templates (no
+    system-artifacts.json), only the .env placeholder is written (foundation-only
+    fallback). The wizard/review_prompts and wizard/skills dirs require the bundle's
+    operating-layer templates/ tree."""
     written: List[Path] = []
-    version = operating_layer_source_version(str(build_repo_root))
+    if bundle_has_operating_layer(plan.bundle_version, build_repo_root):
+        version = plan.bundle_version
+    else:
+        # Foundation-only bundle: skip wizard/review_prompts + wizard/skills.
+        env = staging_dir / ENV_RELPATH
+        env.write_text("", encoding="utf-8")
+        written.append(env)
+        return written
     bundle_templates_root = _bundle_dir(version, build_repo_root) / "templates"
     for src_rel, dest_rel in BUNDLE_OPERATOR_FILL_SOURCES:
         src_dir = bundle_templates_root / src_rel

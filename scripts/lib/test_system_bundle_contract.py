@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-BUNDLE_VERSION = "v0.5.0"
+BUNDLE_VERSION = "v0.6.0"
 BUNDLE_DIR = REPO_ROOT / "wizard" / "foundation-bundles" / BUNDLE_VERSION
 CONTRACT_PATH = BUNDLE_DIR / "system-artifacts.json"
 

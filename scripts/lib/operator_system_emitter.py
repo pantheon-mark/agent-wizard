@@ -63,27 +63,35 @@ def _verify_template_dependencies(plan: EmissionPlan, build_repo_root: Path) -> 
 
     Closes the silent-skip gap: scaffold_emitter._scaffold_sources skips a missing
     template subdir without error, which would drop control-plane files from the
-    emitted tree while the manifest still reports drift-clean. The agent + foundation
-    templates fail loudly on read, but we check them up front too so the failure
-    surfaces before a partial tree is written."""
+    emitted tree while the manifest still reports drift-clean.
+
+    For bundles WITH an operating layer (system-artifacts.json present), verify the
+    bundle's required template directories exist (the bundle is the single template
+    home). For foundation-only bundles (no system-artifacts.json), skip — those files
+    are simply absent from the emitted tree."""
+    from bundle_templates import bundle_has_operating_layer, _bundle_dir  # type: ignore
+    if not bundle_has_operating_layer(plan.bundle_version, build_repo_root):
+        return  # foundation-only bundle: no operating-layer dependencies to verify
+
+    # For operating-layer bundles, verify required bundle template subdirs exist.
+    from scaffold_emitter import SCAFFOLD_SUBDIRS  # type: ignore
     from agent_emitter import (  # type: ignore
-        ORCHESTRATOR_TEMPLATE, SPECIALIST_TEMPLATE, QA_TEMPLATE,
-        INVOCATION_TEMPLATE, CRON_TEMPLATE,
+        _BUNDLE_ORCHESTRATOR_REL, _BUNDLE_SPECIALIST_REL, _BUNDLE_QA_REL,
+        _BUNDLE_INVOCATION_REL, _BUNDLE_CRON_REL,
     )
-    from scaffold_emitter import (  # type: ignore
-        TEMPLATES_REL, START_SESSION_TEMPLATE, SCAFFOLD_SUBDIRS,
-    )
+    from scaffold_emitter import _BUNDLE_START_SESSION_REL  # type: ignore
+    bundle_templates = _bundle_dir(plan.bundle_version, build_repo_root) / "templates"
     missing: List[str] = []
-    for rel in (ORCHESTRATOR_TEMPLATE, SPECIALIST_TEMPLATE, QA_TEMPLATE,
-                INVOCATION_TEMPLATE, CRON_TEMPLATE, START_SESSION_TEMPLATE):
-        if not (build_repo_root / rel).exists():
-            missing.append(rel)
+    for rel in (_BUNDLE_ORCHESTRATOR_REL, _BUNDLE_SPECIALIST_REL, _BUNDLE_QA_REL,
+                _BUNDLE_INVOCATION_REL, _BUNDLE_CRON_REL, _BUNDLE_START_SESSION_REL):
+        if not (bundle_templates / rel).is_file():
+            missing.append(f"bundle/{plan.bundle_version}/templates/{rel}")
     for sub in SCAFFOLD_SUBDIRS:
-        if not (build_repo_root / TEMPLATES_REL / sub).exists():
-            missing.append(f"{TEMPLATES_REL}/{sub}")
+        if not (bundle_templates / sub).exists():
+            missing.append(f"bundle/{plan.bundle_version}/templates/{sub}")
     if missing:
         raise GeneratorError(
-            f"missing required template dependencies (cannot emit a complete system): {missing}"
+            f"missing required bundle template dependencies (cannot emit a complete system): {missing}"
         )
 
 

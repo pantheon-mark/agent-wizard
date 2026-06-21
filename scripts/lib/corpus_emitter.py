@@ -123,13 +123,19 @@ def render_rules_library_entries(cells: List[CorpusCellRecord], created: str) ->
 
 def emit_rules_library(plan: EmissionPlan, staging_dir: Path, build_repo_root: Path,
                        records: Optional[List[CorpusCellRecord]] = None) -> List[Path]:
-    """Emit quality/rules_library.md (the corpus single home) into staging."""
+    """Emit quality/rules_library.md (the corpus single home) into staging.
+
+    When the emitted bundle_version carries no operating-layer templates (no
+    system-artifacts.json), rules_library.md is absent (foundation-only fallback)."""
+    from bundle_templates import bundle_has_operating_layer  # type: ignore
+    if not bundle_has_operating_layer(plan.bundle_version, build_repo_root):
+        return []  # foundation-only bundle: rules_library absent
+
     resolved = _resolved_records(plan, records)
     created = str((plan.foundation_doc_inputs or {}).get(INSTALLED_DATE_KEY, DEFAULT_INSTALLED_MARKER))
     entries = render_rules_library_entries(resolved, created)
 
-    from bundle_templates import operating_layer_source_version  # type: ignore
-    version = operating_layer_source_version(str(build_repo_root))
+    version = plan.bundle_version
     template = read_bundle_template(version, RULES_LIBRARY_RELPATH, build_repo_root)
     result, _seen = _substitute_placeholders(
         template, {"RULES_LIBRARY_ENTRIES": entries}, template_name="rules_library.md")
@@ -295,9 +301,15 @@ def emit_decisions(plan: EmissionPlan, staging_dir: Path, build_repo_root: Path)
 
     The templates are static and operator-fill (<...> markers, not {{KEY}}); they
     are copied verbatim. _substitute_placeholders runs with no inputs purely as a
-    fail-fast guard against an accidental {{KEY}} ever being introduced."""
-    from bundle_templates import operating_layer_source_version  # type: ignore
-    version = operating_layer_source_version(str(build_repo_root))
+    fail-fast guard against an accidental {{KEY}} ever being introduced.
+
+    When the emitted bundle_version carries no operating-layer templates (no
+    system-artifacts.json), the decisions/ tree is absent (foundation-only fallback)."""
+    from bundle_templates import bundle_has_operating_layer  # type: ignore
+    if not bundle_has_operating_layer(plan.bundle_version, build_repo_root):
+        return []  # foundation-only bundle: decisions/ absent
+
+    version = plan.bundle_version
     written: List[Path] = []
     for dest_rel in DECISIONS_RELPATHS:
         content = read_bundle_template(version, dest_rel, build_repo_root)

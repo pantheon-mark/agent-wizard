@@ -1,0 +1,33 @@
+{
+  "_note": "JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing companion. Both files MUST stay in sync.",
+  "migrations": [
+    {
+      "breaking_changes_summary": "",
+      "class": "minor-additive",
+      "from": "v0.4.x",
+      "migration_steps": "1. Run the upgrade check (plan-only) to confirm v0.4.x -> v0.6.0 is offered. 2. Run the apply path (operator-explicit). Foundation docs: byte-identical to v0.4.0 emit (no content change). Operating-layer files (CLAUDE.md, project_instructions.md, .claude/, agents/, skills/, etc.) are NEW \u2014 delivered additively (no existing file clobbered). 3. Review any operating-layer file routed to .wizard/upgrade-review/ and copy wanted wording by hand.",
+      "notes": "First coherent system-bundle version: v0.4.0 foundation-doc templates + relocated operating-layer templates + system-artifacts.json managed-artifacts contract. Foundation docs are byte-identical to a v0.4.0 emit; the operating layer is new (additive new-file path, G-A). No foundation-doc content change from v0.4.0. The v0.5.0 vision_recap section and v0.4 schema bumps are absent in v0.6.0 foundation docs.",
+      "preflight": "Verify the operator project carries a .wizard/replay-capsule.json and a .wizard/manifest.json whose foundation_bundle_version is v0.4.x. The apply path runs a replay-conformance gate before any write.",
+      "requires_operator_approval": true,
+      "rollback": "The apply path snapshots touched files and the .wizard/ control plane to .wizard/backups/pre-v0.6.0/ before writing. To roll back, restore from that backup and set .wizard/manifest.json foundation_bundle_version back to v0.4.0.",
+      "stop_condition": "not_applicable",
+      "supported": true
+    },
+    {
+      "breaking_changes_summary": "",
+      "class": "minor-additive",
+      "from": "v0.5.x",
+      "migration_steps": "1. Run the upgrade check (plan-only) to confirm v0.5.x -> v0.6.0 is offered. 2. Run the apply path (operator-explicit). Foundation docs: v0.6.0 uses v0.4.0-era templates (no vision_recap section, schema v0.3). Operators who upgraded to v0.5.0 for vision_recap will see that section replaced/reverted on this path. 3. Operating-layer files are present in both; content may differ per template edits.",
+      "notes": "v0.5.0 -> v0.6.0 path: foundation docs revert to v0.4.0-era content (schema v0.3, no vision_recap). v0.5.0 remains the path for the vision_recap section. The operating layer is shared (same templates as v0.5.0).",
+      "preflight": "Verify the operator project carries a .wizard/replay-capsule.json and a .wizard/manifest.json whose foundation_bundle_version is v0.5.x.",
+      "requires_operator_approval": true,
+      "rollback": "Restore from .wizard/backups/pre-v0.6.0/ and set foundation_bundle_version back to v0.5.0.",
+      "stop_condition": "not_applicable",
+      "supported": true
+    }
+  ],
+  "release_classification": "minor_additive_prerelease",
+  "release_date": "2026-06-21",
+  "schema_version": "v1",
+  "target_version": "v0.6.0"
+}

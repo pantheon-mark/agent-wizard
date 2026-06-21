@@ -259,10 +259,18 @@ class GenerateOperatorSystemTests(unittest.TestCase):
     def test_missing_template_dependency_fails_closed(self):
         from operator_system_emitter import _verify_template_dependencies  # noqa: E402
         from generator import GeneratorError  # noqa: E402
+        import json
         plan = self._plan()
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        # Provide a system-artifacts.json so the bundle is recognized as having an
+        # operating layer, but leave all template files absent -> should raise.
+        bundle_dir = root / "wizard" / "foundation-bundles" / plan.bundle_version
+        bundle_dir.mkdir(parents=True)
+        (bundle_dir / "system-artifacts.json").write_text(
+            json.dumps({"artifacts": []}), encoding="utf-8")
         with self.assertRaises(GeneratorError):
-            _verify_template_dependencies(plan, Path(tmp.name))  # empty fake repo -> no templates
+            _verify_template_dependencies(plan, root)  # bundle present but templates absent
 
     def test_empty_source_commit_fails_fast_prewrite(self):
         """source_commit guard moved PREWRITE (close-review F2): empty source_commit

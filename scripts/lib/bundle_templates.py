@@ -40,22 +40,24 @@ def _bundle_dir(version: str, build_repo_root: Path) -> Path:
     return build_repo_root / "wizard" / "foundation-bundles" / version
 
 
+def bundle_has_operating_layer(version: str, build_repo_root: Path) -> bool:
+    """Return True iff the named bundle carries a system-artifacts.json contract
+    (i.e. it declares the operating-layer template home). Foundation-only bundles
+    (v0.3.0/v0.4.0/v0.5.0 and earlier) return False; the emitters skip the
+    operating-layer files gracefully when this returns False."""
+    return (_bundle_dir(version, build_repo_root) / CONTRACT_BASENAME).is_file()
+
+
 @lru_cache(maxsize=None)
 def operating_layer_source_version(build_repo_root_str: str) -> str:
-    """The bundle version that is the single frozen home for the wizard-authored
-    operating-layer + scaffold templates — i.e. the version that carries a
-    `system-artifacts.json` managed-artifacts contract + the relocated operating-layer
-    `templates/` tree.
+    """DEPRECATED — used only by the ``_verify_template_dependencies`` prewrite
+    guard in operator_system_emitter (which still needs to locate the
+    contract-bearing bundle for legacy callers).  Emit paths now call
+    ``bundle_has_operating_layer`` + ``read_bundle_template`` with the explicit
+    ``bundle_version`` from the plan instead of discovering the "latest" bundle.
 
-    Emit's `plan.bundle_version` selects the FOUNDATION-doc + manifest version (the
-    operator-install version, e.g. the current production bundle). The operating-layer
-    templates were relocated into ONE frozen home (the contract-bearing bundle); emit
-    sources every `delivery:"wizard"` operating-layer template from there so emit and a
-    future upgrade-render share that one source. The two are decoupled on purpose: a
-    foundation-only bundle bump must not require re-relocating the operating layer.
-
-    Resolved (not hardcoded) as the lexically-greatest bundle version directory that
-    contains a `system-artifacts.json`. Fail-closed if none exists."""
+    Resolved as the lexically-greatest bundle version directory that contains a
+    `system-artifacts.json`. Fail-closed if none exists."""
     build_repo_root = Path(build_repo_root_str)
     bundles_root = build_repo_root / "wizard" / "foundation-bundles"
     candidates = []

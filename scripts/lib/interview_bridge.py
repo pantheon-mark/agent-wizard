@@ -80,7 +80,7 @@ def build_operator_system_from_transcript(
     build_repo_root: Optional[Path] = None,
     generator_version_override: Optional[str] = None,
     project_name: str = "operator-system",
-    bundle_version: str = "v0.4.0",
+    bundle_version: str = "v0.6.0",
     model_tiers_override: Optional[Dict[str, str]] = None,
     auto_values: Optional[Dict[str, str]] = None,
 ) -> BridgeResult:
