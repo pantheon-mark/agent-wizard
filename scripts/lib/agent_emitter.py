@@ -131,6 +131,83 @@ def _render_cron_entries(plan: EmissionPlan) -> str:
     return "\n".join(rows) if rows else _CRON_EMPTY_NOTE
 
 
+def _orchestrator_resolved_inputs(plan: EmissionPlan) -> Dict[str, str]:
+    """The EXACT substitution map emit_agent_layer feeds the orchestrator prompt."""
+    orch = plan.orchestrator
+    return {
+        "PROJECT_NAME": plan.project_name,
+        "MODEL_TIER_HIGH": orch["model_tier_high"],
+        "MODEL_TIER_STANDARD": orch["model_tier_standard"],
+        "MODEL_TIER_FAST": orch["model_tier_fast"],
+    }
+
+
+def _qa_resolved_inputs(plan: EmissionPlan) -> Dict[str, str]:
+    """The EXACT substitution map emit_agent_layer feeds the QA prompt."""
+    return {
+        "PROJECT_NAME": plan.project_name,
+        "MODEL_TIER_HIGH": "high",
+        "MODEL_TIER_STANDARD": "standard",
+        "MODEL_TIER_FAST": "fast",
+    }
+
+
+def _agent_prompt_resolved_inputs(plan: EmissionPlan, a) -> Dict[str, str]:
+    """The EXACT substitution map emit_agent_layer feeds a specialist prompt."""
+    return {
+        "PROJECT_NAME": plan.project_name,
+        "AGENT_NAME": a.id,
+        "AGENT_ROLE_DESCRIPTION": a.role_description,
+        "CRITICALITY_TIER": a.criticality_tier,
+        "ADDITIONAL_CONTEXT_FILES": _md_bullets(
+            a.additional_context_files, "(none beyond the foundational documents)"),
+        "PERMITTED_WRITE_DIRECTORIES": _md_bullets_indented(
+            a.permitted_write_directories, "(none)"),
+        "STEP_COMPLETION_CRITERIA": a.step_completion_criteria,
+        "TASK_COMPLETION_CRITERIA": a.task_completion_criteria,
+        "OUTPUT_FORMAT_SPECIFICATION": a.output_format_specification,
+        "MODEL_TIER": a.primary_model_tier,
+        "MODEL_TIER_FAST": a.status_model_tier,
+    }
+
+
+def _agent_script_resolved_inputs(plan: EmissionPlan, a) -> Dict[str, str]:
+    """The EXACT substitution map emit_agent_layer feeds a specialist invocation script."""
+    return {
+        "AGENT_NAME": a.id,
+        "AGENT_MODEL": plan.model_tiers[a.primary_model_tier],
+        "OUTPUT_DIRECTORY": a.output_directory,
+        "ADDITIONAL_CONTEXT_FILES": _bash_context_array(a.additional_context_files),
+    }
+
+
+def _cron_resolved_inputs(plan: EmissionPlan) -> Dict[str, str]:
+    """The EXACT substitution map emit_agent_layer feeds cron_config.md."""
+    return {"CRON_ENTRIES": _render_cron_entries(plan)}
+
+
+def build_agent_resolved_inputs(plan: EmissionPlan) -> Dict[str, object]:
+    """Return the resolved substitution dicts the agent layer feeds every
+    `delivery:wizard render` agent-layer file, keyed by emitted relpath. Used by the
+    replay capsule so a future upgrade can re-render each agent file as a pure
+    template substitution from persisted values (no re-derivation from upstream
+    facts). Reuses the SAME helpers emit_agent_layer substitutes from, so the values
+    are identical to what was emitted.
+
+    Empty when foundation_only_mode (no agent layer is emitted)."""
+    if plan.foundation_only_mode:
+        return {}
+    by_relpath: Dict[str, Dict[str, str]] = {
+        "agents/prompts/orchestrator_prompt.md": _orchestrator_resolved_inputs(plan),
+        "agents/prompts/qa_agent_prompt.md": _qa_resolved_inputs(plan),
+        "agents/cron/cron_config.md": _cron_resolved_inputs(plan),
+    }
+    for a in plan.agents:
+        by_relpath[f"agents/prompts/{a.id}_prompt.md"] = _agent_prompt_resolved_inputs(plan, a)
+        by_relpath[f"agents/scripts/{a.id}.sh"] = _agent_script_resolved_inputs(plan, a)
+    return {"by_relpath": by_relpath}
+
+
 def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Path) -> List[Path]:
     """Emit the /agents/ tree for `plan` into `staging_dir`. Returns paths written.
 
@@ -157,16 +234,10 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
     bt = _bundle_agent_templates_root(build_repo_root, plan.bundle_version)
 
     # --- Orchestrator (control plane) — tier NAMES in the prompt ---
-    orch = plan.orchestrator
     written.append(_emit_from_template(
         bt / _BUNDLE_ORCHESTRATOR_REL,
         prompts_dir / "orchestrator_prompt.md",
-        {
-            "PROJECT_NAME": plan.project_name,
-            "MODEL_TIER_HIGH": orch["model_tier_high"],
-            "MODEL_TIER_STANDARD": orch["model_tier_standard"],
-            "MODEL_TIER_FAST": orch["model_tier_fast"],
-        },
+        _orchestrator_resolved_inputs(plan),
         "orchestrator_prompt.md",
     ))
 
@@ -174,12 +245,7 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
     written.append(_emit_from_template(
         bt / _BUNDLE_QA_REL,
         prompts_dir / "qa_agent_prompt.md",
-        {
-            "PROJECT_NAME": plan.project_name,
-            "MODEL_TIER_HIGH": "high",
-            "MODEL_TIER_STANDARD": "standard",
-            "MODEL_TIER_FAST": "fast",
-        },
+        _qa_resolved_inputs(plan),
         "qa_agent_prompt.md",
     ))
 
@@ -189,33 +255,14 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
         written.append(_emit_from_template(
             bt / _BUNDLE_SPECIALIST_REL,
             prompts_dir / f"{a.id}_prompt.md",
-            {
-                "PROJECT_NAME": plan.project_name,
-                "AGENT_NAME": a.id,
-                "AGENT_ROLE_DESCRIPTION": a.role_description,
-                "CRITICALITY_TIER": a.criticality_tier,
-                "ADDITIONAL_CONTEXT_FILES": _md_bullets(
-                    a.additional_context_files, "(none beyond the foundational documents)"),
-                "PERMITTED_WRITE_DIRECTORIES": _md_bullets_indented(
-                    a.permitted_write_directories, "(none)"),
-                "STEP_COMPLETION_CRITERIA": a.step_completion_criteria,
-                "TASK_COMPLETION_CRITERIA": a.task_completion_criteria,
-                "OUTPUT_FORMAT_SPECIFICATION": a.output_format_specification,
-                "MODEL_TIER": a.primary_model_tier,
-                "MODEL_TIER_FAST": a.status_model_tier,
-            },
+            _agent_prompt_resolved_inputs(plan, a),
             f"{a.id}_prompt.md",
         ))
         # Invocation script: RESOLVED model string (programmatic --model)
         script_path = _emit_from_template(
             bt / _BUNDLE_INVOCATION_REL,
             scripts_dir / f"{a.id}.sh",
-            {
-                "AGENT_NAME": a.id,
-                "AGENT_MODEL": plan.model_tiers[a.primary_model_tier],
-                "OUTPUT_DIRECTORY": a.output_directory,
-                "ADDITIONAL_CONTEXT_FILES": _bash_context_array(a.additional_context_files),
-            },
+            _agent_script_resolved_inputs(plan, a),
             f"{a.id}.sh",
         )
         script_path.chmod(SCRIPT_MODE)
@@ -226,7 +273,7 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
     written.append(_emit_from_template(
         bt / _BUNDLE_CRON_REL,
         cron_out,
-        {"CRON_ENTRIES": _render_cron_entries(plan)},
+        _cron_resolved_inputs(plan),
         "cron_config.md",
     ))
 

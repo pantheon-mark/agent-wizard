@@ -27,13 +27,19 @@ import math
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from emission_plan import EmissionPlan  # type: ignore
 from upgrade import CANONICALIZATION_VERSION, HASH_ALGORITHM  # type: ignore
 
 
-CAPSULE_SCHEMA_VERSION = "replay-capsule-v1"
+# v1: foundation_doc_inputs only (could not re-render the operating layer).
+# v2: adds an `operating` block carrying the RESOLVED substitution values for every
+#     `delivery:wizard render_kind:render` operating-layer file, so a future upgrade
+#     can re-render those files as a pure template-substitution op (durable against
+#     generator-Python refactors — see the durability note on build_replay_capsule).
+CAPSULE_SCHEMA_VERSION = "replay-capsule-v2"
+CAPSULE_SCHEMA_VERSION_FOUNDATION_ONLY = "replay-capsule-v1"
 
 REPLAY_CAPSULE_REL = ".wizard/replay-capsule.json"
 
@@ -123,38 +129,144 @@ def _scan_value(value: Any) -> List[str]:
     return reasons
 
 
-def scan_inputs_for_secrets(foundation_doc_inputs: dict) -> None:
-    """Fail-closed pre-write guard. Scan every value in `foundation_doc_inputs` for
-    credential/token-shaped strings. On ANY hit raise ReplayCapsuleError naming the
-    offending KEY (never the value) and refusing to emit. Clean inputs return None."""
+def _collect_secret_hits(inputs: dict, key_prefix: str = "") -> List[str]:
+    """Return human-readable '<key> (<reasons>)' hits for credential-shaped values in
+    `inputs`. `key_prefix` namespaces the reported key (e.g. an agent relpath) so the
+    message points at the exact location across the capsule's nested blocks."""
     hits: List[str] = []
-    for key, value in foundation_doc_inputs.items():
+    for key, value in inputs.items():
         reasons = _scan_value(value)
         if reasons:
-            # Dedupe while preserving order, so the message is stable + deterministic.
             seen: List[str] = []
             for r in reasons:
                 if r not in seen:
                     seen.append(r)
-            hits.append(f"{key!r} ({'; '.join(seen)})")
+            label = f"{key_prefix}{key}" if key_prefix else str(key)
+            hits.append(f"{label!r} ({'; '.join(seen)})")
+    return hits
+
+
+def scan_inputs_for_secrets(foundation_doc_inputs: dict,
+                            operating: Optional[dict] = None) -> None:
+    """Fail-closed pre-write guard. Scan every value in `foundation_doc_inputs` AND,
+    when present, every value in the v2 `operating` block (resolved_scaffold_inputs +
+    each agent's resolved_inputs + orchestrator/qa/cron resolved_inputs) for
+    credential/token-shaped strings. On ANY hit raise ReplayCapsuleError naming the
+    offending KEY (never the value) and refusing to emit. Clean inputs return None."""
+    hits: List[str] = _collect_secret_hits(foundation_doc_inputs)
+
+    if operating:
+        scaffold = operating.get("resolved_scaffold_inputs") or {}
+        hits += _collect_secret_hits(scaffold, key_prefix="resolved_scaffold_inputs.")
+        for relpath, resolved in sorted((operating.get("by_relpath") or {}).items()):
+            hits += _collect_secret_hits(resolved, key_prefix=f"{relpath}:")
+
     if hits:
         raise ReplayCapsuleError(
             "refusing to write the replay capsule: credential/token-shaped value(s) "
-            "found in foundation-doc inputs: " + ", ".join(sorted(hits)) + ". "
+            "found in capsule inputs: " + ", ".join(sorted(hits)) + ". "
             "Credentials belong in .env, not in interview answers — remove the secret "
             "from the answer (reference it indirectly) and re-run, so the capsule never "
             "persists a secret to disk."
         )
 
 
-def build_replay_capsule(plan: EmissionPlan) -> dict:
-    """Build the replay-capsule dict from the emission plan. Pure function of the
-    plan; deterministic. Provenance fields come from the SAME plan attributes the
-    manifest emitter uses (no re-derivation): foundation_bundle_version =
-    plan.bundle_version, generator_version = plan.generator_version (the 40-char SHA
-    the manifest records), system_shape, foundation_only_mode."""
+def _wizard_render_persisted_keys(bundle_version: str, build_repo_root: Path) -> set:
+    """Union of `inputs.persisted` keys across every `delivery:wizard render_kind:render`
+    contract entry for the bundle. These are the inputs the capsule must carry RESOLVED
+    (the `inputs.derived` keys are re-derived from the target bundle at upgrade time and
+    are NOT stored)."""
+    from bundle_templates import _bundle_dir  # type: ignore
+    contract_path = _bundle_dir(bundle_version, build_repo_root) / "system-artifacts.json"
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    keys: set = set()
+    for entry in contract.get("artifacts", []):
+        if entry.get("delivery") == "wizard" and entry.get("render_kind") == "render":
+            keys |= set((entry.get("inputs") or {}).get("persisted", []))
+    return keys
+
+
+def build_operating_block(plan: EmissionPlan, build_repo_root: Path) -> Optional[dict]:
+    """Build the v2 `operating` block: the RESOLVED substitution values for every
+    `delivery:wizard render_kind:render` operating-layer file. None when the bundle
+    carries no operating layer or the plan is foundation-only (no operating files emitted).
+
+    Two parts:
+      - resolved_scaffold_inputs: the scaffold/root render files share ONE substitution
+        map (build_scaffold_inputs). We carry the persisted subset only — keys that are
+        (a) a persisted input of some wizard-render file per the contract AND (b) present
+        in the scaffold map AND (c) NOT already in foundation_doc_inputs (those round-trip
+        via the existing block — no duplication). `derived` inputs are excluded by
+        construction (they are not persisted keys).
+      - by_relpath: each agent-layer render file -> its exact resolved substitution dict
+        (per-agent prompts/scripts + orchestrator + qa + cron).
+
+    Values are the SAME strings the emitters substitute (reused from the emitter helpers),
+    so re-render is a pure substitution that reproduces the emitted bytes."""
+    from bundle_templates import bundle_has_operating_layer  # type: ignore
+    if plan.foundation_only_mode:
+        return None
+    if not bundle_has_operating_layer(plan.bundle_version, build_repo_root):
+        return None
+
+    # Reuse the EXACT scaffold-extra the orchestrator feeds emit_scaffold, so the resolved
+    # values match the emitted files byte-for-byte.
+    from scaffold_emitter import build_scaffold_inputs  # type: ignore
+    from corpus_emitter import render_claude_md_block  # type: ignore
+    from corpus_loader import load_corpus_pack  # type: ignore
+    from authority_profile import autonomous_actions_summary  # type: ignore
+    from agent_emitter import build_agent_resolved_inputs  # type: ignore
+
+    records = load_corpus_pack()
+    block = render_claude_md_block(plan, records)
+    autonomy_level = plan.foundation_doc_inputs.get("AUTONOMY_LEVEL", "1")
+    scaffold_extra = {
+        "INHERITED_OPERATING_PRINCIPLES": block,
+        "AUTONOMOUS_ACTIONS": autonomous_actions_summary(autonomy_level),
+    }
+    core_purpose = str(plan.foundation_doc_inputs.get("CORE_PURPOSE", "")).strip()
+    if core_purpose:
+        scaffold_extra["PROJECT_PURPOSE"] = core_purpose
+    scaffold_inputs = build_scaffold_inputs(plan, scaffold_extra)
+
+    persisted = _wizard_render_persisted_keys(plan.bundle_version, build_repo_root)
+    fdi_keys = set(plan.foundation_doc_inputs)
+    resolved_scaffold_inputs = {
+        k: scaffold_inputs[k]
+        for k in persisted
+        if k in scaffold_inputs and k not in fdi_keys
+    }
+
+    agent_block = build_agent_resolved_inputs(plan)
+    by_relpath = agent_block.get("by_relpath", {}) if agent_block else {}
+
     return {
-        "schema_version": CAPSULE_SCHEMA_VERSION,
+        "resolved_scaffold_inputs": resolved_scaffold_inputs,
+        "by_relpath": by_relpath,
+    }
+
+
+def build_replay_capsule(plan: EmissionPlan, build_repo_root: Optional[Path] = None) -> dict:
+    """Build the replay-capsule dict from the emission plan. Deterministic. Provenance
+    fields come from the SAME plan attributes the manifest emitter uses (no
+    re-derivation): foundation_bundle_version = plan.bundle_version, generator_version,
+    system_shape, foundation_only_mode.
+
+    When `build_repo_root` is supplied AND the plan emits an operating layer, the capsule
+    is schema v2 and carries the resolved `operating` block (see build_operating_block).
+    Foundation-only / no-operating-layer plans stay schema v1 and carry no operating block.
+
+    DURABILITY: the operating block stores the RESOLVED substitution values (the exact
+    strings passed into _substitute_placeholders), NOT raw upstream facts — so replay is a
+    pure template-substitution op, durable against future generator-Python refactors. This
+    mirrors how foundation_doc_inputs already stores resolved values (e.g. AGENT_ROSTER_ROWS)."""
+    operating = None
+    if build_repo_root is not None:
+        operating = build_operating_block(plan, build_repo_root)
+
+    doc = {
+        "schema_version": CAPSULE_SCHEMA_VERSION if operating is not None
+        else CAPSULE_SCHEMA_VERSION_FOUNDATION_ONLY,
         "foundation_bundle_version": plan.bundle_version,
         "generator_version": plan.generator_version,
         "system_shape": plan.system_shape,
@@ -163,20 +275,22 @@ def build_replay_capsule(plan: EmissionPlan) -> dict:
         "hash_algorithm": HASH_ALGORITHM,
         "foundation_doc_inputs": dict(plan.foundation_doc_inputs),
     }
+    if operating is not None:
+        doc["operating"] = operating
+    return doc
 
 
 def emit_replay_capsule(plan: EmissionPlan, staging_dir: Path,
                         build_repo_root: Path) -> Path:
     """Emit `.wizard/replay-capsule.json` into `staging_dir`. Runs the fail-closed
-    secret scan FIRST (before any write); on a hit raises ReplayCapsuleError and
-    writes nothing. Provenance is reused from `plan` (the same source the manifest
-    uses), not re-derived. `build_repo_root` is accepted for signature parity with
-    the other `.wizard/` emitters; the capsule needs nothing from it.
+    secret scan FIRST (before any write) over BOTH foundation_doc_inputs and the v2
+    operating block; on a hit raises ReplayCapsuleError and writes nothing. Provenance
+    is reused from `plan` (the same source the manifest uses), not re-derived.
 
     Returns the path written. Deterministic: sorted keys + trailing newline; no
     clock / no randomness."""
-    scan_inputs_for_secrets(plan.foundation_doc_inputs)  # fail-closed; raises before write
-    doc = build_replay_capsule(plan)
+    doc = build_replay_capsule(plan, build_repo_root)
+    scan_inputs_for_secrets(plan.foundation_doc_inputs, doc.get("operating"))  # fail-closed; raises before write
     dest = staging_dir / REPLAY_CAPSULE_REL
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
