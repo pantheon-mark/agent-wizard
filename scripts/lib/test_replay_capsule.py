@@ -20,7 +20,8 @@ import replay_capsule as rc  # noqa: E402
 from replay_capsule import (  # noqa: E402
     CAPSULE_SCHEMA_VERSION, CAPSULE_SCHEMA_VERSION_FOUNDATION_ONLY,
     REPLAY_CAPSULE_REL, ReplayCapsuleError,
-    build_replay_capsule, emit_replay_capsule, scan_inputs_for_secrets,
+    build_replay_capsule, capsule_supports_operating_replay,
+    emit_replay_capsule, scan_inputs_for_secrets,
 )
 from upgrade import CANONICALIZATION_VERSION, HASH_ALGORITHM  # noqa: E402
 
@@ -377,6 +378,43 @@ class CapsuleV2OperatingBlockTests(unittest.TestCase):
         doc = build_replay_capsule(plan, REPO_ROOT)
         self.assertEqual(doc["schema_version"], CAPSULE_SCHEMA_VERSION_FOUNDATION_ONLY)
         self.assertNotIn("operating", doc)
+
+
+class LoaderCompatTests(unittest.TestCase):
+    """Loader version-compatibility: v1 capsules load cleanly and signal that
+    operating-layer replay is UNAVAILABLE; v2 capsules signal it is AVAILABLE.
+    These tests exercise the accessor that upgrade_apply.B1 will use to branch
+    between foundation-only vs full handling."""
+
+    def test_loader_reads_v1_capsule_operating_unavailable(self):
+        """A v1 (foundation-only) capsule: loads without KeyError; accessor is False."""
+        # Build a v1 capsule using a foundation_only plan (no operating block).
+        plan = _plan(foundation_only=True)
+        capsule = build_replay_capsule(plan, REPO_ROOT)
+        # Confirm it really is v1.
+        self.assertEqual(capsule["schema_version"], CAPSULE_SCHEMA_VERSION_FOUNDATION_ONLY)
+        self.assertNotIn("operating", capsule)
+        # Accessor must not raise and must return False.
+        result = capsule_supports_operating_replay(capsule)
+        self.assertFalse(result)
+        # foundation_doc_inputs must still be accessible (no KeyError on load).
+        self.assertIsInstance(capsule["foundation_doc_inputs"], dict)
+
+    def test_loader_reads_v2_capsule_operating_available(self):
+        """A v2 (full-system) capsule: accessor is True; operating block accessible."""
+        # Build a v2 capsule using a full (non-foundation-only) plan with build_repo_root.
+        plan = _plan()
+        capsule = build_replay_capsule(plan, REPO_ROOT)
+        # Confirm it really is v2 with an operating block.
+        self.assertEqual(capsule["schema_version"], CAPSULE_SCHEMA_VERSION)
+        self.assertIsInstance(capsule.get("operating"), dict)
+        # Accessor must return True.
+        result = capsule_supports_operating_replay(capsule)
+        self.assertTrue(result)
+        # Operating block must be accessible without KeyError.
+        operating = capsule["operating"]
+        self.assertIn("resolved_scaffold_inputs", operating)
+        self.assertIn("by_relpath", operating)
 
 
 if __name__ == "__main__":

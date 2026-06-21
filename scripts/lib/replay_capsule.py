@@ -280,6 +280,23 @@ def build_replay_capsule(plan: EmissionPlan, build_repo_root: Optional[Path] = N
     return doc
 
 
+def capsule_supports_operating_replay(capsule: dict) -> bool:
+    """Return True iff the capsule is schema v2 AND carries an `operating` block.
+
+    A v1 capsule (foundation-only systems, e.g. built on v0.4.0) has schema
+    CAPSULE_SCHEMA_VERSION_FOUNDATION_ONLY and no `operating` key — this returns
+    False. A v2 capsule (full systems from v0.6.0) has schema CAPSULE_SCHEMA_VERSION
+    and an `operating` block — returns True. Callers use this to decide between
+    foundation-only vs full operating-layer replay handling without KeyError.
+
+    Safe to call on any capsule dict; never raises."""
+    return (
+        isinstance(capsule, dict)
+        and capsule.get("schema_version") == CAPSULE_SCHEMA_VERSION
+        and isinstance(capsule.get("operating"), dict)
+    )
+
+
 def emit_replay_capsule(plan: EmissionPlan, staging_dir: Path,
                         build_repo_root: Path) -> Path:
     """Emit `.wizard/replay-capsule.json` into `staging_dir`. Runs the fail-closed
