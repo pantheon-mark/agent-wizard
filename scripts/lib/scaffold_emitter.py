@@ -34,12 +34,20 @@ from typing import Dict, List, Optional
 
 from emission_plan import EmissionPlan  # type: ignore
 from generator import _substitute_placeholders, PLACEHOLDER_RE  # type: ignore
+from bundle_templates import (  # type: ignore
+    operating_layer_source_version, _bundle_dir,
+)
 
 
 # Operational directories emitted verbatim-with-substitution (flat one level each).
 # root/ maps to the staging root; the rest map to a same-named staging subdir.
 SCAFFOLD_SUBDIRS = ("root", "logs", "quality", "work", "docs", "security", "archive")
 
+# Scaffold + operating-layer templates are now sourced from the versioned system
+# bundle's templates/ tree (the single frozen template home), NOT the live working
+# trees. These build-repo-relative constants are retained ONLY for the prewrite
+# dependency check in operator_system_emitter and the unused-input scan; emission
+# itself reads from the bundle (see _bundle_templates_root / emit_scaffold).
 TEMPLATES_REL = "wizard/templates"
 START_SESSION_TEMPLATE = "wizard/scripts/start_session_template.sh"
 # Claude Code config emitted into the operator project's .claude/ so the system can SEE
@@ -48,8 +56,16 @@ START_SESSION_TEMPLATE = "wizard/scripts/start_session_template.sh"
 CLAUDE_CONFIG_REL = "wizard/templates/claude_config"
 CLAUDE_CONFIG_SCRIPTS = ("statusline.sh", "context_monitor.sh", "receipt_gate.sh")
 
+# Bundle-relative subpaths for the named scaffold scripts (their relpath inside the
+# bundle's templates/ tree differs from the live build-repo layout).
+_BUNDLE_START_SESSION_REL = "scripts/start_session_template.sh"
+_BUNDLE_CLAUDE_CONFIG_REL = "claude_config"
+
 # Files the scaffold layer must NOT emit (owned elsewhere or wizard-internal).
-EXCLUDE_BASENAMES = {"_index.md"}
+# env_template lives in the bundle (so the contract's .env template_path resolves)
+# but .env is emitted EMPTY by operator_fill_emitter, not from this template — the
+# scaffold walk must skip it.
+EXCLUDE_BASENAMES = {"_index.md", "env_template"}
 EXCLUDE_RELPATHS = {"quality/rules_library.md"}  # corpus single-home (corpus_emitter)
 
 # Source-basename -> emitted-basename renames.
@@ -209,9 +225,19 @@ def build_scaffold_inputs(plan: EmissionPlan,
     return merged
 
 
+def _bundle_templates_root(build_repo_root: Path) -> Path:
+    """The bundle templates/ tree that is the single frozen home for the scaffold +
+    operating-layer templates (the contract-bearing bundle, not the live working tree)."""
+    version = operating_layer_source_version(str(build_repo_root))
+    return _bundle_dir(version, build_repo_root) / "templates"
+
+
 def _scaffold_sources(build_repo_root: Path) -> List[Path]:
-    """Collect the scaffold template files to emit (excluding the never-emit set)."""
-    templates_root = build_repo_root / TEMPLATES_REL
+    """Collect the scaffold template files to emit (excluding the never-emit set).
+
+    Sourced from the bundle's frozen templates/ tree (single home), not the live
+    working tree."""
+    templates_root = _bundle_templates_root(build_repo_root)
     sources: List[Path] = []
     for sub in SCAFFOLD_SUBDIRS:
         d = templates_root / sub
@@ -252,7 +278,7 @@ def scaffold_template_placeholders(build_repo_root: Path) -> set:
     keys: set = set()
     for src in _scaffold_sources(build_repo_root):
         keys |= set(PLACEHOLDER_RE.findall(src.read_text(encoding="utf-8")))
-    sess_src = build_repo_root / START_SESSION_TEMPLATE
+    sess_src = _bundle_templates_root(build_repo_root) / _BUNDLE_START_SESSION_REL
     keys |= set(PLACEHOLDER_RE.findall(sess_src.read_text(encoding="utf-8")))
     return keys
 
@@ -272,8 +298,9 @@ def emit_scaffold(plan: EmissionPlan, staging_dir: Path, build_repo_root: Path,
         dest.write_text(result, encoding="utf-8")
         written.append(dest)
 
-    # start-session.sh (from wizard/scripts/), resolved-model + executable.
-    sess_src = build_repo_root / START_SESSION_TEMPLATE
+    # start-session.sh (from the frozen bundle templates/scripts/), resolved-model + executable.
+    bundle_templates_root = _bundle_templates_root(build_repo_root)
+    sess_src = bundle_templates_root / _BUNDLE_START_SESSION_REL
     sess_dest = staging_dir / "start-session.sh"
     content = sess_src.read_text(encoding="utf-8")
     result, _seen = _substitute_placeholders(content, inputs, template_name="start-session.sh")
@@ -282,8 +309,9 @@ def emit_scaffold(plan: EmissionPlan, staging_dir: Path, build_repo_root: Path,
     written.append(sess_dest)
 
     # .claude/ config (statusline + context-monitor hook + settings) — emitted verbatim
-    # (static, no placeholders); the shell scripts are made executable.
-    claude_src = build_repo_root / CLAUDE_CONFIG_REL
+    # (static, no placeholders); the shell scripts are made executable. Sourced from the
+    # frozen bundle templates/claude_config/.
+    claude_src = bundle_templates_root / _BUNDLE_CLAUDE_CONFIG_REL
     claude_dir = staging_dir / ".claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
     for name in ("settings.json",) + CLAUDE_CONFIG_SCRIPTS:

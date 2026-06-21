@@ -30,6 +30,23 @@ CONTRACT_PATH = BUNDLE_DIR / "system-artifacts.json"
 VALID_RENDER_KIND = {"copy", "render"}
 VALID_MERGE_STRATEGY = {"three_way", "operator_review", "warn_on_drift", "frozen"}
 VALID_MODE = {"0644", "0755"}
+VALID_DELIVERY = {"wizard", "operator_derived"}
+
+# operator_derived files (operator-owned content) — tracked for drift only, NEVER
+# delivered/overwritten by an upgrade; they keep their existing Python emit path and
+# are NOT bundle-template-sourced. They must carry merge_strategy=operator_review.
+EXPECTED_OPERATOR_DERIVED = frozenset({
+    "prd.md",
+    "agents/roster.md",
+    "agents/acceptance/phase_01_acceptance.md",
+    "agents/acceptance/phase_02_acceptance.md",
+    "agents/acceptance/phase_03_acceptance.md",
+    "agents/acceptance/phase_04_acceptance.md",
+})
+
+# Entries whose body is produced by a Python control-plane emitter (not a bundle
+# template) — they carry source="control_plane" and have NO resolving template_path.
+CONTROL_PLANE_RELPATHS = frozenset({".wizard/UPGRADING.md"})
 
 # ---------------------------------------------------------------------------
 # Closed expected managed-file set — transcribed from the build-side artifact
@@ -176,13 +193,26 @@ class SystemArtifactsContractTest(unittest.TestCase):
         self.assertEqual(extra, set(), f"contract has EXTRA files not in inventory: {sorted(extra)}")
 
         for relpath, entry in self.by_relpath.items():
-            # (c) required keys + valid enums
-            for key in ("relpath", "render_kind", "template_path", "merge_strategy", "mode"):
+            control_plane = relpath in CONTROL_PLANE_RELPATHS
+            # (c) required keys + valid enums. delivery is required on every entry.
+            required_keys = ["relpath", "render_kind", "merge_strategy", "mode", "delivery"]
+            if not control_plane:
+                required_keys.append("template_path")
+            for key in required_keys:
                 self.assertIn(key, entry, f"{relpath}: missing key {key!r}")
             self.assertEqual(entry["relpath"], relpath)
             self.assertIn(entry["render_kind"], VALID_RENDER_KIND, f"{relpath}: bad render_kind")
             self.assertIn(entry["merge_strategy"], VALID_MERGE_STRATEGY, f"{relpath}: bad merge_strategy")
             self.assertIn(entry["mode"], VALID_MODE, f"{relpath}: bad mode")
+            self.assertIn(entry["delivery"], VALID_DELIVERY, f"{relpath}: bad delivery")
+
+            # control-plane entries are Python-emitted, not template-sourced: they carry
+            # source="control_plane" and no template_path.
+            if control_plane:
+                self.assertEqual(entry.get("source"), "control_plane",
+                                 f"{relpath}: control-plane entry must declare source=control_plane")
+                self.assertNotIn("template_path", entry,
+                                 f"{relpath}: control-plane entry must not carry a template_path")
 
             # (d) render entries declare non-empty persisted + derived
             if entry["render_kind"] == "render":
@@ -195,18 +225,19 @@ class SystemArtifactsContractTest(unittest.TestCase):
                 self.assertTrue(persisted, f"{relpath}: render entry has empty inputs.persisted")
                 self.assertTrue(derived, f"{relpath}: render entry has empty inputs.derived")
 
-            # (e) template_path resolves inside the bundle
-            tpl = BUNDLE_DIR / entry["template_path"]
-            self.assertTrue(
-                tpl.is_file(),
-                f"{relpath}: template_path {entry['template_path']!r} does not resolve to a "
-                f"file inside the bundle ({tpl})",
-            )
-            # template_path must be inside the bundle (no traversal)
-            self.assertTrue(
-                str(tpl.resolve()).startswith(str(BUNDLE_DIR.resolve()) + "/"),
-                f"{relpath}: template_path escapes the bundle",
-            )
+            # (e) template_path resolves inside the bundle (skip control-plane entries).
+            if not control_plane:
+                tpl = BUNDLE_DIR / entry["template_path"]
+                self.assertTrue(
+                    tpl.is_file(),
+                    f"{relpath}: template_path {entry['template_path']!r} does not resolve to a "
+                    f"file inside the bundle ({tpl})",
+                )
+                # template_path must be inside the bundle (no traversal)
+                self.assertTrue(
+                    str(tpl.resolve()).startswith(str(BUNDLE_DIR.resolve()) + "/"),
+                    f"{relpath}: template_path escapes the bundle",
+                )
 
     def test_executable_scripts_have_0755_mode(self):
         """.sh hooks/scripts carry 0755; everything else 0644 (file-mode metadata)."""
@@ -216,6 +247,31 @@ class SystemArtifactsContractTest(unittest.TestCase):
                 entry["mode"], expected,
                 f"{relpath}: mode should be {expected} (got {entry['mode']})",
             )
+
+    def test_delivery_field_partitions_wizard_vs_operator_derived(self):
+        """Every entry carries a valid `delivery`; the operator_derived set is exactly
+        the expected operator-owned files; operator_derived ⟹ merge_strategy=operator_review
+        (operator content is tracked for drift only, never delivered/overwritten); and
+        every other (wizard-authored) entry is delivery=wizard (IN the upgrade surface)."""
+        declared_operator_derived = {
+            r for r, e in self.by_relpath.items() if e.get("delivery") == "operator_derived"
+        }
+        self.assertEqual(
+            declared_operator_derived, set(EXPECTED_OPERATOR_DERIVED),
+            "operator_derived set diverges from the controller-declared set "
+            f"(only-in-contract={sorted(declared_operator_derived - EXPECTED_OPERATOR_DERIVED)}, "
+            f"only-expected={sorted(EXPECTED_OPERATOR_DERIVED - declared_operator_derived)})",
+        )
+        for relpath, entry in self.by_relpath.items():
+            self.assertIn(entry.get("delivery"), VALID_DELIVERY, f"{relpath}: bad/missing delivery")
+            if entry["delivery"] == "operator_derived":
+                self.assertEqual(
+                    entry["merge_strategy"], "operator_review",
+                    f"{relpath}: operator_derived MUST be merge_strategy=operator_review",
+                )
+            else:
+                self.assertEqual(entry["delivery"], "wizard",
+                                 f"{relpath}: non-operator_derived must be delivery=wizard")
 
     def test_copy_entries_have_no_render_inputs(self):
         """copy entries do not carry render inputs (or carry empty input lists)."""

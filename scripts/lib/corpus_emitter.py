@@ -30,17 +30,23 @@ from typing import Dict, List, Optional, Tuple
 from emission_plan import EmissionPlan  # type: ignore
 from generator import _substitute_placeholders  # type: ignore
 from corpus_loader import CorpusCellRecord, load_corpus_pack, resolve_for_shape  # type: ignore
+from bundle_templates import read_bundle_template  # type: ignore
 
 
 RULES_LIBRARY_TEMPLATE = "wizard/templates/quality/rules_library.md"
 RULES_LIBRARY_DEST = "quality/rules_library.md"
 
+# Operating-layer corpus templates are sourced from the frozen system bundle (single
+# home) by their operator-project relpath, via the managed-artifacts contract.
+RULES_LIBRARY_RELPATH = "quality/rules_library.md"
+
 # decisions/ ADR core (the OP-01 scaffold-template cell). Static operator-facing
-# templates with <...> operator-fill markers (no {{KEY}} substitution).
-DECISIONS_TEMPLATES = {
-    "wizard/templates/decisions/decision_record_template.md": "decisions/decision_record_template.md",
-    "wizard/templates/decisions/_index.md": "decisions/_index.md",
-}
+# templates with <...> operator-fill markers (no {{KEY}} substitution). Keyed by
+# operator-project relpath (the bundle-source path comes from the contract).
+DECISIONS_RELPATHS = (
+    "decisions/decision_record_template.md",
+    "decisions/_index.md",
+)
 
 # Deterministic install marker (no clock; replay-safe). Operator-overridable via
 # the plan's free-form foundation_doc_inputs map.
@@ -122,7 +128,9 @@ def emit_rules_library(plan: EmissionPlan, staging_dir: Path, build_repo_root: P
     created = str((plan.foundation_doc_inputs or {}).get(INSTALLED_DATE_KEY, DEFAULT_INSTALLED_MARKER))
     entries = render_rules_library_entries(resolved, created)
 
-    template = (build_repo_root / RULES_LIBRARY_TEMPLATE).read_text(encoding="utf-8")
+    from bundle_templates import operating_layer_source_version  # type: ignore
+    version = operating_layer_source_version(str(build_repo_root))
+    template = read_bundle_template(version, RULES_LIBRARY_RELPATH, build_repo_root)
     result, _seen = _substitute_placeholders(
         template, {"RULES_LIBRARY_ENTRIES": entries}, template_name="rules_library.md")
 
@@ -288,10 +296,12 @@ def emit_decisions(plan: EmissionPlan, staging_dir: Path, build_repo_root: Path)
     The templates are static and operator-fill (<...> markers, not {{KEY}}); they
     are copied verbatim. _substitute_placeholders runs with no inputs purely as a
     fail-fast guard against an accidental {{KEY}} ever being introduced."""
+    from bundle_templates import operating_layer_source_version  # type: ignore
+    version = operating_layer_source_version(str(build_repo_root))
     written: List[Path] = []
-    for src_rel, dest_rel in DECISIONS_TEMPLATES.items():
-        content = (build_repo_root / src_rel).read_text(encoding="utf-8")
-        result, _seen = _substitute_placeholders(content, {}, template_name=Path(src_rel).name)
+    for dest_rel in DECISIONS_RELPATHS:
+        content = read_bundle_template(version, dest_rel, build_repo_root)
+        result, _seen = _substitute_placeholders(content, {}, template_name=Path(dest_rel).name)
         dest = staging_dir / dest_rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(result, encoding="utf-8")

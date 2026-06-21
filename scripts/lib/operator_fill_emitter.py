@@ -25,9 +25,21 @@ from pathlib import Path
 from typing import List
 
 from emission_plan import EmissionPlan  # type: ignore
+from bundle_templates import (  # type: ignore
+    operating_layer_source_version, _bundle_dir,
+)
 
 # (build-repo source dir, operator-project dest dir) — copied VERBATIM (no substitution).
+# Retained for reference / external consumers; emission sources these from the frozen
+# bundle templates/ tree (single home) via BUNDLE_OPERATOR_FILL_SOURCES.
 OPERATOR_FILL_SOURCES = (
+    ("wizard/review_prompts", "wizard/review_prompts"),
+    ("wizard/skills", "wizard/skills"),
+)
+
+# (bundle-templates-relative source dir, operator-project dest dir). The operator-fill
+# helpers live under <bundle>/templates/wizard/ in the frozen template home.
+BUNDLE_OPERATOR_FILL_SOURCES = (
     ("wizard/review_prompts", "wizard/review_prompts"),
     ("wizard/skills", "wizard/skills"),
 )
@@ -51,8 +63,10 @@ def emit_operator_fill_templates(plan: EmissionPlan, staging_dir: Path,
     """Copy the operator-fill helper templates verbatim + write an empty .env.
     Returns the paths written."""
     written: List[Path] = []
-    for src_rel, dest_rel in OPERATOR_FILL_SOURCES:
-        src_dir = build_repo_root / src_rel
+    version = operating_layer_source_version(str(build_repo_root))
+    bundle_templates_root = _bundle_dir(version, build_repo_root) / "templates"
+    for src_rel, dest_rel in BUNDLE_OPERATOR_FILL_SOURCES:
+        src_dir = bundle_templates_root / src_rel
         if not src_dir.exists():
             continue
         dest_dir = staging_dir / dest_rel

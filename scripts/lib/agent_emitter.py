@@ -20,16 +20,34 @@ from typing import Dict, List
 
 from emission_plan import EmissionPlan  # type: ignore
 from generator import _substitute_placeholders  # type: ignore
+from bundle_templates import (  # type: ignore
+    operating_layer_source_version, _bundle_dir,
+)
 
 
-# Template locations (build-repo-relative). markdown-CC shape at v1.
+# Template locations (build-repo-relative) — retained for the operator_system_emitter
+# prewrite dependency check. EMISSION sources these from the frozen bundle templates/
+# tree (single home), via the _bundle_agent_template paths below.
 ORCHESTRATOR_TEMPLATE = "wizard/agents/orchestrator_prompt.md"
 SPECIALIST_TEMPLATE = "wizard/agents/agent_prompt_template.md"
 QA_TEMPLATE = "wizard/agents/qa_agent_prompt.md"
 INVOCATION_TEMPLATE = "wizard/scripts/agent_invocation_template.sh"
 CRON_TEMPLATE = "wizard/templates/agents/cron_config.md"
 
+# Bundle-relative subpaths (inside <bundle>/templates/) for the agent-layer templates.
+_BUNDLE_ORCHESTRATOR_REL = "agents/orchestrator_prompt.md"
+_BUNDLE_SPECIALIST_REL = "agents/agent_prompt_template.md"
+_BUNDLE_QA_REL = "agents/qa_agent_prompt.md"
+_BUNDLE_INVOCATION_REL = "scripts/agent_invocation_template.sh"
+_BUNDLE_CRON_REL = "agents/cron_config.md"
+
 SCRIPT_MODE = 0o755
+
+
+def _bundle_agent_templates_root(build_repo_root: Path) -> Path:
+    """The frozen bundle templates/ tree that homes the agent-layer templates."""
+    version = operating_layer_source_version(str(build_repo_root))
+    return _bundle_dir(version, build_repo_root) / "templates"
 
 
 def _emit_from_template(template_path: Path, out_path: Path, inputs: Dict[str, str],
@@ -126,10 +144,12 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
     for d in (prompts_dir, scripts_dir, cron_dir):
         d.mkdir(parents=True, exist_ok=True)
 
+    bt = _bundle_agent_templates_root(build_repo_root)
+
     # --- Orchestrator (control plane) — tier NAMES in the prompt ---
     orch = plan.orchestrator
     written.append(_emit_from_template(
-        build_repo_root / ORCHESTRATOR_TEMPLATE,
+        bt / _BUNDLE_ORCHESTRATOR_REL,
         prompts_dir / "orchestrator_prompt.md",
         {
             "PROJECT_NAME": plan.project_name,
@@ -142,7 +162,7 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
 
     # --- QA agent (every system gets exactly one) — tier NAMES ---
     written.append(_emit_from_template(
-        build_repo_root / QA_TEMPLATE,
+        bt / _BUNDLE_QA_REL,
         prompts_dir / "qa_agent_prompt.md",
         {
             "PROJECT_NAME": plan.project_name,
@@ -157,7 +177,7 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
     for a in plan.agents:
         # Prompt: tier NAMES (a.primary_model_tier / a.status_model_tier)
         written.append(_emit_from_template(
-            build_repo_root / SPECIALIST_TEMPLATE,
+            bt / _BUNDLE_SPECIALIST_REL,
             prompts_dir / f"{a.id}_prompt.md",
             {
                 "PROJECT_NAME": plan.project_name,
@@ -178,7 +198,7 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
         ))
         # Invocation script: RESOLVED model string (programmatic --model)
         script_path = _emit_from_template(
-            build_repo_root / INVOCATION_TEMPLATE,
+            bt / _BUNDLE_INVOCATION_REL,
             scripts_dir / f"{a.id}.sh",
             {
                 "AGENT_NAME": a.id,
@@ -194,7 +214,7 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
     # --- Cron config — scheduled agents become Orchestrator-invoked entries (control-plane default) ---
     cron_out = cron_dir / "cron_config.md"
     written.append(_emit_from_template(
-        build_repo_root / CRON_TEMPLATE,
+        bt / _BUNDLE_CRON_REL,
         cron_out,
         {"CRON_ENTRIES": _render_cron_entries(plan)},
         "cron_config.md",
