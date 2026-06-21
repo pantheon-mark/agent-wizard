@@ -227,6 +227,26 @@ class SystemArtifactsContractTest(unittest.TestCase):
                     f"{relpath}: copy entry should not declare render inputs",
                 )
 
+    def test_render_templates_contain_at_least_one_placeholder(self):
+        """Every render entry's template must contain at least one {{ placeholder.
+
+        A render_kind='render' entry with no {{ in its template has nothing to
+        substitute — the distinction from 'copy' is incoherent and will confuse
+        the upgrade engine.  If a template has no placeholders, the entry must
+        be reclassified to render_kind='copy'.
+        """
+        for relpath, entry in self.by_relpath.items():
+            if entry["render_kind"] == "render":
+                tpl_path = BUNDLE_DIR / entry["template_path"]
+                content = tpl_path.read_text(encoding="utf-8")
+                self.assertIn(
+                    "{{",
+                    content,
+                    f"{relpath}: render_kind='render' but template "
+                    f"{entry['template_path']!r} contains no '{{{{' placeholder — "
+                    f"reclassify to render_kind='copy' and remove the inputs block",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

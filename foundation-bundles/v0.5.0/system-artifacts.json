@@ -83,63 +83,31 @@
       "template_path": "templates/root/SESSION_STATE.md"
     },
     {
-      "inputs": {
-        "derived": [
-          "WIZARD_VERSION"
-        ],
-        "persisted": [
-          "ACCEPTANCE_CONTRACT_CONTENT"
-        ]
-      },
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "agents/acceptance/phase_01_acceptance.md",
-      "render_kind": "render",
+      "render_kind": "copy",
       "template_path": "templates/agents/acceptance_contract.md"
     },
     {
-      "inputs": {
-        "derived": [
-          "WIZARD_VERSION"
-        ],
-        "persisted": [
-          "ACCEPTANCE_CONTRACT_CONTENT"
-        ]
-      },
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "agents/acceptance/phase_02_acceptance.md",
-      "render_kind": "render",
+      "render_kind": "copy",
       "template_path": "templates/agents/acceptance_contract.md"
     },
     {
-      "inputs": {
-        "derived": [
-          "WIZARD_VERSION"
-        ],
-        "persisted": [
-          "ACCEPTANCE_CONTRACT_CONTENT"
-        ]
-      },
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "agents/acceptance/phase_03_acceptance.md",
-      "render_kind": "render",
+      "render_kind": "copy",
       "template_path": "templates/agents/acceptance_contract.md"
     },
     {
-      "inputs": {
-        "derived": [
-          "WIZARD_VERSION"
-        ],
-        "persisted": [
-          "ACCEPTANCE_CONTRACT_CONTENT"
-        ]
-      },
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "agents/acceptance/phase_04_acceptance.md",
-      "render_kind": "render",
+      "render_kind": "copy",
       "template_path": "templates/agents/acceptance_contract.md"
     },
     {
