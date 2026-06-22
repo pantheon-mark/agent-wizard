@@ -48,7 +48,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from bundle_templates import read_bundle_template, BundleTemplateError  # type: ignore
+from bundle_templates import (  # type: ignore
+    read_bundle_template,
+    derive_scaffold_render_inputs,
+    BundleTemplateError,
+)
 from generator import render_foundation_docs  # type: ignore
 from replay_capsule import REPLAY_CAPSULE_REL, capsule_supports_operating_replay  # type: ignore
 from section_merge import section_three_way_merge  # type: ignore
@@ -200,6 +204,154 @@ def _render_version(version: str, inputs: Dict[str, Any], build_repo_root: Path)
     fail-closed refusal (migration-required; never emit a raw placeholder)."""
     records = render_foundation_docs(version, inputs, build_repo_root)
     return {rec.operator_relpath: rec.content for rec in records}
+
+
+_OL_PLACEHOLDER_RE = re.compile(r"\{\{([A-Z][A-Z0-9_]*)\}\}")
+
+
+def _render_operating_layer(
+    version: str,
+    relpaths: List[str],
+    *,
+    capsule: Dict[str, Any],
+    capsule_inputs: Dict[str, Any],
+    project_name: str,
+    build_repo_root: Path,
+) -> Dict[str, str]:
+    """Render the operating-layer `render_kind:render` files (NOT the classic foundation
+    docs) for `version`, byte-faithfully reproducing what the emitter produced.
+
+    This is the CANONICAL operating-layer render used both for the conformance-gate
+    "reproduce CURRENT" check and step 4c's "render THEIRS". It assembles the FULL input
+    set the emitter used:
+
+      - scaffold/root render files: re-derived DERIVED inputs (defaults + corpus block +
+        autonomy body + resolved model tiers + rules-library body) from the relevant
+        bundle/corpus/registry, overlaid with the capsule's PERSISTED inputs
+        (foundation_doc_inputs + operating.resolved_scaffold_inputs). Then the bundle's
+        deterministic target-hook injection post-pass is replayed over the rendered tree —
+        exactly the emitter's step-5 transform.
+      - agent-layer render files: the capsule's `operating.by_relpath[rel]` map is fully
+        self-contained (already resolved at emit), so it is used verbatim.
+
+    Fail-closed: a placeholder key that resolves nowhere raises UpgradeApplyError (the
+    capsule/bundle are out of sync; never emit a raw `{{...}}`). The capsule-only
+    substitution this replaces is the operating-layer-upgrade delivery gap — persisted
+    inputs alone leave DERIVED placeholders unresolved.
+
+    Returns {relpath: rendered content}. Stdlib-only / pip-free.
+    """
+    from corpus_emitter import inject_target_hooks  # type: ignore
+
+    operating_block = capsule.get("operating") if isinstance(capsule, dict) else None
+    by_relpath: Dict[str, Dict[str, str]] = {}
+    persisted_scaffold: Dict[str, str] = {}
+    if isinstance(operating_block, dict):
+        _rsi = operating_block.get("resolved_scaffold_inputs") or {}
+        if isinstance(_rsi, dict):
+            persisted_scaffold = {k: str(v) for k, v in _rsi.items()}
+        _byr = operating_block.get("by_relpath") or {}
+        if isinstance(_byr, dict):
+            by_relpath = {
+                k: {kk: str(vv) for kk, vv in v.items()}
+                for k, v in _byr.items()
+                if isinstance(v, dict)
+            }
+
+    system_shape = str(capsule.get("system_shape", "")) if isinstance(capsule, dict) else ""
+    # Re-derived base map for the scaffold/root render files (NOT agent files), assembled
+    # from the TARGET bundle's deterministic derivations + the capsule's persisted inputs.
+    scaffold_base = derive_scaffold_render_inputs(
+        system_shape=system_shape,
+        foundation_doc_inputs=dict(capsule_inputs),
+        project_name=project_name,
+        target_version=version,
+        build_repo_root=build_repo_root,
+    )
+    # Persisted scaffold inputs are layered on top (they are persisted, not derived).
+    scaffold_inputs = dict(scaffold_base)
+    scaffold_inputs.update(persisted_scaffold)
+
+    import tempfile
+    out: Dict[str, str] = {}
+    with tempfile.TemporaryDirectory() as _td:
+        staging = Path(_td)
+        # The shim carries only what inject_target_hooks reads (system_shape).
+        from bundle_templates import _DerivationShim  # type: ignore
+        shim = _DerivationShim(system_shape, dict(capsule_inputs))
+        scaffold_relpaths: List[str] = []
+        for rel in relpaths:
+            try:
+                template_text = read_bundle_template(version, rel, build_repo_root)
+            except BundleTemplateError as e:
+                raise UpgradeApplyError(
+                    f"cannot read the target bundle template for operating-layer file "
+                    f"{rel!r}: {e}. No files were changed."
+                ) from e
+            if rel in by_relpath:
+                # Agent-layer file: the capsule's resolved dict is self-contained.
+                sub_inputs = dict(by_relpath[rel])
+            else:
+                sub_inputs = scaffold_inputs
+            missing_keys: List[str] = []
+
+            def _replace(m: "re.Match", _sub=sub_inputs, _missing=missing_keys) -> str:
+                key = m.group(1)
+                if key not in _sub:
+                    _missing.append(key)
+                    return m.group(0)
+                return _sub[key]
+
+            rendered = _OL_PLACEHOLDER_RE.sub(_replace, template_text)
+            if missing_keys:
+                raise UpgradeApplyError(
+                    f"the target bundle template for {rel!r} references placeholder(s) "
+                    f"{sorted(set(missing_keys))} that could not be resolved from the "
+                    f"recorded setup values or the target bundle. A setup-record (capsule) "
+                    f"upgrade may be required. No files were changed."
+                )
+            sp = staging / rel
+            sp.parent.mkdir(parents=True, exist_ok=True)
+            sp.write_text(rendered, encoding="utf-8")
+            if rel not in by_relpath:
+                scaffold_relpaths.append(rel)
+
+        # Replay the emitter's deterministic target-hook injection post-pass over the
+        # staged tree (the hooks are corpus-derived from the bundle, not operator input).
+        # This is the same transform the emitter runs at step 5, so the re-rendered bytes
+        # match the emitted file exactly.
+        inject_target_hooks(shim, staging)
+
+        for rel in relpaths:
+            out[rel] = (staging / rel).read_text(encoding="utf-8")
+    return out
+
+
+def _inject_hooks_for_copy_file(
+    relpath: str, content: str, capsule: Dict[str, Any], build_repo_root: Path
+) -> str:
+    """Replay the bundle's deterministic target-hook injection for a single copy-kind
+    file. The emitter injects corpus hooks (OP-… cross-reference regions) into hook-target
+    files AFTER copying them, so the emitted bytes = template + hook region. Reproduce that
+    here so a hook-target copy file's `theirs` matches what was emitted (otherwise drift
+    detection false-positives on an unchanged file).
+
+    Non-hook-target files are returned unchanged (inject_target_hooks skips them).
+    Stdlib-only / pip-free; corpus hooks are bundle-derived, not operator input."""
+    from corpus_emitter import inject_target_hooks  # type: ignore
+    from bundle_templates import _DerivationShim  # type: ignore
+
+    system_shape = str(capsule.get("system_shape", "")) if isinstance(capsule, dict) else ""
+    fdi = capsule.get("foundation_doc_inputs") if isinstance(capsule, dict) else {}
+    shim = _DerivationShim(system_shape, dict(fdi) if isinstance(fdi, dict) else {})
+    import tempfile
+    with tempfile.TemporaryDirectory() as _td:
+        staging = Path(_td)
+        sp = staging / relpath
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        sp.write_text(content, encoding="utf-8")
+        inject_target_hooks(shim, staging)
+        return sp.read_text(encoding="utf-8")
 
 
 # ===== Merge-surface computation + classification =====
@@ -379,14 +531,57 @@ def compute_merge_surface(
 
 # ===== Replay-conformance gate =====
 
+def _operating_render_relpaths(
+    current_version: str,
+    build_repo_root: Path,
+    manifest: Dict[str, Any],
+    foundation_entries: Dict[str, Dict[str, Any]],
+) -> List[str]:
+    """The managed operating-layer `render_kind:render` relpaths to verify at the
+    CURRENT bundle (NOT the classic foundation docs, which the foundation leg covers).
+    Identified from the CURRENT bundle's contract (the manifest carries no render_kind),
+    intersected with the manifest's managed entries. Empty for a foundation-only current
+    bundle (no contract)."""
+    contract_path = (build_repo_root / "wizard" / "foundation-bundles"
+                     / current_version / CONTRACT_BASENAME)
+    if not contract_path.is_file():
+        return []
+    try:
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    managed = _manifest_managed_relpaths(manifest)
+    out: List[str] = []
+    for entry in contract.get("artifacts", []):
+        if entry.get("delivery") != "wizard" or entry.get("render_kind") != RENDER_KIND_RENDER:
+            continue
+        rel = entry.get("relpath")
+        if rel and rel not in foundation_entries and rel in managed:
+            out.append(rel)
+    return sorted(out)
+
+
 def _replay_conformance_check(
     current_version: str,
     capsule_inputs: Dict[str, Any],
     build_repo_root: Path,
     foundation_entries: Dict[str, Dict[str, Any]],
+    *,
+    capsule: Optional[Dict[str, Any]] = None,
+    manifest: Optional[Dict[str, Any]] = None,
+    project_name: str = "",
 ) -> None:
     """Fail-closed gate: re-render the CURRENT version from the capsule inputs and
     confirm each foundation doc hashes identically to the manifest base_hash.
+
+    Operating-layer leg (when `capsule` + `manifest` are supplied): ALSO re-render the
+    current bundle's managed operating-layer `render_kind:render` files through the
+    CANONICAL render (capsule persisted inputs + current-bundle-DERIVED inputs +
+    target-hook injection) and confirm each reproduces the manifest base_hash. This is the
+    symmetric counterpart to step 4c's TARGET render: if the canonical render cannot
+    reproduce CURRENT, the merge base it computes for a drifted three_way file is untrusted,
+    so the upgrade is refused. (Proven a no-false-fail leg: all current operating render
+    files reproduce their recorded base_hash.)
 
     Uses the SAME hashing scheme the manifest base_hash was produced with:
     `sha256:` + sha256_bytes(rendered.encode("utf-8")). sha256_bytes applies the
@@ -406,6 +601,31 @@ def _replay_conformance_check(
         actual = "sha256:" + sha256_bytes(base_rendered[rel].encode("utf-8"))
         if actual != expected:
             mismatches.append(f"{rel} (manifest base_hash != re-rendered hash)")
+
+    # Operating-layer leg: verify the canonical CURRENT render of the managed operating
+    # render files reproduces their recorded base_hash (symmetric to step 4c).
+    if capsule is not None and manifest is not None:
+        ol_rels = _operating_render_relpaths(
+            current_version, build_repo_root, manifest, foundation_entries
+        )
+        if ol_rels:
+            files_block = manifest.get("managed_files") or manifest.get("files") or {}
+            try:
+                ol_rendered = _render_operating_layer(
+                    current_version, ol_rels,
+                    capsule=capsule, capsule_inputs=capsule_inputs,
+                    project_name=project_name, build_repo_root=build_repo_root,
+                )
+            except UpgradeApplyError as e:
+                mismatches.append(f"operating layer (render failed: {e})")
+                ol_rendered = {}
+            for rel in ol_rels:
+                if rel not in ol_rendered:
+                    continue
+                expected = str(files_block.get(rel, {}).get("base_hash", ""))
+                actual = "sha256:" + sha256_bytes(ol_rendered[rel].encode("utf-8"))
+                if actual != expected:
+                    mismatches.append(f"{rel} (manifest base_hash != re-rendered hash)")
     if mismatches:
         raise UpgradeApplyError(
             "replay-conformance gate FAILED: the recorded build inputs no longer "
@@ -605,7 +825,17 @@ def apply_upgrade(
         )
 
     # --- 2b. Replay-conformance gate (fail-closed) ----------------------------
-    _replay_conformance_check(current_version, capsule_inputs, build_repo_root, foundation_entries)
+    # Includes the operating-layer leg: the canonical CURRENT render of managed operating
+    # render files must reproduce their recorded base_hash (symmetric to step 4c's TARGET
+    # render). project_name (structural; the project's directory-derived name) is the
+    # PROJECT_NAME the emitter substituted — sourced from the manifest, not foundation_doc_inputs.
+    project_name = str(manifest.get("project_name", "")) or str(
+        capsule_inputs.get("PROJECT_NAME", "")
+    )
+    _replay_conformance_check(
+        current_version, capsule_inputs, build_repo_root, foundation_entries,
+        capsule=capsule, manifest=manifest, project_name=project_name,
+    )
 
     # --- 3. Render theirs (fail-closed on missing placeholder) ----------------
     target_generator_version = _read_target_generator_version(build_repo_root, target_entry)
@@ -811,6 +1041,17 @@ def apply_upgrade(
                 f"cannot read the bundle template for {rel!r}: {e}. No files were changed."
             ) from e
 
+        # Replay the emitter's deterministic target-hook injection over copy files that
+        # are corpus hook targets (e.g. logs/audit_log.md carries the OP-06 hook). The
+        # emitted file = template + injected hook region, so comparing the RAW template
+        # against the hook-injected base would spuriously flag an unchanged file as
+        # changed and route it to review. Non-hook-target copy files pass through
+        # unchanged. (The same transform the render-kind path replays in
+        # _render_operating_layer.)
+        theirs_copy = _inject_hooks_for_copy_file(
+            rel, theirs_copy, capsule, build_repo_root
+        )
+
         # Resolve mode from the contract entry (default 0644).
         mode_str = str(_contract_entries_map.get(rel, {}).get("mode", "0644"))
         try:
@@ -954,34 +1195,40 @@ def apply_upgrade(
     #   warn_on_drift             -> ack-or-refuse
     #   frozen                    -> block on drift; adopt clean
 
-    # Build a combined inputs dict for placeholder substitution.
-    # Foundation doc inputs supply PROJECT_NAME, PROJECT_PURPOSE, etc.
-    # resolved_scaffold_inputs supply INHERITED_OPERATING_PRINCIPLES, OL_COLOR, etc.
-    # per-relpath overrides (by_relpath) cover agent-specific files.
-    _PLACEHOLDER_RE = re.compile(r"\{\{([A-Z][A-Z0-9_]*)\}\}")
-    operating_block = capsule.get("operating") if isinstance(capsule, dict) else None
-    _scaffold_inputs: Dict[str, str] = {}
-    _by_relpath_inputs: Dict[str, Dict[str, str]] = {}
-    if isinstance(operating_block, dict):
-        _rsi = operating_block.get("resolved_scaffold_inputs") or {}
-        if isinstance(_rsi, dict):
-            _scaffold_inputs = {k: str(v) for k, v in _rsi.items()}
-        _byr = operating_block.get("by_relpath") or {}
-        if isinstance(_byr, dict):
-            _by_relpath_inputs = {
-                k: {kk: str(vv) for kk, vv in v.items()}
-                for k, v in _byr.items()
-                if isinstance(v, dict)
-            }
-    # Combined base substitution map (foundation_doc_inputs overrides scaffold for
-    # duplicated keys, since foundation inputs are the canonical source for shared
-    # keys like PROJECT_NAME, WIZARD_VERSION).
-    _combined_base: Dict[str, str] = dict(_scaffold_inputs)
-    _combined_base.update({k: str(v) for k, v in capsule_inputs.items()})
-
+    # Canonical operating-layer render (closes the delivery gap). The capsule stores only
+    # PERSISTED inputs; the DERIVED inputs (scaffold defaults, corpus inherited-principles
+    # block, autonomy-derived actions, resolved model tiers, rules-library body) are
+    # re-derived from the TARGET bundle and the persisted inputs overlaid, then the bundle's
+    # target-hook injection post-pass is replayed. The earlier capsule-only substitution
+    # left DERIVED placeholders unresolved and refused the whole upgrade.
+    # (project_name computed at step 2b — the structural PROJECT_NAME the emitter used.)
     files_block_ol = manifest.get("managed_files") or manifest.get("files") or {}
     # Track manifest entry updates for operating-layer render files.
     new_ol_manifest_entries: Dict[str, Dict[str, Any]] = {}
+
+    # Eligible operating-layer render relpaths: render-kind, not a classic foundation doc,
+    # already managed, and surviving (not dropped/collision/needs-capsule).
+    ol_relpaths = [
+        se.relpath for se in surface
+        if se.render_kind == RENDER_KIND_RENDER
+        and se.relpath not in foundation_entries
+        and se.in_manifest
+        and se.classification not in (SURFACE_DROPPED, SURFACE_COLLISION, SURFACE_NEEDS_CAPSULE)
+    ]
+    theirs_ol_map = _render_operating_layer(
+        target_version, ol_relpaths,
+        capsule=capsule, capsule_inputs=capsule_inputs,
+        project_name=project_name, build_repo_root=build_repo_root,
+    ) if ol_relpaths else {}
+    # Base = the CURRENT-version render of the SAME files (same canonical assembly). The
+    # section-aware 3-way merge for a drifted three_way file needs this as its merge base;
+    # the replay-conformance gate (step 2b operating leg) verified it reproduces the manifest
+    # base_hash, so it is a trustworthy merge ancestor.
+    base_ol_map = _render_operating_layer(
+        current_version, ol_relpaths,
+        capsule=capsule, capsule_inputs=capsule_inputs,
+        project_name=project_name, build_repo_root=build_repo_root,
+    ) if ol_relpaths else {}
 
     for se in surface:
         rel = se.relpath
@@ -1001,35 +1248,7 @@ def apply_upgrade(
         if cls in (SURFACE_DROPPED, SURFACE_COLLISION, SURFACE_NEEDS_CAPSULE):
             continue
 
-        # Resolve the target-version template and substitute placeholders.
-        try:
-            template_text = read_bundle_template(target_version, rel, build_repo_root)
-        except BundleTemplateError as e:
-            raise UpgradeApplyError(
-                f"cannot read the target bundle template for operating-layer file "
-                f"{rel!r}: {e}. No files were changed."
-            ) from e
-
-        # Per-relpath inputs (agent-specific) take precedence over the combined base.
-        sub_inputs: Dict[str, str] = dict(_combined_base)
-        if rel in _by_relpath_inputs:
-            sub_inputs.update(_by_relpath_inputs[rel])
-
-        # Substitution: fail-closed on missing placeholder keys.
-        missing_keys: List[str] = []
-        def _replace_ol(m: "re.Match", _sub=sub_inputs, _missing=missing_keys) -> str:
-            key = m.group(1)
-            if key not in _sub:
-                _missing.append(key)
-                return m.group(0)
-            return _sub[key]
-        theirs_ol = _PLACEHOLDER_RE.sub(_replace_ol, template_text)
-        if missing_keys:
-            raise UpgradeApplyError(
-                f"the target bundle template for {rel!r} references placeholder(s) "
-                f"{sorted(set(missing_keys))} that are not in the capsule operating "
-                f"block. A capsule upgrade may be required. No files were changed."
-            )
+        theirs_ol = theirs_ol_map[rel]
 
         # Read the live file.
         live_ol = _read_live(operator_project_dir, rel)
@@ -1071,17 +1290,11 @@ def apply_upgrade(
                                               note="no operator edits; adopted the new version"))
             else:
                 # Section-aware merge: same logic as the foundation-doc three_way path.
-                # Reconstruct base from the capsule inputs + the BASE-version bundle template.
-                try:
-                    base_template_text = read_bundle_template(current_version, rel, build_repo_root)
-                    base_ol_rendered = _PLACEHOLDER_RE.sub(
-                        lambda m, _s=sub_inputs: _s.get(m.group(1), m.group(0)),
-                        base_template_text,
-                    )
-                except BundleTemplateError:
-                    # No base template available (e.g. file is new in this version but
-                    # somehow managed — defensive: route to sidecar).
-                    base_ol_rendered = live_ol
+                # Base = the canonical CURRENT-version render (same full input assembly as
+                # theirs), which the conformance gate verified reproduces the recorded
+                # base_hash — a trustworthy merge ancestor. Fall back to live (no-op merge
+                # base -> sidecar) only if the file was not renderable at the base version.
+                base_ol_rendered = base_ol_map.get(rel, live_ol)
 
                 eligible = str(meta_ol.get(LIVE_LINEAGE_VERSION_FIELD, "")) == current_version
                 merge = (section_three_way_merge(base_ol_rendered, live_ol, theirs_ol)

@@ -25,21 +25,20 @@ byte-identical), never merely `classification == applied`. A silent drop fails t
 test.
 
 ============================================================================
-FINDING (surfaced by this proof; see the slice report) — the operating-layer
-upgrade does NOT yet deliver on a real v2->v2 emit. The v2 replay capsule's
-`operating` block carries only the PERSISTED render inputs (by design it excludes
-`derived` keys, meaning to re-derive them at upgrade time) — but the apply path's
-operating-layer render loop (step 4c) does NOT re-derive them; it substitutes from
-the capsule alone. So ~half the in-manifest operating render files (.gitignore,
-CLAUDE.md, project_instructions.md, session_bootstrap.md, ...) reference keys the
-capsule lacks, and the apply REFUSES (fail-closed) the moment step 4c reaches the
-first such file. The positive Regime-B delivery + edit-protection properties
-therefore CANNOT yet be proven on a real emit; this test asserts the CURRENT real
-behavior (a clean refusal with ZERO writes) and is marked with explicit FINDING
-docstrings so the gap is not mistaken for a passing delivery path. Closing the gap
-(persist the full resolved render-input map in the capsule, or wire re-derivation
-into step 4c) is a follow-on slice; the tamper-refusal property is independent of
-the gap and IS proven here.
+RESOLVED — the operating-layer upgrade now delivers on a real v2->v2 emit. The v2
+replay capsule's `operating` block carries only the PERSISTED render inputs (by
+design it excludes `derived` keys, to re-derive them at upgrade time); the apply
+path's operating-layer render loop (step 4c) re-derives the DERIVED inputs (scaffold
+defaults, the corpus-rendered inherited-principles block, the autonomy-derived
+autonomous-actions body, the resolved model-tier strings, the rules-library body)
+from the TARGET bundle and overlays the capsule's persisted inputs, then replays the
+bundle's deterministic target-hook injection post-pass. The conformance gate (step
+2b) verifies the symmetric CURRENT render reproduces the recorded base_hash before any
+write, so the merge base is trustworthy and there is no false-fail. Regime B now
+proves POSITIVE delivery (exact path set), section-merge edit protection (both the
+clean-merge and same-section-sidecar cases, never git markers), tamper-refusal, and a
+next-cycle conformance pass (the upgrade chain is not stranded). Path sets are
+asserted exactly, never `classification == applied` alone.
 ============================================================================
 """
 
@@ -285,43 +284,173 @@ class OperatingLayerUpgradeE2E(unittest.TestCase):
         # The v0.6.1-new skill does NOT exist yet on a v0.6.0 emit (it is new in target).
         self.assertFalse((proj / "wizard" / "skills" / "health-check.md").exists())
 
-    def test_regimeB_FINDING_operating_render_replay_gap_refuses_with_zero_writes(self):
-        """FINDING (headline). On a real v0.6.0 -> v0.6.1 (v2 -> v2) apply, the operating
-        upgrade REFUSES because the v2 capsule's operating block does not carry every key
-        the in-manifest operating RENDER files reference (the apply path does not
-        re-derive `derived` keys at step 4c). The refusal is fail-closed: ZERO writes,
-        rollback clean, no review sidecars. This asserts the CURRENT real behavior; the
-        positive delivery/edit-protection properties cannot be proven until the capsule
-        gap is closed (follow-on slice).
+    # The v0.6.0 -> v0.6.1 operating-layer delta, by relpath + disposition.
+    _OL_DELTA_NEW_SKILL = "wizard/skills/health-check.md"       # brand-new copy file
+    _OL_DELTA_CHANGED_RENDER = "operating_discipline.md"        # render doc gains a section
+    _OL_DELTA_CHANGED_COPY = "wizard/skills/pause.md"           # one-line copy change
 
-        ANTI-FALSE-GREEN for the slice: this test would START FAILING (the refusal would
-        no longer fire) once the gap is fixed — at which point the positive-delivery
-        assertions below it must be enabled. It is the canary on the gap, not a claim the
-        path works."""
-        proj = self._emit("estate-gap", FULL_VERSION)
+    def test_regimeB_positive_delivery_exact_path_set_on_v2_emit(self):
+        """POSITIVE DELIVERY (was the FINDING canary). On a real v0.6.0 -> v0.6.1 apply of
+        an UNEDITED v2 system, the operating-layer delta lands with the EXACT path set:
+          - the brand-new operating skill is CREATED;
+          - the changed operating RENDER doc is UPDATED (clean adopt, unedited);
+          - the changed COPY skill is ADOPTED.
+        Nothing else is written, nothing is routed to review, and the classification is
+        `applied`. ANTI-FALSE-GREEN: assert the EXACT written set, never `applied` alone."""
+        proj = self._emit("estate-deliver", FULL_VERSION)
         before = self._file_bytes(proj)
+        # Premise: the new skill does not exist yet; the changed files do.
+        self.assertFalse((proj / self._OL_DELTA_NEW_SKILL).exists())
+        self.assertTrue((proj / self._OL_DELTA_CHANGED_RENDER).exists())
+        self.assertTrue((proj / self._OL_DELTA_CHANGED_COPY).exists())
+        before_render = (proj / self._OL_DELTA_CHANGED_RENDER).read_bytes()
+        before_copy = (proj / self._OL_DELTA_CHANGED_COPY).read_bytes()
 
-        with self.assertRaises(UpgradeApplyError) as ctx:
-            self._apply(proj, OPERATING_DELTA_VERSION)
-        msg = str(ctx.exception).lower()
-        # The refusal is the capsule-replay gap on an operating render file (placeholder
-        # key not in the capsule), NOT a generic failure.
-        self.assertIn("placeholder", msg)
+        res = self._apply(proj, OPERATING_DELTA_VERSION)
 
+        # EXACT delivered path set (the whole point of the slice).
+        expected_written = {
+            self._OL_DELTA_NEW_SKILL,
+            self._OL_DELTA_CHANGED_RENDER,
+            self._OL_DELTA_CHANGED_COPY,
+        }
+        self.assertEqual(
+            set(res.files_written), expected_written,
+            f"delivered set != delta set; got {sorted(res.files_written)}",
+        )
+        self.assertEqual(res.files_in_review, [], "unedited system routed nothing to review")
+        self.assertEqual(
+            res.classification, APPLY_RESULT_APPLIED,
+            f"clean full delivery must be `applied`; got {res.classification} "
+            f"(review={res.files_in_review})",
+        )
+
+        # The new skill was CREATED on disk and matches the target bundle template.
+        new_skill = proj / self._OL_DELTA_NEW_SKILL
+        self.assertTrue(new_skill.exists(), "new operating skill not created")
+        target_new = (REPO_ROOT / "wizard" / "foundation-bundles" / OPERATING_DELTA_VERSION
+                      / "templates" / "wizard" / "skills" / "health-check.md")
+        self.assertEqual(new_skill.read_text(), target_new.read_text(),
+                         "new skill content != target bundle template")
+
+        # The changed render doc was UPDATED (content changed) and carries the target's
+        # new additive section; the changed copy was ADOPTED (content changed).
+        after_render = (proj / self._OL_DELTA_CHANGED_RENDER).read_bytes()
+        after_copy = (proj / self._OL_DELTA_CHANGED_COPY).read_bytes()
+        self.assertNotEqual(after_render, before_render, "render doc not updated")
+        self.assertIn("Operating-layer upgrade note",
+                      after_render.decode("utf-8"),
+                      "target's new section absent from the updated render doc")
+        self.assertNotEqual(after_copy, before_copy, "copy skill not adopted")
+        self.assertIn("safe to use at any point",
+                      after_copy.decode("utf-8"),
+                      "target's copy change absent from the adopted skill")
+
+        # No git conflict markers anywhere in the touched files.
+        for rel in expected_written:
+            text = (proj / rel).read_text()
+            for marker in ("<<<<<<<", "=======", ">>>>>>>"):
+                self.assertNotIn(marker, text, f"git marker {marker!r} in {rel}")
+
+        # Every OTHER managed file is byte-identical (foundation docs included).
         after = self._file_bytes(proj)
-        self.assertEqual(set(before), set(after), "refusal created/removed files")
-        for rel, b in before.items():
-            self.assertEqual(after[rel], b, f"refusal mutated {rel}")
-        self.assertFalse(
-            (proj / ".wizard" / "upgrade-review").exists(),
-            "refusal wrote review sidecars",
+        touched = {f for f in (set(after) | set(before))
+                   if f in expected_written or f.startswith(".wizard/")}
+        for rel in (set(before) & set(after)) - touched:
+            self.assertEqual(after[rel], before[rel], f"untouched file {rel} changed")
+        for rel in _FOUNDATION_DOCS:
+            self.assertEqual(after.get(rel), before.get(rel),
+                             f"foundation doc {rel} changed during operating upgrade")
+
+    def test_regimeB_edit_protection_nonoverlapping_section_merges_clean(self):
+        """EDIT PROTECTION (non-overlapping). The operator edits a section of the changed
+        render doc that the target does NOT touch (the target only APPENDS a new section).
+        The section-aware 3-way merge keeps BOTH the operator's edit and the target's new
+        section, writes the merged file live, emits NO git markers, and the file is
+        reported merged."""
+        proj = self._emit("estate-merge", FULL_VERSION)
+        doc = proj / self._OL_DELTA_CHANGED_RENDER
+        original = doc.read_text()
+        # Insert the operator's own words under an EXISTING, untouched section heading.
+        anchor = "## Orientation: you always know where you are"
+        self.assertIn(anchor, original)
+        operator_note = "OPERATOR NOTE: my own words under an untouched section."
+        doc.write_text(original.replace(anchor, f"{anchor}\n\n{operator_note}", 1))
+
+        res = self._apply(proj, OPERATING_DELTA_VERSION)
+        merged = doc.read_text()
+
+        self.assertIn(self._OL_DELTA_CHANGED_RENDER, res.files_merged,
+                      "non-overlapping edit should section-merge, not route to review")
+        self.assertNotIn(self._OL_DELTA_CHANGED_RENDER, res.files_in_review)
+        self.assertIn(operator_note, merged, "operator's edit was lost in the merge")
+        self.assertIn("Operating-layer upgrade note", merged,
+                      "target's new section was lost in the merge")
+        for marker in ("<<<<<<<", "=======", ">>>>>>>"):
+            self.assertNotIn(marker, merged, f"git marker {marker!r} in merged file")
+
+    def test_regimeB_edit_protection_same_section_routes_to_sidecar(self):
+        """EDIT PROTECTION (same section). The operator edits the SAME section the target
+        changed (an add/add of the target's new section heading with a DIFFERENT body).
+        The merge cannot reconcile, so theirs is routed to a `.wizard/upgrade-review/`
+        sidecar, the LIVE file is left as the OPERATOR's version, and NO git markers appear
+        in either the live file or the sidecar."""
+        proj = self._emit("estate-conflict", FULL_VERSION)
+        doc = proj / self._OL_DELTA_CHANGED_RENDER
+        original = doc.read_text()
+        operator_body = "Operator wrote a DIFFERENT body under this exact heading."
+        doc.write_text(
+            original.rstrip("\n")
+            + f"\n\n## Operating-layer upgrade note\n\n{operator_body}\n"
+        )
+
+        res = self._apply(proj, OPERATING_DELTA_VERSION)
+        live = doc.read_text()
+
+        self.assertIn(self._OL_DELTA_CHANGED_RENDER, res.files_in_review,
+                      "same-section conflict should route to the review sidecar")
+        self.assertNotIn(self._OL_DELTA_CHANGED_RENDER, res.files_merged)
+        self.assertEqual(res.classification, APPLY_RESULT_PARTIAL,
+                         "a routed file makes the apply partial, not applied")
+        # Live file is the operator's version, unchanged by the apply.
+        self.assertIn(operator_body, live, "live file is not the operator's version")
+        # Sidecar carries theirs; no git markers anywhere.
+        sidecar = (proj / ".wizard" / "upgrade-review"
+                   / f"{FULL_VERSION}-to-{OPERATING_DELTA_VERSION}"
+                   / f"{self._OL_DELTA_CHANGED_RENDER}.new")
+        self.assertTrue(sidecar.exists(), "review sidecar (.new) not written")
+        for marker in ("<<<<<<<", "=======", ">>>>>>>"):
+            self.assertNotIn(marker, live, f"git marker {marker!r} in live file")
+            self.assertNotIn(marker, sidecar.read_text(),
+                             f"git marker {marker!r} in sidecar")
+
+    def test_regimeB_next_cycle_conformance_passes_after_apply(self):
+        """NEXT-CYCLE REPLAY. After a clean v0.6.0 -> v0.6.1 apply, the manifest is advanced
+        to v0.6.1; the replay-conformance gate run at v0.6.1 (foundation + operating legs)
+        must reproduce the NEW recorded base_hash for every managed render file. This proves
+        the upgrade chain is not stranded — a subsequent operation does not false-fail."""
+        import upgrade_apply as ua
+        proj = self._emit("estate-nextcycle", FULL_VERSION)
+        self._apply(proj, OPERATING_DELTA_VERSION)
+
+        mp = proj / ".wizard" / "manifest.json"
+        manifest = load_operator_manifest(mp)
+        capsule = ua.load_replay_capsule(proj)
+        ci = capsule["foundation_doc_inputs"]
+        base = ua._render_version(OPERATING_DELTA_VERSION, ci, REPO_ROOT)
+        foundation_entries = ua._foundation_managed_entries(manifest, list(base.keys()))
+        project_name = str(manifest.get("project_name", ""))
+        # Must NOT raise (fail-closed gate); a strand would raise here.
+        ua._replay_conformance_check(
+            OPERATING_DELTA_VERSION, ci, REPO_ROOT, foundation_entries,
+            capsule=capsule, manifest=manifest, project_name=project_name,
         )
 
     def test_regimeB_new_target_skill_is_classified_new_on_the_surface(self):
-        """Even though the apply refuses before committing (FINDING above), the computed
-        surface MUST classify the brand-new v0.6.1 skill as `new` (a delivery the upgrade
-        WOULD make additively once the render-replay gap is closed). This proves the new
-        operating file is SEEN, not silently dropped from the surface."""
+        """The computed surface MUST classify the brand-new v0.6.1 skill as `new` (the
+        additive delivery the apply then makes). This proves the new operating file is SEEN
+        on the surface, not silently dropped — the surface-level counterpart to the
+        positive-delivery test that asserts it is actually CREATED on disk."""
         proj = self._emit("estate-surface", FULL_VERSION)
         # Compute the surface directly (the refusal happens later, in the write loop).
         import upgrade_apply as ua
