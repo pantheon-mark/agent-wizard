@@ -13,7 +13,7 @@
     ".env": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".gitignore": "sha256:9a072795b1a3902e27753c3d0b22ca922628079eadc1239f2d3cb800a70ee512",
     ".wizard/UPGRADING.md": "sha256:1cb7539b73dd6108d5ff41bba629264c7556e475335420d65c4bb4050e950b27",
-    "CLAUDE.md": "sha256:e06b9ead32acdb1320c8053d9668313ea7ac4df7600f4d411506c1d197ad3e04",
+    "CLAUDE.md": "sha256:a33b7dcd397900e3abfb90275ba21db283a12d574f33c3b6c106ec02a5558660",
     "SESSION_STATE.md": "sha256:dea1b4cd595eccb69b9f887ecf8a00eb642daa87b90f5cdb47b7cd6c86aee86d",
     "agents/cron/cron_config.md": "sha256:972e217125ae5239f71cb02e0b2071a090754240f15be714ad30ba4ad0f8236b",
     "agents/prompts/call-notes-helper_prompt.md": "sha256:640ef52344be9a729def8c35b7728127ab5c1bbc763d822e1bae8113545fbd94",

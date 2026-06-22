@@ -423,6 +423,12 @@ class DurableRelayInstructionContractTest(unittest.TestCase):
         self.assertIn("remind", low, "CLAUDE.md must offer a 'remind me later' option")
         self.assertTrue(any(p in low for p in ("skip this version", "until a newer", "dismiss")),
                         "CLAUDE.md must offer a 'skip this version until a newer one' option")
+        # must name BOTH versions: the one the operator is on + the newer one
+        self.assertIn("current_version", text,
+                      "CLAUDE.md must instruct naming the operator's current version "
+                      "(not a vague 'you're on the current version')")
+        self.assertIn("latest_version", text,
+                      "CLAUDE.md must instruct naming the newer (latest) version")
         # the persistence mechanism the model writes
         self.assertIn("upgrade-notice-state.json", low,
                       "CLAUDE.md must tell the model where to persist the snooze/dismiss choice")
