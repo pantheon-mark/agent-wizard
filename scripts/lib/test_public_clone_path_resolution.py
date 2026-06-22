@@ -332,3 +332,28 @@ class PublicCloneCliE2ETest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RegistryDefaultIsToolkitRelativeTest(unittest.TestCase):
+    """The default registry path must resolve to the TOOLKIT's own registry (engine-relative),
+    so an operator running the tool from their OWN project directory (cwd != toolkit) still
+    finds the version list. A cwd-relative default was the operator-channel bug."""
+
+    def test_default_registry_resolves_to_toolkit_regardless_of_cwd(self):
+        import os
+        import wizard_upgrade as wu
+        toolkit_root = Path(wu.__file__).resolve().parent.parent
+        expected = toolkit_root / "registry" / "foundation-bundles.json"
+        with tempfile.TemporaryDirectory() as d:
+            old = Path.cwd()
+            try:
+                os.chdir(d)  # simulate the operator's own project dir (has no registry/)
+                got = wu._resolve_registry_path(None)
+            finally:
+                os.chdir(old)
+        self.assertEqual(got, expected)
+        self.assertTrue(got.exists(), "default registry must point at the real toolkit registry")
+
+    def test_explicit_registry_arg_still_wins(self):
+        import wizard_upgrade as wu
+        self.assertEqual(wu._resolve_registry_path("/tmp/x/y.json"), Path("/tmp/x/y.json"))

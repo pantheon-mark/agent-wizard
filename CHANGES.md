@@ -20,6 +20,7 @@ Entries appear newest-first.
 - **Nothing happens without your OK.** It shows you what an update would change and what is protected, and applies only after you say yes. Your own data — task lists, rules, credentials, logs — is never touched, and a backup is made first.
 - **Keeping the update tool itself current is a separate, careful step.** A guarded "update the tool" command refreshes the tool only when you ask: it verifies the update comes from the expected official source, backs the tool up first, can be undone, and only ever touches the tool — never your project. (Honest limit: this verifies the expected origin, version lineage, and integrity — it is not a cryptographic signature check.)
 - **The published tool now runs as distributed.** A path issue that prevented the publicly distributed copy from running an upgrade has been fixed.
+- **"Check for updates" works from inside your project.** The tool now finds the version list on its own when run from your own project folder (it previously looked in the wrong place and reported, honestly, that it could not check).
 - **Your upgrade instructions stay current.** The in-system upgrade guide is refreshed automatically when you upgrade (no more stale version numbers or commands that don't exist), and a new "check for updates" skill is included.
 
 **Operator-facing notes:**

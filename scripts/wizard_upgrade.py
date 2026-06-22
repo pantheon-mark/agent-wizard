@@ -167,10 +167,18 @@ def _resolve_manifest_path(manifest_arg: str | None) -> Path:
 
 
 def _resolve_registry_path(registry_arg: str | None) -> Path:
-    """Resolve --registry-path; default = wizard/registry/foundation-bundles.json (cwd-relative)."""
+    """Resolve --registry-path. Default = the TOOLKIT's own registry, resolved relative
+    to THIS engine file (`<toolkit>/scripts/wizard_upgrade.py` -> `<toolkit>/registry/
+    foundation-bundles.json`), NOT cwd-relative. This lets an operator run `wizard ...`
+    from their OWN project directory and still find the toolkit's version list — the bug
+    a cwd-relative default caused (the operator's project has no `registry/`). Works in
+    both layouts: build-repo `<root>/wizard/...` and public clone `<clone>/...` (the
+    `scripts/` + `registry/` siblings sit directly under the toolkit root in each). The
+    manifest path deliberately STAYS cwd-relative: that IS the operator's project."""
     if registry_arg:
         return Path(registry_arg)
-    return Path.cwd() / _DEFAULT_REGISTRY_PATH
+    toolkit_root = Path(__file__).resolve().parent.parent
+    return toolkit_root / "registry" / "foundation-bundles.json"
 
 
 def _emit_outcome(outcome, args, *, detail_render: str = "") -> int:
