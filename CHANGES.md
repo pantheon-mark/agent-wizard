@@ -12,6 +12,25 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-22 — your system can now check for and safely apply its own updates
+
+**Public-facing change:** Your built system can now find out when a newer version is available and, with your explicit OK, apply it — through its own update channel, in plain language. Previously the update machinery worked but your system had no way to reach it.
+
+- **Just ask.** Say "check for updates" (or "update my system") and your system checks and reports in plain words: an update is available (and what it would change), you're already current, or — honestly — it could not check. It will never tell you that you're up to date when it actually could not check.
+- **Nothing happens without your OK.** It shows you what an update would change and what is protected, and applies only after you say yes. Your own data — task lists, rules, credentials, logs — is never touched, and a backup is made first.
+- **Keeping the update tool itself current is a separate, careful step.** A guarded "update the tool" command refreshes the tool only when you ask: it verifies the update comes from the expected official source, backs the tool up first, can be undone, and only ever touches the tool — never your project. (Honest limit: this verifies the expected origin, version lineage, and integrity — it is not a cryptographic signature check.)
+- **The published tool now runs as distributed.** A path issue that prevented the publicly distributed copy from running an upgrade has been fixed.
+- **Your upgrade instructions stay current.** The in-system upgrade guide is refreshed automatically when you upgrade (no more stale version numbers or commands that don't exist), and a new "check for updates" skill is included.
+
+**Operator-facing notes:**
+
+- These additions are part of the `v0.6.1` minor release (operator-explicit; nothing updates on its own).
+- Updating the tool itself is the one step that, the very first time, you start by refreshing your copy of the wizard; after that your system can guide it.
+
+`Source-Meta-Commit:` `<PENDING>` (private build repo) · public repo commit `<PENDING>`
+
+---
+
 ## 2026-06-22 — your built system can now receive operating-layer improvements through an upgrade
 
 **Public-facing change:** Until now, an upgrade could only refresh your foundation documents (vision, approach, plan, and the like). It can now also deliver improvements to the *operating layer* of your system — the working instructions, skills, and safety routines that govern how your agents run (for example your `CLAUDE.md`, the operating-discipline doctrine, the orientation and pause skills, and the agent prompt scaffolding). An existing system no longer has to be rebuilt to pick these up.
