@@ -199,7 +199,7 @@ class UpgradeMigrateTests(unittest.TestCase):
         because no bundle render reproduces a stale v0.4.0-era base_hash. The prior version
         of this test asserted that stale baseline was preserved — i.e. it encoded the bug.
 
-        NEW behavior (cross-vendor-ratified Path D): the divergent
+        NEW behavior (Path D): the divergent
         render file's baseline is RE-BASED to the source_version known payload
         (`base_hash`/`base_content_hash` -> the v0.6.0 render, lineage -> source_version),
         WITHOUT writing the operator's live bytes. `current_hash_last_seen` is the TRUE live

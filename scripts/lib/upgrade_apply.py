@@ -137,8 +137,8 @@ class UpgradeApplyResult:
     files_in_review: List[str] = field(default_factory=list)
     files_merged: List[str] = field(default_factory=list)
     # The classified merge surface sourced from the TARGET contract. Carries the
-    # new/collision/dropped/needs-capsule files the foundation-doc loop alone never saw
-    # (REV-3 G-A). The copy-write path for `new` files is a follow-on task.
+    # new/collision/dropped/needs-capsule files the foundation-doc loop alone never saw.
+    # The copy-write path for `new` files is a follow-on task.
     surface: List["SurfaceEntry"] = field(default_factory=list)
 
     @property
@@ -356,7 +356,7 @@ def _inject_hooks_for_copy_file(
 
 # ===== Merge-surface computation + classification =====
 #
-# REV-3 G-A fix. The merge surface MUST be sourced from the TARGET bundle's
+# The merge surface MUST be sourced from the TARGET bundle's
 # managed-artifacts contract (system-artifacts.json, delivery=="wizard"), NOT from
 # what the CURRENT version happens to render. A system whose current bundle predates
 # the operating layer (e.g. estate on v0.4.0) renders only foundation docs; sourcing
@@ -420,7 +420,7 @@ def compute_merge_surface(
     operator_project_dir: Path,
     capsule: Dict[str, Any],
 ) -> List[SurfaceEntry]:
-    """Compute the upgrade merge surface from the TARGET bundle's contract (REV-3 G-A).
+    """Compute the upgrade merge surface from the TARGET bundle's contract.
 
     Surface = union(base_rendered keys, theirs_rendered keys, target wizard-delivery
     relpaths). Foundation docs flow through base/theirs render; copy-artifacts +
@@ -428,7 +428,7 @@ def compute_merge_surface(
 
       new        -> in target contract, not in the operator manifest AND not on disk.
                     UNLESS an UNMANAGED file already exists at that path -> collision
-                    (REV-2 C1c: refuse/sidecar, never silently adopt/overwrite).
+                    (refuse/sidecar, never silently adopt/overwrite).
       modified   -> in both manifest and target; content/render differs (best-effort
                     for render-from-foundation files where we have theirs text).
       unchanged  -> in both; identical (or no signal to call it modified).
@@ -853,7 +853,7 @@ def apply_upgrade(
     # major/structural release that renames/reorders sections). Wired in Phase 4.
     auto_merge_enabled = _auto_merge_enabled(migration, current_version, target_version)
 
-    # --- 3b. Compute the merge surface from the TARGET contract (REV-3 G-A) -----
+    # --- 3b. Compute the merge surface from the TARGET contract -----
     # Source-of-truth = the target bundle's system-artifacts.json (delivery=="wizard"),
     # NOT _render_version(current).keys(). This is what surfaces operating-layer + copy
     # files the current bundle never rendered, so a system upgrading FROM a

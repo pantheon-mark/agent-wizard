@@ -8,7 +8,7 @@ upgrade-render) read wizard-authored templates from exactly ONE source — the
 versioned bundle — instead of the live `wizard/templates/`, `wizard/agents/`,
 `wizard/scripts/` working trees.
 
-Fail-closed (REV-2 C1d): bundle-sourced means there is NO live fallback. A missing
+Fail-closed: bundle-sourced means there is NO live fallback. A missing
 contract, a `relpath` absent from the contract, or a `template_path` that does not
 resolve inside the bundle RAISES — the emitter must not silently fall back to a live
 template (that would defeat the frozen-home / replay-conformance guarantee).

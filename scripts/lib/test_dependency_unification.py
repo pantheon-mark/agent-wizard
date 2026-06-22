@@ -41,7 +41,7 @@ _ANNOTATION = json.dumps([
 class DecisionClassingTest(unittest.TestCase):
     """The integration-boundary decision lives on the IDENTITY record; the annotation and the three
     projection caches are content-only (so a narrative edit / a re-rendered cache is not a blind-
-    apply rule-decision — the cross-vendor decision to split identity from annotation)."""
+    apply rule-decision — the decision to split identity from annotation)."""
 
     def setUp(self):
         self.m = load_field_manifest(SHAPE)

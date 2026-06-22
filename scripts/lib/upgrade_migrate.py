@@ -1,7 +1,7 @@
 """Pre-v2 upgrade MIGRATION preflight — reconcile a manually-patched operator system
 so a subsequent normal `apply_upgrade` runs safely.
 
-THE SAFETY HOLE THIS CLOSES (codex C5 / gemini G-C). A system can receive a newer
+THE SAFETY HOLE THIS CLOSES. A system can receive a newer
 operating layer by a MANUAL, additive apply AFTER its original foundation-only emit
 (the estate received its operating-layer files this way). When that happens the
 project's `.wizard/manifest.json` does NOT correctly track those operating-layer files:
@@ -23,7 +23,7 @@ WHAT THE PREFLIGHT DOES (general; not estate-specific):
          resolved inputs in the (reconciled) v2 capsule.
        - live == known payload  -> ADOPT the correct base_hash + base_content_hash AND
          advance `live_lineage_version` to `source_version`, WITHOUT changing live bytes.
-         (gemini G-C: lineage MUST advance, or every future drifted-three_way merge stays
+         (lineage MUST advance, or every future drifted-three_way merge stays
          permanently disabled by the lineage guard.)
        - manifest base already == live (already reconciled) -> LEAVE untouched (idempotent).
        - live != known payload (render-kind)  -> RE-BASE the baseline to the source_version
@@ -433,7 +433,7 @@ def migrate_pre_v2_system(
         if live_content_hash != known_content_hash:
             # DIVERGENT operating RENDER file (live != the known source_version payload).
             #
-            # Part D (cross-vendor-ratified): RE-BASE the manifest
+            # Part D: RE-BASE the manifest
             # baseline to the source_version known payload (base_hash/base_content_hash to
             # the v0.6.0 render, lineage to source_version) WITHOUT writing live bytes. The
             # old behavior LEFT the stale foundation-era baseline here, which the intact

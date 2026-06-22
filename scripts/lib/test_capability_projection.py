@@ -63,7 +63,7 @@ class BuildPhasesProjectionTest(unittest.TestCase):
         self.assertEqual(len(body.splitlines()), 1)
 
     def test_partial_phase_lists_both_buckets_capabilities(self):
-        # A single phase carrying an mvp capability AND a roadmap capability (codex's partial-phase).
+        # A single phase carrying both an mvp capability and a roadmap capability.
         rows = [
             _incr("Task spine", "mvp", phase=1, agents="Coordinator"),
             _incr("Drafting", "post_mvp_roadmap", phase=1, agents="Drafter"),

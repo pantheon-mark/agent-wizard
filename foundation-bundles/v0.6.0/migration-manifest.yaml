@@ -16,7 +16,7 @@ migrations:
       First coherent system-bundle version: v0.4.0 foundation-doc templates +
       relocated operating-layer templates + system-artifacts.json.
       Foundation docs are byte-identical to a v0.4.0 emit; the operating layer
-      is new (additive new-file path, G-A). No foundation-doc content change from
+      is new (additive new-file path). No foundation-doc content change from
       v0.4.0.
     migration_steps: |
       1. Run the upgrade check (plan-only) to confirm v0.4.x -> v0.6.0 is offered.

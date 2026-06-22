@@ -1053,8 +1053,8 @@ class MergeSurfaceTests(_Base):
     """The merge surface MUST be sourced from the TARGET bundle's
     managed-artifacts contract (system-artifacts.json, delivery=='wizard'), NOT from
     _render_version(current).keys(). Without this, a system whose current bundle
-    predates the operating layer never sees the operating-layer files the target adds
-    (REV-3 G-A): the upgrade reports 'applied' while delivering nothing."""
+    predates the operating layer never sees the operating-layer files the target adds:
+    the upgrade reports 'applied' while delivering nothing."""
 
     def _target_contract(self, *, op_relpath="operating_discipline.md",
                          op_render_kind="copy", include_collision_only=False):
@@ -1121,7 +1121,7 @@ class MergeSurfaceTests(_Base):
                                 proj=proj, capsule=capsule)
         by_rel = {e.relpath: e for e in surface}
         self.assertIn("operating_discipline.md", by_rel,
-                      "operating-layer target file silently dropped from the surface (REV-3 G-A)")
+                      "operating-layer target file silently dropped from the surface")
         self.assertEqual(by_rel["operating_discipline.md"].classification, SURFACE_NEW)
 
     def test_surface_source_is_target_manifest_not_current_render(self):
@@ -1147,7 +1147,7 @@ class MergeSurfaceTests(_Base):
 
     def test_new_file_collision_detected(self):
         """A `new` target path where an UNMANAGED file already exists on disk is classified
-        a collision (refuse/sidecar) — never silently adopted/overwritten (REV-2 C1c)."""
+        a collision (refuse/sidecar) — never silently adopted/overwritten."""
         from upgrade_apply import SURFACE_COLLISION
         _, proj, manifest, base, theirs, capsule = self._setup()
         # Plant an unmanaged file at the target's new path.

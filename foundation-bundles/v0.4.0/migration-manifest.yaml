@@ -63,11 +63,10 @@ migrations:
       (execution_plan.md § human_in_the_loop_map) respectively.
 
       Coupling preserved: HITL_MAP_ROWS derives from ASKS_FIRST_ACTIONS + AUTONOMOUS_ACTIONS
-      + AUTONOMY_LEVEL per inputs.json _derivation_inputs. Per the v0.4.0 release R3 cross-vendor
-      pre-spec advisor s2.26pre-r3-gemini:C-001: derivation logic must strictly validate
-      presence of upstream dependencies even when downstream placeholders are removed
-      (extends generator fail-fast contract to derivation inputs lacking direct template
-      placeholders).
+      + AUTONOMY_LEVEL per inputs.json _derivation_inputs. Pre-spec advisor review confirmed:
+      derivation logic must strictly validate presence of upstream dependencies even when
+      downstream placeholders are removed (extends generator fail-fast contract to derivation
+      inputs lacking direct template placeholders).
     supported: false  # no operator projects to support
     stop_condition: |
       No operator project depends on v0.3.0 (inventory check carry-forward from
@@ -87,16 +86,16 @@ migrations:
       META finding on verbatim Agent Roster duplication).
 
       Advisor sequence:
-      - Pre-spec R1 (codex gpt-5.5): 1 HIGH + 2 MED + 1 LOW; non-convergence;
+      - Pre-spec R1: 1 HIGH + 2 MED + 1 LOW; non-convergence;
         all TAKE-variant applied (caught semver coherence + graveyard risk +
         Permission/HITL framing + live-link refinement)
-      - Pre-spec R2 (codex thread continuation): 1 MED + 2 LOW; premise REJECTED
+      - Pre-spec R2 (thread continuation): 1 MED + 2 LOW; premise REJECTED
         cleanup-class until § 8 partial-closure resolved; all TAKE applied
-      - Pre-spec R3 (gemini-3.1-pro-preview cross-vendor; alien-frame): 4 codex
-        diagnoses confirmed + 3 divergent findings (2 MED + 1 LOW) caught
-        by alien-frame lens; all TAKE-variant applied (derivation data-loss
-        risk + ADR cohesion bend deferred to future cleanup slice per § A.5
-        + schema-vs-template-stub duplication acknowledged as v0 trade-off)
+      - Pre-spec R3 (alien-frame): 4 R1 diagnoses confirmed + 3 divergent
+        findings (2 MED + 1 LOW) caught by alien-frame lens; all TAKE-variant
+        applied (derivation data-loss risk + ADR cohesion bend deferred to
+        future cleanup slice per § A.5 + schema-vs-template-stub duplication
+        acknowledged as v0 trade-off)
       - Calibration n=143 → n=148
 
       Slice spec: the v0.4.0 release notes

@@ -696,7 +696,7 @@ class EmitSystemCLITests(unittest.TestCase):
                              "foundation-only emission must not emit the agent layer")
 
     def test_emit_system_fails_closed_on_stale_group(self):
-        # Defense-in-depth (cross-vendor close Finding C): a group confirmed earlier whose
+        # Defense-in-depth: a group confirmed earlier whose
         # upstream source answer changed AFTER confirmation (stale group_source_hash) must
         # abort emit before any write — the carrier re-confirms interactively, but emit must
         # not trust that and silently emit content derived from superseded answers.
@@ -866,10 +866,10 @@ class EmitSystemCLITests(unittest.TestCase):
             self.assertTrue(target.exists())
 
     def test_emit_system_fails_closed_on_unconfirmed_sourced_group(self):
-        # Cross-vendor close R2 (codex blocker): a LIVE group that recorded source answers but was
-        # never confirmed (no group_confirmed marker — a carrier that skipped the rendered-preview
-        # confirmation) must abort emit. Tolerating missing markers applies ONLY to field-only /
-        # foundation-only transcripts with no source events.
+        # A LIVE group that recorded source answers but was never confirmed (no group_confirmed
+        # marker — a carrier that skipped the rendered-preview confirmation) must abort emit.
+        # Tolerating missing markers applies ONLY to field-only / foundation-only transcripts
+        # with no source events.
         from test_emission_plan import _FOUNDATION_DOC_INPUTS
         from test_interview_bridge import _ai
         from derivation_groups import load_derivation_groups
