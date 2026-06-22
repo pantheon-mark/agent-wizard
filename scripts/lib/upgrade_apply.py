@@ -47,6 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from bundle_templates import read_bundle_template, BundleTemplateError  # type: ignore
 from generator import render_foundation_docs  # type: ignore
 from replay_capsule import REPLAY_CAPSULE_REL, capsule_supports_operating_replay  # type: ignore
 from section_merge import section_three_way_merge  # type: ignore
@@ -748,6 +749,177 @@ def apply_upgrade(
             "to continue. No files were changed."
         )
 
+    # --- 4b. Copy-kind + new-in-target write path --------------------------------
+    # Walk the surface entries for copy-kind wizard-delivery files. Foundation-doc
+    # render files are already handled above (steps 4a); skip them here. Also skip
+    # needs_capsule_upgrade (deferred to the capsule-upgrade task), dropped, and collision entries.
+    #
+    # For each copy-kind entry:
+    #   - Read theirs from the frozen bundle template (NOT from live templates/).
+    #   - Detect drift (live hash vs manifest base_content_hash / base_hash).
+    #   - Apply merge_strategy (warn_on_drift / operator_review / three_way / frozen).
+    #     Copy-kind files skip ONLY the replay-conformance gate (no operator-specific
+    #     content to reproduce); all other transaction stages apply.
+    #   - Track file mode from the contract (0755 for .sh, else 0644).
+    #   - new-in-target: create additively; add to manifest.
+
+    # staged_modes: relpath -> octal int — mode to apply at atomic-replace time.
+    staged_modes: Dict[str, int] = {}
+    # new_copy_manifest_entries: relpath -> manifest entry dict for newly created files.
+    new_copy_manifest_entries: Dict[str, Dict[str, Any]] = {}
+
+    # Build the contract entries map once for mode resolution.
+    _contract_entries_map: Dict[str, Dict[str, Any]] = {}
+    if target_contract:
+        for _art in target_contract.get("artifacts", []):
+            if _art.get("relpath"):
+                _contract_entries_map[_art["relpath"]] = _art
+
+    for se in surface:
+        rel = se.relpath
+        rk = se.render_kind
+        strategy = se.merge_strategy
+        cls = se.classification
+
+        # Only process copy-kind wizard-delivery files on this path.
+        if rk != RENDER_KIND_COPY:
+            continue
+        # Foundation-doc render files that happen to be copy-kind are handled above.
+        if rel in foundation_entries:
+            continue
+        # Skipped classifications.
+        if cls in (SURFACE_DROPPED, SURFACE_COLLISION, SURFACE_NEEDS_CAPSULE):
+            continue
+        # Only new + modified/unchanged (in-manifest) processed here.
+        if cls not in (SURFACE_NEW, SURFACE_MODIFIED, SURFACE_UNCHANGED):
+            continue
+
+        # Read the frozen template (fail-closed; BundleTemplateError -> refusal).
+        try:
+            theirs_copy = read_bundle_template(target_version, rel, build_repo_root)
+        except BundleTemplateError as e:
+            raise UpgradeApplyError(
+                f"cannot read the bundle template for {rel!r}: {e}. No files were changed."
+            ) from e
+
+        # Resolve mode from the contract entry (default 0644).
+        mode_str = str(_contract_entries_map.get(rel, {}).get("mode", "0644"))
+        try:
+            mode_int = int(mode_str, 8)
+        except ValueError:
+            mode_int = 0o644
+
+        theirs_hash = "sha256:" + sha256_bytes(theirs_copy.encode("utf-8"))
+
+        if cls == SURFACE_NEW:
+            # Additive creation — no existing managed entry, no existing disk file.
+            staged_writes[rel] = theirs_copy
+            staged_modes[rel] = mode_int
+            new_copy_manifest_entries[rel] = {
+                "managed": "true",
+                "managed_by": "shared",
+                "base_hash": theirs_hash,
+                "base_content_hash": theirs_hash,
+                "current_hash_last_seen": theirs_hash,
+                "local_modifications": "expected",
+                "merge_strategy": strategy,
+                "mode": mode_str,
+                "render_kind": rk,
+                "source_refs": [],
+                "live_lineage_version": target_version,
+            }
+            decisions.append(FileDecision(rel, strategy, FILE_ADOPTED, False,
+                                          note="new file in target; created additively"))
+            continue
+
+        # In-manifest copy-kind file: detect drift, apply strategy.
+        files_block = manifest.get("managed_files") or manifest.get("files") or {}
+        meta = files_block.get(rel, {})
+        base_content_hash = str(meta.get("base_content_hash", "")) or str(meta.get("base_hash", ""))
+        live = _read_live(operator_project_dir, rel)
+        if live is None:
+            # Managed copy file missing on disk — refuse (same as foundation docs).
+            raise UpgradeApplyError(
+                f"managed copy file {rel!r} is missing on disk; cannot apply an upgrade "
+                "over a missing file. No files were changed."
+            )
+        live_hash = "sha256:" + sha256_bytes(live.encode("utf-8"))
+        drifted = (live_hash != base_content_hash)
+        target_changed = (theirs_hash != base_content_hash)
+
+        if not target_changed:
+            decisions.append(FileDecision(rel, strategy, FILE_UNCHANGED, drifted,
+                                          note="target copy is identical to the installed version"))
+            # Advance manifest base hashes even if content unchanged (lineage/version bump).
+            new_copy_manifest_entries[rel] = dict(meta)
+            new_copy_manifest_entries[rel]["base_hash"] = theirs_hash
+            new_copy_manifest_entries[rel]["base_content_hash"] = theirs_hash
+            new_copy_manifest_entries[rel]["live_lineage_version"] = target_version
+            continue
+
+        if strategy == MERGE_STRATEGY_FROZEN:
+            if drifted:
+                frozen_blocks.append(rel)
+                continue
+            staged_writes[rel] = theirs_copy
+            staged_modes[rel] = mode_int
+            decisions.append(FileDecision(rel, strategy, FILE_ADOPTED, drifted,
+                                          note="frozen copy file, no operator edits; adopted the new version"))
+        elif strategy == MERGE_STRATEGY_THREE_WAY:
+            if not drifted:
+                staged_writes[rel] = theirs_copy
+                staged_modes[rel] = mode_int
+                decisions.append(FileDecision(rel, strategy, FILE_ADOPTED, drifted,
+                                              note="no operator edits; adopted the new version"))
+            else:
+                # Copy-kind files have no section-merge semantics; route drifted three_way
+                # to the review sidecar (no text structure to auto-merge).
+                review_writes.append((rel, live, theirs_copy, True))
+                decisions.append(FileDecision(rel, strategy, FILE_REVIEW, drifted,
+                                              note="you edited this file; your version was kept and the new version was saved for review"))
+        elif strategy == MERGE_STRATEGY_OPERATOR_REVIEW:
+            review_writes.append((rel, live, theirs_copy, False))
+            decisions.append(FileDecision(rel, strategy, FILE_REVIEW, drifted,
+                                          note="this file is operator-reviewed; the new version was saved for review and your version kept"))
+        elif strategy == MERGE_STRATEGY_WARN_ON_DRIFT:
+            if drifted and not ack:
+                raise UpgradeApplyError(
+                    f"{rel!r} has local edits and its upgrade rule requires you to "
+                    "acknowledge replacing them. Re-run the upgrade with --ack to "
+                    "adopt the new version (your current version is backed up first). "
+                    "No files were changed."
+                )
+            staged_writes[rel] = theirs_copy
+            staged_modes[rel] = mode_int
+            decisions.append(FileDecision(rel, strategy, FILE_ADOPTED, drifted,
+                                          note=("acknowledged; adopted the new version" if drifted
+                                                else "no operator edits; adopted the new version")))
+        else:
+            raise UpgradeApplyError(
+                f"{rel!r} has an unrecognized merge strategy {strategy!r}; refusing to "
+                "apply rather than guess. No files were changed."
+            )
+
+        # For every completed in-manifest copy-kind branch (not frozen-blocked, not raised),
+        # advance the manifest base_hash + base_content_hash + lineage to the target. The
+        # current_hash_last_seen advances only for adopted files (via staged_writes check in
+        # _recompute_manifest). Routed files keep their prior merge-ancestor pointer.
+        copy_entry_update: Dict[str, Any] = dict(meta)
+        copy_entry_update["base_hash"] = theirs_hash
+        copy_entry_update["base_content_hash"] = theirs_hash
+        if rel not in {d.relpath for d in decisions if d.disposition == FILE_REVIEW}:
+            copy_entry_update[LIVE_LINEAGE_VERSION_FIELD] = target_version
+        new_copy_manifest_entries[rel] = copy_entry_update
+
+    # Re-check frozen_blocks in case copy-kind files added to it.
+    if frozen_blocks:
+        raise UpgradeApplyError(
+            "this upgrade is blocked because protected file(s) have local edits: "
+            f"{', '.join(sorted(frozen_blocks))}. These files are not meant to be edited "
+            "and cannot be upgraded while they differ from their original. Restore them "
+            "to continue. No files were changed."
+        )
+
     # --- 5. Transaction: backup -> stage -> validate -> atomic replace --------
     touched_relpaths = sorted(set(staged_writes) | {MANIFEST_REL, UPGRADE_HISTORY_REL})
     backup_dir = ""
@@ -773,6 +945,7 @@ def apply_upgrade(
                 foundation_entries, target_generator_version,
                 theirs_rendered=theirs_rendered,
                 routed_relpaths=routed_relpaths,
+                new_copy_entries=new_copy_manifest_entries,
             )
             sm = staging / MANIFEST_REL
             sm.parent.mkdir(parents=True, exist_ok=True)
@@ -811,6 +984,8 @@ def apply_upgrade(
             # broadened rollback below.
             for rel in staged_writes:
                 _atomic_replace(staging / rel, operator_project_dir / rel)
+                if rel in staged_modes:
+                    os.chmod(operator_project_dir / rel, staged_modes[rel])
             for rrel in review_rel_paths:
                 _atomic_replace(staging / rrel, operator_project_dir / rrel)
                 review_paths_written.append(rrel)
@@ -954,6 +1129,7 @@ def _recompute_manifest(
     *,
     theirs_rendered: Dict[str, str],
     routed_relpaths: Optional[set] = None,
+    new_copy_entries: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Return a NEW manifest dict reflecting the apply (Finding A dual-hash fix).
 
@@ -1013,4 +1189,19 @@ def _recompute_manifest(
             # ineligible until reconciled.
             entry[LIVE_LINEAGE_VERSION_FIELD] = target_version
         files_block[rel] = entry
+
+    # Copy-kind + new-in-target file entries: merge advanced entries for existing managed
+    # copy files (base_hash / base_content_hash / lineage) and add new-file entries.
+    if new_copy_entries:
+        for rel, entry in new_copy_entries.items():
+            existing = files_block.get(rel)
+            if existing is not None:
+                # Already-managed copy file: update hashes + lineage, preserve other fields.
+                merged = dict(existing)
+                merged.update(entry)
+                files_block[rel] = merged
+            else:
+                # Genuinely new file: add the full entry.
+                files_block[rel] = dict(entry)
+
     return new_manifest

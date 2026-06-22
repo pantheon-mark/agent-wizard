@@ -1178,5 +1178,283 @@ class MergeSurfaceTests(_Base):
         self.assertEqual(by_rel["CLAUDE.md"].classification, SURFACE_NEEDS_CAPSULE)
 
 
+class CopyKindWritePathTests(_Base):
+    """The write path for copy-kind + new-in-target files (routed through the existing
+    transaction). Copy-kind files skip ONLY the replay-conformance gate; they still go
+    through drift detection, backup, stage, atomic-replace, and manifest advance.
+    """
+
+    # ---- helpers ---------------------------------------------------------------
+
+    def _build_v040_to_v060_repo(self, sub: str = ""):
+        """Build a synthetic repo whose target is v0.6.0 with a system-artifacts.json
+        contract carrying copy-kind files. Returns (build_root, registry_path)."""
+        tmp = self.tmp / sub if sub else self.tmp
+        build_root = tmp / "build"
+        # required-docs contract
+        contract_dst = (build_root / "wizard" / "foundation-bundles" / "v0"
+                        / "contracts" / "foundation-manifest-hash-baseline-v1.json")
+        contract_dst.parent.mkdir(parents=True, exist_ok=True)
+        contract_dst.write_text(_REAL_CONTRACT.read_text(encoding="utf-8"), encoding="utf-8")
+
+        # Base bundle (v0.4.0) — foundation-only, no system-artifacts.json
+        _write_bundle(build_root, "v0.4.0", migration_from="v0.4.0")
+
+        # Target bundle (v0.6.0) — has a copy-kind file (.claude/statusline.sh)
+        _write_bundle(build_root, "v0.6.0", migration_from="v0.4.x",
+                      migration_class="minor-additive",
+                      migration_extra={"stop_condition": "not_applicable"})
+
+        # Write a real copy-kind template into the target bundle.
+        # Use DISTINCT content for the installed version (v0.4.0-era) vs. target (v0.6.0)
+        # so the write path can detect a content change.
+        tpl_dir = build_root / "wizard" / "foundation-bundles" / "v0.6.0" / "templates" / "claude_config"
+        tpl_dir.mkdir(parents=True, exist_ok=True)
+        copy_file_content = "#!/bin/bash\n# statusline.sh v0.6.0\necho 'status v060'\n"
+        (tpl_dir / "statusline.sh").write_text(copy_file_content, encoding="utf-8")
+
+        # Write the system-artifacts.json contract for v0.6.0
+        contract = {
+            "artifacts": [
+                {
+                    "delivery": "wizard",
+                    "merge_strategy": "warn_on_drift",
+                    "mode": "0755",
+                    "relpath": ".claude/statusline.sh",
+                    "render_kind": "copy",
+                    "template_path": "templates/claude_config/statusline.sh",
+                }
+            ],
+            "bundle_version": "v0.6.0",
+            "contract_id": "system-artifacts",
+            "contract_version": "system-artifacts-v1",
+        }
+        contract_path = build_root / "wizard" / "foundation-bundles" / "v0.6.0" / "system-artifacts.json"
+        contract_path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
+
+        registry = {
+            "schema_version": "v1",
+            "bundles": [
+                {"foundation_bundle_version": "v0.4.0",
+                 "path": "wizard/foundation-bundles/v0.4.0/",
+                 "source_commit": "aaa1111", "status": "prerelease"},
+                {"foundation_bundle_version": "v0.6.0",
+                 "path": "wizard/foundation-bundles/v0.6.0/",
+                 "source_commit": "bbb2222", "status": "prerelease"},
+            ],
+        }
+        registry_path = build_root / "wizard" / "registry" / "foundation-bundles.json"
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+        return build_root, registry_path, copy_file_content
+
+    def _build_operator_with_copy_file(self, tmp_sub: str, build_root: Path,
+                                        *, include_copy_file: bool = True,
+                                        copy_file_edited: bool = False,
+                                        unmanaged_collision: bool = False):
+        """Build an operator project on v0.4.0. Optionally place .claude/statusline.sh
+        as an already-managed file (include_copy_file=True) with or without operator
+        edits, or as an unmanaged collision file (unmanaged_collision=True).
+        Returns (proj_dir, manifest_path)."""
+        proj = self.tmp / tmp_sub
+        proj.mkdir(parents=True, exist_ok=True)
+        (proj / ".wizard").mkdir(parents=True, exist_ok=True)
+
+        rendered = render_foundation_docs("v0.4.0", _CAPSULE_INPUTS, build_root)
+        strategies = _strategy_roster("A")
+        managed_files = {}
+        for rec in rendered:
+            rel = rec.operator_relpath
+            if rel not in strategies:
+                (proj / rel).write_text(rec.content, encoding="utf-8")
+                continue
+            (proj / rel).write_text(rec.content, encoding="utf-8")
+            digest = "sha256:" + sha256_bytes(rec.content.encode("utf-8"))
+            entry = {
+                "managed": "true",
+                "managed_by": "shared",
+                "base_hash": digest,
+                "current_hash_last_seen": digest,
+                "local_modifications": "expected",
+                "merge_strategy": strategies[rel],
+                "source_refs": [],
+                "live_lineage_version": "v0.4.0",
+            }
+            managed_files[rel] = entry
+
+        copy_relpath = ".claude/statusline.sh"
+        # The installed (v0.4.0-era) content is distinct from the target bundle template,
+        # so the write path detects a content change and stages the new version.
+        installed_copy_content = "#!/bin/bash\n# statusline.sh v0.4.0\necho 'status v040'\n"
+
+        if include_copy_file and not unmanaged_collision:
+            # The file is managed and on disk (already on v0.4.0)
+            disk_content = "#!/bin/bash\n# operator-edited statusline\necho 'CUSTOM'\n" if copy_file_edited else installed_copy_content
+            (proj / ".claude").mkdir(parents=True, exist_ok=True)
+            (proj / copy_relpath).write_text(disk_content, encoding="utf-8")
+            digest = "sha256:" + sha256_bytes(installed_copy_content.encode("utf-8"))
+            managed_files[copy_relpath] = {
+                "managed": "true",
+                "managed_by": "shared",
+                "base_hash": digest,
+                "base_content_hash": digest,
+                "current_hash_last_seen": digest,
+                "local_modifications": "expected",
+                "merge_strategy": "warn_on_drift",
+                "mode": "0755",
+                "render_kind": "copy",
+                "source_refs": [],
+                "live_lineage_version": "v0.4.0",
+            }
+        elif unmanaged_collision:
+            # File on disk but NOT in the manifest — collision scenario
+            (proj / ".claude").mkdir(parents=True, exist_ok=True)
+            (proj / copy_relpath).write_text("# unmanaged file\n", encoding="utf-8")
+            # do NOT add to managed_files
+
+        manifest = {
+            "manifest_schema_version": "manifest-v2",
+            "foundation_bundle_version": "v0.4.0",
+            "source_commit": "aaa1111",
+            "generator_version": "f" * 40,
+            "project_name": "Acme Helper",
+            "system_shape": "markdown-CC",
+            "managed_files": managed_files,
+            "control_files": [".wizard/manifest.json", ".wizard/upgrade-history.log"],
+        }
+        manifest_path = proj / ".wizard" / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        (proj / ".wizard" / "upgrade-history.log").write_text("# history\n", encoding="utf-8")
+
+        capsule = {
+            "schema_version": "replay-capsule-v1",
+            "foundation_bundle_version": "v0.4.0",
+            "generator_version": "f" * 40,
+            "system_shape": "markdown-CC",
+            "foundation_only_mode": False,
+            "canonicalization_version": "v1",
+            "hash_algorithm": "sha256-lf",
+            "foundation_doc_inputs": dict(_CAPSULE_INPUTS),
+        }
+        (proj / ".wizard" / "replay-capsule.json").write_text(
+            json.dumps(capsule, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return proj, manifest_path
+
+    def _apply_v060(self, proj, manifest_path, registry_path, build_root, ack=False):
+        manifest = load_operator_manifest(manifest_path)
+        registry = load_registry(registry_path)
+        return apply_upgrade(
+            proj, "v0.6.0", build_root,
+            registry=registry, registry_path=registry_path,
+            manifest=manifest, manifest_path=manifest_path,
+            ack=ack, backup=True,
+        )
+
+    # ---- tests -----------------------------------------------------------------
+
+    def test_copy_file_adopted_when_unedited(self):
+        """An unedited copy-kind file adopts the target version; manifest advances."""
+        build_root, reg, copy_content = self._build_v040_to_v060_repo("unedited")
+        proj, mp = self._build_operator_with_copy_file("op_unedited", build_root,
+                                                        include_copy_file=True,
+                                                        copy_file_edited=False)
+        res = self._apply_v060(proj, mp, reg, build_root)
+
+        copy_relpath = ".claude/statusline.sh"
+        live = (proj / copy_relpath).read_text(encoding="utf-8")
+        self.assertEqual(live, copy_content,
+                         "unedited copy-kind file not replaced with target content")
+        self.assertIn(copy_relpath, res.files_written,
+                      "unedited copy-kind file not in files_written")
+
+        # Manifest base_hash advances
+        new_manifest = json.loads((mp).read_text(encoding="utf-8"))
+        entry = new_manifest["managed_files"].get(copy_relpath)
+        self.assertIsNotNone(entry, "copy-kind file missing from new manifest")
+        expected_hash = "sha256:" + sha256_bytes(copy_content.encode("utf-8"))
+        self.assertEqual(entry["base_hash"], expected_hash,
+                         "manifest base_hash not advanced for adopted copy-kind file")
+        self.assertEqual(new_manifest["foundation_bundle_version"], "v0.6.0")
+
+    def test_copy_file_edited_refuses_without_ack(self):
+        """Operator-edited copy-kind file (warn_on_drift) refuses without --ack; adopts with --ack; live file never silently overwritten."""
+        build_root, reg, copy_content = self._build_v040_to_v060_repo("edited")
+        proj, mp = self._build_operator_with_copy_file("op_edited", build_root,
+                                                        include_copy_file=True,
+                                                        copy_file_edited=True)
+        copy_relpath = ".claude/statusline.sh"
+        edited_content = "#!/bin/bash\n# operator-edited statusline\necho 'CUSTOM'\n"
+        self.assertEqual((proj / copy_relpath).read_text(encoding="utf-8"), edited_content)
+
+        # Without ack: refuses
+        before_live = (proj / copy_relpath).read_text(encoding="utf-8")
+        with self.assertRaises(UpgradeApplyError) as ctx:
+            self._apply_v060(proj, mp, reg, build_root, ack=False)
+        self.assertIn("--ack", str(ctx.exception))
+        # Live file untouched
+        self.assertEqual((proj / copy_relpath).read_text(encoding="utf-8"), before_live,
+                         "live file silently overwritten on warn_on_drift refusal")
+
+        # With ack: adopts
+        res = self._apply_v060(proj, mp, reg, build_root, ack=True)
+        live_after = (proj / copy_relpath).read_text(encoding="utf-8")
+        self.assertEqual(live_after, copy_content,
+                         "ack'd warn_on_drift copy file not replaced with target content")
+        self.assertIn(copy_relpath, res.files_written)
+
+    def test_new_copy_file_created_additively(self):
+        """A new copy-kind file in the target is created on a system that lacked it; path exists; mode correct (.sh -> 0755)."""
+        build_root, reg, copy_content = self._build_v040_to_v060_repo("newfile")
+        # Operator project does NOT have .claude/statusline.sh (neither managed nor on disk)
+        proj, mp = self._build_operator_with_copy_file("op_new", build_root,
+                                                        include_copy_file=False,
+                                                        unmanaged_collision=False)
+        copy_relpath = ".claude/statusline.sh"
+        self.assertFalse((proj / copy_relpath).exists(), "precondition: file must not exist")
+
+        res = self._apply_v060(proj, mp, reg, build_root)
+
+        # File exists after apply
+        dest = proj / copy_relpath
+        self.assertTrue(dest.exists(), "new copy-kind file not created additively")
+        self.assertEqual(dest.read_text(encoding="utf-8"), copy_content)
+
+        # Mode: 0755 for .sh
+        import stat
+        mode = dest.stat().st_mode
+        self.assertTrue(mode & stat.S_IXUSR, ".sh copy-kind file not executable (mode 0755)")
+
+        # In files_written
+        self.assertIn(copy_relpath, res.files_written)
+
+        # Added to manifest
+        new_manifest = json.loads(mp.read_text(encoding="utf-8"))
+        self.assertIn(copy_relpath, new_manifest["managed_files"],
+                      "new copy-kind file not added to manifest")
+
+    def test_new_file_collision_routes_to_sidecar(self):
+        """A new target path with an unmanaged existing file -> sidecar/refuse; live preserved."""
+        build_root, reg, copy_content = self._build_v040_to_v060_repo("collision")
+        proj, mp = self._build_operator_with_copy_file("op_collision", build_root,
+                                                        include_copy_file=False,
+                                                        unmanaged_collision=True)
+        copy_relpath = ".claude/statusline.sh"
+        original_content = "# unmanaged file\n"
+        self.assertEqual((proj / copy_relpath).read_text(encoding="utf-8"), original_content)
+
+        res = self._apply_v060(proj, mp, reg, build_root)
+
+        # Live file NOT overwritten
+        self.assertEqual((proj / copy_relpath).read_text(encoding="utf-8"), original_content,
+                         "collision: live unmanaged file was silently overwritten")
+        # Not in files_written
+        self.assertNotIn(copy_relpath, res.files_written)
+        # Surface has a collision entry for this path
+        collision_entries = [e for e in res.surface if e.relpath == copy_relpath]
+        self.assertTrue(collision_entries, "no collision surface entry for the colliding path")
+        from upgrade_apply import SURFACE_COLLISION
+        self.assertEqual(collision_entries[0].classification, SURFACE_COLLISION)
+
+
 if __name__ == "__main__":
     unittest.main()
