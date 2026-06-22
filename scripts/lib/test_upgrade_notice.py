@@ -347,6 +347,13 @@ class DurableRelayInstructionContractTest(unittest.TestCase):
         # routes review through the in-project upgrade process
         self.assertIn("upgrading.md", low,
                       "CLAUDE.md must route review through the in-project upgrade process")
+        # SALIENCE: must instruct surfacing it as its own visible item, not a buried footnote
+        self.assertTrue(any(p in low for p in ("clearly visible", "its own", "do not bury",
+                                               "distinct line", "not a footnote", "do not downplay")),
+                        "CLAUDE.md must instruct surfacing the update prominently, not buried")
+        # must pose a direct offer the operator can answer
+        self.assertIn("yes/no", low,
+                      "CLAUDE.md must instruct posing a direct yes/no offer to the operator")
 
 
 if __name__ == "__main__":
