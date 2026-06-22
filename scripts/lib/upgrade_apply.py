@@ -529,6 +529,244 @@ def compute_merge_surface(
     return out
 
 
+# ===== Target-change set (READ-ONLY; consumed by the plan path) =====
+#
+# The upgrade PLAN must show the operator what the TARGET version changes — the
+# artifacts the target bundle ADDS or MODIFIES versus the operator's current
+# installed version — NOT the operator's local drift. This is the complement of the
+# drift report ("your local changes"): the change set is "what the new version
+# changes for you, and why".
+#
+# It is computed by REUSING the apply engine's surface computation read-only:
+#   - render the CURRENT version (base) and the TARGET version (theirs) for the
+#     classic foundation docs (_render_version);
+#   - render the CURRENT + TARGET operating-layer render-kind files
+#     (_render_operating_layer) so a modified operating doc (e.g.
+#     operating_discipline.md) is detected by content hash, not silently dropped;
+#   - read the TARGET bundle template for each copy-kind file (+ replay the
+#     deterministic hook injection) so a modified/new copy file (e.g. a new
+#     health-check skill) is detected;
+#   - classify each surface entry new / modified / unchanged.
+#
+# It performs NO writes and mutates nothing on disk. It is fail-soft: a v1 capsule
+# that cannot replay the operating layer degrades to "" (the caller treats that as
+# an empty change set + the drift report still shows) rather than refusing.
+
+
+@dataclass
+class TargetChangeEntry:
+    """One artifact the target version adds or modifies vs the current version.
+
+    Read-only planning record; the plan path joins these with the migration-manifest
+    benefit text + the operator's drift state to build the operator-facing analysis.
+
+    Fields:
+        relpath        -- artifact path inside the operator project
+        what           -- "new" | "modified"
+        render_kind    -- "render" | "copy"
+        merge_strategy -- the file's merge strategy (drives the at-risk label)
+        drift_status   -- the operator's local drift on this file (DRIFT_NONE for a
+                          new file, or the manifest-derived drift state for a modified
+                          one). Drives whether applying touches an operator-edited file.
+    """
+    relpath: str
+    what: str            # "new" | "modified"
+    render_kind: str     # render | copy
+    merge_strategy: str
+    drift_status: str
+
+
+def _drift_status_for(
+    operator_project_dir: Path,
+    manifest: Dict[str, Any],
+    relpath: str,
+) -> str:
+    """Operator-local drift status for one managed file (content-hash based), used to
+    label whether applying a target change touches a file the operator has edited.
+    Returns DRIFT_NONE / DRIFT_DETECTED / DRIFT_MISSING_FILE. A file not in the
+    manifest (a brand-new target file) has no recorded baseline -> DRIFT_NONE."""
+    from upgrade import DRIFT_NONE, DRIFT_DETECTED, DRIFT_MISSING_FILE  # type: ignore
+
+    files_block = manifest.get("managed_files") or manifest.get("files") or {}
+    meta = files_block.get(relpath)
+    if not isinstance(meta, dict):
+        return DRIFT_NONE
+    abs_path = operator_project_dir / relpath
+    if not abs_path.exists():
+        return DRIFT_MISSING_FILE
+    base_content = str(meta.get("base_content_hash", "")) or str(meta.get("base_hash", ""))
+    if not base_content.startswith("sha256:"):
+        return DRIFT_NONE
+    live = abs_path.read_text(encoding="utf-8")
+    return DRIFT_NONE if _content_hash(live) == base_content else DRIFT_DETECTED
+
+
+def compute_target_change_set(
+    operator_project_dir: Path,
+    target_version: str,
+    build_repo_root: Path,
+    *,
+    registry: Dict[str, Any],
+    manifest: Dict[str, Any],
+) -> List[TargetChangeEntry]:
+    """Compute the read-only set of artifacts the TARGET version adds/modifies vs the
+    operator's current version. NO disk writes; mutates nothing.
+
+    Reuses the apply engine's render + surface computation:
+      _render_version (foundation docs), _render_operating_layer (operating-layer
+      render files), read_bundle_template + _inject_hooks_for_copy_file (copy files),
+      compute_merge_surface (new/modified/unchanged classification).
+
+    Fail-soft: if the change set cannot be computed (e.g. a legacy v1 capsule that
+    cannot replay the operating layer, or a missing capsule/contract), returns [] so
+    the plan still renders (the drift report remains the complementary view). For a
+    v2-capsule system this populates the full new+modified set.
+
+    Returns the NEW + MODIFIED entries only (unchanged + dropped are excluded — the
+    operator reviews only what changes).
+    """
+    current_version = str(manifest.get("foundation_bundle_version", ""))
+    target_entry = find_bundle_entry(registry, target_version)
+    if target_entry is None:
+        return []
+
+    try:
+        capsule = load_replay_capsule(operator_project_dir)
+        capsule_inputs = capsule["foundation_doc_inputs"]
+    except UpgradeApplyError:
+        # No / malformed capsule -> cannot re-render -> empty change set (fail-soft).
+        return []
+
+    target_bundle_dir = (build_repo_root / target_entry.get("path", "")).resolve()
+
+    # 1. Foundation-doc base + theirs (the classic 6 docs render_foundation_docs produces).
+    try:
+        base_rendered = _render_version(current_version, capsule_inputs, build_repo_root)
+        theirs_rendered = _render_version(target_version, capsule_inputs, build_repo_root)
+    except Exception:
+        # A placeholder the capsule cannot resolve (e.g. the target adds a question this
+        # system never answered) -> degrade to empty (the plan + drift report still show).
+        return []
+
+    target_contract = _load_target_contract(target_bundle_dir)
+
+    # 2. Compute the surface (new/modified/unchanged per artifact) from the TARGET
+    #    contract — the same read-only classification the apply path uses.
+    try:
+        surface = compute_merge_surface(
+            manifest, target_contract, base_rendered, theirs_rendered,
+            operator_project_dir, capsule,
+        )
+    except UpgradeApplyError:
+        return []
+
+    foundation_relpaths = set(base_rendered) | set(theirs_rendered)
+
+    # 3. For operating-layer render-kind files + copy-kind files, compute_merge_surface
+    #    lacks `theirs` text and defaults them to UNCHANGED-with-signal. Render those
+    #    `theirs` here so a genuine modification is detected by content hash. This mirrors
+    #    the apply path's step-4b (copy) + step-4c (operating render) `theirs` computation,
+    #    but read-only.
+    files_block = manifest.get("managed_files") or manifest.get("files") or {}
+
+    # Operating-layer render files that are managed + surviving.
+    ol_render_rels = [
+        se.relpath for se in surface
+        if se.render_kind == RENDER_KIND_RENDER
+        and se.relpath not in foundation_relpaths
+        and se.classification not in (SURFACE_DROPPED, SURFACE_COLLISION, SURFACE_NEEDS_CAPSULE)
+        and se.in_manifest
+    ]
+    project_name = str(manifest.get("project_name", "")) or str(
+        capsule_inputs.get("PROJECT_NAME", "")
+    )
+    theirs_ol: Dict[str, str] = {}
+    if ol_render_rels:
+        try:
+            theirs_ol = _render_operating_layer(
+                target_version, ol_render_rels,
+                capsule=capsule, capsule_inputs=capsule_inputs,
+                project_name=project_name, build_repo_root=build_repo_root,
+            )
+        except UpgradeApplyError:
+            # Operating layer not replayable (v1 capsule) -> those files stay unclassified
+            # for modification (fail-soft); foundation + copy deltas still surface.
+            theirs_ol = {}
+
+    # Copy-kind files (with a real bundle template) that are managed + surviving.
+    contract_entries_map: Dict[str, Dict[str, Any]] = {}
+    if target_contract:
+        for _art in target_contract.get("artifacts", []):
+            if _art.get("relpath"):
+                contract_entries_map[_art["relpath"]] = _art
+
+    from upgrade import DRIFT_NONE  # type: ignore
+
+    out: List[TargetChangeEntry] = []
+    for se in surface:
+        rel = se.relpath
+        cls = se.classification
+        if cls in (SURFACE_DROPPED, SURFACE_COLLISION, SURFACE_NEEDS_CAPSULE):
+            # Not a clean target add/modify the operator can simply review-and-apply.
+            continue
+
+        is_foundation = rel in foundation_relpaths
+
+        if cls == SURFACE_NEW:
+            out.append(TargetChangeEntry(
+                relpath=rel, what="new",
+                render_kind=se.render_kind or RENDER_KIND_COPY,
+                merge_strategy=se.merge_strategy,
+                drift_status=DRIFT_NONE,
+            ))
+            continue
+
+        # MODIFIED / UNCHANGED in-manifest entry: decide modified vs unchanged by
+        # comparing target `theirs` to the manifest's recorded base_content_hash.
+        meta = files_block.get(rel, {}) if isinstance(files_block, dict) else {}
+        base_content = str(meta.get("base_content_hash", "")) or str(meta.get("base_hash", ""))
+
+        theirs_text: Optional[str] = None
+        if is_foundation and rel in theirs_rendered:
+            theirs_text = theirs_rendered[rel]
+        elif rel in theirs_ol:
+            theirs_text = theirs_ol[rel]
+        elif se.render_kind == RENDER_KIND_COPY and rel in contract_entries_map \
+                and contract_entries_map[rel].get("template_path") is not None:
+            try:
+                copy_text = read_bundle_template(target_version, rel, build_repo_root)
+                theirs_text = _inject_hooks_for_copy_file(
+                    rel, copy_text, capsule, build_repo_root
+                )
+            except (BundleTemplateError, UpgradeApplyError):
+                theirs_text = None
+
+        if theirs_text is None:
+            # No `theirs` signal (e.g. control-plane-emitted file, or unrenderable) ->
+            # cannot assert a modification; fall back on the surface classification.
+            if cls == SURFACE_MODIFIED:
+                out.append(TargetChangeEntry(
+                    relpath=rel, what="modified",
+                    render_kind=se.render_kind or RENDER_KIND_COPY,
+                    merge_strategy=se.merge_strategy,
+                    drift_status=_drift_status_for(operator_project_dir, manifest, rel),
+                ))
+            continue
+
+        if base_content.startswith("sha256:") and _content_hash(theirs_text) == base_content:
+            continue  # unchanged — not part of the change set
+
+        out.append(TargetChangeEntry(
+            relpath=rel, what="modified",
+            render_kind=se.render_kind or RENDER_KIND_COPY,
+            merge_strategy=se.merge_strategy,
+            drift_status=_drift_status_for(operator_project_dir, manifest, rel),
+        ))
+
+    out.sort(key=lambda e: e.relpath)
+    return out
+
+
 # ===== Replay-conformance gate =====
 
 def _operating_render_relpaths(

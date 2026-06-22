@@ -1,7 +1,9 @@
 """Tests for the per-artifact upgrade analysis (compute_upgrade_analysis).
 
-Each changed artifact in the upgrade plan is enriched with:
-  - what    : new | modified | unchanged
+The analysis is over the TARGET-CHANGE SET (what the new version adds/modifies vs the
+operator's current version) -- NOT the operator's local drift. compute_upgrade_analysis
+is the presentation JOIN that enriches each change-set entry with:
+  - what    : new | modified
   - kind    : render | copy
   - benefit : plain-language why-this-helps (from migration-manifest artifact_notes,
               or a neutral default)
@@ -9,13 +11,15 @@ Each changed artifact in the upgrade plan is enriched with:
               will warn -- needs your OK (--ack) to replace | installed as-is
   - how     : same action phrased as what will happen
 
-These tests use SYNTHETIC fixtures only -- no real estate, no real disk project.
-Fixtures are built inline to avoid coupling to a particular operator project.
+These tests use SYNTHETIC change-set entries built inline. The REAL-path coverage --
+emitting a real v0.6.0 system and computing the plan via the same function path the CLI
+uses -- lives in test_upgrade_plan_analysis_real.py (these synthetic tests are NOT the
+only coverage; a prior build passed synthetic tests while the real path produced nothing).
 """
 
-import json
-import sys
 import unittest
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -23,15 +27,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from upgrade import (  # noqa: E402
     DRIFT_DETECTED,
     DRIFT_NONE,
-    DRIFT_MISSING_FILE,
     MERGE_STRATEGY_THREE_WAY,
     MERGE_STRATEGY_OPERATOR_REVIEW,
     MERGE_STRATEGY_WARN_ON_DRIFT,
     MERGE_STRATEGY_FROZEN,
-    DriftReport,
-    DriftReportEntry,
     MigrationEntry,
     UpgradePlan,
+    DriftReport,
     STANDING_APPROVAL_STATUS_UNAVAILABLE,
     upgrade_plan_to_dict,
     render_upgrade_plan,
@@ -42,55 +44,21 @@ from upgrade import (  # noqa: E402
 
 # ===== Shared fixtures =====
 
-def _make_drift_entry(
-    path: str,
-    merge_strategy: str,
-    status: str = DRIFT_NONE,
-) -> DriftReportEntry:
-    base = "sha256:aabbcc"
-    current = base if status == DRIFT_NONE else "sha256:ddeeff"
-    return DriftReportEntry(
-        path=path,
-        base_hash=base,
-        current_hash=current,
-        status=status,
-        merge_strategy=merge_strategy,
-        local_modifications="expected",
-        plan_action="plan action placeholder",
-    )
+
+@dataclass
+class _ChangeEntry:
+    """Stand-in for upgrade_apply.TargetChangeEntry (duck-typed by relpath / what /
+    render_kind / merge_strategy / drift_status). Lets these unit tests stay decoupled
+    from the apply engine while exercising the same JOIN the real path uses."""
+    relpath: str
+    what: str
+    render_kind: str
+    merge_strategy: str
+    drift_status: str = DRIFT_NONE
 
 
-def _make_plan(
-    entries: list,
-    migration_manifest: dict = None,
-) -> UpgradePlan:
-    """Build a synthetic UpgradePlan with the given drift entries."""
-    drift = DriftReport(
-        operator_project_path="/fake/project",
-        bundle_version="v0.6.0",
-        target_bundle_version="v0.6.1",
-        entries=entries,
-    )
-    me = MigrationEntry(
-        from_version="v0.6.0",
-        migration_class="minor-additive",
-        requires_operator_approval=True,
-        stop_condition="not_applicable",
-        breaking_changes_summary="",
-        supported=True,
-    )
-    return UpgradePlan(
-        operator_project_path="/fake/project",
-        from_version="v0.6.0",
-        to_version="v0.6.1",
-        tier="minor-additive",
-        drift_report=drift,
-        standing_approval_status=STANDING_APPROVAL_STATUS_UNAVAILABLE,
-        migration_entry=me,
-        planned_steps=[],
-        requires_review=True,
-        plan_only=True,
-    )
+def _change(relpath, what, render_kind, merge_strategy, drift_status=DRIFT_NONE):
+    return _ChangeEntry(relpath, what, render_kind, merge_strategy, drift_status)
 
 
 def _make_migration_manifest_with_notes() -> dict:
@@ -121,64 +89,35 @@ def _make_migration_manifest_with_notes() -> dict:
     }
 
 
-def _make_contract_entries() -> dict:
-    """Minimal system-artifacts entries for the three v0.6.1-changed files."""
-    return {
-        "wizard/skills/health-check.md": {
-            "render_kind": "copy",
-            "merge_strategy": MERGE_STRATEGY_WARN_ON_DRIFT,
-            "delivery": "wizard",
-        },
-        "operating_discipline.md": {
-            "render_kind": "render",
-            "merge_strategy": MERGE_STRATEGY_THREE_WAY,
-            "delivery": "wizard",
-        },
-        "wizard/skills/pause.md": {
-            "render_kind": "copy",
-            "merge_strategy": MERGE_STRATEGY_WARN_ON_DRIFT,
-            "delivery": "wizard",
-        },
-    }
-
-
 # ===== Tests =====
 
+
 class TestAnalysisPerArtifactFields(unittest.TestCase):
-    """compute_upgrade_analysis returns one ArtifactAnalysis per surface file,
+    """compute_upgrade_analysis returns one ArtifactAnalysis per change-set entry,
     each with all five required fields populated."""
 
     def setUp(self):
-        # health-check.md is NEW (not in operator manifest / no drift entry)
-        # operating_discipline.md is MODIFIED (three_way, no operator drift)
-        # pause.md is MODIFIED (warn_on_drift, no operator drift)
-        self.entries = [
-            _make_drift_entry("operating_discipline.md", MERGE_STRATEGY_THREE_WAY),
-            _make_drift_entry("wizard/skills/pause.md", MERGE_STRATEGY_WARN_ON_DRIFT),
+        # The v0.6.1 target-change set: health-check.md is NEW (copy), operating_discipline.md
+        # is MODIFIED (render, no operator drift), pause.md is MODIFIED (copy, no drift).
+        self.change_set = [
+            _change("wizard/skills/health-check.md", "new", "copy", MERGE_STRATEGY_WARN_ON_DRIFT),
+            _change("operating_discipline.md", "modified", "render", MERGE_STRATEGY_THREE_WAY),
+            _change("wizard/skills/pause.md", "modified", "copy", MERGE_STRATEGY_WARN_ON_DRIFT),
         ]
-        self.plan = _make_plan(self.entries)
         self.migration_manifest = _make_migration_manifest_with_notes()
-        self.contract_entries = _make_contract_entries()
 
     def test_analysis_lists_per_artifact_fields(self):
-        """Each analysis entry carries all five fields; benefit for health-check.md
-        comes from the migration-manifest artifact_notes."""
-        items = compute_upgrade_analysis(
-            self.plan,
-            self.migration_manifest,
-            self.contract_entries,
-            new_files=["wizard/skills/health-check.md"],
-        )
+        """Each analysis entry carries all five fields; benefit comes from the
+        migration-manifest artifact_notes."""
+        items = compute_upgrade_analysis(self.change_set, self.migration_manifest)
         relpaths = [a.relpath for a in items]
-        # All three changed files must appear
         self.assertIn("wizard/skills/health-check.md", relpaths)
         self.assertIn("operating_discipline.md", relpaths)
         self.assertIn("wizard/skills/pause.md", relpaths)
 
-        # All five fields must be non-empty on every entry
         for a in items:
             with self.subTest(relpath=a.relpath):
-                self.assertIn(a.what, ("new", "modified", "unchanged"),
+                self.assertIn(a.what, ("new", "modified"),
                               msg=f"what={a.what!r} not a valid value")
                 self.assertIn(a.kind, ("render", "copy"),
                               msg=f"kind={a.kind!r} not a valid value")
@@ -186,233 +125,134 @@ class TestAnalysisPerArtifactFields(unittest.TestCase):
                 self.assertTrue(a.risk, msg="risk must not be empty")
                 self.assertTrue(a.how, msg="how must not be empty")
 
-        # health-check.md: benefit must come from the manifest notes
         hc = next(a for a in items if a.relpath == "wizard/skills/health-check.md")
         self.assertIn("healthy", hc.benefit.lower(),
                       msg="health-check.md benefit must include manifest note text")
-
-        # health-check.md is new, not modified
         self.assertEqual(hc.what, "new")
 
-        # operating_discipline.md is modified
         od = next(a for a in items if a.relpath == "operating_discipline.md")
         self.assertEqual(od.what, "modified")
+
+    def test_only_change_set_files_appear(self):
+        """Files NOT in the change set never appear (drift on un-changed files is NOT
+        the basis -- that is the complementary drift report's job)."""
+        items = compute_upgrade_analysis(self.change_set, self.migration_manifest)
+        self.assertEqual(len(items), 3)
+        # A drifted-but-unchanged-by-target file (e.g. vision.md) is absent.
+        self.assertNotIn("vision.md", [a.relpath for a in items])
 
     def test_benefit_default_when_no_note(self):
         """When no artifact_notes entry exists for a file, benefit is a neutral default
         that mentions the filename."""
-        entries = [
-            _make_drift_entry("vision.md", MERGE_STRATEGY_THREE_WAY),
-        ]
-        plan = _make_plan(entries)
-        contract = {
-            "vision.md": {
-                "render_kind": "render",
-                "merge_strategy": MERGE_STRATEGY_THREE_WAY,
-                "delivery": "wizard",
-            }
-        }
-        manifest_no_notes = {
-            "target_version": "v0.6.1",
-            "migrations": [],
-        }
-        items = compute_upgrade_analysis(plan, manifest_no_notes, contract, new_files=[])
+        change_set = [_change("vision.md", "modified", "render", MERGE_STRATEGY_THREE_WAY)]
+        manifest_no_notes = {"target_version": "v0.6.1", "migrations": []}
+        items = compute_upgrade_analysis(change_set, manifest_no_notes)
         self.assertEqual(len(items), 1)
-        a = items[0]
-        self.assertIn("vision.md", a.benefit.lower(),
+        self.assertIn("vision.md", items[0].benefit.lower(),
                       msg="default benefit must mention the filename")
 
 
-class TestAnalysisFlagsAckReplacementDestructive(unittest.TestCase):
-    """A warn_on_drift file the operator has edited is flagged as needing --ack."""
+class TestAnalysisRiskFromDrift(unittest.TestCase):
+    """The at-risk label is derived from merge_strategy + the operator's drift state on
+    the file (whether applying the target change touches an operator-edited file)."""
 
     def test_analysis_flags_ack_replacement_destructive(self):
         """warn_on_drift + operator drift => risk mentions '--ack' and is not 'clean adopt'."""
-        entries = [
-            _make_drift_entry("wizard/skills/pause.md", MERGE_STRATEGY_WARN_ON_DRIFT,
-                              status=DRIFT_DETECTED),
+        change_set = [
+            _change("wizard/skills/pause.md", "modified", "copy",
+                    MERGE_STRATEGY_WARN_ON_DRIFT, drift_status=DRIFT_DETECTED),
         ]
-        plan = _make_plan(entries)
-        manifest = _make_migration_manifest_with_notes()
-        contract = {
-            "wizard/skills/pause.md": {
-                "render_kind": "copy",
-                "merge_strategy": MERGE_STRATEGY_WARN_ON_DRIFT,
-                "delivery": "wizard",
-            }
-        }
-        items = compute_upgrade_analysis(plan, manifest, contract, new_files=[])
+        items = compute_upgrade_analysis(change_set, _make_migration_manifest_with_notes())
         self.assertEqual(len(items), 1)
         a = items[0]
-        # Must flag as needing explicit operator OK (--ack)
         combined = (a.risk + " " + a.how).lower()
         self.assertIn("--ack", combined,
                       msg="warn_on_drift + drift must mention --ack in risk or how")
-        self.assertNotEqual(a.risk.lower(), "clean adopt",
-                            msg="warn_on_drift + drift must not be 'clean adopt'")
+        self.assertNotEqual(a.risk.lower(), "clean adopt")
 
     def test_three_way_no_drift_is_clean_adopt(self):
-        """three_way + no drift => risk is 'clean adopt'."""
-        entries = [
-            _make_drift_entry("operating_discipline.md", MERGE_STRATEGY_THREE_WAY,
-                              status=DRIFT_NONE),
+        change_set = [
+            _change("operating_discipline.md", "modified", "render",
+                    MERGE_STRATEGY_THREE_WAY, drift_status=DRIFT_NONE),
         ]
-        plan = _make_plan(entries)
-        manifest = _make_migration_manifest_with_notes()
-        contract = {
-            "operating_discipline.md": {
-                "render_kind": "render",
-                "merge_strategy": MERGE_STRATEGY_THREE_WAY,
-                "delivery": "wizard",
-            }
-        }
-        items = compute_upgrade_analysis(plan, manifest, contract, new_files=[])
+        items = compute_upgrade_analysis(change_set, _make_migration_manifest_with_notes())
         self.assertEqual(len(items), 1)
-        a = items[0]
-        self.assertIn("clean adopt", a.risk.lower(),
-                      msg="three_way + no drift must be 'clean adopt'")
+        self.assertIn("clean adopt", items[0].risk.lower())
 
     def test_three_way_with_drift_will_merge(self):
-        """three_way + drift => risk mentions merging edits."""
-        entries = [
-            _make_drift_entry("operating_discipline.md", MERGE_STRATEGY_THREE_WAY,
-                              status=DRIFT_DETECTED),
+        change_set = [
+            _change("operating_discipline.md", "modified", "render",
+                    MERGE_STRATEGY_THREE_WAY, drift_status=DRIFT_DETECTED),
         ]
-        plan = _make_plan(entries)
-        manifest = _make_migration_manifest_with_notes()
-        contract = {
-            "operating_discipline.md": {
-                "render_kind": "render",
-                "merge_strategy": MERGE_STRATEGY_THREE_WAY,
-                "delivery": "wizard",
-            }
-        }
-        items = compute_upgrade_analysis(plan, manifest, contract, new_files=[])
+        items = compute_upgrade_analysis(change_set, _make_migration_manifest_with_notes())
         self.assertEqual(len(items), 1)
-        a = items[0]
-        # Should mention merging edits
-        self.assertIn("merge", a.risk.lower(),
-                      msg="three_way + drift must mention merging edits in risk")
+        self.assertIn("merge", items[0].risk.lower())
 
     def test_operator_review_is_saved_for_review(self):
-        """operator_review => risk says saved for your review."""
-        entries = [
-            _make_drift_entry("vision.md", MERGE_STRATEGY_OPERATOR_REVIEW,
-                              status=DRIFT_DETECTED),
+        change_set = [
+            _change("vision.md", "modified", "render",
+                    MERGE_STRATEGY_OPERATOR_REVIEW, drift_status=DRIFT_DETECTED),
         ]
-        plan = _make_plan(entries)
-        manifest = {"target_version": "v0.6.1", "migrations": []}
-        contract = {
-            "vision.md": {
-                "render_kind": "render",
-                "merge_strategy": MERGE_STRATEGY_OPERATOR_REVIEW,
-                "delivery": "wizard",
-            }
-        }
-        items = compute_upgrade_analysis(plan, manifest, contract, new_files=[])
+        items = compute_upgrade_analysis(change_set, {"target_version": "v0.6.1", "migrations": []})
+        self.assertEqual(len(items), 1)
+        self.assertIn("review", items[0].risk.lower())
+
+    def test_new_file_installed_as_is(self):
+        change_set = [
+            _change("wizard/skills/health-check.md", "new", "copy", MERGE_STRATEGY_WARN_ON_DRIFT),
+        ]
+        items = compute_upgrade_analysis(change_set, _make_migration_manifest_with_notes())
         self.assertEqual(len(items), 1)
         a = items[0]
-        self.assertIn("review", a.risk.lower(),
-                      msg="operator_review must mention 'review' in risk")
+        self.assertEqual(a.what, "new")
+        self.assertIn("installed", (a.risk + " " + a.how).lower())
+
+    def test_frozen_no_drift_is_clean_adopt(self):
+        change_set = [_change("some.md", "modified", "copy", MERGE_STRATEGY_FROZEN, DRIFT_NONE)]
+        items = compute_upgrade_analysis(change_set, {})
+        self.assertIn("clean adopt", items[0].risk.lower())
 
 
-class TestAnalysisJsonShape(unittest.TestCase):
-    """The --json output (upgrade_plan_to_dict) carries the per-artifact analysis
-    structure with stable keys."""
+class TestAnalysisJsonAndRenderShape(unittest.TestCase):
+    """The --json output + human render carry the per-artifact analysis."""
 
-    def test_analysis_json_shape(self):
-        """upgrade_plan_to_dict includes 'artifact_analysis' list with stable keys."""
-        entries = [
-            _make_drift_entry("operating_discipline.md", MERGE_STRATEGY_THREE_WAY),
-            _make_drift_entry("wizard/skills/pause.md", MERGE_STRATEGY_WARN_ON_DRIFT),
+    def _plan_with_analysis(self):
+        change_set = [
+            _change("operating_discipline.md", "modified", "render", MERGE_STRATEGY_THREE_WAY),
+            _change("wizard/skills/health-check.md", "new", "copy", MERGE_STRATEGY_WARN_ON_DRIFT),
         ]
-        plan = _make_plan(entries)
-        manifest = _make_migration_manifest_with_notes()
-        contract = _make_contract_entries()
-
-        # Attach analysis to plan
-        items = compute_upgrade_analysis(
-            plan, manifest, contract, new_files=["wizard/skills/health-check.md"]
+        items = compute_upgrade_analysis(change_set, _make_migration_manifest_with_notes())
+        me = MigrationEntry(
+            from_version="v0.6.0", migration_class="minor-additive",
+            requires_operator_approval=True, stop_condition="not_applicable",
+            breaking_changes_summary="", supported=True,
+        )
+        plan = UpgradePlan(
+            operator_project_path="/fake/project",
+            from_version="v0.6.0", to_version="v0.6.1", tier="minor-additive",
+            drift_report=DriftReport("/fake/project", "v0.6.0", "v0.6.1", entries=[]),
+            standing_approval_status=STANDING_APPROVAL_STATUS_UNAVAILABLE,
+            migration_entry=me, planned_steps=[], requires_review=True, plan_only=True,
         )
         plan.artifact_analysis = items
+        return plan
 
-        d = upgrade_plan_to_dict(plan)
-        self.assertIn("artifact_analysis", d,
-                      msg="upgrade_plan_to_dict must include 'artifact_analysis' key")
+    def test_analysis_json_shape(self):
+        d = upgrade_plan_to_dict(self._plan_with_analysis())
+        self.assertIn("artifact_analysis", d)
         analysis_list = d["artifact_analysis"]
         self.assertIsInstance(analysis_list, list)
         self.assertGreater(len(analysis_list), 0)
-
-        # Each entry must have the five stable keys plus relpath
         required_keys = {"relpath", "what", "kind", "benefit", "risk", "how"}
         for entry in analysis_list:
             with self.subTest(entry=entry.get("relpath")):
-                missing = required_keys - set(entry.keys())
-                self.assertFalse(missing,
-                                 msg=f"analysis entry missing keys: {missing}")
+                self.assertFalse(required_keys - set(entry.keys()))
 
     def test_analysis_in_render_output(self):
-        """render_upgrade_plan includes the per-artifact analysis section."""
-        entries = [
-            _make_drift_entry("operating_discipline.md", MERGE_STRATEGY_THREE_WAY),
-        ]
-        plan = _make_plan(entries)
-        manifest = _make_migration_manifest_with_notes()
-        contract = {
-            "operating_discipline.md": {
-                "render_kind": "render",
-                "merge_strategy": MERGE_STRATEGY_THREE_WAY,
-                "delivery": "wizard",
-            }
-        }
-        items = compute_upgrade_analysis(plan, manifest, contract, new_files=[])
-        plan.artifact_analysis = items
-
-        output = render_upgrade_plan(plan)
-        # The rendered output must include the per-artifact section
-        self.assertIn("operating_discipline.md", output,
-                      msg="render_upgrade_plan must list analyzed artifacts")
-        self.assertIn("clean adopt", output.lower(),
-                      msg="render_upgrade_plan must show the risk label")
-
-
-class TestAnalysisRiskMapping(unittest.TestCase):
-    """Exhaustive coverage of all merge-strategy + drift combinations."""
-
-    def _single(self, merge_strategy: str, drift_status: str,
-                is_new: bool = False) -> "ArtifactAnalysis":
-        relpath = "some_file.md"
-        entries = [] if is_new else [_make_drift_entry(relpath, merge_strategy, drift_status)]
-        plan = _make_plan(entries)
-        contract = {
-            relpath: {
-                "render_kind": "copy",
-                "merge_strategy": merge_strategy,
-                "delivery": "wizard",
-            }
-        }
-        manifest = {"target_version": "v0.6.1", "migrations": []}
-        new_files = [relpath] if is_new else []
-        items = compute_upgrade_analysis(plan, manifest, contract, new_files=new_files)
-        self.assertEqual(len(items), 1)
-        return items[0]
-
-    def test_warn_no_drift_is_installed_as_is(self):
-        a = self._single(MERGE_STRATEGY_WARN_ON_DRIFT, DRIFT_NONE)
-        combined = (a.risk + " " + a.how).lower()
-        self.assertIn("installed", combined)
-
-    def test_new_file_what_is_new(self):
-        a = self._single(MERGE_STRATEGY_WARN_ON_DRIFT, DRIFT_NONE, is_new=True)
-        self.assertEqual(a.what, "new")
-
-    def test_frozen_no_drift_is_clean_adopt(self):
-        a = self._single(MERGE_STRATEGY_FROZEN, DRIFT_NONE)
-        self.assertIn("clean adopt", a.risk.lower())
-
-    def test_operator_review_no_drift(self):
-        a = self._single(MERGE_STRATEGY_OPERATOR_REVIEW, DRIFT_NONE)
-        self.assertIn("review", a.risk.lower())
+        output = render_upgrade_plan(self._plan_with_analysis())
+        self.assertIn("operating_discipline.md", output)
+        self.assertIn("wizard/skills/health-check.md", output)
+        self.assertIn("clean adopt", output.lower())
 
 
 if __name__ == "__main__":

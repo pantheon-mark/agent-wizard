@@ -43,13 +43,17 @@ if str(_LIB) not in sys.path:
 
 from lib.upgrade import (  # noqa: E402
     BundleNotFoundError,
+    MIGRATION_MANIFEST_JSON_SIDECAR_FILENAME,
     OPERATOR_MANIFEST_JSON_FILENAME,
     OperatorManifestError,
     PlanOnlyRequiredError,
     RegistryError,
     UpgradeError,
+    compute_upgrade_analysis,
     compute_upgrade_check,
     compute_upgrade_plan,
+    find_bundle_entry,
+    load_migration_manifest,
     load_operator_manifest,
     load_registry,
     render_upgrade_check,
@@ -59,9 +63,54 @@ from lib.upgrade import (  # noqa: E402
 )
 from lib.upgrade_apply import (  # noqa: E402
     apply_upgrade,
+    compute_target_change_set,
     render_apply_result,
     UpgradeApplyError,
 )
+
+
+def populate_plan_analysis(
+    plan,
+    operator_dir: Path,
+    target_version: str,
+    build_repo_root: Path,
+    registry: dict,
+    manifest: dict,
+) -> None:
+    """Populate `plan.artifact_analysis` over the TARGET-CHANGE SET (read-only).
+
+    This is the wiring the prior C1 build was missing: it computes the artifacts the
+    target version adds/modifies (reusing the apply engine's render + surface
+    computation, read-only via `compute_target_change_set`), loads the target
+    migration-manifest's `artifact_notes` for the plain-language benefit text, and
+    joins them into per-artifact analysis entries on the plan.
+
+    Fail-soft: any error here (e.g. a legacy v1 capsule that cannot replay the
+    operating layer, or a missing migration manifest) leaves `artifact_analysis = []`
+    and the plan still renders — the drift report remains the complementary
+    "your local changes" view. For a v2-capsule system this populates the full set."""
+    try:
+        change_set = compute_target_change_set(
+            operator_dir, target_version, build_repo_root,
+            registry=registry, manifest=manifest,
+        )
+    except UpgradeError:
+        return
+    if not change_set:
+        return
+    migration_manifest: dict = {}
+    target_entry = find_bundle_entry(registry, target_version)
+    if target_entry is not None:
+        migration_json = (
+            build_repo_root / target_entry.get("path", "")
+            / MIGRATION_MANIFEST_JSON_SIDECAR_FILENAME
+        )
+        if migration_json.exists():
+            try:
+                migration_manifest = load_migration_manifest(migration_json)
+            except UpgradeError:
+                migration_manifest = {}
+    plan.artifact_analysis = compute_upgrade_analysis(change_set, migration_manifest)
 
 
 def _resolve_build_repo_root(registry_path: Path) -> Path:
@@ -132,6 +181,13 @@ def _run_upgrade_plan(args: argparse.Namespace, plan_only_invoked_via_synonym: b
     except UpgradeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    # Populate the per-artifact analysis over the target-change set (read-only). This is
+    # the wiring the prior C1 build omitted, which left artifact_analysis empty on every
+    # real plan run. Fail-soft: leaves the analysis empty if it cannot be computed.
+    populate_plan_analysis(
+        plan, operator_dir, args.to,
+        _resolve_build_repo_root(registry_path), registry, manifest,
+    )
     if args.json:
         print(json.dumps(upgrade_plan_to_dict(plan), sort_keys=True, indent=2, ensure_ascii=False))
     else:

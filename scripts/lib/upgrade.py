@@ -994,32 +994,32 @@ def _artifact_risk_and_how(
 
 
 def compute_upgrade_analysis(
-    plan: "UpgradePlan",
+    change_set: List[Any],
     migration_manifest: Dict[str, Any],
-    contract_entries: Dict[str, Dict[str, Any]],
-    new_files: Optional[List[str]] = None,
 ) -> List["ArtifactAnalysis"]:
-    """Build a per-artifact analysis list from an UpgradePlan.
+    """Build the per-artifact upgrade analysis from the TARGET-CHANGE SET.
 
-    This is a presentation JOIN over data the plan already holds (drift report +
-    merge_strategy per file) plus the migration-manifest artifact_notes.  It does
-    NOT mutate the plan or touch disk.
+    The analysis is over what the TARGET version adds/modifies versus the operator's
+    current version — NOT the operator's local drift. The `change_set` is produced by
+    the apply engine's read-only `compute_target_change_set` (which reuses the apply
+    path's render + surface computation); this function is the presentation JOIN that
+    adds the plain-language benefit (from the migration-manifest artifact_notes) and
+    the at-risk / how-applied labels (from each entry's merge_strategy + the operator's
+    drift state on that file). It does NOT mutate anything or touch disk.
 
     Args:
-        plan              -- the UpgradePlan from compute_upgrade_plan
-        migration_manifest -- the raw migration-manifest dict (already loaded);
-                              may carry an optional top-level "artifact_notes" map
-        contract_entries  -- dict mapping relpath -> {render_kind, merge_strategy, ...}
-                             sourced from the target bundle's system-artifacts.json
-                             (only wizard-delivery entries need be included)
-        new_files         -- relpaths the upgrade would create fresh (not already in
-                             the operator manifest); these carry what="new"
+        change_set        -- list of change entries, each exposing the attributes
+                             `relpath`, `what` ("new"|"modified"), `render_kind`
+                             ("render"|"copy"), `merge_strategy`, and `drift_status`
+                             (the operator's local drift on the file: DRIFT_NONE for a
+                             new file). Produced by `compute_target_change_set`.
+        migration_manifest -- the raw migration-manifest dict (already loaded); may
+                             carry an optional top-level "artifact_notes" map keyed by
+                             relpath with a plain-language `benefit`.
 
-    Returns a list of ArtifactAnalysis, one per artifact in the union of:
-        - drift report entries, AND
-        - new_files
-
-    Each entry carries all five display fields populated.
+    Returns one ArtifactAnalysis per change-set entry, sorted by relpath, each with all
+    display fields populated. Files the target does NOT change never appear (they are
+    not in the change set).
     """
     artifact_notes: Dict[str, Dict[str, Any]] = {}
     if isinstance(migration_manifest, dict):
@@ -1027,44 +1027,20 @@ def compute_upgrade_analysis(
         if isinstance(raw_notes, dict):
             artifact_notes = raw_notes
 
-    new_set = set(new_files or [])
-
-    # Build a lookup from the drift report
-    drift_by_path: Dict[str, DriftReportEntry] = {}
-    for entry in plan.drift_report.entries:
-        drift_by_path[entry.path] = entry
-
-    # Union of all relpaths to analyze
-    all_relpaths = sorted(set(drift_by_path.keys()) | new_set)
-
     result: List[ArtifactAnalysis] = []
-    for relpath in all_relpaths:
-        is_new = relpath in new_set and relpath not in drift_by_path
-        drift_entry = drift_by_path.get(relpath)
-        drift_status = drift_entry.status if drift_entry else DRIFT_NONE
+    for entry in sorted(change_set, key=lambda e: e.relpath):
+        relpath = entry.relpath
+        what = entry.what if entry.what in ("new", "modified") else "modified"
+        is_new = (what == "new")
 
-        # what -- change type
-        if is_new:
-            what = "new"
-        elif drift_status == DRIFT_NONE:
-            what = "modified"  # it's in the upgrade surface, so the bundle has a new version
-        else:
-            what = "modified"
-
-        # kind -- from contract entry
-        contract = contract_entries.get(relpath, {})
-        kind = str(contract.get("render_kind", "copy"))
+        kind = str(getattr(entry, "render_kind", "copy") or "copy")
         if kind not in ("render", "copy"):
             kind = "copy"
 
-        # merge_strategy -- from drift entry or contract
-        merge_strategy = ""
-        if drift_entry:
-            merge_strategy = drift_entry.merge_strategy
-        if not merge_strategy:
-            merge_strategy = str(contract.get("merge_strategy", MERGE_STRATEGY_OPERATOR_REVIEW))
+        merge_strategy = str(getattr(entry, "merge_strategy", "") or MERGE_STRATEGY_OPERATOR_REVIEW)
+        drift_status = str(getattr(entry, "drift_status", DRIFT_NONE) or DRIFT_NONE)
 
-        # benefit -- from artifact_notes or default
+        # benefit -- from migration-manifest artifact_notes, or a neutral default.
         note = artifact_notes.get(relpath)
         if isinstance(note, dict) and note.get("benefit"):
             benefit = str(note["benefit"])
