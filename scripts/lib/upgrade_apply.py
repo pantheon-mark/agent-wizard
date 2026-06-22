@@ -59,6 +59,7 @@ from generator import render_foundation_docs  # type: ignore
 from replay_capsule import REPLAY_CAPSULE_REL, capsule_supports_operating_replay  # type: ignore
 from section_merge import section_three_way_merge  # type: ignore
 from upgrade import (  # type: ignore
+    MERGE_STRATEGY_CONTROL_PLANE_REFRESH,
     MERGE_STRATEGY_FROZEN,
     MERGE_STRATEGY_OPERATOR_REVIEW,
     MERGE_STRATEGY_THREE_WAY,
@@ -109,6 +110,22 @@ UPGRADE_HISTORY_REL = ".wizard/upgrade-history.log"
 MANIFEST_REL = ".wizard/manifest.json"
 
 MIGRATION_MANIFEST_JSON_SIDECAR_FILENAME = "migration-manifest.json"
+
+
+# ===== Control-plane refresh registry =====
+# Wizard-authored guidance files whose body comes from a Python control-plane renderer
+# (NOT a bundle template) — the contract marks them `source: control_plane` with no
+# `template_path`. The copy-write path skips them (no bundle template to read); this
+# registry gives the control-plane refresh step the renderer for each, so the operator's
+# copy is brought current on upgrade under the drift-safe control_plane_refresh policy.
+# One canonical body each; keyed by operator relpath.
+def _render_control_plane_body(relpath: str) -> Optional[str]:
+    """Return the freshly-rendered body for a control-plane file, or None if the relpath
+    is not a known control-plane file (caller skips it)."""
+    if relpath == ".wizard/UPGRADING.md":
+        from upgrade_scaffold_emitter import render_command_surface  # type: ignore
+        return render_command_surface()
+    return None
 
 
 class UpgradeApplyError(UpgradeError):
@@ -1637,6 +1654,113 @@ def apply_upgrade(
             "to continue. No files were changed."
         )
 
+    # --- 4d. Control-plane refresh (wizard-authored guidance files) -----------
+    # Files the contract marks `source: control_plane` (no bundle template) carry their
+    # body from a Python control-plane renderer. The copy-write loop (4b) skips them; here
+    # they are re-rendered for the target and refreshed under the drift-safe policy so a
+    # stale operator copy (e.g. an old `.wizard/UPGRADING.md` naming a wrong version /
+    # narrower scope) is brought current. Policy: unedited (live == prior baseline) ->
+    # replace; drifted (operator annotated it) -> sidecar + leave local intact (never
+    # clobber, never markers). base_hash advances in the manifest like a managed file.
+    new_cp_manifest_entries: Dict[str, Dict[str, Any]] = {}
+    if target_contract:
+        files_block_cp = manifest.get("managed_files") or manifest.get("files") or {}
+        for entry in target_contract.get("artifacts", []):
+            if entry.get("delivery") != "wizard":
+                continue
+            if entry.get("source") != "control_plane":
+                continue
+            rel = entry.get("relpath")
+            if not rel:
+                continue
+            theirs_cp = _render_control_plane_body(rel)
+            if theirs_cp is None:
+                # A control-plane entry with no known renderer: leave it to the control
+                # plane (do not guess), exactly as before this step existed.
+                continue
+
+            meta_cp = files_block_cp.get(rel, {}) if isinstance(files_block_cp, dict) else {}
+            theirs_hash_cp = "sha256:" + sha256_bytes(theirs_cp.encode("utf-8"))
+            theirs_content_cp = _content_hash(theirs_cp)
+            live_cp = _read_live(operator_project_dir, rel)
+
+            if live_cp is None:
+                # Not yet on disk (e.g. a system that predates this control-plane file):
+                # create it additively under the refresh policy + record it managed.
+                staged_writes[rel] = theirs_cp
+                new_cp_manifest_entries[rel] = {
+                    "managed": "true",
+                    "managed_by": "wizard",
+                    "base_hash": theirs_hash_cp,
+                    "base_content_hash": theirs_content_cp,
+                    "current_hash_last_seen": theirs_hash_cp,
+                    "local_modifications": "not_recommended",
+                    "merge_strategy": MERGE_STRATEGY_CONTROL_PLANE_REFRESH,
+                    "render_kind": RENDER_KIND_COPY,
+                    "source_refs": [],
+                    "live_lineage_version": target_version,
+                }
+                decisions.append(FileDecision(
+                    rel, MERGE_STRATEGY_CONTROL_PLANE_REFRESH, FILE_ADOPTED, False,
+                    note="wizard guidance file created and refreshed to the current version"))
+                continue
+
+            # Drift = the live file differs from the prior emitted baseline. base_content
+            # = recorded base_content_hash, falling back to base_hash (legacy manifest).
+            base_content_cp = str(meta_cp.get("base_content_hash", "")) or str(
+                meta_cp.get("base_hash", ""))
+            ours_content_cp = _content_hash(live_cp)
+            drifted_cp = (
+                bool(base_content_cp) and ours_content_cp != base_content_cp
+            )
+            target_changed_cp = (theirs_content_cp != base_content_cp)
+
+            if drifted_cp:
+                # Operator/system annotated it: never clobber. Save the refreshed version to
+                # the review sidecar and leave the live file exactly as-is. Lineage NOT
+                # advanced (the live copy does not descend from the refreshed render).
+                review_writes.append((rel, live_cp, theirs_cp, True))
+                decisions.append(FileDecision(
+                    rel, MERGE_STRATEGY_CONTROL_PLANE_REFRESH, FILE_REVIEW, True,
+                    note=("you edited this guidance file; your version was kept and the "
+                          "refreshed version was saved for review")))
+                # Advance recorded base hashes to the target render so the NEXT cycle's
+                # drift is measured against the current baseline (the file content the
+                # operator's edits diverge from is still the prior baseline; base advances
+                # to track the wizard's canonical body). Lineage left unchanged (routed).
+                upd = dict(meta_cp)
+                upd["base_hash"] = theirs_hash_cp
+                upd["base_content_hash"] = theirs_content_cp
+                upd["merge_strategy"] = MERGE_STRATEGY_CONTROL_PLANE_REFRESH
+                new_cp_manifest_entries[rel] = upd
+                continue
+
+            if not target_changed_cp:
+                # Unedited AND already current: nothing to write; keep manifest coherent.
+                decisions.append(FileDecision(
+                    rel, MERGE_STRATEGY_CONTROL_PLANE_REFRESH, FILE_UNCHANGED, False,
+                    note="wizard guidance file already current"))
+                upd = dict(meta_cp)
+                upd["base_hash"] = theirs_hash_cp
+                upd["base_content_hash"] = theirs_content_cp
+                upd["merge_strategy"] = MERGE_STRATEGY_CONTROL_PLANE_REFRESH
+                upd["live_lineage_version"] = target_version
+                new_cp_manifest_entries[rel] = upd
+                continue
+
+            # Unedited and the wizard body changed: REFRESH (replace) with the new render.
+            staged_writes[rel] = theirs_cp
+            upd = dict(meta_cp)
+            upd["base_hash"] = theirs_hash_cp
+            upd["base_content_hash"] = theirs_content_cp
+            upd["current_hash_last_seen"] = theirs_hash_cp
+            upd["merge_strategy"] = MERGE_STRATEGY_CONTROL_PLANE_REFRESH
+            upd["live_lineage_version"] = target_version
+            new_cp_manifest_entries[rel] = upd
+            decisions.append(FileDecision(
+                rel, MERGE_STRATEGY_CONTROL_PLANE_REFRESH, FILE_ADOPTED, False,
+                note="wizard guidance file refreshed to the current version"))
+
     # --- 5. Transaction: backup -> stage -> validate -> atomic replace --------
     touched_relpaths = sorted(set(staged_writes) | {MANIFEST_REL, UPGRADE_HISTORY_REL})
     backup_dir = ""
@@ -1664,6 +1788,7 @@ def apply_upgrade(
                 routed_relpaths=routed_relpaths,
                 new_copy_entries=new_copy_manifest_entries,
                 new_ol_entries=new_ol_manifest_entries,
+                new_cp_entries=new_cp_manifest_entries,
                 target_contract_by_relpath={
                     e["relpath"]: e for e in (target_contract or {}).get("artifacts", [])
                     if e.get("delivery") == "wizard" and e.get("relpath")
@@ -1867,6 +1992,7 @@ def _recompute_manifest(
     routed_relpaths: Optional[set] = None,
     new_copy_entries: Optional[Dict[str, Dict[str, Any]]] = None,
     new_ol_entries: Optional[Dict[str, Dict[str, Any]]] = None,
+    new_cp_entries: Optional[Dict[str, Dict[str, Any]]] = None,
     target_contract_by_relpath: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Return a NEW manifest dict reflecting the apply (Finding A dual-hash fix).
@@ -1955,6 +2081,22 @@ def _recompute_manifest(
             else:
                 files_block[rel] = dict(entry)
 
+    # Control-plane refresh entries (step 4d): advance base hashes + lineage for the
+    # wizard-authored guidance files (e.g. .wizard/UPGRADING.md), creating the entry if a
+    # system predated it. The merge_strategy here is authoritative (control_plane_refresh);
+    # see the hygiene pass below, which preserves it for control-plane-source files.
+    cp_relpaths: set = set()
+    if new_cp_entries:
+        for rel, entry in new_cp_entries.items():
+            cp_relpaths.add(rel)
+            existing = files_block.get(rel)
+            if existing is not None:
+                updated = dict(existing)
+                updated.update(entry)
+                files_block[rel] = updated
+            else:
+                files_block[rel] = dict(entry)
+
     # Fork 1(c) hygiene: refresh merge_strategy for every surviving managed file from the
     # TARGET contract (same target-contract precedence the apply + plan resolve with), so a
     # stale manifest value (e.g. an older emit's warn_on_drift on a file later reclassified
@@ -1962,8 +2104,15 @@ def _recompute_manifest(
     # Files absent from the target contract keep their recorded strategy.
     if target_contract_by_relpath and isinstance(files_block, dict):
         for rel, entry in files_block.items():
-            if isinstance(entry, dict):
-                entry["merge_strategy"] = resolve_merge_strategy(
-                    target_contract_by_relpath.get(rel), entry.get("merge_strategy", ""))
+            if not isinstance(entry, dict):
+                continue
+            # Control-plane-refresh files keep the authoritative control_plane_refresh
+            # strategy set in step 4d — a target contract that still records an older
+            # value (e.g. a released bundle whose UPGRADING.md entry predates this policy)
+            # must not downgrade it back to a non-refreshing strategy.
+            if rel in cp_relpaths:
+                continue
+            entry["merge_strategy"] = resolve_merge_strategy(
+                target_contract_by_relpath.get(rel), entry.get("merge_strategy", ""))
 
     return new_manifest

@@ -28,7 +28,12 @@ BUNDLE_DIR = REPO_ROOT / "wizard" / "foundation-bundles" / BUNDLE_VERSION
 CONTRACT_PATH = BUNDLE_DIR / "system-artifacts.json"
 
 VALID_RENDER_KIND = {"copy", "render"}
-VALID_MERGE_STRATEGY = {"three_way", "operator_review", "warn_on_drift", "frozen"}
+VALID_MERGE_STRATEGY = {
+    "three_way", "operator_review", "warn_on_drift", "frozen",
+    # wizard-authored control-plane guidance files (e.g. .wizard/UPGRADING.md): drift-safe
+    # refresh on upgrade (unedited -> replace with the current body; edited -> sidecar).
+    "control_plane_refresh",
+}
 VALID_MODE = {"0644", "0755"}
 VALID_DELIVERY = {"wizard", "operator_derived"}
 

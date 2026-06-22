@@ -325,9 +325,14 @@ def emit_upgrade_history(plan: EmissionPlan, staging_dir: Path) -> Path:
     return dest
 
 
-def emit_command_surface(plan: EmissionPlan, staging_dir: Path) -> Path:
-    """Emit .wizard/UPGRADING.md — the operator-facing command surface. v0 is
-    plan-only: checking for updates is supported; applying them is not yet."""
+def render_command_surface() -> str:
+    """Return the operator-facing command-surface text for `.wizard/UPGRADING.md`.
+
+    Single source of truth for the command surface, shared by the setup-time emitter
+    (`emit_command_surface`) AND the upgrade-time refresh (the apply path re-renders this
+    so an operator's copy stays current as the commands/scope evolve). Carries NO baked
+    version number — the operator's current version lives in `.wizard/manifest.json` and
+    is reported by the upgrade check — so the text never goes stale on a version bump."""
     lines = [
         "# Upgrading this system's foundation",
         "",
@@ -386,9 +391,15 @@ def emit_command_surface(plan: EmissionPlan, staging_dir: Path) -> Path:
         "protect those edits during an upgrade. `.wizard/upgrade-policy.yaml` holds your",
         "upgrade preferences. `.wizard/upgrade-history.log` records upgrades over time.",
     ]
+    return "\n".join(lines) + "\n"
+
+
+def emit_command_surface(plan: EmissionPlan, staging_dir: Path) -> Path:
+    """Emit .wizard/UPGRADING.md — the operator-facing command surface, from the single
+    canonical body in `render_command_surface`."""
     dest = staging_dir / COMMAND_SURFACE_REL
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    dest.write_text(render_command_surface(), encoding="utf-8")
     return dest
 
 

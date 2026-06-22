@@ -75,6 +75,17 @@ MERGE_STRATEGY_THREE_WAY = "three_way"
 MERGE_STRATEGY_OPERATOR_REVIEW = "operator_review"
 MERGE_STRATEGY_WARN_ON_DRIFT = "warn_on_drift"
 MERGE_STRATEGY_FROZEN = "frozen"
+# Drift-safe refresh policy for wizard-authored control-plane guidance files (the
+# operator-facing `.wizard/UPGRADING.md` is the first). These files are produced by a
+# Python control-plane emitter at setup, not by a bundle template, so the new wording
+# would otherwise freeze at first emit. Apply-time semantics:
+#   - live file == the prior emitted baseline (unedited)  -> REPLACE with the freshly
+#     re-rendered version (the guidance stays current as commands/scope evolve).
+#   - live file has DRIFTED (operator/system annotated it) -> write the new version to
+#     the review sidecar and LEAVE the local file intact (never clobber, never markers).
+# Distinct from operator_review (which would NEVER refresh an unedited file) and from a
+# blind overwrite (which would clobber operator annotations).
+MERGE_STRATEGY_CONTROL_PLANE_REFRESH = "control_plane_refresh"
 
 # Operator-project manifest schema versions.
 #   manifest-v1: legacy / foundation-docs-only manifests (no manifest_schema_version field).
@@ -85,6 +96,7 @@ MANIFEST_SCHEMA_V2 = "manifest-v2"
 _MERGE_STRATEGIES = {
     MERGE_STRATEGY_THREE_WAY, MERGE_STRATEGY_OPERATOR_REVIEW,
     MERGE_STRATEGY_WARN_ON_DRIFT, MERGE_STRATEGY_FROZEN,
+    MERGE_STRATEGY_CONTROL_PLANE_REFRESH,
 }
 _LOCAL_MODIFICATIONS = {"expected", "allowed", "not_recommended"}
 
@@ -1158,6 +1170,9 @@ def _plan_action_for(status: str, merge_strategy: str) -> str:
         return "drift detected; operator review required; no automatic resolution at v0"
     if merge_strategy == MERGE_STRATEGY_WARN_ON_DRIFT:
         return "drift detected; explicit operator acknowledgement required; local content preserved unless explicitly approved"
+    if merge_strategy == MERGE_STRATEGY_CONTROL_PLANE_REFRESH:
+        return ("drift detected on a wizard-authored guidance file; your version is kept "
+                "and the refreshed version is saved for review (never overwritten)")
     if merge_strategy == MERGE_STRATEGY_FROZEN:
         return "drift detected on frozen file; hard block — upgrade refused until drift resolved"
     return f"drift detected; unknown merge_strategy={merge_strategy}; review required"

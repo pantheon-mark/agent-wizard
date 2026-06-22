@@ -505,6 +505,120 @@ class OperatingLayerUpgradeE2E(unittest.TestCase):
             "tamper-refusal wrote review sidecars",
         )
 
+    # ======================================================================
+    # Control-plane guidance refresh (.wizard/UPGRADING.md) on apply.
+    # ======================================================================
+
+    _UPGRADING_REL = ".wizard/UPGRADING.md"
+
+    def _staleify_upgrading(self, proj: Path, stale_text: str) -> None:
+        """Overwrite the operator's `.wizard/UPGRADING.md` with stale text AND sync its
+        manifest baseline (base_hash + base_content_hash + current_hash_last_seen) so the
+        file reads as UNEDITED-but-stale (== prior baseline). Mirrors a real operator who
+        was emitted from an older wizard whose command surface named a wrong version /
+        narrower scope."""
+        import upgrade_apply as ua
+        from upgrade import sha256_bytes
+        path = proj / self._UPGRADING_REL
+        path.write_text(stale_text, encoding="utf-8")
+        digest = "sha256:" + sha256_bytes(stale_text.encode("utf-8"))
+        content_digest = ua._content_hash(stale_text)
+        mp = proj / ".wizard" / "manifest.json"
+        m = json.loads(mp.read_text())
+        block = m.setdefault("managed_files", {})
+        block[self._UPGRADING_REL] = {
+            "managed": "true",
+            "managed_by": "wizard",
+            "lifecycle": "inherited_content",
+            "base_hash": digest,
+            "base_content_hash": content_digest,
+            "current_hash_last_seen": digest,
+            "local_modifications": "not_recommended",
+            "merge_strategy": "warn_on_drift",  # the released-bundle value before the refresh policy
+            "live_lineage_version": FULL_VERSION,
+            "source_refs": [],
+        }
+        mp.write_text(json.dumps(m, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    def test_control_plane_upgrading_refreshed_when_unedited(self):
+        """An UNEDITED-but-stale `.wizard/UPGRADING.md` is REFRESHED to the current wizard
+        command surface on apply. Proves the file is not frozen at first
+        emit: a stale version-string / narrower-scope copy is replaced with the current
+        body, the change is reported written, and the manifest base_hash advances."""
+        proj = self._emit("estate-cp-refresh", FULL_VERSION)
+        # The current canonical command surface (what the refresh should install).
+        from upgrade_scaffold_emitter import render_command_surface
+        current_body = render_command_surface()
+        stale_body = (
+            "# Upgrading this system's foundation\n\n"
+            "This system was set up from foundation bundle v0.4.0.\n\n"
+            "Updates only ever change the foundation documents.\n\n"
+            "```\nwizard upgrade-check\n```\n"
+        )
+        self.assertNotEqual(stale_body, current_body, "test premise: stale != current")
+        self._staleify_upgrading(proj, stale_body)
+        self.assertEqual((proj / self._UPGRADING_REL).read_text(), stale_body)
+
+        res = self._apply(proj, OPERATING_DELTA_VERSION)
+        refreshed = (proj / self._UPGRADING_REL).read_text()
+
+        self.assertEqual(refreshed, current_body,
+                         "UPGRADING.md was NOT refreshed to the current command surface")
+        self.assertIn(self._UPGRADING_REL, res.files_written,
+                      "refreshed UPGRADING.md not reported written")
+        self.assertNotIn(self._UPGRADING_REL, res.files_in_review)
+        # No baked version + correct scope in the refreshed body.
+        self.assertNotIn("v0.4.0", refreshed)
+        self.assertNotIn("v0.6.0", refreshed)
+        self.assertNotIn("only ever change the foundation", refreshed.lower())
+        self.assertIn("foundation documents and shared operating files", refreshed)
+        # Manifest base_hash advanced to the refreshed body.
+        from upgrade import sha256_bytes
+        m = json.loads((proj / ".wizard" / "manifest.json").read_text())
+        entry = m["managed_files"][self._UPGRADING_REL]
+        self.assertEqual(entry["base_hash"],
+                         "sha256:" + sha256_bytes(current_body.encode("utf-8")))
+        self.assertEqual(entry["merge_strategy"], "control_plane_refresh")
+        # No git markers.
+        for marker in ("<<<<<<<", "=======", ">>>>>>>"):
+            self.assertNotIn(marker, refreshed)
+
+    def test_control_plane_upgrading_edited_is_sidecarred_and_preserved(self):
+        """An EDITED `.wizard/UPGRADING.md` (operator annotated it) is NEVER clobbered: the
+        refreshed version goes to the `.wizard/upgrade-review/` sidecar and the LOCAL file
+        is left byte-identical, with NO git markers anywhere."""
+        proj = self._emit("estate-cp-edit", FULL_VERSION)
+        # Start from a stale, unedited baseline, then the operator edits it (drift).
+        stale_body = (
+            "# Upgrading this system's foundation\n\n"
+            "This system was set up from foundation bundle v0.4.0.\n"
+        )
+        self._staleify_upgrading(proj, stale_body)
+        edited_body = stale_body + "\nOPERATOR NOTE: my own annotations on the upgrade guide.\n"
+        (proj / self._UPGRADING_REL).write_text(edited_body, encoding="utf-8")
+        before_bytes = (proj / self._UPGRADING_REL).read_bytes()
+
+        res = self._apply(proj, OPERATING_DELTA_VERSION)
+
+        # Local file UNTOUCHED (byte-identical to the operator's edited version).
+        self.assertEqual((proj / self._UPGRADING_REL).read_bytes(), before_bytes,
+                         "edited UPGRADING.md was clobbered (must be preserved)")
+        self.assertIn(self._UPGRADING_REL, res.files_in_review,
+                      "edited UPGRADING.md not routed to review")
+        self.assertNotIn(self._UPGRADING_REL, res.files_written)
+        # Sidecar carries the REFRESHED (current) body.
+        from upgrade_scaffold_emitter import render_command_surface
+        sidecar = (proj / ".wizard" / "upgrade-review"
+                   / f"{FULL_VERSION}-to-{OPERATING_DELTA_VERSION}"
+                   / f"{self._UPGRADING_REL}.new")
+        self.assertTrue(sidecar.exists(), "refreshed version not saved to sidecar")
+        self.assertIn("foundation documents and shared operating files",
+                      sidecar.read_text(), "sidecar does not carry the refreshed body")
+        # No git markers in the live file or the sidecar.
+        for marker in ("<<<<<<<", "=======", ">>>>>>>"):
+            self.assertNotIn(marker, (proj / self._UPGRADING_REL).read_text())
+            self.assertNotIn(marker, sidecar.read_text())
+
 
 if __name__ == "__main__":
     unittest.main()
