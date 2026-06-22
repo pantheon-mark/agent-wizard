@@ -12,6 +12,24 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-22 — your built system can now receive operating-layer improvements through an upgrade
+
+**Public-facing change:** Until now, an upgrade could only refresh your foundation documents (vision, approach, plan, and the like). It can now also deliver improvements to the *operating layer* of your system — the working instructions, skills, and safety routines that govern how your agents run (for example your `CLAUDE.md`, the operating-discipline doctrine, the orientation and pause skills, and the agent prompt scaffolding). An existing system no longer has to be rebuilt to pick these up.
+
+- **Your edits are still protected.** Operating-layer files you have changed are merged with the new version where they don't overlap, and set aside for your review where they do — never silently overwritten, never with confusing merge markers (the same safety model as foundation-document upgrades).
+- **Install-and-go files update cleanly.** Files you aren't expected to edit (skills, helper scripts, settings) adopt the new version directly; if you did edit one, the upgrade pauses and asks you to confirm replacing it.
+- **A system built before this capability existed is brought up to date in one step** the first time it upgrades — your credentials, your progress, and your documents are left untouched.
+- **What this release adds:** a new "health-check" skill, an addition to the operating-discipline doctrine, and a small refinement to the pause skill.
+
+**Operator-facing notes:**
+
+- This is a minor, additive release (`v0.6.1`). Apply it with `wizard upgrade --to v0.6.1` (it stays operator-explicit; nothing upgrades on its own).
+- The startup version-check and the detailed per-file upgrade preview are a follow-on refinement in a subsequent release.
+
+`Source-Meta-Commit:` `(filled at publish)` (private build repo) · public repo commit `(filled after subtree push)`
+
+---
+
 ## 2026-06-19 — your system now keeps you oriented and protects risky actions
 
 **Public-facing change:** Your system is now clearer about where you are, and more careful before it does anything that can't be undone.
