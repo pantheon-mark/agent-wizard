@@ -19,12 +19,13 @@ Entries appear newest-first.
 - **Your edits are still protected.** Operating-layer files you have changed are merged with the new version where they don't overlap, and set aside for your review where they do — never silently overwritten, never with confusing merge markers (the same safety model as foundation-document upgrades).
 - **Install-and-go files update cleanly.** Files you aren't expected to edit (skills, helper scripts, settings) adopt the new version directly; if you did edit one, the upgrade pauses and asks you to confirm replacing it.
 - **A system built before this capability existed is brought up to date in one step** the first time it upgrades — your credentials, your progress, and your documents are left untouched.
-- **What this release adds:** a new "health-check" skill, an addition to the operating-discipline doctrine, and a small refinement to the pause skill.
+- **Your accumulated knowledge is protected.** The files your system builds up as it runs — your rules library, your source and advisor registries, your validation and protected-workflow settings, your review queue — are now treated as yours: an upgrade never overwrites them, even when you confirm replacing other files. (Previously a confirmed upgrade could have overwritten them.)
+- **What this release adds:** a startup version-check that lets your system tell you, in plain language, when an update is available (and route you to apply it); a new "health-check" skill; an addition to the operating-discipline doctrine; and a small refinement to the pause skill.
 
 **Operator-facing notes:**
 
 - This is a minor, additive release (`v0.6.1`). Apply it with `wizard upgrade --to v0.6.1` (it stays operator-explicit; nothing upgrades on its own).
-- The startup version-check and the detailed per-file upgrade preview are a follow-on refinement in a subsequent release.
+- A detailed per-file upgrade preview ("what changes and why") is included; making your system keep its own upgrade toolkit current is a follow-on refinement in a subsequent release.
 
 `Source-Meta-Commit:` `(filled at publish)` (private build repo) · public repo commit `(filled after subtree push)`
 
