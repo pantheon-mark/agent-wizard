@@ -138,8 +138,9 @@ class UpgradeNoticeNewerAvailableTest(unittest.TestCase):
             self.assertIn("upgrade", lower,
                           f"notice should mention how to review/apply the upgrade; got: {output!r}")
 
-    def test_notice_includes_review_command(self):
-        """The notice includes a concrete command the operator can copy-paste."""
+    def test_notice_carries_the_command_for_the_assistant_to_run(self):
+        """The notice still carries a concrete wizard_upgrade.py command — but for the
+        ASSISTANT to run, not as copy-paste text dumped on the operator."""
         with tempfile.TemporaryDirectory() as td:
             project_dir = Path(td)
             registry_dir = Path(td)
@@ -149,9 +150,88 @@ class UpgradeNoticeNewerAvailableTest(unittest.TestCase):
                 "UPGRADE_NOTICE_REGISTRY_URL": f"file://{registry_file}",
             })
             output = result.stdout.strip()
-            # The notice should show a wizard_upgrade.py command.
+            # The notice should carry the wizard_upgrade.py command.
             self.assertIn("wizard_upgrade.py", output,
-                          f"notice should include the review command; got: {output!r}")
+                          f"notice should carry the upgrade command; got: {output!r}")
+
+
+class UpgradeNoticeModelRelayContractTest(unittest.TestCase):
+    """Model-relay output contract: a SessionStart hook's stdout lands in the
+    model's session-start context, NOT in a user-visible message. The notice only reaches
+    the operator if the model RELAYS it. The original notice was operator-facing prose with
+    raw file paths/commands; the emitted system's 'greet plainly / show no internal details
+    (file names)' orientation suppressed it, so the operator never saw the notice.
+
+    The fix reframes the stdout as an INSTRUCTION TO THE ASSISTANT: relay the availability of
+    an update to the operator in plain language, withholding the paths/command (which are for
+    the assistant to run if the operator says yes). These tests pin that contract shape; the
+    live estate-transcript read is the behavioral proof that the model actually relays it.
+    """
+
+    def _notice_output(self, project_dir: Path, registry_dir: Path) -> str:
+        _write_manifest(project_dir, "v0.6.0")
+        registry_file = _write_registry_fixture(registry_dir, ["v0.6.0", "v0.6.1"])
+        result = _run_script(project_dir, {
+            "UPGRADE_NOTICE_REGISTRY_URL": f"file://{registry_file}",
+        })
+        self.assertEqual(result.returncode, 0,
+                         f"unexpected exit code {result.returncode}; stderr: {result.stderr}")
+        return result.stdout.strip()
+
+    def test_notice_addresses_the_assistant_and_instructs_relay(self):
+        """The stdout is framed as an instruction to the assistant to TELL/RELAY the operator
+        (not operator-facing prose). It must name the assistant audience and a relay verb."""
+        with tempfile.TemporaryDirectory() as td:
+            output = self._notice_output(Path(td), Path(td))
+            lower = output.lower()
+            self.assertIn("assistant", lower,
+                          f"notice must address the assistant (its real audience); got: {output!r}")
+            self.assertTrue(
+                any(p in lower for p in ("tell the operator", "tell them", "relay")),
+                f"notice must instruct the assistant to relay to the operator; got: {output!r}",
+            )
+
+    def test_notice_instructs_relay_in_plain_language(self):
+        """The relay instruction must require plain, non-technical language for the operator."""
+        with tempfile.TemporaryDirectory() as td:
+            output = self._notice_output(Path(td), Path(td))
+            lower = output.lower()
+            self.assertIn("plain", lower,
+                          f"notice must instruct plain-language relay; got: {output!r}")
+
+    def test_notice_instructs_withholding_paths_from_operator(self):
+        """The notice must explicitly instruct the assistant NOT to show the operator the
+        raw paths/command — those are for the assistant to run. This is what un-suppresses
+        the notice under a 'show no internal details (file names)' orientation."""
+        with tempfile.TemporaryDirectory() as td:
+            output = self._notice_output(Path(td), Path(td))
+            lower = output.lower()
+            self.assertTrue(
+                ("do not show" in lower) or ("don't show" in lower) or ("not show the operator" in lower),
+                f"notice must instruct withholding detail from the operator; got: {output!r}",
+            )
+            self.assertTrue(
+                any(p in lower for p in ("path", "command")),
+                f"the withholding instruction must reference the paths/command; got: {output!r}",
+            )
+
+    def test_notice_describes_what_the_update_improves(self):
+        """The relay must convey WHAT the update improves in operator terms (so the operator
+        can decide), not just that 'a version' exists."""
+        with tempfile.TemporaryDirectory() as td:
+            output = self._notice_output(Path(td), Path(td))
+            lower = output.lower()
+            self.assertTrue(
+                any(p in lower for p in ("operating", "skill", "safety", "how your system runs",
+                                         "how this system runs")),
+                f"notice should say what the update improves in operator terms; got: {output!r}",
+            )
+
+    def test_notice_names_the_newer_version(self):
+        with tempfile.TemporaryDirectory() as td:
+            output = self._notice_output(Path(td), Path(td))
+            self.assertIn("v0.6.1", output,
+                          f"notice must name the newer version; got: {output!r}")
 
 
 class UpgradeNoticeCurrentTest(unittest.TestCase):
