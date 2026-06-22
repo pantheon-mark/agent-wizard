@@ -27,7 +27,7 @@ Entries appear newest-first.
 - This is a minor, additive release (`v0.6.1`). Apply it with `wizard upgrade --to v0.6.1` (it stays operator-explicit; nothing upgrades on its own).
 - A detailed per-file upgrade preview ("what changes and why") is included; making your system keep its own upgrade toolkit current is a follow-on refinement in a subsequent release.
 
-`Source-Meta-Commit:` `(filled at publish)` (private build repo) · public repo commit `(filled after subtree push)`
+`Source-Meta-Commit:` `5cf3c79` (private build repo) · public repo commit `e1b6ecb`
 
 ---
 
