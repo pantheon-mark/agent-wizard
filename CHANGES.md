@@ -27,7 +27,7 @@ Entries appear newest-first.
 - These additions are part of the `v0.6.1` minor release (operator-explicit; nothing updates on its own).
 - Updating the tool itself is the one step that, the very first time, you start by refreshing your copy of the wizard; after that your system can guide it.
 
-`Source-Meta-Commit:` `<PENDING>` (private build repo) · public repo commit `<PENDING>`
+`Source-Meta-Commit:` `e0e711d` (private build repo) · public repo commit `f018c8f`
 
 ---
 
