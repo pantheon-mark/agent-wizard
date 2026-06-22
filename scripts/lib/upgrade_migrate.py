@@ -26,11 +26,32 @@ WHAT THE PREFLIGHT DOES (general; not estate-specific):
          (gemini G-C: lineage MUST advance, or every future drifted-three_way merge stays
          permanently disabled by the lineage guard.)
        - manifest base already == live (already reconciled) -> LEAVE untouched (idempotent).
-       - live != known payload  -> OPERATOR DRIFT: do NOT rewrite the baseline. Preserve the
-         operator's edit signal so the normal upgrade routes it to review rather than
-         clobbering it.
+       - live != known payload (render-kind)  -> RE-BASE the baseline to the source_version
+         known payload (base_hash/base_content_hash to the source render, lineage to
+         source_version) WITHOUT writing live bytes; `current_hash_last_seen` = the TRUE live
+         ancestor (full hash of the live bytes). The OLD behavior left the stale
+         foundation-era baseline, which the intact replay-conformance gate then hard-failed
+         on. Re-basing to the known payload — which the capsule reproduces — lets the file
+         PASS the fully-intact gate, while the operator's divergence is STILL surfaced at
+         apply time as drift (`content_hash(live) != base_content_hash`). No safety check is
+         relaxed.
        - file absent on disk      -> create ONLY if it is additive (not already managed) AND
          collision-free (no unmanaged file already there). Otherwise leave it alone.
+
+  1b. Coherent-baseline advance (Part 1). After reconciliation, verify that
+     rendering the FOUNDATION docs at `source_version` from the capsule reproduces every
+     managed foundation doc's recorded FULL base_hash (strict). If ALL reproduce, advance
+     `foundation_bundle_version` to `source_version` and each foundation doc's lineage to
+     `source_version` (base_hash unchanged: the foundation-doc templates are byte-identical
+     across the split versions). FAIL-CLOSED: if any foundation doc does not reproduce, do
+     NOT advance (one-time baseline alias; not generalized). This makes the subsequent apply
+     a normal `source_version -> next` so the operating-layer merge base renders at
+     `source_version` (the foundation-only-predecessor crash dissolves).
+
+  NOTE on copy-kind divergence: an operating-layer COPY file whose live != the known payload
+     is LEFT UNMANAGED (operator_drift) so the upgrade's collision/sidecar rule protects it;
+     Part D re-basing applies only to render-kind files (the estate's divergent files are all
+     render-kind).
 
   2. Capsule upgrade v1 -> v2. A pre-operating-layer system carries a v1 capsule
      (foundation_doc_inputs only); it cannot replay the operating layer (no operating
@@ -67,6 +88,8 @@ from upgrade_apply import (  # type: ignore
     CONTRACT_BASENAME,
     LIVE_LINEAGE_VERSION_FIELD,
     _render_operating_layer,
+    _render_version,
+    _foundation_managed_entries,
     _inject_hooks_for_copy_file,
     _manifest_managed_relpaths,
 )
@@ -87,7 +110,8 @@ _VOLATILE_BUILD_INPUT_KEYS = ("LAST_UPDATED_DATE", "MANUAL_LAST_UPDATED", "WIZAR
 # Per-file reconciliation dispositions.
 MIGRATE_RECONCILED = "reconciled"          # adopted base_hash + advanced lineage; bytes unchanged
 MIGRATE_ALREADY = "already_reconciled"      # manifest base already == live; left untouched
-MIGRATE_OPERATOR_DRIFT = "operator_drift"   # live != known payload; baseline NOT rewritten
+MIGRATE_OPERATOR_DRIFT = "operator_drift"   # copy-kind: live != known payload; left UNMANAGED for collision/sidecar
+MIGRATE_REBASED_DIVERGENT = "rebased_divergent"  # render-kind: live != known; baseline RE-BASED to source_version, live bytes UNCHANGED, drift still detected at apply
 MIGRATE_CREATED = "created"                # absent + additive + collision-free; created from known payload
 MIGRATE_ABSENT_SKIPPED = "absent_skipped"   # absent but not safely creatable; left alone
 MIGRATE_COLLISION = "collision"            # absent in manifest but an unmanaged file exists; left alone
@@ -109,6 +133,8 @@ class MigrateResult:
     manifest_changed: bool = False
     capsule_changed: bool = False
     noop: bool = False
+    foundation_baseline_advanced: bool = False  # Part 1: foundation_bundle_version + foundation lineage advanced to source_version
+    foundation_baseline_blocked: List[str] = field(default_factory=list)  # foundation docs that did NOT reproduce at source_version (fail-closed)
 
     @property
     def reconciled(self) -> List[str]:
@@ -117,6 +143,10 @@ class MigrateResult:
     @property
     def operator_drift(self) -> List[str]:
         return sorted(d.relpath for d in self.decisions if d.disposition == MIGRATE_OPERATOR_DRIFT)
+
+    @property
+    def rebased_divergent(self) -> List[str]:
+        return sorted(d.relpath for d in self.decisions if d.disposition == MIGRATE_REBASED_DIVERGENT)
 
     @property
     def created(self) -> List[str]:
@@ -401,11 +431,54 @@ def migrate_pre_v2_system(
         live_content_hash = _content_hash(live_text)
 
         if live_content_hash != known_content_hash:
-            # OPERATOR DRIFT — preserve the edit signal; never rewrite the baseline.
+            # DIVERGENT operating RENDER file (live != the known source_version payload).
+            #
+            # Part D (cross-vendor-ratified): RE-BASE the manifest
+            # baseline to the source_version known payload (base_hash/base_content_hash to
+            # the v0.6.0 render, lineage to source_version) WITHOUT writing live bytes. The
+            # old behavior LEFT the stale foundation-era baseline here, which the intact
+            # replay-conformance gate then hard-failed on (no bundle render reproduces a
+            # stale v0.4.0-era base_hash). Re-basing to the known payload — which the capsule
+            # DOES reproduce — lets the file PASS the fully-intact gate, while the operator's
+            # divergence is STILL surfaced at apply time as drift because
+            # `content_hash(live) != base_content_hash(=source_version)`. No gate relaxed.
+            #
+            # current_hash_last_seen = the TRUE live ancestor (full hash of the live bytes),
+            # NOT the known payload: the live content did NOT descend from the known payload,
+            # so the merge-ancestor pointer must reflect what is actually on disk.
+            new_meta = dict(meta) if meta else {
+                "managed": "true",
+                "managed_by": "shared",
+                "local_modifications": "expected",
+                "merge_strategy": "three_way",
+                "render_kind": RENDER_KIND_RENDER,
+                "source_refs": [],
+            }
+            new_meta["base_hash"] = known_full_hash
+            new_meta["base_content_hash"] = known_content_hash
+            new_meta["current_hash_last_seen"] = _full_hash(live_text)
+            new_meta[LIVE_LINEAGE_VERSION_FIELD] = source_version
+            # Idempotence: only mark changed when something actually changed.
+            cur_base_content = str(meta.get("base_content_hash", "")) if meta else ""
+            cur_base_hash = str(meta.get("base_hash", "")) if meta else ""
+            cur_lineage = str(meta.get(LIVE_LINEAGE_VERSION_FIELD, "")) if meta else ""
+            cur_last_seen = str(meta.get("current_hash_last_seen", "")) if meta else ""
+            already_rebased = (
+                in_manifest
+                and cur_base_content == known_content_hash
+                and cur_base_hash == known_full_hash
+                and cur_lineage == source_version
+                and cur_last_seen == _full_hash(live_text)
+            )
+            if not already_rebased:
+                files_block[rel] = new_meta
+                manifest_changed = True
             decisions.append(FileReconcileDecision(
-                rel, MIGRATE_OPERATOR_DRIFT,
-                note="live content differs from the known wizard payload; baseline left "
-                     "untouched so the upgrade preserves the operator's edit"))
+                rel, MIGRATE_REBASED_DIVERGENT,
+                note="live content differs from the known wizard payload; baseline RE-BASED "
+                     "to the source_version payload (live bytes UNCHANGED) so the intact "
+                     "conformance gate reproduces it and the divergence is still detected as "
+                     "drift at apply time"))
             continue
 
         # live == known payload. Reconcile baseline + lineage if not already correct.
@@ -545,6 +618,56 @@ def migrate_pre_v2_system(
             note="live == known copy payload; adopted base_hash/base_content_hash + advanced "
                  "lineage; live bytes UNCHANGED"))
 
+    # --- 2c. Part 1 — advance to a coherent foundation baseline ---------------
+    # The split-version estate carries a foundation-only `source_version` predecessor
+    # (foundation_bundle_version=v0.4.0) whose foundation-doc TEMPLATES are BYTE-IDENTICAL
+    # to source_version (only the operating layer was added in between). So the estate is
+    # SEMANTICALLY a coherent source_version system; it was just never recorded as one.
+    #
+    # Verify that rendering the foundation docs at `source_version` from the capsule
+    # reproduces each managed foundation doc's recorded FULL base_hash (strict full-file
+    # sha256, NOT content-normalized). If ALL reproduce, advance:
+    #   - manifest["foundation_bundle_version"] = source_version
+    #   - each foundation-doc entry's live_lineage_version = source_version
+    # leaving base_hash UNCHANGED (templates byte-identical -> the recorded hash is correct).
+    # This makes the subsequent apply a normal source_version -> next apply, so the
+    # operating-layer merge base renders at source_version (Blocker 1 dissolves).
+    #
+    # FAIL-CLOSED: if ANY foundation doc does NOT reproduce at source_version, do NOT advance
+    # the version (leave it; report it). This is a one-time baseline alias valid ONLY because
+    # the foundation renders are byte-identical; it is NOT generalized to "advance when close".
+    foundation_baseline_advanced = False
+    foundation_baseline_blocked: List[str] = []
+    cur_foundation_version = str(manifest.get("foundation_bundle_version", ""))
+    if cur_foundation_version != source_version:
+        try:
+            foundation_rendered = _render_version(source_version, capsule_inputs, build_repo_root)
+        except UpgradeApplyError as e:
+            # Foundation docs could not be rendered at source_version at all -> fail closed.
+            foundation_rendered = {}
+            foundation_baseline_blocked.append(f"<render-failed: {e}>")
+        foundation_entries = _foundation_managed_entries(
+            manifest, list(foundation_rendered.keys()))
+        all_reproduce = bool(foundation_entries)
+        for frel, fmeta in foundation_entries.items():
+            expected = str(fmeta.get("base_hash", ""))
+            actual = _full_hash(foundation_rendered[frel])
+            if actual != expected:
+                foundation_baseline_blocked.append(frel)
+                all_reproduce = False
+        if all_reproduce and not foundation_baseline_blocked:
+            # Advance the version + each foundation doc's lineage; base_hash unchanged.
+            manifest["foundation_bundle_version"] = source_version
+            for frel in foundation_entries:
+                fmeta = files_block.get(frel)
+                if isinstance(fmeta, dict):
+                    if str(fmeta.get(LIVE_LINEAGE_VERSION_FIELD, "")) != source_version:
+                        fmeta[LIVE_LINEAGE_VERSION_FIELD] = source_version
+                    files_block[frel] = fmeta
+            foundation_baseline_advanced = True
+            manifest_changed = True
+        # else: leave foundation_bundle_version untouched (fail-closed; reported below).
+
     # --- 3. Write (transactional-ish: capsule + manifest + any created files) ----
     capsule_changed = capsule_upgraded
     if write:
@@ -571,4 +694,6 @@ def migrate_pre_v2_system(
         manifest_changed=manifest_changed,
         capsule_changed=capsule_changed,
         noop=noop,
+        foundation_baseline_advanced=foundation_baseline_advanced,
+        foundation_baseline_blocked=foundation_baseline_blocked,
     )

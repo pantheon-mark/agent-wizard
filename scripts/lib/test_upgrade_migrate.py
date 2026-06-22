@@ -190,7 +190,26 @@ class UpgradeMigrateTests(unittest.TestCase):
 
     # ======================================================================
 
-    def test_migrate_reconciles_known_payload_without_rewriting_drift(self):
+    def test_migrate_rebases_divergent_render_without_touching_live(self):
+        """Part D (NEW contract; the old assertion encoded the BUG).
+
+        OLD behavior (the bug): a divergent operating RENDER file (live != known payload)
+        was classified `operator_drift` and its manifest baseline was LEFT at the stale
+        foundation-era hash. The intact replay-conformance gate then hard-failed on it,
+        because no bundle render reproduces a stale v0.4.0-era base_hash. The prior version
+        of this test asserted that stale baseline was preserved — i.e. it encoded the bug.
+
+        NEW behavior (cross-vendor-ratified Path D): the divergent
+        render file's baseline is RE-BASED to the source_version known payload
+        (`base_hash`/`base_content_hash` -> the v0.6.0 render, lineage -> source_version),
+        WITHOUT writing the operator's live bytes. `current_hash_last_seen` is the TRUE live
+        ancestor (full hash of the live bytes), not the known payload, because the live
+        content did not descend from the known payload. The divergence is STILL detected as
+        drift at apply time because `content_hash(live) != base_content_hash(=v0.6.0)`. The
+        conformance gate stays 100% intact: the re-based baseline is exactly what the capsule
+        reproduces, so the file PASSES the gate (verified end-to-end in
+        test_migrate_then_upgrade_replay_passes_with_divergent_file).
+        """
         proj = self._emit_v060("recon")
         # Pick a clean render file to DROP (untracked) and a distinct one to DRIFT.
         ol = _operating_render_relpaths()
@@ -230,14 +249,27 @@ class UpgradeMigrateTests(unittest.TestCase):
         self.assertEqual((proj / drop_rel).read_bytes(), before[drop_rel],
                          "migration changed live bytes of the reconciled file")
 
-        # (b) OPERATOR-DRIFT file: baseline NOT rewritten (still the stale corrupted hash),
-        #     lineage NOT advanced, live bytes unchanged.
-        self.assertIn(drift_rel, res.operator_drift, "drifted file not classified operator_drift")
-        self.assertEqual(fb[drift_rel]["base_hash"], "sha256:" + ("a" * 64),
-                         "migration rewrote a drifted file's baseline (lost edit signal)")
-        self.assertNotEqual(fb[drift_rel][LIVE_LINEAGE_VERSION_FIELD], SOURCE_VERSION)
+        # (b) DIVERGENT render file: baseline RE-BASED to the source_version known payload,
+        #     lineage advanced to source_version, live bytes UNCHANGED, and STILL detectable
+        #     as drift (content_hash(live) != re-based base_content_hash).
+        self.assertIn(drift_rel, res.rebased_divergent,
+                      "divergent render file not classified rebased_divergent")
+        self.assertEqual(fb[drift_rel]["base_hash"], _full_hash(known[drift_rel]),
+                         "divergent file base_hash not re-based to the known payload")
+        self.assertEqual(fb[drift_rel]["base_content_hash"], _content_hash(known[drift_rel]),
+                         "divergent file base_content_hash not re-based to the known payload")
+        self.assertEqual(fb[drift_rel][LIVE_LINEAGE_VERSION_FIELD], SOURCE_VERSION,
+                         "divergent file lineage not advanced to source_version")
+        # current_hash_last_seen = the TRUE live ancestor (full hash of live bytes).
+        live_text = (proj / drift_rel).read_text()
+        self.assertEqual(fb[drift_rel]["current_hash_last_seen"], _full_hash(live_text),
+                         "current_hash_last_seen is not the true live ancestor")
+        # live bytes UNCHANGED.
         self.assertEqual((proj / drift_rel).read_bytes(), drift_before,
-                         "migration changed live bytes of the drifted file")
+                         "migration changed live bytes of the divergent file")
+        # STILL detectable as drift: content_hash(live) != re-based base_content_hash.
+        self.assertNotEqual(_content_hash(live_text), fb[drift_rel]["base_content_hash"],
+                            "divergence no longer detected as drift after re-basing")
 
         # (c) A clean tracked file (live == known, stale lineage): lineage advanced to source,
         #     baseline adopted, bytes unchanged.
@@ -302,6 +334,128 @@ class UpgradeMigrateTests(unittest.TestCase):
         self.assertEqual(
             manifest["managed_files"]["operating_discipline.md"][LIVE_LINEAGE_VERSION_FIELD],
             SOURCE_VERSION)
+
+    def test_migrate_then_upgrade_replay_passes_with_divergent_file(self):
+        """TDD (a): the FULL replay-conformance gate (foundation + operating legs)
+        passes after migration on a split-version fixture that INCLUDES a divergent operating
+        render file. This is the core proof of Part D: a divergent render file, re-based to
+        the source_version payload, reproduces under the intact gate (no gate change), while
+        its operator divergence is still detectable as drift."""
+        proj = self._emit_v060("replaydiv")
+        ol = _operating_render_relpaths()
+        drop_rel = "operating_discipline.md"
+        drift_rel = "project_instructions.md"  # a real estate divergent render file
+        self.assertIn(drift_rel, ol)
+        # Downgrade WITH a divergent render file (drift_rel edited + stale baseline).
+        self._downgrade_to_pre_v2(proj, drop_rel=drop_rel, drift_rel=drift_rel)
+
+        mp = proj / ".wizard" / "manifest.json"
+        res = mig.migrate_pre_v2_system(
+            proj, SOURCE_VERSION, REPO_ROOT,
+            transcript_path=TRANSCRIPT, system_shape=SHAPE, project_name=PROJECT_NAME,
+            generator_version_override=_GEN_OVERRIDE,
+        )
+        # Premise: the fixture genuinely exercised a divergent render file.
+        self.assertIn(drift_rel, res.rebased_divergent,
+                      "fixture did not produce a divergent (re-based) render file")
+
+        manifest = load_operator_manifest(mp)
+        cap = json.loads((proj / REPLAY_CAPSULE_REL).read_text())
+        ci = cap["foundation_doc_inputs"]
+        base = _render_version(SOURCE_VERSION, ci, REPO_ROOT)
+        foundation_entries = _foundation_managed_entries(manifest, list(base.keys()))
+        # Must NOT raise: BOTH the foundation leg AND the operating leg (incl. the re-based
+        # divergent file) reproduce their recorded base_hash under the fully-intact gate.
+        _replay_conformance_check(
+            SOURCE_VERSION, ci, REPO_ROOT, foundation_entries,
+            capsule=cap, manifest=manifest, project_name=PROJECT_NAME,
+        )
+        # And the divergent file is still detectable as drift (TDD (b)): content_hash(live)
+        # != re-based base_content_hash; live bytes preserved (the operator edit survives).
+        fb = manifest["managed_files"]
+        live_text = (proj / drift_rel).read_text()
+        self.assertNotEqual(_content_hash(live_text), fb[drift_rel]["base_content_hash"])
+        self.assertIn("OPERATOR EDIT during manual operation.", live_text,
+                      "operator's live edit was clobbered")
+
+    def test_migrate_advances_foundation_baseline(self):
+        """TDD (c) — Part 1. After migration on a split-version fixture (where the
+        foundation-doc templates at v0.4.0 are byte-identical to v0.6.0), the manifest's
+        foundation_bundle_version is advanced to source_version and every foundation-doc
+        entry's live_lineage_version is advanced to source_version, with the foundation docs'
+        base_hash UNCHANGED."""
+        proj = self._emit_v060("fadv")
+        # Record foundation base_hashes BEFORE downgrade (they must be unchanged after).
+        mp = proj / ".wizard" / "manifest.json"
+        cap0 = json.loads((proj / REPLAY_CAPSULE_REL).read_text())
+        ci0 = cap0["foundation_doc_inputs"]
+        base = _render_version(SOURCE_VERSION, ci0, REPO_ROOT)
+        m0 = json.loads(mp.read_text())
+        foundation_rels = [r for r in base.keys() if r in m0["managed_files"]]
+        self.assertTrue(foundation_rels, "no managed foundation docs in the fixture")
+        base_hashes_before = {r: m0["managed_files"][r]["base_hash"] for r in foundation_rels}
+
+        self._downgrade_to_pre_v2(proj, drop_rel="operating_discipline.md", drift_rel="CLAUDE.md")
+        # Premise: downgrade rolled the foundation version back to v0.4.0.
+        self.assertEqual(json.loads(mp.read_text())["foundation_bundle_version"], "v0.4.0")
+
+        res = mig.migrate_pre_v2_system(
+            proj, SOURCE_VERSION, REPO_ROOT,
+            transcript_path=TRANSCRIPT, system_shape=SHAPE, project_name=PROJECT_NAME,
+            generator_version_override=_GEN_OVERRIDE,
+        )
+        self.assertTrue(res.foundation_baseline_advanced,
+                        "Part 1 did not advance the foundation baseline")
+        self.assertEqual(res.foundation_baseline_blocked, [])
+
+        m = json.loads(mp.read_text())
+        fb = m["managed_files"]
+        self.assertEqual(m["foundation_bundle_version"], SOURCE_VERSION,
+                         "foundation_bundle_version not advanced to source_version")
+        for r in foundation_rels:
+            self.assertEqual(fb[r][LIVE_LINEAGE_VERSION_FIELD], SOURCE_VERSION,
+                             f"{r} foundation lineage not advanced")
+            self.assertEqual(fb[r]["base_hash"], base_hashes_before[r],
+                             f"{r} foundation base_hash changed (must be unchanged)")
+
+    def test_migrate_foundation_baseline_fail_closed(self):
+        """TDD (d) — Part 1 fail-closed negative test. If a foundation doc does NOT
+        reproduce at source_version (here: corrupt one foundation doc's recorded base_hash in
+        the manifest), the migration must NOT advance foundation_bundle_version (stays at the
+        pre-migration v0.4.0) and must report the offending doc as blocked."""
+        proj = self._emit_v060("ffail")
+        mp = proj / ".wizard" / "manifest.json"
+        cap0 = json.loads((proj / REPLAY_CAPSULE_REL).read_text())
+        base = _render_version(SOURCE_VERSION, cap0["foundation_doc_inputs"], REPO_ROOT)
+        # Corrupt a FOUNDATION-ONLY doc (one NOT in the operating render set, so the
+        # render-reconciliation leg never re-bases it and erases the corruption). prd.md is
+        # foundation-only in v0.6.0; fall back to any foundation doc absent from ol if its
+        # name changes.
+        ol = set(_operating_render_relpaths())
+        m0 = json.loads(mp.read_text())
+        foundation_only = [r for r in base.keys()
+                           if r in m0["managed_files"] and r not in ol]
+        self.assertTrue(foundation_only,
+                        "no foundation-only doc available to exercise the fail-closed path")
+        corrupt_rel = foundation_only[0]
+
+        self._downgrade_to_pre_v2(proj, drop_rel="operating_discipline.md", drift_rel="CLAUDE.md")
+        # Corrupt the foundation-only doc's recorded base_hash so it cannot reproduce at source.
+        m = json.loads(mp.read_text())
+        m["managed_files"][corrupt_rel]["base_hash"] = "sha256:" + ("c" * 64)
+        mp.write_text(json.dumps(m, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        res = mig.migrate_pre_v2_system(
+            proj, SOURCE_VERSION, REPO_ROOT,
+            transcript_path=TRANSCRIPT, system_shape=SHAPE, project_name=PROJECT_NAME,
+            generator_version_override=_GEN_OVERRIDE,
+        )
+        self.assertFalse(res.foundation_baseline_advanced,
+                         "fail-closed violated: advanced despite a non-reproducing foundation doc")
+        self.assertIn(corrupt_rel, res.foundation_baseline_blocked)
+        # foundation_bundle_version stays at the pre-migration value (NOT advanced).
+        self.assertEqual(json.loads(mp.read_text())["foundation_bundle_version"], "v0.4.0",
+                         "foundation_bundle_version was advanced despite fail-closed")
 
     def test_migrate_capsule_upgraded_to_v2(self):
         proj = self._emit_v060("capsule")
