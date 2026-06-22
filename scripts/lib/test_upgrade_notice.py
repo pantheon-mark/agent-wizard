@@ -68,6 +68,19 @@ def _write_registry_fixture(registry_dir: Path, versions: list) -> Path:
     return p
 
 
+def _write_state(project_dir: Path, obj: dict) -> None:
+    wizard_dir = project_dir / ".wizard"
+    wizard_dir.mkdir(exist_ok=True)
+    (wizard_dir / "upgrade-notice-state.json").write_text(
+        json.dumps(obj), encoding="utf-8",
+    )
+
+
+def _iso(days_from_today: int) -> str:
+    import datetime
+    return (datetime.date.today() + datetime.timedelta(days=days_from_today)).isoformat()
+
+
 def _project_files(project_dir: Path) -> set:
     """Return the set of file paths inside project_dir, excluding Python bytecode
     caches that Python itself writes under Library/Caches when HOME is set to tmpdir."""
@@ -152,6 +165,55 @@ class UpgradeNoticeNewerAvailableTest(unittest.TestCase):
             self.assertEqual(present, [],
                              f"output contains injection-signature tells {present}; "
                              f"it must be pure declarative data")
+
+
+class UpgradeNoticeSnoozeStateTest(unittest.TestCase):
+    """The operator can snooze ('remind me later') or dismiss ('skip this version until a
+    newer one'). Those choices persist in .wizard/upgrade-notice-state.json, which the notice
+    READS (it never writes it — the model writes it per the CLAUDE.md rule). The notice is
+    fail-open: a malformed/garbage state file is ignored and the notice still fires (the safe
+    failure direction is to remind, not to silently never remind)."""
+
+    def _run(self, td: str) -> str:
+        project_dir = Path(td)
+        _write_manifest(project_dir, "v0.6.0")
+        registry_file = _write_registry_fixture(Path(td), ["v0.6.0", "v0.6.1"])
+        return _run_script(project_dir, {
+            "UPGRADE_NOTICE_REGISTRY_URL": f"file://{registry_file}",
+        }).stdout.strip()
+
+    def test_suppressed_when_snoozed_until_future(self):
+        with tempfile.TemporaryDirectory() as td:
+            _write_state(Path(td), {"snooze_until": _iso(7)})
+            self.assertEqual(self._run(td), "",
+                             "an active snooze (future date) must suppress the notice")
+
+    def test_fires_when_snooze_expired(self):
+        with tempfile.TemporaryDirectory() as td:
+            _write_state(Path(td), {"snooze_until": _iso(-1)})
+            self.assertIn("hookSpecificOutput", self._run(td),
+                          "an expired snooze must NOT suppress; the notice fires again")
+
+    def test_suppressed_when_this_version_dismissed(self):
+        with tempfile.TemporaryDirectory() as td:
+            _write_state(Path(td), {"dismissed_version": "v0.6.1"})
+            self.assertEqual(self._run(td), "",
+                             "dismissing the latest version must suppress the notice")
+
+    def test_fires_when_newer_than_dismissed_version(self):
+        with tempfile.TemporaryDirectory() as td:
+            # operator dismissed v0.6.0 earlier; v0.6.1 is newer -> must fire again
+            _write_state(Path(td), {"dismissed_version": "v0.6.0"})
+            self.assertIn("hookSpecificOutput", self._run(td),
+                          "a newer version than the dismissed one must fire again")
+
+    def test_failopen_on_malformed_state(self):
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / ".wizard").mkdir(exist_ok=True)
+            (Path(td) / ".wizard" / "upgrade-notice-state.json").write_text(
+                "this is not json {{{", encoding="utf-8")
+            self.assertIn("hookSpecificOutput", self._run(td),
+                          "a malformed state file must be ignored (fail-open: still remind)")
 
 
 class UpgradeNoticeCurrentTest(unittest.TestCase):
@@ -351,9 +413,21 @@ class DurableRelayInstructionContractTest(unittest.TestCase):
         self.assertTrue(any(p in low for p in ("clearly visible", "its own", "do not bury",
                                                "distinct line", "not a footnote", "do not downplay")),
                         "CLAUDE.md must instruct surfacing the update prominently, not buried")
-        # must pose a direct offer the operator can answer
-        self.assertIn("yes/no", low,
-                      "CLAUDE.md must instruct posing a direct yes/no offer to the operator")
+        # SEQUENCING: ask the update first / on its own, before the recommended next step
+        self.assertTrue(any(p in low for p in ("ask about the update first", "before your recommended",
+                                               "before the recommended", "on its own first",
+                                               "ask only about the update", "do not ask both",
+                                               "one question at a time")),
+                        "CLAUDE.md must sequence the update question first/alone, not alongside the next step")
+        # the four operator options, including snooze + skip-version
+        self.assertIn("remind", low, "CLAUDE.md must offer a 'remind me later' option")
+        self.assertTrue(any(p in low for p in ("skip this version", "until a newer", "dismiss")),
+                        "CLAUDE.md must offer a 'skip this version until a newer one' option")
+        # the persistence mechanism the model writes
+        self.assertIn("upgrade-notice-state.json", low,
+                      "CLAUDE.md must tell the model where to persist the snooze/dismiss choice")
+        self.assertTrue(("snooze_until" in text) and ("dismissed_version" in text),
+                        "CLAUDE.md must name the snooze_until + dismissed_version state fields")
 
 
 if __name__ == "__main__":

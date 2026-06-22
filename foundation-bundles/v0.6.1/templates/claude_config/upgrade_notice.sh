@@ -138,6 +138,31 @@ latest_ver_tuple = _semver(latest_version)
 if latest_ver_tuple <= local_ver_tuple:
     sys.exit(0)
 
+# --- 4b. Respect the operator's snooze / dismiss preference, if any. ---
+# The operator can ask to be reminded later ("snooze_until": "YYYY-MM-DD") or to skip a
+# version until a newer one ships ("dismissed_version": "vX.Y.Z"). The model writes this
+# file when the operator chooses; this hook only READS it. FAIL-OPEN: any problem (missing,
+# unreadable, malformed, unexpected fields) is ignored and the notice still fires — the safe
+# direction is to remind, never to silently go quiet.
+state_path = os.path.join(os.getcwd(), ".wizard", "upgrade-notice-state.json")
+try:
+    with open(state_path, encoding="utf-8") as fh:
+        state = json.load(fh)
+    if isinstance(state, dict):
+        # skip-this-version: suppress while the latest available is not newer than dismissed.
+        dismissed = state.get("dismissed_version")
+        if isinstance(dismissed, str) and dismissed and latest_ver_tuple <= _semver(dismissed):
+            sys.exit(0)
+        # remind-me-later: suppress while today is before snooze_until (ISO YYYY-MM-DD sorts
+        # lexicographically, so a plain string compare is correct).
+        snooze_until = state.get("snooze_until")
+        if isinstance(snooze_until, str) and snooze_until:
+            import datetime
+            if datetime.date.today().isoformat() < snooze_until:
+                sys.exit(0)
+except Exception:
+    pass  # fail-open: notify
+
 # This is printed by a SessionStart hook. For the output to reach the assistant's
 # session-start context, a SessionStart hook must emit EITHER plain text OR a JSON object
 # with a `hookSpecificOutput.additionalContext` field. A BARE JSON object (no
