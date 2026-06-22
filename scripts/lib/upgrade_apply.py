@@ -42,6 +42,7 @@ this path — post-validation re-hashes the staged bytes instead.
 
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -920,6 +921,221 @@ def apply_upgrade(
             "to continue. No files were changed."
         )
 
+    # --- 4c. Operating-layer render-kind files (already managed) -------------
+    # These are `render_kind="render"` files whose content is built from capsule inputs
+    # (not from the foundation-doc render surface) and that are ALREADY tracked in the
+    # manifest. Examples: CLAUDE.md, operating_discipline.md, project_instructions.md,
+    # per-agent prompt files. They are NOT in foundation_entries (render_foundation_docs
+    # only produces the 6 classic foundation docs), so the step-4a loop skips them.
+    # They are NOT copy-kind, so the step-4b loop skips them.
+    #
+    # Render "theirs" by substituting the capsule's operating block inputs into the
+    # frozen target-bundle template:
+    #   - `operating.resolved_scaffold_inputs` covers root-level files
+    #     (CLAUDE.md, operating_discipline.md, etc.) — combined with
+    #     `foundation_doc_inputs` (PROJECT_NAME etc.) into one lookup dict.
+    #   - `operating.by_relpath[rel]` covers per-agent render files (if present).
+    # Capsule must be v2 (operating_replay_ok); if not, the surface already marks these
+    # as SURFACE_NEEDS_CAPSULE and they never appear as in-manifest here.
+    #
+    # Merge strategy applied identically to the foundation-doc three_way path:
+    #   three_way + no drift      -> adopt theirs
+    #   three_way + drift + elig  -> section_merge; clean -> FILE_MERGED; conflict -> sidecar
+    #   three_way + drift + inelig -> sidecar
+    #   operator_review           -> always sidecar
+    #   warn_on_drift             -> ack-or-refuse
+    #   frozen                    -> block on drift; adopt clean
+
+    # Build a combined inputs dict for placeholder substitution.
+    # Foundation doc inputs supply PROJECT_NAME, PROJECT_PURPOSE, etc.
+    # resolved_scaffold_inputs supply INHERITED_OPERATING_PRINCIPLES, OL_COLOR, etc.
+    # per-relpath overrides (by_relpath) cover agent-specific files.
+    _PLACEHOLDER_RE = re.compile(r"\{\{([A-Z][A-Z0-9_]*)\}\}")
+    operating_block = capsule.get("operating") if isinstance(capsule, dict) else None
+    _scaffold_inputs: Dict[str, str] = {}
+    _by_relpath_inputs: Dict[str, Dict[str, str]] = {}
+    if isinstance(operating_block, dict):
+        _rsi = operating_block.get("resolved_scaffold_inputs") or {}
+        if isinstance(_rsi, dict):
+            _scaffold_inputs = {k: str(v) for k, v in _rsi.items()}
+        _byr = operating_block.get("by_relpath") or {}
+        if isinstance(_byr, dict):
+            _by_relpath_inputs = {
+                k: {kk: str(vv) for kk, vv in v.items()}
+                for k, v in _byr.items()
+                if isinstance(v, dict)
+            }
+    # Combined base substitution map (foundation_doc_inputs overrides scaffold for
+    # duplicated keys, since foundation inputs are the canonical source for shared
+    # keys like PROJECT_NAME, WIZARD_VERSION).
+    _combined_base: Dict[str, str] = dict(_scaffold_inputs)
+    _combined_base.update({k: str(v) for k, v in capsule_inputs.items()})
+
+    files_block_ol = manifest.get("managed_files") or manifest.get("files") or {}
+    # Track manifest entry updates for operating-layer render files.
+    new_ol_manifest_entries: Dict[str, Dict[str, Any]] = {}
+
+    for se in surface:
+        rel = se.relpath
+        rk = se.render_kind
+        strategy = se.merge_strategy
+        cls = se.classification
+
+        # Only render-kind operating-layer files not in foundation_entries.
+        if rk != RENDER_KIND_RENDER:
+            continue
+        if rel in foundation_entries:
+            continue
+        # Skip non-managed / non-surviving surface entries (new files are a
+        # separate follow-on task; needs_capsule / dropped / collision are no-ops here).
+        if not se.in_manifest:
+            continue
+        if cls in (SURFACE_DROPPED, SURFACE_COLLISION, SURFACE_NEEDS_CAPSULE):
+            continue
+
+        # Resolve the target-version template and substitute placeholders.
+        try:
+            template_text = read_bundle_template(target_version, rel, build_repo_root)
+        except BundleTemplateError as e:
+            raise UpgradeApplyError(
+                f"cannot read the target bundle template for operating-layer file "
+                f"{rel!r}: {e}. No files were changed."
+            ) from e
+
+        # Per-relpath inputs (agent-specific) take precedence over the combined base.
+        sub_inputs: Dict[str, str] = dict(_combined_base)
+        if rel in _by_relpath_inputs:
+            sub_inputs.update(_by_relpath_inputs[rel])
+
+        # Substitution: fail-closed on missing placeholder keys.
+        missing_keys: List[str] = []
+        def _replace_ol(m: "re.Match", _sub=sub_inputs, _missing=missing_keys) -> str:
+            key = m.group(1)
+            if key not in _sub:
+                _missing.append(key)
+                return m.group(0)
+            return _sub[key]
+        theirs_ol = _PLACEHOLDER_RE.sub(_replace_ol, template_text)
+        if missing_keys:
+            raise UpgradeApplyError(
+                f"the target bundle template for {rel!r} references placeholder(s) "
+                f"{sorted(set(missing_keys))} that are not in the capsule operating "
+                f"block. A capsule upgrade may be required. No files were changed."
+            )
+
+        # Read the live file.
+        live_ol = _read_live(operator_project_dir, rel)
+        if live_ol is None:
+            raise UpgradeApplyError(
+                f"managed operating-layer file {rel!r} is missing on disk; cannot "
+                "apply an upgrade over a missing file. No files were changed."
+            )
+
+        # Drift detection uses content hashes (same as the foundation-doc path).
+        meta_ol = files_block_ol.get(rel, {})
+        base_content_ol = str(meta_ol.get("base_content_hash", "")) or \
+                          str(meta_ol.get("base_hash", ""))
+        ours_content_ol = _content_hash(live_ol)
+        drifted_ol = (ours_content_ol != base_content_ol)
+        theirs_content_ol = _content_hash(theirs_ol)
+        target_changed_ol = (theirs_content_ol != base_content_ol)
+
+        if not target_changed_ol:
+            decisions.append(FileDecision(rel, strategy, FILE_UNCHANGED, drifted_ol,
+                                          note="target version is identical to the installed version"))
+            # Advance lineage even for content-unchanged files.
+            upd = dict(meta_ol)
+            upd["live_lineage_version"] = target_version
+            new_ol_manifest_entries[rel] = upd
+            continue
+
+        if strategy == MERGE_STRATEGY_FROZEN:
+            if drifted_ol:
+                frozen_blocks.append(rel)
+                continue
+            staged_writes[rel] = theirs_ol
+            decisions.append(FileDecision(rel, strategy, FILE_ADOPTED, drifted_ol,
+                                          note="frozen file, no operator edits; adopted the new version"))
+        elif strategy == MERGE_STRATEGY_THREE_WAY:
+            if not drifted_ol:
+                staged_writes[rel] = theirs_ol
+                decisions.append(FileDecision(rel, strategy, FILE_ADOPTED, drifted_ol,
+                                              note="no operator edits; adopted the new version"))
+            else:
+                # Section-aware merge: same logic as the foundation-doc three_way path.
+                # Reconstruct base from the capsule inputs + the BASE-version bundle template.
+                try:
+                    base_template_text = read_bundle_template(current_version, rel, build_repo_root)
+                    base_ol_rendered = _PLACEHOLDER_RE.sub(
+                        lambda m, _s=sub_inputs: _s.get(m.group(1), m.group(0)),
+                        base_template_text,
+                    )
+                except BundleTemplateError:
+                    # No base template available (e.g. file is new in this version but
+                    # somehow managed — defensive: route to sidecar).
+                    base_ol_rendered = live_ol
+
+                eligible = str(meta_ol.get(LIVE_LINEAGE_VERSION_FIELD, "")) == current_version
+                merge = (section_three_way_merge(base_ol_rendered, live_ol, theirs_ol)
+                         if (eligible and auto_merge_enabled) else None)
+                if merge is not None and merge.clean:
+                    staged_writes[rel] = merge.merged
+                    decisions.append(FileDecision(rel, strategy, FILE_MERGED, drifted_ol,
+                                                  note="your edits were merged with the new version"))
+                else:
+                    if merge is not None and not merge.clean:
+                        note = ("your edits overlap with the new version, so they could not "
+                                "be merged automatically; your version was kept and the new "
+                                "version was saved for review")
+                    else:
+                        note = ("you edited this file; your version was kept and the new "
+                                "version was saved for review")
+                    review_writes.append((rel, live_ol, theirs_ol, True))
+                    decisions.append(FileDecision(rel, strategy, FILE_REVIEW, drifted_ol, note=note))
+        elif strategy == MERGE_STRATEGY_OPERATOR_REVIEW:
+            review_writes.append((rel, live_ol, theirs_ol, False))
+            decisions.append(FileDecision(rel, strategy, FILE_REVIEW, drifted_ol,
+                                          note="this file is operator-reviewed; the new version was saved for review and your version kept"))
+        elif strategy == MERGE_STRATEGY_WARN_ON_DRIFT:
+            if drifted_ol and not ack:
+                raise UpgradeApplyError(
+                    f"{rel!r} has local edits and its upgrade rule requires you to "
+                    "acknowledge replacing them. Re-run the upgrade with --ack to "
+                    "adopt the new version (your current version is backed up first). "
+                    "No files were changed."
+                )
+            staged_writes[rel] = theirs_ol
+            decisions.append(FileDecision(rel, strategy, FILE_ADOPTED, drifted_ol,
+                                          note=("acknowledged; adopted the new version" if drifted_ol
+                                                else "no operator edits; adopted the new version")))
+        else:
+            raise UpgradeApplyError(
+                f"{rel!r} has an unrecognized merge strategy {strategy!r}; refusing to "
+                "apply rather than guess. No files were changed."
+            )
+
+        # Advance manifest base hashes for this operating-layer file.
+        theirs_hash_ol = "sha256:" + sha256_bytes(theirs_ol.encode("utf-8"))
+        ol_entry_update: Dict[str, Any] = dict(meta_ol)
+        ol_entry_update["base_hash"] = theirs_hash_ol
+        ol_entry_update["base_content_hash"] = theirs_content_ol
+        if rel in staged_writes:
+            ol_entry_update["current_hash_last_seen"] = "sha256:" + sha256_bytes(
+                staged_writes[rel].encode("utf-8")
+            )
+        if rel not in {d.relpath for d in decisions if d.disposition == FILE_REVIEW}:
+            ol_entry_update[LIVE_LINEAGE_VERSION_FIELD] = target_version
+        new_ol_manifest_entries[rel] = ol_entry_update
+
+    # Final frozen-blocks check (operating-layer files may have added to it).
+    if frozen_blocks:
+        raise UpgradeApplyError(
+            "this upgrade is blocked because protected file(s) have local edits: "
+            f"{', '.join(sorted(frozen_blocks))}. These files are not meant to be edited "
+            "and cannot be upgraded while they differ from their original. Restore them "
+            "to continue. No files were changed."
+        )
+
     # --- 5. Transaction: backup -> stage -> validate -> atomic replace --------
     touched_relpaths = sorted(set(staged_writes) | {MANIFEST_REL, UPGRADE_HISTORY_REL})
     backup_dir = ""
@@ -946,6 +1162,7 @@ def apply_upgrade(
                 theirs_rendered=theirs_rendered,
                 routed_relpaths=routed_relpaths,
                 new_copy_entries=new_copy_manifest_entries,
+                new_ol_entries=new_ol_manifest_entries,
             )
             sm = staging / MANIFEST_REL
             sm.parent.mkdir(parents=True, exist_ok=True)
@@ -1130,6 +1347,7 @@ def _recompute_manifest(
     theirs_rendered: Dict[str, str],
     routed_relpaths: Optional[set] = None,
     new_copy_entries: Optional[Dict[str, Dict[str, Any]]] = None,
+    new_ol_entries: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Return a NEW manifest dict reflecting the apply (Finding A dual-hash fix).
 
@@ -1202,6 +1420,19 @@ def _recompute_manifest(
                 files_block[rel] = merged
             else:
                 # Genuinely new file: add the full entry.
+                files_block[rel] = dict(entry)
+
+    # Operating-layer render-kind entries (step 4c): advance base hashes + lineage.
+    # Same semantics as copy-kind — all already-managed files; no new-file creation here
+    # (that is a separate follow-on task for SURFACE_NEW render-kind operating files).
+    if new_ol_entries:
+        for rel, entry in new_ol_entries.items():
+            existing = files_block.get(rel)
+            if existing is not None:
+                updated = dict(existing)
+                updated.update(entry)
+                files_block[rel] = updated
+            else:
                 files_block[rel] = dict(entry)
 
     return new_manifest
