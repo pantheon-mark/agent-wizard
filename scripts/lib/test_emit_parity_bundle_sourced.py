@@ -80,10 +80,18 @@ class EmitParityBundleSourced(unittest.TestCase):
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
         proj = Path(td.name) / name
+        # Pin the clock to the baseline's capture date so the re-emit is reproducible
+        # regardless of run date — the date-bearing delivery:wizard files (manual.md,
+        # execution_plan.md, project_instructions.md, session_bootstrap.md,
+        # docs/future_items.md, docs/voice_and_style.md) stamp a build date that would
+        # otherwise drift and break parity on any day after capture. (A clock-less
+        # baseline passed only when re-emitted on the same calendar day it was captured.)
+        pinned = b.get("clock")
         cli.cmd_emit_system(
             str(TRANSCRIPT), b["shape"], str(proj), str(REPO_ROOT),
             bundle_version=b["emit_bundle_version"],
             generator_version_override=b["generator_version_override"],
+            clock=(lambda c=pinned: c) if pinned else None,
         )
         return proj
 

@@ -1,8 +1,9 @@
 {
-  "_note": "Byte-parity baseline: canonical (LF-normalized sha256_file) hashes of every delivery:wizard emitted file, captured at v0.6.0 (the first coherent system-bundle). Parity test re-emits and asserts each delivery:wizard file hash equals this baseline.",
+  "_note": "Byte-parity baseline: canonical (LF-normalized sha256_file) hashes of every delivery:wizard emitted file, captured at v0.6.0 (the first coherent system-bundle). Parity test re-emits and asserts each delivery:wizard file hash equals this baseline. The clock is PINNED so the re-emit is reproducible regardless of run date (the date-bearing files carry a build date that would otherwise drift).",
   "emit_bundle_version": "v0.6.0",
   "generator_version_override": "c3b5609fbbe566d73f3097ff0d1cd087dfe19245",
   "shape": "markdown-CC",
+  "clock": "2026-06-21",
   "hashes": {
     ".claude/context_monitor.sh": "sha256:1394d836e0f674a7363f60e224790fbe857ec1fe485c4cc0c4a006e66c16028b",
     ".claude/receipt_gate.sh": "sha256:46860438445a13c67d996d147fa990178a8f843200bf2a2219604174c8957d6f",
