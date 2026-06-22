@@ -114,7 +114,9 @@ versions = []
 for b in bundles:
     if not isinstance(b, dict):
         continue
-    v = b.get("version")
+    # The registry's bundle entries key the version as "foundation_bundle_version"
+    # (the live public-registry shape); tolerate a bare "version" as a fallback.
+    v = b.get("foundation_bundle_version") or b.get("version")
     if isinstance(v, str) and v:
         versions.append(v)
 

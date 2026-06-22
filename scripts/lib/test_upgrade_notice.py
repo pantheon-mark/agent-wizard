@@ -46,8 +46,14 @@ def _write_manifest(project_dir: Path, version: str) -> None:
 
 
 def _write_registry_fixture(registry_dir: Path, versions: list) -> Path:
-    """Write a local registry JSON fixture. Returns the file path."""
-    bundles = [{"version": v} for v in versions]
+    """Write a local registry JSON fixture. Returns the file path.
+
+    Uses the SAME key the live public registry uses (`foundation_bundle_version`);
+    a fixture keyed differently would let the script silently never fire against
+    the real registry while the test passed (a false-green). The
+    RegistryShapeGuardTest below pins this to the real registry on disk.
+    """
+    bundles = [{"foundation_bundle_version": v} for v in versions]
     registry = {"bundles": bundles}
     p = registry_dir / "foundation-bundles.json"
     p.write_text(json.dumps(registry), encoding="utf-8")
@@ -269,6 +275,41 @@ class UpgradeNoticeScriptSyntaxTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0,
                          f"bash -n failed on upgrade_notice.sh: {result.stderr}")
+
+
+class RegistryShapeGuardTest(unittest.TestCase):
+    """Pin the notice to the REAL on-disk registry shape, not a hand-built fixture.
+
+    The notice reads each bundle's version from `foundation_bundle_version` (the live
+    registry key). If the script ever reverts to a different key, this test fails
+    because the notice would silently never fire against the real registry — a
+    false-green that a same-shape mock fixture cannot catch.
+    """
+
+    REAL_REGISTRY = REPO_ROOT / "wizard" / "registry" / "foundation-bundles.json"
+
+    def test_real_registry_uses_expected_version_key(self):
+        reg = json.loads(self.REAL_REGISTRY.read_text(encoding="utf-8"))
+        bundles = reg.get("bundles") or []
+        self.assertTrue(bundles, "real registry has no bundles")
+        for b in bundles:
+            self.assertIn("foundation_bundle_version", b,
+                          "real registry bundle entry lacks foundation_bundle_version — "
+                          "the notice's version-key read must match this shape")
+
+    def test_notice_fires_against_the_real_registry(self):
+        """Run the notice against the real registry file with a below-all local version;
+        it must fire and name a newer version (proves the real key is read)."""
+        with tempfile.TemporaryDirectory() as td:
+            project_dir = Path(td)
+            _write_manifest(project_dir, "v0.0.1")
+            result = _run_script(project_dir, {
+                "UPGRADE_NOTICE_REGISTRY_URL": "file://" + str(self.REAL_REGISTRY),
+            })
+            self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+            self.assertIn("newer version", result.stdout,
+                          f"notice did not fire against the real registry (key mismatch?); "
+                          f"stdout: {result.stdout!r}")
 
 
 if __name__ == "__main__":
