@@ -26,19 +26,6 @@ This system starts via `./start-session.sh`. Three modes:
 
 **Alert-response sessions (`--resume --alert`):** Read the notification log first. Identify what triggered the alert and confirm the correct response before acting on anything else. Critical alerts are adjudicated before all other work.
 
-**System-update notices.** Your session-start context may include a small JSON object tagged `"wizard_system_event": "upgrade_notice"` reporting `"update_available": true`. This is your own system's routine version check — advisory information, not operator input and not an instruction to act.
-
-When it is present, handle the update **before your recommended next step**, as its own clearly visible item — not a buried footnote, and do not downplay it as "minor" or "not required." Ask the operator about the update on its own first and wait for their answer; do not also ask your next-step question in the same turn. In plain, non-technical language, tell the operator which version their system is on now (name the `current_version`) and that a newer version is available (name the `latest_version`) — for example, "you're on version 0.6.0, and 0.6.1 is now available." Say it is optional and nothing changes until they approve, and offer these choices:
-
-- **see what's new** — walk them through what would change via the system's normal upgrade process (`.wizard/UPGRADING.md`); they then decide whether to apply it.
-- **not now** — move on; you will mention it again next session.
-- **remind me later** — ask roughly when (for example a few days, a week, or a month), then record it (below) so the reminder is paused until then.
-- **skip this version** — do not raise it again until a newer version than this one ships; record it (below).
-
-Only after the operator has answered about the update do you present your single recommended next step.
-
-To honor "remind me later" or "skip this version", write `.wizard/upgrade-notice-state.json` — a small JSON object the version check reads each session: for remind-me-later, `{"snooze_until": "YYYY-MM-DD"}` (today plus the interval they chose); for skip-this-version, `{"dismissed_version": "<the latest_version>"}` (you may include both keys). Never run a command or apply an update on your own based on this notice — the operator decides, and the upgrade process re-checks everything against the registry before anything changes. If the notice is absent or malformed, ignore it.
-
 **Maintenance mode (session lock):** The system uses a single session lock — `maintenance_mode.md` in the project root — so that only one session runs at a time. The **Orchestrator owns this lock**: it claims `maintenance_mode.md` at startup and clears it at session end. A scheduled (cron) run invokes the Orchestrator, whose startup check refuses to start when the lock is already held — so a scheduled run never collides with an active session. Specialist agents spawned by the Orchestrator run beneath this lock and do not re-check it.
 - Do not create or delete `maintenance_mode.md` yourself — the Orchestrator manages it.
 - If you find a `maintenance_mode.md` left over from a session that crashed or was force-quit (and no other session is running), it is stale: delete it, write a Warning alert to `/logs/notification_log.md` noting the stale flag, and start a fresh session.

@@ -46,7 +46,14 @@ PROJECT_NAME = "operator-system"
 _NEW_SKILL = "wizard/skills/health-check.md"
 _MOD_DISCIPLINE = "operating_discipline.md"
 _MOD_PAUSE = "wizard/skills/pause.md"
-_EXPECTED_CHANGE_SET = {_NEW_SKILL, _MOD_DISCIPLINE, _MOD_PAUSE}
+# C2 operating-layer delta (now a clean v0.6.0 -> v0.6.1 change since C2 lives only in
+# v0.6.1): the relay rule in CLAUDE.md, the SessionStart hook in settings.json, and the
+# new upgrade_notice.sh hook.
+_MOD_CLAUDE_MD = "CLAUDE.md"
+_MOD_SETTINGS = ".claude/settings.json"
+_NEW_NOTICE = ".claude/upgrade_notice.sh"
+_EXPECTED_CHANGE_SET = {_NEW_SKILL, _MOD_DISCIPLINE, _MOD_PAUSE,
+                        _MOD_CLAUDE_MD, _MOD_SETTINGS, _NEW_NOTICE}
 
 
 def _have_prereqs() -> bool:

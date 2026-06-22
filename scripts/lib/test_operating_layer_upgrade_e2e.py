@@ -313,6 +313,12 @@ class OperatingLayerUpgradeE2E(unittest.TestCase):
             self._OL_DELTA_NEW_SKILL,
             self._OL_DELTA_CHANGED_RENDER,
             self._OL_DELTA_CHANGED_COPY,
+            # C2 operating-layer delta (now a clean v0.6.0 -> v0.6.1 change since C2 lives
+            # only in v0.6.1): CLAUDE.md gains the relay rule, settings.json gains the
+            # SessionStart hook, upgrade_notice.sh is brand-new.
+            "CLAUDE.md",
+            ".claude/settings.json",
+            ".claude/upgrade_notice.sh",
         }
         self.assertEqual(
             set(res.files_written), expected_written,

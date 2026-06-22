@@ -388,8 +388,10 @@ class DurableRelayInstructionContractTest(unittest.TestCase):
     JSON sits in context with no guidance and is suppressed as 'internal detail' (failure 1).
     """
 
-    # The bundle copy that the upgrade DELIVERS (and that fresh emits source from).
-    BUNDLE_CLAUDE_MD = (REPO_ROOT / "wizard" / "foundation-bundles" / "v0.6.0"
+    # The bundle copy that CARRIES the relay rule. The notice + relay rule are a v0.6.1
+    # operating-layer delta (NOT in v0.6.0, the estate's emitted base); the v0.6.0 ->
+    # v0.6.1 upgrade DELIVERS them.
+    BUNDLE_CLAUDE_MD = (REPO_ROOT / "wizard" / "foundation-bundles" / "v0.6.1"
                         / "templates" / "root" / "CLAUDE.md")
 
     def test_claude_md_carries_the_upgrade_notice_relay_rule(self):

@@ -82,7 +82,9 @@ EXPECTED_MANAGED_FILES = frozenset({
     ".claude/statusline.sh",
     ".claude/context_monitor.sh",
     ".claude/receipt_gate.sh",
-    ".claude/upgrade_notice.sh",
+    # NOTE: .claude/upgrade_notice.sh is a v0.6.1 operating-layer DELTA, not part of the
+    # v0.6.0 managed set (this contract test is pinned to v0.6.0). It is delivered by the
+    # v0.6.0 -> v0.6.1 upgrade.
     # agents/ prompts
     "agents/prompts/orchestrator_prompt.md",
     "agents/prompts/qa_agent_prompt.md",

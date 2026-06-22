@@ -332,8 +332,15 @@ def emit_scaffold(plan: EmissionPlan, staging_dir: Path, build_repo_root: Path,
     claude_dir = staging_dir / ".claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
     for name in ("settings.json",) + CLAUDE_CONFIG_SCRIPTS:
+        src = claude_src / name
+        if not src.is_file():
+            # Operating-layer files are keyed to the bundle version: a bundle that does
+            # not carry this .claude file (e.g. one predating the upgrade-notice hook)
+            # gracefully skips it — matching the operating-layer absent-fallback — instead
+            # of crashing on a missing optional file. Newer bundles that carry it emit it.
+            continue
         dest = claude_dir / name
-        dest.write_text((claude_src / name).read_text(encoding="utf-8"), encoding="utf-8")
+        dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
         if name.endswith(".sh"):
             dest.chmod(SCRIPT_MODE)
         written.append(dest)

@@ -144,6 +144,21 @@ class ScaffoldEmitterTests(unittest.TestCase):
         self.assertIn("five_hour", statusline, "statusline omits the 5h usage limit")
         self.assertIn("seven_day", statusline, "statusline omits the 7d usage limit")
 
+    def test_claude_config_emission_tolerates_a_bundle_without_the_notice(self):
+        """A bundle that does not carry .claude/upgrade_notice.sh (one predating the
+        upgrade-notice hook) emits the .claude config it DOES carry, gracefully skipping
+        the absent file instead of crashing. .claude files are keyed to the bundle
+        version: a bundle delivers only the operating-layer files it actually carries."""
+        staging, _ = self._emit()
+        cdir = staging / ".claude"
+        self.assertTrue((cdir / "settings.json").exists(), "carried settings.json not emitted")
+        self.assertTrue((cdir / "statusline.sh").exists(), "carried statusline.sh not emitted")
+        self.assertTrue((cdir / "context_monitor.sh").exists(), "carried context_monitor.sh not emitted")
+        self.assertFalse(
+            (cdir / "upgrade_notice.sh").exists(),
+            "notice emitted from a bundle that does not carry its template",
+        )
+
     def test_stop_hook_idle_guard_present(self):
         staging, _ = self._emit()
         text = (staging / ".claude" / "context_monitor.sh").read_text()
@@ -381,12 +396,14 @@ class SessionStartUpgradeNoticeTests(unittest.TestCase):
             tmp.cleanup()
 
     def test_claude_config_emits_sessionstart_notice_hook(self):
-        """A fresh emit produces .claude/upgrade_notice.sh (exists, mode 0755,
-        bash -n clean) AND .claude/settings.json has a SessionStart hook invoking it,
-        matching the existing hooks schema."""
+        """A fresh emit FROM A BUNDLE THAT CARRIES THE NOTICE (v0.6.1) produces
+        .claude/upgrade_notice.sh (exists, mode 0755, bash -n clean) AND .claude/
+        settings.json has a SessionStart hook invoking it, matching the existing hooks
+        schema. (The notice is a v0.6.1 operating-layer delta; a bundle predating it —
+        e.g. v0.6.0 — gracefully emits without it per the keyed-to-bundle-version rule.)"""
         import json as _json
         import subprocess as _sub
-        staging = self._emit()
+        staging = self._emit({**_valid_plan(), "bundle_version": "v0.6.1"})
 
         # --- 1. script file emitted and executable ---
         script = staging / ".claude" / "upgrade_notice.sh"
