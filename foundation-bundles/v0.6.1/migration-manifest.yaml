@@ -1,0 +1,34 @@
+# Migration manifest for foundation bundle v0.6.1
+#
+# v0.6.1 is an operating-layer-only delta over v0.6.0 (additive section in
+# operating_discipline.md, a one-line pause-skill change, a new health-check skill).
+# Foundation docs are byte-identical to v0.6.0. Cut as the held-out e2e fixture for
+# the operating-layer upgrade proof.
+
+schema_version: v1
+target_version: v0.6.1
+release_date: 2026-06-21
+release_classification: minor_additive_prerelease
+
+migrations:
+  - from: v0.6.0
+    class: minor-additive
+    breaking_changes_summary: ""
+    notes: |
+      Operating-layer-only delta from v0.6.0: an additive section in
+      operating_discipline.md, a one-line change to the pause skill, and a new
+      health-check skill. Foundation docs are byte-identical to v0.6.0.
+    migration_steps: |
+      1. Run the upgrade check (plan-only) to confirm v0.6.0 -> v0.6.1 is offered.
+      2. Run the apply path (operator-explicit). Operating-layer files changed in this
+         version are merged (your edits kept) or saved for review; a new skill is
+         delivered additively.
+    preflight: |
+      Verify the operator project carries a .wizard/replay-capsule.json and a
+      .wizard/manifest.json whose foundation_bundle_version is v0.6.0.
+    rollback: |
+      Restore from .wizard/backups/pre-v0.6.1/ and set foundation_bundle_version
+      back to v0.6.0.
+    requires_operator_approval: true
+    stop_condition: not_applicable
+    supported: true

@@ -794,6 +794,14 @@ def apply_upgrade(
         # Only new + modified/unchanged (in-manifest) processed here.
         if cls not in (SURFACE_NEW, SURFACE_MODIFIED, SURFACE_UNCHANGED):
             continue
+        # Control-plane-emitted entries (contract `source: control_plane`, no
+        # `template_path`) are produced by the Python emitter at setup time, NOT from a
+        # bundle template. They are not bundle-sourced and must never be read from the
+        # bundle here — doing so fails closed on a missing template and refuses the WHOLE
+        # upgrade (e.g. `.wizard/UPGRADING.md`). They are runtime control-plane files; the
+        # copy-write path leaves them to the control plane and skips them.
+        if _contract_entries_map.get(rel, {}).get("template_path") is None:
+            continue
 
         # Read the frozen template (fail-closed; BundleTemplateError -> refusal).
         try:
@@ -1235,7 +1243,19 @@ def apply_upgrade(
     files_written = sorted(staged_writes)
     files_in_review = sorted(d.relpath for d in decisions if d.disposition == FILE_REVIEW)
     files_merged = sorted(d.relpath for d in decisions if d.disposition == FILE_MERGED)
-    classification = APPLY_RESULT_PARTIAL if files_in_review else APPLY_RESULT_APPLIED
+    # A `needs_capsule_upgrade` surface entry is a target file the upgrade COULD NOT
+    # deliver (a render-kind operating-layer file whose replay needs an operating block
+    # this system's v1 capsule does not carry). It is surfaced, not written. Reporting
+    # `applied` while such files went undelivered is a false-green: the operator would
+    # believe the whole new version landed. Treat any undelivered surface entry the same
+    # as a routed file -> partial. (Collisions are likewise undelivered.)
+    undelivered = [
+        se.relpath for se in surface
+        if se.classification in (SURFACE_NEEDS_CAPSULE, SURFACE_COLLISION)
+    ]
+    classification = (
+        APPLY_RESULT_PARTIAL if (files_in_review or undelivered) else APPLY_RESULT_APPLIED
+    )
 
     return UpgradeApplyResult(
         operator_project_path=str(operator_project_dir),

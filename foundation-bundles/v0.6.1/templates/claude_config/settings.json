@@ -1,0 +1,43 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/statusline.sh\""
+  },
+  "permissions": {
+    "deny": ["Edit(.claude/**)", "Write(.claude/**)"],
+    "disableBypassPermissionsMode": "disable"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/receipt_gate.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/receipt_gate.sh\" || true"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/context_monitor.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/context_monitor.sh\" || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/context_monitor.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/context_monitor.sh\" || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

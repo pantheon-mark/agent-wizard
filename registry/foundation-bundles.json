@@ -32,6 +32,14 @@
       "source_commit": "7ba3f48",
       "manifest": "wizard/foundation-bundles/v0.6.0/manifest.yaml",
       "status": "prerelease"
+    },
+    {
+      "foundation_bundle_version": "v0.6.1",
+      "path": "wizard/foundation-bundles/v0.6.1/",
+      "release_date": "2026-06-21",
+      "source_commit": "296d5ff",
+      "manifest": "wizard/foundation-bundles/v0.6.1/manifest.yaml",
+      "status": "prerelease"
     }
   ]
 }

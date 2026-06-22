@@ -1,0 +1,78 @@
+# Foundation bundle v0.6.1 manifest
+#
+# Operating-layer-only delta over v0.6.0: an additive section in operating_discipline.md,
+# a one-line change to the pause skill, and a new health-check skill. Foundation docs are
+# byte-identical to v0.6.0. Cut as the held-out e2e fixture for the operating-layer upgrade
+# proof; see migration-manifest.yaml for the v0.6.0 → v0.6.1 entry.
+#
+# Schema changes from v0.5.0 (additive):
+#   - foundation-doc templates are v0.4.0's (foundation_schema_version v0.3), NOT v0.5.0's.
+#     The vision_recap section and v0.4 schema bumps from v0.5.0 are intentionally absent here;
+#     v0.5.0 remains the path to get those foundation-doc changes.
+#   - system-artifacts.json managed-artifacts contract ADDED (87 managed files).
+#   - Full operating-layer templates/ tree ADDED (agents/, root/, scripts/, .claude/, etc.).
+#   - This is the first bundle from which emit(bundle_version=v0.6.0) produces a COMPLETE
+#     coherent system (foundation docs + operating layer, one version axis).
+#
+# Per-version foundation-bundle package (status: prerelease).
+# Authority: the canonical foundation-versioning specification § 8.1 schema + § 7 directory layout.
+# Pre-v1 stabilization clause applies per § 1.3.
+
+foundation_bundle_version: v0.6.1
+foundation_schema_version: v0.3
+agent_contract_version: v0-pre-rebuild
+release_date: 2026-06-21
+source_commit: 296d5ff  # held-out e2e fixture bundle cut over v0.6.0
+status: prerelease
+
+included_templates:
+  foundation_docs:
+    - vision.md
+    - approach.md
+    - technical_architecture.md
+    - execution_plan.md
+    - test_cases.md
+    - audit_framework.md
+
+managed_files:
+  foundation/vision.md:
+    managed_by: shared
+    local_modifications: expected
+    merge_strategy: three_way
+  foundation/prd.md:
+    managed_by: operator
+    local_modifications: expected
+    merge_strategy: operator_review
+  foundation/approach.md:
+    managed_by: shared
+    local_modifications: allowed
+    merge_strategy: three_way
+  foundation/execution_plan.md:
+    managed_by: operator
+    local_modifications: expected
+    merge_strategy: operator_review
+  foundation/technical_architecture.md:
+    managed_by: shared
+    local_modifications: allowed
+    merge_strategy: three_way
+  foundation/test_cases.md:
+    managed_by: operator
+    local_modifications: expected
+    merge_strategy: operator_review
+  foundation/audit_framework.md:
+    managed_by: wizard
+    local_modifications: not_recommended
+    merge_strategy: warn_on_drift
+
+public_api:
+  required_files:
+    - foundation/vision.md
+    - foundation/prd.md
+    - foundation/approach.md
+    - foundation/execution_plan.md
+    - foundation/technical_architecture.md
+    - foundation/test_cases.md
+    - foundation/audit_framework.md
+  required_frontmatter_fields_per_file: see the canonical foundation-versioning specification § 1.1
+  required_sections_per_doc_type: see schemas/section-schema.yaml in this bundle
+  section_schema: schemas/section-schema.yaml
