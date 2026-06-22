@@ -589,10 +589,34 @@ def _plan_action_for(status: str, merge_strategy: str) -> str:
     return f"drift detected; unknown merge_strategy={merge_strategy}; review required"
 
 
+def resolve_merge_strategy(
+    target_entry: Optional[Dict[str, Any]],
+    manifest_strategy: str,
+    default: str = MERGE_STRATEGY_OPERATOR_REVIEW,
+) -> str:
+    """Resolve a managed file's merge_strategy with TARGET-CONTRACT PRECEDENCE.
+
+    The apply trusts the target bundle's system-artifacts.json over the operator's
+    (possibly stale) manifest; the PLAN must resolve identically (same function) so it
+    never warns the operator that a file is at overwrite-risk when the apply will
+    actually preserve it (Plan/apply consistency — plan must not lie about the apply).
+    Order: the target contract entry's merge_strategy, then the manifest's recorded
+    strategy, then `default`.
+    """
+    if target_entry:
+        s = str(target_entry.get("merge_strategy", "")).strip()
+        if s:
+            return s
+    if manifest_strategy:
+        return str(manifest_strategy)
+    return default
+
+
 def compute_drift_report(
     operator_project_dir: Path,
     operator_manifest: Dict[str, Any],
     target_bundle_version: Optional[str] = None,
+    target_contract: Optional[Dict[str, Any]] = None,
 ) -> DriftReport:
     """Compute drift report for an operator project against its current base_hashes.
 
@@ -613,7 +637,12 @@ def compute_drift_report(
             raise OperatorManifestError(f"managed_files['{rel_path}'] must be a dict")
         base_hash = meta.get("base_hash", "")
         base_content_hash = meta.get("base_content_hash", "")
-        merge_strategy = meta.get("merge_strategy", MERGE_STRATEGY_OPERATOR_REVIEW)
+        # Target-contract precedence (Fork 1(c)): when a target contract is supplied, the
+        # plan resolves merge_strategy exactly as the apply does, so a stale manifest value
+        # cannot make the plan mislabel what the apply will do. Falls back to the manifest's
+        # recorded strategy (current behavior) when no contract is passed.
+        merge_strategy = resolve_merge_strategy(
+            (target_contract or {}).get(rel_path), meta.get("merge_strategy", ""))
         local_mods = meta.get("local_modifications", "")
         abs_path = operator_project_dir / rel_path
         if not abs_path.exists():
@@ -791,7 +820,26 @@ def compute_upgrade_plan(
     if target_entry is None:
         raise BundleNotFoundError(f"target version {target_version!r} not in registry")
 
-    drift_report = compute_drift_report(operator_project_dir, operator_manifest, target_version)
+    # Load the target bundle's managed-artifacts contract so the PLAN resolves
+    # merge_strategy with the SAME target-contract precedence as the apply (Fork 1(c));
+    # otherwise a stale operator manifest would make the plan mislabel a file the apply
+    # will actually operator_review (sidecar-and-preserve). Fail-soft: a foundation-only
+    # target (no contract) or an unreadable contract leaves target_contract=None, which
+    # falls back to the manifest-recorded strategy (current behavior).
+    target_contract = None
+    if registry_path is not None and target_entry.get("path"):
+        _contract_path = registry_path.parents[2] / target_entry["path"] / "system-artifacts.json"
+        if _contract_path.is_file():
+            try:
+                _c = json.loads(_contract_path.read_text(encoding="utf-8"))
+                target_contract = {
+                    e["relpath"]: e for e in _c.get("artifacts", [])
+                    if e.get("delivery") == "wizard" and e.get("relpath")
+                }
+            except (json.JSONDecodeError, OSError):
+                target_contract = None
+    drift_report = compute_drift_report(
+        operator_project_dir, operator_manifest, target_version, target_contract=target_contract)
     semver_delta_tier = classify_tier(current_version, target_version)
     tier = semver_delta_tier  # default to semver arithmetic; overridden below if migration manifest available
 

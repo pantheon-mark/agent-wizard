@@ -644,5 +644,107 @@ class EditedOperatingMarkdownMergesNotBlocks(unittest.TestCase):
                                  f"{relpath}: git marker in sidecar")
 
 
+# ===========================================================================
+# Test N: operator-owned files must be operator_review in EVERY bundle (operator-state clobber fix)
+# ===========================================================================
+
+# The operator/system WRITES these during operation (accumulated rules/registries/
+# advisor KB, operator-tuned config, system-mutated runtime state). A single global
+# `--ack` (needed to deliver a wizard warn_on_drift file) would collaterally overwrite
+# their content if they were warn_on_drift. They MUST be operator_review (route theirs
+# to a sidecar; live file preserved). Principle: "a file the operator or the system
+# writes during operation is not warn_on_drift" (operator-state clobber fix).
+_OPERATOR_OWNED_RELPATHS = (
+    # operator-data accumulators
+    "quality/rules_library.md",
+    "quality/source_registry.md",
+    "quality/advisor_knowledge_base.md",
+    # operator config (seeded once, operator-tuned)
+    "quality/validation_gate_config.md",
+    "quality/co-protected-workflows.md",
+    # system-mutated runtime state
+    "quality/human_review_queue.md",
+    "docs/future_items.md",
+    "docs/architectural_review_staging.md",
+    "docs/document_impact_map.md",
+    "agents/cron/cron_config.md",
+)
+
+_BUNDLES_WITH_CONTRACT = ("v0.6.0", "v0.6.1")
+
+
+def _contract_by_relpath(version: str) -> dict:
+    p = _REAL_REPO / "wizard" / "foundation-bundles" / version / "system-artifacts.json"
+    data = json.loads(p.read_text(encoding="utf-8"))
+    return {e["relpath"]: e for e in data.get("artifacts", []) if "relpath" in e}
+
+
+class OperatorOwnedFilesAreOperatorReview(unittest.TestCase):
+    """Operator-state clobber fix: operator/system-written files must be operator_review in
+    EVERY bundle that carries a contract, so a global `--ack` can never clobber them."""
+
+    def test_operator_owned_files_are_operator_review_in_every_bundle(self):
+        for version in _BUNDLES_WITH_CONTRACT:
+            by_rel = _contract_by_relpath(version)
+            for rel in _OPERATOR_OWNED_RELPATHS:
+                entry = by_rel.get(rel)
+                self.assertIsNotNone(entry, f"{version}: {rel} missing from contract")
+                self.assertEqual(
+                    entry["merge_strategy"], "operator_review",
+                    f"{version}: {rel} must be operator_review (operator/system-written; "
+                    f"warn_on_drift lets a global --ack clobber operator content)",
+                )
+
+    def test_system_authored_templates_are_not_warn_on_drift(self):
+        """Forward guard (machine-checkable principle): any DELIVERED file whose template
+        self-declares it is system-maintained ('Never edited manually') must not be
+        warn_on_drift -- catches the NEXT misclassified system-state file before it ships."""
+        for version in _BUNDLES_WITH_CONTRACT:
+            bundle = _REAL_REPO / "wizard" / "foundation-bundles" / version
+            for rel, entry in _contract_by_relpath(version).items():
+                tp = entry.get("template_path")
+                if not tp:
+                    continue
+                tpath = bundle / tp
+                if not tpath.is_file():
+                    continue
+                if "Never edited manually" in tpath.read_text(encoding="utf-8"):
+                    self.assertNotEqual(
+                        entry.get("merge_strategy"), "warn_on_drift",
+                        f"{version}: {rel} template says 'Never edited manually' but is "
+                        f"warn_on_drift -- a global --ack would wipe its system-written state",
+                    )
+
+
+class ManifestMergeStrategyRefreshTests(unittest.TestCase):
+    """Plan/apply-consistency hygiene: after an apply, a SURVIVING managed file's manifest
+    merge_strategy is refreshed from the TARGET contract, so a stale manifest value
+    (e.g. an older emit's warn_on_drift on a file later reclassified operator_review)
+    does not keep mislabeling the file post-upgrade."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def test_surviving_file_merge_strategy_refreshed_from_contract(self):
+        build_root, reg = _write_synthetic_build_repo(self.tmp)
+        proj, mp = _build_operating_layer_project(self.tmp, build_root)
+        # Make the manifest STALE for _OP_MARKDOWN_A: the target contract declares it
+        # three_way, but the operator's manifest still says warn_on_drift (older emit).
+        manifest = json.loads(mp.read_text(encoding="utf-8"))
+        manifest["managed_files"][_OP_MARKDOWN_A]["merge_strategy"] = "warn_on_drift"
+        mp.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        _apply_ol(proj, mp, reg, build_root, ack=True)
+        new_manifest = json.loads(mp.read_text(encoding="utf-8"))
+        self.assertEqual(
+            new_manifest["managed_files"][_OP_MARKDOWN_A]["merge_strategy"], "three_way",
+            "post-apply manifest kept the stale merge_strategy instead of refreshing it "
+            "from the target contract (plan/manifest would keep mislabeling the file)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

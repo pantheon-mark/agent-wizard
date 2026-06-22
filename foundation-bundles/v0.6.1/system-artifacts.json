@@ -141,7 +141,7 @@
           "CRON_ENTRIES"
         ]
       },
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "agents/cron/cron_config.md",
       "render_kind": "render",
@@ -562,7 +562,7 @@
     },
     {
       "delivery": "wizard",
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "docs/architectural_review_staging.md",
       "render_kind": "copy",
@@ -570,7 +570,7 @@
     },
     {
       "delivery": "wizard",
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "docs/document_impact_map.md",
       "render_kind": "copy",
@@ -591,7 +591,7 @@
           "CREDENTIAL_CHECK_CADENCE"
         ]
       },
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "docs/future_items.md",
       "render_kind": "render",
@@ -846,7 +846,7 @@
           "ADVISOR_ENTRIES"
         ]
       },
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "quality/advisor_knowledge_base.md",
       "render_kind": "render",
@@ -854,7 +854,7 @@
     },
     {
       "delivery": "wizard",
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "quality/co-protected-workflows.md",
       "render_kind": "copy",
@@ -862,7 +862,7 @@
     },
     {
       "delivery": "wizard",
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "quality/human_review_queue.md",
       "render_kind": "copy",
@@ -878,7 +878,7 @@
           "PROJECT_NAME"
         ]
       },
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "quality/rules_library.md",
       "render_kind": "render",
@@ -894,7 +894,7 @@
           "SOURCE_REGISTRY_ROWS"
         ]
       },
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "quality/source_registry.md",
       "render_kind": "render",
@@ -911,7 +911,7 @@
           "DOMAIN_SENSITIVITY_SETTINGS"
         ]
       },
-      "merge_strategy": "warn_on_drift",
+      "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "quality/validation_gate_config.md",
       "render_kind": "render",

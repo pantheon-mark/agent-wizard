@@ -171,6 +171,32 @@ class UpgradeScaffoldEmitterTests(unittest.TestCase):
         with self.assertRaises(UpgradeScaffoldError):
             classify_lifecycle("totally_unknown_root_file.md")
 
+    def test_operator_owned_files_classify_to_operator_review(self):
+        """Operator-state clobber fix: a file the operator or the system WRITES during operation must
+        stamp merge_strategy=operator_review in the fresh-emit manifest (single source
+        of truth with the bundle contract) so a global --ack can never clobber it.
+        Principle: operator/system-written -> not warn_on_drift."""
+        operator_owned = (
+            "quality/rules_library.md",
+            "quality/source_registry.md",
+            "quality/advisor_knowledge_base.md",
+            "quality/validation_gate_config.md",
+            "quality/co-protected-workflows.md",
+            "quality/human_review_queue.md",
+            "docs/future_items.md",
+            "docs/architectural_review_staging.md",
+            "docs/document_impact_map.md",
+            "agents/cron/cron_config.md",
+        )
+        for rel in operator_owned:
+            lifecycle = classify_lifecycle(rel)
+            self.assertEqual(
+                LIFECYCLE_POLICY[lifecycle]["merge_strategy"], "operator_review",
+                f"{rel} classifies to {lifecycle!r} (merge_strategy="
+                f"{LIFECYCLE_POLICY[lifecycle]['merge_strategy']!r}); operator/system-written "
+                f"files must resolve to operator_review, not warn_on_drift",
+            )
+
 
 class ScaffoldGuardTests(unittest.TestCase):
     """Fail-closed guards: empty source_commit + symlinks in the staged tree."""

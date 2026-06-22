@@ -68,6 +68,7 @@ from upgrade import (  # type: ignore
     find_migration_entry,
     load_migration_manifest,
     normalize_for_content_hash,
+    resolve_merge_strategy,
     sha256_bytes,
     sha256_file,
 )
@@ -474,10 +475,14 @@ def compute_merge_surface(
         disk_path = operator_project_dir / rel
         on_disk = disk_path.exists()
         render_kind = str(entry.get("render_kind", "")) if entry else ""
-        strategy = str(entry.get("merge_strategy", "")) if entry else ""
-        if not strategy and in_manifest:
+        # Shared resolver (Fork 1(c)): target-contract precedence, then the manifest's
+        # recorded strategy — the SAME function the plan/drift-report uses, so the apply
+        # and the operator-facing plan can never diverge on what will happen to a file.
+        _meta_strategy = ""
+        if in_manifest:
             meta = (manifest.get("managed_files") or manifest.get("files") or {}).get(rel, {})
-            strategy = str(meta.get("merge_strategy", ""))
+            _meta_strategy = str(meta.get("merge_strategy", ""))
+        strategy = resolve_merge_strategy(entry, _meta_strategy, default="")
 
         # DROPPED: managed by the operator, but the target no longer carries it.
         if in_manifest and not in_target:
@@ -1622,6 +1627,10 @@ def apply_upgrade(
                 routed_relpaths=routed_relpaths,
                 new_copy_entries=new_copy_manifest_entries,
                 new_ol_entries=new_ol_manifest_entries,
+                target_contract_by_relpath={
+                    e["relpath"]: e for e in (target_contract or {}).get("artifacts", [])
+                    if e.get("delivery") == "wizard" and e.get("relpath")
+                },
             )
             sm = staging / MANIFEST_REL
             sm.parent.mkdir(parents=True, exist_ok=True)
@@ -1819,6 +1828,7 @@ def _recompute_manifest(
     routed_relpaths: Optional[set] = None,
     new_copy_entries: Optional[Dict[str, Dict[str, Any]]] = None,
     new_ol_entries: Optional[Dict[str, Dict[str, Any]]] = None,
+    target_contract_by_relpath: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Return a NEW manifest dict reflecting the apply (Finding A dual-hash fix).
 
@@ -1905,5 +1915,16 @@ def _recompute_manifest(
                 files_block[rel] = updated
             else:
                 files_block[rel] = dict(entry)
+
+    # Fork 1(c) hygiene: refresh merge_strategy for every surviving managed file from the
+    # TARGET contract (same target-contract precedence the apply + plan resolve with), so a
+    # stale manifest value (e.g. an older emit's warn_on_drift on a file later reclassified
+    # operator_review) does not persist past the upgrade and keep mislabeling the file.
+    # Files absent from the target contract keep their recorded strategy.
+    if target_contract_by_relpath and isinstance(files_block, dict):
+        for rel, entry in files_block.items():
+            if isinstance(entry, dict):
+                entry["merge_strategy"] = resolve_merge_strategy(
+                    target_contract_by_relpath.get(rel), entry.get("merge_strategy", ""))
 
     return new_manifest

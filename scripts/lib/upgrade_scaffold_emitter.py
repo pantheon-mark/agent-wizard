@@ -117,6 +117,15 @@ _EXACT_LIFECYCLE = {
     "wizard_feedback.md": "runtime_state",
     "SESSION_STATE.md": "runtime_state",
     "build_progress.md": "runtime_state",  # acceptance ledger; operator updates after each phase
+    # System-mutated docs (templates self-declare "Updated by the system. Never edited
+    # manually") — runtime state, NOT wizard guidance. operator_review so a global --ack
+    # never clobbers what the agents have written here (operator-state clobber fix). The other
+    # docs/ files (how_your_system_works.md, voice_and_style.md) stay inherited_content
+    # via the docs/ prefix — they are wizard guidance the operator only reads.
+    "docs/future_items.md": "runtime_state",
+    "docs/architectural_review_staging.md": "runtime_state",
+    "docs/document_impact_map.md": "runtime_state",
+    "agents/cron/cron_config.md": "runtime_state",
     ".gitignore": "operator_config",
     ".env": "operator_config",   # operator-owned secrets file, emitted empty; never wizard-overwritten
     COMMAND_SURFACE_REL: "inherited_content",
@@ -140,6 +149,11 @@ _DIR_LIFECYCLE = {
     "decisions/": "inherited_content",
     "docs/": "inherited_content",
     "quality/": "inherited_content",
+    "quality/": "operator_config",   # operator's QA knowledge base + config (rules library,
+                                      # source/advisor registries, validation + protected-workflow
+                                      # config, review queue) — operator/system-written, NOT wizard
+                                      # guidance. operator_review so a global --ack never clobbers it
+                                      # (operator-state clobber fix).
     "security/": "operator_config",
     "wizard/": "operator_fill_template",   # operator's build-session materials (review prompts / skill templates)
     ".claude/": "inherited_content",       # Claude Code config (statusline + context-monitor hook + settings); wizard-authored

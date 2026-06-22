@@ -365,6 +365,25 @@ class PerStrategyTests(_Base):
             self.assertTrue(sidecar.exists())
             self.assertNotIn(orv_doc, res.files_written)
 
+    def test_operator_review_survives_global_ack(self):
+        """Blast-radius guard: --ack is a single GLOBAL flag. When the operator
+        passes it to deliver a wizard warn_on_drift file, a correctly-classified
+        operator_review file (their accumulated rules/registries) must STILL route to the
+        sidecar with the live file preserved -- --ack must never collaterally clobber it."""
+        for roster in ("A", "B"):
+            build_root, reg = _write_build_repo(self.tmp / roster)
+            proj, mp, strat = _build_operator_project(self.tmp / roster, build_root, roster=roster)
+            orv_doc = next(d for d, s in strat.items() if s == "operator_review")
+            edited = "# operator-edited operator_review doc\nkeep my accumulated content\n"
+            (proj / orv_doc).write_text(edited, encoding="utf-8")
+            res = _apply(proj, mp, reg, build_root, ack=True)
+            dec = next(d for d in res.decisions if d.relpath == orv_doc)
+            self.assertEqual(dec.disposition, FILE_REVIEW,
+                             f"{roster}: operator_review not routed under global --ack")
+            self.assertEqual(_read(proj / orv_doc), edited,
+                             f"{roster}: operator_review live clobbered by global --ack")
+            self.assertNotIn(orv_doc, res.files_written)
+
     def test_warn_on_drift_without_ack_refuses(self):
         for roster in ("A", "B"):
             build_root, reg = _write_build_repo(self.tmp / roster)
@@ -1037,6 +1056,40 @@ class DriftReportReconciliationTests(_Base):
         from upgrade import compute_drift_report, DRIFT_DETECTED
         report = compute_drift_report(self.tmp, self._manifest(with_content_hash=False))
         self.assertEqual(report.entries[0].status, DRIFT_DETECTED)
+
+    def test_drift_report_uses_target_contract_merge_strategy_precedence(self):
+        """Plan/apply consistency: the plan must resolve merge_strategy with the SAME target-
+        contract precedence as the apply, so a STALE manifest (warn_on_drift) does not make
+        the plan warn the operator a file is at overwrite-risk when the apply will actually
+        operator_review (sidecar-and-preserve) it. Plan must not lie about the apply."""
+        from upgrade import sha256_bytes, normalize_for_content_hash, compute_drift_report
+        live = "# Rules Library\n\nmy accumulated rule\n"
+        (self.tmp / "quality").mkdir()
+        (self.tmp / "quality" / "rules_library.md").write_text(live, encoding="utf-8")
+        h = "sha256:" + sha256_bytes(live.encode("utf-8"))
+        ch = "sha256:" + sha256_bytes(normalize_for_content_hash(live).encode("utf-8"))
+        manifest = {
+            "manifest_schema_version": "manifest-v2",
+            "foundation_bundle_version": "v0.6.0",
+            "managed_files": {"quality/rules_library.md": {
+                "managed": "true", "managed_by": "wizard",
+                "base_hash": h, "base_content_hash": ch, "current_hash_last_seen": h,
+                "local_modifications": "not_recommended",
+                "merge_strategy": "warn_on_drift",  # STALE manifest value
+                "source_refs": [],
+            }},
+        }
+        target_contract = {"quality/rules_library.md": {
+            "relpath": "quality/rules_library.md", "delivery": "wizard",
+            "merge_strategy": "operator_review",
+        }}
+        report = compute_drift_report(self.tmp, manifest, "v0.6.1",
+                                      target_contract=target_contract)
+        self.assertEqual(
+            report.entries[0].merge_strategy, "operator_review",
+            "plan ignored target-contract precedence; would mislabel a stale warn_on_drift file "
+            "the apply will actually operator_review",
+        )
 
     def test_three_way_drift_plan_action_reflects_landed_merge_driver(self):
         # The plan-only action text for a drifted three_way doc must reflect that the
