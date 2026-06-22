@@ -1049,5 +1049,134 @@ class DriftReportReconciliationTests(_Base):
         self.assertNotIn("follow-on", action.lower())
 
 
+class MergeSurfaceTests(_Base):
+    """The merge surface MUST be sourced from the TARGET bundle's
+    managed-artifacts contract (system-artifacts.json, delivery=='wizard'), NOT from
+    _render_version(current).keys(). Without this, a system whose current bundle
+    predates the operating layer never sees the operating-layer files the target adds
+    (REV-3 G-A): the upgrade reports 'applied' while delivering nothing."""
+
+    def _target_contract(self, *, op_relpath="operating_discipline.md",
+                         op_render_kind="copy", include_collision_only=False):
+        """A minimal target system-artifacts.json: the six foundation docs (delivery
+        wizard) PLUS one operating-layer file the current (foundation-only) version
+        never rendered. render_kind on the operating file is parametrized so the
+        capsule-replay branch can be exercised."""
+        artifacts = [
+            {"delivery": "wizard", "relpath": d, "render_kind": "render",
+             "merge_strategy": "three_way",
+             "template_path": f"templates/{d}"}
+            for d in _TEMPLATE_DOCS
+        ]
+        if not include_collision_only:
+            artifacts.append({
+                "delivery": "wizard", "relpath": op_relpath,
+                "render_kind": op_render_kind, "merge_strategy": "three_way",
+                "template_path": "templates/root/operating_discipline.md",
+            })
+        else:
+            artifacts.append({
+                "delivery": "wizard", "relpath": op_relpath,
+                "render_kind": op_render_kind, "merge_strategy": "three_way",
+                "template_path": "templates/root/operating_discipline.md",
+            })
+        return {
+            "artifacts": artifacts,
+            "bundle_version": "v0.5.0",
+            "contract_id": "system-artifacts",
+            "contract_version": "system-artifacts-v1",
+        }
+
+    def _surface(self, *, target_contract, manifest, base_rendered, theirs_rendered,
+                 proj, capsule):
+        import upgrade_apply as ua
+        return ua.compute_merge_surface(
+            manifest, target_contract, base_rendered, theirs_rendered,
+            Path(proj), capsule,
+        )
+
+    def _setup(self, roster="A"):
+        """A v0.4.0-style operator project (foundation-only manifest + v1 capsule) and a
+        rendered base/theirs for the six foundation docs."""
+        build_root, reg = _write_build_repo(self.tmp)
+        proj, mp, strat = _build_operator_project(self.tmp, build_root, roster=roster)
+        manifest = json.loads(_read(mp))
+        base = {r.operator_relpath: r.content
+                for r in render_foundation_docs("v0.4.0", _CAPSULE_INPUTS, build_root)}
+        theirs = {r.operator_relpath: r.content
+                  for r in render_foundation_docs("v0.5.0", _CAPSULE_INPUTS, build_root)}
+        capsule = json.loads(_read(proj / ".wizard" / "replay-capsule.json"))
+        return build_root, proj, manifest, base, theirs, capsule
+
+    def test_merge_surface_includes_new_in_target_files(self):
+        """THE bug: an operating-layer file present in the target contract but NOT in the
+        operator manifest must appear on the surface classified `new`, never silently
+        dropped. Uses render_kind copy so the capsule-replay branch does not intercept."""
+        from upgrade_apply import SURFACE_NEW
+        _, proj, manifest, base, theirs, capsule = self._setup()
+        contract = self._target_contract(op_relpath="operating_discipline.md",
+                                          op_render_kind="copy")
+        surface = self._surface(target_contract=contract, manifest=manifest,
+                                base_rendered=base, theirs_rendered=theirs,
+                                proj=proj, capsule=capsule)
+        by_rel = {e.relpath: e for e in surface}
+        self.assertIn("operating_discipline.md", by_rel,
+                      "operating-layer target file silently dropped from the surface (REV-3 G-A)")
+        self.assertEqual(by_rel["operating_discipline.md"].classification, SURFACE_NEW)
+
+    def test_surface_source_is_target_manifest_not_current_render(self):
+        """The surface derives from the TARGET contract, not from what the current version
+        renders. Proof: the current render carries ONLY the six foundation docs, yet the
+        surface includes a target-only operating-layer file. A surface built from
+        _render_version(current).keys() could not contain it."""
+        from upgrade_apply import SURFACE_NEW
+        _, proj, manifest, base, theirs, capsule = self._setup()
+        # current render surface == the six foundation docs only.
+        self.assertEqual(set(base), set(_TEMPLATE_DOCS) | {"prd.md"})
+        contract = self._target_contract(op_relpath="agents/prompts/coordinator_prompt.md",
+                                          op_render_kind="copy")
+        surface = self._surface(target_contract=contract, manifest=manifest,
+                                base_rendered=base, theirs_rendered=theirs,
+                                proj=proj, capsule=capsule)
+        rels = {e.relpath for e in surface}
+        self.assertIn("agents/prompts/coordinator_prompt.md", rels)
+        new_rels = {e.relpath for e in surface if e.classification == SURFACE_NEW}
+        self.assertIn("agents/prompts/coordinator_prompt.md", new_rels)
+        # And it is genuinely absent from the current render keys (the OLD surface source).
+        self.assertNotIn("agents/prompts/coordinator_prompt.md", set(base))
+
+    def test_new_file_collision_detected(self):
+        """A `new` target path where an UNMANAGED file already exists on disk is classified
+        a collision (refuse/sidecar) — never silently adopted/overwritten (REV-2 C1c)."""
+        from upgrade_apply import SURFACE_COLLISION
+        _, proj, manifest, base, theirs, capsule = self._setup()
+        # Plant an unmanaged file at the target's new path.
+        (Path(proj) / "operating_discipline.md").write_text(
+            "operator's own pre-existing file\n", encoding="utf-8")
+        contract = self._target_contract(op_relpath="operating_discipline.md",
+                                          op_render_kind="copy")
+        surface = self._surface(target_contract=contract, manifest=manifest,
+                                base_rendered=base, theirs_rendered=theirs,
+                                proj=proj, capsule=capsule)
+        by_rel = {e.relpath: e for e in surface}
+        self.assertEqual(by_rel["operating_discipline.md"].classification, SURFACE_COLLISION,
+                         "unmanaged file at a new target path was not flagged as a collision")
+
+    def test_render_kind_new_file_with_v1_capsule_needs_capsule_not_crash(self):
+        """A render-kind operating-layer NEW file whose theirs needs the capsule operating
+        block, with a v1 (foundation-only) capsule, is surfaced as needs_capsule_upgrade —
+        graceful, no crash (a follow-on task upgrades the capsule)."""
+        from upgrade_apply import SURFACE_NEEDS_CAPSULE
+        from replay_capsule import capsule_supports_operating_replay
+        _, proj, manifest, base, theirs, capsule = self._setup()
+        self.assertFalse(capsule_supports_operating_replay(capsule), "fixture capsule should be v1")
+        contract = self._target_contract(op_relpath="CLAUDE.md", op_render_kind="render")
+        surface = self._surface(target_contract=contract, manifest=manifest,
+                                base_rendered=base, theirs_rendered=theirs,
+                                proj=proj, capsule=capsule)
+        by_rel = {e.relpath: e for e in surface}
+        self.assertEqual(by_rel["CLAUDE.md"].classification, SURFACE_NEEDS_CAPSULE)
+
+
 if __name__ == "__main__":
     unittest.main()

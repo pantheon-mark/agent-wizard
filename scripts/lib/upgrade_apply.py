@@ -48,7 +48,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from generator import render_foundation_docs  # type: ignore
-from replay_capsule import REPLAY_CAPSULE_REL  # type: ignore
+from replay_capsule import REPLAY_CAPSULE_REL, capsule_supports_operating_replay  # type: ignore
 from section_merge import section_three_way_merge  # type: ignore
 from upgrade import (  # type: ignore
     MERGE_STRATEGY_FROZEN,
@@ -130,6 +130,10 @@ class UpgradeApplyResult:
     files_written: List[str] = field(default_factory=list)
     files_in_review: List[str] = field(default_factory=list)
     files_merged: List[str] = field(default_factory=list)
+    # The classified merge surface sourced from the TARGET contract. Carries the
+    # new/collision/dropped/needs-capsule files the foundation-doc loop alone never saw
+    # (REV-3 G-A). The copy-write path for `new` files is a follow-on task.
+    surface: List["SurfaceEntry"] = field(default_factory=list)
 
     @property
     def applied(self) -> bool:
@@ -194,6 +198,181 @@ def _render_version(version: str, inputs: Dict[str, Any], build_repo_root: Path)
     fail-closed refusal (migration-required; never emit a raw placeholder)."""
     records = render_foundation_docs(version, inputs, build_repo_root)
     return {rec.operator_relpath: rec.content for rec in records}
+
+
+# ===== Merge-surface computation + classification =====
+#
+# REV-3 G-A fix. The merge surface MUST be sourced from the TARGET bundle's
+# managed-artifacts contract (system-artifacts.json, delivery=="wizard"), NOT from
+# what the CURRENT version happens to render. A system whose current bundle predates
+# the operating layer (e.g. estate on v0.4.0) renders only foundation docs; sourcing
+# the surface from that render silently drops every operating-layer file the target
+# adds, so the upgrade reports `applied` while delivering nothing. Sourcing from the
+# target contract is what lets a `new` file in the target be seen + staged.
+
+# Surface entry classification.
+SURFACE_NEW = "new"                  # in target, not in operator manifest/disk -> stage for create
+SURFACE_MODIFIED = "modified"        # in both; content or render differs
+SURFACE_UNCHANGED = "unchanged"      # in both; identical
+SURFACE_DROPPED = "dropped"          # in manifest, not in target contract
+SURFACE_COLLISION = "collision"      # `new` target path, but an UNMANAGED file already on disk
+SURFACE_NEEDS_CAPSULE = "needs_capsule_upgrade"  # render-kind operating file, v1 capsule can't replay
+
+# Render kinds (from the contract).
+RENDER_KIND_RENDER = "render"
+RENDER_KIND_COPY = "copy"
+
+CONTRACT_BASENAME = "system-artifacts.json"
+
+
+@dataclass
+class SurfaceEntry:
+    """One file on the computed merge surface."""
+    relpath: str
+    classification: str          # SURFACE_* above
+    render_kind: str             # render | copy | "" (foundation-doc-from-render / dropped)
+    merge_strategy: str
+    in_manifest: bool
+    on_disk: bool
+    reason: str = ""             # operator-facing note (collision / needs-capsule / dropped)
+
+
+def _load_target_contract(target_bundle_dir: Path) -> Optional[Dict[str, Any]]:
+    """Load the target bundle's managed-artifacts contract, or None if the target is a
+    foundation-only bundle (no system-artifacts.json). Stdlib-only; this is the
+    operator/runtime path so it does NOT import the PyYAML-backed build validator."""
+    contract_path = target_bundle_dir / CONTRACT_BASENAME
+    if not contract_path.is_file():
+        return None
+    try:
+        return json.loads(contract_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise UpgradeApplyError(
+            f"the target version's managed-artifacts contract at {contract_path} is not "
+            f"valid JSON: {e}. Cannot apply."
+        ) from e
+
+
+def _manifest_managed_relpaths(manifest: Dict[str, Any]) -> set:
+    block = manifest.get("managed_files") or manifest.get("files") or {}
+    return set(block.keys()) if isinstance(block, dict) else set()
+
+
+def compute_merge_surface(
+    manifest: Dict[str, Any],
+    target_contract: Optional[Dict[str, Any]],
+    base_rendered: Dict[str, str],
+    theirs_rendered: Dict[str, str],
+    operator_project_dir: Path,
+    capsule: Dict[str, Any],
+) -> List[SurfaceEntry]:
+    """Compute the upgrade merge surface from the TARGET bundle's contract (REV-3 G-A).
+
+    Surface = union(base_rendered keys, theirs_rendered keys, target wizard-delivery
+    relpaths). Foundation docs flow through base/theirs render; copy-artifacts +
+    operating-layer render files come from the contract. Each file is classified:
+
+      new        -> in target contract, not in the operator manifest AND not on disk.
+                    UNLESS an UNMANAGED file already exists at that path -> collision
+                    (REV-2 C1c: refuse/sidecar, never silently adopt/overwrite).
+      modified   -> in both manifest and target; content/render differs (best-effort
+                    for render-from-foundation files where we have theirs text).
+      unchanged  -> in both; identical (or no signal to call it modified).
+      dropped    -> in the manifest, not in the target contract / not rendered by target.
+      needs_capsule_upgrade -> a render-kind operating-layer file whose `theirs` needs
+                    the capsule's operating block, but the capsule is v1 (no operating
+                    block). Surfaced + skipped with a reason; NOT a crash (a follow-on task upgrades
+                    the capsule; this is graceful handling only).
+
+    This function does NOT write anything. The actual copy-write path for new/copy
+    files is a follow-on task; this is surface + classification only.
+    """
+    managed = _manifest_managed_relpaths(manifest)
+
+    # Target wizard-delivery contract entries (relpath -> entry). Foundation-only
+    # target (no contract) => empty; the surface then reduces to the rendered docs,
+    # i.e. the pre-existing behavior (graceful).
+    target_entries: Dict[str, Dict[str, Any]] = {}
+    if target_contract:
+        for entry in target_contract.get("artifacts", []):
+            if entry.get("delivery") != "wizard":
+                continue
+            rel = entry.get("relpath")
+            if rel:
+                target_entries[rel] = entry
+
+    operating_replay_ok = capsule_supports_operating_replay(capsule)
+
+    # Foundation-doc render files (those produced by render_foundation_docs) are the
+    # set we have rendered text for. The contract may mark a foundation doc render-kind
+    # "render" too; we treat any relpath present in theirs_rendered/base_rendered as a
+    # foundation-doc render file (replay handled by the existing engine, no operating
+    # block needed).
+    rendered_relpaths = set(base_rendered) | set(theirs_rendered)
+
+    surface_relpaths = rendered_relpaths | set(target_entries) | managed
+    out: List[SurfaceEntry] = []
+
+    for rel in sorted(surface_relpaths):
+        entry = target_entries.get(rel)
+        in_target = rel in target_entries or rel in theirs_rendered
+        in_manifest = rel in managed
+        disk_path = operator_project_dir / rel
+        on_disk = disk_path.exists()
+        render_kind = str(entry.get("render_kind", "")) if entry else ""
+        strategy = str(entry.get("merge_strategy", "")) if entry else ""
+        if not strategy and in_manifest:
+            meta = (manifest.get("managed_files") or manifest.get("files") or {}).get(rel, {})
+            strategy = str(meta.get("merge_strategy", ""))
+
+        # DROPPED: managed by the operator, but the target no longer carries it.
+        if in_manifest and not in_target:
+            out.append(SurfaceEntry(
+                rel, SURFACE_DROPPED, render_kind, strategy, in_manifest, on_disk,
+                reason="the new version no longer carries this file; left in place"))
+            continue
+
+        # In target. Decide new vs modified/unchanged.
+        is_foundation_render = rel in rendered_relpaths
+        if not in_manifest:
+            # The operator does not manage this file yet -> NEW (or a collision).
+            if on_disk:
+                # An unmanaged file already exists here -> never silently overwrite.
+                out.append(SurfaceEntry(
+                    rel, SURFACE_COLLISION, render_kind, strategy, in_manifest, on_disk,
+                    reason="a file already exists at this path that the system does not "
+                           "manage; the new version was NOT applied over it"))
+                continue
+            # Render-kind operating-layer file needing the capsule operating block, but
+            # the capsule is v1 -> surface as needing a capsule upgrade, do not crash.
+            if (render_kind == RENDER_KIND_RENDER
+                    and not is_foundation_render
+                    and not operating_replay_ok):
+                out.append(SurfaceEntry(
+                    rel, SURFACE_NEEDS_CAPSULE, render_kind, strategy, in_manifest, on_disk,
+                    reason="this new file is built from recorded setup values that this "
+                           "system's setup record does not yet carry; it will be available "
+                           "after the setup record is upgraded"))
+                continue
+            out.append(SurfaceEntry(
+                rel, SURFACE_NEW, render_kind, strategy, in_manifest, on_disk))
+            continue
+
+        # In both manifest and target. For foundation-doc render files we have theirs
+        # text and can detect modification by content hash; for contract-only files we
+        # lack rendered theirs here (produced by a follow-on task), so default to unchanged-with-signal.
+        if is_foundation_render and rel in theirs_rendered and rel in base_rendered:
+            differs = (_content_hash(theirs_rendered[rel]) != _content_hash(base_rendered[rel]))
+            out.append(SurfaceEntry(
+                rel,
+                SURFACE_MODIFIED if differs else SURFACE_UNCHANGED,
+                render_kind, strategy, in_manifest, on_disk))
+        else:
+            out.append(SurfaceEntry(
+                rel, SURFACE_UNCHANGED, render_kind, strategy, in_manifest, on_disk,
+                reason="copy/operating-layer file; disposition computed by the per-file "
+                       "engine (write path is a follow-on task)"))
+    return out
 
 
 # ===== Replay-conformance gate =====
@@ -442,6 +621,19 @@ def apply_upgrade(
     # major/structural release that renames/reorders sections). Wired in Phase 4.
     auto_merge_enabled = _auto_merge_enabled(migration, current_version, target_version)
 
+    # --- 3b. Compute the merge surface from the TARGET contract (REV-3 G-A) -----
+    # Source-of-truth = the target bundle's system-artifacts.json (delivery=="wizard"),
+    # NOT _render_version(current).keys(). This is what surfaces operating-layer + copy
+    # files the current bundle never rendered, so a system upgrading FROM a
+    # pre-operating-layer bundle (e.g. estate on v0.4.0) actually sees them instead of
+    # silently delivering nothing. This classifies the surface; the write path
+    # for new/copy/operating-layer files.
+    target_contract = _load_target_contract(target_bundle_dir)
+    surface = compute_merge_surface(
+        manifest, target_contract, base_rendered, theirs_rendered,
+        operator_project_dir, capsule,
+    )
+
     # --- 4. Per-file decisions ------------------------------------------------
     decisions: List[FileDecision] = []
     upgrade_id = f"{current_version}-to-{target_version}"
@@ -664,6 +856,7 @@ def apply_upgrade(
         files_written=files_written,
         files_in_review=files_in_review,
         files_merged=files_merged,
+        surface=surface,
     )
 
 
