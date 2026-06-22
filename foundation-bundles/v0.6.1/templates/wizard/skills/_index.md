@@ -9,6 +9,18 @@ Skill file templates the wizard uses when generating skills for the user's Syste
 | `skill_template_external.md` | Template for skills that make external MCP or API calls. Includes the degradation path baked in: local output fallback write location and plain-language action prompt template for when the MCP call fails. |
 | `skill_template_internal.md` | Template for internal-only skills that only read/write local files. No degradation logic — internal skills have no external dependency. |
 
+## Prebuilt operating skills
+
+These skills ship ready to use. Ask the system in plain language and it picks the right one.
+
+| Skill file | What it does |
+|--------------|-------------|
+| `orientation.md` | Tells you where things stand, whether the system is waiting on you, and the single next step. |
+| `health-check.md` | Gives a fast, plain-language read on whether the system is in good shape. |
+| `next-phase.md` | Builds the next phase of work once the current one is accepted. |
+| `pause.md` | Stops the work cleanly and writes a handoff so you can pick up later. |
+| `check-for-updates.md` | Checks whether a newer version of the system is available and, with your OK, applies it safely. |
+
 ## Skill requirements (both templates)
 
 All generated skill files must pass the four agent-readiness criteria:

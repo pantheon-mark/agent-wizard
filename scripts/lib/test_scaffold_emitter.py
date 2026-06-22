@@ -461,5 +461,69 @@ class SessionStartUpgradeNoticeTests(unittest.TestCase):
                       f"SessionStart hook command does not invoke upgrade_notice.sh: {cmd!r}")
 
 
+class CheckForUpdatesSkillDeliveryTests(unittest.TestCase):
+    """The check-for-updates operator skill ships exactly like the other
+    operating-layer skills (health-check / next-phase / orientation / pause):
+    contracted with delivery=wizard + a clobber-appropriate merge strategy, and
+    emitted to the operator project by the operator-fill layer alongside them."""
+
+    BUNDLE_VERSION = "v0.6.1"
+    SKILL_RELPATH = "wizard/skills/check-for-updates.md"
+    # Strategies safe for a wizard-owned file the operator may have customized:
+    # the upgrade must never silently clobber an operator's edited copy.
+    CLOBBER_SAFE_STRATEGIES = ("warn_on_drift", "operator_review")
+
+    @classmethod
+    def setUpClass(cls):
+        import json as _json
+        wizard_root = Path(__file__).resolve().parents[2]
+        contract_path = (wizard_root / "foundation-bundles" / cls.BUNDLE_VERSION
+                         / "system-artifacts.json")
+        cls.contract = _json.loads(contract_path.read_text(encoding="utf-8"))
+        cls.entries = cls.contract["files"] if "files" in cls.contract else cls.contract.get("artifacts", [])
+
+    def _entry(self, relpath):
+        return next((e for e in self.entries if e.get("relpath") == relpath), None)
+
+    def test_skill_is_contracted_with_wizard_delivery_and_clobber_safe_strategy(self):
+        entry = self._entry(self.SKILL_RELPATH)
+        self.assertIsNotNone(
+            entry,
+            f"{self.SKILL_RELPATH} is not in the {self.BUNDLE_VERSION} system-artifacts contract",
+        )
+        self.assertEqual(entry.get("delivery"), "wizard",
+                         "check-for-updates skill must be delivery=wizard like the other skills")
+        self.assertIn(
+            entry.get("merge_strategy"), self.CLOBBER_SAFE_STRATEGIES,
+            "check-for-updates skill must carry a clobber-safe merge strategy "
+            f"(one of {self.CLOBBER_SAFE_STRATEGIES}), not silently overwrite an operator's copy",
+        )
+        # Same shape as the sibling skills: a verbatim copy of the template.
+        self.assertEqual(entry.get("render_kind"), "copy")
+        self.assertEqual(entry.get("template_path"),
+                         f"templates/{self.SKILL_RELPATH}")
+
+    def test_skill_emitted_alongside_the_other_operating_layer_skills(self):
+        from operator_fill_emitter import emit_operator_fill_templates
+        contract = load_contract(default_contract_path())
+        plan = validate_emission_plan(
+            {**_valid_plan(), "bundle_version": self.BUNDLE_VERSION}, contract)
+        with tempfile.TemporaryDirectory() as td:
+            staging = Path(td)
+            emit_operator_fill_templates(plan, staging, REPO_ROOT)
+            skills_dir = staging / "wizard" / "skills"
+            self.assertTrue(
+                (skills_dir / "check-for-updates.md").exists(),
+                "check-for-updates.md not emitted to the operator project",
+            )
+            # It ships next to the other operating-layer skills, not on its own.
+            for sibling in ("health-check.md", "next-phase.md",
+                            "orientation.md", "pause.md"):
+                self.assertTrue(
+                    (skills_dir / sibling).exists(),
+                    f"sibling operating-layer skill missing from emit: {sibling}",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

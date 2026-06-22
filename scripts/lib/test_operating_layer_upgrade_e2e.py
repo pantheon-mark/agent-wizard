@@ -288,6 +288,8 @@ class OperatingLayerUpgradeE2E(unittest.TestCase):
     _OL_DELTA_NEW_SKILL = "wizard/skills/health-check.md"       # brand-new copy file
     _OL_DELTA_CHANGED_RENDER = "operating_discipline.md"        # render doc gains a section
     _OL_DELTA_CHANGED_COPY = "wizard/skills/pause.md"           # one-line copy change
+    _OL_DELTA_NEW_UPDATES_SKILL = "wizard/skills/check-for-updates.md"  # brand-new copy file
+    _OL_DELTA_CHANGED_SKILLS_INDEX = "wizard/skills/_index.md"  # index gains the new skill row
 
     def test_regimeB_positive_delivery_exact_path_set_on_v2_emit(self):
         """POSITIVE DELIVERY (was the FINDING canary). On a real v0.6.0 -> v0.6.1 apply of
@@ -319,6 +321,10 @@ class OperatingLayerUpgradeE2E(unittest.TestCase):
             "CLAUDE.md",
             ".claude/settings.json",
             ".claude/upgrade_notice.sh",
+            # check-for-updates operating skill (new in v0.6.1) + the skills index that
+            # now lists it: both ship so the operator discovers the capability.
+            self._OL_DELTA_NEW_UPDATES_SKILL,
+            self._OL_DELTA_CHANGED_SKILLS_INDEX,
         }
         self.assertEqual(
             set(res.files_written), expected_written,

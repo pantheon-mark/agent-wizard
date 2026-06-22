@@ -19,6 +19,10 @@ artifact_notes:
     benefit: "Updates the operating guidelines your system follows day to day."
   wizard/skills/pause.md:
     benefit: "Improves the pause skill so your system handles interruptions more reliably."
+  wizard/skills/check-for-updates.md:
+    benefit: "Adds a safe way to ask your system to check for updates and apply them with your OK."
+  wizard/skills/_index.md:
+    benefit: "Updates the list of built-in skills so the new ones are easy to find."
 
 migrations:
   - from: v0.6.0

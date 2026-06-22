@@ -52,8 +52,12 @@ _MOD_PAUSE = "wizard/skills/pause.md"
 _MOD_CLAUDE_MD = "CLAUDE.md"
 _MOD_SETTINGS = ".claude/settings.json"
 _NEW_NOTICE = ".claude/upgrade_notice.sh"
+# check-for-updates operating skill (new in v0.6.1) + the skills index that now lists it.
+_NEW_UPDATES_SKILL = "wizard/skills/check-for-updates.md"
+_MOD_SKILLS_INDEX = "wizard/skills/_index.md"
 _EXPECTED_CHANGE_SET = {_NEW_SKILL, _MOD_DISCIPLINE, _MOD_PAUSE,
-                        _MOD_CLAUDE_MD, _MOD_SETTINGS, _NEW_NOTICE}
+                        _MOD_CLAUDE_MD, _MOD_SETTINGS, _NEW_NOTICE,
+                        _NEW_UPDATES_SKILL, _MOD_SKILLS_INDEX}
 
 
 def _have_prereqs() -> bool:

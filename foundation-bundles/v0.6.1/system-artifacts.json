@@ -1192,6 +1192,14 @@
       "relpath": "wizard/skills/health-check.md",
       "render_kind": "copy",
       "template_path": "templates/wizard/skills/health-check.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "wizard/skills/check-for-updates.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/skills/check-for-updates.md"
     }
   ],
   "bundle_version": "v0.6.1",

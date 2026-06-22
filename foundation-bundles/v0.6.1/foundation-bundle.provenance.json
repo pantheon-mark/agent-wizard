@@ -33,11 +33,11 @@
       "path": "manifest.yaml"
     },
     {
-      "hash": "sha256:6b2cae78a807a71db12384faf88c098a835806e2ba4559608b4943c24e61df4e",
+      "hash": "sha256:f8b587697443f7089619bbd8998d64b08cb510faa50c98d0e40bb78a9a2777c3",
       "path": "migration-manifest.json"
     },
     {
-      "hash": "sha256:8566094839eecb5d050cdabbbc760b508e2e195119a6400f900d8f5fac3d30f0",
+      "hash": "sha256:357ff9ea122ca0b04a7b873be125274c967055ea1b39934d76285d2f4018913a",
       "path": "migration-manifest.yaml"
     },
     {
@@ -45,7 +45,7 @@
       "path": "schemas/section-schema.yaml"
     },
     {
-      "hash": "sha256:eae9995576b4417ce7ec5f4b5f9969411ff0aa4535ed638f907dff2b6b659a77",
+      "hash": "sha256:27aa42ea3ac61ed50fed2fb9f3374b9084499e214db0534e27628fed465446e7",
       "path": "system-artifacts.json"
     },
     {
@@ -301,8 +301,12 @@
       "path": "templates/wizard/review_prompts/post_wizard_review.md"
     },
     {
-      "hash": "sha256:7e46a7e1c7612a6050d0634b238a62f9b4842a176f7e0c4cc47bac212d9a57ed",
+      "hash": "sha256:07c7d23ce004224fcf54e8e67e437dffaa263d9d2d932d261707a184b6ddcfff",
       "path": "templates/wizard/skills/_index.md"
+    },
+    {
+      "hash": "sha256:b522e59afb5f101692cbe51ce30ef0da25ef887dd3a9f1c3e49e1177e54d393d",
+      "path": "templates/wizard/skills/check-for-updates.md"
     },
     {
       "hash": "sha256:c70db33fce6105d4d5ea502253318d0a4f4015fa91e0509523c65e908b81535d",
@@ -350,8 +354,8 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-06-22T22:16:03Z",
-  "generator_version": "57219cb8a5bed1ab0827368177e68bd8f6a1b13b",
+  "generated_at": "2026-06-22T22:43:23Z",
+  "generator_version": "763b6b62364e209f51a818f1c2e3a59c3bca36ab",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.6.1",
