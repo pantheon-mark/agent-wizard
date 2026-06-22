@@ -35,13 +35,16 @@ from upgrade import (  # noqa: E402
 )
 from upgrade_apply import (  # noqa: E402
     _render_operating_layer,
+    _inject_hooks_for_copy_file,
     _replay_conformance_check,
     _foundation_managed_entries,
     _render_version,
     LIVE_LINEAGE_VERSION_FIELD,
     RENDER_KIND_RENDER,
+    RENDER_KIND_COPY,
     CONTRACT_BASENAME,
 )
+from bundle_templates import read_bundle_template  # noqa: E402
 from replay_capsule import (  # noqa: E402
     REPLAY_CAPSULE_REL,
     CAPSULE_SCHEMA_VERSION_FOUNDATION_ONLY,
@@ -56,6 +59,9 @@ SHAPE = "markdown-CC"
 SOURCE_VERSION = "v0.6.0"          # the version the manual operating layer came from
 _GEN_OVERRIDE = "c3b5609fbbe566d73f3097ff0d1cd087dfe19245"
 PROJECT_NAME = "operator-system"
+# A FIXED past emit date, chosen to differ from any real today() the suite runs on, so a
+# regeneration that stamps today() diverges from the recorded foundation base_hashes.
+PAST_DATE = "2024-01-02"
 
 
 def _content_hash(text: str) -> str:
@@ -87,6 +93,21 @@ def _operating_render_relpaths() -> list:
     )
 
 
+def _operating_copy_relpaths() -> list:
+    """The operating-layer `render_kind:copy` relpaths the source bundle carries
+    (delivery == wizard, with a real bundle template_path — control-plane-emitted
+    entries carry no template and are not bundle-sourced)."""
+    contract = json.loads(
+        (REPO_ROOT / "wizard" / "foundation-bundles" / SOURCE_VERSION / CONTRACT_BASENAME)
+        .read_text(encoding="utf-8"))
+    return sorted(
+        e["relpath"] for e in contract.get("artifacts", [])
+        if e.get("delivery") == "wizard"
+        and e.get("render_kind") == RENDER_KIND_COPY
+        and e.get("template_path") is not None
+    )
+
+
 @unittest.skipUnless(
     _have_prereqs(),
     f"requires the preserved pilot transcript at {TRANSCRIPT} and the {SOURCE_VERSION} bundle",
@@ -107,6 +128,17 @@ class UpgradeMigrateTests(unittest.TestCase):
             str(TRANSCRIPT), SHAPE, str(proj), str(REPO_ROOT),
             project_name=PROJECT_NAME, bundle_version=SOURCE_VERSION,
             generator_version_override=_GEN_OVERRIDE,
+        )
+        return proj
+
+    def _emit_v060_at(self, proj: Path, *, clock) -> Path:
+        """Emit a v0.6.0 system whose volatile globals (LAST_UPDATED_DATE /
+        MANUAL_LAST_UPDATED) are stamped from `clock` — used to force a FIXED past emit
+        date so a later regeneration at today() exercises the date-stability path."""
+        cli.cmd_emit_system(
+            str(TRANSCRIPT), SHAPE, str(proj), str(REPO_ROOT),
+            project_name=PROJECT_NAME, bundle_version=SOURCE_VERSION,
+            generator_version_override=_GEN_OVERRIDE, clock=clock,
         )
         return proj
 
@@ -312,6 +344,173 @@ class UpgradeMigrateTests(unittest.TestCase):
                          "second run changed the manifest bytes")
         self.assertEqual((proj / REPLAY_CAPSULE_REL).read_bytes(), capsule_after_1,
                          "second run changed the capsule bytes")
+
+
+    # ======================================================================
+    # FINDING 1 — capsule regeneration must NOT bake in the regeneration-time
+    # date/version. The original emit's LAST_UPDATED_DATE / MANUAL_LAST_UPDATED /
+    # WIZARD_VERSION must be PRESERVED in the regenerated capsule's
+    # foundation_doc_inputs, or the foundation-doc replay-conformance leg false-fails
+    # (the regenerated foundation docs carry today's date / the regen version and no
+    # longer reproduce the manifest's recorded foundation base_hashes).
+    #
+    # The pre-existing suite missed this because it emits + regenerates the SAME
+    # source system in ONE run on ONE date at the SAME bundle_version, so the volatile
+    # values matched by luck. This test FORCES the split: emit at a FIXED PAST date,
+    # then regenerate (via the migration) at the REAL today() date, and prove the
+    # foundation values are carried from the original capsule + the gate still passes.
+
+    def test_migrate_preserves_original_volatile_inputs_on_regen(self):
+        from datetime import date
+        proj = self._emit_v060_at(self.tmp / "volatile", clock=lambda: PAST_DATE)
+        # Premise: TODAY differs from the fixed original emit date, so a regeneration
+        # that stamps today() would diverge from the recorded foundation base_hashes.
+        self.assertNotEqual(date.today().isoformat(), PAST_DATE,
+                            "test premise broken: today() == the fixed past date")
+
+        # Record the original capsule's volatile foundation values BEFORE downgrade.
+        cap_path = proj / REPLAY_CAPSULE_REL
+        orig_cap = json.loads(cap_path.read_text(encoding="utf-8"))
+        orig_fdi = dict(orig_cap["foundation_doc_inputs"])
+        self.assertEqual(orig_fdi.get("LAST_UPDATED_DATE"), PAST_DATE)
+        self.assertEqual(orig_fdi.get("MANUAL_LAST_UPDATED"), PAST_DATE)
+        self.assertEqual(orig_fdi.get("WIZARD_VERSION"), SOURCE_VERSION)
+
+        # Downgrade the capsule to v1 (strip the operating block) — preserving the
+        # original foundation_doc_inputs (the original date/version). The migration must
+        # REGENERATE the operating block today() WITHOUT clobbering those values.
+        v1 = {
+            "schema_version": CAPSULE_SCHEMA_VERSION_FOUNDATION_ONLY,
+            "foundation_bundle_version": orig_cap["foundation_bundle_version"],
+            "generator_version": orig_cap["generator_version"],
+            "system_shape": orig_cap["system_shape"],
+            "foundation_only_mode": orig_cap.get("foundation_only_mode", False),
+            "canonicalization_version": orig_cap["canonicalization_version"],
+            "hash_algorithm": orig_cap["hash_algorithm"],
+            "foundation_doc_inputs": orig_fdi,
+        }
+        cap_path.write_text(json.dumps(v1, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        # Roll back operating-render lineage so the migration re-advances them (and so the
+        # operating leg is exercised end to end).
+        mp = proj / ".wizard" / "manifest.json"
+        m = json.loads(mp.read_text())
+        fb = m["managed_files"]
+        for rel in _operating_render_relpaths():
+            if rel in fb:
+                fb[rel][LIVE_LINEAGE_VERSION_FIELD] = "v0.4.0"
+        mp.write_text(json.dumps(m, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        # Run the migration — capsule REGENERATION happens at today() (!= PAST_DATE) and
+        # at the source bundle_version, the exact split that triggered the bug.
+        res = mig.migrate_pre_v2_system(
+            proj, SOURCE_VERSION, REPO_ROOT,
+            transcript_path=TRANSCRIPT, system_shape=SHAPE, project_name=PROJECT_NAME,
+            generator_version_override=_GEN_OVERRIDE,
+        )
+        self.assertTrue(res.capsule_upgraded_to_v2)
+
+        # (a) The regenerated capsule's foundation_doc_inputs carry the ORIGINAL volatile
+        #     values, NOT today() / the regen-time version.
+        post = json.loads(cap_path.read_text())
+        pfdi = post["foundation_doc_inputs"]
+        self.assertEqual(pfdi.get("LAST_UPDATED_DATE"), PAST_DATE,
+                         "regeneration baked in today()'s date instead of the original")
+        self.assertEqual(pfdi.get("MANUAL_LAST_UPDATED"), PAST_DATE,
+                         "regeneration baked in today()'s manual-update date")
+        self.assertEqual(pfdi.get("WIZARD_VERSION"), SOURCE_VERSION,
+                         "regeneration baked in the regen-time version")
+        # And it is a real v2 capsule (operating block regenerated).
+        self.assertTrue(capsule_supports_operating_replay(post))
+
+        # (b) The replay-conformance gate passes for ALL foundation docs (no false-fail) —
+        #     the foundation leg reproduces every recorded base_hash, AND the operating leg
+        #     reproduces its reconciled base_hashes.
+        manifest = load_operator_manifest(mp)
+        ci = post["foundation_doc_inputs"]
+        base = _render_version(SOURCE_VERSION, ci, REPO_ROOT)
+        foundation_entries = _foundation_managed_entries(manifest, list(base.keys()))
+        # Must NOT raise.
+        _replay_conformance_check(
+            SOURCE_VERSION, ci, REPO_ROOT, foundation_entries,
+            capsule=post, manifest=manifest, project_name=PROJECT_NAME,
+        )
+
+    # ======================================================================
+    # FINDING 2 — the migration must ALSO adopt UNMANAGED copy-kind operating-layer
+    # files whose live == the known bundle payload (verbatim template bytes at
+    # source_version, hook-injection replayed). A manually-applied .claude/* + skills
+    # file is copy-kind and carries no manifest entry; on upgrade it hits the new-file
+    # collision rule instead of being adopted. An operator-EDITED copy (live != known)
+    # must be LEFT unmanaged for the collision/sidecar path.
+
+    def _known_copy_payload(self, rel: str, capsule: dict) -> str:
+        """The known wizard payload for a copy-kind file = verbatim source-version
+        bundle template bytes, with the emitter's deterministic hook-injection replayed
+        (a no-op for non-hook-target files)."""
+        raw = read_bundle_template(SOURCE_VERSION, rel, REPO_ROOT)
+        return _inject_hooks_for_copy_file(rel, raw, capsule, REPO_ROOT)
+
+    def test_migrate_adopts_unmanaged_copy_files_and_leaves_edited(self):
+        proj = self._emit_v060("copyadopt")
+        cap = json.loads((proj / REPLAY_CAPSULE_REL).read_text())
+
+        copy_rels = _operating_copy_relpaths()
+        # Pick MULTIPLE clean unmanaged copies (anti-overfit; not estate-specific) and a
+        # distinct one the operator edited. Use only files that exist on disk in the emit.
+        present = [r for r in copy_rels if (proj / r).exists()]
+        self.assertGreaterEqual(len(present), 3,
+                                "need >=3 copy files on disk to test divergent adoption")
+        adopt_rels = present[:2]            # unmanaged + live == known -> ADOPT
+        edited_rel = present[2]             # unmanaged + operator-edited -> LEAVE
+
+        mp = proj / ".wizard" / "manifest.json"
+        m = json.loads(mp.read_text())
+        fb = m["managed_files"]
+        # Make them UNMANAGED: delete their manifest entries, keep the files on disk.
+        for rel in adopt_rels + [edited_rel]:
+            self.assertIn(rel, fb, f"{rel} should be managed pre-downgrade")
+            del fb[rel]
+        mp.write_text(json.dumps(m, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        # Operator-edit the edited_rel live file (live != known payload).
+        ep = proj / edited_rel
+        ep.write_text(ep.read_text(encoding="utf-8") + "\n# OPERATOR LOCAL EDIT\n",
+                      encoding="utf-8")
+
+        before_bytes = {rel: (proj / rel).read_bytes() for rel in adopt_rels + [edited_rel]}
+
+        res = mig.migrate_pre_v2_system(
+            proj, SOURCE_VERSION, REPO_ROOT,
+            transcript_path=TRANSCRIPT, system_shape=SHAPE, project_name=PROJECT_NAME,
+            generator_version_override=_GEN_OVERRIDE,
+        )
+
+        m2 = json.loads(mp.read_text())
+        fb2 = m2["managed_files"]
+
+        # (a) Each clean unmanaged copy is ADOPTED into the manifest with correct
+        #     base_hash/base_content_hash + warn_on_drift + render_kind copy +
+        #     live_lineage_version == source_version; live bytes UNCHANGED.
+        for rel in adopt_rels:
+            self.assertIn(rel, fb2, f"{rel} not adopted into the manifest")
+            self.assertIn(rel, res.reconciled,
+                          f"{rel} not classified reconciled (adopted)")
+            known = self._known_copy_payload(rel, cap)
+            self.assertEqual(fb2[rel]["base_content_hash"], _content_hash(known))
+            self.assertEqual(fb2[rel]["base_hash"], _full_hash(known))
+            self.assertEqual(fb2[rel]["merge_strategy"], "warn_on_drift")
+            self.assertEqual(fb2[rel]["render_kind"], RENDER_KIND_COPY)
+            self.assertEqual(fb2[rel][LIVE_LINEAGE_VERSION_FIELD], SOURCE_VERSION)
+            self.assertEqual((proj / rel).read_bytes(), before_bytes[rel],
+                             f"migration changed live bytes of adopted copy {rel}")
+
+        # (b) The operator-edited unmanaged copy is NOT adopted (left for the
+        #     collision/sidecar path); live bytes unchanged.
+        self.assertNotIn(edited_rel, fb2,
+                         "operator-edited unmanaged copy was adopted (lost the edit signal)")
+        self.assertIn(edited_rel, res.operator_drift)
+        self.assertEqual((proj / edited_rel).read_bytes(), before_bytes[edited_rel])
 
 
 if __name__ == "__main__":

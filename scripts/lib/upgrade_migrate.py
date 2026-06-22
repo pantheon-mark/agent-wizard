@@ -63,13 +63,25 @@ from upgrade import sha256_bytes, normalize_for_content_hash  # type: ignore
 from upgrade_apply import (  # type: ignore
     UpgradeApplyError,
     RENDER_KIND_RENDER,
+    RENDER_KIND_COPY,
     CONTRACT_BASENAME,
     LIVE_LINEAGE_VERSION_FIELD,
     _render_operating_layer,
+    _inject_hooks_for_copy_file,
     _manifest_managed_relpaths,
 )
+from bundle_templates import read_bundle_template, BundleTemplateError  # type: ignore
 
 MANIFEST_REL = ".wizard/manifest.json"
+
+# Volatile per-build globals the emit pipeline stamps at emit time from the clock + the
+# bundle version (see interview_cli.cmd_emit_system auto_values). On a capsule REGENERATION
+# these would otherwise be RE-stamped with the regeneration-time date + version, so the
+# regenerated foundation_doc_inputs would render foundation docs that no longer reproduce
+# the manifest's recorded base_hashes (the replay-conformance foundation leg false-fails).
+# The migration carries the ORIGINAL build's values forward from the system's existing
+# capsule instead, so a regeneration on any later date reproduces what was first emitted.
+_VOLATILE_BUILD_INPUT_KEYS = ("LAST_UPDATED_DATE", "MANUAL_LAST_UPDATED", "WIZARD_VERSION")
 
 
 # Per-file reconciliation dispositions.
@@ -136,6 +148,41 @@ def _operating_render_relpaths_for(source_version: str, build_repo_root: Path) -
     return sorted(rels)
 
 
+def _operating_copy_entries_for(source_version: str, build_repo_root: Path) -> Dict[str, Dict[str, Any]]:
+    """The operating-layer `render_kind:copy` entries the `source_version` bundle carries
+    that are bundle-sourced (delivery == wizard AND a real `template_path`). Returns
+    {relpath: contract_entry}. Control-plane-emitted copy entries (no template_path, e.g.
+    `.wizard/UPGRADING.md`) are excluded — they are upgrade-machinery, produced by the
+    Python emitter, not adoptable from a frozen template. Empty if the bundle is
+    foundation-only (no contract)."""
+    contract_path = (build_repo_root / "wizard" / "foundation-bundles"
+                     / source_version / CONTRACT_BASENAME)
+    if not contract_path.is_file():
+        return {}
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    out: Dict[str, Dict[str, Any]] = {}
+    for entry in contract.get("artifacts", []):
+        if (entry.get("delivery") == "wizard"
+                and entry.get("render_kind") == RENDER_KIND_COPY
+                and entry.get("template_path") is not None):
+            rel = entry.get("relpath")
+            if rel:
+                out[rel] = entry
+    return out
+
+
+def _known_copy_payload(
+    source_version: str, relpath: str, capsule: Dict[str, Any], build_repo_root: Path
+) -> str:
+    """The KNOWN wizard payload for a copy-kind operating-layer file = the verbatim
+    `source_version` bundle template bytes (NO render), with the emitter's deterministic
+    target-hook injection replayed (a no-op for non-hook-target files). This is exactly
+    what apply_upgrade compares against for a copy file, so an adopted copy baseline is
+    what a subsequent upgrade reproduces."""
+    raw = read_bundle_template(source_version, relpath, build_repo_root)
+    return _inject_hooks_for_copy_file(relpath, raw, capsule, build_repo_root)
+
+
 def build_v2_capsule_from_transcript(
     transcript_path: Path,
     source_version: str,
@@ -144,6 +191,7 @@ def build_v2_capsule_from_transcript(
     system_shape: str,
     project_name: str,
     generator_version_override: Optional[str] = None,
+    preserve_volatile_from: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Regenerate a v2 replay capsule (carrying the `operating` block) from the operator's
     preserved transcript, by re-running the real wizard emit pipeline into a THROWAWAY temp
@@ -153,7 +201,15 @@ def build_v2_capsule_from_transcript(
     The emitted system is full (not foundation-only) at `source_version`, so its capsule is
     schema v2 with the resolved operating inputs the operating-layer render needs. Fail-closed:
     if the emit does not produce a v2 capsule, raise (a v1 result would leave the operating
-    layer un-replayable and is never silently accepted)."""
+    layer un-replayable and is never silently accepted).
+
+    `preserve_volatile_from` (the ORIGINAL build's foundation_doc_inputs): the emit pipeline
+    re-stamps the per-build volatile globals (the build date + the bundle version) at
+    regeneration time. Those render into the foundation docs, so a regeneration on a later
+    date / a different bundle version would no longer reproduce the manifest's recorded
+    foundation base_hashes. We overlay the ORIGINAL values for `_VOLATILE_BUILD_INPUT_KEYS`
+    back into the regenerated foundation_doc_inputs, so the regenerated capsule reproduces
+    exactly what was first emitted regardless of when the regeneration runs."""
     import sys
     scripts_dir = build_repo_root / "wizard" / "scripts"
     for p in (str(scripts_dir / "lib"), str(scripts_dir)):
@@ -189,6 +245,17 @@ def build_v2_capsule_from_transcript(
             f"source version {source_version!r} emit must carry an operating block. No files "
             "were changed."
         )
+
+    # Carry the ORIGINAL build's volatile globals forward (date + version) so the
+    # regenerated capsule reproduces the recorded foundation base_hashes regardless of the
+    # regeneration date / target bundle version. Only keys the original actually carried are
+    # overlaid (a missing key is left as the regeneration emitted it).
+    if preserve_volatile_from:
+        regen_fdi = capsule.get("foundation_doc_inputs")
+        if isinstance(regen_fdi, dict):
+            for k in _VOLATILE_BUILD_INPUT_KEYS:
+                if k in preserve_volatile_from:
+                    regen_fdi[k] = preserve_volatile_from[k]
     return capsule
 
 
@@ -239,10 +306,20 @@ def migrate_pre_v2_system(
             # Already v2: reuse it (idempotent; no regeneration needed).
             capsule = existing_capsule
         else:
+            # Carry the ORIGINAL build's volatile globals (date + version) forward from the
+            # system's existing capsule, so the regenerated foundation_doc_inputs still
+            # reproduce the manifest's recorded foundation base_hashes (the regeneration runs
+            # on a later date / possibly a different target version than the original build).
+            preserve_from: Optional[Dict[str, Any]] = None
+            if isinstance(existing_capsule, dict):
+                _efdi = existing_capsule.get("foundation_doc_inputs")
+                if isinstance(_efdi, dict):
+                    preserve_from = _efdi
             capsule = build_v2_capsule_from_transcript(
                 transcript_path, source_version, build_repo_root,
                 system_shape=system_shape, project_name=project_name,
                 generator_version_override=generator_version_override,
+                preserve_volatile_from=preserve_from,
             )
             capsule_upgraded = True
 
@@ -365,6 +442,107 @@ def migrate_pre_v2_system(
         decisions.append(FileReconcileDecision(
             rel, MIGRATE_RECONCILED,
             note="live == known payload; adopted base_hash/base_content_hash + advanced "
+                 "lineage; live bytes UNCHANGED"))
+
+    # --- 2b. Copy-kind operating-layer reconciliation -----------------------
+    # The estate's manually-applied `.claude/*` + skills files are render_kind:copy and
+    # UNMANAGED (no manifest entry). On upgrade they hit the new-file collision rule
+    # instead of being delivered/adopted. Mirror the render reconciliation for copy files:
+    # the KNOWN payload is the VERBATIM source-bundle template bytes (NO render), with the
+    # emitter's deterministic hook-injection replayed. Same dispositions, same invariant —
+    # adoption only ADDS a manifest entry; live bytes are NEVER rewritten (except the one
+    # additive-create-when-absent-and-collision-free case, matching the render policy).
+    copy_entries = _operating_copy_entries_for(source_version, build_repo_root)
+    for rel, entry in sorted(copy_entries.items()):
+        try:
+            known_text = _known_copy_payload(source_version, rel, capsule, build_repo_root)
+        except BundleTemplateError as e:
+            raise UpgradeApplyError(
+                f"cannot read the source bundle template for copy file {rel!r}: {e}. "
+                "No files were changed."
+            ) from e
+        known_content_hash = _content_hash(known_text)
+        known_full_hash = _full_hash(known_text)
+        live_path = operator_project_dir / rel
+        in_manifest = rel in managed
+        meta = files_block.get(rel) if in_manifest else None
+        strategy = str(entry.get("merge_strategy", "warn_on_drift")) or "warn_on_drift"
+        mode = str(entry.get("mode", "0644"))
+
+        if not live_path.exists():
+            if in_manifest:
+                decisions.append(FileReconcileDecision(
+                    rel, MIGRATE_ABSENT_SKIPPED,
+                    note="managed copy file but missing on disk; left for the normal upgrade"))
+                continue
+            # Absent + unmanaged -> additive, collision-free -> create from known payload.
+            created_writes[rel] = known_text
+            files_block[rel] = {
+                "managed": "true",
+                "managed_by": "shared",
+                "base_hash": known_full_hash,
+                "base_content_hash": known_full_hash,
+                "current_hash_last_seen": known_full_hash,
+                "local_modifications": "expected",
+                "merge_strategy": strategy,
+                "mode": mode,
+                "render_kind": RENDER_KIND_COPY,
+                "source_refs": [],
+                LIVE_LINEAGE_VERSION_FIELD: source_version,
+            }
+            manifest_changed = True
+            decisions.append(FileReconcileDecision(
+                rel, MIGRATE_CREATED,
+                note="absent + additive + collision-free; created from the known copy payload"))
+            continue
+
+        live_text = live_path.read_text(encoding="utf-8")
+        live_content_hash = _content_hash(live_text)
+
+        if live_content_hash != known_content_hash:
+            # OPERATOR DRIFT (or operator-authored file at this path) — never adopt over it;
+            # leave it for the upgrade's collision/sidecar rule to protect.
+            decisions.append(FileReconcileDecision(
+                rel, MIGRATE_OPERATOR_DRIFT,
+                note="live copy differs from the known wizard payload; left unmanaged so the "
+                     "upgrade's collision/sidecar rule protects the operator's file"))
+            continue
+
+        # live == known payload. The copy-kind base_hash and base_content_hash are BOTH the
+        # full-file hash (copy files carry no content-normalized write-only field; this
+        # matches apply_upgrade's new-copy entry, which sets both to the full hash).
+        cur_base_content = str(meta.get("base_content_hash", "")) if meta else ""
+        cur_base_hash = str(meta.get("base_hash", "")) if meta else ""
+        cur_lineage = str(meta.get(LIVE_LINEAGE_VERSION_FIELD, "")) if meta else ""
+        already = (
+            in_manifest
+            and cur_base_content == known_full_hash
+            and cur_base_hash == known_full_hash
+            and cur_lineage == source_version
+        )
+        if already:
+            decisions.append(FileReconcileDecision(
+                rel, MIGRATE_ALREADY, note="manifest copy baseline already reconciled; left untouched"))
+            continue
+
+        new_meta = dict(meta) if meta else {
+            "managed": "true",
+            "managed_by": "shared",
+            "local_modifications": "expected",
+            "merge_strategy": strategy,
+            "mode": mode,
+            "render_kind": RENDER_KIND_COPY,
+            "source_refs": [],
+        }
+        new_meta["base_hash"] = known_full_hash
+        new_meta["base_content_hash"] = known_full_hash
+        new_meta["current_hash_last_seen"] = known_full_hash
+        new_meta[LIVE_LINEAGE_VERSION_FIELD] = source_version
+        files_block[rel] = new_meta
+        manifest_changed = True
+        decisions.append(FileReconcileDecision(
+            rel, MIGRATE_RECONCILED,
+            note="live == known copy payload; adopted base_hash/base_content_hash + advanced "
                  "lineage; live bytes UNCHANGED"))
 
     # --- 3. Write (transactional-ish: capsule + manifest + any created files) ----
