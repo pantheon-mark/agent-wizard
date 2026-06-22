@@ -2,16 +2,24 @@
 
 Drives the script directly via subprocess with synthetic .wizard/manifest.json files
 and a local fixture file as the registry source (via UPGRADE_NOTICE_REGISTRY_URL env
-override pointing at a file:// URL, or UPGRADE_NOTICE_REGISTRY_FILE for a plain path).
+override pointing at a file:// URL).
 
-Test seam: the script honours the env var UPGRADE_NOTICE_REGISTRY_URL to override the
-default public registry URL. By pointing it at an unreachable URL or a file:// path,
-the tests run deterministically without a real network connection.
+Output contract (declarative-hook design): a SessionStart hook's stdout lands
+in the model's session-start context, NOT in a user-visible message. Two prior designs
+failed on live runs: operator-prose-with-paths was SUPPRESSED as "internal detail" by the
+emitted system's "greet plainly / no file names" kickoff; an imperative model-relay
+instruction with secrecy + an external command was CLASSIFIED AS A PROMPT-INJECTION ATTACK
+by the system's own anti-injection/transparency operating-discipline. The fix: the hook
+emits ONE minimal DECLARATIVE JSON line (data, not commands) when a newer version is
+available; the "tell the operator" instruction lives in
+durable config (the emitted CLAUDE.md startup section) which the model already trusts; the
+trust boundary is the in-project upgrade tool, which re-validates against the real registry.
+These tests pin the JSON contract + the absence of injection tells + fail-open silence; the
+live estate-transcript read is the behavioral proof that the model now relays it plainly.
 """
 
 import json
 import os
-import stat
 import subprocess
 import sys
 import tempfile
@@ -67,110 +75,31 @@ def _project_files(project_dir: Path) -> set:
     for f in project_dir.rglob("*"):
         if not f.is_file():
             continue
-        # Skip __pycache__ and .pyc files — Python cache files written by the
-        # interpreter, not by the script under test.
         parts = f.parts
         if "__pycache__" in parts or f.suffix == ".pyc":
             continue
-        # Skip Apple-style python bytecode cache under Library/Caches.
         if "Library" in parts and "Caches" in parts:
             continue
         result.add(str(f))
     return result
 
 
-class UpgradeNoticeOfflineTest(unittest.TestCase):
-    """Script exits 0 silently when the network is unavailable."""
-
-    def test_notice_graceful_offline(self):
-        """Pointing at an unreachable URL: exits 0 with no output and no file changes."""
-        with tempfile.TemporaryDirectory() as td:
-            project_dir = Path(td)
-            _write_manifest(project_dir, "v0.6.0")
-            # Use an invalid/unreachable URL to simulate offline.
-            result = _run_script(project_dir, {
-                "UPGRADE_NOTICE_REGISTRY_URL": "http://127.0.0.1:19999/unreachable.json",
-            })
-            self.assertEqual(result.returncode, 0,
-                             f"script should exit 0 on network failure; got {result.returncode}. "
-                             f"stderr: {result.stderr}")
-            self.assertEqual(result.stdout.strip(), "",
-                             f"script should print nothing on failure; got: {result.stdout!r}")
-            # No new files written (excluding python bytecode caches).
-            non_manifest = [
-                p for p in _project_files(project_dir)
-                if not p.endswith("manifest.json")
-            ]
-            self.assertEqual(non_manifest, [],
-                             f"script wrote unexpected files: {non_manifest}")
+# Injection-signature tells the OUTPUT must never contain (the prior failure mode):
+# imperative assistant instructions, secrecy language, executable commands, file paths.
+_INJECTION_TELLS = (
+    "do not show", "don't show", "do this", "instruction for the assistant",
+    "tell the operator", "the operator cannot see", "quietly",
+    "wizard_upgrade.py", "upgrade-plan", "python3 ", "--manifest-path", "/users/",
+)
 
 
 class UpgradeNoticeNewerAvailableTest(unittest.TestCase):
-    """Script prints a plain-language notice when a newer version is available."""
+    """When a newer version is available, the hook emits ONE declarative JSON line."""
 
-    def test_notice_prints_when_newer_available(self):
-        """With a mock registry showing v0.6.1 and local at v0.6.0, prints a notice."""
-        with tempfile.TemporaryDirectory() as td:
-            project_dir = Path(td)
-            registry_dir = Path(td)
-            _write_manifest(project_dir, "v0.6.0")
-            registry_file = _write_registry_fixture(registry_dir, ["v0.6.0", "v0.6.1"])
-            result = _run_script(project_dir, {
-                "UPGRADE_NOTICE_REGISTRY_URL": f"file://{registry_file}",
-            })
-            self.assertEqual(result.returncode, 0,
-                             f"unexpected exit code {result.returncode}; stderr: {result.stderr}")
-            output = result.stdout.strip()
-            self.assertNotEqual(output, "",
-                                "expected a notice but got no output")
-            # Must name the newer version.
-            self.assertIn("v0.6.1", output,
-                          f"notice should name the newer version; got: {output!r}")
-            # Must not be technical jargon — check for plain-language cues.
-            lower = output.lower()
-            self.assertTrue(
-                any(phrase in lower for phrase in (
-                    "newer version", "new version", "update available", "upgrade available"
-                )),
-                f"notice should mention 'newer version' or similar; got: {output!r}",
-            )
-            # Must tell the operator what to do next (review command mention).
-            self.assertIn("upgrade", lower,
-                          f"notice should mention how to review/apply the upgrade; got: {output!r}")
-
-    def test_notice_carries_the_command_for_the_assistant_to_run(self):
-        """The notice still carries a concrete wizard_upgrade.py command — but for the
-        ASSISTANT to run, not as copy-paste text dumped on the operator."""
-        with tempfile.TemporaryDirectory() as td:
-            project_dir = Path(td)
-            registry_dir = Path(td)
-            _write_manifest(project_dir, "v0.6.0")
-            registry_file = _write_registry_fixture(registry_dir, ["v0.6.0", "v0.6.1"])
-            result = _run_script(project_dir, {
-                "UPGRADE_NOTICE_REGISTRY_URL": f"file://{registry_file}",
-            })
-            output = result.stdout.strip()
-            # The notice should carry the wizard_upgrade.py command.
-            self.assertIn("wizard_upgrade.py", output,
-                          f"notice should carry the upgrade command; got: {output!r}")
-
-
-class UpgradeNoticeModelRelayContractTest(unittest.TestCase):
-    """Model-relay output contract: a SessionStart hook's stdout lands in the
-    model's session-start context, NOT in a user-visible message. The notice only reaches
-    the operator if the model RELAYS it. The original notice was operator-facing prose with
-    raw file paths/commands; the emitted system's 'greet plainly / show no internal details
-    (file names)' orientation suppressed it, so the operator never saw the notice.
-
-    The fix reframes the stdout as an INSTRUCTION TO THE ASSISTANT: relay the availability of
-    an update to the operator in plain language, withholding the paths/command (which are for
-    the assistant to run if the operator says yes). These tests pin that contract shape; the
-    live estate-transcript read is the behavioral proof that the model actually relays it.
-    """
-
-    def _notice_output(self, project_dir: Path, registry_dir: Path) -> str:
+    def _output(self, td: str) -> str:
+        project_dir = Path(td)
         _write_manifest(project_dir, "v0.6.0")
-        registry_file = _write_registry_fixture(registry_dir, ["v0.6.0", "v0.6.1"])
+        registry_file = _write_registry_fixture(Path(td), ["v0.6.0", "v0.6.1"])
         result = _run_script(project_dir, {
             "UPGRADE_NOTICE_REGISTRY_URL": f"file://{registry_file}",
         })
@@ -178,72 +107,43 @@ class UpgradeNoticeModelRelayContractTest(unittest.TestCase):
                          f"unexpected exit code {result.returncode}; stderr: {result.stderr}")
         return result.stdout.strip()
 
-    def test_notice_addresses_the_assistant_and_instructs_relay(self):
-        """The stdout is framed as an instruction to the assistant to TELL/RELAY the operator
-        (not operator-facing prose). It must name the assistant audience and a relay verb."""
+    def test_emits_declarative_json_when_newer_available(self):
+        """stdout is a single JSON object with the upgrade-notice event + the versions."""
         with tempfile.TemporaryDirectory() as td:
-            output = self._notice_output(Path(td), Path(td))
-            lower = output.lower()
-            self.assertIn("assistant", lower,
-                          f"notice must address the assistant (its real audience); got: {output!r}")
-            self.assertTrue(
-                any(p in lower for p in ("tell the operator", "tell them", "relay")),
-                f"notice must instruct the assistant to relay to the operator; got: {output!r}",
-            )
+            output = self._output(td)
+            try:
+                payload = json.loads(output)
+            except json.JSONDecodeError as e:
+                self.fail(f"stdout is not a single JSON object: {e}; got: {output!r}")
+            self.assertEqual(payload.get("wizard_system_event"), "upgrade_notice",
+                             f"payload must be tagged wizard_system_event=upgrade_notice; got: {payload!r}")
+            self.assertIs(payload.get("update_available"), True,
+                          f"update_available must be boolean true; got: {payload!r}")
+            self.assertEqual(payload.get("latest_version"), "v0.6.1",
+                             f"latest_version must name the newer version; got: {payload!r}")
+            self.assertEqual(payload.get("current_version"), "v0.6.0",
+                             f"current_version must name the local version; got: {payload!r}")
 
-    def test_notice_instructs_relay_in_plain_language(self):
-        """The relay instruction must require plain, non-technical language for the operator."""
+    def test_output_is_pure_data_with_no_injection_tells(self):
+        """The output must carry NONE of the prompt-injection tells that got the prior
+        design flagged as an attack: no imperative assistant instructions, no secrecy,
+        no executable command, no file paths."""
         with tempfile.TemporaryDirectory() as td:
-            output = self._notice_output(Path(td), Path(td))
-            lower = output.lower()
-            self.assertIn("plain", lower,
-                          f"notice must instruct plain-language relay; got: {output!r}")
-
-    def test_notice_instructs_withholding_paths_from_operator(self):
-        """The notice must explicitly instruct the assistant NOT to show the operator the
-        raw paths/command — those are for the assistant to run. This is what un-suppresses
-        the notice under a 'show no internal details (file names)' orientation."""
-        with tempfile.TemporaryDirectory() as td:
-            output = self._notice_output(Path(td), Path(td))
-            lower = output.lower()
-            self.assertTrue(
-                ("do not show" in lower) or ("don't show" in lower) or ("not show the operator" in lower),
-                f"notice must instruct withholding detail from the operator; got: {output!r}",
-            )
-            self.assertTrue(
-                any(p in lower for p in ("path", "command")),
-                f"the withholding instruction must reference the paths/command; got: {output!r}",
-            )
-
-    def test_notice_describes_what_the_update_improves(self):
-        """The relay must convey WHAT the update improves in operator terms (so the operator
-        can decide), not just that 'a version' exists."""
-        with tempfile.TemporaryDirectory() as td:
-            output = self._notice_output(Path(td), Path(td))
-            lower = output.lower()
-            self.assertTrue(
-                any(p in lower for p in ("operating", "skill", "safety", "how your system runs",
-                                         "how this system runs")),
-                f"notice should say what the update improves in operator terms; got: {output!r}",
-            )
-
-    def test_notice_names_the_newer_version(self):
-        with tempfile.TemporaryDirectory() as td:
-            output = self._notice_output(Path(td), Path(td))
-            self.assertIn("v0.6.1", output,
-                          f"notice must name the newer version; got: {output!r}")
+            lower = self._output(td).lower()
+            present = [t for t in _INJECTION_TELLS if t in lower]
+            self.assertEqual(present, [],
+                             f"output contains injection-signature tells {present}; "
+                             f"it must be pure declarative data")
 
 
 class UpgradeNoticeCurrentTest(unittest.TestCase):
-    """Script exits 0 silently when the local version is current."""
+    """Script exits 0 silently when the local version is current or ahead."""
 
     def test_notice_silent_when_current(self):
-        """When registry latest == local version, exits 0 with no output."""
         with tempfile.TemporaryDirectory() as td:
             project_dir = Path(td)
-            registry_dir = Path(td)
             _write_manifest(project_dir, "v0.6.0")
-            registry_file = _write_registry_fixture(registry_dir, ["v0.6.0"])
+            registry_file = _write_registry_fixture(Path(td), ["v0.6.0"])
             result = _run_script(project_dir, {
                 "UPGRADE_NOTICE_REGISTRY_URL": f"file://{registry_file}",
             })
@@ -253,12 +153,10 @@ class UpgradeNoticeCurrentTest(unittest.TestCase):
                              f"should be silent when current; got: {result.stdout!r}")
 
     def test_notice_silent_when_local_is_newer(self):
-        """When local version is ahead of registry, exits 0 with no output."""
         with tempfile.TemporaryDirectory() as td:
             project_dir = Path(td)
-            registry_dir = Path(td)
             _write_manifest(project_dir, "v0.6.1")
-            registry_file = _write_registry_fixture(registry_dir, ["v0.6.0"])
+            registry_file = _write_registry_fixture(Path(td), ["v0.6.0"])
             result = _run_script(project_dir, {
                 "UPGRADE_NOTICE_REGISTRY_URL": f"file://{registry_file}",
             })
@@ -267,61 +165,34 @@ class UpgradeNoticeCurrentTest(unittest.TestCase):
                              f"should be silent when local is newer; got: {result.stdout!r}")
 
 
-class UpgradeNoticeReadOnlyTest(unittest.TestCase):
-    """Script never writes files and never eval's fetched content."""
+class UpgradeNoticeOfflineTest(unittest.TestCase):
+    """Script exits 0 silently when the network is unavailable (fail-open)."""
 
-    def test_notice_read_only(self):
-        """After running with a newer version available, no files are changed or created."""
+    def test_notice_graceful_offline(self):
         with tempfile.TemporaryDirectory() as td:
             project_dir = Path(td)
-            registry_dir = Path(td)
             _write_manifest(project_dir, "v0.6.0")
-            registry_file = _write_registry_fixture(registry_dir, ["v0.6.0", "v0.6.1"])
-            # Record files before (excluding Python bytecode caches).
-            files_before = {p: Path(p).read_bytes() for p in _project_files(project_dir)}
-            _run_script(project_dir, {
-                "UPGRADE_NOTICE_REGISTRY_URL": f"file://{registry_file}",
+            result = _run_script(project_dir, {
+                "UPGRADE_NOTICE_REGISTRY_URL": "http://127.0.0.1:19999/unreachable.json",
             })
-            # Check no new files were written (beyond what existed before, excl. caches).
-            files_after = _project_files(project_dir)
-            new_files = files_after - set(files_before.keys())
-            self.assertEqual(new_files, set(),
-                             f"script wrote new files: {new_files}")
-            # Check existing files were not modified.
-            for path_str, before_bytes in files_before.items():
-                p = Path(path_str)
-                if not p.is_file():
-                    continue
-                after_bytes = p.read_bytes()
-                self.assertEqual(before_bytes, after_bytes,
-                                 f"script modified file: {path_str}")
-
-    def test_script_contains_no_eval_of_fetched_content(self):
-        """The script source must not exec/eval fetched network content."""
-        script_text = SCRIPT_PATH.read_text(encoding="utf-8")
-        # 'eval' of fetched content would be a security issue. We permit 'eval'
-        # as a keyword only if not being used on fetched data. The safest check:
-        # the script must not pass the fetched body to eval/exec directly.
-        # We grep for the dangerous pattern rather than banning 'eval' entirely
-        # (it may appear in comments/strings).
-        lower = script_text.lower()
-        # Check there is no "eval $(...curl...)" or "eval $fetch" pattern.
-        import re
-        # Match eval followed by something that resembles a fetch variable.
-        dangerous_eval = re.search(r'\beval\s+\$\(?.*?(?:curl|wget|fetch|registry)\b',
-                                   script_text, re.IGNORECASE | re.DOTALL)
-        self.assertIsNone(dangerous_eval,
-                          "script appears to eval fetched content — security issue")
+            self.assertEqual(result.returncode, 0,
+                             f"script should exit 0 on network failure; got {result.returncode}. "
+                             f"stderr: {result.stderr}")
+            self.assertEqual(result.stdout.strip(), "",
+                             f"script should print nothing on failure; got: {result.stdout!r}")
+            non_manifest = [
+                p for p in _project_files(project_dir) if not p.endswith("manifest.json")
+            ]
+            self.assertEqual(non_manifest, [],
+                             f"script wrote unexpected files: {non_manifest}")
 
 
 class UpgradeNoticeMissingManifestTest(unittest.TestCase):
-    """Script exits 0 silently when .wizard/manifest.json is absent or unreadable."""
+    """Script exits 0 silently when .wizard/manifest.json is absent or lacks the version."""
 
     def test_graceful_when_no_manifest(self):
-        """When .wizard/manifest.json is absent, exits 0 silently."""
         with tempfile.TemporaryDirectory() as td:
             project_dir = Path(td)
-            # No manifest written.
             result = _run_script(project_dir, {
                 "UPGRADE_NOTICE_REGISTRY_URL": "http://127.0.0.1:19999/unreachable.json",
             })
@@ -330,7 +201,6 @@ class UpgradeNoticeMissingManifestTest(unittest.TestCase):
             self.assertEqual(result.stdout.strip(), "")
 
     def test_graceful_when_manifest_has_no_version_field(self):
-        """When manifest.json exists but lacks foundation_bundle_version, exits 0 silently."""
         with tempfile.TemporaryDirectory() as td:
             project_dir = Path(td)
             wizard_dir = project_dir / ".wizard"
@@ -343,6 +213,37 @@ class UpgradeNoticeMissingManifestTest(unittest.TestCase):
             })
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.stdout.strip(), "")
+
+
+class UpgradeNoticeReadOnlyTest(unittest.TestCase):
+    """Script never writes files and never eval's fetched content."""
+
+    def test_notice_read_only(self):
+        with tempfile.TemporaryDirectory() as td:
+            project_dir = Path(td)
+            _write_manifest(project_dir, "v0.6.0")
+            registry_file = _write_registry_fixture(Path(td), ["v0.6.0", "v0.6.1"])
+            files_before = {p: Path(p).read_bytes() for p in _project_files(project_dir)}
+            _run_script(project_dir, {
+                "UPGRADE_NOTICE_REGISTRY_URL": f"file://{registry_file}",
+            })
+            files_after = _project_files(project_dir)
+            new_files = files_after - set(files_before.keys())
+            self.assertEqual(new_files, set(), f"script wrote new files: {new_files}")
+            for path_str, before_bytes in files_before.items():
+                p = Path(path_str)
+                if not p.is_file():
+                    continue
+                self.assertEqual(before_bytes, p.read_bytes(),
+                                 f"script modified file: {path_str}")
+
+    def test_script_contains_no_eval_of_fetched_content(self):
+        script_text = SCRIPT_PATH.read_text(encoding="utf-8")
+        import re
+        dangerous_eval = re.search(r'\beval\s+\$\(?.*?(?:curl|wget|fetch|registry)\b',
+                                   script_text, re.IGNORECASE | re.DOTALL)
+        self.assertIsNone(dangerous_eval,
+                          "script appears to eval fetched content — security issue")
 
 
 class UpgradeNoticeScriptSyntaxTest(unittest.TestCase):
@@ -378,8 +279,8 @@ class RegistryShapeGuardTest(unittest.TestCase):
                           "the notice's version-key read must match this shape")
 
     def test_notice_fires_against_the_real_registry(self):
-        """Run the notice against the real registry file with a below-all local version;
-        it must fire and name a newer version (proves the real key is read)."""
+        """Run the notice against the real registry with a below-all local version; it must
+        emit the declarative upgrade-notice JSON (proves the real key is read)."""
         with tempfile.TemporaryDirectory() as td:
             project_dir = Path(td)
             _write_manifest(project_dir, "v0.0.1")
@@ -387,9 +288,43 @@ class RegistryShapeGuardTest(unittest.TestCase):
                 "UPGRADE_NOTICE_REGISTRY_URL": "file://" + str(self.REAL_REGISTRY),
             })
             self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
-            self.assertIn("newer version", result.stdout,
-                          f"notice did not fire against the real registry (key mismatch?); "
-                          f"stdout: {result.stdout!r}")
+            payload = json.loads(result.stdout.strip())
+            self.assertEqual(payload.get("wizard_system_event"), "upgrade_notice",
+                             f"notice did not fire against the real registry (key mismatch?); "
+                             f"stdout: {result.stdout!r}")
+            self.assertIs(payload.get("update_available"), True)
+            self.assertTrue(payload.get("latest_version"),
+                            f"notice must name a latest_version; got: {payload!r}")
+
+
+class DurableRelayInstructionContractTest(unittest.TestCase):
+    """The model relays the notice only if a DURABLE instruction it trusts tells it to.
+    That instruction lives in the emitted CLAUDE.md startup section (read first at every
+    session start). Pin it here so it can never silently drop — without it, the declarative
+    JSON sits in context with no guidance and is suppressed as 'internal detail' (failure 1).
+    """
+
+    # The bundle copy that the upgrade DELIVERS (and that fresh emits source from).
+    BUNDLE_CLAUDE_MD = (REPO_ROOT / "wizard" / "foundation-bundles" / "v0.6.0"
+                        / "templates" / "root" / "CLAUDE.md")
+
+    def test_claude_md_carries_the_upgrade_notice_relay_rule(self):
+        text = self.BUNDLE_CLAUDE_MD.read_text(encoding="utf-8")
+        low = text.lower()
+        # references the declarative event tag the hook emits
+        self.assertIn("wizard_system_event", text,
+                      "CLAUDE.md must reference the wizard_system_event upgrade-notice tag")
+        # instructs the model to TELL the operator
+        self.assertTrue(any(p in low for p in ("tell the operator", "let the operator know",
+                                               "tell them")),
+                        "CLAUDE.md must instruct relaying the notice to the operator")
+        # advisory-only / never auto-act containment
+        self.assertTrue(any(p in low for p in ("advisory", "never run", "never apply",
+                                               "do not run", "do not apply")),
+                        "CLAUDE.md must scope the notice as advisory / never auto-act")
+        # routes review through the in-project upgrade process
+        self.assertIn("upgrading.md", low,
+                      "CLAUDE.md must route review through the in-project upgrade process")
 
 
 if __name__ == "__main__":
