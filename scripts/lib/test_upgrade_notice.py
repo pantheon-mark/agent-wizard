@@ -107,22 +107,40 @@ class UpgradeNoticeNewerAvailableTest(unittest.TestCase):
                          f"unexpected exit code {result.returncode}; stderr: {result.stderr}")
         return result.stdout.strip()
 
-    def test_emits_declarative_json_when_newer_available(self):
-        """stdout is a single JSON object with the upgrade-notice event + the versions."""
+    def test_stdout_is_a_sessionstart_additionalcontext_wrapper(self):
+        """CRITICAL delivery contract: a SessionStart hook's stdout only reaches the model's
+        context if it is plain text OR a JSON object with hookSpecificOutput.additionalContext.
+        A BARE JSON object (no hookSpecificOutput) is parsed as a control object and SILENTLY
+        DROPPED — it never reaches context. (Empirically reproduced: the model reported not
+        seeing the notice.) So the hook MUST emit the hookSpecificOutput wrapper."""
         with tempfile.TemporaryDirectory() as td:
             output = self._output(td)
             try:
-                payload = json.loads(output)
+                top = json.loads(output)
             except json.JSONDecodeError as e:
-                self.fail(f"stdout is not a single JSON object: {e}; got: {output!r}")
-            self.assertEqual(payload.get("wizard_system_event"), "upgrade_notice",
-                             f"payload must be tagged wizard_system_event=upgrade_notice; got: {payload!r}")
-            self.assertIs(payload.get("update_available"), True,
-                          f"update_available must be boolean true; got: {payload!r}")
-            self.assertEqual(payload.get("latest_version"), "v0.6.1",
-                             f"latest_version must name the newer version; got: {payload!r}")
-            self.assertEqual(payload.get("current_version"), "v0.6.0",
-                             f"current_version must name the local version; got: {payload!r}")
+                self.fail(f"stdout is not valid JSON: {e}; got: {output!r}")
+            hso = top.get("hookSpecificOutput")
+            self.assertIsInstance(hso, dict,
+                                  f"stdout MUST carry hookSpecificOutput or it never reaches "
+                                  f"context; got: {output!r}")
+            self.assertEqual(hso.get("hookEventName"), "SessionStart",
+                             f"hookEventName must be 'SessionStart'; got: {output!r}")
+            self.assertTrue(isinstance(hso.get("additionalContext"), str) and hso["additionalContext"].strip(),
+                            f"additionalContext must be a non-empty string; got: {output!r}")
+
+    def test_additionalcontext_carries_the_declarative_upgrade_notice(self):
+        """The injected additionalContext carries the declarative wizard_system_event object
+        (the data the CLAUDE.md relay rule keys on) — tagged, with the versions."""
+        with tempfile.TemporaryDirectory() as td:
+            ac = json.loads(self._output(td))["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("wizard_system_event", ac,
+                          f"additionalContext must carry the wizard_system_event tag; got: {ac!r}")
+            # the embedded object must be parseable + correct
+            inner = json.loads(ac[ac.index("{"):ac.rindex("}") + 1])
+            self.assertEqual(inner.get("wizard_system_event"), "upgrade_notice")
+            self.assertIs(inner.get("update_available"), True)
+            self.assertEqual(inner.get("latest_version"), "v0.6.1")
+            self.assertEqual(inner.get("current_version"), "v0.6.0")
 
     def test_output_is_pure_data_with_no_injection_tells(self):
         """The output must carry NONE of the prompt-injection tells that got the prior
@@ -280,7 +298,8 @@ class RegistryShapeGuardTest(unittest.TestCase):
 
     def test_notice_fires_against_the_real_registry(self):
         """Run the notice against the real registry with a below-all local version; it must
-        emit the declarative upgrade-notice JSON (proves the real key is read)."""
+        emit the hookSpecificOutput wrapper whose additionalContext carries the upgrade notice
+        (proves the real key is read AND the output reaches context)."""
         with tempfile.TemporaryDirectory() as td:
             project_dir = Path(td)
             _write_manifest(project_dir, "v0.0.1")
@@ -288,13 +307,16 @@ class RegistryShapeGuardTest(unittest.TestCase):
                 "UPGRADE_NOTICE_REGISTRY_URL": "file://" + str(self.REAL_REGISTRY),
             })
             self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
-            payload = json.loads(result.stdout.strip())
-            self.assertEqual(payload.get("wizard_system_event"), "upgrade_notice",
+            hso = json.loads(result.stdout.strip()).get("hookSpecificOutput", {})
+            self.assertEqual(hso.get("hookEventName"), "SessionStart",
                              f"notice did not fire against the real registry (key mismatch?); "
                              f"stdout: {result.stdout!r}")
-            self.assertIs(payload.get("update_available"), True)
-            self.assertTrue(payload.get("latest_version"),
-                            f"notice must name a latest_version; got: {payload!r}")
+            ac = hso.get("additionalContext", "")
+            self.assertIn("wizard_system_event", ac)
+            inner = json.loads(ac[ac.index("{"):ac.rindex("}") + 1])
+            self.assertIs(inner.get("update_available"), True)
+            self.assertTrue(inner.get("latest_version"),
+                            f"notice must name a latest_version; got: {ac!r}")
 
 
 class DurableRelayInstructionContractTest(unittest.TestCase):

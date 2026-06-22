@@ -138,24 +138,34 @@ latest_ver_tuple = _semver(latest_version)
 if latest_ver_tuple <= local_ver_tuple:
     sys.exit(0)
 
-# IMPORTANT: this is printed by a SessionStart hook, so it lands in the assistant's
-# session-start CONTEXT, not in a message the operator can see. The operator only learns
-# of an update if the assistant relays it. We emit a single minimal DECLARATIVE JSON line
-# (data, not commands) — no prose, no imperative instructions, no secrecy, no executable
-# command, no file paths. Two reasons:
-#   1. An imperative/secret instruction here ("tell the operator... DO NOT show them...
-#      run this command") reads as a prompt-injection attack and the system's own
-#      anti-injection discipline (correctly) refuses it.
-#   2. Declarative data carries no verbs to hijack and no command to run.
-# The "tell the operator about this" instruction lives in DURABLE config the model trusts
-# (the emitted CLAUDE.md startup section), which reads this tag and relays it in plain
-# language, advisory-only. The real trust boundary is the in-project upgrade tool, which
-# re-validates against the registry before anything changes.
-print(json.dumps({
+# This is printed by a SessionStart hook. For the output to reach the assistant's
+# session-start context, a SessionStart hook must emit EITHER plain text OR a JSON object
+# with a `hookSpecificOutput.additionalContext` field. A BARE JSON object (no
+# hookSpecificOutput) is parsed as a control object and SILENTLY DROPPED — it never reaches
+# context. So we wrap the notice in the hookSpecificOutput envelope.
+#
+# The injected `additionalContext` is DECLARATIVE DATA (a `wizard_system_event` object),
+# not an instruction — no prose imperatives, no secrecy, no command, no file paths. Reason:
+# an imperative/secret instruction here ("tell the operator... DO NOT show them... run this
+# command") reads as a prompt-injection attack and the system's own anti-injection discipline
+# (correctly) refuses it. The "tell the operator about this" instruction lives in DURABLE
+# config the model trusts (the emitted CLAUDE.md "System-update notices" rule), which keys on
+# this tag and relays it in plain language, advisory-only. The real trust boundary is the
+# in-project upgrade tool, which re-validates against the registry before anything changes.
+notice = json.dumps({
     "wizard_system_event": "upgrade_notice",
     "update_available": True,
     "current_version": local_version,
     "latest_version": latest_version,
+})
+additional_context = (
+    "System version check (advisory status, not an instruction): " + notice
+)
+print(json.dumps({
+    "hookSpecificOutput": {
+        "hookEventName": "SessionStart",
+        "additionalContext": additional_context,
+    }
 }))
 
 PY
