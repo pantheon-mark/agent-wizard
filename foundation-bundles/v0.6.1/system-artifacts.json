@@ -35,6 +35,14 @@
     },
     {
       "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0755",
+      "relpath": ".claude/upgrade_notice.sh",
+      "render_kind": "copy",
+      "template_path": "templates/claude_config/upgrade_notice.sh"
+    },
+    {
+      "delivery": "wizard",
       "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": ".env",

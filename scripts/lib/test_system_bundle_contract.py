@@ -7,8 +7,8 @@ strategy, the file mode, and (for render files) which inputs are persisted in th
 replay capsule vs derived from the target bundle.
 
 The closed expected file set below is transcribed from the build-side artifact
-inventory (the closed list of every emitted operator-project file) — the 87 MANAGED
-operator-project files (91 emitted minus the 4 control files, which are upgrade
+inventory (the closed list of every emitted operator-project file) — the 88 MANAGED
+operator-project files (92 emitted minus the 4 control files, which are upgrade
 machinery, not delivered content). The contract is CLOSED + fail-closed: every
 managed file must have exactly one entry; no file omitted; no extra entries.
 
@@ -50,7 +50,7 @@ CONTROL_PLANE_RELPATHS = frozenset({".wizard/UPGRADING.md"})
 
 # ---------------------------------------------------------------------------
 # Closed expected managed-file set — transcribed from the build-side artifact
-# inventory (the closed list of emitted operator-project files). 87 managed files.
+# inventory (the closed list of emitted operator-project files). 88 managed files.
 # The 4 control files (.wizard/manifest.json, .wizard/replay-capsule.json,
 # .wizard/upgrade-history.log, .wizard/upgrade-policy.yaml) are EXCLUDED — they
 # are upgrade machinery, not delivered content.
@@ -82,6 +82,7 @@ EXPECTED_MANAGED_FILES = frozenset({
     ".claude/statusline.sh",
     ".claude/context_monitor.sh",
     ".claude/receipt_gate.sh",
+    ".claude/upgrade_notice.sh",
     # agents/ prompts
     "agents/prompts/orchestrator_prompt.md",
     "agents/prompts/qa_agent_prompt.md",

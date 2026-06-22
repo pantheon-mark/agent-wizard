@@ -103,6 +103,7 @@ ALLOWLIST_UNIFIED_ADDITIONS = {
     ".claude/statusline.sh": "statusline showing actual context % (Claude Code built-in field) to operator + session; legacy had none",
     ".claude/context_monitor.sh": "context-monitor hook surfacing actual context % so the context-integrity protocol runs on real data, not guesses; legacy had none",
     ".claude/receipt_gate.sh": "PreToolUse hook enforcing the high-risk-write protection: requires a fresh valid pre-write receipt (backup + evidence-bound verification + plan + operator approval) before a high-risk/irreversible action, else forces the operator approval dialog (ask); legacy had no enforcement of the protective sequence",
+    ".claude/upgrade_notice.sh": "SessionStart hook that quietly checks for a newer system-bundle version and prints a plain-language heads-up; read-only, graceful-offline, never blocks a session; legacy had no upgrade-awareness",
 }
 
 CRITICAL_FILES = (

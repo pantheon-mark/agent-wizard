@@ -54,7 +54,8 @@ START_SESSION_TEMPLATE = "wizard/scripts/start_session_template.sh"
 # its actual context (statusline + context-monitor hook) instead of guessing. Static
 # files (no {{placeholders}}); the .sh scripts are emitted executable.
 CLAUDE_CONFIG_REL = "wizard/templates/claude_config"
-CLAUDE_CONFIG_SCRIPTS = ("statusline.sh", "context_monitor.sh", "receipt_gate.sh")
+CLAUDE_CONFIG_SCRIPTS = ("statusline.sh", "context_monitor.sh", "receipt_gate.sh",
+                         "upgrade_notice.sh")
 
 # Bundle-relative subpaths for the named scaffold scripts (their relpath inside the
 # bundle's templates/ tree differs from the live build-repo layout).

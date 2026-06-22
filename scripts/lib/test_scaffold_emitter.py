@@ -361,5 +361,66 @@ class HowItWorksCrossLinkTests(unittest.TestCase):
         self.assertIn("what your system does on its own", self.text)
 
 
+class SessionStartUpgradeNoticeTests(unittest.TestCase):
+    """F-C2: every emitted operator system ships upgrade_notice.sh wired as a
+    SessionStart hook so the operator gets a quiet, read-only heads-up when a
+    newer version of their system bundle is available. The hook never blocks the
+    session and never changes anything."""
+
+    def _emit(self, plan_dict=None):
+        contract = load_contract(default_contract_path())
+        plan = validate_emission_plan(plan_dict or _valid_plan(), contract)
+        self._tmp = tempfile.TemporaryDirectory()
+        staging = Path(self._tmp.name)
+        emit_scaffold(plan, staging, REPO_ROOT)
+        return staging
+
+    def tearDown(self):
+        tmp = getattr(self, "_tmp", None)
+        if tmp is not None:
+            tmp.cleanup()
+
+    def test_claude_config_emits_sessionstart_notice_hook(self):
+        """A fresh emit produces .claude/upgrade_notice.sh (exists, mode 0755,
+        bash -n clean) AND .claude/settings.json has a SessionStart hook invoking it,
+        matching the existing hooks schema."""
+        import json as _json
+        import subprocess as _sub
+        staging = self._emit()
+
+        # --- 1. script file emitted and executable ---
+        script = staging / ".claude" / "upgrade_notice.sh"
+        self.assertTrue(script.exists(), ".claude/upgrade_notice.sh not emitted")
+        self.assertTrue(script.stat().st_mode & stat.S_IXUSR,
+                        ".claude/upgrade_notice.sh not executable")
+
+        # --- 2. bash -n syntax check ---
+        r = _sub.run(["bash", "-n", str(script)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0,
+                         f"bash -n failed on emitted upgrade_notice.sh: {r.stderr}")
+
+        # --- 3. settings.json has SessionStart hook invoking upgrade_notice.sh ---
+        settings = _json.loads((staging / ".claude" / "settings.json").read_text())
+        hooks = settings.get("hooks", {})
+        session_start = hooks.get("SessionStart", [])
+        self.assertTrue(
+            len(session_start) > 0,
+            "settings.json has no SessionStart hook entry",
+        )
+        # The hook must follow the same shape as the existing hooks:
+        # a list of dicts each with a "hooks" list of {"type": "command", "command": "..."}.
+        hook_entry = session_start[0]
+        self.assertIn("hooks", hook_entry,
+                      "SessionStart hook entry must have a 'hooks' key")
+        inner_hooks = hook_entry["hooks"]
+        self.assertTrue(len(inner_hooks) > 0, "SessionStart hooks list is empty")
+        inner = inner_hooks[0]
+        self.assertEqual(inner.get("type"), "command",
+                         "SessionStart hook must be type 'command'")
+        cmd = inner.get("command", "")
+        self.assertIn("upgrade_notice.sh", cmd,
+                      f"SessionStart hook command does not invoke upgrade_notice.sh: {cmd!r}")
+
+
 if __name__ == "__main__":
     unittest.main()

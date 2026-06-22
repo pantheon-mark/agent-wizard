@@ -7,8 +7,9 @@
   "hashes": {
     ".claude/context_monitor.sh": "sha256:1394d836e0f674a7363f60e224790fbe857ec1fe485c4cc0c4a006e66c16028b",
     ".claude/receipt_gate.sh": "sha256:46860438445a13c67d996d147fa990178a8f843200bf2a2219604174c8957d6f",
-    ".claude/settings.json": "sha256:dffc5902f551ff501ad5251a4ce076460c853056081131afb81ec023864d94ff",
+    ".claude/settings.json": "sha256:08c8697760f19b878c745df10d0f4fa50021b17722d53333c5a4ee8584bebffa",
     ".claude/statusline.sh": "sha256:44df82d6f0086bd6e15fa6685b313c4f53d1eb4042e6a3255ff0931e0aa43e40",
+    ".claude/upgrade_notice.sh": "sha256:30728ad130ae2d0e4895d33cf31b01aa89eaf102e330444ee8624130ae731ca9",
     ".env": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".gitignore": "sha256:9a072795b1a3902e27753c3d0b22ca922628079eadc1239f2d3cb800a70ee512",
     ".wizard/UPGRADING.md": "sha256:1cb7539b73dd6108d5ff41bba629264c7556e475335420d65c4bb4050e950b27",
