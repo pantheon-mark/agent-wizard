@@ -102,6 +102,7 @@ class UpgradeAnalysisRealPath(unittest.TestCase):
         )
         wu.populate_plan_analysis(
             plan, proj, TARGET_VERSION, REPO_ROOT, registry, manifest,
+            registry_path=REGISTRY_PATH,
         )
         return plan
 

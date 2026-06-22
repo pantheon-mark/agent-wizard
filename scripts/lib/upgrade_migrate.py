@@ -75,7 +75,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from bundle_templates import bundle_has_operating_layer  # type: ignore
+from bundle_templates import bundle_has_operating_layer, wizard_subroot, _bundle_dir  # type: ignore
 from replay_capsule import (  # type: ignore
     REPLAY_CAPSULE_REL,
     capsule_supports_operating_replay,
@@ -164,8 +164,8 @@ def _full_hash(text: str) -> str:
 def _operating_render_relpaths_for(source_version: str, build_repo_root: Path) -> List[str]:
     """The operating-layer `render_kind:render` relpaths the `source_version` bundle
     carries (delivery == wizard). Empty if the bundle has no contract (foundation-only)."""
-    contract_path = (build_repo_root / "wizard" / "foundation-bundles"
-                     / source_version / CONTRACT_BASENAME)
+    contract_path = (_bundle_dir(source_version, build_repo_root)
+                     / CONTRACT_BASENAME)
     if not contract_path.is_file():
         return []
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
@@ -185,8 +185,8 @@ def _operating_copy_entries_for(source_version: str, build_repo_root: Path) -> D
     `.wizard/UPGRADING.md`) are excluded — they are upgrade-machinery, produced by the
     Python emitter, not adoptable from a frozen template. Empty if the bundle is
     foundation-only (no contract)."""
-    contract_path = (build_repo_root / "wizard" / "foundation-bundles"
-                     / source_version / CONTRACT_BASENAME)
+    contract_path = (_bundle_dir(source_version, build_repo_root)
+                     / CONTRACT_BASENAME)
     if not contract_path.is_file():
         return {}
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
@@ -241,7 +241,7 @@ def build_v2_capsule_from_transcript(
     back into the regenerated foundation_doc_inputs, so the regenerated capsule reproduces
     exactly what was first emitted regardless of when the regeneration runs."""
     import sys
-    scripts_dir = build_repo_root / "wizard" / "scripts"
+    scripts_dir = wizard_subroot(build_repo_root) / "scripts"
     for p in (str(scripts_dir / "lib"), str(scripts_dir)):
         if p not in sys.path:
             sys.path.insert(0, p)

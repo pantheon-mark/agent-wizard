@@ -58,6 +58,8 @@ from lib.upgrade import (  # noqa: E402
     load_registry,
     render_upgrade_check,
     render_upgrade_plan,
+    resolve_bundle_dir,
+    resolve_toolkit_root,
     upgrade_check_to_dict,
     upgrade_plan_to_dict,
 )
@@ -76,6 +78,7 @@ def populate_plan_analysis(
     build_repo_root: Path,
     registry: dict,
     manifest: dict,
+    registry_path: Path,
 ) -> None:
     """Populate `plan.artifact_analysis` over the TARGET-CHANGE SET (read-only).
 
@@ -101,8 +104,11 @@ def populate_plan_analysis(
     migration_manifest: dict = {}
     target_entry = find_bundle_entry(registry, target_version)
     if target_entry is not None:
+        # Registry-relative, layout-agnostic (build-repo + public-clone). Was a fixed
+        # `build_repo_root / entry["path"]` join that re-prepended the build-repo
+        # `wizard/` prefix and broke in the prefix-stripped public clone (F-OR-4).
         migration_json = (
-            build_repo_root / target_entry.get("path", "")
+            resolve_bundle_dir(registry_path, registry, target_entry)
             / MIGRATION_MANIFEST_JSON_SIDECAR_FILENAME
         )
         if migration_json.exists():
@@ -114,11 +120,26 @@ def populate_plan_analysis(
 
 
 def _resolve_build_repo_root(registry_path: Path) -> Path:
-    """Resolve the build-repo root that the apply path renders bundles from.
+    """Resolve the toolkit root the apply/render path resolves bundles under.
 
-    The registry lives at <root>/wizard/registry/foundation-bundles.json, so the
-    root is two levels above the registry directory."""
-    return registry_path.resolve().parent.parent.parent
+    Registry-relative + layout-agnostic (operator-reach C1', fixes F-OR-4): the
+    registry ALWAYS lives at `<toolkit>/registry/foundation-bundles.json`, so the
+    toolkit root is the registry file's grandparent in BOTH shipping layouts:
+
+      * BUILD-REPO  : `<root>/wizard/registry/...` -> `<root>/wizard`
+      * PUBLIC-CLONE: `<clone>/registry/...`       -> `<clone>` (the `git subtree
+        --prefix=wizard` split strips the `wizard/` prefix)
+
+    The render engine (`bundle_templates.wizard_subroot`) accepts this toolkit root
+    directly: it detects that the value already contains `foundation-bundles/` and does
+    not re-prepend a `wizard/` segment, so resolution is identical in both layouts. The
+    canonical per-bundle directory resolution is registry-relative
+    (`upgrade.resolve_bundle_dir`).
+
+    Was `registry_path.resolve().parent.parent.parent`, which assumed the build-repo
+    `wizard/` prefix and re-prepended it in the prefix-stripped public clone -> the
+    public clone was un-runnable (registry-not-found / bundle-directory-missing)."""
+    return resolve_toolkit_root(registry_path)
 
 
 _DEFAULT_REGISTRY_PATH = Path("wizard/registry/foundation-bundles.json")
@@ -187,6 +208,7 @@ def _run_upgrade_plan(args: argparse.Namespace, plan_only_invoked_via_synonym: b
     populate_plan_analysis(
         plan, operator_dir, args.to,
         _resolve_build_repo_root(registry_path), registry, manifest,
+        registry_path=registry_path,
     )
     if args.json:
         print(json.dumps(upgrade_plan_to_dict(plan), sort_keys=True, indent=2, ensure_ascii=False))

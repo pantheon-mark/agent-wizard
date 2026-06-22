@@ -51,6 +51,8 @@ from typing import Any, Dict, List, Optional
 from bundle_templates import (  # type: ignore
     read_bundle_template,
     derive_scaffold_render_inputs,
+    wizard_subroot,
+    _bundle_dir,
     BundleTemplateError,
 )
 from generator import render_foundation_docs  # type: ignore
@@ -642,7 +644,7 @@ def compute_target_change_set(
         # No / malformed capsule -> cannot re-render -> empty change set (fail-soft).
         return []
 
-    target_bundle_dir = (build_repo_root / target_entry.get("path", "")).resolve()
+    target_bundle_dir = _bundle_dir(target_version, build_repo_root).resolve()
 
     # 1. Foundation-doc base + theirs (the classic 6 docs render_foundation_docs produces).
     try:
@@ -785,7 +787,7 @@ def _operating_render_relpaths(
     Identified from the CURRENT bundle's contract (the manifest carries no render_kind),
     intersected with the manifest's managed entries. Empty for a foundation-only current
     bundle (no contract)."""
-    contract_path = (build_repo_root / "wizard" / "foundation-bundles"
+    contract_path = (wizard_subroot(build_repo_root) / "foundation-bundles"
                      / current_version / CONTRACT_BASENAME)
     if not contract_path.is_file():
         return []
@@ -1031,7 +1033,7 @@ def apply_upgrade(
             f"this system is already on {current_version!r}; nothing to apply."
         )
 
-    target_bundle_dir = (build_repo_root / target_entry.get("path", "")).resolve()
+    target_bundle_dir = _bundle_dir(target_version, build_repo_root).resolve()
     migration_json = target_bundle_dir / MIGRATION_MANIFEST_JSON_SIDECAR_FILENAME
     if not migration_json.exists():
         raise UpgradeApplyError(
@@ -1804,7 +1806,9 @@ def _read_target_generator_version(build_repo_root: Path, target_entry: Dict[str
     canonical source the original manifest's generator_version came from — not
     re-derived). Returns None if the sidecar is absent or carries no value (the
     manifest then keeps its existing generator_version)."""
-    bundle_dir = (build_repo_root / target_entry.get("path", "")).resolve()
+    bundle_dir = _bundle_dir(
+        target_entry.get("foundation_bundle_version", ""), build_repo_root
+    ).resolve()
     prov = bundle_dir / "foundation-bundle.provenance.json"
     if not prov.exists():
         return None

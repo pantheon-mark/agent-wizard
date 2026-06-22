@@ -28,7 +28,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field, asdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -473,22 +473,134 @@ def find_bundle_entry(registry: Dict[str, Any], version: str) -> Optional[Dict[s
     return None
 
 
-def _resolve_bundle_dir(registry_path: Path, entry: Dict[str, Any]) -> Path:
-    """Resolve the bundle directory path from a registry entry.
+# ===== Registry schema versions =====
+# The registry's `registry_schema_version` (preferred) — or the legacy top-level
+# `schema_version`, or absent -> legacy — selects the bundle-path resolution rule.
+# Both schemas resolve registry-relative; they differ ONLY in whether the per-entry
+# `path` carries the build-repo `wizard/` prefix (legacy) or is already
+# toolkit-relative (newer schema). See resolve_bundle_dir for the legacy branch.
+REGISTRY_SCHEMA_V1 = "v1"   # legacy: per-entry `path` is build-repo-rooted ("wizard/foundation-bundles/<v>/")
+REGISTRY_SCHEMA_V2 = "v2"   # newer schema: per-entry `path` is toolkit-relative ("foundation-bundles/<v>/")
+_LEGACY_PATH_PREFIX = "wizard/"
 
-    Entry's `path` is repo-relative. Anchor strategy (in priority order):
-      1. Walk up from registry_path looking for a `.git` directory → use that as repo root.
-      2. Otherwise fall back to registry_path's parent (best-effort; test fixture path).
+
+def _registry_schema_version(registry: Dict[str, Any]) -> str:
+    """The bundle-path resolution-rule selector.
+
+    Prefers the explicit `registry_schema_version` field; falls back to
+    the legacy generic top-level `schema_version`; falls back to REGISTRY_SCHEMA_V1
+    (legacy `wizard/`-prefixed paths) when neither is present. Keeping both readable
+    means an older registry (no `registry_schema_version`) still resolves correctly."""
+    return (
+        registry.get("registry_schema_version")
+        or registry.get("schema_version")
+        or REGISTRY_SCHEMA_V1
+    )
+
+
+def resolve_toolkit_root(registry_path: Path) -> Path:
+    """The toolkit root = the directory that CONTAINS `registry/` + `foundation-bundles/`.
+
+    Canonical + layout-agnostic: the registry ALWAYS lives at
+    `<toolkit>/registry/foundation-bundles.json`, so the toolkit root is the registry
+    file's grandparent in BOTH shipping layouts:
+
+      * BUILD-REPO  : `<root>/wizard/registry/foundation-bundles.json` -> `<root>/wizard`
+      * PUBLIC-CLONE: `<clone>/registry/foundation-bundles.json`       -> `<clone>`
+
+    This is deterministic (no filesystem probe, no path string-matching) — it keys only
+    on the registry file's own location, which is identical structure in both layouts.
     """
-    start = registry_path.resolve().parent
-    for candidate in [start] + list(start.parents):
-        if (candidate / ".git").exists():
-            repo_root = candidate
-            break
-    else:
-        repo_root = start
+    return registry_path.resolve().parent.parent
+
+
+def resolve_bundle_dir(
+    registry_path: Path,
+    registry: Dict[str, Any],
+    entry: Dict[str, Any],
+) -> Path:
+    """Resolve a bundle's on-disk directory REGISTRY-RELATIVE (canonical), layout-agnostic.
+
+    Resolution is anchored on `resolve_toolkit_root(registry_path)` so it produces the
+    SAME bundle directory in the build-repo (`<root>/wizard/...`) and the public-clone
+    (`<clone>/...`, prefix stripped by the subtree split) layouts.
+
+    Two resolution rules, selected by the registry's top-level `schema_version`:
+
+      * REGISTRY_SCHEMA_V2 (newer schema): the per-entry `path` is ALREADY toolkit-relative
+        (e.g. "foundation-bundles/<v>/") and is joined directly to the toolkit root.
+      * REGISTRY_SCHEMA_V1 (legacy / absent): the per-entry `path` carries the build-repo
+        `wizard/` prefix (e.g. "wizard/foundation-bundles/<v>/"). The subtree publish
+        does NOT rewrite these, so a public clone has the files WITHOUT that prefix. The
+        LEGACY BRANCH strips a single leading `wizard/` segment, then joins the remainder
+        to the toolkit root — which lands on the bundle in BOTH layouts (build-repo's
+        toolkit root already IS `<root>/wizard`, so the stripped path re-roots correctly;
+        the public clone has no `wizard/` dir, so stripping is exactly right).
+
+    Fail closed (RegistryError) if:
+      * the entry `path` is absolute, or
+      * the resolved bundle directory escapes the toolkit root (path traversal), or
+      * the layout is ambiguous (a legacy-prefixed registry whose toolkit root does not
+        plausibly anchor `foundation-bundles/`).
+    """
+    toolkit_root = resolve_toolkit_root(registry_path)
     rel = entry.get("path", "")
-    return repo_root / rel if rel else repo_root
+    version = entry.get("foundation_bundle_version", "<unknown>")
+    if not rel:
+        return toolkit_root
+
+    raw = PurePosixPath(rel)
+    if raw.is_absolute():
+        raise RegistryError(
+            f"registry entry for {version!r} has an absolute `path` {rel!r}; "
+            f"bundle paths must be relative to the toolkit root (fail-closed)"
+        )
+
+    schema_version = _registry_schema_version(registry)
+    parts = raw.parts
+    if schema_version == REGISTRY_SCHEMA_V1 or schema_version is None:
+        # Legacy branch: strip exactly one leading `wizard/` segment if present. The
+        # build-repo toolkit root IS `<root>/wizard`, and the public clone strips the
+        # `wizard/` prefix at publish — stripping here lands on the bundle in BOTH.
+        if parts and parts[0] == "wizard":
+            parts = parts[1:]
+        else:
+            # A legacy-schema registry whose entry path is NOT wizard/-prefixed is an
+            # ambiguous layout we cannot resolve deterministically — fail closed rather
+            # than guess.
+            raise RegistryError(
+                f"registry schema {schema_version!r} entry for {version!r} has a non-`wizard/`-"
+                f"prefixed `path` {rel!r}; ambiguous layout (legacy paths must be "
+                f"`wizard/`-prefixed). Declare schema_version {REGISTRY_SCHEMA_V2!r} for "
+                f"toolkit-relative paths."
+            )
+    # schema_version == v2 (or any future toolkit-relative schema): use parts as-is.
+
+    rel_under_toolkit = PurePosixPath(*parts) if parts else PurePosixPath()
+    resolved = (toolkit_root / Path(*rel_under_toolkit.parts)).resolve()
+
+    # Fail-closed escape guard: the resolved bundle dir MUST remain inside the toolkit root.
+    toolkit_resolved = toolkit_root.resolve()
+    if resolved != toolkit_resolved and toolkit_resolved not in resolved.parents:
+        raise RegistryError(
+            f"registry entry for {version!r} resolves to {resolved} which escapes the "
+            f"toolkit root {toolkit_resolved} (fail-closed; bundle paths must stay inside "
+            f"the toolkit)"
+        )
+    return resolved
+
+
+def _resolve_bundle_dir(registry_path: Path, entry: Dict[str, Any], registry: Optional[Dict[str, Any]] = None) -> Path:
+    """Back-compat shim around the canonical `resolve_bundle_dir`.
+
+    Older callers pass only (registry_path, entry); they predate the registry-relative
+    resolver. When the registry dict is not supplied, load it (cheap; cached by the OS)
+    so the schema_version branch is honored. New callers should use `resolve_bundle_dir`
+    directly with the already-loaded registry.
+    """
+    if registry is None:
+        registry = load_registry(registry_path)
+    return resolve_bundle_dir(registry_path, registry, entry)
 
 
 def _is_semver_match(from_spec: str, current_version: str) -> bool:
@@ -691,13 +803,18 @@ def _lookup_target_migration(
     registry_path: Path,
     target_entry: Dict[str, Any],
     current_version: str,
+    registry: Optional[Dict[str, Any]] = None,
 ) -> MigrationEntry:
     """Shared helper used by compute_upgrade_check + compute_upgrade_plan.
 
     Resolves target bundle dir + loads target migration-manifest.json + finds the matching
     `from:` entry. Fail-closed on any gap (per the foundation-versioning policy upgrade-check
-    contract requiring migration metadata at upgrade-check time AND upgrade-plan time)."""
-    target_bundle_dir = _resolve_bundle_dir(registry_path, target_entry)
+    contract requiring migration metadata at upgrade-check time AND upgrade-plan time).
+
+    Bundle-dir resolution is registry-relative + layout-agnostic (build-repo + public-clone);
+    callers pass the already-loaded `registry` so the schema_version branch is honored without
+    re-reading the file."""
+    target_bundle_dir = _resolve_bundle_dir(registry_path, target_entry, registry=registry)
     migration_json = target_bundle_dir / MIGRATION_MANIFEST_JSON_SIDECAR_FILENAME
     if not migration_json.exists():
         raise MigrationManifestError(
@@ -753,7 +870,7 @@ def compute_upgrade_check(
                 "manifest_path": entry.get("manifest", ""),
             }
             if registry_path is not None:
-                me = _lookup_target_migration(registry_path, entry, current_version)
+                me = _lookup_target_migration(registry_path, entry, current_version, registry=registry)
                 # Per the v0.4.0 release slice-level R2 advisor finding (HIGH):
                 # target-owned migration manifest is authoritative when available.
                 # Override semver-arithmetic tier with the migration manifest's class
@@ -828,7 +945,10 @@ def compute_upgrade_plan(
     # falls back to the manifest-recorded strategy (current behavior).
     target_contract = None
     if registry_path is not None and target_entry.get("path"):
-        _contract_path = registry_path.parents[2] / target_entry["path"] / "system-artifacts.json"
+        # Registry-relative, layout-agnostic (build-repo + public-clone). Was a fixed
+        # `registry_path.parents[2] / entry["path"]` join that re-prepended the build-repo
+        # `wizard/` prefix and broke in the prefix-stripped public clone (F-OR-4).
+        _contract_path = resolve_bundle_dir(registry_path, registry, target_entry) / "system-artifacts.json"
         if _contract_path.is_file():
             try:
                 _c = json.loads(_contract_path.read_text(encoding="utf-8"))
@@ -845,7 +965,7 @@ def compute_upgrade_plan(
 
     migration_entry: Optional[MigrationEntry] = None
     if registry_path is not None:
-        migration_entry = _lookup_target_migration(registry_path, target_entry, current_version)
+        migration_entry = _lookup_target_migration(registry_path, target_entry, current_version, registry=registry)
         # Per the v0.4.0 release slice-level R2 advisor finding (HIGH):
         # target-owned migration manifest is authoritative when available.
         # Override semver-arithmetic tier with the migration manifest's class because

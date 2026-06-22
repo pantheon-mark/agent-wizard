@@ -36,8 +36,33 @@ class BundleTemplateError(Exception):
 CONTRACT_BASENAME = "system-artifacts.json"
 
 
+def wizard_subroot(build_repo_root: Path) -> Path:
+    """Resolve the toolkit subroot that directly contains `foundation-bundles/`.
+
+    Layout-agnostic (operator-reach C1'): the toolkit ships two ways and the bundle
+    directories live at different depths relative to the value callers pass as
+    ``build_repo_root``:
+
+      * BUILD-REPO  : the value IS the repo root and bundles are under `wizard/` ->
+        the subroot is `<build_repo_root>/wizard`.
+      * PUBLIC-CLONE / toolkit-root: the value IS already the toolkit root (the dir
+        that holds `registry/` + `foundation-bundles/`, e.g. resolve_toolkit_root(...))
+        -> the subroot is the value itself (no `wizard/` segment exists in the split).
+
+    The PRIMARY canonical bundle-directory resolution is registry-relative
+    (`upgrade.resolve_bundle_dir`); this helper is the transitional bridge for the
+    render engine, which receives only a root path (no registry). It keys on the
+    structural invariant "the subroot is the dir that holds `foundation-bundles/`" —
+    not on string-matching a path — and falls back to the legacy `wizard/`-prefixed
+    subroot when the value is a build-repo root.
+    """
+    if (build_repo_root / "foundation-bundles").is_dir():
+        return build_repo_root
+    return build_repo_root / "wizard"
+
+
 def _bundle_dir(version: str, build_repo_root: Path) -> Path:
-    return build_repo_root / "wizard" / "foundation-bundles" / version
+    return wizard_subroot(build_repo_root) / "foundation-bundles" / version
 
 
 def bundle_has_operating_layer(version: str, build_repo_root: Path) -> bool:
@@ -59,7 +84,7 @@ def operating_layer_source_version(build_repo_root_str: str) -> str:
     Resolved as the lexically-greatest bundle version directory that contains a
     `system-artifacts.json`. Fail-closed if none exists."""
     build_repo_root = Path(build_repo_root_str)
-    bundles_root = build_repo_root / "wizard" / "foundation-bundles"
+    bundles_root = wizard_subroot(build_repo_root) / "foundation-bundles"
     candidates = []
     if bundles_root.is_dir():
         for child in bundles_root.iterdir():
