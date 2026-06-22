@@ -1,5 +1,16 @@
 {
   "_note": "JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing companion. Both files MUST stay in sync.",
+  "artifact_notes": {
+    "operating_discipline.md": {
+      "benefit": "Updates the operating guidelines your system follows day to day."
+    },
+    "wizard/skills/health-check.md": {
+      "benefit": "Adds a quick 'is my system healthy?' check you can run any time."
+    },
+    "wizard/skills/pause.md": {
+      "benefit": "Improves the pause skill so your system handles interruptions more reliably."
+    }
+  },
   "migrations": [
     {
       "breaking_changes_summary": "",

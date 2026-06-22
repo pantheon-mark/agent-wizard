@@ -10,6 +10,16 @@ target_version: v0.6.1
 release_date: 2026-06-21
 release_classification: minor_additive_prerelease
 
+# Per-artifact plain-language benefit notes used by `wizard upgrade-plan` to explain
+# what each changed file does for the operator. Optional; absent entries use a default.
+artifact_notes:
+  wizard/skills/health-check.md:
+    benefit: "Adds a quick 'is my system healthy?' check you can run any time."
+  operating_discipline.md:
+    benefit: "Updates the operating guidelines your system follows day to day."
+  wizard/skills/pause.md:
+    benefit: "Improves the pause skill so your system handles interruptions more reliably."
+
 migrations:
   - from: v0.6.0
     class: minor-additive

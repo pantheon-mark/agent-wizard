@@ -273,6 +273,30 @@ class MigrationEntry:
 
 
 @dataclass
+class ArtifactAnalysis:
+    """Per-artifact analysis entry for the upgrade plan display.
+
+    Joins drift report + merge_strategy + migration-manifest artifact_notes into a
+    plain-language summary the operator reviews before deciding to apply.
+
+    Fields:
+        relpath    -- relative path of the artifact inside the operator project
+        what       -- "new" | "modified" | "unchanged"
+        kind       -- "render" (re-rendered from your inputs) | "copy" (install-as-is)
+        benefit    -- plain-language why this change helps; from artifact_notes or a default
+        risk       -- operator-facing risk label (clean adopt / will merge / saved for
+                      review / will warn -- needs --ack / installed as-is)
+        how        -- same action phrased as what will happen when applied
+    """
+    relpath: str
+    what: str    # new | modified | unchanged
+    kind: str    # render | copy
+    benefit: str
+    risk: str
+    how: str
+
+
+@dataclass
 class UpgradePlan:
     """Plan-only upgrade record: a non-mutating preview of what an upgrade would change.
 
@@ -294,6 +318,7 @@ class UpgradePlan:
         "To apply, run `wizard upgrade --to <version> --apply` (operator-explicit; "
         "standing auto-approval is disabled at v0)."
     )
+    artifact_analysis: List["ArtifactAnalysis"] = field(default_factory=list)
 
 
 @dataclass
@@ -907,6 +932,160 @@ def hash_bundle_files(bundle_dir: Path, exclude: Optional[List[str]] = None) -> 
     return result
 
 
+# ===== Per-artifact upgrade analysis =====
+
+def _artifact_risk_and_how(
+    merge_strategy: str,
+    drift_status: str,
+    is_new: bool,
+) -> tuple:
+    """Derive (risk, how) labels from merge_strategy + drift for the analysis display.
+
+    Returns plain-language strings the operator reads before deciding to apply.
+    """
+    if is_new:
+        return (
+            "installed as-is (new file, no existing version to conflict with)",
+            "The file will be installed fresh into your system.",
+        )
+    if merge_strategy == MERGE_STRATEGY_THREE_WAY:
+        if drift_status == DRIFT_NONE:
+            return (
+                "clean adopt",
+                "The updated version will be installed automatically -- no edits to reconcile.",
+            )
+        else:
+            return (
+                "will merge your edits (or save for your review if they overlap)",
+                "Your edits will be carried forward where possible; any overlap is saved for your review.",
+            )
+    if merge_strategy == MERGE_STRATEGY_OPERATOR_REVIEW:
+        return (
+            "saved for your review; your version kept",
+            "The new version is placed in a review folder. Your existing file stays in place.",
+        )
+    if merge_strategy == MERGE_STRATEGY_WARN_ON_DRIFT:
+        if drift_status in (DRIFT_DETECTED, DRIFT_MISSING_FILE):
+            return (
+                "will warn -- needs your OK (--ack) to replace",
+                "You have edited this file. The upgrade will stop unless you pass --ack to confirm replacing it.",
+            )
+        else:
+            return (
+                "installed as-is",
+                "The updated version will be installed automatically.",
+            )
+    if merge_strategy == MERGE_STRATEGY_FROZEN:
+        if drift_status in (DRIFT_DETECTED, DRIFT_MISSING_FILE):
+            return (
+                "blocked -- drift on a frozen file must be resolved first",
+                "This file must not be edited. Resolve the drift before applying the upgrade.",
+            )
+        else:
+            return (
+                "clean adopt",
+                "The updated version will be installed automatically -- no edits to reconcile.",
+            )
+    # Unknown strategy fallback
+    return (
+        "review required",
+        "Review this file manually before applying.",
+    )
+
+
+def compute_upgrade_analysis(
+    plan: "UpgradePlan",
+    migration_manifest: Dict[str, Any],
+    contract_entries: Dict[str, Dict[str, Any]],
+    new_files: Optional[List[str]] = None,
+) -> List["ArtifactAnalysis"]:
+    """Build a per-artifact analysis list from an UpgradePlan.
+
+    This is a presentation JOIN over data the plan already holds (drift report +
+    merge_strategy per file) plus the migration-manifest artifact_notes.  It does
+    NOT mutate the plan or touch disk.
+
+    Args:
+        plan              -- the UpgradePlan from compute_upgrade_plan
+        migration_manifest -- the raw migration-manifest dict (already loaded);
+                              may carry an optional top-level "artifact_notes" map
+        contract_entries  -- dict mapping relpath -> {render_kind, merge_strategy, ...}
+                             sourced from the target bundle's system-artifacts.json
+                             (only wizard-delivery entries need be included)
+        new_files         -- relpaths the upgrade would create fresh (not already in
+                             the operator manifest); these carry what="new"
+
+    Returns a list of ArtifactAnalysis, one per artifact in the union of:
+        - drift report entries, AND
+        - new_files
+
+    Each entry carries all five display fields populated.
+    """
+    artifact_notes: Dict[str, Dict[str, Any]] = {}
+    if isinstance(migration_manifest, dict):
+        raw_notes = migration_manifest.get("artifact_notes")
+        if isinstance(raw_notes, dict):
+            artifact_notes = raw_notes
+
+    new_set = set(new_files or [])
+
+    # Build a lookup from the drift report
+    drift_by_path: Dict[str, DriftReportEntry] = {}
+    for entry in plan.drift_report.entries:
+        drift_by_path[entry.path] = entry
+
+    # Union of all relpaths to analyze
+    all_relpaths = sorted(set(drift_by_path.keys()) | new_set)
+
+    result: List[ArtifactAnalysis] = []
+    for relpath in all_relpaths:
+        is_new = relpath in new_set and relpath not in drift_by_path
+        drift_entry = drift_by_path.get(relpath)
+        drift_status = drift_entry.status if drift_entry else DRIFT_NONE
+
+        # what -- change type
+        if is_new:
+            what = "new"
+        elif drift_status == DRIFT_NONE:
+            what = "modified"  # it's in the upgrade surface, so the bundle has a new version
+        else:
+            what = "modified"
+
+        # kind -- from contract entry
+        contract = contract_entries.get(relpath, {})
+        kind = str(contract.get("render_kind", "copy"))
+        if kind not in ("render", "copy"):
+            kind = "copy"
+
+        # merge_strategy -- from drift entry or contract
+        merge_strategy = ""
+        if drift_entry:
+            merge_strategy = drift_entry.merge_strategy
+        if not merge_strategy:
+            merge_strategy = str(contract.get("merge_strategy", MERGE_STRATEGY_OPERATOR_REVIEW))
+
+        # benefit -- from artifact_notes or default
+        note = artifact_notes.get(relpath)
+        if isinstance(note, dict) and note.get("benefit"):
+            benefit = str(note["benefit"])
+        else:
+            filename = relpath.split("/")[-1]
+            benefit = f"Improvement to your system's {filename}."
+
+        risk, how = _artifact_risk_and_how(merge_strategy, drift_status, is_new)
+
+        result.append(ArtifactAnalysis(
+            relpath=relpath,
+            what=what,
+            kind=kind,
+            benefit=benefit,
+            risk=risk,
+            how=how,
+        ))
+
+    return result
+
+
 # ===== Pretty-printing for CLI =====
 # (Build-side JSON sidecar emission lives at `wizard/scripts/lib/sidecar_emit.py`;
 #  this module stays pure-read engine for the operator runtime CLI.)
@@ -973,6 +1152,19 @@ def render_upgrade_plan(plan: UpgradePlan) -> str:
     else:
         lines.append("Drift report: clean (no drift on managed files)")
     lines.append("")
+    if plan.artifact_analysis:
+        lines.append("Per-file upgrade analysis:")
+        lines.append(
+            f"  {'File':<45}  {'What':<10}  {'Kind':<8}  {'At risk':<45}  Benefit"
+        )
+        lines.append(f"  {'-'*45}  {'-'*10}  {'-'*8}  {'-'*45}  {'-'*30}")
+        for a in plan.artifact_analysis:
+            filename = a.relpath.split("/")[-1]
+            lines.append(
+                f"  {a.relpath:<45}  {a.what:<10}  {a.kind:<8}  {a.risk:<45}  {a.benefit}"
+            )
+            lines.append(f"      How applied: {a.how}")
+        lines.append("")
     lines.append(f"Apply blocked reason: {plan.apply_blocked_reason}")
     return "\n".join(lines) + "\n"
 
@@ -983,5 +1175,14 @@ def upgrade_check_to_dict(r: UpgradeCheckResult) -> Dict[str, Any]:
 
 
 def upgrade_plan_to_dict(p: UpgradePlan) -> Dict[str, Any]:
-    """Convert UpgradePlan to a JSON-emittable dict (for `--json` CLI output)."""
-    return asdict(p)
+    """Convert UpgradePlan to a JSON-emittable dict (for `--json` CLI output).
+
+    The returned dict includes an `artifact_analysis` list when the plan carries one.
+    Each analysis entry has stable keys: relpath, what, kind, benefit, risk, how.
+    """
+    d = asdict(p)
+    # asdict handles ArtifactAnalysis dataclasses in artifact_analysis automatically;
+    # ensure the key is always present (empty list when no analysis attached).
+    if "artifact_analysis" not in d:
+        d["artifact_analysis"] = []
+    return d
