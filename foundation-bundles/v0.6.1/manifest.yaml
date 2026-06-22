@@ -21,6 +21,14 @@
 foundation_bundle_version: v0.6.1
 foundation_schema_version: v0.3
 agent_contract_version: v0-pre-rebuild
+# bundle-manifest schema that introduced the engine-compatibility contract; a manifest
+# declaring this MUST carry min_engine_version (else the engine fails closed). A bundle
+# omitting bundle_manifest_schema_version is a legacy bundle, exempt from the gate.
+bundle_manifest_schema_version: v2
+# the minimum SEMANTIC upgrade-engine version (ENGINE_VERSION) required to apply this
+# bundle. An older local engine must refresh the toolkit first (ENGINE_TOO_OLD) — never
+# best-effort apply.
+min_engine_version: v1.0.0
 release_date: 2026-06-21
 source_commit: 296d5ff  # held-out e2e fixture bundle cut over v0.6.0
 status: prerelease

@@ -1,6 +1,7 @@
 {
   "_note": "JSON sidecar for manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing companion. Both files MUST stay in sync.",
   "agent_contract_version": "v0-pre-rebuild",
+  "bundle_manifest_schema_version": "v2",
   "foundation_bundle_version": "v0.6.1",
   "foundation_schema_version": "v0.3",
   "included_templates": {
@@ -50,6 +51,7 @@
       "merge_strategy": "three_way"
     }
   },
+  "min_engine_version": "v1.0.0",
   "public_api": {
     "required_files": [
       "foundation/vision.md",

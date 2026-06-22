@@ -64,7 +64,9 @@ from upgrade import (  # type: ignore
     MERGE_STRATEGY_THREE_WAY,
     MERGE_STRATEGY_WARN_ON_DRIFT,
     TIER_MAJOR_BREAKING,
+    EngineDirectoryBoundaryError,
     UpgradeError,
+    check_engine_compatibility,
     classify_tier,
     find_bundle_entry,
     find_migration_entry,
@@ -73,6 +75,7 @@ from upgrade import (  # type: ignore
     resolve_merge_strategy,
     sha256_bytes,
     sha256_file,
+    target_escapes_engine_dir,
 )
 
 
@@ -1055,6 +1058,19 @@ def apply_upgrade(
             f"be applied automatically: {stop_condition}. No files were changed."
         )
 
+    # --- 1b. Engine-compatibility gate (MF-2) ----------------------------------
+    # Refuse (ENGINE_TOO_OLD) rather than best-effort apply when the installed engine is
+    # older than the target bundle's declared min_engine_version (a stale engine would
+    # apply a pre-clobber-fix version). A new-schema bundle missing the field fails
+    # closed; a legacy bundle (no bundle_manifest_schema_version) is exempt.
+    compat = check_engine_compatibility(registry_path, registry, target_entry)
+    if not compat.compatible:
+        raise UpgradeApplyError(
+            "this update cannot be applied because the update tool on this machine is "
+            f"too old (or its compatibility could not be confirmed): {compat.reason} "
+            "Refresh the update tool first, then try again. No files were changed."
+        )
+
     capsule = load_replay_capsule(operator_project_dir)
     capsule_inputs = capsule["foundation_doc_inputs"]
 
@@ -1106,6 +1122,25 @@ def apply_upgrade(
     # silently delivering nothing. This classifies the surface; the write path
     # for new/copy/operating-layer files.
     target_contract = _load_target_contract(target_bundle_dir)
+
+    # --- 3b(i). Engine-directory boundary (MF-4) ------------------------------
+    # A data bundle may modify ONLY operator-estate files (foundation docs +
+    # operating-layer render/copy files), NEVER the engine's own code area. Reject the
+    # WHOLE upgrade fail-closed (no writes) if any wizard-delivery contract entry resolves
+    # into `scripts/` / `scripts/lib/` / `wizard_upgrade.py` or escapes the project root.
+    if target_contract:
+        for entry in target_contract.get("artifacts", []):
+            if entry.get("delivery") != "wizard":
+                continue
+            rel = entry.get("relpath")
+            if rel and target_escapes_engine_dir(rel):
+                raise EngineDirectoryBoundaryError(
+                    f"the update tried to modify a protected engine file ({rel!r}); a "
+                    "data update may only change your system's own documents and "
+                    "operating files, never the update engine itself. The update was "
+                    "refused and no files were changed."
+                )
+
     surface = compute_merge_surface(
         manifest, target_contract, base_rendered, theirs_rendered,
         operator_project_dir, capsule,

@@ -48,7 +48,10 @@ from lib.upgrade import (  # noqa: E402
     OperatorManifestError,
     PlanOnlyRequiredError,
     RegistryError,
+    UpdateStatus,
     UpgradeError,
+    classify_update_status,
+    check_engine_compatibility,
     compute_upgrade_analysis,
     compute_upgrade_check,
     compute_upgrade_plan,
@@ -56,10 +59,13 @@ from lib.upgrade import (  # noqa: E402
     load_migration_manifest,
     load_operator_manifest,
     load_registry,
+    render_update_status,
     render_upgrade_check,
     render_upgrade_plan,
     resolve_bundle_dir,
     resolve_toolkit_root,
+    status_exit_code,
+    update_outcome_to_dict,
     upgrade_check_to_dict,
     upgrade_plan_to_dict,
 )
@@ -160,27 +166,76 @@ def _resolve_registry_path(registry_arg: str | None) -> Path:
     return Path.cwd() / _DEFAULT_REGISTRY_PATH
 
 
+def _emit_outcome(outcome, args, *, detail_render: str = "") -> int:
+    """Shared emit for the typed honest-status contract: --json emits the structured
+    outcome (status / reason_code / fields); otherwise the operator-facing message
+    (rendered ONLY from the typed status, never raw logs) plus optional detail. Returns
+    the status-mapped exit code so the could-not-determine band never collapses to 0."""
+    if args.json:
+        print(json.dumps(update_outcome_to_dict(outcome), sort_keys=True, indent=2, ensure_ascii=False))
+    else:
+        print(render_update_status(outcome))
+        if detail_render:
+            print()
+            print(detail_render, end="")
+    return status_exit_code(outcome.status)
+
+
 def cmd_upgrade_check(args: argparse.Namespace) -> int:
-    """`wizard upgrade-check`."""
+    """`wizard upgrade-check` — typed honest-status contract (C6').
+
+    Every outcome funnels through `classify_update_status` so no failure path can
+    collapse into a false "up to date": a missing/unparseable registry -> REGISTRY_INVALID;
+    a check that did not complete -> COULD_NOT_CHECK; an update that exists but the local
+    engine is too old to apply -> ENGINE_TOO_OLD. Distinct exit code per status."""
     manifest_path = _resolve_manifest_path(args.manifest_path)
     registry_path = _resolve_registry_path(args.registry_path)
+
+    # Operator-manifest load failures are an operator/config error, not an
+    # update-status determination — keep the legacy tooling exit code 1.
     try:
         manifest = load_operator_manifest(manifest_path)
-        registry = load_registry(registry_path)
     except UpgradeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+
+    # Registry load failure is an update-status determination: a missing/unparseable
+    # registry means "could not check", classified REGISTRY_INVALID (NOT "no updates").
+    try:
+        registry = load_registry(registry_path)
+    except RegistryError as e:
+        return _emit_outcome(classify_update_status(e), args)
+
     operator_dir = manifest_path.parent.parent
     try:
         result = compute_upgrade_check(operator_dir, manifest, registry, registry_path=registry_path)
+    except RegistryError as e:
+        return _emit_outcome(classify_update_status(e), args)
     except UpgradeError as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 1
-    if args.json:
-        print(json.dumps(upgrade_check_to_dict(result), sort_keys=True, indent=2, ensure_ascii=False))
-    else:
-        print(render_upgrade_check(result), end="")
-    return 0
+        # The check itself did not complete (e.g. a target's migration manifest could
+        # not be loaded) -> COULD_NOT_CHECK, never a false "current".
+        return _emit_outcome(classify_update_status(e), args)
+
+    # Engine-compatibility gate (MF-2): if an update exists but the local engine is older
+    # than the latest available target's declared min_engine_version, surface ENGINE_TOO_OLD
+    # (honest STOP — refresh the tool first) rather than UPDATE_AVAILABLE.
+    engine_too_old = False
+    min_engine = ""
+    if result.available_targets:
+        # Highest available target (the check sorts ascending; take the last).
+        latest_target = result.available_targets[-1].get("foundation_bundle_version", "")
+        target_entry = find_bundle_entry(registry, latest_target)
+        if target_entry is not None:
+            compat = check_engine_compatibility(registry_path, registry, target_entry)
+            if not compat.compatible:
+                engine_too_old = True
+                min_engine = compat.min_engine_version
+
+    outcome = classify_update_status(
+        result, engine_too_old=engine_too_old, min_engine_version=min_engine,
+    )
+    detail = "" if args.json else render_upgrade_check(result)
+    return _emit_outcome(outcome, args, detail_render=detail)
 
 
 def _run_upgrade_plan(args: argparse.Namespace, plan_only_invoked_via_synonym: bool) -> int:

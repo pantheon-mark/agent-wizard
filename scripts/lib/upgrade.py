@@ -28,6 +28,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field, asdict
+from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -96,6 +97,277 @@ DRIFT_MISSING_FILE = "managed_file_missing"
 SEMVER_PATTERN = re.compile(r"^v(\d+)\.(\d+)(?:\.(\d+))?(?:-[a-zA-Z0-9.-]+)?$")
 
 
+# ===== Engine (toolkit) semantic version =====
+# A SEMANTIC version of the upgrade engine itself, distinct from `generator_version`
+# (a commit hash). It is the version a bundle's `min_engine_version` is compared
+# against to decide whether the locally-installed engine is new enough to apply that
+# bundle (MF-2 engine-compatibility gate). Bump the MINOR when a bundle could legitimately
+# declare a higher `min_engine_version` than older engines satisfy (i.e. when this engine
+# gains an apply capability a future bundle may require); bump MAJOR on a breaking apply
+# contract change. NOT auto-derived from git — semantic + hand-maintained.
+ENGINE_VERSION = "v1.0.0"
+
+# Bundle-manifest schema version that introduced the engine-compatibility contract.
+# A bundle manifest declaring `bundle_manifest_schema_version` >= this value MUST carry a
+# `min_engine_version` (else the engine fails closed rather than assume compatibility);
+# a manifest that omits `bundle_manifest_schema_version` is a LEGACY (pre-engine-compat)
+# bundle and is NOT subject to the gate (engine assumed compatible — applies prospectively,
+# so already-released foundation-only bundles keep loading).
+BUNDLE_MANIFEST_SCHEMA_ENGINE_COMPAT = "v2"
+
+
+# ===== C6' typed honest-status contract (the upgrade-check surface) =====
+# Every upgrade-check outcome is a TYPED status, not a boolean or LLM free-text. The
+# load-bearing invariant: ONLY `CHECKED_CURRENT` may render an "up to date" message; any
+# "could not determine" outcome renders "could not check / status unknown" and must never
+# be reported as up-to-date. Statuses map to distinct CLI exit codes so a caller can
+# branch on WHY a check failed without parsing prose.
+
+class UpdateStatus(Enum):
+    """Typed outcome of an update check. Exhaustively handled by `render_update_status`
+    + `status_exit_code` (both raise on an unhandled member — no silent default)."""
+    UPDATE_AVAILABLE = "update_available"        # checked; a newer target exists
+    CHECKED_CURRENT = "checked_current"          # checked; system IS current (ONLY up-to-date status)
+    COULD_NOT_CHECK = "could_not_check"          # generic could-not-determine (fetch/IO/unknown)
+    TOOLKIT_UNVERIFIED = "toolkit_unverified"    # local toolkit could not be integrity-verified
+    SOURCE_UNCONFIGURED = "source_unconfigured"  # no update source wired (the F-OR-3 case)
+    ENGINE_TOO_OLD = "engine_too_old"            # an update exists but the local engine must refresh first
+    NETWORK_UNAVAILABLE = "network_unavailable"  # could not reach the update source over the network
+    REGISTRY_INVALID = "registry_invalid"        # registry missing / unparseable / malformed
+    CANDIDATE_UNVERIFIED = "candidate_unverified"  # a fetched candidate failed integrity/lineage verification
+    UPDATE_SOURCE_TAMPERED = "update_source_tampered"  # the update source did not match its pinned origin
+
+
+# Statuses that mean "the system FAILED to establish whether an update exists." None of
+# these may render up-to-date; all render a could-not-check / status-unknown message.
+_COULD_NOT_DETERMINE_STATUSES = frozenset({
+    UpdateStatus.COULD_NOT_CHECK,
+    UpdateStatus.TOOLKIT_UNVERIFIED,
+    UpdateStatus.SOURCE_UNCONFIGURED,
+    UpdateStatus.NETWORK_UNAVAILABLE,
+    UpdateStatus.REGISTRY_INVALID,
+    UpdateStatus.CANDIDATE_UNVERIFIED,
+    UpdateStatus.UPDATE_SOURCE_TAMPERED,
+    UpdateStatus.ENGINE_TOO_OLD,
+})
+
+
+# ===== CLI exit codes (one per status class; distinct + documented) =====
+# 0  = checked-current (no update)            -> EXIT_CHECKED_CURRENT
+# 10 = update available                       -> EXIT_UPDATE_AVAILABLE
+# 20 = could-not-check (generic)              -> EXIT_COULD_NOT_CHECK
+# 21 = toolkit unverified                     -> EXIT_TOOLKIT_UNVERIFIED
+# 22 = no update source configured            -> EXIT_SOURCE_UNCONFIGURED
+# 23 = engine too old (refresh tool first)    -> EXIT_ENGINE_TOO_OLD
+# 24 = network unavailable                    -> EXIT_NETWORK_UNAVAILABLE
+# 25 = registry invalid                       -> EXIT_REGISTRY_INVALID
+# 26 = candidate failed verification          -> EXIT_CANDIDATE_UNVERIFIED
+# 27 = update source tampered / wrong origin  -> EXIT_UPDATE_SOURCE_TAMPERED
+# (These are distinct from the argparse/tooling exit code 2 used by wizard_upgrade.py for
+#  invalid CLI arguments; the could-not-determine band starts at 20 to avoid colliding.)
+EXIT_CHECKED_CURRENT = 0
+EXIT_UPDATE_AVAILABLE = 10
+EXIT_COULD_NOT_CHECK = 20
+EXIT_TOOLKIT_UNVERIFIED = 21
+EXIT_SOURCE_UNCONFIGURED = 22
+EXIT_ENGINE_TOO_OLD = 23
+EXIT_NETWORK_UNAVAILABLE = 24
+EXIT_REGISTRY_INVALID = 25
+EXIT_CANDIDATE_UNVERIFIED = 26
+EXIT_UPDATE_SOURCE_TAMPERED = 27
+
+_STATUS_EXIT_CODES: Dict[UpdateStatus, int] = {
+    UpdateStatus.CHECKED_CURRENT: EXIT_CHECKED_CURRENT,
+    UpdateStatus.UPDATE_AVAILABLE: EXIT_UPDATE_AVAILABLE,
+    UpdateStatus.COULD_NOT_CHECK: EXIT_COULD_NOT_CHECK,
+    UpdateStatus.TOOLKIT_UNVERIFIED: EXIT_TOOLKIT_UNVERIFIED,
+    UpdateStatus.SOURCE_UNCONFIGURED: EXIT_SOURCE_UNCONFIGURED,
+    UpdateStatus.ENGINE_TOO_OLD: EXIT_ENGINE_TOO_OLD,
+    UpdateStatus.NETWORK_UNAVAILABLE: EXIT_NETWORK_UNAVAILABLE,
+    UpdateStatus.REGISTRY_INVALID: EXIT_REGISTRY_INVALID,
+    UpdateStatus.CANDIDATE_UNVERIFIED: EXIT_CANDIDATE_UNVERIFIED,
+    UpdateStatus.UPDATE_SOURCE_TAMPERED: EXIT_UPDATE_SOURCE_TAMPERED,
+}
+
+
+def status_exit_code(status: "UpdateStatus") -> int:
+    """Map a status to its distinct CLI exit code. EXHAUSTIVE: raises on any status not
+    in the table (no silent default — a new enum member is a compile-time-equivalent
+    failure here, surfaced by the all-statuses test)."""
+    code = _STATUS_EXIT_CODES.get(status)
+    if code is None:
+        raise ValueError(
+            f"status_exit_code: unhandled UpdateStatus {getattr(status, 'name', status)!r}; "
+            "add it to _STATUS_EXIT_CODES (no silent default permitted)."
+        )
+    return code
+
+
+@dataclass
+class UpdateCheckOutcome:
+    """The typed result the upgrade-check surface returns. Carries the typed `status`,
+    a stable machine `reason_code`, and structured fields the operator-facing layer
+    renders from (NEVER from raw logs). `--json` emits status / reason_code / the
+    structured fields verbatim."""
+    status: UpdateStatus
+    reason_code: str
+    current_version: str = ""
+    available_targets: List[Dict[str, Any]] = field(default_factory=list)
+    detail: str = ""                 # short machine-facing detail (e.g. the registry error text)
+    engine_version: str = ENGINE_VERSION
+    min_engine_version: str = ""     # populated for ENGINE_TOO_OLD
+
+
+# Operator-facing message per status. EXHAUSTIVE: `render_update_status` raises on any
+# status absent from this table. ONLY CHECKED_CURRENT carries an up-to-date phrase; the
+# could-not-determine statuses all carry a "could not check / status unknown" phrase.
+_STATUS_MESSAGES: Dict[UpdateStatus, str] = {
+    UpdateStatus.CHECKED_CURRENT: (
+        "Checked for updates: your system is up to date. There is no newer version to install."
+    ),
+    UpdateStatus.UPDATE_AVAILABLE: (
+        "An update is available for your system. Review what it changes before applying it."
+    ),
+    UpdateStatus.COULD_NOT_CHECK: (
+        "Could not check for updates, so the update status is unknown. The check did "
+        "not complete — this is not a confirmation that your system is current."
+    ),
+    UpdateStatus.TOOLKIT_UNVERIFIED: (
+        "Could not check for updates: the update tool on this machine could not be "
+        "verified, so the update status is unknown. Refresh the tool, then check again."
+    ),
+    UpdateStatus.SOURCE_UNCONFIGURED: (
+        "Could not check for updates: no update source is connected to this system, so "
+        "the update status is unknown. This is not a confirmation that your system is current."
+    ),
+    UpdateStatus.ENGINE_TOO_OLD: (
+        "An update is available, but the update tool on this machine is too old to apply "
+        "it safely. Refresh the tool first, then check again. The update was NOT applied."
+    ),
+    UpdateStatus.NETWORK_UNAVAILABLE: (
+        "Could not check for updates: the update source could not be reached over the "
+        "network, so the update status is unknown. Check your connection and try again."
+    ),
+    UpdateStatus.REGISTRY_INVALID: (
+        "Could not check for updates: the list of available versions is missing or "
+        "unreadable, so the update status is unknown. This is not a confirmation that "
+        "your system is current."
+    ),
+    UpdateStatus.CANDIDATE_UNVERIFIED: (
+        "Could not check for updates: a candidate update failed verification, so the "
+        "update status is unknown and nothing was applied."
+    ),
+    UpdateStatus.UPDATE_SOURCE_TAMPERED: (
+        "Could not check for updates: the update source did not match the expected, "
+        "trusted origin, so the update status is unknown and nothing was applied."
+    ),
+}
+
+
+def render_update_status(outcome: "UpdateCheckOutcome") -> str:
+    """EXHAUSTIVE renderer: map a status to its operator-facing string. Raises on any
+    status not in `_STATUS_MESSAGES` (no silent default).
+
+    INVARIANT (test-enforced across ALL statuses): only CHECKED_CURRENT yields an
+    up-to-date message; every other status renders a non-up-to-date string, and the
+    could-not-determine class renders a 'could not check / status unknown' message."""
+    status = outcome.status
+    msg = _STATUS_MESSAGES.get(status)
+    if msg is None:
+        raise ValueError(
+            f"render_update_status: unhandled UpdateStatus {getattr(status, 'name', status)!r}; "
+            "add it to _STATUS_MESSAGES (no silent default permitted)."
+        )
+    if status == UpdateStatus.ENGINE_TOO_OLD and outcome.min_engine_version:
+        msg = (
+            msg + f" (needs update tool {outcome.min_engine_version} or newer; this "
+            f"machine has {outcome.engine_version})."
+        )
+    return msg
+
+
+def classify_update_status(
+    source: Any,
+    *,
+    engine_too_old: bool = False,
+    min_engine_version: str = "",
+) -> "UpdateCheckOutcome":
+    """Map a raw upgrade-check result OR a failure into the typed outcome.
+
+    Accepts:
+      - an `UpgradeCheckResult`  -> UPDATE_AVAILABLE (targets present) /
+                                    CHECKED_CURRENT (none). If `engine_too_old` is set
+                                    AND targets exist -> ENGINE_TOO_OLD (an update exists
+                                    but the local engine must refresh first).
+      - a `RegistryError`        -> REGISTRY_INVALID (NOT "no updates")
+      - any other `UpgradeError` -> COULD_NOT_CHECK (the check did not complete)
+      - None                     -> SOURCE_UNCONFIGURED (no source/result at all)
+
+    This is the single funnel that prevents a fetch/parse failure collapsing into a
+    false "you're up to date" (F-OR-3)."""
+    if source is None:
+        return UpdateCheckOutcome(
+            status=UpdateStatus.SOURCE_UNCONFIGURED,
+            reason_code="no_update_source_configured",
+        )
+    if isinstance(source, RegistryError):
+        return UpdateCheckOutcome(
+            status=UpdateStatus.REGISTRY_INVALID,
+            reason_code="registry_missing_or_unparseable",
+            detail=str(source),
+        )
+    if isinstance(source, UpgradeError):
+        return UpdateCheckOutcome(
+            status=UpdateStatus.COULD_NOT_CHECK,
+            reason_code="check_did_not_complete",
+            detail=str(source),
+        )
+    if isinstance(source, UpgradeCheckResult):
+        targets = list(source.available_targets or [])
+        if targets and engine_too_old:
+            return UpdateCheckOutcome(
+                status=UpdateStatus.ENGINE_TOO_OLD,
+                reason_code="local_engine_below_min_engine_version",
+                current_version=source.current_version,
+                available_targets=targets,
+                min_engine_version=min_engine_version,
+            )
+        if targets:
+            return UpdateCheckOutcome(
+                status=UpdateStatus.UPDATE_AVAILABLE,
+                reason_code="newer_target_available",
+                current_version=source.current_version,
+                available_targets=targets,
+            )
+        return UpdateCheckOutcome(
+            status=UpdateStatus.CHECKED_CURRENT,
+            reason_code="no_newer_target",
+            current_version=source.current_version,
+        )
+    # Unknown source type — fail honest, never current.
+    return UpdateCheckOutcome(
+        status=UpdateStatus.COULD_NOT_CHECK,
+        reason_code="unrecognized_check_result",
+        detail=f"unrecognized source type {type(source).__name__}",
+    )
+
+
+def update_outcome_to_dict(outcome: "UpdateCheckOutcome") -> Dict[str, Any]:
+    """JSON-emittable dict for `--json` (status value + reason_code + structured fields).
+    The operator-facing layer renders from THESE fields, never from raw logs."""
+    return {
+        "status": outcome.status.value,
+        "reason_code": outcome.reason_code,
+        "current_version": outcome.current_version,
+        "available_targets": outcome.available_targets,
+        "detail": outcome.detail,
+        "engine_version": outcome.engine_version,
+        "min_engine_version": outcome.min_engine_version,
+        "message": render_update_status(outcome),
+        "exit_code": status_exit_code(outcome.status),
+    }
+
+
 # ===== Exception classes =====
 
 class UpgradeError(Exception):
@@ -124,6 +396,67 @@ class PlanOnlyRequiredError(UpgradeError):
 
 class MigrationManifestError(UpgradeError):
     """Raised when target version's migration manifest cannot be loaded or lacks required `from:` entry."""
+
+
+class EngineDirectoryBoundaryError(UpgradeError):
+    """Raised (MF-4) when a data bundle / contract entry would write into the engine's
+    own code area. Data bundles may only modify operator-estate files (foundation docs +
+    operating-layer render/copy files), NEVER the upgrade engine itself."""
+
+
+# ===== MF-4 engine-directory boundary =====
+# A data-apply must NEVER write into the engine's own code area. The engine code lives
+# under `scripts/` in the toolkit (`scripts/wizard_upgrade.py`, `scripts/lib/*.py`); a
+# bundle/contract entry resolving into that area (or escaping the operator project via
+# `..`) is refused fail-closed. The operator estate never legitimately contains a
+# top-level `scripts/` engine directory — operating-layer files live under `.claude/`,
+# `agents/`, `foundation/`, `quality/`, root docs, etc.
+
+# The operator-relative path prefixes that constitute the engine's own code area.
+_ENGINE_DIR_SEGMENTS = ("scripts",)
+# Specific engine entrypoint files (defense-in-depth; covered by the `scripts/` prefix
+# too, but named so the intent is explicit and a future relocation is easy to extend).
+_ENGINE_FILE_BASENAMES = ("wizard_upgrade.py",)
+
+
+def target_escapes_engine_dir(relpath: str) -> bool:
+    """Pure predicate (MF-4): True if an operator-relative target would land in the
+    engine's own code area or escape the operator project.
+
+    Flags:
+      - any path whose first normalized segment is an engine dir (`scripts/...`),
+      - the named engine entrypoint files anywhere,
+      - any path that escapes the operator project root via `..`.
+
+    Normalizes `.`/`..` segments WITHOUT touching the filesystem so a crafted
+    `scripts/../scripts/lib/x.py` or `./scripts/...` cannot slip past a naive
+    startswith check.
+    """
+    if not relpath:
+        return False
+    raw = PurePosixPath(relpath.replace("\\", "/"))
+    if raw.is_absolute():
+        # An absolute target is never a valid operator-relative estate file.
+        return True
+    # Normalize . / .. without resolving against the filesystem.
+    parts: List[str] = []
+    for seg in raw.parts:
+        if seg == ".":
+            continue
+        if seg == "..":
+            if not parts:
+                # Escapes above the operator project root.
+                return True
+            parts.pop()
+            continue
+        parts.append(seg)
+    if not parts:
+        return False
+    if parts[0] in _ENGINE_DIR_SEGMENTS:
+        return True
+    if parts[-1] in _ENGINE_FILE_BASENAMES:
+        return True
+    return False
 
 
 # ===== Canonicalization =====
@@ -601,6 +934,135 @@ def _resolve_bundle_dir(registry_path: Path, entry: Dict[str, Any], registry: Op
     if registry is None:
         registry = load_registry(registry_path)
     return resolve_bundle_dir(registry_path, registry, entry)
+
+
+# ===== MF-2 engine-compatibility gate =====
+# The locally-installed engine (ENGINE_VERSION) must be >= a target bundle's declared
+# `min_engine_version` before plan/apply. A new-schema bundle missing the field fails
+# closed (never assume compatible); a legacy bundle (no bundle_manifest_schema_version)
+# predates the gate and is exempt (the fix applies prospectively).
+
+BUNDLE_MANIFEST_JSON_FILENAME = "manifest.json"
+
+
+@dataclass
+class EngineCompatResult:
+    """Result of `check_engine_compatibility`."""
+    compatible: bool
+    installed_engine_version: str
+    min_engine_version: str = ""     # the target's declared minimum (empty if none / legacy)
+    reason: str = ""                 # operator/diagnostic reason when NOT compatible
+
+
+def _semver_ge(a: str, b: str) -> Optional[bool]:
+    """True if semver a >= b; None if either is unparseable (caller fails closed)."""
+    ta, tb = parse_semver(a), parse_semver(b)
+    if ta is None or tb is None:
+        return None
+    return ta >= tb
+
+
+def check_engine_compatibility(
+    registry_path: Path,
+    registry: Dict[str, Any],
+    target_entry: Dict[str, Any],
+    *,
+    installed_engine_version: str = ENGINE_VERSION,
+) -> EngineCompatResult:
+    """Compare the installed engine version against the target bundle's
+    `min_engine_version` (read from the target bundle's manifest.json), fail-closed.
+
+    Rules:
+      - legacy bundle (manifest omits `bundle_manifest_schema_version`) -> compatible
+        (the gate applies prospectively; existing foundation-only bundles keep loading).
+      - new-schema bundle (declares `bundle_manifest_schema_version`) MISSING
+        `min_engine_version` -> NOT compatible (fail closed; never assume).
+      - min_engine_version present:
+          installed >= min -> compatible.
+          installed <  min -> NOT compatible (ENGINE_TOO_OLD; refresh the tool first).
+          unparseable min  -> NOT compatible (fail closed).
+      - manifest.json unreadable / absent -> NOT compatible (cannot establish; fail closed).
+
+    Bundle-dir resolution is registry-relative + layout-agnostic (build-repo + public-clone).
+    """
+    version = target_entry.get("foundation_bundle_version", "<unknown>")
+    try:
+        bundle_dir = resolve_bundle_dir(registry_path, registry, target_entry)
+    except RegistryError as e:
+        return EngineCompatResult(
+            compatible=False, installed_engine_version=installed_engine_version,
+            reason=f"cannot resolve the target bundle directory for {version!r}: {e}",
+        )
+    manifest_json = bundle_dir / BUNDLE_MANIFEST_JSON_FILENAME
+    if not manifest_json.is_file():
+        # No bundle manifest.json at all -> a legacy / foundation-only bundle (the
+        # operating-layer/new-schema bundles always ship one). The engine-compat gate
+        # applies prospectively, so such a bundle is exempt (compatible). This is what
+        # keeps pre-operating-layer bundles (and synthetic foundation-only fixtures)
+        # applying; a new-schema bundle declaring the schema-version but missing the
+        # min_engine_version field is the fail-closed case handled below.
+        return EngineCompatResult(
+            compatible=True, installed_engine_version=installed_engine_version,
+        )
+    try:
+        data = json.loads(manifest_json.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        return EngineCompatResult(
+            compatible=False, installed_engine_version=installed_engine_version,
+            reason=f"the target bundle {version!r} manifest could not be read: {e} (fail-closed).",
+        )
+    if not isinstance(data, dict):
+        return EngineCompatResult(
+            compatible=False, installed_engine_version=installed_engine_version,
+            reason=f"the target bundle {version!r} manifest is not a JSON object (fail-closed).",
+        )
+
+    schema_version = data.get("bundle_manifest_schema_version")
+    min_engine = data.get("min_engine_version")
+
+    # Legacy bundle: predates the engine-compat contract -> exempt (compatible).
+    if schema_version is None:
+        # A legacy bundle that nonetheless declares a min_engine_version is still honored
+        # (defensive); otherwise it's exempt.
+        if not min_engine:
+            return EngineCompatResult(
+                compatible=True, installed_engine_version=installed_engine_version,
+            )
+
+    # New-schema bundle (or a legacy one that declared min_engine): require + check it.
+    if not min_engine or not isinstance(min_engine, str):
+        return EngineCompatResult(
+            compatible=False, installed_engine_version=installed_engine_version,
+            reason=(
+                f"the target bundle {version!r} declares schema "
+                f"{schema_version!r} but is missing a `min_engine_version`; refusing to "
+                "assume it is compatible with this engine (fail-closed)."
+            ),
+        )
+    ge = _semver_ge(installed_engine_version, min_engine)
+    if ge is None:
+        return EngineCompatResult(
+            compatible=False, installed_engine_version=installed_engine_version,
+            min_engine_version=min_engine,
+            reason=(
+                f"the target bundle {version!r} declares an unparseable "
+                f"min_engine_version {min_engine!r} (fail-closed)."
+            ),
+        )
+    if not ge:
+        return EngineCompatResult(
+            compatible=False, installed_engine_version=installed_engine_version,
+            min_engine_version=min_engine,
+            reason=(
+                f"the update tool on this machine ({installed_engine_version}) is older "
+                f"than the version {min_engine} the target {version!r} requires; refresh "
+                "the tool first."
+            ),
+        )
+    return EngineCompatResult(
+        compatible=True, installed_engine_version=installed_engine_version,
+        min_engine_version=min_engine,
+    )
 
 
 def _is_semver_match(from_spec: str, current_version: str) -> bool:
