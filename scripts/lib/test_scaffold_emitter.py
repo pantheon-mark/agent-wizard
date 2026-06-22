@@ -37,6 +37,28 @@ class ScaffoldEmitterTests(unittest.TestCase):
         written = emit_scaffold(plan, staging, REPO_ROOT)
         return staging, written
 
+    def test_upgrading_md_does_not_bake_a_stale_version(self):
+        """.wizard/UPGRADING.md is a control file written once at emit and never refreshed
+        by an upgrade, so a baked foundation-bundle version goes permanently stale (the
+        operator reads 'set up from v0.4.0' while actually on v0.6.0). The current version
+        lives in the manifest / upgrade-check output; UPGRADING.md must point there instead
+        of claiming a fixed version."""
+        from upgrade_scaffold_emitter import emit_command_surface, COMMAND_SURFACE_REL
+        plan = validate_emission_plan(_valid_plan(), self.contract)
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name)
+        emit_command_surface(plan, staging)
+        text = (staging / COMMAND_SURFACE_REL).read_text(encoding="utf-8")
+        self.assertNotIn(
+            "set up from foundation bundle", text,
+            "UPGRADING.md bakes a version that goes stale after an upgrade",
+        )
+        low = text.lower()
+        self.assertTrue(
+            "upgrade-check" in low or "manifest" in low,
+            "UPGRADING.md must point to upgrade-check / the manifest for the current version",
+        )
+
     def tearDown(self):
         tmp = getattr(self, "_tmp", None)
         if tmp is not None:

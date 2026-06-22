@@ -11,7 +11,7 @@
     ".claude/statusline.sh": "sha256:44df82d6f0086bd6e15fa6685b313c4f53d1eb4042e6a3255ff0931e0aa43e40",
     ".env": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".gitignore": "sha256:9a072795b1a3902e27753c3d0b22ca922628079eadc1239f2d3cb800a70ee512",
-    ".wizard/UPGRADING.md": "sha256:1cb7539b73dd6108d5ff41bba629264c7556e475335420d65c4bb4050e950b27",
+    ".wizard/UPGRADING.md": "sha256:777c6087176214ed686fcc8185dbb7927dfe2d57a3b380a4a6fd7526ca1908e3",
     "CLAUDE.md": "sha256:5f85f00eb7303da204afb4c8c5dab857615ce0cba3667e946f08670deadc33b8",
     "SESSION_STATE.md": "sha256:dea1b4cd595eccb69b9f887ecf8a00eb642daa87b90f5cdb47b7cd6c86aee86d",
     "agents/cron/cron_config.md": "sha256:972e217125ae5239f71cb02e0b2071a090754240f15be714ad30ba4ad0f8236b",
