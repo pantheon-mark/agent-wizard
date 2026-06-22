@@ -86,6 +86,7 @@ ALLOWLIST_UNIFIED_ADDITIONS = {
     ".wizard/upgrade-history.log": "upgrade scaffold; legacy had no upgrade surface",
     ".wizard/UPGRADING.md": "upgrade command surface; legacy had none",
     ".wizard/replay-capsule.json": "replay capsule (build-time inputs + provenance) enabling deterministic upgrade re-render; gitignored + secret-scanned; legacy had no upgrade surface",
+    ".wizard/update-source.json": "durable, read-only-to-the-AI update-source reference (pinned distribution repo + last-known-good commit) the self-update and notice hook agree on; legacy had no update source",
     "decisions/_index.md": "ADR/decisions core emitted by the corpus layer; legacy did not emit it",
     "decisions/decision_record_template.md": "ADR/decisions core; legacy did not emit it",
     "wizard/skills/credential-setup.md": "first-boot credential-setup skill; a pre-built operational skill the legacy close-assembly had no equivalent of",

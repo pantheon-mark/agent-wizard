@@ -75,6 +75,14 @@
     },
     {
       "delivery": "wizard",
+      "merge_strategy": "control_plane_refresh",
+      "mode": "0644",
+      "relpath": ".wizard/update-source.json",
+      "render_kind": "copy",
+      "source": "control_plane"
+    },
+    {
+      "delivery": "wizard",
       "inputs": {
         "derived": [
           "INHERITED_OPERATING_PRINCIPLES"

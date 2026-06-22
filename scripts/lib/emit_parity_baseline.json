@@ -1,9 +1,8 @@
 {
   "_note": "Byte-parity baseline: canonical (LF-normalized sha256_file) hashes of every delivery:wizard emitted file, captured at v0.6.0 (the first coherent system-bundle). Parity test re-emits and asserts each delivery:wizard file hash equals this baseline. The clock is PINNED so the re-emit is reproducible regardless of run date (the date-bearing files carry a build date that would otherwise drift).",
+  "clock": "2026-06-21",
   "emit_bundle_version": "v0.6.0",
   "generator_version_override": "c3b5609fbbe566d73f3097ff0d1cd087dfe19245",
-  "shape": "markdown-CC",
-  "clock": "2026-06-21",
   "hashes": {
     ".claude/context_monitor.sh": "sha256:1394d836e0f674a7363f60e224790fbe857ec1fe485c4cc0c4a006e66c16028b",
     ".claude/receipt_gate.sh": "sha256:46860438445a13c67d996d147fa990178a8f843200bf2a2219604174c8957d6f",
@@ -11,7 +10,7 @@
     ".claude/statusline.sh": "sha256:44df82d6f0086bd6e15fa6685b313c4f53d1eb4042e6a3255ff0931e0aa43e40",
     ".env": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     ".gitignore": "sha256:9a072795b1a3902e27753c3d0b22ca922628079eadc1239f2d3cb800a70ee512",
-    ".wizard/UPGRADING.md": "sha256:777c6087176214ed686fcc8185dbb7927dfe2d57a3b380a4a6fd7526ca1908e3",
+    ".wizard/UPGRADING.md": "sha256:02fdba8dc363a1613c617efcc085dd0c6f91cfd97163853de10e6045c0844580",
     "CLAUDE.md": "sha256:5f85f00eb7303da204afb4c8c5dab857615ce0cba3667e946f08670deadc33b8",
     "SESSION_STATE.md": "sha256:dea1b4cd595eccb69b9f887ecf8a00eb642daa87b90f5cdb47b7cd6c86aee86d",
     "agents/cron/cron_config.md": "sha256:972e217125ae5239f71cb02e0b2071a090754240f15be714ad30ba4ad0f8236b",
@@ -86,5 +85,6 @@
     "work/issues_log.md": "sha256:8b8c4d430477a4819d709bbe83a76c3cb1240e49a52a0faa2dd445c6fe277f2c",
     "work/stub_tracker.md": "sha256:1ad448ca405e3c0524c87cba98f07e03e78648b42aebb6437350127598a86544",
     "work/work_queue.md": "sha256:4cf225dd55b62940f3330254a0c8435091099eae67a8b2d4c24475dda6bf93fc"
-  }
+  },
+  "shape": "markdown-CC"
 }

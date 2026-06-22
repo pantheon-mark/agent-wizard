@@ -43,6 +43,9 @@ from emission_plan import EmissionPlan  # type: ignore
 from corpus_loader import CorpusCellRecord, load_corpus_pack  # type: ignore
 from corpus_emitter import build_corpus_authority_doc  # type: ignore
 from upgrade import sha256_bytes, sha256_file, normalize_for_content_hash  # type: ignore
+from update_source import (  # type: ignore
+    emit_update_source, UPDATE_SOURCE_REL,
+)
 
 
 class UpgradeScaffoldError(Exception):
@@ -129,6 +132,11 @@ _EXACT_LIFECYCLE = {
     ".gitignore": "operator_config",
     ".env": "operator_config",   # operator-owned secrets file, emitted empty; never wizard-overwritten
     COMMAND_SURFACE_REL: "inherited_content",
+    # Durable, read-only-to-the-AI update-source reference. Wizard-authored safety
+    # config; the apply path refreshes it under the authoritative control_plane_refresh
+    # policy (set from the target contract), so the emit-time lifecycle only governs the
+    # v0 drift-report wording. Classed inherited_content (mirrors the command surface).
+    UPDATE_SOURCE_REL: "inherited_content",
     # Foundation docs (root-level in the operator project; per-doc policy from the
     # hash-baseline contract — see the foundation_* lifecycles above).
     "vision.md": "foundation_shared_expected",
@@ -384,12 +392,44 @@ def render_command_surface() -> str:
         "To preview an update without changing anything, use `--plan-only` instead of",
         "`--apply` (or the `wizard upgrade-plan` command shown above).",
         "",
+        "## Keeping the wizard tool itself current",
+        "",
+        "The commands above are run by the wizard tool installed on your machine. From",
+        "time to time the tool itself gets improvements. Updating the tool is a separate,",
+        "deliberate step from the updates above, and it is guarded: the tool checks that",
+        "the new version really comes from the expected, trusted source and continues",
+        "cleanly from your current version before it changes anything, and it backs up the",
+        "old version first.",
+        "",
+        "```",
+        "wizard self-update --check",
+        "```",
+        "",
+        "That checks only and changes nothing. When you are ready to update the tool:",
+        "",
+        "```",
+        "wizard self-update --apply",
+        "```",
+        "",
+        "The updated tool is used the next time you start a session (for safety, the",
+        "current run finishes on the version you started with). If anything looks wrong",
+        "afterward, the command prints exactly how to put the old version back by hand",
+        "(delete the new folder, rename the backup folder back). This check confirms the",
+        "expected origin and version history; it is not a cryptographic signature.",
+        "",
+        "The `wizard` command runs the tool installed at `$WIZARD_HOME` (which defaults to",
+        "`~/agent-wizard`). If your tool is installed somewhere else, you can run it by its",
+        "full path, for example `~/agent-wizard/scripts/wizard upgrade-check`.",
+        "",
         "## What the wizard tracks",
         "",
         "`.wizard/manifest.json` records every file this system was set up with and its",
         "content fingerprint, so the wizard can tell which files you have customized and",
         "protect those edits during an upgrade. `.wizard/upgrade-policy.yaml` holds your",
         "upgrade preferences. `.wizard/upgrade-history.log` records upgrades over time.",
+        "`.wizard/update-source.json` records where your updates come from (the trusted",
+        "repository and the last version confirmed good); it is protected so it cannot be",
+        "changed accidentally or by anything other than you or a verified update.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -422,5 +462,9 @@ def emit_upgrade_scaffold(plan: EmissionPlan, staging_dir: Path, build_repo_root
     written.append(emit_upgrade_policy(plan, staging_dir))
     written.append(emit_upgrade_history(plan, staging_dir))
     written.append(emit_command_surface(plan, staging_dir))
+    # Durable, read-only update-source reference. A MANAGED file (hashed into the
+    # manifest + carried in the system-artifacts contract), so it is emitted before the
+    # manifest. It is read-only to the assistant via the .claude/settings.json deny set.
+    written.append(emit_update_source(staging_dir))
     written.append(emit_manifest(plan, staging_dir, build_repo_root, records=recs))
     return written

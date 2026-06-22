@@ -33,11 +33,11 @@
       "path": "manifest.yaml"
     },
     {
-      "hash": "sha256:4c69426f969c98c27cb10c9d9d2408353e0a041f9f731589ee98d58c9ab99c5c",
+      "hash": "sha256:6b2cae78a807a71db12384faf88c098a835806e2ba4559608b4943c24e61df4e",
       "path": "migration-manifest.json"
     },
     {
-      "hash": "sha256:3e1c1396f4ee95c621470889271107dee3e9b76acfe7372658dd1be494828cf7",
+      "hash": "sha256:8566094839eecb5d050cdabbbc760b508e2e195119a6400f900d8f5fac3d30f0",
       "path": "migration-manifest.yaml"
     },
     {
@@ -45,7 +45,7 @@
       "path": "schemas/section-schema.yaml"
     },
     {
-      "hash": "sha256:67735b817c352c028d06566cf10fd0443fb4d966b4ad38d4152764352438ef02",
+      "hash": "sha256:eae9995576b4417ce7ec5f4b5f9969411ff0aa4535ed638f907dff2b6b659a77",
       "path": "system-artifacts.json"
     },
     {
@@ -105,12 +105,16 @@
       "path": "templates/claude_config/receipt_gate.sh"
     },
     {
-      "hash": "sha256:dffc5902f551ff501ad5251a4ce076460c853056081131afb81ec023864d94ff",
+      "hash": "sha256:a99b8614cce06332e8e04f0ac825c4cc229ec44501c715893a5659819a8f1dc3",
       "path": "templates/claude_config/settings.json"
     },
     {
       "hash": "sha256:44df82d6f0086bd6e15fa6685b313c4f53d1eb4042e6a3255ff0931e0aa43e40",
       "path": "templates/claude_config/statusline.sh"
+    },
+    {
+      "hash": "sha256:adef37cf7b7172c62db3e8d360a86de159727dae612e5ebc667fc8244d8a8069",
+      "path": "templates/claude_config/upgrade_notice.sh"
     },
     {
       "hash": "sha256:c104d9a6e5e728babe5efdd0912b0695c1a20ef6aa419367f6a4b337a349532a",
@@ -213,7 +217,7 @@
       "path": "templates/quality/validation_gate_config.md"
     },
     {
-      "hash": "sha256:a7b0f449eb56041f4734a30f86df093e3616741351ffb4c437b77f9b2b2f0d93",
+      "hash": "sha256:222590bfc9e16e4a7f3cefb1c2fd5e75bf4b81e18e0b97c3dabe49a040b46293",
       "path": "templates/root/CLAUDE.md"
     },
     {
@@ -346,14 +350,14 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-06-22T01:07:44Z",
-  "generator_version": "296d5ff73e7faed484c5e12f674eed20dd4f85c4",
+  "generated_at": "2026-06-22T22:16:03Z",
+  "generator_version": "57219cb8a5bed1ab0827368177e68bd8f6a1b13b",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.6.1",
-  "source_registry_entry_hash": "sha256:5e63f9d41e0ab95315f9b7ca78a3938289817390339af061913e955f762557eb",
+  "source_registry_entry_hash": "sha256:621db0a573d0a7bfa9ad8b9a55c213feef52357a4b1e883a3d696771e1d37700",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
-  "template_tree_hash": "sha256:07fbdc415228779889906d22a89f87791fced084da6dd6292d14521f5b9c8978",
+  "template_tree_hash": "sha256:62328bf9ff5b04aaa380643d01b4b29a40f16be766afe203d0fc6b8570f8ab28",
   "worktree_clean": false
 }

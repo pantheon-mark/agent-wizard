@@ -75,6 +75,13 @@ from lib.upgrade_apply import (  # noqa: E402
     render_apply_result,
     UpgradeApplyError,
 )
+from lib.self_update import (  # noqa: E402
+    apply_self_update,
+    render_self_update_result,
+    self_update_exit_code,
+    verify_self_update,
+)
+from lib.update_source import record_last_known_good_commit  # noqa: E402
 
 
 def populate_plan_analysis(
@@ -333,6 +340,49 @@ def cmd_upgrade_plan(args: argparse.Namespace) -> int:
     return _run_upgrade_plan(args, plan_only_invoked_via_synonym=True)
 
 
+def _resolve_toolkit_dir(toolkit_arg: str | None) -> Path:
+    """Resolve the installed-toolkit directory. Default = this engine's own toolkit root
+    (`scripts/`'s parent), i.e. the directory the running engine lives under. This is the
+    directory the guarded self-update verifies + backs up + swaps."""
+    if toolkit_arg:
+        return Path(toolkit_arg)
+    return _HERE.parent
+
+
+def cmd_self_update(args: argparse.Namespace) -> int:
+    """`wizard self-update [--check | --apply]` — the GUARDED toolkit-currency contract.
+
+    SAFE ORDERING: the CURRENTLY-INSTALLED engine performs verify (+ backup + swap on
+    --apply); the freshly-fetched code is NOT executed in this run — it runs on the
+    operator's NEXT invocation. Touches ONLY the toolkit directory, never operator files.
+
+    --check  : verify only (origin + lineage + clean tree); report; change nothing.
+    --apply  : verify, back up the toolkit, swap to the verified candidate, record the
+               new last-known-good commit. Fail-closed on any failed gate.
+    """
+    toolkit_dir = _resolve_toolkit_dir(args.toolkit_dir)
+    # The operator project is where `.wizard/update-source.json` lives (the pinned source).
+    operator_dir = (
+        Path(args.operator_dir) if args.operator_dir else _resolve_manifest_path(None).parent.parent
+    )
+    candidate = args.to_commit or None
+
+    if args.apply:
+        result = apply_self_update(
+            toolkit_dir, operator_dir, candidate_commit=candidate,
+            record_commit_fn=lambda c: record_last_known_good_commit(operator_dir, c),
+        )
+    else:
+        # Default + --check: verify only, never mutate.
+        result = verify_self_update(toolkit_dir, operator_dir, candidate_commit=candidate)
+
+    print(render_self_update_result(result, json_mode=args.json), end="")
+    # Reuse the typed status -> exit-code mapping so a caller branches on the outcome.
+    # Routed through the engine's own helper to avoid an enum-identity mismatch across
+    # module import paths.
+    return self_update_exit_code(result)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wizard_upgrade",
@@ -375,6 +425,25 @@ def build_parser() -> argparse.ArgumentParser:
     plan_p.add_argument("--registry-path", default=None)
     plan_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON to stdout")
     plan_p.set_defaults(func=cmd_upgrade_plan)
+
+    su_p = sub.add_parser(
+        "self-update",
+        help="Guarded update of the installed wizard toolkit itself (verify -> backup -> swap)",
+    )
+    su_mode = su_p.add_mutually_exclusive_group()
+    su_mode.add_argument("--check", action="store_true",
+                         help="Verify only (origin + lineage + clean tree); report; change nothing. (default)")
+    su_mode.add_argument("--apply", action="store_true",
+                         help="Verify, back up the toolkit, swap to the verified version, and record it. "
+                              "The new version is used on your NEXT session (safe ordering).")
+    su_p.add_argument("--toolkit-dir", default=None,
+                      help="Path to the installed wizard toolkit (default: the directory this engine runs from)")
+    su_p.add_argument("--operator-dir", default=None,
+                      help="Path to the operator project holding .wizard/update-source.json (default: cwd)")
+    su_p.add_argument("--to-commit", default=None,
+                      help="Candidate commit to update to (default: current toolkit HEAD)")
+    su_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON to stdout")
+    su_p.set_defaults(func=cmd_self_update)
 
     return parser
 

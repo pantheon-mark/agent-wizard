@@ -125,6 +125,13 @@ def _render_control_plane_body(relpath: str) -> Optional[str]:
     if relpath == ".wizard/UPGRADING.md":
         from upgrade_scaffold_emitter import render_command_surface  # type: ignore
         return render_command_surface()
+    if relpath == ".wizard/update-source.json":
+        # Durable, read-only update-source reference. Refreshed under control_plane_refresh
+        # so an unedited operator copy stays current as the pinned origin evolves; a drifted
+        # copy is sidecar'd, never clobbered. The body is re-rendered from the canonical
+        # source identity (NOT a bundle template).
+        from update_source import render_update_source_json  # type: ignore
+        return render_update_source_json()
     return None
 
 

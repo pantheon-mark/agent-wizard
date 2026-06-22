@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# `wizard` command shim.
+#
+# Resolves `wizard <subcommand> ...` to the installed local upgrade engine
+# (`wizard_upgrade.py`) that sits next to this script, so the operator and the system
+# can run `wizard upgrade-check`, `wizard upgrade --to <v> --apply`, `wizard self-update`
+# etc. without typing a raw `python3 .../wizard_upgrade.py` invocation and without
+# editing their PATH.
+#
+# How it is reached (no PATH edit required):
+#   * by full path:  "$WIZARD_HOME/scripts/wizard" <subcommand>   (WIZARD_HOME defaults
+#     to ~/agent-wizard — the same toolkit-install convention recorded in
+#     .wizard/update-source.json and used by the session-start update notice), or
+#   * the operator may symlink/alias it onto PATH if they wish (optional).
+#
+# It runs the CURRENTLY-INSTALLED engine. Toolkit currency is a separate, explicit step
+# (`wizard self-update`) — this shim never downloads or executes freshly-fetched code.
+set -euo pipefail
+
+# Directory this script lives in (the toolkit's scripts/ dir), following symlinks.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+
+ENGINE="$SCRIPT_DIR/wizard_upgrade.py"
+if [ ! -f "$ENGINE" ]; then
+  echo "wizard: cannot find the upgrade engine at $ENGINE" >&2
+  exit 2
+fi
+
+PYTHON="${PYTHON:-python3}"
+exec "$PYTHON" "$ENGINE" "$@"
