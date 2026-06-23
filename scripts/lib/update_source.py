@@ -24,6 +24,7 @@ Stdlib-only, pip-install-free. JSON is the runtime contract surface.
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -136,7 +137,11 @@ def record_last_known_good_commit(operator_project_dir: Path, commit: str) -> Pa
     data["last_known_good_commit"] = commit
     dest = operator_project_dir / UPDATE_SOURCE_REL
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # Atomic write (temp + os.replace): the pin is safety-critical — a crash mid-write must
+    # never leave a truncated/corrupt update-source that fails-closed every future upgrade.
+    tmp = dest.with_suffix(dest.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(str(tmp), str(dest))
     return dest
 
 

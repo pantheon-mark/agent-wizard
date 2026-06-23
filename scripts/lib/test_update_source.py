@@ -26,6 +26,7 @@ from update_source import (  # noqa: E402
     UpdateSourceError,
     emit_update_source,
     load_update_source,
+    record_last_known_good_commit,
     render_update_source,
     render_update_source_json,
 )
@@ -115,6 +116,28 @@ class UpdateSourceEmitLoadTests(unittest.TestCase):
             (staging / UPDATE_SOURCE_REL).write_text(json.dumps(doc), encoding="utf-8")
             with self.assertRaises(UpdateSourceError):
                 load_update_source(staging)
+
+
+class RecordLastKnownGoodAtomicTests(unittest.TestCase):
+    """The pin write is safety-critical: it must record correctly and leave NO temp residue
+    (atomic temp + os.replace), so a crash mid-write can never corrupt the update-source."""
+
+    def test_records_commit_and_preserves_fields(self):
+        with tempfile.TemporaryDirectory() as td:
+            proj = Path(td)
+            emit_update_source(proj)
+            record_last_known_good_commit(proj, "a" * 40)
+            data = load_update_source(proj)
+            self.assertEqual(data["last_known_good_commit"], "a" * 40)
+            self.assertEqual(data["repo_owner"], CANONICAL_REPO_OWNER)  # other fields preserved
+
+    def test_no_temp_residue(self):
+        with tempfile.TemporaryDirectory() as td:
+            proj = Path(td)
+            emit_update_source(proj)
+            record_last_known_good_commit(proj, "b" * 40)
+            residue = list((proj / ".wizard").glob("*.tmp"))
+            self.assertEqual(residue, [], f"atomic write must leave no temp residue; found {residue}")
 
 
 class UpdateSourceDenySetTests(unittest.TestCase):
