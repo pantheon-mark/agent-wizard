@@ -145,6 +145,7 @@ class UpdateStatus(Enum):
     SOURCE_UNCONFIGURED = "source_unconfigured"  # no update source wired (the F-OR-3 case)
     ENGINE_TOO_OLD = "engine_too_old"            # an update exists but the local engine must refresh first
     NETWORK_UNAVAILABLE = "network_unavailable"  # could not reach the update source over the network
+    CURRENCY_UNCONFIRMED = "currency_unconfirmed"  # a local catalog is readable, but the AUTHORITATIVE remote could not be reached → currency UNKNOWN (the stale-mirror case; never "up to date")
     REGISTRY_INVALID = "registry_invalid"        # registry missing / unparseable / malformed
     CANDIDATE_UNVERIFIED = "candidate_unverified"  # a fetched candidate failed integrity/lineage verification
     UPDATE_SOURCE_TAMPERED = "update_source_tampered"  # the update source did not match its pinned origin
@@ -157,6 +158,7 @@ _COULD_NOT_DETERMINE_STATUSES = frozenset({
     UpdateStatus.TOOLKIT_UNVERIFIED,
     UpdateStatus.SOURCE_UNCONFIGURED,
     UpdateStatus.NETWORK_UNAVAILABLE,
+    UpdateStatus.CURRENCY_UNCONFIRMED,
     UpdateStatus.REGISTRY_INVALID,
     UpdateStatus.CANDIDATE_UNVERIFIED,
     UpdateStatus.UPDATE_SOURCE_TAMPERED,
@@ -175,6 +177,7 @@ _COULD_NOT_DETERMINE_STATUSES = frozenset({
 # 25 = registry invalid                       -> EXIT_REGISTRY_INVALID
 # 26 = candidate failed verification          -> EXIT_CANDIDATE_UNVERIFIED
 # 27 = update source tampered / wrong origin  -> EXIT_UPDATE_SOURCE_TAMPERED
+# 28 = currency unconfirmed (remote unreached) -> EXIT_CURRENCY_UNCONFIRMED
 # (These are distinct from the argparse/tooling exit code 2 used by wizard_upgrade.py for
 #  invalid CLI arguments; the could-not-determine band starts at 20 to avoid colliding.)
 EXIT_CHECKED_CURRENT = 0
@@ -187,6 +190,7 @@ EXIT_NETWORK_UNAVAILABLE = 24
 EXIT_REGISTRY_INVALID = 25
 EXIT_CANDIDATE_UNVERIFIED = 26
 EXIT_UPDATE_SOURCE_TAMPERED = 27
+EXIT_CURRENCY_UNCONFIRMED = 28
 
 _STATUS_EXIT_CODES: Dict[UpdateStatus, int] = {
     UpdateStatus.CHECKED_CURRENT: EXIT_CHECKED_CURRENT,
@@ -196,6 +200,7 @@ _STATUS_EXIT_CODES: Dict[UpdateStatus, int] = {
     UpdateStatus.SOURCE_UNCONFIGURED: EXIT_SOURCE_UNCONFIGURED,
     UpdateStatus.ENGINE_TOO_OLD: EXIT_ENGINE_TOO_OLD,
     UpdateStatus.NETWORK_UNAVAILABLE: EXIT_NETWORK_UNAVAILABLE,
+    UpdateStatus.CURRENCY_UNCONFIRMED: EXIT_CURRENCY_UNCONFIRMED,
     UpdateStatus.REGISTRY_INVALID: EXIT_REGISTRY_INVALID,
     UpdateStatus.CANDIDATE_UNVERIFIED: EXIT_CANDIDATE_UNVERIFIED,
     UpdateStatus.UPDATE_SOURCE_TAMPERED: EXIT_UPDATE_SOURCE_TAMPERED,
@@ -259,6 +264,11 @@ _STATUS_MESSAGES: Dict[UpdateStatus, str] = {
     UpdateStatus.NETWORK_UNAVAILABLE: (
         "Could not check for updates: the update source could not be reached over the "
         "network, so the update status is unknown. Check your connection and try again."
+    ),
+    UpdateStatus.CURRENCY_UNCONFIRMED: (
+        "Could not confirm whether an update is available. A local list of versions "
+        "exists, but the authoritative source could not be reached, so it was NOT used "
+        "to decide — this is not a confirmation that your system is current."
     ),
     UpdateStatus.REGISTRY_INVALID: (
         "Could not check for updates: the list of available versions is missing or "
