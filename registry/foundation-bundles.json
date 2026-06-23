@@ -1,54 +1,60 @@
 {
-  "schema_version": "v1",
-  "registry_schema_version": "v1",
+  "schema_version": "v2",
+  "registry_schema_version": "v2",
   "bundles": [
     {
       "foundation_bundle_version": "v0.3.0",
-      "path": "wizard/foundation-bundles/v0.3.0/",
+      "path": "foundation-bundles/v0.3.0/",
       "release_date": "2026-05-21",
       "source_commit": "15757c5",
-      "manifest": "wizard/foundation-bundles/v0.3.0/manifest.yaml",
-      "status": "prerelease"
+      "manifest": "foundation-bundles/v0.3.0/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "First concrete foundation-bundle prerelease package (six foundation-document templates with their own schema and hash baselines)."
     },
     {
       "foundation_bundle_version": "v0.4.0",
-      "path": "wizard/foundation-bundles/v0.4.0/",
+      "path": "foundation-bundles/v0.4.0/",
       "release_date": "2026-05-28",
       "source_commit": "d4fbf73",
-      "manifest": "wizard/foundation-bundles/v0.4.0/manifest.yaml",
-      "status": "prerelease"
+      "manifest": "foundation-bundles/v0.4.0/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "Reworks the technical-architecture document so cross-cutting content lives in one place and is cross-referenced rather than duplicated."
     },
     {
       "foundation_bundle_version": "v0.5.0",
-      "path": "wizard/foundation-bundles/v0.5.0/",
+      "path": "foundation-bundles/v0.5.0/",
       "release_date": "2026-06-16",
       "source_commit": "cb2b7ad",
-      "manifest": "wizard/foundation-bundles/v0.5.0/manifest.yaml",
-      "status": "prerelease"
+      "manifest": "foundation-bundles/v0.5.0/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "Your built system can now APPLY foundation-document upgrades (not just detect them); upgrades became repeatable, quieter, and clearer, and merge your edits with the new version where possible."
     },
     {
       "foundation_bundle_version": "v0.6.0",
-      "path": "wizard/foundation-bundles/v0.6.0/",
+      "path": "foundation-bundles/v0.6.0/",
       "release_date": "2026-06-21",
       "source_commit": "7ba3f48",
-      "manifest": "wizard/foundation-bundles/v0.6.0/manifest.yaml",
-      "status": "prerelease"
+      "manifest": "foundation-bundles/v0.6.0/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "You now build and run your system one capability at a time, accepting each before building the next (the build-and-operate loop with per-phase acceptance)."
     },
     {
       "foundation_bundle_version": "v0.6.1",
-      "path": "wizard/foundation-bundles/v0.6.1/",
+      "path": "foundation-bundles/v0.6.1/",
       "release_date": "2026-06-21",
       "source_commit": "296d5ff",
-      "manifest": "wizard/foundation-bundles/v0.6.1/manifest.yaml",
-      "status": "prerelease"
+      "manifest": "foundation-bundles/v0.6.1/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "Your system now keeps you oriented and protects risky actions; can receive operating-layer improvements through an upgrade (not just foundation documents); and can check for and safely apply its own updates."
     },
     {
       "foundation_bundle_version": "v0.6.2",
-      "path": "wizard/foundation-bundles/v0.6.2/",
+      "path": "foundation-bundles/v0.6.2/",
       "release_date": "2026-06-22",
       "source_commit": "f8ff0ba",
-      "manifest": "wizard/foundation-bundles/v0.6.2/manifest.yaml",
-      "status": "prerelease"
+      "manifest": "foundation-bundles/v0.6.2/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "The approval drill (the one-time safety demonstration) now uses an example grounded in what your system actually does, instead of a generic action."
     }
   ]
 }

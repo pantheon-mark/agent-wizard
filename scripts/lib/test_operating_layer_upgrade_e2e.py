@@ -466,7 +466,7 @@ class OperatingLayerUpgradeE2E(unittest.TestCase):
         proj = self._emit("estate-surface", FULL_VERSION)
         # Compute the surface directly (the refusal happens later, in the write loop).
         import upgrade_apply as ua
-        from upgrade import find_bundle_entry
+        from upgrade import find_bundle_entry, resolve_bundle_dir
         registry = load_registry(REGISTRY_PATH)
         manifest = load_operator_manifest(proj / ".wizard" / "manifest.json")
         capsule = ua.load_replay_capsule(proj)
@@ -474,7 +474,10 @@ class OperatingLayerUpgradeE2E(unittest.TestCase):
         base = ua._render_version(FULL_VERSION, ci, REPO_ROOT)
         theirs = ua._render_version(OPERATING_DELTA_VERSION, ci, REPO_ROOT)
         target_entry = find_bundle_entry(registry, OPERATING_DELTA_VERSION)
-        target_dir = (REPO_ROOT / target_entry.get("path", "")).resolve()
+        # Resolve the bundle dir via the canonical layout-agnostic resolver, NOT a raw
+        # `REPO_ROOT / entry["path"]` join — the registry is schema V2 (toolkit-relative
+        # paths), so a verbatim join against the repo root no longer lands on the bundle.
+        target_dir = resolve_bundle_dir(REGISTRY_PATH, registry, target_entry)
         target_contract = ua._load_target_contract(target_dir)
         surface = ua.compute_merge_surface(
             manifest, target_contract, base, theirs, proj, capsule)
