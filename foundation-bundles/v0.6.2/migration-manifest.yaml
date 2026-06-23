@@ -1,0 +1,68 @@
+# Migration manifest for foundation bundle v0.6.2
+#
+# v0.6.2 is a content fix to a single operating-layer skill (the next-phase
+# build-and-operate skill). The Tier-1 approval drill instruction now requires the
+# demonstrated action to be grounded in the running phase's actual agents (a real
+# irreversible/outbound action they perform), with an explicit low-risk hypothetical
+# fallback for phases whose agents take no irreversible/outbound action. No new
+# sections, no new capabilities, foundation docs byte-identical to v0.6.1 — a wording
+# change that affects how the system constructs the drill, so patch-behavioral.
+
+schema_version: v1
+target_version: v0.6.2
+release_date: 2026-06-22
+release_classification: patch_behavioral_prerelease
+
+# Per-artifact plain-language benefit notes used by `wizard upgrade-plan` to explain
+# what each changed file does for the operator. Optional; absent entries use a default.
+artifact_notes:
+  wizard/skills/next-phase.md:
+    benefit: "The approval drill now uses an example that matches what your system actually does."
+
+migrations:
+  - from: v0.6.1
+    class: patch-behavioral
+    breaking_changes_summary: ""
+    notes: |
+      Single-skill content fix from v0.6.1: the next-phase skill's Tier-1 approval
+      drill now grounds its demonstrated action in the running phase's actual agents,
+      and falls back to a clearly-hypothetical low-risk demonstration when no agent in
+      the phase performs an irreversible or outbound action. Foundation docs are
+      byte-identical to v0.6.1; no new sections or capabilities.
+    migration_steps: |
+      1. Run the upgrade check (plan-only) to confirm v0.6.1 -> v0.6.2 is offered.
+      2. Run the apply path (operator-explicit). The updated next-phase skill is
+         delivered; your edits to operating-layer files are kept or saved for review.
+    preflight: |
+      Verify the operator project carries a .wizard/replay-capsule.json and a
+      .wizard/manifest.json whose foundation_bundle_version is v0.6.1.
+    rollback: |
+      Restore from .wizard/backups/pre-v0.6.2/ and set foundation_bundle_version
+      back to v0.6.1.
+    requires_operator_approval: true
+    stop_condition: not_applicable
+    supported: true
+  - from: v0.6.0
+    class: minor-additive
+    breaking_changes_summary: ""
+    notes: |
+      Combined jump from v0.6.0 straight to v0.6.2 (an operator still on v0.6.0 who
+      never took v0.6.1). Delivers the v0.6.0 -> v0.6.1 operating-layer additions (an
+      additive section in operating_discipline.md, the pause-skill change, and the new
+      health-check skill) PLUS the v0.6.2 next-phase approval-drill content fix.
+      Classified minor-additive because the combined delta is dominated by v0.6.1's
+      additive capabilities. Foundation docs are byte-identical to v0.6.0.
+    migration_steps: |
+      1. Run the upgrade check (plan-only) to confirm v0.6.0 -> v0.6.2 is offered.
+      2. Run the apply path (operator-explicit). Operating-layer files changed across
+         v0.6.1 and v0.6.2 are merged (your edits kept) or saved for review; the new
+         health-check skill is delivered additively and the next-phase skill is updated.
+    preflight: |
+      Verify the operator project carries a .wizard/replay-capsule.json and a
+      .wizard/manifest.json whose foundation_bundle_version is v0.6.0.
+    rollback: |
+      Restore from .wizard/backups/pre-v0.6.2/ and set foundation_bundle_version
+      back to v0.6.0.
+    requires_operator_approval: true
+    stop_condition: not_applicable
+    supported: true

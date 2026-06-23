@@ -1,0 +1,25 @@
+# Hash baseline for execution_plan.md (bundle v0.4.0)
+# Enforced-path drift detection mechanism for this foundation bundle's templates.
+# Regeneration rationale: render-contract reconcile: schema + baseline aligned to template
+template: execution_plan.md
+schema_revision: v0.3
+sections_hash:
+- id: mvp_definition
+  heading: MVP Definition
+  heading_hash: 48d823c8b8554fb14ac423828053f6851fe8d77d
+- id: mvp_and_roadmap_boundary
+  heading: MVP and Roadmap Boundary
+  heading_hash: 0f4742445c3fbd094dacbc8718b07b623e1fb9a2
+- id: build_phases
+  heading: Build Phases
+  heading_hash: 9d06e30d2e6433f32663837446fe782efd137fb1
+- id: execution_sequence
+  heading: Execution Sequence
+  heading_hash: 48c2730ff81d4a51c5cbbea5340aa527dfcc483d
+- id: human_in_the_loop_map
+  heading: Human-in-the-Loop Map
+  heading_hash: e4887921837fd842ae0863395875173bc850db51
+- id: work_tracking
+  heading: Work Tracking
+  heading_hash: 840aee24538911f87afbe7d95bdcba0f1c99b724
+base_hash: 838a274fdc98f97c15d64fa9e6e170cfb8581904

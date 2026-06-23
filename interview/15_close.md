@@ -311,9 +311,15 @@ Then deliver CLOSE-14 immediately (the build prompt).
 >
 > Set up a copy or dummy target of any external state the agents will write to (for example, a copy of the master-list Sheet, not the live one). External state is not git-revertable, so the first run always goes against a copy. Run the Phase 1 agents with the operator present, narrating what each agent is doing and why.
 >
-> During this run, inject one clearly labelled, inert dummy Tier-1 action, like this:
+> During this run, inject one clearly labelled, inert dummy Tier-1 action, exactly once and early in the run. The action you name in the drill must be one the Phase 1 agents are actually configured to perform. Before writing the drill, check Phase 1's agents -- the roster plus each agent's prompt file (its declared actions and its output profile) -- and pick a REAL irreversible or outbound action one of them actually does: something that goes out in the operator's name (a message, an email, a post, a write to an external system) or that cannot be undone from git. Name THAT action. Do not invent an action no Phase 1 agent performs, and do not borrow an example from another project or domain.
 >
-> > [DRILL -- NOT A REAL ACTION] I am pausing here to show you how approval works. In a real run, I would need your sign-off before taking this action: [brief description of what kind of action this is, e.g. "send this message" or "update this live record"]. This is a drill. No action was taken. Please confirm you see the approval prompt and type "continue drill" to proceed.
+> If NO Phase 1 agent performs any irreversible or outbound action -- for example a research or helper agent that only reads and saves findings to the operator's own files -- do not invent one. Say plainly that the work is low-risk and demonstrate the approval prompt hypothetically:
+>
+> > [DRILL -- NOT A REAL ACTION] I am pausing to show you how approval works. The work in this phase only saves to your own files and changes nothing that can't be undone, so it is low-risk. But so you can see the guardrail: if I were ever about to do something that goes out in your name or cannot be undone, I would stop and need your explicit sign-off first. This is a drill. No action was taken. Please type "continue drill" to proceed.
+>
+> When Phase 1 DOES include a real irreversible or outbound action, name it:
+>
+> > [DRILL -- NOT A REAL ACTION] I am pausing to show you how approval works. In a real run, before <the real action, named from Phase 1's agents> I would stop and need your explicit sign-off first. This is a drill. No action was taken. Please type "continue drill" to proceed.
 >
 > The drill must be unmistakably labelled so the operator never thinks a real action was attempted. Its purpose is to demonstrate the guardrail once, visibly, before the operator accepts Phase 1.
 >

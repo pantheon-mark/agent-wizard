@@ -1,0 +1,54 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/statusline.sh\""
+  },
+  "permissions": {
+    "deny": ["Edit(.claude/**)", "Write(.claude/**)", "Edit(.wizard/update-source.json)", "Write(.wizard/update-source.json)"],
+    "disableBypassPermissionsMode": "disable"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/upgrade_notice.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/upgrade_notice.sh\" || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/receipt_gate.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/receipt_gate.sh\" || true"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/context_monitor.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/context_monitor.sh\" || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/context_monitor.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/context_monitor.sh\" || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

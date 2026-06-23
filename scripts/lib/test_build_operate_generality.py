@@ -642,8 +642,17 @@ class SupervisedCopyTargetSourceGuardTest(unittest.TestCase):
     def setUpClass(cls):
         cls.close14_path = REPO_ROOT / "wizard" / "interview" / "15_close.md"
         cls.next_phase_path = REPO_ROOT / "wizard" / "skills" / "next-phase.md"
+        # The EMITTED home of the next-phase skill: the latest bundle's template.
+        # Operators receive this copy (operator_fill_emitter sources skills from the
+        # bundle templates/ tree, not from wizard/skills/). The drill fix must land
+        # here too, or emitted/upgraded systems keep the un-grounded instruction.
+        cls.bundle_next_phase_path = (
+            REPO_ROOT / "wizard" / "foundation-bundles" / "v0.6.2"
+            / "templates" / "wizard" / "skills" / "next-phase.md"
+        )
         cls.close14_text = cls.close14_path.read_text(encoding="utf-8")
         cls.next_phase_text = cls.next_phase_path.read_text(encoding="utf-8")
+        cls.bundle_next_phase_text = cls.bundle_next_phase_path.read_text(encoding="utf-8")
 
     def test_close14_file_exists(self):
         """wizard/interview/15_close.md exists."""
@@ -712,6 +721,119 @@ class SupervisedCopyTargetSourceGuardTest(unittest.TestCase):
         # files carry the supervised keyword at the document level, not gated by a condition.
         self.assertIn("supervised", self.close14_text.lower())
         self.assertIn("supervised", self.next_phase_text.lower())
+
+    # --- Drill example must be GROUNDED in the running phase's agents ---
+    #
+    # The drill previously illustrated the high-risk-action guardrail with an
+    # un-grounded free-text placeholder + generic examples ("send this message" /
+    # "update this live record"). On a research-only agent (reads + saves to the
+    # operator's own files; no outbound/irreversible action) the agent improvised an
+    # off-scope vivid action it never performs. The fix: ground the named action in
+    # this phase's agents' actual declared actions, and for a no-irreversible-action
+    # phase, say so and demonstrate the prompt hypothetically rather than inventing one.
+    #
+    # These assertions cover all three homes: the Phase-1 build prompt generator
+    # (15_close.md), the Phase-2+ skill dev home (wizard/skills/next-phase.md), and the
+    # EMITTED home (the latest bundle template that operators actually receive).
+
+    def _assert_drill_grounded(self, text, where):
+        lower = text.lower()
+        # (a) Requires grounding the example in the phase's agents' actual actions.
+        self.assertIn(
+            "agent", lower,
+            f"{where}: drill instruction must reference this phase's agents",
+        )
+        self.assertTrue(
+            "configured to perform" in lower or "actually does" in lower
+            or "declared actions" in lower,
+            f"{where}: drill must require the named action be one the phase's agents "
+            f"actually perform (grounding requirement missing)",
+        )
+        self.assertTrue(
+            "do not invent" in lower or "not invent" in lower,
+            f"{where}: drill must forbid inventing an action no agent in the phase performs",
+        )
+        self.assertTrue(
+            "do not borrow an example" in lower or "another project" in lower,
+            f"{where}: drill must forbid borrowing an example from another project/domain",
+        )
+
+    def _assert_drill_fallback(self, text, where):
+        lower = text.lower()
+        # (b) No-irreversible-action hypothetical fallback present.
+        self.assertTrue(
+            "low-risk" in lower or "low risk" in lower,
+            f"{where}: drill must include the low-risk hypothetical fallback for a "
+            f"phase whose agents take no irreversible/outbound action",
+        )
+        self.assertIn(
+            "goes out in your name",
+            lower,
+            f"{where}: drill fallback must demonstrate the guardrail hypothetically "
+            f"(\"goes out in your name or cannot be undone\")",
+        )
+
+    def _assert_no_generic_placeholder(self, text, where):
+        lower = text.lower()
+        # The un-grounded generic placeholder examples must be GONE as the only guidance.
+        self.assertNotIn(
+            "send this message", lower,
+            f"{where}: the un-grounded generic placeholder example "
+            f"('send this message') must be removed",
+        )
+        self.assertNotIn(
+            "update this live record", lower,
+            f"{where}: the un-grounded generic placeholder example "
+            f"('update this live record') must be removed",
+        )
+
+    def test_close14_drill_grounded_in_phase_agents(self):
+        """15_close.md drill requires grounding the example in Phase 1's agents' actions."""
+        self._assert_drill_grounded(self.close14_text, "15_close.md")
+
+    def test_close14_drill_has_no_irreversible_action_fallback(self):
+        """15_close.md drill carries the no-irreversible-action hypothetical fallback."""
+        self._assert_drill_fallback(self.close14_text, "15_close.md")
+
+    def test_close14_drill_generic_placeholder_removed(self):
+        """15_close.md no longer offers the un-grounded generic placeholder as guidance."""
+        self._assert_no_generic_placeholder(self.close14_text, "15_close.md")
+
+    def test_next_phase_drill_grounded_in_phase_agents(self):
+        """next-phase.md (dev home) drill requires grounding in this phase's agents."""
+        self._assert_drill_grounded(self.next_phase_text, "wizard/skills/next-phase.md")
+
+    def test_next_phase_drill_has_no_irreversible_action_fallback(self):
+        """next-phase.md (dev home) drill carries the no-irreversible-action fallback."""
+        self._assert_drill_fallback(self.next_phase_text, "wizard/skills/next-phase.md")
+
+    def test_next_phase_drill_generic_placeholder_removed(self):
+        """next-phase.md (dev home) no longer offers the un-grounded generic placeholder."""
+        self._assert_no_generic_placeholder(self.next_phase_text, "wizard/skills/next-phase.md")
+
+    def test_bundle_next_phase_drill_grounded_in_phase_agents(self):
+        """Emitted bundle next-phase.md drill requires grounding in this phase's agents."""
+        self._assert_drill_grounded(self.bundle_next_phase_text,
+                                    "bundle v0.6.2 templates/wizard/skills/next-phase.md")
+
+    def test_bundle_next_phase_drill_has_no_irreversible_action_fallback(self):
+        """Emitted bundle next-phase.md drill carries the no-irreversible-action fallback."""
+        self._assert_drill_fallback(self.bundle_next_phase_text,
+                                    "bundle v0.6.2 templates/wizard/skills/next-phase.md")
+
+    def test_bundle_next_phase_drill_generic_placeholder_removed(self):
+        """Emitted bundle next-phase.md no longer offers the un-grounded generic placeholder."""
+        self._assert_no_generic_placeholder(self.bundle_next_phase_text,
+                                            "bundle v0.6.2 templates/wizard/skills/next-phase.md")
+
+    def test_bundle_next_phase_matches_dev_home(self):
+        """The emitted bundle next-phase.md is byte-identical to the dev home (single source
+        of truth kept in sync by hand convention; no sync script exists)."""
+        self.assertEqual(
+            self.bundle_next_phase_text, self.next_phase_text,
+            "bundle v0.6.2 next-phase.md template diverged from wizard/skills/next-phase.md; "
+            "the two homes must be kept byte-identical",
+        )
 
 
 # ---------------------------------------------------------------------------

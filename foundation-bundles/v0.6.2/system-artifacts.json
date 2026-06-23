@@ -1,0 +1,1208 @@
+{
+  "_note": "Supply-side managed-artifacts contract: per emitted operator-project file, how an upgrade should produce it (render_kind, bundle-resident template_path, merge_strategy, file mode, and for render files which inputs are persisted in the replay capsule vs derived from the target bundle). Closed + fail-closed: one entry per managed file. Control files (.wizard/manifest.json, .wizard/replay-capsule.json, .wizard/upgrade-history.log, .wizard/upgrade-policy.yaml) are upgrade machinery, not delivered content, and are excluded.",
+  "artifacts": [
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0755",
+      "relpath": ".claude/context_monitor.sh",
+      "render_kind": "copy",
+      "template_path": "templates/claude_config/context_monitor.sh"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0755",
+      "relpath": ".claude/receipt_gate.sh",
+      "render_kind": "copy",
+      "template_path": "templates/claude_config/receipt_gate.sh"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": ".claude/settings.json",
+      "render_kind": "copy",
+      "template_path": "templates/claude_config/settings.json"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0755",
+      "relpath": ".claude/statusline.sh",
+      "render_kind": "copy",
+      "template_path": "templates/claude_config/statusline.sh"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0755",
+      "relpath": ".claude/upgrade_notice.sh",
+      "render_kind": "copy",
+      "template_path": "templates/claude_config/upgrade_notice.sh"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": ".env",
+      "render_kind": "copy",
+      "template_path": "templates/root/env_template"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "ADDITIONAL_GITIGNORE_ENTRIES"
+        ],
+        "persisted": [
+          "PROJECT_NAME"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": ".gitignore",
+      "render_kind": "render",
+      "template_path": "templates/root/gitignore_template"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": ".wizard/UPGRADING.md",
+      "render_kind": "copy",
+      "source": "control_plane"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "control_plane_refresh",
+      "mode": "0644",
+      "relpath": ".wizard/update-source.json",
+      "render_kind": "copy",
+      "source": "control_plane"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "INHERITED_OPERATING_PRINCIPLES"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "PROJECT_PURPOSE",
+          "AUTONOMY_LEVEL"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "CLAUDE.md",
+      "render_kind": "render",
+      "template_path": "templates/root/CLAUDE.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "SESSION_STATE.md",
+      "render_kind": "copy",
+      "template_path": "templates/root/SESSION_STATE.md"
+    },
+    {
+      "delivery": "operator_derived",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "agents/acceptance/phase_01_acceptance.md",
+      "render_kind": "copy",
+      "template_path": "templates/agents/acceptance_contract.md"
+    },
+    {
+      "delivery": "operator_derived",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "agents/acceptance/phase_02_acceptance.md",
+      "render_kind": "copy",
+      "template_path": "templates/agents/acceptance_contract.md"
+    },
+    {
+      "delivery": "operator_derived",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "agents/acceptance/phase_03_acceptance.md",
+      "render_kind": "copy",
+      "template_path": "templates/agents/acceptance_contract.md"
+    },
+    {
+      "delivery": "operator_derived",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "agents/acceptance/phase_04_acceptance.md",
+      "render_kind": "copy",
+      "template_path": "templates/agents/acceptance_contract.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "CRON_ENTRIES"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "agents/cron/cron_config.md",
+      "render_kind": "render",
+      "template_path": "templates/agents/cron_config.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "MODEL_TIER",
+          "MODEL_TIER_FAST"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "AGENT_NAME",
+          "AGENT_ROLE_DESCRIPTION",
+          "CRITICALITY_TIER",
+          "ADDITIONAL_CONTEXT_FILES",
+          "PERMITTED_WRITE_DIRECTORIES",
+          "STEP_COMPLETION_CRITERIA",
+          "TASK_COMPLETION_CRITERIA",
+          "OUTPUT_FORMAT_SPECIFICATION"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "agents/prompts/call-notes-helper_prompt.md",
+      "render_kind": "render",
+      "template_path": "templates/agents/agent_prompt_template.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "MODEL_TIER",
+          "MODEL_TIER_FAST"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "AGENT_NAME",
+          "AGENT_ROLE_DESCRIPTION",
+          "CRITICALITY_TIER",
+          "ADDITIONAL_CONTEXT_FILES",
+          "PERMITTED_WRITE_DIRECTORIES",
+          "STEP_COMPLETION_CRITERIA",
+          "TASK_COMPLETION_CRITERIA",
+          "OUTPUT_FORMAT_SPECIFICATION"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "agents/prompts/coordinator_prompt.md",
+      "render_kind": "render",
+      "template_path": "templates/agents/agent_prompt_template.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "MODEL_TIER",
+          "MODEL_TIER_FAST"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "AGENT_NAME",
+          "AGENT_ROLE_DESCRIPTION",
+          "CRITICALITY_TIER",
+          "ADDITIONAL_CONTEXT_FILES",
+          "PERMITTED_WRITE_DIRECTORIES",
+          "STEP_COMPLETION_CRITERIA",
+          "TASK_COMPLETION_CRITERIA",
+          "OUTPUT_FORMAT_SPECIFICATION"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "agents/prompts/drafting-helper_prompt.md",
+      "render_kind": "render",
+      "template_path": "templates/agents/agent_prompt_template.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "MODEL_TIER",
+          "MODEL_TIER_FAST"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "AGENT_NAME",
+          "AGENT_ROLE_DESCRIPTION",
+          "CRITICALITY_TIER",
+          "ADDITIONAL_CONTEXT_FILES",
+          "PERMITTED_WRITE_DIRECTORIES",
+          "STEP_COMPLETION_CRITERIA",
+          "TASK_COMPLETION_CRITERIA",
+          "OUTPUT_FORMAT_SPECIFICATION"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "agents/prompts/master-list-keeper_prompt.md",
+      "render_kind": "render",
+      "template_path": "templates/agents/agent_prompt_template.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "MODEL_TIER_HIGH",
+          "MODEL_TIER_STANDARD",
+          "MODEL_TIER_FAST"
+        ],
+        "persisted": [
+          "PROJECT_NAME"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "agents/prompts/orchestrator_prompt.md",
+      "render_kind": "render",
+      "template_path": "templates/agents/orchestrator_prompt.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "MODEL_TIER",
+          "MODEL_TIER_FAST"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "AGENT_NAME",
+          "AGENT_ROLE_DESCRIPTION",
+          "CRITICALITY_TIER",
+          "ADDITIONAL_CONTEXT_FILES",
+          "PERMITTED_WRITE_DIRECTORIES",
+          "STEP_COMPLETION_CRITERIA",
+          "TASK_COMPLETION_CRITERIA",
+          "OUTPUT_FORMAT_SPECIFICATION"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "agents/prompts/prep-helper_prompt.md",
+      "render_kind": "render",
+      "template_path": "templates/agents/agent_prompt_template.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "MODEL_TIER_HIGH",
+          "MODEL_TIER_STANDARD",
+          "MODEL_TIER_FAST"
+        ],
+        "persisted": [
+          "PROJECT_NAME"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "agents/prompts/qa_agent_prompt.md",
+      "render_kind": "render",
+      "template_path": "templates/agents/qa_agent_prompt.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "MODEL_TIER",
+          "MODEL_TIER_FAST"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "AGENT_NAME",
+          "AGENT_ROLE_DESCRIPTION",
+          "CRITICALITY_TIER",
+          "ADDITIONAL_CONTEXT_FILES",
+          "PERMITTED_WRITE_DIRECTORIES",
+          "STEP_COMPLETION_CRITERIA",
+          "TASK_COMPLETION_CRITERIA",
+          "OUTPUT_FORMAT_SPECIFICATION"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "agents/prompts/research-helper_prompt.md",
+      "render_kind": "render",
+      "template_path": "templates/agents/agent_prompt_template.md"
+    },
+    {
+      "delivery": "operator_derived",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "AGENT_ROSTER_ROWS"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "agents/roster.md",
+      "render_kind": "render",
+      "template_path": "templates/agents/roster.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "AGENT_MODEL"
+        ],
+        "persisted": [
+          "AGENT_NAME",
+          "OUTPUT_DIRECTORY",
+          "ADDITIONAL_CONTEXT_FILES"
+        ]
+      },
+      "merge_strategy": "warn_on_drift",
+      "mode": "0755",
+      "relpath": "agents/scripts/call-notes-helper.sh",
+      "render_kind": "render",
+      "template_path": "templates/scripts/agent_invocation_template.sh"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "AGENT_MODEL"
+        ],
+        "persisted": [
+          "AGENT_NAME",
+          "OUTPUT_DIRECTORY",
+          "ADDITIONAL_CONTEXT_FILES"
+        ]
+      },
+      "merge_strategy": "warn_on_drift",
+      "mode": "0755",
+      "relpath": "agents/scripts/coordinator.sh",
+      "render_kind": "render",
+      "template_path": "templates/scripts/agent_invocation_template.sh"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "AGENT_MODEL"
+        ],
+        "persisted": [
+          "AGENT_NAME",
+          "OUTPUT_DIRECTORY",
+          "ADDITIONAL_CONTEXT_FILES"
+        ]
+      },
+      "merge_strategy": "warn_on_drift",
+      "mode": "0755",
+      "relpath": "agents/scripts/drafting-helper.sh",
+      "render_kind": "render",
+      "template_path": "templates/scripts/agent_invocation_template.sh"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "AGENT_MODEL"
+        ],
+        "persisted": [
+          "AGENT_NAME",
+          "OUTPUT_DIRECTORY",
+          "ADDITIONAL_CONTEXT_FILES"
+        ]
+      },
+      "merge_strategy": "warn_on_drift",
+      "mode": "0755",
+      "relpath": "agents/scripts/master-list-keeper.sh",
+      "render_kind": "render",
+      "template_path": "templates/scripts/agent_invocation_template.sh"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "AGENT_MODEL"
+        ],
+        "persisted": [
+          "AGENT_NAME",
+          "OUTPUT_DIRECTORY",
+          "ADDITIONAL_CONTEXT_FILES"
+        ]
+      },
+      "merge_strategy": "warn_on_drift",
+      "mode": "0755",
+      "relpath": "agents/scripts/prep-helper.sh",
+      "render_kind": "render",
+      "template_path": "templates/scripts/agent_invocation_template.sh"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "AGENT_MODEL"
+        ],
+        "persisted": [
+          "AGENT_NAME",
+          "OUTPUT_DIRECTORY",
+          "ADDITIONAL_CONTEXT_FILES"
+        ]
+      },
+      "merge_strategy": "warn_on_drift",
+      "mode": "0755",
+      "relpath": "agents/scripts/research-helper.sh",
+      "render_kind": "render",
+      "template_path": "templates/scripts/agent_invocation_template.sh"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "APPROACH_SOLUTION_BRIEF",
+          "AGENT_ROSTER_ROWS",
+          "SYSTEM_SHAPE",
+          "FOUNDATION_ONLY_MODE"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "approach.md",
+      "render_kind": "render",
+      "template_path": "templates/approach.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "archive/decisions_archive.md",
+      "render_kind": "copy",
+      "template_path": "templates/archive/decisions_archive.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "archive/notification_archive.md",
+      "render_kind": "copy",
+      "template_path": "templates/archive/notification_archive.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "archive/review_queue_archive.md",
+      "render_kind": "copy",
+      "template_path": "templates/archive/review_queue_archive.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "archive/work_archive.md",
+      "render_kind": "copy",
+      "template_path": "templates/archive/work_archive.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "DRIFT_ANALYSIS_CADENCE",
+          "SYSTEM_SHAPE",
+          "FOUNDATION_ONLY_MODE"
+        ]
+      },
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "audit_framework.md",
+      "render_kind": "render",
+      "template_path": "templates/audit_framework.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "BUILD_PROGRESS_ROWS"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "build_progress.md",
+      "render_kind": "render",
+      "template_path": "templates/root/build_progress.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "decisions/_index.md",
+      "render_kind": "copy",
+      "template_path": "templates/decisions/_index.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "decisions/decision_record_template.md",
+      "render_kind": "copy",
+      "template_path": "templates/decisions/decision_record_template.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "docs/architectural_review_staging.md",
+      "render_kind": "copy",
+      "template_path": "templates/docs/architectural_review_staging.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "docs/document_impact_map.md",
+      "render_kind": "copy",
+      "template_path": "templates/docs/document_impact_map.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "LAST_UPDATED_DATE",
+          "FIRST_CONTEXT_CHECK_DATE",
+          "FIRST_CREDENTIAL_CHECK_DATE",
+          "FIRST_QUARTERLY_REVIEW_DATE",
+          "CREDENTIAL_CHECK_CADENCE"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "docs/future_items.md",
+      "render_kind": "render",
+      "template_path": "templates/docs/future_items.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "docs/how_your_system_works.md",
+      "render_kind": "copy",
+      "template_path": "templates/docs/how_your_system_works.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "TONE",
+          "TECHNICAL_LEVEL",
+          "EXPLANATION_DEPTH",
+          "LENGTH_PREFERENCE",
+          "LIST_STYLE",
+          "TABLE_STYLE"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "LAST_UPDATED_DATE"
+        ]
+      },
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "docs/voice_and_style.md",
+      "render_kind": "render",
+      "template_path": "templates/docs/voice_and_style.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "BUILD_PHASES_ROWS",
+          "EXECUTION_SEQUENCE",
+          "HITL_MAP_ROWS",
+          "AUTONOMY_LEVEL",
+          "MVP_CORE_FUNCTION",
+          "MVP_MINIMUM_VIABLE_STATE",
+          "MVP_SUCCESS_CONDITION",
+          "MVP_ROADMAP_BOUNDARY",
+          "LAST_UPDATED_DATE",
+          "LAST_UPDATED_TRIGGER",
+          "SYSTEM_SHAPE",
+          "FOUNDATION_ONLY_MODE"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "execution_plan.md",
+      "render_kind": "render",
+      "template_path": "templates/execution_plan.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "logs/advisor_log.md",
+      "render_kind": "copy",
+      "template_path": "templates/logs/advisor_log.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "logs/audit_log.md",
+      "render_kind": "copy",
+      "template_path": "templates/logs/audit_log.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "INTENSIVE_OPERATION_THRESHOLD_PCT"
+        ],
+        "persisted": [
+          "PROJECT_AUTOMATION_BUDGET",
+          "INTENSIVE_OPERATION_THRESHOLD"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "logs/cost_efficiency_log.md",
+      "render_kind": "render",
+      "template_path": "templates/logs/cost_efficiency_log.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "logs/drift_log.md",
+      "render_kind": "copy",
+      "template_path": "templates/logs/drift_log.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "logs/error_log.md",
+      "render_kind": "copy",
+      "template_path": "templates/logs/error_log.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "logs/notification_log.md",
+      "render_kind": "copy",
+      "template_path": "templates/logs/notification_log.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "logs/qa_log.md",
+      "render_kind": "copy",
+      "template_path": "templates/logs/qa_log.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "logs/session_log.md",
+      "render_kind": "copy",
+      "template_path": "templates/logs/session_log.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "logs/source_health_log.md",
+      "render_kind": "copy",
+      "template_path": "templates/logs/source_health_log.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "logs/validation_log.md",
+      "render_kind": "copy",
+      "template_path": "templates/logs/validation_log.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "MANUAL_LAST_UPDATED"
+        ]
+      },
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "manual.md",
+      "render_kind": "render",
+      "template_path": "templates/root/manual.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "CEREMONY_MATURITY_ROWS"
+        ],
+        "persisted": [
+          "PROJECT_NAME"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "operating_discipline.md",
+      "render_kind": "render",
+      "template_path": "templates/root/operating_discipline.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "STALE_DECISION_THRESHOLD_DAYS"
+        ],
+        "persisted": [
+          "PROJECT_NAME"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "pending_decisions.md",
+      "render_kind": "render",
+      "template_path": "templates/root/pending_decisions.md"
+    },
+    {
+      "delivery": "operator_derived",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "prd.md",
+      "render_kind": "copy",
+      "template_path": "templates/prd.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "MODEL_HIGH",
+          "MODEL_STANDARD",
+          "MODEL_FAST"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "AUTONOMY_LEVEL",
+          "AUTOMATION_CREDIT_POOL",
+          "PROJECT_AUTOMATION_BUDGET",
+          "EXHAUSTION_BEHAVIOR",
+          "NTFY_TOPIC",
+          "DIGEST_EMAIL",
+          "DIGEST_CADENCE",
+          "INTENSIVE_OPERATION_THRESHOLD",
+          "CREDENTIAL_CHECK_CADENCE",
+          "ROTATION_LEAD_TIME_DAYS",
+          "DRIFT_ANALYSIS_CADENCE",
+          "SCALE_TIER",
+          "SCALE_TIER_RATIONALE",
+          "INPUT_TYPE_INVENTORY",
+          "CREDENTIAL_REFERENCE_ROWS",
+          "SOURCE_REGISTRY_ROWS",
+          "DOMAIN_SENSITIVITY_SETTINGS",
+          "LAST_UPDATED_DATE"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "project_instructions.md",
+      "render_kind": "render",
+      "template_path": "templates/root/project_instructions.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "ADVISOR_ENTRIES"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "quality/advisor_knowledge_base.md",
+      "render_kind": "render",
+      "template_path": "templates/quality/advisor_knowledge_base.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "quality/co-protected-workflows.md",
+      "render_kind": "copy",
+      "template_path": "templates/quality/co-protected-workflows.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "quality/human_review_queue.md",
+      "render_kind": "copy",
+      "template_path": "templates/quality/human_review_queue.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "RULES_LIBRARY_ENTRIES"
+        ],
+        "persisted": [
+          "PROJECT_NAME"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "quality/rules_library.md",
+      "render_kind": "render",
+      "template_path": "templates/quality/rules_library.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "SOURCE_REGISTRY_ROWS"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "quality/source_registry.md",
+      "render_kind": "render",
+      "template_path": "templates/quality/source_registry.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "INPUT_TYPE_INVENTORY",
+          "DOMAIN_SENSITIVITY_SETTINGS"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "quality/validation_gate_config.md",
+      "render_kind": "render",
+      "template_path": "templates/quality/validation_gate_config.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "CREDENTIAL_REGISTRY_ROWS"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "security/credentials_registry.md",
+      "render_kind": "render",
+      "template_path": "templates/security/credentials_registry.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "security/gitignore_manifest.md",
+      "render_kind": "copy",
+      "template_path": "templates/security/gitignore_manifest.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "MODEL_HIGH",
+          "MODEL_STANDARD",
+          "MODEL_FAST"
+        ],
+        "persisted": [
+          "PROJECT_NAME",
+          "PROJECT_PURPOSE",
+          "AUTONOMY_LEVEL",
+          "SCALE_TIER",
+          "PROJECT_AUTOMATION_BUDGET",
+          "EXHAUSTION_BEHAVIOR",
+          "NTFY_TOPIC",
+          "DIGEST_EMAIL",
+          "LAST_UPDATED_DATE",
+          "LAST_UPDATED_TRIGGER"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "session_bootstrap.md",
+      "render_kind": "render",
+      "template_path": "templates/root/session_bootstrap.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "MODEL_HIGH"
+        ],
+        "persisted": [
+          "PROJECT_NAME"
+        ]
+      },
+      "merge_strategy": "warn_on_drift",
+      "mode": "0755",
+      "relpath": "start-session.sh",
+      "render_kind": "render",
+      "template_path": "templates/scripts/start_session_template.sh"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "ORCHESTRATION_MODEL",
+          "INTEGRATIONS",
+          "SCALE_TIER",
+          "SCALE_TIER_RATIONALE",
+          "SCALE_TIER_BASIS",
+          "COMPLIANCE_GAPS_CONTENT",
+          "TASK_COMPLETION_CHECKLISTS",
+          "SYSTEM_SHAPE",
+          "FOUNDATION_ONLY_MODE"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "technical_architecture.md",
+      "render_kind": "render",
+      "template_path": "templates/technical_architecture.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "AGENT_SPECIFIC_TESTS",
+          "SYSTEM_SHAPE",
+          "FOUNDATION_ONLY_MODE"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "test_cases.md",
+      "render_kind": "render",
+      "template_path": "templates/test_cases.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_VERSION"
+        ],
+        "persisted": [
+          "VISION_PURPOSE",
+          "VISION_GOALS",
+          "VISION_AUDIENCE_OUTPUTS",
+          "VISION_SCOPE_BOUNDARY",
+          "VISION_CONSTRAINTS",
+          "VISION_SUCCESS_CRITERIA",
+          "SYSTEM_SHAPE",
+          "FOUNDATION_ONLY_MODE"
+        ]
+      },
+      "merge_strategy": "three_way",
+      "mode": "0644",
+      "relpath": "vision.md",
+      "render_kind": "render",
+      "template_path": "templates/vision.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "wizard/review_prompts/per_agent_review.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/review_prompts/per_agent_review.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "wizard/review_prompts/phase_gate_review.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/review_prompts/phase_gate_review.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "wizard/review_prompts/post_wizard_review.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/review_prompts/post_wizard_review.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "wizard/skills/_index.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/skills/_index.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "wizard/skills/credential-setup.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/skills/credential-setup.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "wizard/skills/next-phase.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/skills/next-phase.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "wizard/skills/orientation.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/skills/orientation.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "wizard/skills/pause.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/skills/pause.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "wizard/skills/skill_template_external.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/skills/skill_template_external.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "wizard/skills/skill_template_internal.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/skills/skill_template_internal.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "wizard_feedback.md",
+      "render_kind": "copy",
+      "template_path": "templates/root/wizard_feedback.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "work/execution_plan_state.md",
+      "render_kind": "copy",
+      "template_path": "templates/work/execution_plan_state.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "work/issues_log.md",
+      "render_kind": "copy",
+      "template_path": "templates/work/issues_log.md"
+    },
+    {
+      "delivery": "wizard",
+      "inputs": {
+        "derived": [
+          "WIZARD_SETUP_STUBS"
+        ],
+        "persisted": [
+          "PROJECT_NAME"
+        ]
+      },
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "work/stub_tracker.md",
+      "render_kind": "render",
+      "template_path": "templates/work/stub_tracker.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "operator_review",
+      "mode": "0644",
+      "relpath": "work/work_queue.md",
+      "render_kind": "copy",
+      "template_path": "templates/work/work_queue.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "wizard/skills/health-check.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/skills/health-check.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "wizard/skills/check-for-updates.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/skills/check-for-updates.md"
+    }
+  ],
+  "bundle_version": "v0.6.2",
+  "contract_id": "system-artifacts",
+  "contract_version": "system-artifacts-v1"
+}

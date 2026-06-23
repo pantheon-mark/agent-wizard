@@ -12,6 +12,19 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-22 — the approval drill now matches what your system actually does (v0.6.2)
+
+**Public-facing change:** When your system demonstrates its one-time approval "drill" before you accept a build phase, the example it uses is now grounded in what *that phase's agents actually do* — it no longer invents an unrelated or off-topic action.
+
+- If a phase's agents perform a real action that goes out in your name or can't be undone, the drill names *that* action.
+- If a phase only reads and saves to your own files (low-risk, like a research helper), the drill now says so plainly and shows the approval prompt as a clear "if I ever were to…" example — instead of inventing an action that agent would never take.
+
+This is a small wording/behavior fix (`v0.6.2`, applied with `wizard upgrade --to v0.6.2` — operator-explicit as always). Your own files and customizations are untouched.
+
+`Source-Meta-Commit:` `<PENDING>` (private build repo) · public repo commit `<PENDING>`
+
+---
+
 ## 2026-06-22 — your system can now check for and safely apply its own updates
 
 **Public-facing change:** Your built system can now find out when a newer version is available and, with your explicit OK, apply it — through its own update channel, in plain language. Previously the update machinery worked but your system had no way to reach it.
