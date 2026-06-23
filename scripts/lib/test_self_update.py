@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from self_update import (  # noqa: E402
     apply_self_update,
+    resolve_remote_commit,
     verify_self_update,
 )
 from update_source import (  # noqa: E402
@@ -92,6 +93,30 @@ class SelfUpdateBase(unittest.TestCase):
         # unreachable canonical URL used only for origin verification).
         _git(self.toolkit, "fetch", "-q", "local")
         return new
+
+
+class ResolveRemoteCommitTests(SelfUpdateBase):
+    """Option A+: check resolves the EXACT public commit (`git ls-remote <url> <ref>`) and
+    binds it into the approved resolution, so self-update checks out exactly that commit. Runs
+    against the real local upstream (no network). Fail-closed (None) on any git failure → the
+    check renders a could-not-determine status, never a false 'current'."""
+
+    def test_resolves_ref_to_head_sha(self):
+        self.assertEqual(
+            resolve_remote_commit(self.toolkit, str(self.upstream), "main"), self.base_commit)
+
+    def test_tracks_new_head(self):
+        new = self._add_upstream_commit()
+        self.assertEqual(
+            resolve_remote_commit(self.toolkit, str(self.upstream), "main"), new)
+
+    def test_unknown_ref_returns_none(self):
+        self.assertIsNone(
+            resolve_remote_commit(self.toolkit, str(self.upstream), "no-such-branch"))
+
+    def test_unreachable_source_returns_none(self):
+        self.assertIsNone(
+            resolve_remote_commit(self.toolkit, str(self.root / "nope-not-a-repo"), "main"))
 
 
 class VerifyGateTests(SelfUpdateBase):

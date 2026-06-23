@@ -139,14 +139,19 @@ def fetch_remote_registry(
                 detail="update-source pin has no usable https raw base url",
             )
 
-    fetch = fetcher or _default_fetcher
-    text = fetch(url, timeout)
+    return _fetch_and_parse(url, fetcher, timeout)
+
+
+def _fetch_and_parse(url: str, fetcher: Optional[Fetcher], timeout: int) -> RegistryFetchResult:
+    """Fetch a registry URL as DATA, parse + validate, return a typed result (shared by the
+    @branch and commit-pinned fetch paths). Never raises; never executes fetched content.
+    Preserves the EXACT fetched body as `raw_text` on success (for registry_sha256)."""
+    text = (fetcher or _default_fetcher)(url, timeout)
     if text is None:
         return RegistryFetchResult(
             ok=False, failure_status=UpdateStatus.NETWORK_UNAVAILABLE,
             detail="remote registry could not be reached", source_url=url,
         )
-
     try:
         registry = json.loads(text)
     except Exception as e:
@@ -160,3 +165,41 @@ def fetch_remote_registry(
             detail="remote registry has no bundles", source_url=url,
         )
     return RegistryFetchResult(ok=True, registry=registry, source_url=url, raw_text=text)
+
+
+def commit_pinned_registry_url(source: Dict[str, Any], commit: str) -> Optional[str]:
+    """Build the COMMIT-pinned raw registry URL from the pin's owner/repo + an exact commit SHA:
+    `raw.githubusercontent.com/<owner>/<repo>/<commit>/registry/foundation-bundles.json`.
+    Returns None if owner/repo/commit is missing. The resolution-creation path fetches at the
+    commit (not the moving branch) so registry_sha256 matches the registry self-update sees
+    after `git checkout <commit>`."""
+    owner, repo = source.get("repo_owner"), source.get("repo_name")
+    if not (owner and repo and commit):
+        return None
+    return f"https://raw.githubusercontent.com/{owner}/{repo}/{commit}/{REGISTRY_RELPATH}"
+
+
+def fetch_registry_at_commit(
+    operator_project_dir: Path,
+    commit: str,
+    *,
+    fetcher: Optional[Fetcher] = None,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> RegistryFetchResult:
+    """Fetch + parse the registry AT an exact commit (commit-pinned raw URL) for the
+    resolution-creation path. Resolves owner/repo ONLY from the origin pin — the
+    `WIZARD_UPDATE_REGISTRY_URL` env seam is NOT honored here (a non-origin source must never
+    seed an operator-approved resolution). Failure mapping mirrors `fetch_remote_registry`."""
+    try:
+        source = load_update_source(operator_project_dir)
+    except UpdateSourceError as e:
+        return RegistryFetchResult(
+            ok=False, failure_status=UpdateStatus.SOURCE_UNCONFIGURED, detail=str(e)
+        )
+    url = commit_pinned_registry_url(source, commit)
+    if url is None:
+        return RegistryFetchResult(
+            ok=False, failure_status=UpdateStatus.UPDATE_SOURCE_TAMPERED,
+            detail="cannot build a commit-pinned registry url from the update-source pin",
+        )
+    return _fetch_and_parse(url, fetcher, timeout)

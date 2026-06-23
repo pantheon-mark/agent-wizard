@@ -129,6 +129,28 @@ def _rev_parse(toolkit_dir: Path, ref: str) -> Optional[str]:
     return out.strip()
 
 
+def resolve_remote_commit(
+    toolkit_dir: Path, source_url: str, ref: str, *, timeout: int = 30
+) -> Optional[str]:
+    """Resolve a remote ref to its EXACT commit SHA via `git ls-remote <source_url> <ref>`
+    (Option A+ engine-commit binding). Read-only — no fetch, no checkout: it only asks the
+    remote what <ref> currently points to, so `check` can bind the exact commit the operator
+    approves and `self-update` later checks out precisely that commit.
+
+    Returns the 40-hex SHA, or None on ANY git failure (git missing / unreachable source /
+    unknown ref / unexpected output) so the caller fails CLOSED with a could-not-determine
+    status rather than guessing a commit."""
+    ok, out = _git(toolkit_dir, "ls-remote", source_url, ref, timeout=timeout)
+    if not ok or not out:
+        return None
+    # ls-remote prints "<sha>\t<refname>" per matching ref; take the first line's sha.
+    first = out.splitlines()[0].split()
+    sha = first[0].strip().lower() if first else ""
+    if len(sha) == 40 and all(c in "0123456789abcdef" for c in sha):
+        return sha
+    return None
+
+
 # ===== verification (the fail-closed gates) =====
 
 def verify_self_update(
