@@ -38,8 +38,14 @@ from upgrade import UpdateStatus, status_exit_code  # type: ignore
 from update_source import (  # type: ignore
     UpdateSourceError,
     load_update_source,
+    record_last_known_good_commit,
     _normalize_repo_url,
 )
+from update_resolution import (  # type: ignore
+    UpdateResolutionError,
+    load_update_resolution,
+)
+from resolution_verify import verify_fetched_against_resolution  # type: ignore
 
 
 def self_update_exit_code(result: "SelfUpdateResult") -> int:
@@ -479,6 +485,136 @@ def apply_self_update(
         checks=verified.checks + [
             ("checkout_candidate", True, new_commit),
             ("record_last_known_good", recorded, new_commit if recorded else "deferred to caller"),
+        ],
+    )
+
+
+def apply_self_update_with_resolution(
+    toolkit_dir: Path,
+    operator_project_dir: Path,
+    *,
+    fetch_remote: str = "origin",
+    record_commit_fn=None,
+) -> SelfUpdateResult:
+    """Option A+ resolution-driven self-update. ORDERING (load-bearing):
+    fetch -> verify (origin/lineage/clean) -> backup -> checkout the EXACT approved commit ->
+    HEAD==approved -> CONTENT GATE (fetched registry+bundle+operator state == approved hashes)
+    -> atomic pin -> handoff. Auto-rolls-back to the previous commit on a post-checkout failure
+    (HEAD mismatch / content mismatch / pin failure). NEVER `applied=True` unless checkout,
+    HEAD check, content gate, AND pin all succeed. Touches ONLY the toolkit dir; the new engine
+    runs on the operator's NEXT invocation (os.execv re-exec is wired separately).
+
+    `fetch_remote` is the git remote to fetch from (default "origin"; tests use a local remote).
+    `record_commit_fn(commit)` overrides the pin writer (default records the new last-known-good
+    into the operator's read-only update-source via the guarded path)."""
+    registry_path = toolkit_dir / "registry" / "foundation-bundles.json"
+
+    # 0. the operator-approved contract.
+    try:
+        resolution = load_update_resolution(operator_project_dir)
+    except UpdateResolutionError as e:
+        return SelfUpdateResult(
+            status=UpdateStatus.SOURCE_UNCONFIGURED, reason_code="no_approved_resolution",
+            message=f"Cannot apply an update: no approved update was found. {e}",
+            toolkit_dir=str(toolkit_dir),
+        )
+
+    previous_commit = _rev_parse(toolkit_dir, "HEAD") or ""
+    target = resolution.target_public_commit_sha
+
+    # 1. fetch the approved commit's objects (no checkout yet).
+    ok, out = fetch_ref(toolkit_dir, resolution.source_ref, remote=fetch_remote)
+    if not ok:
+        return SelfUpdateResult(
+            status=UpdateStatus.TOOLKIT_UNVERIFIED, reason_code="fetch_failed",
+            message=f"Could not download the update. Nothing was changed. ({out})",
+            toolkit_dir=str(toolkit_dir), previous_commit=previous_commit,
+        )
+
+    # 2. fail-closed verify gates (origin / lineage / clean) for the EXACT approved commit.
+    verified = verify_self_update(toolkit_dir, operator_project_dir, candidate_commit=target)
+    if verified.status == UpdateStatus.CHECKED_CURRENT:
+        return verified  # already at the approved commit; nothing to do.
+    if verified.status != UpdateStatus.UPDATE_AVAILABLE:
+        return verified  # any non-OK verify status is a fail-closed refusal.
+
+    # 3. back up BEFORE touching anything.
+    try:
+        backup_dir, rollback = _backup_toolkit(toolkit_dir)
+    except OSError as e:
+        return SelfUpdateResult(
+            status=UpdateStatus.TOOLKIT_UNVERIFIED, reason_code="backup_failed",
+            message=f"Refusing to apply: could not make a backup first. Nothing was changed. ({e})",
+            toolkit_dir=str(toolkit_dir), previous_commit=previous_commit,
+        )
+
+    # 4. checkout the EXACT approved commit.
+    ok, out = _git(toolkit_dir, "checkout", target)
+    if not ok:
+        return SelfUpdateResult(
+            status=UpdateStatus.CANDIDATE_UNVERIFIED, reason_code="checkout_failed",
+            message=("The update did not check out cleanly. Your old version is backed up and "
+                     "unchanged.\n\n" + rollback),
+            toolkit_dir=str(toolkit_dir), backup_dir=str(backup_dir),
+            rollback_instructions=rollback, previous_commit=previous_commit,
+            checks=verified.checks + [("checkout_candidate", False, out)],
+        )
+
+    # 5. HEAD must be EXACTLY the approved commit (no surprise ref movement).
+    head = _rev_parse(toolkit_dir, "HEAD") or ""
+    if head != target:
+        rollback_to_previous(toolkit_dir, previous_commit)
+        return SelfUpdateResult(
+            status=UpdateStatus.CANDIDATE_UNVERIFIED, reason_code="head_mismatch",
+            message=("Refusing to apply: the checked-out version did not match the approved "
+                     "commit. Rolled back to your previous version.\n\n" + rollback),
+            toolkit_dir=str(toolkit_dir), backup_dir=str(backup_dir),
+            rollback_instructions=rollback, previous_commit=previous_commit,
+            checks=verified.checks + [("head_equals_approved", False, f"head={head} approved={target}")],
+        )
+
+    # 6. CONTENT GATE: the fetched toolkit + operator state must match the approved hashes.
+    vr = verify_fetched_against_resolution(registry_path, operator_project_dir, resolution)
+    if not vr.ok:
+        rollback_to_previous(toolkit_dir, previous_commit)
+        return SelfUpdateResult(
+            status=UpdateStatus.CANDIDATE_UNVERIFIED, reason_code="resolution_mismatch",
+            message=("Refusing to apply: what was downloaded does not match what you approved. "
+                     "Rolled back to your previous version.\n\n"
+                     + "; ".join(vr.failures) + "\n\n" + rollback),
+            toolkit_dir=str(toolkit_dir), backup_dir=str(backup_dir),
+            rollback_instructions=rollback, previous_commit=previous_commit,
+            checks=verified.checks + [("resolution_content_match", False, f) for f in vr.failures],
+        )
+
+    # 7. atomic pin write. AUTO-ROLLBACK on failure; NEVER applied unless the pin succeeds.
+    pin = record_commit_fn or (lambda c: record_last_known_good_commit(operator_project_dir, c))
+    try:
+        pin(target)
+    except Exception as e:  # noqa: BLE001 — pin failure is fatal to the transaction.
+        rolled, _ = rollback_to_previous(toolkit_dir, previous_commit)
+        recovery = ("" if rolled else
+                    f"\n\nAutomatic rollback ALSO failed; restore from the backup by hand:\n{rollback}")
+        return SelfUpdateResult(
+            status=UpdateStatus.TOOLKIT_UNVERIFIED, reason_code="pin_write_failed",
+            message=(f"Refusing to complete the update: could not record the new version, so it "
+                     f"was rolled back (NOT applied). ({e}){recovery}"),
+            toolkit_dir=str(toolkit_dir), backup_dir=str(backup_dir),
+            rollback_instructions=rollback, previous_commit=previous_commit,
+            checks=verified.checks + [("record_last_known_good", False, str(e))],
+        )
+
+    # 8. success — fully applied + recorded. NEW engine runs on the operator's NEXT invocation.
+    return SelfUpdateResult(
+        status=UpdateStatus.UPDATE_AVAILABLE, reason_code="self_update_applied",
+        message=("Updated the tool to the approved, verified new version. It will be used the "
+                 "next time you start a session.\n\n" + HONEST_CEILING_NOTE + "\n\n" + rollback),
+        applied=True, toolkit_dir=str(toolkit_dir), backup_dir=str(backup_dir),
+        rollback_instructions=rollback, previous_commit=previous_commit, new_commit=target,
+        checks=verified.checks + [
+            ("checkout_candidate", True, target),
+            ("resolution_content_match", True, "fetched == approved"),
+            ("record_last_known_good", True, target),
         ],
     )
 
