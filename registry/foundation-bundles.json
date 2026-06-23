@@ -9,7 +9,9 @@
       "source_commit": "15757c5",
       "manifest": "foundation-bundles/v0.3.0/manifest.yaml",
       "status": "prerelease",
-      "changelog": "First concrete foundation-bundle prerelease package (six foundation-document templates with their own schema and hash baselines)."
+      "changelog": "First concrete foundation-bundle prerelease package (six foundation-document templates with their own schema and hash baselines).",
+      "bundle_tree_sha256": "sha256:45d66d8a11ad11bfb3bac5d7e40dcfad9eeb1cf5bfa3ff9ad66dc7a6a2ca9d41",
+      "bundle_manifest_sha256": "sha256:269194de13fb88acd19f671da15f725b7a7049051bed2f16fb7419d098129195"
     },
     {
       "foundation_bundle_version": "v0.4.0",
@@ -18,7 +20,9 @@
       "source_commit": "d4fbf73",
       "manifest": "foundation-bundles/v0.4.0/manifest.yaml",
       "status": "prerelease",
-      "changelog": "Reworks the technical-architecture document so cross-cutting content lives in one place and is cross-referenced rather than duplicated."
+      "changelog": "Reworks the technical-architecture document so cross-cutting content lives in one place and is cross-referenced rather than duplicated.",
+      "bundle_tree_sha256": "sha256:f4b53be9fd95fdc554f8a7d3362240285538f1ee468fdf24b470ff16b9db13c1",
+      "bundle_manifest_sha256": "sha256:f27bd84b0314f91c39204c3118b4f2069b43e8979f46ba2083c3c7d14b345fae"
     },
     {
       "foundation_bundle_version": "v0.5.0",
@@ -27,7 +31,9 @@
       "source_commit": "cb2b7ad",
       "manifest": "foundation-bundles/v0.5.0/manifest.yaml",
       "status": "prerelease",
-      "changelog": "Your built system can now APPLY foundation-document upgrades (not just detect them); upgrades became repeatable, quieter, and clearer, and merge your edits with the new version where possible."
+      "changelog": "Your built system can now APPLY foundation-document upgrades (not just detect them); upgrades became repeatable, quieter, and clearer, and merge your edits with the new version where possible.",
+      "bundle_tree_sha256": "sha256:b94c6f81f93a3af8a5e0e63a569c20ae71f84c6f1c1a962e830ec3a8febe3fc5",
+      "bundle_manifest_sha256": "sha256:6507c1ec4ad3293a92e3d0040b5d772afa23544aa02b3527106bbac0fa280981"
     },
     {
       "foundation_bundle_version": "v0.6.0",
@@ -36,7 +42,9 @@
       "source_commit": "7ba3f48",
       "manifest": "foundation-bundles/v0.6.0/manifest.yaml",
       "status": "prerelease",
-      "changelog": "You now build and run your system one capability at a time, accepting each before building the next (the build-and-operate loop with per-phase acceptance)."
+      "changelog": "You now build and run your system one capability at a time, accepting each before building the next (the build-and-operate loop with per-phase acceptance).",
+      "bundle_tree_sha256": "sha256:72c66573f79d224cc57048e3c92c86771cc8fa574e4d9a080a0ff7b6e0c2ed88",
+      "bundle_manifest_sha256": "sha256:b4dad65c93ddda8b055f71a0c69df78b891d6569eabe982735dc3fa25a3af845"
     },
     {
       "foundation_bundle_version": "v0.6.1",
@@ -45,7 +53,9 @@
       "source_commit": "296d5ff",
       "manifest": "foundation-bundles/v0.6.1/manifest.yaml",
       "status": "prerelease",
-      "changelog": "Your system now keeps you oriented and protects risky actions; can receive operating-layer improvements through an upgrade (not just foundation documents); and can check for and safely apply its own updates."
+      "changelog": "Your system now keeps you oriented and protects risky actions; can receive operating-layer improvements through an upgrade (not just foundation documents); and can check for and safely apply its own updates.",
+      "bundle_tree_sha256": "sha256:cf438ac6f39e34b2bc41a0081468a9c6c8228d6f7df6808b75b0b31725c0c4c2",
+      "bundle_manifest_sha256": "sha256:f8b587697443f7089619bbd8998d64b08cb510faa50c98d0e40bb78a9a2777c3"
     },
     {
       "foundation_bundle_version": "v0.6.2",
@@ -54,7 +64,9 @@
       "source_commit": "f8ff0ba",
       "manifest": "foundation-bundles/v0.6.2/manifest.yaml",
       "status": "prerelease",
-      "changelog": "The approval drill (the one-time safety demonstration) now uses an example grounded in what your system actually does, instead of a generic action."
+      "changelog": "The approval drill (the one-time safety demonstration) now uses an example grounded in what your system actually does, instead of a generic action.",
+      "bundle_tree_sha256": "sha256:f5d8ebafa628d03bb473040f2a4ccef6ec7070b15420615ce62064b14ba464fb",
+      "bundle_manifest_sha256": "sha256:0b92595ac3b462ad32971ce44c7f0b4ef7785be949c1707b2d2b1472e85ef106"
     }
   ]
 }

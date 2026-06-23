@@ -20,6 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from upgrade import (  # noqa: E402
     REGISTRY_SCHEMA_V2,
+    compute_bundle_manifest_sha256,
+    compute_bundle_tree_sha256,
     load_registry,
     resolve_bundle_dir,
     resolve_toolkit_root,
@@ -74,6 +76,30 @@ class PublishedRegistryContractTest(unittest.TestCase):
                 changelog = entry.get("changelog")
                 self.assertIsInstance(changelog, str, f"{version}: missing `changelog` string")
                 self.assertTrue(changelog.strip(), f"{version}: empty `changelog`")
+
+    def test_every_entry_declares_bundle_hashes_matching_the_real_bundle(self):
+        """Upgrade integrity: each entry declares `bundle_tree_sha256` +
+        `bundle_manifest_sha256` matching the actual resolved bundle dir, so `check` records
+        the EXPECTED hash into the operator's approved resolution and `self-update` verifies the
+        FETCHED bundle == approved. Computed LIVE here, so a future bundle edit (or a stale
+        hand-typed hash) fails closed. Hash scope = full bundle dir (GATE-0: subtree-published
+        byte-identical to the build copy, so reproducible on the operator's public clone)."""
+        for entry in self.bundles:
+            version = entry.get("foundation_bundle_version", "<unknown>")
+            with self.subTest(version=version):
+                bundle_dir = resolve_bundle_dir(_REGISTRY_PATH, self.registry, entry)
+                declared_tree = entry.get("bundle_tree_sha256")
+                declared_manifest = entry.get("bundle_manifest_sha256")
+                self.assertIsInstance(
+                    declared_tree, str, f"{version}: missing `bundle_tree_sha256`")
+                self.assertIsInstance(
+                    declared_manifest, str, f"{version}: missing `bundle_manifest_sha256`")
+                self.assertEqual(
+                    declared_tree, compute_bundle_tree_sha256(bundle_dir),
+                    f"{version}: declared bundle_tree_sha256 != computed over the real bundle dir")
+                self.assertEqual(
+                    declared_manifest, compute_bundle_manifest_sha256(bundle_dir),
+                    f"{version}: declared bundle_manifest_sha256 != computed over the real bundle")
 
     def test_v2_paths_resolve_to_real_bundle_dirs_in_build_repo(self):
         """Sanity: the V2 toolkit-relative paths resolve (build-repo layout) to dirs that exist."""

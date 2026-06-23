@@ -1566,6 +1566,47 @@ def hash_subtree(root: Path) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+class BundleHashError(Exception):
+    """Raised when a bundle's content hash cannot be computed: missing bundle dir / manifest,
+    or a symlink in the tree. Integrity hashing fails closed rather than guessing."""
+
+
+def compute_bundle_tree_sha256(bundle_dir: Path) -> str:
+    """Canonical content hash of a bundle DIRECTORY for upgrade integrity (Option A+).
+
+    Returns `sha256:` + the `hash_subtree` digest over the FULL bundle dir. The scope is the
+    whole dir because the subtree publish copies it byte-identically to the operator's public
+    clone (GATE-0, verified), so this EXPECTED value — recorded into the registry at build time
+    and into the operator's approved UpdateResolution at check time — is reproducible when
+    `self-update` re-hashes the FETCHED bundle to verify it matches what the operator approved.
+    Canonicalized per file (via hash_subtree) so a Windows autocrlf git checkout still matches.
+
+    Hashing the bundle's own `foundation-bundle.provenance.json` is NOT circular here: this
+    digest lives in the REGISTRY / resolution, not inside the bundle, so it never feeds itself.
+
+    REJECTS symlinks (F-H): a bundle is regular files only; a symlink is a fail-closed signal,
+    never silently followed into content outside the bundle.
+    """
+    if not bundle_dir.is_dir():
+        raise BundleHashError(f"bundle dir not found: {bundle_dir}")
+    for p in sorted(bundle_dir.rglob("*")):
+        if p.is_symlink():
+            raise BundleHashError(
+                f"bundle contains a symlink {p}; integrity hashing rejects symlinks (fail-closed)"
+            )
+    return "sha256:" + hash_subtree(bundle_dir)
+
+
+def compute_bundle_manifest_sha256(bundle_dir: Path) -> str:
+    """Canonical content hash of the bundle's apply-consumed migration manifest — defense in
+    depth alongside the tree hash (lets self-update verify the manifest specifically). Returns
+    `sha256:` + the canonicalized file digest. Fails closed if the manifest is absent."""
+    manifest_path = bundle_dir / MIGRATION_MANIFEST_JSON_SIDECAR_FILENAME
+    if not manifest_path.is_file():
+        raise BundleHashError(f"bundle manifest not found: {manifest_path}")
+    return "sha256:" + sha256_file(manifest_path)
+
+
 def hash_bundle_files(bundle_dir: Path, exclude: Optional[List[str]] = None) -> List[Dict[str, str]]:
     """Build a bundle_file_manifest list (path + canonicalized hash) for provenance.
 
