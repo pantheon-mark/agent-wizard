@@ -32,7 +32,7 @@ bundle_manifest_schema_version: v2
 # best-effort apply.
 min_engine_version: v1.0.0
 release_date: 2026-06-22
-source_commit: TBD-at-commit  # patch-behavioral skill-content fix cut over v0.6.1
+source_commit: f8ff0ba  # patch-behavioral skill-content fix cut over v0.6.1
 status: prerelease
 
 included_templates:

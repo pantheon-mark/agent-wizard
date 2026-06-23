@@ -21,7 +21,7 @@ Entries appear newest-first.
 
 This is a small wording/behavior fix (`v0.6.2`, applied with `wizard upgrade --to v0.6.2` — operator-explicit as always). Your own files and customizations are untouched.
 
-`Source-Meta-Commit:` `<PENDING>` (private build repo) · public repo commit `<PENDING>`
+`Source-Meta-Commit:` `f8ff0ba` (private build repo) · public repo commit `842845c`
 
 ---
 

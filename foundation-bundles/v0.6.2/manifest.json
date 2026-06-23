@@ -67,6 +67,6 @@
     "section_schema": "schemas/section-schema.yaml"
   },
   "release_date": "2026-06-22",
-  "source_commit": "TBD-at-commit",
+  "source_commit": "f8ff0ba",
   "status": "prerelease"
 }
