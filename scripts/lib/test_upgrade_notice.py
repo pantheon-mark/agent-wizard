@@ -32,8 +32,15 @@ SCRIPT_PATH = REPO_ROOT / "wizard" / "templates" / "claude_config" / "upgrade_no
 
 
 def _run_script(project_dir: Path, env_overrides: dict) -> subprocess.CompletedProcess:
-    """Run upgrade_notice.sh with the given project dir and env overrides."""
-    env = {**os.environ, "HOME": str(project_dir), **env_overrides}
+    """Run upgrade_notice.sh with the given project dir and env overrides.
+
+    WIZARD_HOME points at the real build toolkit (REPO_ROOT/wizard) so the notice can
+    import the shared `registry_fetch` routine from `$WIZARD_HOME/scripts/lib` — the same
+    layout-agnostic path an operator's public clone (~/agent-wizard) exposes. A test that
+    left WIZARD_HOME unset would exercise a no-toolkit machine, not the real operator path.
+    """
+    env = {**os.environ, "HOME": str(project_dir),
+           "WIZARD_HOME": str(REPO_ROOT / "wizard"), **env_overrides}
     # The script reads .wizard/manifest.json relative to its working dir.
     return subprocess.run(
         ["bash", str(SCRIPT_PATH)],
@@ -165,6 +172,56 @@ class UpgradeNoticeNewerAvailableTest(unittest.TestCase):
             self.assertEqual(present, [],
                              f"output contains injection-signature tells {present}; "
                              f"it must be pure declarative data")
+
+
+class UpgradeNoticeSharedRoutineUnificationTest(unittest.TestCase):
+    """D1 hardening: the notice and `wizard upgrade-check` fetch the remote registry through
+    ONE shared routine (`registry_fetch.fetch_remote_registry`), so they can never diverge on
+    SOURCE again (the F2 false-"up to date" root cause was two checkers over two sources).
+
+    The shared routine's canonical override seam is WIZARD_UPDATE_REGISTRY_URL. Proving the
+    notice honors it — while the legacy UPGRADE_NOTICE_REGISTRY_URL is pointed at an
+    unreachable address — proves the notice fetches via the shared routine, not its own
+    pre-unification path. (Both addresses are deterministic: the file:// fixture always
+    succeeds; 127.0.0.1:19999 always refuses — so this is network-independent.)
+    """
+
+    def test_shared_routine_seam_is_authoritative(self):
+        with tempfile.TemporaryDirectory() as td:
+            project_dir = Path(td)
+            _write_manifest(project_dir, "v0.6.0")
+            registry_file = _write_registry_fixture(Path(td), ["v0.6.0", "v0.6.1"])
+            result = _run_script(project_dir, {
+                "WIZARD_UPDATE_REGISTRY_URL": f"file://{registry_file}",
+                "UPGRADE_NOTICE_REGISTRY_URL": "http://127.0.0.1:19999/unreachable.json",
+            })
+            self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+            self.assertIn("hookSpecificOutput", result.stdout,
+                          "the notice must fetch via the shared routine's "
+                          "WIZARD_UPDATE_REGISTRY_URL seam (one shared fetch path)")
+
+    def test_legacy_seam_still_honored_for_back_compat(self):
+        """The legacy UPGRADE_NOTICE_REGISTRY_URL seam keeps working (mapped onto the
+        canonical one) so the emitted hook's documented seam does not break."""
+        with tempfile.TemporaryDirectory() as td:
+            project_dir = Path(td)
+            _write_manifest(project_dir, "v0.6.0")
+            registry_file = _write_registry_fixture(Path(td), ["v0.6.0", "v0.6.1"])
+            result = _run_script(project_dir, {
+                "UPGRADE_NOTICE_REGISTRY_URL": f"file://{registry_file}",
+            })
+            self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+            self.assertIn("hookSpecificOutput", result.stdout,
+                          "legacy UPGRADE_NOTICE_REGISTRY_URL seam must still drive the notice")
+
+    def test_no_hardcoded_production_registry_url_in_script(self):
+        """Hardening: the notice no longer bakes in a production registry URL — its source is
+        resolved from the origin-pinned .wizard/update-source.json via the shared routine.
+        A baked-in URL is exactly the future-divergence hazard this unification removes."""
+        script_text = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("raw.githubusercontent.com", script_text,
+                         "notice must not hardcode a production registry URL; the source comes "
+                         "from the update-source pin via the shared registry_fetch routine")
 
 
 class UpgradeNoticeSnoozeStateTest(unittest.TestCase):
