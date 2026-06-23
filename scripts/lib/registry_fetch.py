@@ -53,6 +53,10 @@ class RegistryFetchResult:
     failure_status: Optional["UpdateStatus"] = None
     detail: str = ""
     source_url: str = ""
+    # The EXACT fetched body bytes (as text), preserved on success so the resolution-creation
+    # path can hash registry_sha256 over what was actually fetched (NOT a re-serialization of
+    # the parsed dict). None on failure.
+    raw_text: Optional[str] = None
 
 
 def registry_url_from_source(source: Dict[str, Any]) -> Optional[str]:
@@ -101,8 +105,15 @@ def fetch_remote_registry(
     *,
     fetcher: Optional[Fetcher] = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    allow_url_override: bool = True,
 ) -> RegistryFetchResult:
     """Fetch + parse the AUTHORITATIVE remote registry. Pure of side effects; never raises.
+
+    `allow_url_override`: when True (default — notice / check), the `WIZARD_UPDATE_REGISTRY_URL`
+    env seam may point the fetch at a `file://` / local URL for tests. When False, that seam is
+    IGNORED and the source is resolved ONLY from the origin-pinned update-source — required for
+    the resolution-creation path, where honoring an env-pointed source would let a non-origin
+    URL seed an operator-approved UpdateResolution (a supply-chain hazard).
 
     Failure mapping (all typed; the check renders these as honest could-not-determine, the
     notice stays silent):
@@ -111,7 +122,7 @@ def fetch_remote_registry(
       * remote unreachable / transport failure  -> NETWORK_UNAVAILABLE
       * fetched body not JSON / no bundles      -> REGISTRY_INVALID
     """
-    override = os.environ.get(REGISTRY_URL_OVERRIDE_ENV)
+    override = os.environ.get(REGISTRY_URL_OVERRIDE_ENV) if allow_url_override else None
     if override:
         url = override
     else:
@@ -148,4 +159,4 @@ def fetch_remote_registry(
             ok=False, failure_status=UpdateStatus.REGISTRY_INVALID,
             detail="remote registry has no bundles", source_url=url,
         )
-    return RegistryFetchResult(ok=True, registry=registry, source_url=url)
+    return RegistryFetchResult(ok=True, registry=registry, source_url=url, raw_text=text)

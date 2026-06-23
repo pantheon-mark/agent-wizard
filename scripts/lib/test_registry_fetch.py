@@ -82,6 +82,55 @@ class FetchRemoteRegistryTest(unittest.TestCase):
             self.assertEqual(calls, [], "must not attempt a fetch with no configured source")
 
 
+class RawTextAndOverrideGateTest(unittest.TestCase):
+    """The resolution-creation path needs the EXACT fetched bytes (for registry_sha256) and
+    must NOT honor an env-pointed source override (that would let a non-origin URL seed an
+    approved resolution). The notice/check keep the override as a test/advanced seam."""
+
+    def test_ok_carries_exact_raw_body(self):
+        with tempfile.TemporaryDirectory() as td:
+            proj = _project_with_pin(Path(td))
+            body = _GOOD_REGISTRY + "\n   "  # exact bytes, incl. trailing whitespace
+            res = fetch_remote_registry(proj, fetcher=lambda url, t: body)
+            self.assertTrue(res.ok)
+            self.assertEqual(res.raw_text, body,
+                             "raw_text must be the exact fetched body (for registry_sha256), "
+                             "not a re-serialization of the parsed dict")
+
+    def test_url_override_honored_by_default(self):
+        import os
+        calls = []
+        with tempfile.TemporaryDirectory() as td:
+            proj = _project_with_pin(Path(td))
+            os.environ["WIZARD_UPDATE_REGISTRY_URL"] = "https://override.example/x.json"
+            try:
+                fetch_remote_registry(
+                    proj, fetcher=lambda url, t: calls.append(url) or _GOOD_REGISTRY)
+            finally:
+                del os.environ["WIZARD_UPDATE_REGISTRY_URL"]
+            self.assertEqual(calls, ["https://override.example/x.json"],
+                             "default behavior keeps the override seam for notice/check")
+
+    def test_url_override_ignored_when_disallowed(self):
+        import os
+        calls = []
+        with tempfile.TemporaryDirectory() as td:
+            proj = _project_with_pin(Path(td))
+            os.environ["WIZARD_UPDATE_REGISTRY_URL"] = "https://override.example/x.json"
+            try:
+                fetch_remote_registry(
+                    proj, fetcher=lambda url, t: calls.append(url) or _GOOD_REGISTRY,
+                    allow_url_override=False)
+            finally:
+                del os.environ["WIZARD_UPDATE_REGISTRY_URL"]
+            self.assertEqual(len(calls), 1)
+            self.assertTrue(
+                calls[0].endswith("/registry/foundation-bundles.json")
+                and calls[0].startswith("https://") and "override.example" not in calls[0],
+                f"resolution-creation must resolve ONLY from the origin pin, not the env "
+                f"override; got {calls[0]!r}")
+
+
 class RegistryUrlFromSourceTest(unittest.TestCase):
     def test_prefers_raw_base_url(self):
         url = registry_url_from_source({"raw_base_url": "https://example/raw/o/r/main"})
