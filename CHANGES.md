@@ -12,6 +12,23 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-23 — updating your system is now one safe step (v0.6.3)
+
+**Public-facing change:** When you ask your system to update itself, it now does the whole thing in one safe, operator-approved step — instead of you running two separate commands.
+
+- **One "yes" does it.** Say "update my system," review what would change, and approve. Your system then refreshes the update tool to the exact approved version and applies the update in one go (behind the scenes: `wizard self-upgrade --to <version> --apply`). You no longer have to refresh the tool first as a separate manual step.
+- **You approve an exact, verified version.** Before anything is applied, your system records exactly what you approved — the precise published version, down to the specific code commit and the content fingerprints of the update — and refuses to apply anything that doesn't match. If it can't verify the update against the official source, it changes nothing and tells you the status is unknown (never a false "you're up to date").
+- **Your data is always protected.** Your task lists, rules, credentials, and logs are never touched; a backup is taken first, and a file you've edited yourself is only ever updated after that backup is made.
+- **Two safety details are hardened.** The record of an approved update can no longer be altered (so the "approve one thing, apply exactly that" guarantee holds even if something tries to tamper with it), and the start-of-session "an update is available" notice now checks the same trusted source as the manual check, so the two always agree.
+
+Honest limit (unchanged): this verifies the expected official source, the version lineage, the exact commit, and the content fingerprints — it is **not** a cryptographic signature check.
+
+This is a small additive change (`v0.6.3`, operator-explicit as always). Your own files and customizations are untouched.
+
+`Source-Meta-Commit:` `<stamped at publication>` (private build repo) · public repo commit `<filled after subtree push>`
+
+---
+
 ## 2026-06-22 — the approval drill now matches what your system actually does (v0.6.2)
 
 **Public-facing change:** When your system demonstrates its one-time approval "drill" before you accept a build phase, the example it uses is now grounded in what *that phase's agents actually do* — it no longer invents an unrelated or off-topic action.
