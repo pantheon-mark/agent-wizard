@@ -165,5 +165,23 @@ class LoadFailClosedTest(unittest.TestCase):
                 load_update_resolution(proj)
 
 
+class ResolutionDenySetTest(unittest.TestCase):
+    """The resolution must be READ-ONLY to the assistant (the same anti-self-bypass pattern as
+    .wizard/update-source.json): if it were writable, a prompt-injection could rewrite the
+    approved hashes to match a malicious payload and survive self-update's re-validation. The
+    deny rule goes in the build-side template (reaches operators via the next bundle cut)."""
+
+    _BUILD_SETTINGS = (Path(__file__).resolve().parents[2]
+                       / "templates" / "claude_config" / "settings.json")
+
+    def test_build_template_settings_deny_resolution_file(self):
+        settings = json.loads(self._BUILD_SETTINGS.read_text(encoding="utf-8"))
+        deny = settings["permissions"]["deny"]
+        self.assertIn(f"Edit({UPDATE_RESOLUTION_REL})", deny,
+                      "settings.json must deny Edit of the approved-resolution file")
+        self.assertIn(f"Write({UPDATE_RESOLUTION_REL})", deny,
+                      "settings.json must deny Write of the approved-resolution file")
+
+
 if __name__ == "__main__":
     unittest.main()

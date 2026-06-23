@@ -4,7 +4,7 @@
     "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/statusline.sh\""
   },
   "permissions": {
-    "deny": ["Edit(.claude/**)", "Write(.claude/**)", "Edit(.wizard/update-source.json)", "Write(.wizard/update-source.json)"],
+    "deny": ["Edit(.claude/**)", "Write(.claude/**)", "Edit(.wizard/update-source.json)", "Write(.wizard/update-source.json)", "Edit(.wizard/update-resolution.json)", "Write(.wizard/update-resolution.json)"],
     "disableBypassPermissionsMode": "disable"
   },
   "hooks": {
