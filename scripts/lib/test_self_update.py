@@ -178,10 +178,25 @@ class VerifyGateTests(SelfUpdateBase):
         self.assertFalse(res.applied)
 
     def test_dirty_tree_refused(self):
+        # A TRACKED modification (uncommitted change to a committed file) is real work a
+        # checkout could lose -> refuse.
         new = self._add_upstream_commit()
-        (self.toolkit / "dirty.txt").write_text("uncommitted", encoding="utf-8")
+        tracked = _run(self.toolkit, "git", "ls-files").stdout.splitlines()[0]
+        (self.toolkit / tracked).write_text("LOCALLY MODIFIED", encoding="utf-8")
         res = verify_self_update(self.toolkit, self.operator, candidate_commit=new)
         self.assertEqual(res.status, UpdateStatus.TOOLKIT_UNVERIFIED)
+
+    def test_untracked_files_do_not_block_update(self):
+        # UNTRACKED files (a macOS .DS_Store, an operator scratch note) are not at risk from a
+        # checkout and must NOT make the tree "dirty" — else self-update would refuse on nearly
+        # every real macOS toolkit. With only untracked files present, a valid descendant
+        # candidate verifies as available.
+        new = self._add_upstream_commit()
+        (self.toolkit / ".DS_Store").write_text("\x00mac", encoding="utf-8")
+        (self.toolkit / "scratch_notes.txt").write_text("my notes", encoding="utf-8")
+        res = verify_self_update(self.toolkit, self.operator, candidate_commit=new)
+        self.assertEqual(res.status, UpdateStatus.UPDATE_AVAILABLE,
+                         f"untracked-only tree must not refuse; got {res.status}: {res.message}")
 
     def test_non_descendant_candidate_unverified(self):
         # Create a divergent commit on a separate orphan branch (not descended from base).
@@ -238,7 +253,8 @@ class ApplyTests(SelfUpdateBase):
 
     def test_apply_refuses_dirty_tree_no_backup(self):
         new = self._add_upstream_commit()
-        (self.toolkit / "dirty.txt").write_text("uncommitted", encoding="utf-8")
+        tracked = _run(self.toolkit, "git", "ls-files").stdout.splitlines()[0]
+        (self.toolkit / tracked).write_text("LOCALLY MODIFIED", encoding="utf-8")
         res = apply_self_update(self.toolkit, self.operator, candidate_commit=new)
         self.assertEqual(res.status, UpdateStatus.TOOLKIT_UNVERIFIED)
         self.assertFalse(res.applied)

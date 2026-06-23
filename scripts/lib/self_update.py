@@ -117,8 +117,14 @@ def _working_tree_clean(toolkit_dir: Path) -> Tuple[bool, str]:
     ok, out = _git(toolkit_dir, "status", "--porcelain")
     if not ok:
         return (False, out)
-    # Empty porcelain output == clean.
-    return (out.strip() == "", out)
+    # "Clean" for the purpose of a safe checkout = no UNCOMMITTED CHANGES TO TRACKED FILES
+    # (the only thing a fetch+checkout of a descendant could lose). UNTRACKED files (porcelain
+    # `??` lines — e.g. a macOS `.DS_Store`, an operator's scratch note) are NOT at risk and
+    # must NOT block the update: git checkout/reset to a descendant never deletes them, and a
+    # gate that tripped on `.DS_Store` would refuse self-update on essentially every real macOS
+    # toolkit. So ignore `??` lines and fail only on tracked modifications (staged/unstaged).
+    tracked = [ln for ln in out.splitlines() if ln.strip() and not ln.startswith("??")]
+    return (not tracked, "\n".join(tracked))
 
 
 def _is_ancestor(toolkit_dir: Path, ancestor: str, descendant: str) -> bool:

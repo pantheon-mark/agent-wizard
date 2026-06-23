@@ -126,13 +126,15 @@ def _render_control_plane_body(relpath: str) -> Optional[str]:
     if relpath == ".wizard/UPGRADING.md":
         from upgrade_scaffold_emitter import render_command_surface  # type: ignore
         return render_command_surface()
-    if relpath == ".wizard/update-source.json":
-        # Durable, read-only update-source reference. Refreshed under control_plane_refresh
-        # so an unedited operator copy stays current as the pinned origin evolves; a drifted
-        # copy is sidecar'd, never clobbered. The body is re-rendered from the canonical
-        # source identity (NOT a bundle template).
-        from update_source import render_update_source_json  # type: ignore
-        return render_update_source_json()
+    # NOTE: `.wizard/update-source.json` is intentionally NOT refreshed on upgrade. It is
+    # delivered once at emit (`upgrade_scaffold_emitter.emit_update_source`) and is thereafter
+    # operator/system runtime state: its static fields (origin owner/repo/branch) never change,
+    # and its one dynamic field — `last_known_good_commit` — is written by the system on every
+    # verified self-update. Re-rendering the default body (LKG unset) here made the live pin
+    # look "drifted" against the recorded baseline on EVERY upgrade, routing it to review as
+    # noise (and demoting the result to `partial`) even though nothing was wrong. Returning None
+    # leaves it entirely to the operator/system, matching how the engine's other runtime-state
+    # files (e.g. `.wizard/update-resolution.json`) are never upgrade-managed.
     return None
 
 

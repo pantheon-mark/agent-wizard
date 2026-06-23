@@ -746,5 +746,28 @@ class ManifestMergeStrategyRefreshTests(unittest.TestCase):
         )
 
 
+class ControlPlaneRendererRegistry(unittest.TestCase):
+    """`.wizard/update-source.json` must NOT be upgrade-refreshed (it is delivered once at emit
+    and is thereafter operator/system runtime state — its `last_known_good_commit` is written by
+    every verified self-update, so re-rendering the default body routed it to review as noise on
+    every upgrade and demoted the result to `partial`). The control-plane renderer returns None
+    for it (-> the apply skips it, leaving the operator's pin untouched), while a genuine
+    control-plane guidance file (UPGRADING.md) still renders."""
+
+    def test_update_source_is_not_control_plane_refreshed(self):
+        from upgrade_apply import _render_control_plane_body  # noqa: E402
+        self.assertIsNone(
+            _render_control_plane_body(".wizard/update-source.json"),
+            "update-source.json must not be upgrade-refreshed (operator/system runtime state)",
+        )
+
+    def test_upgrading_md_still_control_plane_refreshed(self):
+        from upgrade_apply import _render_control_plane_body  # noqa: E402
+        self.assertIsNotNone(
+            _render_control_plane_body(".wizard/UPGRADING.md"),
+            "UPGRADING.md is genuine wizard guidance and must still refresh on upgrade",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
