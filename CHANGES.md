@@ -25,7 +25,7 @@ Honest limit (unchanged): this verifies the expected official source, the versio
 
 This is a small additive change (`v0.6.3`, operator-explicit as always). Your own files and customizations are untouched.
 
-`Source-Meta-Commit:` `<stamped at publication>` (private build repo) · public repo commit `<filled after subtree push>`
+`Source-Meta-Commit:` `3eacd9d` (private build repo) · public repo commit `<filled after subtree push>`
 
 ---
 
