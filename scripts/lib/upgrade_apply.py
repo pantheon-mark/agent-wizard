@@ -73,6 +73,7 @@ from upgrade import (  # type: ignore
     find_migration_entry,
     load_migration_manifest,
     normalize_for_content_hash,
+    resolve_bundle_dir,
     resolve_merge_strategy,
     sha256_bytes,
     sha256_file,
@@ -1060,7 +1061,10 @@ def apply_upgrade(
             f"this system is already on {current_version!r}; nothing to apply."
         )
 
-    target_bundle_dir = _bundle_dir(target_version, build_repo_root).resolve()
+    # Resolve the target bundle through the canonical registry-anchored resolver (V1/V2-aware),
+    # NOT the build-layout _bundle_dir, so this APPLY reads exactly the bundle dir the content
+    # gate (verify_fetched_against_resolution) verified — verify-path == apply-path by construction.
+    target_bundle_dir = resolve_bundle_dir(registry_path, registry, target_entry).resolve()
     migration_json = target_bundle_dir / MIGRATION_MANIFEST_JSON_SIDECAR_FILENAME
     if not migration_json.exists():
         raise UpgradeApplyError(
@@ -1123,7 +1127,7 @@ def apply_upgrade(
     )
 
     # --- 3. Render theirs (fail-closed on missing placeholder) ----------------
-    target_generator_version = _read_target_generator_version(build_repo_root, target_entry)
+    target_generator_version = _read_target_generator_version(target_bundle_dir)
     try:
         theirs_rendered = _render_version(target_version, capsule_inputs, build_repo_root)
     except Exception as e:  # GeneratorError on undefined placeholder, etc.
@@ -1968,15 +1972,13 @@ def _atomic_replace(src: Path, dest: Path) -> None:
     os.replace(str(src), str(dest))
 
 
-def _read_target_generator_version(build_repo_root: Path, target_entry: Dict[str, Any]) -> Optional[str]:
+def _read_target_generator_version(target_bundle_dir: Path) -> Optional[str]:
     """Read the target bundle's generator_version from its provenance sidecar (the
     canonical source the original manifest's generator_version came from — not
     re-derived). Returns None if the sidecar is absent or carries no value (the
-    manifest then keeps its existing generator_version)."""
-    bundle_dir = _bundle_dir(
-        target_entry.get("foundation_bundle_version", ""), build_repo_root
-    ).resolve()
-    prov = bundle_dir / "foundation-bundle.provenance.json"
+    manifest then keeps its existing generator_version). Takes the already-resolved bundle
+    dir (the same canonical resolve_bundle_dir path apply reads) — not a re-resolution."""
+    prov = target_bundle_dir / "foundation-bundle.provenance.json"
     if not prov.exists():
         return None
     try:
