@@ -19,7 +19,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from self_update import (  # noqa: E402
     apply_self_update,
+    fetch_ref,
     resolve_remote_commit,
+    rollback_to_previous,
     verify_self_update,
 )
 from update_source import (  # noqa: E402
@@ -93,6 +95,40 @@ class SelfUpdateBase(unittest.TestCase):
         # unreachable canonical URL used only for origin verification).
         _git(self.toolkit, "fetch", "-q", "local")
         return new
+
+
+class FetchRefTests(SelfUpdateBase):
+    """A+ self-update must FETCH the approved commit's objects local before checkout (the target
+    commit may not be present yet). Fail-closed (ok=False) on git failure."""
+
+    def test_fetch_makes_new_commit_reachable(self):
+        new = _commit(self.upstream, "newer2", content="z")  # on upstream, not fetched yet
+        ok, detail = fetch_ref(self.toolkit, "main", remote="local")
+        self.assertTrue(ok, detail)
+        # object is now present locally (cat-file -e raises via check=True if absent)
+        _git(self.toolkit, "cat-file", "-e", new)
+
+    def test_fetch_bad_remote_fails_closed(self):
+        ok, _ = fetch_ref(self.toolkit, "main", remote="no-such-remote")
+        self.assertFalse(ok)
+
+
+class RollbackTests(SelfUpdateBase):
+    """A+ auto-rollback: if a post-checkout step fails (e.g. pin-write), restore the toolkit to
+    its previous commit programmatically (never leave it advanced-but-unrecorded)."""
+
+    def test_rollback_restores_previous_commit(self):
+        new = self._add_upstream_commit()
+        _git(self.toolkit, "checkout", new)
+        self.assertEqual(_run(self.toolkit, "git", "rev-parse", "HEAD").stdout.strip(), new)
+        ok, detail = rollback_to_previous(self.toolkit, self.base_commit)
+        self.assertTrue(ok, detail)
+        self.assertEqual(
+            _run(self.toolkit, "git", "rev-parse", "HEAD").stdout.strip(), self.base_commit)
+
+    def test_rollback_no_previous_fails(self):
+        ok, _ = rollback_to_previous(self.toolkit, "")
+        self.assertFalse(ok)
 
 
 class ResolveRemoteCommitTests(SelfUpdateBase):

@@ -129,6 +129,23 @@ def _rev_parse(toolkit_dir: Path, ref: str) -> Optional[str]:
     return out.strip()
 
 
+def rollback_to_previous(toolkit_dir: Path, previous_commit: str, *, timeout: int = 30) -> Tuple[bool, str]:
+    """Programmatic rollback after a failed post-checkout step (e.g. pin-write): restore the
+    toolkit to its previous commit via `git checkout <previous_commit>`. Returns (ok, detail);
+    if this itself fails, the pre-update backup dir is the durable recovery state the caller
+    surfaces to the operator. Never raises."""
+    if not previous_commit:
+        return (False, "no previous commit to roll back to")
+    return _git(toolkit_dir, "checkout", previous_commit, timeout=timeout)
+
+
+def fetch_ref(toolkit_dir: Path, ref: str, *, remote: str = "origin", timeout: int = 60) -> Tuple[bool, str]:
+    """`git fetch <remote> <ref>` — bring the approved commit's objects into the toolkit before
+    checkout (the A+ target commit may not be present locally yet). Returns (ok, detail); never
+    raises (git missing / unreachable remote -> (False, message)) so the caller fails closed."""
+    return _git(toolkit_dir, "fetch", remote, ref, timeout=timeout)
+
+
 def resolve_remote_commit(
     toolkit_dir: Path, source_url: str, ref: str, *, timeout: int = 30
 ) -> Optional[str]:
