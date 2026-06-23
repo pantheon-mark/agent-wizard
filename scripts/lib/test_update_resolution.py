@@ -129,6 +129,33 @@ class SerializeRoundTripTest(unittest.TestCase):
             self.assertEqual(load_update_resolution(proj), r)
 
 
+class EngineEnvelopeOptionalTest(unittest.TestCase):
+    """min_engine_version is NOT determinable at check (the target bundle is not local; apply
+    re-derives engine-compat independently), so the engine-envelope fields are allowed EMPTY
+    in a resolution — but the KEYS must still be present. The integrity-critical fields (hashes,
+    commit, operator manifest) remain required-non-empty."""
+
+    def test_empty_engine_fields_round_trip(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = build_update_resolution(
+                operator_project_dir=_operator_project(Path(td)),
+                registry_raw_text="{...}", source_url="https://x/registry/foundation-bundles.json",
+                source_origin_id="github:o/r", source_ref="main", entry=_ENTRY,
+                from_version="v0.6.1", target_public_commit_sha="abc",
+                min_engine_version="", checked_engine_version="",
+                checked_at="2026-06-23T00:00:00Z")
+            self.assertEqual(r.min_engine_version, "")
+            # loads back (empty engine fields tolerated)
+            self.assertEqual(UpdateResolution.from_dict(r.to_dict()), r)
+
+    def test_missing_integrity_field_still_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = _build(_operator_project(Path(td))).to_dict()
+            d["registry_sha256"] = ""  # integrity-critical -> must remain required
+            with self.assertRaises(UpdateResolutionError):
+                UpdateResolution.from_dict(d)
+
+
 class LoadFailClosedTest(unittest.TestCase):
     def test_missing_file_raises(self):
         with tempfile.TemporaryDirectory() as td:

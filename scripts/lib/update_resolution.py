@@ -88,10 +88,19 @@ class UpdateResolution:
                 f"{UPDATE_RESOLUTION_SCHEMA_VERSION!r} (fail-closed)"
             )
         names = [f.name for f in fields(cls)]
-        missing = [n for n in names if not (isinstance(data.get(n), str) and data.get(n))]
-        if missing:
+        # The engine envelope is best-effort at check time (min_engine_version is not
+        # determinable until the target bundle is local; apply re-derives engine-compat
+        # independently), so these keys must be PRESENT but may be empty strings. Every other
+        # field is integrity-critical and required-non-empty.
+        optional_empty = {"min_engine_version", "checked_engine_version"}
+        absent = [n for n in names if not isinstance(data.get(n), str)]
+        empty_required = [n for n in names
+                          if n not in optional_empty and isinstance(data.get(n), str)
+                          and not data.get(n)]
+        if absent or empty_required:
             raise UpdateResolutionError(
-                f"update-resolution missing/empty required field(s): {missing}"
+                f"update-resolution missing key(s) {absent} / empty required field(s) "
+                f"{empty_required}"
             )
         return cls(**{n: data[n] for n in names})
 
