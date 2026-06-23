@@ -67,6 +67,17 @@
       "changelog": "The approval drill (the one-time safety demonstration) now uses an example grounded in what your system actually does, instead of a generic action.",
       "bundle_tree_sha256": "sha256:f5d8ebafa628d03bb473040f2a4ccef6ec7070b15420615ce62064b14ba464fb",
       "bundle_manifest_sha256": "sha256:0b92595ac3b462ad32971ce44c7f0b4ef7785be949c1707b2d2b1472e85ef106"
+    },
+    {
+      "foundation_bundle_version": "v0.6.3",
+      "path": "foundation-bundles/v0.6.3/",
+      "release_date": "2026-06-23",
+      "source_commit": "6428b90",
+      "manifest": "foundation-bundles/v0.6.3/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "Updating your system is now one safe step: the assistant refreshes the update tool and applies the update together. Also hardens two safety details — the record of an approved update can no longer be altered, and the start-of-session update check uses the same trusted source as the manual check.",
+      "bundle_tree_sha256": "sha256:f9d4499de69312ee1111292bc9de50743d6435af54c0583ea653d65d7287fc1e",
+      "bundle_manifest_sha256": "sha256:4cf5da55b0135408714f52319823b61d9ca267d5ba3df1948dda32abc9d4b72f"
     }
   ]
 }
