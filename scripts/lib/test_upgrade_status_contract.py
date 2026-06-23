@@ -16,6 +16,7 @@ fixture cannot mask a collapse-to-"current" bug.
 
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -255,7 +256,25 @@ def _make_operator_manifest(proj: Path, version: str) -> Path:
 
 class CliTypedStatusTest(unittest.TestCase):
     """The `upgrade-check` CLI emits the typed status + reason_code under --json and
-    returns the status-mapped exit code. NO failure path may exit 0 (current)."""
+    returns the status-mapped exit code. NO failure path may exit 0 (current).
+
+    The check is REMOTE-AUTHORITATIVE: availability is decided against the remote
+    registry, driven here through the documented `WIZARD_UPDATE_REGISTRY_URL` file:// seam.
+    `--registry-path` is the LOCAL mirror (fallback/engine-compat only), no longer authority."""
+
+    def setUp(self):
+        from registry_fetch import REGISTRY_URL_OVERRIDE_ENV
+        self._env_key = REGISTRY_URL_OVERRIDE_ENV
+        self._saved = os.environ.get(self._env_key)
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop(self._env_key, None)
+        else:
+            os.environ[self._env_key] = self._saved
+
+    def _set_remote(self, path: Path):
+        os.environ[self._env_key] = "file://" + str(path)
 
     def _run(self, argv):
         import wizard_upgrade as wu  # heavy module; local import
@@ -268,7 +287,8 @@ class CliTypedStatusTest(unittest.TestCase):
         from upgrade import EXIT_UPDATE_AVAILABLE
         with tempfile.TemporaryDirectory() as td:
             proj = Path(td)
-            mp = _make_operator_manifest(proj, "v0.6.0")  # v0.6.1 is newer in the real registry
+            mp = _make_operator_manifest(proj, "v0.6.0")  # the real remote registry has newer
+            self._set_remote(_REAL_REGISTRY)
             rc, out, err = self._run([
                 "upgrade-check",
                 "--manifest-path", str(mp),
@@ -289,6 +309,7 @@ class CliTypedStatusTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             proj = Path(td)
             mp = _make_operator_manifest(proj, latest)  # already latest -> current
+            self._set_remote(_REAL_REGISTRY)
             rc, out, err = self._run([
                 "upgrade-check",
                 "--manifest-path", str(mp),
@@ -299,16 +320,20 @@ class CliTypedStatusTest(unittest.TestCase):
             data = json.loads(out)
             self.assertEqual(data["status"], "checked_current")
 
-    def test_missing_registry_is_registry_invalid_not_current(self):
+    def test_malformed_remote_registry_is_registry_invalid_not_current(self):
+        """A registry problem (malformed REMOTE) must classify REGISTRY_INVALID, NOT 'current'.
+        (Under remote authority the determinant is the remote, not the local mirror.)"""
         from upgrade import EXIT_REGISTRY_INVALID
         with tempfile.TemporaryDirectory() as td:
             proj = Path(td)
             mp = _make_operator_manifest(proj, "v0.6.0")
-            missing = proj / "no-such-registry.json"
+            malformed = proj / "malformed_remote.json"
+            malformed.write_text("<<< not json >>>", encoding="utf-8")
+            self._set_remote(malformed)
             rc, out, err = self._run([
                 "upgrade-check",
                 "--manifest-path", str(mp),
-                "--registry-path", str(missing),
+                "--registry-path", str(_REAL_REGISTRY),
                 "--json",
             ])
             # MUST NOT be 0 (current) and MUST be the registry-invalid code.

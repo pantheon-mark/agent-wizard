@@ -48,6 +48,7 @@ from lib.upgrade import (  # noqa: E402
     OperatorManifestError,
     PlanOnlyRequiredError,
     RegistryError,
+    UpdateCheckOutcome,
     UpdateStatus,
     UpgradeError,
     classify_update_status,
@@ -82,6 +83,7 @@ from lib.self_update import (  # noqa: E402
     verify_self_update,
 )
 from lib.update_source import record_last_known_good_commit  # noqa: E402
+from lib.registry_fetch import fetch_remote_registry  # noqa: E402
 
 
 def populate_plan_analysis(
@@ -196,13 +198,28 @@ def _emit_outcome(outcome, args, *, detail_render: str = "") -> int:
     return status_exit_code(outcome.status)
 
 
-def cmd_upgrade_check(args: argparse.Namespace) -> int:
-    """`wizard upgrade-check` — typed honest-status contract (C6').
+def _try_load_local_registry(registry_path: Path) -> dict | None:
+    """The local toolkit registry mirror, or None if absent/unreadable. The mirror is NOT
+    the currency authority (that is the remote source); it is consulted only to (a) decide
+    NETWORK_UNAVAILABLE vs CURRENCY_UNCONFIRMED on a remote-fetch failure, and (b) run the
+    engine-compatibility gate when the target bundle is actually present locally."""
+    try:
+        registry = load_registry(registry_path)
+        return registry if registry.get("bundles") else None
+    except (RegistryError, UpgradeError):
+        return None
 
-    Every outcome funnels through `classify_update_status` so no failure path can
-    collapse into a false "up to date": a missing/unparseable registry -> REGISTRY_INVALID;
-    a check that did not complete -> COULD_NOT_CHECK; an update that exists but the local
-    engine is too old to apply -> ENGINE_TOO_OLD. Distinct exit code per status."""
+
+def cmd_upgrade_check(args: argparse.Namespace) -> int:
+    """`wizard upgrade-check` — typed honest-status contract, REMOTE-AUTHORITATIVE.
+
+    Version availability is decided against the AUTHORITATIVE remote registry (fetched as
+    DATA from the origin-pinned update source via the shared `fetch_remote_registry` routine —
+    the same routine the SessionStart notice uses, so the two can never disagree). The check
+    fails CLOSED: if the remote cannot be reached/verified it reports a could-not-determine
+    status and NEVER `CHECKED_CURRENT` off a stale local mirror. The local mirror is demoted
+    to a fallback signal only (network-unreachable-but-local-exists -> CURRENCY_UNCONFIRMED)
+    and to the engine-compat gate when the target bundle is locally present."""
     manifest_path = _resolve_manifest_path(args.manifest_path)
     registry_path = _resolve_registry_path(args.registry_path)
 
@@ -214,37 +231,62 @@ def cmd_upgrade_check(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
-    # Registry load failure is an update-status determination: a missing/unparseable
-    # registry means "could not check", classified REGISTRY_INVALID (NOT "no updates").
-    try:
-        registry = load_registry(registry_path)
-    except RegistryError as e:
-        return _emit_outcome(classify_update_status(e), args)
-
     operator_dir = manifest_path.parent.parent
+    current_version = manifest.get("foundation_bundle_version", "")
+
+    # AUTHORITATIVE: fetch the remote registry. Fail CLOSED on any fetch/verify failure.
+    fetch = fetch_remote_registry(operator_dir)
+    if not fetch.ok:
+        # Normalize by VALUE: registry_fetch resolves `upgrade` as a flat module while this
+        # CLI resolves it as `lib.upgrade`, so the two UpdateStatus enums are not identity-
+        # equal across the dual import paths. Rebuild the member in THIS module's enum so the
+        # comparison + construction + render below all use one identity.
+        raw_status = fetch.failure_status or UpdateStatus.COULD_NOT_CHECK
+        status = UpdateStatus(raw_status.value)
+        # A reachable-but-stale local mirror does not make us current: if the remote was
+        # simply unreachable AND a local catalog exists, the honest status is
+        # CURRENCY_UNCONFIRMED (local data exists, authority not reached) — not bare network.
+        if status == UpdateStatus.NETWORK_UNAVAILABLE and _try_load_local_registry(registry_path) is not None:
+            status = UpdateStatus.CURRENCY_UNCONFIRMED
+        return _emit_outcome(
+            UpdateCheckOutcome(
+                status=status,
+                reason_code=f"remote_registry_unavailable_{status.value}",
+                current_version=current_version,
+                detail=fetch.detail,
+            ),
+            args,
+        )
+
+    registry = fetch.registry  # the authoritative remote registry
+
+    # registry_path=None: availability is decided from the remote version list ALONE — do NOT
+    # read per-target migration manifests from local disk (the newer target is not local yet;
+    # a local read would fail-closed on exactly the available-update case). Migration detail +
+    # engine-compat enrichment happen at plan/apply time after the toolkit refresh.
     try:
-        result = compute_upgrade_check(operator_dir, manifest, registry, registry_path=registry_path)
-    except RegistryError as e:
-        return _emit_outcome(classify_update_status(e), args)
-    except UpgradeError as e:
-        # The check itself did not complete (e.g. a target's migration manifest could
-        # not be loaded) -> COULD_NOT_CHECK, never a false "current".
+        result = compute_upgrade_check(operator_dir, manifest, registry, registry_path=None)
+    except (RegistryError, UpgradeError) as e:
         return _emit_outcome(classify_update_status(e), args)
 
-    # Engine-compatibility gate (MF-2): if an update exists but the local engine is older
-    # than the latest available target's declared min_engine_version, surface ENGINE_TOO_OLD
-    # (honest STOP — refresh the tool first) rather than UPDATE_AVAILABLE.
+    # Engine-compatibility gate (MF-2): only determinable when the latest available target's
+    # bundle is present in the LOCAL toolkit (older targets may be; the just-published latest
+    # usually is not until a refresh). When it is not local, availability stands honestly and
+    # the engine-compat STOP is re-checked at apply (after self-update fetches the bundle).
     engine_too_old = False
     min_engine = ""
     if result.available_targets:
-        # Highest available target (the check sorts ascending; take the last).
         latest_target = result.available_targets[-1].get("foundation_bundle_version", "")
-        target_entry = find_bundle_entry(registry, latest_target)
-        if target_entry is not None:
-            compat = check_engine_compatibility(registry_path, registry, target_entry)
-            if not compat.compatible:
-                engine_too_old = True
-                min_engine = compat.min_engine_version
+        local_registry = _try_load_local_registry(registry_path)
+        local_entry = find_bundle_entry(local_registry, latest_target) if local_registry else None
+        if local_entry is not None:
+            try:
+                compat = check_engine_compatibility(registry_path, local_registry, local_entry)
+                if not compat.compatible:
+                    engine_too_old = True
+                    min_engine = compat.min_engine_version
+            except (RegistryError, UpgradeError):
+                pass  # cannot determine locally -> do not gate; availability stands
 
     outcome = classify_update_status(
         result, engine_too_old=engine_too_old, min_engine_version=min_engine,
