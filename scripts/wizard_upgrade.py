@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
@@ -84,6 +85,12 @@ from lib.self_update import (  # noqa: E402
 )
 from lib.update_source import record_last_known_good_commit  # noqa: E402
 from lib.registry_fetch import fetch_remote_registry  # noqa: E402
+from lib.resolution_emit import emit_update_resolution_for_target  # noqa: E402
+from lib.update_resolution import (  # noqa: E402
+    UpdateResolutionError,
+    load_update_resolution,
+)
+from lib.run_upgrade import run_resolution_upgrade  # noqa: E402
 
 
 def populate_plan_analysis(
@@ -433,6 +440,171 @@ def cmd_self_update(args: argparse.Namespace) -> int:
     return self_update_exit_code(result)
 
 
+def run_self_upgrade(
+    *,
+    operator_dir: Path,
+    toolkit_dir: Path,
+    registry_path: Path,
+    manifest_path: Path,
+    manifest: dict,
+    target_version: str,
+    checked_at: str,
+    fetch_remote: str = "origin",
+    ack: bool = True,
+    backup: bool = True,
+    commit_resolver=None,
+    fetcher=None,
+    exec_fn=None,
+    apply_fn=None,
+    reexec_argv=None,
+    json_mode: bool = False,
+) -> int:
+    """The operator-reach two-phase A+ upgrade (the heart of `wizard self-upgrade`).
+
+    PHASE 1 (first invocation): if no approved resolution exists for `target_version`, EMIT it —
+    the approve step: resolve the exact public commit (real git ls-remote) + fetch the registry AT
+    that commit + bind the expected bundle hashes into the immutable `.wizard/update-resolution.json`.
+    Then `run_resolution_upgrade` self-updates the toolkit to that exact commit and re-execs the SAME
+    command. PHASE 2 (the re-exec'd, freshly-installed engine): a matching resolution is already
+    present, so emit is SKIPPED (no second git touch, no second approve) and `run_resolution_upgrade`
+    re-validates the content gate and applies — performed by the NEW engine, never the old bytecode.
+
+    Returns a process exit code (0 applied / re-exec'd; nonzero = not applied). The seams
+    (commit_resolver / fetcher / exec_fn / apply_fn / reexec_argv) are injectable CODE seams (not
+    env vars, so production cannot be redirected away from the origin pin) for offline tests;
+    production binds the real defaults via `cmd_self_upgrade`."""
+    operator_dir = Path(operator_dir)
+    toolkit_dir = Path(toolkit_dir)
+    registry_path = Path(registry_path)
+    manifest_path = Path(manifest_path)
+    current_version = manifest.get("foundation_bundle_version", "")
+
+    # 1. EMIT-OR-SKIP. Phase 2 (re-exec'd) finds a matching resolution and must NOT re-emit (no
+    #    second git touch, no second approve); phase 1 / a stale-target leftover emits afresh.
+    need_emit = True
+    try:
+        existing = load_update_resolution(operator_dir)
+        if existing.target_version == target_version:
+            need_emit = False
+    except UpdateResolutionError:
+        need_emit = True
+
+    if need_emit:
+        emit_kwargs: dict = {}
+        if commit_resolver is not None:
+            emit_kwargs["commit_resolver"] = commit_resolver
+        if fetcher is not None:
+            emit_kwargs["fetcher"] = fetcher
+        resolution = emit_update_resolution_for_target(
+            operator_dir, toolkit_dir, target_version,
+            from_version=current_version, checked_at=checked_at,
+            **emit_kwargs,
+        )
+        if resolution is None:
+            # Fail-closed: no pin / git could not resolve the commit / registry unfetchable at that
+            # commit / target absent / registry declares no bundle hashes. Nothing was written;
+            # report honestly (NEVER a false "applied" / "current"). The skill surfaces this to the
+            # operator as could-not-prepare; the status of their system is unchanged.
+            print(
+                "error: could not prepare an approved update for "
+                f"{target_version}. The update could not be verified against the official source "
+                "right now, so NOTHING was changed. This is not a confirmation that you are up to "
+                "date. Try again later, or refresh the tool first (`wizard self-update --apply`).",
+                file=sys.stderr,
+            )
+            return 1
+
+    # 2. apply_fn — executed by the (re-exec'd) NEW engine in phase 2. Loads the registry lazily so
+    #    a phase-1 process (which never calls apply_fn) does not depend on it, and so phase 2 reads
+    #    the freshly-checked-out toolkit's registry.
+    if apply_fn is None:
+        def apply_fn(resolution):  # noqa: ANN001
+            build_repo_root = _resolve_build_repo_root(registry_path)
+            registry = load_registry(registry_path)
+            try:
+                result = apply_upgrade(
+                    operator_dir, resolution.target_version, build_repo_root,
+                    registry=registry, registry_path=registry_path,
+                    manifest=manifest, manifest_path=manifest_path,
+                    ack=ack, backup=backup,
+                )
+            except UpgradeApplyError as e:
+                # Clean refusal (no live writes). Surface the actionable message verbatim.
+                print(f"upgrade refused: {e}", file=sys.stderr)
+                return ("apply_complete", 1)
+            except UpgradeError as e:
+                print(f"error: {e}", file=sys.stderr)
+                return ("apply_complete", 1)
+            print(render_apply_result(result), end="")
+            return ("apply_complete", 0)
+
+    run_kwargs: dict = {"argv": list(reexec_argv) if reexec_argv is not None else [],
+                        "apply_fn": apply_fn, "fetch_remote": fetch_remote}
+    if exec_fn is not None:
+        run_kwargs["exec_fn"] = exec_fn
+    out = run_resolution_upgrade(operator_dir, toolkit_dir, **run_kwargs)
+
+    # 3. Map the orchestration result to an exit code.
+    tag = out[0] if isinstance(out, tuple) and out else None
+    if tag == "refused":
+        # run_resolution_upgrade's own fail-closed (no resolution / content gate failed at apply).
+        print(f"upgrade refused: {out[1]}", file=sys.stderr)
+        return 1
+    if tag == "execed":
+        # Only reachable when exec_fn is a test stub; in production os.execv replaced the process.
+        return 0
+    if tag == "apply_complete":
+        return int(out[1])
+    print(f"error: unexpected upgrade result: {out!r}", file=sys.stderr)
+    return 1
+
+
+def cmd_self_upgrade(args: argparse.Namespace) -> int:
+    """`wizard self-upgrade --to VERSION --apply` — the operator-reach combined upgrade.
+
+    Refreshes the installed toolkit to the EXACT approved public commit, then re-runs itself and
+    applies the foundation/operating-layer update with the freshly-installed engine. One operator
+    "yes" (handled by the check-for-updates skill) drives the whole chain; this command is
+    non-interactive so it survives the os.execv re-run with no human in the loop.
+
+    Operator-edited warn-on-drift files are adopted to the new version with a backup taken first
+    (ack=True); the operator's own data, rules, credentials, and logs (`operator_review`) are never
+    touched. Every run is operator-explicit — standing auto-approval stays disabled."""
+    if not args.apply:
+        print(
+            "error: `wizard self-upgrade --to <version>` requires --apply.\n"
+            "       It refreshes the tool to the approved version and applies the update in one\n"
+            "       step. To only preview what would change, use `wizard upgrade-plan --to <version>`.",
+            file=sys.stderr,
+        )
+        return 2
+
+    manifest_path = _resolve_manifest_path(args.manifest_path)
+    registry_path = _resolve_registry_path(args.registry_path)
+    toolkit_dir = _resolve_toolkit_dir(args.toolkit_dir)
+    try:
+        manifest = load_operator_manifest(manifest_path)
+    except UpgradeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    operator_dir = Path(args.operator_dir) if args.operator_dir else manifest_path.parent.parent
+    checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    fetch_remote = args.fetch_remote or "origin"
+
+    return run_self_upgrade(
+        operator_dir=operator_dir,
+        toolkit_dir=toolkit_dir,
+        registry_path=registry_path,
+        manifest_path=manifest_path,
+        manifest=manifest,
+        target_version=args.to,
+        checked_at=checked_at,
+        fetch_remote=fetch_remote,
+        json_mode=args.json,
+        reexec_argv=list(sys.argv),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wizard_upgrade",
@@ -494,6 +666,28 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Candidate commit to update to (default: current toolkit HEAD)")
     su_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON to stdout")
     su_p.set_defaults(func=cmd_self_update)
+
+    sup_p = sub.add_parser(
+        "self-upgrade",
+        help="Operator-reach upgrade: refresh the tool to the approved version, then apply it "
+             "(self-update -> re-run -> apply, in one operator-approved step)",
+    )
+    sup_p.add_argument("--to", required=True,
+                       help="Target foundation_bundle_version (operator-explicit; no --latest)")
+    sup_p.add_argument("--apply", action="store_true",
+                       help="Perform the combined refresh-and-apply (required; this command mutates).")
+    sup_p.add_argument("--manifest-path", default=None,
+                       help="Path to operator-project `.wizard/manifest.json` (default: ./.wizard/manifest.json)")
+    sup_p.add_argument("--registry-path", default=None,
+                       help="Path to `wizard/registry/foundation-bundles.json`")
+    sup_p.add_argument("--toolkit-dir", default=None,
+                       help="Path to the installed wizard toolkit (default: the directory this engine runs from)")
+    sup_p.add_argument("--operator-dir", default=None,
+                       help="Path to the operator project (default: derived from --manifest-path)")
+    sup_p.add_argument("--fetch-remote", default=None,
+                       help="Git remote the self-update fetches from (default: origin). Advanced/testing.")
+    sup_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON to stdout")
+    sup_p.set_defaults(func=cmd_self_upgrade)
 
     return parser
 
