@@ -37,6 +37,8 @@
     },
     {
       "foundation_bundle_version": "v0.6.0",
+      "safety_class": "routine_improvement",
+      "recommendation_reason": "You now build and run your system one capability at a time, accepting each before the next.",
       "path": "foundation-bundles/v0.6.0/",
       "release_date": "2026-06-21",
       "source_commit": "7ba3f48",
@@ -48,6 +50,8 @@
     },
     {
       "foundation_bundle_version": "v0.6.1",
+      "safety_class": "reliability_fix",
+      "recommendation_reason": "Adds operator orientation and risk-action protections, and lets your system safely apply its own updates.",
       "path": "foundation-bundles/v0.6.1/",
       "release_date": "2026-06-21",
       "source_commit": "296d5ff",
@@ -59,6 +63,8 @@
     },
     {
       "foundation_bundle_version": "v0.6.2",
+      "safety_class": "routine_improvement",
+      "recommendation_reason": "The approval drill now uses an example grounded in what your system actually does.",
       "path": "foundation-bundles/v0.6.2/",
       "release_date": "2026-06-22",
       "source_commit": "f8ff0ba",
@@ -70,6 +76,8 @@
     },
     {
       "foundation_bundle_version": "v0.6.3",
+      "safety_class": "reliability_fix",
+      "recommendation_reason": "Makes updating your system one safe step and hardens two update-safety details.",
       "path": "foundation-bundles/v0.6.3/",
       "release_date": "2026-06-23",
       "source_commit": "6428b90",
@@ -81,6 +89,8 @@
     },
     {
       "foundation_bundle_version": "v0.6.4",
+      "safety_class": "safety_fix",
+      "recommendation_reason": "Fixes a safety-check bug that was interrupting your ordinary edits and training you to click through every prompt.",
       "path": "foundation-bundles/v0.6.4/",
       "release_date": "2026-06-24",
       "source_commit": "95e24b6",

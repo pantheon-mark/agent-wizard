@@ -148,7 +148,7 @@ Now, when you upgrade an editable document (such as your vision):
 **Source-Meta-Commit:** 5c5ee4e
 **Public repo commit:** 3cc81f7
 
-## 2026-06-16 — your built system can now apply foundation-document upgrades (not just detect them)
+## 2026-06-16 — your built system can now apply foundation-document upgrades (not just detect them) (v0.5.0)
 
 **Public-facing change:** When the wizard releases a newer version of its foundation-document set, your built system could already tell you an upgrade was available and whether you'd edited any of the managed documents — but it could not actually take the upgrade. It can now, with `wizard upgrade --to <version> --apply`. The upgrade is always something you ask for explicitly; nothing upgrades itself in the background.
 
@@ -200,7 +200,7 @@ To make faithful upgrade previews possible, every newly built system now also sa
 
 ---
 
-## 2026-06-16 — you now build and run your system one capability at a time, and accept each before building the next
+## 2026-06-16 — you now build and run your system one capability at a time, and accept each before building the next (v0.6.0)
 
 **Public-facing change:** The end of the wizard used to hand you a plan to build every agent first and "review each one" before the system started operating. That asked you to judge things only a builder can judge, and it never let you do the one thing that actually matters: watch the system do your real work before you commit to it. This release replaces that with a single build-and-operate loop:
 

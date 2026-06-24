@@ -308,6 +308,75 @@ def render_update_status(outcome: "UpdateCheckOutcome") -> str:
     return msg
 
 
+# ---------------------------------------------------------------------------
+# Update Advice Contract (S2.46 / F-10): the recommendation stance is SYSTEM-
+# COMPUTED from author-declared registry facts, NOT inferred by the LLM and NEVER
+# keyed on the lifecycle `status`. F-10 incident: the emitted assistant improvised
+# "prerelease + no notes => hold off" against neutral prose and dissuaded the
+# operator from a safe fix. The trust-critical verdict lives here, in pure code the
+# assistant must REPORT (per the check-for-updates "tool status is authoritative;
+# do not infer" precedent + feedback_typed_status_below_llm_for_honest_reporting).
+# Cross-vendor design: external_review/s2.46_crossvendor_decisions_2026-06-24.md (D1).
+SAFETY_CLASSES = frozenset(
+    {"safety_fix", "reliability_fix", "routine_improvement", "breaking_change", "unknown"}
+)
+RECOMMENDATION_STANCES = frozenset(
+    {"recommend_apply", "neutral_offer", "manual_review", "do_not_apply"}
+)
+
+
+def compute_recommendation(entry: Dict[str, Any], *, tier: str = "") -> Dict[str, Any]:
+    """Pure: from a registry bundle entry, compute the operator-facing recommendation.
+
+    Inputs are author-declared FACTS on the registry entry (`safety_class`, optional
+    `yanked`, `recommendation_reason`) plus the change `tier`. It deliberately does NOT
+    read the lifecycle `status` (`prerelease` is the universal pre-v1 status; keying on it
+    is the F-10 bug). Stance rules (conservative — unknown defaults to manual_review):
+
+      do_not_apply  : yanked/revoked
+      manual_review : breaking tier OR safety_class breaking_change/unknown/missing
+      recommend_apply: safety_fix / reliability_fix on a non-breaking tier
+      neutral_offer : routine_improvement on a non-breaking tier
+
+    The anti-dissuade discipline (never talk the operator out of a safe update) applies to
+    recommend_apply / neutral_offer; manual_review / do_not_apply are the brakes that keep
+    the discipline from flipping into nagging a risky/breaking version (the inverse failure).
+    `actionable_command` is the universally-safe `self-upgrade --to V --apply` (refreshes a
+    behind toolkit then applies; a no-op refresh when already current), so the assistant never
+    routes the operator to a doomed local `upgrade-plan`. Preview stays distinct from apply.
+    """
+    version = entry.get("foundation_bundle_version", "")
+    safety = (entry.get("safety_class") or "unknown").strip() or "unknown"
+    if safety not in SAFETY_CLASSES:
+        safety = "unknown"
+    reason = (entry.get("recommendation_reason") or "").strip()
+    yanked = bool(entry.get("yanked"))
+    t = (tier or entry.get("tier") or "").strip().lower()
+    breaking = ("major" in t and "break" in t) or safety == "breaking_change"
+
+    if yanked:
+        stance = "do_not_apply"
+    elif breaking:
+        stance = "manual_review"
+    elif safety in ("safety_fix", "reliability_fix"):
+        stance = "recommend_apply"
+    elif safety == "routine_improvement":
+        stance = "neutral_offer"
+    else:  # unknown / unrecognised -> conservative
+        stance = "manual_review"
+
+    return {
+        "recommendation_stance": stance,
+        "recommendation_reason": reason,
+        "requires_operator_review": stance in ("manual_review", "do_not_apply"),
+        "safety_class": safety,
+        "actionable_command": f"wizard self-upgrade --to {version} --apply",
+        "preview_hint": (
+            f"to preview first, refresh the tool then run: wizard upgrade-plan --to {version}"
+        ),
+    }
+
+
 def classify_update_status(
     source: Any,
     *,
