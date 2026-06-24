@@ -14,6 +14,7 @@ git + network are injected (commit_resolver / fetcher) so this is fully testable
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -31,7 +32,18 @@ CommitResolver = Callable[..., Optional[str]]
 Fetcher = Callable[[str, int], Optional[str]]
 
 
-def emit_update_resolution_for_target(
+@dataclass(frozen=True)
+class ResolutionPlan:
+    """The computed (not-yet-persisted) approved-resolution plus the commit-pinned registry
+    metadata needed to render an operator preview. `.resolution` is the EXACT object that
+    persist/apply would write — a read-only `--plan-only` preview renders from THIS so it can
+    never drift from what `--apply` later binds (the compute-vs-persist safety guard)."""
+    resolution: UpdateResolution
+    entry: Dict[str, Any]
+    source_url: str
+
+
+def compute_update_resolution_for_target(
     operator_project_dir: Path,
     toolkit_dir: Path,
     target_version: str,
@@ -42,9 +54,12 @@ def emit_update_resolution_for_target(
     checked_engine_version: str = "",
     commit_resolver: CommitResolver = resolve_remote_commit,
     fetcher: Optional[Fetcher] = None,
-) -> Optional[UpdateResolution]:
-    """Resolve commit -> fetch registry@commit -> bind + write the resolution. Returns the
-    written UpdateResolution, or None (writing nothing) on any unresolved step."""
+) -> Optional["ResolutionPlan"]:
+    """Resolve commit -> fetch registry@commit -> BIND the immutable resolution. READ-ONLY:
+    writes NOTHING (the caller decides whether to persist). Returns a `ResolutionPlan`, or None
+    (touching nothing) on any unresolved step (no pin / git can't resolve the commit / registry
+    unfetchable at that commit / target absent / entry lacks bundle hashes) — so a read-only
+    preview renders a could-not-determine status, never a partial/false approved contract."""
     try:
         source = load_update_source(operator_project_dir)
     except UpdateSourceError:
@@ -71,7 +86,7 @@ def emit_update_resolution_for_target(
     if entry is None:
         return None
 
-    # 4. bind + write the immutable resolution (fail-closed if the entry lacks bundle hashes).
+    # 4. bind the immutable resolution (fail-closed if the entry lacks bundle hashes). No write.
     try:
         resolution = build_update_resolution(
             operator_project_dir=operator_project_dir,
@@ -88,5 +103,37 @@ def emit_update_resolution_for_target(
         )
     except Exception:
         return None
-    write_update_resolution(operator_project_dir, resolution)
-    return resolution
+    return ResolutionPlan(resolution=resolution, entry=entry, source_url=fetch.source_url)
+
+
+def emit_update_resolution_for_target(
+    operator_project_dir: Path,
+    toolkit_dir: Path,
+    target_version: str,
+    *,
+    from_version: str,
+    checked_at: str,
+    min_engine_version: str = "",
+    checked_engine_version: str = "",
+    commit_resolver: CommitResolver = resolve_remote_commit,
+    fetcher: Optional[Fetcher] = None,
+) -> Optional[UpdateResolution]:
+    """Compute + PERSIST the approved resolution (the approve step). Returns the written
+    UpdateResolution, or None (writing nothing) on any unresolved step. The written JSON is
+    exactly `compute_update_resolution_for_target(...).resolution` — preview and binding share
+    one source of truth."""
+    plan = compute_update_resolution_for_target(
+        operator_project_dir,
+        toolkit_dir,
+        target_version,
+        from_version=from_version,
+        checked_at=checked_at,
+        min_engine_version=min_engine_version,
+        checked_engine_version=checked_engine_version,
+        commit_resolver=commit_resolver,
+        fetcher=fetcher,
+    )
+    if plan is None:
+        return None
+    write_update_resolution(operator_project_dir, plan.resolution)
+    return plan.resolution

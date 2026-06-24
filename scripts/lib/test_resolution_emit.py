@@ -15,7 +15,10 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from resolution_emit import emit_update_resolution_for_target  # noqa: E402
+from resolution_emit import (  # noqa: E402
+    compute_update_resolution_for_target,
+    emit_update_resolution_for_target,
+)
 from update_resolution import UPDATE_RESOLUTION_REL, load_update_resolution  # noqa: E402
 from update_source import emit_update_source  # noqa: E402
 
@@ -87,6 +90,46 @@ class EmitResolutionTest(unittest.TestCase):
             # no update-source pin
             r = _emit(proj)
             self.assertIsNone(r)
+
+
+class ComputeResolutionTest(unittest.TestCase):
+    """The compute/persist split: compute binds the resolution READ-ONLY; emit persists
+    exactly what compute produced (so a `--plan-only` preview can never drift from the binding)."""
+
+    def _kw(self):
+        return dict(
+            from_version="v0.6.1", checked_at="2026-06-23T00:00:00Z",
+            commit_resolver=lambda *a, **k: _SHA,
+            fetcher=lambda url, t: _REGISTRY,
+        )
+
+    def test_compute_returns_plan_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as td:
+            proj = _project(Path(td))
+            plan = compute_update_resolution_for_target(proj, proj, "v0.6.2", **self._kw())
+            self.assertIsNotNone(plan)
+            self.assertEqual(plan.resolution.target_version, "v0.6.2")
+            self.assertEqual(plan.resolution.target_public_commit_sha, _SHA)
+            self.assertEqual(plan.entry["foundation_bundle_version"], "v0.6.2")
+            # READ-ONLY: nothing persisted by compute
+            self.assertFalse((proj / UPDATE_RESOLUTION_REL).exists())
+
+    def test_emit_persists_exactly_compute_resolution(self):
+        with tempfile.TemporaryDirectory() as td:
+            proj = _project(Path(td))
+            plan = compute_update_resolution_for_target(proj, proj, "v0.6.2", **self._kw())
+            written = emit_update_resolution_for_target(proj, proj, "v0.6.2", **self._kw())
+            self.assertEqual(written.to_json(), plan.resolution.to_json())
+            self.assertEqual(load_update_resolution(proj).to_json(), plan.resolution.to_json())
+
+    def test_compute_unresolved_returns_none_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as td:
+            proj = _project(Path(td))
+            kw = self._kw()
+            kw["commit_resolver"] = lambda *a, **k: None
+            plan = compute_update_resolution_for_target(proj, proj, "v0.6.2", **kw)
+            self.assertIsNone(plan)
+            self.assertFalse((proj / UPDATE_RESOLUTION_REL).exists())
 
 
 if __name__ == "__main__":

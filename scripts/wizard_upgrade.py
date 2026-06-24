@@ -54,6 +54,7 @@ from lib.upgrade import (  # noqa: E402
     UpgradeError,
     classify_update_status,
     check_engine_compatibility,
+    compute_recommendation,
     compute_upgrade_analysis,
     compute_upgrade_check,
     compute_upgrade_plan,
@@ -85,10 +86,14 @@ from lib.self_update import (  # noqa: E402
 )
 from lib.update_source import record_last_known_good_commit  # noqa: E402
 from lib.registry_fetch import fetch_remote_registry  # noqa: E402
-from lib.resolution_emit import emit_update_resolution_for_target  # noqa: E402
+from lib.resolution_emit import (  # noqa: E402
+    compute_update_resolution_for_target,
+    emit_update_resolution_for_target,
+)
 from lib.update_resolution import (  # noqa: E402
     UpdateResolutionError,
     load_update_resolution,
+    write_update_resolution,
 )
 from lib.run_upgrade import run_resolution_upgrade  # noqa: E402
 
@@ -486,6 +491,27 @@ def cmd_self_update(args: argparse.Namespace) -> int:
     return self_update_exit_code(result)
 
 
+def _commit_matches(full: str, expect: str) -> bool:
+    """True if `full` (the live-resolved 40-hex commit) matches the operator's previewed `expect`
+    token. Accepts a prefix (>= 7 hex) so the apply command we render can carry a 12-char commit and
+    stay wrap-safe. Empty `expect` means 'no expectation given' (the caller decides what to do)."""
+    full = (full or "").strip().lower()
+    expect = (expect or "").strip().lower()
+    if not expect:
+        return True
+    if len(expect) < 7:
+        return False
+    return full == expect or full.startswith(expect)
+
+
+def _stale_preview_msg(target_version: str) -> str:
+    return (
+        "error: the update you previewed is no longer what the official source now points to — it "
+        "moved since you previewed it, so NOTHING was changed. Re-run the preview to see the current "
+        f"change, then approve again:\n  wizard self-upgrade --to {target_version} --plan-only"
+    )
+
+
 def run_self_upgrade(
     *,
     operator_dir: Path,
@@ -495,6 +521,7 @@ def run_self_upgrade(
     manifest: dict,
     target_version: str,
     checked_at: str,
+    expect_commit: str = "",
     fetch_remote: str = "origin",
     ack: bool = True,
     backup: bool = True,
@@ -541,12 +568,15 @@ def run_self_upgrade(
             emit_kwargs["commit_resolver"] = commit_resolver
         if fetcher is not None:
             emit_kwargs["fetcher"] = fetcher
-        resolution = emit_update_resolution_for_target(
+        # COMPUTE the resolution first (read-only) so an --expect-commit approval guard is enforced
+        # BEFORE any write or self-update: if the live-resolved commit is not the one the operator
+        # previewed, fail closed having written + changed NOTHING (approve-A-apply-B is impossible).
+        plan = compute_update_resolution_for_target(
             operator_dir, toolkit_dir, target_version,
             from_version=current_version, checked_at=checked_at,
             **emit_kwargs,
         )
-        if resolution is None:
+        if plan is None:
             # Fail-closed: no pin / git could not resolve the commit / registry unfetchable at that
             # commit / target absent / registry declares no bundle hashes. Nothing was written;
             # report honestly (NEVER a false "applied" / "current"). The skill surfaces this to the
@@ -558,6 +588,20 @@ def run_self_upgrade(
                 "date. Try again later, or refresh the tool first (`wizard self-update --apply`).",
                 file=sys.stderr,
             )
+            return 1
+        if not _commit_matches(plan.resolution.target_public_commit_sha, expect_commit):
+            print(_stale_preview_msg(target_version), file=sys.stderr)
+            return 1
+        write_update_resolution(operator_dir, plan.resolution)
+    elif expect_commit:
+        # Phase 2 / a pre-existing matching resolution: re-verify it is still the previewed commit
+        # before applying (defense in depth — phase 1 already enforced this).
+        try:
+            existing = load_update_resolution(operator_dir)
+        except UpdateResolutionError:
+            existing = None
+        if existing is None or not _commit_matches(existing.target_public_commit_sha, expect_commit):
+            print(_stale_preview_msg(target_version), file=sys.stderr)
             return 1
 
     # 2. apply_fn — executed by the (re-exec'd) NEW engine in phase 2. Loads the registry lazily so
@@ -605,6 +649,87 @@ def run_self_upgrade(
     return 1
 
 
+def render_self_upgrade_plan(plan, *, current_version: str) -> str:
+    """Operator-facing preview of what `self-upgrade --to V --apply` would change, rendered from
+    the computed (commit-pinned) ResolutionPlan. Carries an `--expect-commit` token (a short commit
+    prefix) so the operator can apply EXACTLY what was previewed. Renders the recommendation stance
+    via the same pure `compute_recommendation` the check uses (never keyed on prerelease)."""
+    res = plan.resolution
+    entry = plan.entry
+    rec = compute_recommendation(entry)
+    target = res.target_version
+    short = (res.target_public_commit_sha or "")[:12]
+    changelog = (entry.get("changelog") or rec.get("recommendation_reason") or "").strip() \
+        or "(no description published yet)"
+    reason = rec.get("recommendation_reason", "").strip()
+    lines = [
+        f"Update preview — {current_version or '(current)'} -> {target}",
+        f"  What's new:      {changelog}",
+        f"  Recommendation:  {rec['recommendation_stance']}"
+        + (f" — {reason}" if reason else ""),
+        f"  Safety class:    {rec['safety_class']}",
+        f"  Pinned to:       commit {short}",
+        "  This preview changed NOTHING (no files touched, tool not refreshed).",
+        "",
+        "  To apply exactly what you previewed:",
+        f"      wizard self-upgrade --to {target} --apply --expect-commit {short}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def run_self_upgrade_plan(
+    *,
+    operator_dir: Path,
+    toolkit_dir: Path,
+    target_version: str,
+    from_version: str,
+    checked_at: str,
+    commit_resolver=None,
+    fetcher=None,
+    json_mode: bool = False,
+) -> int:
+    """`wizard self-upgrade --to V --plan-only` — a strictly READ-ONLY preview of what applying
+    would change. Resolves the target's exact public commit + fetches the registry AT that commit
+    + renders the preview, and writes NOTHING (no `.wizard/update-resolution.json`, no toolkit
+    refresh, no apply). Honest fail: if the official source can't be reached/verified, report
+    could-not-confirm — never a stale or fabricated preview."""
+    operator_dir = Path(operator_dir)
+    toolkit_dir = Path(toolkit_dir)
+    kwargs: dict = {}
+    if commit_resolver is not None:
+        kwargs["commit_resolver"] = commit_resolver
+    if fetcher is not None:
+        kwargs["fetcher"] = fetcher
+    plan = compute_update_resolution_for_target(
+        operator_dir, toolkit_dir, target_version,
+        from_version=from_version, checked_at=checked_at,
+        **kwargs,
+    )
+    if plan is None:
+        print(
+            f"CURRENCY_UNCONFIRMED: couldn't confirm {target_version} against the official update "
+            "source right now, so there is nothing to preview. This is NOT a confirmation that you "
+            "are up to date — try again when you're back online.",
+            file=sys.stderr,
+        )
+        return 1
+    if json_mode:
+        rec = compute_recommendation(plan.entry)
+        print(json.dumps({
+            "status": "plan_only",
+            "from_version": from_version,
+            "target_version": plan.resolution.target_version,
+            "expected_commit": plan.resolution.target_public_commit_sha,
+            "changelog": plan.entry.get("changelog", ""),
+            "recommendation": rec,
+            "wrote_anything": False,
+        }, indent=2))
+    else:
+        print(render_self_upgrade_plan(plan, current_version=from_version), end="")
+    return 0
+
+
 def cmd_self_upgrade(args: argparse.Namespace) -> int:
     """`wizard self-upgrade --to VERSION --apply` — the operator-reach combined upgrade.
 
@@ -616,11 +741,15 @@ def cmd_self_upgrade(args: argparse.Namespace) -> int:
     Operator-edited warn-on-drift files are adopted to the new version with a backup taken first
     (ack=True); the operator's own data, rules, credentials, and logs (`operator_review`) are never
     touched. Every run is operator-explicit — standing auto-approval stays disabled."""
-    if not args.apply:
+    plan_only = getattr(args, "plan_only", False)
+    if args.apply and plan_only:
+        print("error: pass only one of --plan-only / --apply, not both.", file=sys.stderr)
+        return 2
+    if not args.apply and not plan_only:
         print(
-            "error: `wizard self-upgrade --to <version>` requires --apply.\n"
-            "       It refreshes the tool to the approved version and applies the update in one\n"
-            "       step. To only preview what would change, use `wizard upgrade-plan --to <version>`.",
+            "error: `wizard self-upgrade --to <version>` requires --plan-only (preview) or --apply.\n"
+            "       --plan-only shows what would change without touching anything; --apply refreshes\n"
+            "       the tool to the approved version and applies the update in one step.",
             file=sys.stderr,
         )
         return 2
@@ -635,8 +764,20 @@ def cmd_self_upgrade(args: argparse.Namespace) -> int:
         return 1
     operator_dir = Path(args.operator_dir) if args.operator_dir else manifest_path.parent.parent
     checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    fetch_remote = args.fetch_remote or "origin"
+    current_version = manifest.get("foundation_bundle_version", "")
 
+    if plan_only:
+        # Strictly read-only preview — writes nothing, refreshes nothing, applies nothing.
+        return run_self_upgrade_plan(
+            operator_dir=operator_dir,
+            toolkit_dir=toolkit_dir,
+            target_version=args.to,
+            from_version=current_version,
+            checked_at=checked_at,
+            json_mode=args.json,
+        )
+
+    fetch_remote = args.fetch_remote or "origin"
     return run_self_upgrade(
         operator_dir=operator_dir,
         toolkit_dir=toolkit_dir,
@@ -645,6 +786,7 @@ def cmd_self_upgrade(args: argparse.Namespace) -> int:
         manifest=manifest,
         target_version=args.to,
         checked_at=checked_at,
+        expect_commit=getattr(args, "expect_commit", None) or "",
         fetch_remote=fetch_remote,
         json_mode=args.json,
         reexec_argv=list(sys.argv),
@@ -720,8 +862,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sup_p.add_argument("--to", required=True,
                        help="Target foundation_bundle_version (operator-explicit; no --latest)")
-    sup_p.add_argument("--apply", action="store_true",
-                       help="Perform the combined refresh-and-apply (required; this command mutates).")
+    sup_mode = sup_p.add_mutually_exclusive_group()
+    sup_mode.add_argument("--apply", action="store_true",
+                          help="Perform the combined refresh-and-apply (this command mutates).")
+    sup_mode.add_argument("--plan-only", action="store_true",
+                          help="Read-only preview of what applying would change "
+                               "(writes nothing, refreshes nothing, applies nothing).")
+    sup_p.add_argument("--expect-commit", default=None,
+                       help="(with --apply) Fail closed unless the live-resolved source commit "
+                            "matches this token from a prior --plan-only preview — so you apply "
+                            "exactly what you previewed.")
     sup_p.add_argument("--manifest-path", default=None,
                        help="Path to operator-project `.wizard/manifest.json` (default: ./.wizard/manifest.json)")
     sup_p.add_argument("--registry-path", default=None,
