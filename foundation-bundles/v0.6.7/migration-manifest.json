@@ -1,0 +1,97 @@
+{
+  "_note": "JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing companion. Both files MUST stay in sync.",
+  "artifact_notes": {
+    "CLAUDE.md": "The system-update-notice rule: always offer the defer/skip choices, and run the update commands for the operator after their yes (resolving the tool's full path).",
+    "wizard/skills/check-for-updates.md": "Keeps offering the remind-later/skip/not-now choices for an update and, once you approve, runs the update for you -- you never type a command."
+  },
+  "migrations": [
+    {
+      "from": "v0.6.6",
+      "class": "patch-behavioral",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Preview read-only: wizard self-upgrade --to v0.6.7 --plan-only. 2. Review the preview, then the assistant runs the apply command it prints (--expect-commit pins exactly the previewed version). 3. A backup is taken first; your own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.6 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.6.7/ and set foundation_bundle_version back to v0.6.6.",
+      "stop_condition": "not_applicable",
+      "notes": "Operating-layer update-flow fix to v0.6.7. Operating-layer update-flow fix: when an update is available the system keeps offering the remind-me-later / skip-this-version / not-now choices (even when the operator prefers a single next step), and once the operator approves, the assistant RUNS the update commands itself -- the operator never has to type a terminal command -- resolving the update tool's full path so the command can't fail with 'command not found'. No new capabilities; foundation documents and schema are byte-identical to v0.6.6."
+    },
+    {
+      "from": "v0.6.5",
+      "class": "patch-behavioral",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Preview read-only: wizard self-upgrade --to v0.6.7 --plan-only. 2. Review the preview, then the assistant runs the apply command it prints (--expect-commit pins exactly the previewed version). 3. A backup is taken first; your own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.5 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.6.7/ and set foundation_bundle_version back to v0.6.5.",
+      "stop_condition": "not_applicable",
+      "notes": "Operating-layer update-flow fix to v0.6.7. Operating-layer update-flow fix: when an update is available the system keeps offering the remind-me-later / skip-this-version / not-now choices (even when the operator prefers a single next step), and once the operator approves, the assistant RUNS the update commands itself -- the operator never has to type a terminal command -- resolving the update tool's full path so the command can't fail with 'command not found'. No new capabilities; foundation documents and schema are byte-identical to v0.6.6. Combined jump from v0.6.5 straight to v0.6.7: also delivers every operating-layer change in the versions between v0.6.5 and v0.6.7."
+    },
+    {
+      "from": "v0.6.4",
+      "class": "patch-behavioral",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Preview read-only: wizard self-upgrade --to v0.6.7 --plan-only. 2. Review the preview, then the assistant runs the apply command it prints (--expect-commit pins exactly the previewed version). 3. A backup is taken first; your own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.4 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.6.7/ and set foundation_bundle_version back to v0.6.4.",
+      "stop_condition": "not_applicable",
+      "notes": "Operating-layer update-flow fix to v0.6.7. Operating-layer update-flow fix: when an update is available the system keeps offering the remind-me-later / skip-this-version / not-now choices (even when the operator prefers a single next step), and once the operator approves, the assistant RUNS the update commands itself -- the operator never has to type a terminal command -- resolving the update tool's full path so the command can't fail with 'command not found'. No new capabilities; foundation documents and schema are byte-identical to v0.6.6. Combined jump from v0.6.4 straight to v0.6.7: also delivers every operating-layer change in the versions between v0.6.4 and v0.6.7."
+    },
+    {
+      "from": "v0.6.3",
+      "class": "patch-behavioral",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Preview read-only: wizard self-upgrade --to v0.6.7 --plan-only. 2. Review the preview, then the assistant runs the apply command it prints (--expect-commit pins exactly the previewed version). 3. A backup is taken first; your own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.3 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.6.7/ and set foundation_bundle_version back to v0.6.3.",
+      "stop_condition": "not_applicable",
+      "notes": "Operating-layer update-flow fix to v0.6.7. Operating-layer update-flow fix: when an update is available the system keeps offering the remind-me-later / skip-this-version / not-now choices (even when the operator prefers a single next step), and once the operator approves, the assistant RUNS the update commands itself -- the operator never has to type a terminal command -- resolving the update tool's full path so the command can't fail with 'command not found'. No new capabilities; foundation documents and schema are byte-identical to v0.6.6. Combined jump from v0.6.3 straight to v0.6.7: also delivers every operating-layer change in the versions between v0.6.3 and v0.6.7."
+    },
+    {
+      "from": "v0.6.2",
+      "class": "patch-behavioral",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Preview read-only: wizard self-upgrade --to v0.6.7 --plan-only. 2. Review the preview, then the assistant runs the apply command it prints (--expect-commit pins exactly the previewed version). 3. A backup is taken first; your own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.2 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.6.7/ and set foundation_bundle_version back to v0.6.2.",
+      "stop_condition": "not_applicable",
+      "notes": "Operating-layer update-flow fix to v0.6.7. Operating-layer update-flow fix: when an update is available the system keeps offering the remind-me-later / skip-this-version / not-now choices (even when the operator prefers a single next step), and once the operator approves, the assistant RUNS the update commands itself -- the operator never has to type a terminal command -- resolving the update tool's full path so the command can't fail with 'command not found'. No new capabilities; foundation documents and schema are byte-identical to v0.6.6. Combined jump from v0.6.2 straight to v0.6.7: also delivers every operating-layer change in the versions between v0.6.2 and v0.6.7."
+    },
+    {
+      "from": "v0.6.1",
+      "class": "patch-behavioral",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Preview read-only: wizard self-upgrade --to v0.6.7 --plan-only. 2. Review the preview, then the assistant runs the apply command it prints (--expect-commit pins exactly the previewed version). 3. A backup is taken first; your own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.1 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.6.7/ and set foundation_bundle_version back to v0.6.1.",
+      "stop_condition": "not_applicable",
+      "notes": "Operating-layer update-flow fix to v0.6.7. Operating-layer update-flow fix: when an update is available the system keeps offering the remind-me-later / skip-this-version / not-now choices (even when the operator prefers a single next step), and once the operator approves, the assistant RUNS the update commands itself -- the operator never has to type a terminal command -- resolving the update tool's full path so the command can't fail with 'command not found'. No new capabilities; foundation documents and schema are byte-identical to v0.6.6. Combined jump from v0.6.1 straight to v0.6.7: also delivers every operating-layer change in the versions between v0.6.1 and v0.6.7."
+    },
+    {
+      "from": "v0.6.0",
+      "class": "patch-behavioral",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Preview read-only: wizard self-upgrade --to v0.6.7 --plan-only. 2. Review the preview, then the assistant runs the apply command it prints (--expect-commit pins exactly the previewed version). 3. A backup is taken first; your own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.0 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.6.7/ and set foundation_bundle_version back to v0.6.0.",
+      "stop_condition": "not_applicable",
+      "notes": "Operating-layer update-flow fix to v0.6.7. Operating-layer update-flow fix: when an update is available the system keeps offering the remind-me-later / skip-this-version / not-now choices (even when the operator prefers a single next step), and once the operator approves, the assistant RUNS the update commands itself -- the operator never has to type a terminal command -- resolving the update tool's full path so the command can't fail with 'command not found'. No new capabilities; foundation documents and schema are byte-identical to v0.6.6. Combined jump from v0.6.0 straight to v0.6.7: also delivers every operating-layer change in the versions between v0.6.0 and v0.6.7."
+    }
+  ],
+  "release_classification": "patch_behavioral_prerelease",
+  "release_date": "2026-06-24",
+  "schema_version": "v1",
+  "target_version": "v0.6.7"
+}

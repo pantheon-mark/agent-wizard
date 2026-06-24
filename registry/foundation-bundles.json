@@ -125,6 +125,19 @@
       "changelog": "Improves how updates are previewed and applied. When an update is available, your system now runs a read-only preview that shows exactly what would change -- and that preview works even when the update tool is behind, so it can never wrongly tell you there is 'nothing to show'. You then approve, and the apply installs exactly the version you previewed (if the official source moved in between, it stops and re-previews rather than installing something different). The apply command is also kept short so it can't break when pasted.",
       "bundle_tree_sha256": "sha256:2ce1ba064baebb751b86e7dd2b33424cbbf046d26a026f26b89af15699ba1e77",
       "bundle_manifest_sha256": "sha256:1ffadd51d388141ea25ea937c57db2a8196cf6fae372158690edd57176a081aa"
+    },
+    {
+      "foundation_bundle_version": "v0.6.7",
+      "safety_class": "reliability_fix",
+      "recommendation_reason": "Makes updating smoother: your system keeps offering the remind-later / skip / not-now choices for an update, and once you approve it runs the update for you instead of asking you to type a command.",
+      "path": "foundation-bundles/v0.6.7/",
+      "release_date": "2026-06-24",
+      "source_commit": "3cc28a7",
+      "manifest": "foundation-bundles/v0.6.7/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "Smooths out the update experience. When an update is available your system keeps offering the full set of choices -- see what's new, remind me later, skip this version, or not now -- even if you've asked it to lead with a single next step; remind-later and skip are remembered so the reminder actually pauses. And once you approve an update, the assistant runs the update commands for you (resolving the tool's location so they can't fail with 'command not found') rather than asking you to paste them into a terminal.",
+      "bundle_tree_sha256": "sha256:f78aba364022acf6bac22cac2fb337f26fe45066960b022e206b481fd205f4c5",
+      "bundle_manifest_sha256": "sha256:940d1134168cc0397977bbf43684e63bd49803f011e8e441b4c1a1017dcb5210"
     }
   ]
 }

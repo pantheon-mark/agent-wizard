@@ -12,6 +12,19 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-24 — updates are smoother: you keep your choices, and the system does the typing (v0.6.7)
+
+**Public-facing change:** When an update is available you keep the full set of choices, and once you approve one, your system runs it for you instead of asking you to type commands.
+
+- **Your choices come back.** Even if you've asked your system to lead with a single next step, an available update still offers all four options — see what's new, remind me later, skip this version, or not now. "Remind me later" and "skip" are now remembered, so the reminder actually pauses instead of returning every session.
+- **The system does the typing.** Once you approve an update, the assistant runs the update commands itself — you no longer have to paste anything into a terminal. It also resolves where the update tool lives, so the command can't fail with "command not found."
+
+This is a small fix-only change (`v0.6.7`, operator-explicit as always). Your own files and customizations are untouched; a backup is taken before anything is applied.
+
+`Source-Meta-Commit:` `3cc28a7` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-06-24 — you can preview an update before applying it (v0.6.6)
 
 **Public-facing change:** Your system now shows you a read-only preview of exactly what an update would change before anything is applied, and the apply installs exactly what you previewed.
