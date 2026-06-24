@@ -99,6 +99,19 @@
       "changelog": "Fixes a safety-check bug that was stopping you to approve ordinary edits to your own notes and documents — everyday words like \"firm\" or \"High\" were mistaken for risky commands, which both broke auto mode and trained you to click through every prompt. The check now decides by what an action actually does, so it pauses only for genuinely risky, irreversible, or outgoing actions. Also adds a short note explaining why auto mode still pauses before sending, sharing, or deleting.",
       "bundle_tree_sha256": "sha256:11f77d86334cc759429c284bd3af52f16636df7c267483f5995e5447c3f38ff8",
       "bundle_manifest_sha256": "sha256:6a5ff5617660d0f713f58d007c7613e8b004775ae73c5ed41be78a76fa8f945e"
+    },
+    {
+      "foundation_bundle_version": "v0.6.5",
+      "safety_class": "reliability_fix",
+      "recommendation_reason": "Stops your system from talking you out of safe updates — the update check now reports a clear recommendation and never treats a normal prerelease label or missing notes as a reason to wait.",
+      "path": "foundation-bundles/v0.6.5/",
+      "release_date": "2026-06-24",
+      "source_commit": "7ba1dbf",
+      "manifest": "foundation-bundles/v0.6.5/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "Fixes the update flow so your system no longer talks you out of safe updates. When you ask \"what's new?\", it now runs the update check and reports exactly what the check found — a plain-language summary, the system's own recommendation, and the one command to apply it — instead of a vague walkthrough. A version being labeled prerelease or missing detailed notes is never treated as a reason to wait, and if your update tool is behind, the check routes you straight to the one-step refresh-and-apply.",
+      "bundle_tree_sha256": "sha256:ecedcfc36447a80071d0497f13087e062fcdf7d37494698d08944ef54b8082d4",
+      "bundle_manifest_sha256": "sha256:88596c8fef02657bbe3e1de6e0685518ce207b3cdd4707b51e86e8101bdf5812"
     }
   ]
 }

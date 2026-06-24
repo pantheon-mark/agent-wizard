@@ -12,6 +12,20 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-24 — your system no longer talks you out of safe updates (v0.6.5)
+
+**Public-facing change:** Fixes the update flow so your system stops discouraging updates that are safe to take. When you ask "what's new?", you now always get a real answer.
+
+- **"What's new?" always has an answer.** Instead of a vague walkthrough, your system now runs the update check and tells you exactly what it found: a plain-language summary of the change, the system's own recommendation, and the one command to apply it. It reports that recommendation rather than inventing its own opinion — and it will never steer you away from a safe fix.
+- **A "prerelease" label is not a warning.** Every current version — including the one you already have installed — is labeled "prerelease" while the system stabilizes. Your system will no longer treat that label, or the absence of detailed notes, as a reason to wait.
+- **If your update tool is behind, it routes you to the one-step fix.** When the tool that applies updates is older than the version on offer, that is expected — not an error. Your system now sends you straight to the single refresh-and-apply step instead of stalling.
+
+This is a small fix-only change (`v0.6.5`, operator-explicit as always). Your own files and customizations are untouched; a backup is taken before anything is applied.
+
+`Source-Meta-Commit:` `7ba1dbf` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-06-24 — the safety check no longer interrupts your ordinary edits (v0.6.4)
 
 **Public-facing change:** Fixes a bug where your system's safety check would stop you to approve everyday edits to your own notes and documents — because plain words like "firm" or "High" were being mistaken for risky commands.

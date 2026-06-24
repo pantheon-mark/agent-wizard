@@ -1,0 +1,77 @@
+{
+  "_note": "JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing companion. Both files MUST stay in sync.",
+  "artifact_notes": {
+    "CLAUDE.md": {
+      "benefit": "Stops your system from talking you out of safe updates. When you ask \"what's new?\", it now runs the update check and reports exactly what the check found — a plain-language summary, the system's own recommendation, and the one command to apply it — instead of a vague walkthrough. It will never invent its own opinion, never discourage a verified safe update, and never treat a normal prerelease label or missing notes as a reason to wait."
+    },
+    "wizard/skills/check-for-updates.md": {
+      "benefit": "Makes the start-of-session update check report the system's recommendation and a one-line \"what's new\" in plain words, so \"what's new?\" always has an answer. A normal prerelease label or missing notes is never treated as a reason to hold off, and if your update tool is behind it routes you straight to the one-step refresh-and-apply instead of stalling."
+    }
+  },
+  "migrations": [
+    {
+      "breaking_changes_summary": "",
+      "class": "patch-behavioral",
+      "from": "v0.6.4",
+      "migration_steps": "1. Run the upgrade check (plan-only) to confirm v0.6.4 -> v0.6.5 is offered. 2. Run the apply path (operator-explicit). The corrected update-advice guidance and the updated check-for-updates skill are delivered; your edits to operating-layer files are kept or saved for review.",
+      "notes": "Operating-layer update-advice fix from v0.6.4: the 'see what's new' instruction in CLAUDE.md no longer routes through a vague upgrade walkthrough that could read as discouraging an update; it now runs `wizard upgrade-check` and REPORTS what it computes (change summary, the system's own recommendation, the exact apply command) and must never invent its own recommendation, never discourage a safe (recommend_apply) update, and never treat a normal prerelease label or missing notes as a reason to hold off. The check-for-updates skill surfaces the same recommendation and one-line 'what's new', states the two never-hold-off cases, and routes a behind update tool (TOOLKIT_BEHIND) straight to the one-step refresh-and-apply. No new managed files, no new capabilities; foundation docs and schema byte-identical to v0.6.4.",
+      "preflight": "Verify the operator project carries a .wizard/replay-capsule.json and a .wizard/manifest.json whose foundation_bundle_version is v0.6.4.",
+      "requires_operator_approval": true,
+      "rollback": "Restore from .wizard/backups/pre-v0.6.5/ and set foundation_bundle_version back to v0.6.4.",
+      "stop_condition": "not_applicable",
+      "supported": true
+    },
+    {
+      "breaking_changes_summary": "",
+      "class": "patch-behavioral",
+      "from": "v0.6.3",
+      "migration_steps": "1. Run the upgrade check (plan-only) to confirm v0.6.3 -> v0.6.5 is offered. 2. Run the apply path (operator-explicit). The v0.6.4 receipt-gate fix PLUS the corrected update-advice guidance and updated check-for-updates skill are delivered; your edits are kept or saved for review.",
+      "notes": "Combined jump from v0.6.3 straight to v0.6.5 (an operator on v0.6.3 who never took v0.6.4). Delivers the v0.6.4 receipt-gate classification fix and the auto-mode explanatory note PLUS the v0.6.5 update-advice fix (the 'see what's new' instruction reports the system-computed recommendation and never dissuades safe updates; the check-for-updates skill surfaces the recommendation and one-line 'what's new' and routes a behind update tool to the one-step refresh-and-apply). All operating-layer content changes to existing files; no new sections or capabilities; foundation docs byte-identical to v0.6.3.",
+      "preflight": "Verify the operator project carries a .wizard/replay-capsule.json and a .wizard/manifest.json whose foundation_bundle_version is v0.6.3.",
+      "requires_operator_approval": true,
+      "rollback": "Restore from .wizard/backups/pre-v0.6.5/ and set foundation_bundle_version back to v0.6.3.",
+      "stop_condition": "not_applicable",
+      "supported": true
+    },
+    {
+      "breaking_changes_summary": "",
+      "class": "patch-behavioral",
+      "from": "v0.6.2",
+      "migration_steps": "1. Run the upgrade check (plan-only) to confirm v0.6.2 -> v0.6.5 is offered. 2. Run the apply path (operator-explicit). The v0.6.3 operating-layer fixes, the v0.6.4 receipt-gate fix, and the v0.6.5 update-advice fix are delivered; your edits are kept or saved for review.",
+      "notes": "Combined jump from v0.6.2 straight to v0.6.5 (an operator on v0.6.2 who never took v0.6.3 or v0.6.4). Delivers the v0.6.3 operating-layer content fixes (combined operator-reach apply command, approved-update-contract deny, shared update-notice source), the v0.6.4 receipt-gate classification fix and auto-mode note, PLUS the v0.6.5 update-advice fix (report the system-computed recommendation; never dissuade safe updates; surface 'what's new'; route a behind update tool to the one-step refresh-and-apply). All operating-layer content changes to existing files; no new sections or capabilities; foundation docs byte-identical to v0.6.2.",
+      "preflight": "Verify the operator project carries a .wizard/replay-capsule.json and a .wizard/manifest.json whose foundation_bundle_version is v0.6.2.",
+      "requires_operator_approval": true,
+      "rollback": "Restore from .wizard/backups/pre-v0.6.5/ and set foundation_bundle_version back to v0.6.2.",
+      "stop_condition": "not_applicable",
+      "supported": true
+    },
+    {
+      "breaking_changes_summary": "",
+      "class": "patch-behavioral",
+      "from": "v0.6.1",
+      "migration_steps": "1. Run the upgrade check (plan-only) to confirm v0.6.1 -> v0.6.5 is offered. 2. Run the apply path (operator-explicit). The next-phase skill fix and the v0.6.3 + v0.6.4 + v0.6.5 operating-layer fixes are delivered; your edits are kept or saved for review.",
+      "notes": "Combined jump from v0.6.1 straight to v0.6.5. Delivers the v0.6.2 next-phase approval-drill content fix, the v0.6.3 operating-layer content fixes, the v0.6.4 receipt-gate classification fix plus the auto-mode explanatory note, and the v0.6.5 update-advice fix (report the system-computed recommendation; never dissuade safe updates; surface 'what's new'; route a behind update tool to the one-step refresh-and-apply). All operating-layer content changes to existing files; no new sections or capabilities; foundation docs byte-identical to v0.6.1.",
+      "preflight": "Verify the operator project carries a .wizard/replay-capsule.json and a .wizard/manifest.json whose foundation_bundle_version is v0.6.1.",
+      "requires_operator_approval": true,
+      "rollback": "Restore from .wizard/backups/pre-v0.6.5/ and set foundation_bundle_version back to v0.6.1.",
+      "stop_condition": "not_applicable",
+      "supported": true
+    },
+    {
+      "breaking_changes_summary": "",
+      "class": "minor-additive",
+      "from": "v0.6.0",
+      "migration_steps": "1. Run the upgrade check (plan-only) to confirm v0.6.0 -> v0.6.5 is offered. 2. Run the apply path (operator-explicit). Operating-layer files changed across v0.6.1 through v0.6.5 are merged (your edits kept) or saved for review; the health-check skill is delivered additively.",
+      "notes": "Combined jump from v0.6.0 straight to v0.6.5 (an operator still on v0.6.0). Delivers the v0.6.0 -> v0.6.1 operating-layer additions (an additive section in operating_discipline.md, the pause-skill change, and the health-check skill), the v0.6.2 next-phase fix, the v0.6.3 operating-layer content fixes, the v0.6.4 receipt-gate classification fix plus auto-mode note, and the v0.6.5 update-advice fix (report the system-computed recommendation; never dissuade safe updates; surface 'what's new'; route a behind update tool to the one-step refresh-and-apply). Classified minor-additive because the combined delta includes v0.6.1's additive capabilities. Foundation docs byte-identical to v0.6.0.",
+      "preflight": "Verify the operator project carries a .wizard/replay-capsule.json and a .wizard/manifest.json whose foundation_bundle_version is v0.6.0.",
+      "requires_operator_approval": true,
+      "rollback": "Restore from .wizard/backups/pre-v0.6.5/ and set foundation_bundle_version back to v0.6.0.",
+      "stop_condition": "not_applicable",
+      "supported": true
+    }
+  ],
+  "release_classification": "patch_behavioral_prerelease",
+  "release_date": "2026-06-24",
+  "schema_version": "v1",
+  "target_version": "v0.6.5"
+}
