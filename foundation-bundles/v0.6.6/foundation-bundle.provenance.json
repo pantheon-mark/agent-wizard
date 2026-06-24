@@ -1,0 +1,367 @@
+{
+  "bundle_file_manifest": [
+    {
+      "hash": "sha256:8ad725ba0816b815d04d120340348bf6baf597059b822238b2e5797a0bf59a2c",
+      "path": "baselines/approach.md.hash.yaml"
+    },
+    {
+      "hash": "sha256:7f8989fde864ef3df221433aaa789392d85eaf7ebf266c5354328f7516fe79e3",
+      "path": "baselines/audit_framework.md.hash.yaml"
+    },
+    {
+      "hash": "sha256:fa150da3d0eb2d1034850b71be018b7a1b9b65953f80c3722db8ff1fbc70d8a6",
+      "path": "baselines/execution_plan.md.hash.yaml"
+    },
+    {
+      "hash": "sha256:2a6b18c48b935b67ab6e2fa189a628c7a04e0bb68bd34b6f160df43732a64342",
+      "path": "baselines/technical_architecture.md.hash.yaml"
+    },
+    {
+      "hash": "sha256:99db59dbf406a61212cb2e0f23e12ce5888ecfb0882bcfa28fab9a77744b0087",
+      "path": "baselines/test_cases.md.hash.yaml"
+    },
+    {
+      "hash": "sha256:8c9d3f62cf1294711ccdc6c83dbea1ea6c7412af31cd301be9e71c034683613e",
+      "path": "baselines/vision.md.hash.yaml"
+    },
+    {
+      "hash": "sha256:d4092d096e6c57d805982ff6287e4273a4291bad1d6b7b29b2de0c01500e43ca",
+      "path": "manifest.json"
+    },
+    {
+      "hash": "sha256:27b366a7d0a68738b21b36e588099a05858b514a588fe1592738e013b8fef9a4",
+      "path": "manifest.yaml"
+    },
+    {
+      "hash": "sha256:1ffadd51d388141ea25ea937c57db2a8196cf6fae372158690edd57176a081aa",
+      "path": "migration-manifest.json"
+    },
+    {
+      "hash": "sha256:57d6044b55abbbecc389f7d9657204f6369fe6b0b989037d3257ce92344eaf51",
+      "path": "migration-manifest.yaml"
+    },
+    {
+      "hash": "sha256:446d3cc17d40861362684a68a824003927dadceba030ed0321cf864ce42e983e",
+      "path": "schemas/section-schema.yaml"
+    },
+    {
+      "hash": "sha256:e9d87b5f0bdf23ee85e2fd42f06ac270e3f875840482f00d0cc591f049bf7ee3",
+      "path": "system-artifacts.json"
+    },
+    {
+      "hash": "sha256:03519fe545bee8e6f938972d01751174d49de919122cdfb523b7819b501ef2cf",
+      "path": "templates/agents/acceptance_contract.md"
+    },
+    {
+      "hash": "sha256:b10181429b79689d5fcb30ff6fc9ec0c1080a99c3784ebd3cd3e8a8403270f87",
+      "path": "templates/agents/agent_prompt_template.md"
+    },
+    {
+      "hash": "sha256:b998e72c2d7dc66297dc14028ced770c59967eaa207135dbd26e4709ba724787",
+      "path": "templates/agents/cron_config.md"
+    },
+    {
+      "hash": "sha256:b94c3c5e787191afa7789f8e4f27ba133cc60b75c5b7d55ce4fda92f2c30a7b5",
+      "path": "templates/agents/orchestrator_prompt.md"
+    },
+    {
+      "hash": "sha256:05b74be7e7663b4cfcaedb88a400768c872383220db9f69991e45e9a38ddcfe2",
+      "path": "templates/agents/qa_agent_prompt.md"
+    },
+    {
+      "hash": "sha256:06d30c83d102db3259a5e079fc1516b617fe05ff3800a8198b85ed0777ce18ae",
+      "path": "templates/agents/roster.md"
+    },
+    {
+      "hash": "sha256:6909dee91db9f537e8a49963259bca3a409284ca3971793e5b43bd3499ecbc70",
+      "path": "templates/approach.md"
+    },
+    {
+      "hash": "sha256:b1ae4fe8cc80bc53872398ffe52e9521f0a3649227b5344e91d775183e25ac99",
+      "path": "templates/archive/decisions_archive.md"
+    },
+    {
+      "hash": "sha256:225706e71ce0ed186e470f1f253d1ff54b1d58a86fed8dc68e84247954cc31d6",
+      "path": "templates/archive/notification_archive.md"
+    },
+    {
+      "hash": "sha256:c3328c4309ce9aeb5dbe7e3911fc90b9dd5e13c155f44b6346597c366d48aee7",
+      "path": "templates/archive/review_queue_archive.md"
+    },
+    {
+      "hash": "sha256:b471fd96723bea6ec3d649e45132a62b46bf22772d16a70d02f751b55283fdf0",
+      "path": "templates/archive/work_archive.md"
+    },
+    {
+      "hash": "sha256:8b77f8854fea210d3b2a9a65e1e8549f66c1592780c02e26d8612e18dbb0ad35",
+      "path": "templates/audit_framework.md"
+    },
+    {
+      "hash": "sha256:1394d836e0f674a7363f60e224790fbe857ec1fe485c4cc0c4a006e66c16028b",
+      "path": "templates/claude_config/context_monitor.sh"
+    },
+    {
+      "hash": "sha256:cab6c35b6c759f695a3c97c045d36fa90628aaf0420663c9148d50f703bc90cf",
+      "path": "templates/claude_config/receipt_gate.sh"
+    },
+    {
+      "hash": "sha256:3079a7b8e6fcb08fed12ca0be24b36efe48cc13c89f5da5dd18947da7b141d15",
+      "path": "templates/claude_config/settings.json"
+    },
+    {
+      "hash": "sha256:44df82d6f0086bd6e15fa6685b313c4f53d1eb4042e6a3255ff0931e0aa43e40",
+      "path": "templates/claude_config/statusline.sh"
+    },
+    {
+      "hash": "sha256:b92c38d42facd2c3394be63705f775f604a72d5ed2ddc5eb019f5d094be5a10e",
+      "path": "templates/claude_config/upgrade_notice.sh"
+    },
+    {
+      "hash": "sha256:c104d9a6e5e728babe5efdd0912b0695c1a20ef6aa419367f6a4b337a349532a",
+      "path": "templates/decisions/_index.md"
+    },
+    {
+      "hash": "sha256:9860dc135e50785ae2aad676bca84c133f13313d9e0a90b58b4c9a8b90e7e110",
+      "path": "templates/decisions/decision_record_template.md"
+    },
+    {
+      "hash": "sha256:f29194e464094e78272da3a266a3fede67178cca66b6239ebfe6e9f6ffaa020c",
+      "path": "templates/docs/architectural_review_staging.md"
+    },
+    {
+      "hash": "sha256:0cacef17a1635485b8f16e30d711f0254e69e7f8cb902c5d5bfffaf2029830f0",
+      "path": "templates/docs/document_impact_map.md"
+    },
+    {
+      "hash": "sha256:79fedd670d343f771b061fde160285433b922cc3f62fb4bdbc532439d268a3dc",
+      "path": "templates/docs/future_items.md"
+    },
+    {
+      "hash": "sha256:2b543c91de70a72ad6081fc78762e0b706d389a770043a889c05e389406a3bea",
+      "path": "templates/docs/how_your_system_works.md"
+    },
+    {
+      "hash": "sha256:39547cc826674531123846916174e5f21056b6270f0a4b2bab74f01cbacc66f2",
+      "path": "templates/docs/voice_and_style.md"
+    },
+    {
+      "hash": "sha256:03c2499abb465013831536417eef382865582dfc250d53ef61ab8c228b897f1b",
+      "path": "templates/execution_plan.md"
+    },
+    {
+      "hash": "sha256:36085fd2d2390b2bbf3b4b1a7e40259d4cfed3ac76a4ececf567f8fe7ff0239e",
+      "path": "templates/logs/advisor_log.md"
+    },
+    {
+      "hash": "sha256:f4f8e29040a05c97b46f2eb0b99f801601b22ebf8924ec92d8ed54333fb68ffe",
+      "path": "templates/logs/audit_log.md"
+    },
+    {
+      "hash": "sha256:fcc87da5b33940eddcb9d02d5ffc9ef390f8930f9a3294881ca9a1ac7d59f836",
+      "path": "templates/logs/cost_efficiency_log.md"
+    },
+    {
+      "hash": "sha256:317e105771a2c64ff4916397c741f7e34ca2d65c8694c42b47d27ec7c09fdf73",
+      "path": "templates/logs/drift_log.md"
+    },
+    {
+      "hash": "sha256:e2c1e73a60fba22fd79d86d0987c7bf9f6c685e112392f2dc8e7f27340364917",
+      "path": "templates/logs/error_log.md"
+    },
+    {
+      "hash": "sha256:e9efcf83053a8bb0efe93300d6e58f5917757468faf4c78272f8af745fbcfb2a",
+      "path": "templates/logs/notification_log.md"
+    },
+    {
+      "hash": "sha256:13f1bda6fb7b5f3daf8221ca0d9f46a7b5ee110f3ba031c75e24612add1e4cea",
+      "path": "templates/logs/qa_log.md"
+    },
+    {
+      "hash": "sha256:7f06f6c3f4050a9757f3a24007c96bc6e5fb0fab8b650da0d55dba3287e3c389",
+      "path": "templates/logs/session_log.md"
+    },
+    {
+      "hash": "sha256:acd35f2754b57e0f87f783e9dcddf7c4d79c227ed1cca09da2e875e0fc7f3723",
+      "path": "templates/logs/source_health_log.md"
+    },
+    {
+      "hash": "sha256:b734de1a7043d61f99df7a13af9cec87f422f8a1dc50485fc2a2617cc5722ff2",
+      "path": "templates/logs/validation_log.md"
+    },
+    {
+      "hash": "sha256:b2a72e97d44ff6bf5e51838b85d4706134765903c6133d6c3d613c49db681e98",
+      "path": "templates/prd.md"
+    },
+    {
+      "hash": "sha256:a5a477ff89316fb8c566fc79565f3ccc9a4c3d7db6a8f2ce51f33081d0373961",
+      "path": "templates/quality/advisor_knowledge_base.md"
+    },
+    {
+      "hash": "sha256:7d353a9c4b4c3da085f0cca4f754e17468ba3aa555c7d6a304481662f398587c",
+      "path": "templates/quality/co-protected-workflows.md"
+    },
+    {
+      "hash": "sha256:87c1e5486cfc1b3af361de57aa461b4106f2a2cca513b677046c84dda97653bc",
+      "path": "templates/quality/human_review_queue.md"
+    },
+    {
+      "hash": "sha256:802529987a010de99b9dd7e520187e885da4f03300437287e5677df3c55abfac",
+      "path": "templates/quality/rules_library.md"
+    },
+    {
+      "hash": "sha256:fbbd1c381883615305921be98624120d3c6955d48540aed362146aa4d34c97bd",
+      "path": "templates/quality/source_registry.md"
+    },
+    {
+      "hash": "sha256:b54be62e6111db5163f67823da8c015cf52d63143e507c386438b0676fddbbdb",
+      "path": "templates/quality/validation_gate_config.md"
+    },
+    {
+      "hash": "sha256:f19c68d45e02fa584b78670d7095a1fde0b8792361e5f1bbdecf5ed33c486b97",
+      "path": "templates/root/CLAUDE.md"
+    },
+    {
+      "hash": "sha256:dea1b4cd595eccb69b9f887ecf8a00eb642daa87b90f5cdb47b7cd6c86aee86d",
+      "path": "templates/root/SESSION_STATE.md"
+    },
+    {
+      "hash": "sha256:de1b5f7a3547b5c02767443ab5d16f8785f2e9592f8d439af9fbdcbab5423ee4",
+      "path": "templates/root/build_progress.md"
+    },
+    {
+      "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "path": "templates/root/env_template"
+    },
+    {
+      "hash": "sha256:9ff1bc97073aa3ad98c42c3f3a973f4a03c8ca54f44cafd45d30344513ce90af",
+      "path": "templates/root/gitignore_template"
+    },
+    {
+      "hash": "sha256:4076952081b191c6b241a29d2a3cde82738a26af87b51b833339917da586f45b",
+      "path": "templates/root/manual.md"
+    },
+    {
+      "hash": "sha256:c7cbc6f844a7736d52cae190bd749276f590f60e7f12c76cdc5ca8b320faf241",
+      "path": "templates/root/operating_discipline.md"
+    },
+    {
+      "hash": "sha256:1d7dce954f1f5be315d8ddcd1b9a0a73bbe68d218c48e3f6ed6c3bfd144af60e",
+      "path": "templates/root/pending_decisions.md"
+    },
+    {
+      "hash": "sha256:753cc316b8d3f887ddb6924e5ecffe302418d831d4c0eb4f96649375788aaf6b",
+      "path": "templates/root/project_instructions.md"
+    },
+    {
+      "hash": "sha256:16fcab41def44e48dd17afc9fd0c8251bcc867ff103064b6edf77a95dedc76fb",
+      "path": "templates/root/session_bootstrap.md"
+    },
+    {
+      "hash": "sha256:9ff016fe258cf7058a6d59fd42d52e6d63f57e732d3b2cee4f99f1a89ea20053",
+      "path": "templates/root/wizard_feedback.md"
+    },
+    {
+      "hash": "sha256:437ea7eea7c0ace711974f4634792f1136e60f186dd8db1ba4573bf7e5b2b2df",
+      "path": "templates/scripts/agent_invocation_template.sh"
+    },
+    {
+      "hash": "sha256:0d86745d1000f41c239d0f071e9f95b87c714f660dbd2322caff80d55660064d",
+      "path": "templates/scripts/start_session_template.sh"
+    },
+    {
+      "hash": "sha256:0e17f0bc9bf8217c515c67928f15866a2eec44db4f408e26de8076b73d3046eb",
+      "path": "templates/security/credentials_registry.md"
+    },
+    {
+      "hash": "sha256:097ed4009dc83512ad62f60d50611404143d54f9048d9f0bcdbd5a5176db4af7",
+      "path": "templates/security/gitignore_manifest.md"
+    },
+    {
+      "hash": "sha256:af4b18a50efc72eb6611b7a6205bb1859aaf40f16869ea3c61da1efe1c2b1126",
+      "path": "templates/technical_architecture.md"
+    },
+    {
+      "hash": "sha256:d88e67bc63f664fd84ca6813add1422dac8b65fe6cb735cdd2564d4bf14934ee",
+      "path": "templates/test_cases.md"
+    },
+    {
+      "hash": "sha256:aebdb309c7a31312487b5680b1b461a49e3c0701f3966585a50574139b86c29e",
+      "path": "templates/vision.md"
+    },
+    {
+      "hash": "sha256:86be979a471e70a12adfe3413ced66547a53c036c4c6fc1318e86f0bb7d284c7",
+      "path": "templates/wizard/review_prompts/per_agent_review.md"
+    },
+    {
+      "hash": "sha256:58e65b3425c7ee61fed58b0af129bf2169d612defc2a5d30b8215a5f4cfe2674",
+      "path": "templates/wizard/review_prompts/phase_gate_review.md"
+    },
+    {
+      "hash": "sha256:3abf8e28c158389e872450d50b429b4f9af7bad44323826c1cd551c3bb236c36",
+      "path": "templates/wizard/review_prompts/post_wizard_review.md"
+    },
+    {
+      "hash": "sha256:07c7d23ce004224fcf54e8e67e437dffaa263d9d2d932d261707a184b6ddcfff",
+      "path": "templates/wizard/skills/_index.md"
+    },
+    {
+      "hash": "sha256:23e44595b721fe2e39710f8762cd98fd69eb503264a8a150f4d0da8233ceb80a",
+      "path": "templates/wizard/skills/check-for-updates.md"
+    },
+    {
+      "hash": "sha256:c70db33fce6105d4d5ea502253318d0a4f4015fa91e0509523c65e908b81535d",
+      "path": "templates/wizard/skills/credential-setup.md"
+    },
+    {
+      "hash": "sha256:d132864b369366e03da8e2b66e1801ef1ccab140476b6e6424a538a33f4d863d",
+      "path": "templates/wizard/skills/health-check.md"
+    },
+    {
+      "hash": "sha256:0a2fb30d38a995a22a813f300e42990738f10503f429e7e31515d96265c95284",
+      "path": "templates/wizard/skills/next-phase.md"
+    },
+    {
+      "hash": "sha256:6bf4006f0f6f068f1613ea6785b6b524ee370c36ddbdd982e8eb631a42ab2715",
+      "path": "templates/wizard/skills/orientation.md"
+    },
+    {
+      "hash": "sha256:bd67b91cc287a984a542ea967f1f2b1bdd4ae195f32e784442bb9f9536802308",
+      "path": "templates/wizard/skills/pause.md"
+    },
+    {
+      "hash": "sha256:45a2ada6e07abc60c7e44569670ebe54aff7a7a8f9a8554c2eeacd76470a0940",
+      "path": "templates/wizard/skills/skill_template_external.md"
+    },
+    {
+      "hash": "sha256:4fdf0cae40b10020be815f5f72f32e1792f03d51329141a580bcb6619d50b5f6",
+      "path": "templates/wizard/skills/skill_template_internal.md"
+    },
+    {
+      "hash": "sha256:5aa4e567f206ce4fc870711a6424c62f71961f8289960284b63ffbd8de83763a",
+      "path": "templates/work/execution_plan_state.md"
+    },
+    {
+      "hash": "sha256:8b8c4d430477a4819d709bbe83a76c3cb1240e49a52a0faa2dd445c6fe277f2c",
+      "path": "templates/work/issues_log.md"
+    },
+    {
+      "hash": "sha256:79abff8df0224749504ac8f9197a2503aaa025060e1a9756fe9323391aa66916",
+      "path": "templates/work/stub_tracker.md"
+    },
+    {
+      "hash": "sha256:4cf225dd55b62940f3330254a0c8435091099eae67a8b2d4c24475dda6bf93fc",
+      "path": "templates/work/work_queue.md"
+    }
+  ],
+  "canonicalization_version": "v1",
+  "generated_at": "2026-06-24T15:17:12Z",
+  "generator_version": "a6bc5107f48dc7f8971faf3d1e612076800eca85",
+  "hash_algorithm": "sha256-lf",
+  "schema_version": "v1",
+  "source_bundle_version": "v0.6.6",
+  "source_registry_entry_hash": "sha256:501a941c637546af291f066c1b851c94010b68c1b66a6abcaacbd150c46ab280",
+  "strict_mode": false,
+  "strict_mode_source": "cli_flag",
+  "template_tree_hash": "sha256:ea5d5f6e1a28ba63986f37eb94ac15a5c8d14ab8e86530e40bddb8799f73885f",
+  "worktree_clean": false
+}

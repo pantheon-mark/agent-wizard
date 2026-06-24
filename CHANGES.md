@@ -12,6 +12,20 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-24 — you can preview an update before applying it (v0.6.6)
+
+**Public-facing change:** Your system now shows you a read-only preview of exactly what an update would change before anything is applied, and the apply installs exactly what you previewed.
+
+- **Preview first, always.** When an update is available, your system runs a read-only preview that lists what would change and the recommendation — without touching anything. This preview works even when the update tool itself is behind, so it can never wrongly report there is "nothing to show."
+- **You apply exactly what you previewed.** After you approve, the apply installs precisely the version you just saw. If the official source happened to move between your preview and your approval, the apply stops and re-previews rather than quietly installing something different.
+- **The apply step stays simple.** The command your system runs to apply the update is kept short, so it can't break when pasted into a terminal.
+
+This is a small fix-only change (`v0.6.6`, operator-explicit as always). Your own files and customizations are untouched; a backup is taken before anything is applied.
+
+`Source-Meta-Commit:` `a6bc510` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-06-24 — your system no longer talks you out of safe updates (v0.6.5)
 
 **Public-facing change:** Fixes the update flow so your system stops discouraging updates that are safe to take. When you ask "what's new?", you now always get a real answer.

@@ -1,0 +1,148 @@
+# Migration manifest for foundation bundle v0.6.6
+# v0.6.6 is an operating-layer update-flow fix over v0.6.5 (patch-behavioral): the
+# check-for-updates skill previews read-only before applying + binds the apply to the
+# previewed version. Foundation docs byte-identical across the supported range.
+# JSON sidecar (migration-manifest.json) is authoritative; this YAML is the companion.
+
+_note: JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing
+  companion. Both files MUST stay in sync.
+artifact_notes:
+  CLAUDE.md:
+    benefit: Stops your system from talking you out of safe updates. When you ask "what's new?", it now
+      runs the update check and reports exactly what the check found — a plain-language summary, the system's
+      own recommendation, and the one command to apply it — instead of a vague walkthrough. It will never
+      invent its own opinion, never discourage a verified safe update, and never treat a normal prerelease
+      label or missing notes as a reason to wait.
+  wizard/skills/check-for-updates.md: Previews an update read-only before applying and binds the apply
+    to exactly the previewed version, so you always see what changes first and apply only what you approved.
+migrations:
+- from: v0.6.5
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: '1. Preview read-only: wizard self-upgrade --to v0.6.6 --plan-only. 2. Review what
+    the preview reports, then run the apply command it prints verbatim (it carries --expect-commit, so
+    you apply exactly what you previewed). 3. A backup is taken first; your own data, rules, credentials,
+    and logs are never touched.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.5 (or any version in the supported range). A backup is taken automatically before anything
+    is changed.
+  rollback: Restore from .wizard/backups/pre-v0.6.6/ and set foundation_bundle_version back to v0.6.5.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow fix to v0.6.6. Operating-layer update-flow fix: the check-for-updates
+    skill now previews an update READ-ONLY before applying (a step that works even when the update tool
+    is behind, reading the change straight from the official source), and the apply binds EXACTLY the
+    previewed version via an approval-continuity guard -- so you always see what will change first and
+    never apply something different from what you approved. No new capabilities; foundation documents
+    and schema are byte-identical to v0.6.5.'
+- from: v0.6.4
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: '1. Preview read-only: wizard self-upgrade --to v0.6.6 --plan-only. 2. Review what
+    the preview reports, then run the apply command it prints verbatim (it carries --expect-commit, so
+    you apply exactly what you previewed). 3. A backup is taken first; your own data, rules, credentials,
+    and logs are never touched.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.4 (or any version in the supported range). A backup is taken automatically before anything
+    is changed.
+  rollback: Restore from .wizard/backups/pre-v0.6.6/ and set foundation_bundle_version back to v0.6.4.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow fix to v0.6.6. Operating-layer update-flow fix: the check-for-updates
+    skill now previews an update READ-ONLY before applying (a step that works even when the update tool
+    is behind, reading the change straight from the official source), and the apply binds EXACTLY the
+    previewed version via an approval-continuity guard -- so you always see what will change first and
+    never apply something different from what you approved. No new capabilities; foundation documents
+    and schema are byte-identical to v0.6.5. Combined jump from v0.6.4 straight to v0.6.6: it also delivers
+    every operating-layer change in the versions between v0.6.4 and v0.6.6.'
+- from: v0.6.3
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: '1. Preview read-only: wizard self-upgrade --to v0.6.6 --plan-only. 2. Review what
+    the preview reports, then run the apply command it prints verbatim (it carries --expect-commit, so
+    you apply exactly what you previewed). 3. A backup is taken first; your own data, rules, credentials,
+    and logs are never touched.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.3 (or any version in the supported range). A backup is taken automatically before anything
+    is changed.
+  rollback: Restore from .wizard/backups/pre-v0.6.6/ and set foundation_bundle_version back to v0.6.3.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow fix to v0.6.6. Operating-layer update-flow fix: the check-for-updates
+    skill now previews an update READ-ONLY before applying (a step that works even when the update tool
+    is behind, reading the change straight from the official source), and the apply binds EXACTLY the
+    previewed version via an approval-continuity guard -- so you always see what will change first and
+    never apply something different from what you approved. No new capabilities; foundation documents
+    and schema are byte-identical to v0.6.5. Combined jump from v0.6.3 straight to v0.6.6: it also delivers
+    every operating-layer change in the versions between v0.6.3 and v0.6.6.'
+- from: v0.6.2
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: '1. Preview read-only: wizard self-upgrade --to v0.6.6 --plan-only. 2. Review what
+    the preview reports, then run the apply command it prints verbatim (it carries --expect-commit, so
+    you apply exactly what you previewed). 3. A backup is taken first; your own data, rules, credentials,
+    and logs are never touched.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.2 (or any version in the supported range). A backup is taken automatically before anything
+    is changed.
+  rollback: Restore from .wizard/backups/pre-v0.6.6/ and set foundation_bundle_version back to v0.6.2.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow fix to v0.6.6. Operating-layer update-flow fix: the check-for-updates
+    skill now previews an update READ-ONLY before applying (a step that works even when the update tool
+    is behind, reading the change straight from the official source), and the apply binds EXACTLY the
+    previewed version via an approval-continuity guard -- so you always see what will change first and
+    never apply something different from what you approved. No new capabilities; foundation documents
+    and schema are byte-identical to v0.6.5. Combined jump from v0.6.2 straight to v0.6.6: it also delivers
+    every operating-layer change in the versions between v0.6.2 and v0.6.6.'
+- from: v0.6.1
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: '1. Preview read-only: wizard self-upgrade --to v0.6.6 --plan-only. 2. Review what
+    the preview reports, then run the apply command it prints verbatim (it carries --expect-commit, so
+    you apply exactly what you previewed). 3. A backup is taken first; your own data, rules, credentials,
+    and logs are never touched.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.1 (or any version in the supported range). A backup is taken automatically before anything
+    is changed.
+  rollback: Restore from .wizard/backups/pre-v0.6.6/ and set foundation_bundle_version back to v0.6.1.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow fix to v0.6.6. Operating-layer update-flow fix: the check-for-updates
+    skill now previews an update READ-ONLY before applying (a step that works even when the update tool
+    is behind, reading the change straight from the official source), and the apply binds EXACTLY the
+    previewed version via an approval-continuity guard -- so you always see what will change first and
+    never apply something different from what you approved. No new capabilities; foundation documents
+    and schema are byte-identical to v0.6.5. Combined jump from v0.6.1 straight to v0.6.6: it also delivers
+    every operating-layer change in the versions between v0.6.1 and v0.6.6.'
+- from: v0.6.0
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: '1. Preview read-only: wizard self-upgrade --to v0.6.6 --plan-only. 2. Review what
+    the preview reports, then run the apply command it prints verbatim (it carries --expect-commit, so
+    you apply exactly what you previewed). 3. A backup is taken first; your own data, rules, credentials,
+    and logs are never touched.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.0 (or any version in the supported range). A backup is taken automatically before anything
+    is changed.
+  rollback: Restore from .wizard/backups/pre-v0.6.6/ and set foundation_bundle_version back to v0.6.0.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow fix to v0.6.6. Operating-layer update-flow fix: the check-for-updates
+    skill now previews an update READ-ONLY before applying (a step that works even when the update tool
+    is behind, reading the change straight from the official source), and the apply binds EXACTLY the
+    previewed version via an approval-continuity guard -- so you always see what will change first and
+    never apply something different from what you approved. No new capabilities; foundation documents
+    and schema are byte-identical to v0.6.5. Combined jump from v0.6.0 straight to v0.6.6: it also delivers
+    every operating-layer change in the versions between v0.6.0 and v0.6.6.'
+release_classification: patch_behavioral_prerelease
+release_date: '2026-06-24'
+schema_version: v1
+target_version: v0.6.6
+
