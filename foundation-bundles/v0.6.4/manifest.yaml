@@ -1,0 +1,96 @@
+# Foundation bundle v0.6.4 manifest
+#
+# Operating-layer content fix over v0.6.3 (patch-behavioral). Two existing operating-layer
+# files change; no new sections in the managed schema, no new managed files, foundation
+# docs/schema byte-identical to v0.6.3:
+#   - .claude/receipt_gate.sh — the pre-write receipt gate no longer classifies an action by
+#     scanning the text CONTENT of a local edit with an over-broad, case-insensitive substring
+#     regex (everyday words like "firm"/"High"/"through" matched rm/gh, falsely stopping ordinary
+#     markdown edits — which trains the operator to rubber-stamp every prompt). It now classifies
+#     by the action's SHAPE: local edits are never gated on content; Bash is classified by the
+#     resolved command word of each segment (quote-aware shlex tokenization); MCP by its verb. It
+#     pauses only for genuinely destructive / irreversible / outgoing actions.
+#   - operating_discipline.md — gains a short "Why auto mode still pauses for some actions"
+#     subsection explaining that the pause before sending/sharing/deleting is intentional and
+#     cannot be switched off.
+# See migration-manifest.yaml for the v0.6.3/v0.6.2/v0.6.1/v0.6.0 → v0.6.4 entries.
+#
+# Schema changes from v0.5.0 (additive):
+#   - foundation-doc templates are v0.4.0's (foundation_schema_version v0.3), NOT v0.5.0's.
+#     The vision_recap section and v0.4 schema bumps from v0.5.0 are intentionally absent here;
+#     v0.5.0 remains the path to get those foundation-doc changes.
+#   - system-artifacts.json managed-artifacts contract ADDED (87 managed files).
+#   - Full operating-layer templates/ tree ADDED (agents/, root/, scripts/, .claude/, etc.).
+#   - This is the first bundle from which emit(bundle_version=v0.6.0) produces a COMPLETE
+#     coherent system (foundation docs + operating layer, one version axis).
+#
+# Per-version foundation-bundle package (status: prerelease).
+# Authority: the canonical foundation-versioning specification § 8.1 schema + § 7 directory layout.
+# Pre-v1 stabilization clause applies per § 1.3.
+
+foundation_bundle_version: v0.6.4
+foundation_schema_version: v0.3
+agent_contract_version: v0-pre-rebuild
+# bundle-manifest schema that introduced the engine-compatibility contract; a manifest
+# declaring this MUST carry min_engine_version (else the engine fails closed). A bundle
+# omitting bundle_manifest_schema_version is a legacy bundle, exempt from the gate.
+bundle_manifest_schema_version: v2
+# the minimum SEMANTIC upgrade-engine version (ENGINE_VERSION) required to apply this
+# bundle. An older local engine must refresh the toolkit first (ENGINE_TOO_OLD) — never
+# best-effort apply.
+min_engine_version: v1.0.0
+release_date: 2026-06-24
+source_commit: 95e24b6  # operating-layer content fix (receipt-gate classification) cut over v0.6.3
+status: prerelease
+
+included_templates:
+  foundation_docs:
+    - vision.md
+    - approach.md
+    - technical_architecture.md
+    - execution_plan.md
+    - test_cases.md
+    - audit_framework.md
+
+managed_files:
+  foundation/vision.md:
+    managed_by: shared
+    local_modifications: expected
+    merge_strategy: three_way
+  foundation/prd.md:
+    managed_by: operator
+    local_modifications: expected
+    merge_strategy: operator_review
+  foundation/approach.md:
+    managed_by: shared
+    local_modifications: allowed
+    merge_strategy: three_way
+  foundation/execution_plan.md:
+    managed_by: operator
+    local_modifications: expected
+    merge_strategy: operator_review
+  foundation/technical_architecture.md:
+    managed_by: shared
+    local_modifications: allowed
+    merge_strategy: three_way
+  foundation/test_cases.md:
+    managed_by: operator
+    local_modifications: expected
+    merge_strategy: operator_review
+  foundation/audit_framework.md:
+    managed_by: wizard
+    local_modifications: not_recommended
+    merge_strategy: warn_on_drift
+
+public_api:
+  required_files:
+    - foundation/vision.md
+    - foundation/prd.md
+    - foundation/approach.md
+    - foundation/execution_plan.md
+    - foundation/technical_architecture.md
+    - foundation/test_cases.md
+    - foundation/audit_framework.md
+  required_frontmatter_fields_per_file: see the canonical foundation-versioning specification § 1.1
+  required_sections_per_doc_type: see schemas/section-schema.yaml in this bundle
+  section_schema: schemas/section-schema.yaml

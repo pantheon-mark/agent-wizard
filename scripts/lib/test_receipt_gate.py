@@ -157,6 +157,128 @@ class ReceiptGateBehaviorTests(unittest.TestCase):
         self.assertEqual(decision, "ask",
                          "MCP write tool was not classified high-risk / not gated to 'ask'")
 
+    # ------------------------------------------------------------------ #
+    # Classification must be by ACTION SHAPE, not by scanning the prose
+    # content of a local edit. These are the live false-positives an earlier
+    # over-broad substring regex produced (everyday words like "firm"/"High"
+    # tripped rm/gh), plus the must-gate cases that prove the real protection
+    # still fires.
+    # ------------------------------------------------------------------ #
+
+    def _assert_ungated(self, event, why):
+        code, decision, out = self._run(event)
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "", f"benign action emitted a decision (should be ungated): {why}")
+        self.assertIsNone(decision, why)
+
+    def _assert_asks(self, event, why):
+        code, decision, _ = self._run(event)
+        self.assertEqual(code, 0)
+        self.assertEqual(decision, "ask", why)
+
+    # --- must NOT gate: local edits whose CONTENT contains danger substrings --- #
+
+    def test_edit_markdown_with_firm_and_high_is_ungated(self):
+        # The live regression: "fi-rm", "Hi-gh", "throu-gh" tripped rm/gh substrings.
+        self._assert_ungated(
+            {"tool_name": "Edit", "tool_input": {
+                "file_path": "audit_log.md",
+                "old_string": "x",
+                "new_string": "confirm with the firm | High | look through the docs"}},
+            "Edit of markdown containing firm/High/through must never gate")
+
+    def test_write_markdown_with_danger_words_is_ungated(self):
+        self._assert_ungated(
+            {"tool_name": "Write", "tool_input": {
+                "file_path": "prep_briefing.md",
+                "content": "Steps: confirm the sale, review aws billing notes, DELETE this draft line"}},
+            "Write of a local markdown file must never gate on its prose")
+
+    # --- must NOT gate: Bash where danger words live INSIDE quoted strings --- #
+
+    def test_bash_echo_firm_in_string_is_ungated(self):
+        self._assert_ungated(
+            {"tool_name": "Bash", "tool_input": {"command": 'echo "confirm the firm sale"'}},
+            "echo of a string containing 'firm' is not a destructive command")
+
+    def test_bash_quoted_operator_with_rm_in_string_is_ungated(self):
+        # gemini's strongest case: naive operator-splitting would extract 'rm' here.
+        self._assert_ungated(
+            {"tool_name": "Bash", "tool_input": {"command": 'git commit -m "fix bug ; rm old files"'}},
+            "rm inside a quoted commit message is not a command")
+
+    def test_bash_aws_read_subcommand_is_ungated(self):
+        self._assert_ungated(
+            {"tool_name": "Bash", "tool_input": {"command": "aws s3 ls s3://bucket"}},
+            "aws read subcommand (ls) must not gate")
+
+    def test_bash_gh_read_subcommand_is_ungated(self):
+        self._assert_ungated(
+            {"tool_name": "Bash", "tool_input": {"command": "gh issue list"}},
+            "gh read subcommand (issue list) must not gate")
+
+    def test_bash_plain_git_push_is_ungated(self):
+        self._assert_ungated(
+            {"tool_name": "Bash", "tool_input": {"command": "git push origin main"}},
+            "plain fast-forward git push is reversible -> not gated")
+
+    def test_mcp_read_tool_is_ungated(self):
+        self._assert_ungated(
+            {"tool_name": "mcp__sheets__get_values", "tool_input": {"range": "A1:B2"}},
+            "MCP read verb (get) must not gate")
+
+    # --- must GATE: real irreversible / outgoing actions (no receipt) --- #
+
+    def test_bash_rm_rf_asks(self):
+        self._assert_asks(
+            {"tool_name": "Bash", "tool_input": {"command": "rm -rf build/"}},
+            "rm -rf must gate")
+
+    def test_bash_semicolon_rm_asks(self):
+        self._assert_asks(
+            {"tool_name": "Bash", "tool_input": {"command": "echo done; rm important.txt"}},
+            "rm as a command after ; must gate")
+
+    def test_bash_find_delete_asks(self):
+        self._assert_asks(
+            {"tool_name": "Bash", "tool_input": {"command": "find . -name '*.tmp' -delete"}},
+            "find -delete must gate")
+
+    def test_bash_find_exec_rm_asks(self):
+        self._assert_asks(
+            {"tool_name": "Bash", "tool_input": {"command": "find . -name '*.bak' -exec rm {} ;"}},
+            "find -exec rm must gate")
+
+    def test_bash_xargs_rm_asks(self):
+        self._assert_asks(
+            {"tool_name": "Bash", "tool_input": {"command": "ls *.tmp | xargs rm"}},
+            "xargs rm must gate")
+
+    def test_bash_aws_write_subcommand_asks(self):
+        self._assert_asks(
+            {"tool_name": "Bash", "tool_input": {"command": "aws s3 rm s3://bucket/key"}},
+            "aws write subcommand (rm) must gate")
+
+    def test_bash_gh_write_subcommand_asks(self):
+        self._assert_asks(
+            {"tool_name": "Bash", "tool_input": {"command": "gh release create v1.0"}},
+            "gh write subcommand (release create) must gate")
+
+    def test_bash_git_push_force_asks(self):
+        self._assert_asks(
+            {"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}},
+            "git push --force rewrites remote history -> must gate")
+
+    def test_mcp_send_tool_asks(self):
+        self._assert_asks(
+            {"tool_name": "mcp__gmail__send_message", "tool_input": {"to": "a@b.com"}},
+            "MCP send verb must gate")
+
+    def test_mcp_unknown_verb_asks(self):
+        self._assert_asks(
+            {"tool_name": "mcp__connector__frobnicate", "tool_input": {}},
+            "unknown MCP verb on an external connector must gate (D5)")
+
 
 @unittest.skipUnless(HAVE_TOOLS, "bash and/or python3 unavailable")
 class ContextMonitorLoopSafetyTests(unittest.TestCase):

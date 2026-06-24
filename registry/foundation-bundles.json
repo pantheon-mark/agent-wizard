@@ -78,6 +78,17 @@
       "changelog": "Updating your system is now one safe step: the assistant refreshes the update tool and applies the update together. Also hardens two safety details — the record of an approved update can no longer be altered, and the start-of-session update check uses the same trusted source as the manual check.",
       "bundle_tree_sha256": "sha256:f9d4499de69312ee1111292bc9de50743d6435af54c0583ea653d65d7287fc1e",
       "bundle_manifest_sha256": "sha256:4cf5da55b0135408714f52319823b61d9ca267d5ba3df1948dda32abc9d4b72f"
+    },
+    {
+      "foundation_bundle_version": "v0.6.4",
+      "path": "foundation-bundles/v0.6.4/",
+      "release_date": "2026-06-24",
+      "source_commit": "95e24b6",
+      "manifest": "foundation-bundles/v0.6.4/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "Fixes a safety-check bug that was stopping you to approve ordinary edits to your own notes and documents — everyday words like \"firm\" or \"High\" were mistaken for risky commands, which both broke auto mode and trained you to click through every prompt. The check now decides by what an action actually does, so it pauses only for genuinely risky, irreversible, or outgoing actions. Also adds a short note explaining why auto mode still pauses before sending, sharing, or deleting.",
+      "bundle_tree_sha256": "sha256:11f77d86334cc759429c284bd3af52f16636df7c267483f5995e5447c3f38ff8",
+      "bundle_manifest_sha256": "sha256:6a5ff5617660d0f713f58d007c7613e8b004775ae73c5ed41be78a76fa8f945e"
     }
   ]
 }

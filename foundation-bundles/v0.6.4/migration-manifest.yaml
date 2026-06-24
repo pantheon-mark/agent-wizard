@@ -1,0 +1,118 @@
+# Migration manifest for foundation bundle v0.6.4
+#
+# v0.6.4 is an operating-layer content fix over v0.6.3 (patch-behavioral). Two existing
+# operating-layer files change; no new sections in the managed schema, no new managed files,
+# foundation docs byte-identical to v0.6.3:
+#   - .claude/receipt_gate.sh — the pre-write receipt gate no longer classifies an action by
+#     scanning the text CONTENT of a local edit with over-broad word matching (everyday words
+#     like "firm"/"High" tripped it, falsely stopping ordinary markdown edits and training
+#     rubber-stamping). It now classifies by the action's SHAPE (tool + resolved command word),
+#     so it pauses only for genuinely risky/irreversible/outgoing actions.
+#   - operating_discipline.md — gains a short "Why auto mode still pauses for some actions"
+#     subsection explaining that the pause before irreversible/outgoing actions is intentional.
+
+schema_version: v1
+target_version: v0.6.4
+release_date: 2026-06-24
+release_classification: patch_behavioral_prerelease
+
+# Per-artifact plain-language benefit notes used by `wizard upgrade-plan` to explain
+# what each changed file does for the operator. Optional; absent entries use a default.
+artifact_notes:
+  .claude/receipt_gate.sh:
+    benefit: "Fixes a safety-check bug that was stopping you to approve ordinary edits to your own notes and documents (everyday words like \"firm\" or \"High\" were being mistaken for risky commands). The check now decides by what an action actually does, so it pauses only for genuinely risky or irreversible actions — and no longer trains you to click through every prompt."
+  operating_discipline.md:
+    benefit: "Adds a short plain-language explanation of why auto mode still pauses before sending, sharing, or deleting something — that pause is intentional and cannot be switched off."
+
+migrations:
+  - from: v0.6.3
+    class: patch-behavioral
+    breaking_changes_summary: ""
+    notes: |
+      Operating-layer content fix from v0.6.3: the pre-write receipt gate (.claude/receipt_gate.sh)
+      no longer classifies actions by scanning the text content of local edits with over-broad word
+      matching (which falsely stopped ordinary markdown edits and trained rubber-stamping); it now
+      classifies by the action's shape (tool + command word). operating_discipline.md gains a short
+      'Why auto mode still pauses for some actions' subsection. No new managed files, no new
+      capabilities; foundation docs and schema byte-identical to v0.6.3.
+    migration_steps: |
+      1. Run the upgrade check (plan-only) to confirm v0.6.3 -> v0.6.4 is offered.
+      2. Run the apply path (operator-explicit). The corrected safety-check script is delivered and
+         the operating-discipline guidance gains a short explanatory note; your edits to
+         operating-layer files are kept or saved for review.
+    preflight: |
+      Verify the operator project carries a .wizard/replay-capsule.json and a
+      .wizard/manifest.json whose foundation_bundle_version is v0.6.3.
+    rollback: |
+      Restore from .wizard/backups/pre-v0.6.4/ and set foundation_bundle_version
+      back to v0.6.3.
+    requires_operator_approval: true
+    stop_condition: not_applicable
+    supported: true
+  - from: v0.6.2
+    class: patch-behavioral
+    breaking_changes_summary: ""
+    notes: |
+      Combined jump from v0.6.2 straight to v0.6.4 (an operator on v0.6.2 who never took v0.6.3).
+      Delivers the v0.6.3 operating-layer content fixes (combined operator-reach apply command,
+      approved-update-contract deny, shared update-notice source) PLUS the v0.6.4 receipt-gate
+      classification fix and the auto-mode explanatory note. All operating-layer content changes to
+      existing files; no new sections or capabilities; foundation docs byte-identical to v0.6.2.
+    migration_steps: |
+      1. Run the upgrade check (plan-only) to confirm v0.6.2 -> v0.6.4 is offered.
+      2. Run the apply path (operator-explicit). The v0.6.3 operating-layer fixes PLUS the corrected
+         safety-check script are delivered; your edits are kept or saved for review.
+    preflight: |
+      Verify the operator project carries a .wizard/replay-capsule.json and a
+      .wizard/manifest.json whose foundation_bundle_version is v0.6.2.
+    rollback: |
+      Restore from .wizard/backups/pre-v0.6.4/ and set foundation_bundle_version
+      back to v0.6.2.
+    requires_operator_approval: true
+    stop_condition: not_applicable
+    supported: true
+  - from: v0.6.1
+    class: patch-behavioral
+    breaking_changes_summary: ""
+    notes: |
+      Combined jump from v0.6.1 straight to v0.6.4. Delivers the v0.6.2 next-phase approval-drill
+      content fix, the v0.6.3 operating-layer content fixes, and the v0.6.4 receipt-gate
+      classification fix plus the auto-mode explanatory note. All operating-layer content changes to
+      existing files; no new sections or capabilities; foundation docs byte-identical to v0.6.1.
+    migration_steps: |
+      1. Run the upgrade check (plan-only) to confirm v0.6.1 -> v0.6.4 is offered.
+      2. Run the apply path (operator-explicit). The next-phase skill fix and the v0.6.3 + v0.6.4
+         operating-layer fixes are delivered; your edits are kept or saved for review.
+    preflight: |
+      Verify the operator project carries a .wizard/replay-capsule.json and a
+      .wizard/manifest.json whose foundation_bundle_version is v0.6.1.
+    rollback: |
+      Restore from .wizard/backups/pre-v0.6.4/ and set foundation_bundle_version
+      back to v0.6.1.
+    requires_operator_approval: true
+    stop_condition: not_applicable
+    supported: true
+  - from: v0.6.0
+    class: minor-additive
+    breaking_changes_summary: ""
+    notes: |
+      Combined jump from v0.6.0 straight to v0.6.4 (an operator still on v0.6.0). Delivers the
+      v0.6.0 -> v0.6.1 operating-layer additions (an additive section in operating_discipline.md,
+      the pause-skill change, and the health-check skill), the v0.6.2 next-phase fix, the v0.6.3
+      operating-layer content fixes, and the v0.6.4 receipt-gate classification fix plus auto-mode
+      note. Classified minor-additive because the combined delta includes v0.6.1's additive
+      capabilities. Foundation docs byte-identical to v0.6.0.
+    migration_steps: |
+      1. Run the upgrade check (plan-only) to confirm v0.6.0 -> v0.6.4 is offered.
+      2. Run the apply path (operator-explicit). Operating-layer files changed across v0.6.1
+         through v0.6.4 are merged (your edits kept) or saved for review; the health-check
+         skill is delivered additively.
+    preflight: |
+      Verify the operator project carries a .wizard/replay-capsule.json and a
+      .wizard/manifest.json whose foundation_bundle_version is v0.6.0.
+    rollback: |
+      Restore from .wizard/backups/pre-v0.6.4/ and set foundation_bundle_version
+      back to v0.6.0.
+    requires_operator_approval: true
+    stop_condition: not_applicable
+    supported: true
