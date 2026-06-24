@@ -141,6 +141,14 @@ git clone https://github.com/pantheon-mark/agent-wizard.git ~/agent-wizard
 
 This downloads the wizard to a folder called `agent-wizard` in your home directory. It only needs to run once.
 
+**Optional — make `wizard` a plain command.** This is not required; everything works without it. If you would like to be able to type just `wizard` in Terminal later (instead of the full folder path), paste this one command and press Enter:
+
+```
+~/agent-wizard/scripts/wizard install-path
+```
+
+It is safe to run: it never asks for a password, never changes anything you have set up, and simply tells you what it did. If it says it could not add the command, that is fine — the system always works either way.
+
 ---
 
 ## Step 7 — Launch the wizard

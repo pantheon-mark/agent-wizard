@@ -12,6 +12,19 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-24 — updates never trip over "command not found" (v0.6.9)
+
+**Public-facing change:** A small reliability fix so checking for and applying an update never fails with a "command not found" message.
+
+- **Always uses the full path.** When your system checks for or applies an update, it now always runs the update tool by its full path instead of a short name that was sometimes not recognized. The step that occasionally reported "command not found" no longer happens.
+- **Optional convenience for you.** If you would like to type just `wizard` in Terminal yourself, there is now an optional one-time setup command (`wizard install-path`); it is documented in the manual and is entirely optional — the system works the same either way.
+
+This is a small fix-only change (`v0.6.9`, operator-explicit as always). Your own files and customizations are untouched; a backup is taken before anything is applied. Foundation documents are byte-identical to `v0.6.8`.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-06-24 — one consistent update path (v0.6.8)
 
 **Public-facing change:** A small consistency fix so checking for and applying an update works the same way every time.

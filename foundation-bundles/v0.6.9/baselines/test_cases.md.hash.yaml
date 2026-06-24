@@ -1,0 +1,22 @@
+# Hash baseline for test_cases.md (bundle v0.4.0)
+# Enforced-path drift detection mechanism for this foundation bundle's templates.
+# Regeneration rationale: render-contract reconcile: schema + baseline aligned to template
+template: test_cases.md
+schema_revision: v0.3
+sections_hash:
+- id: acceptance_criteria
+  heading: Acceptance Criteria
+  heading_hash: edcc04ccc0ba8beb55a17cea1f724f4d8f973d89
+- id: test_pyramid
+  heading: Test Pyramid
+  heading_hash: d5d7fa6e64c210a634437231515fc6ad5ad00974
+- id: validation_method
+  heading: Validation Method
+  heading_hash: ffade1af9a43418c6e26db1cf902f8f8a719be4d
+- id: markdown_agent_validation_matrix
+  heading: Markdown Agent Validation Matrix
+  heading_hash: 4273c4711b0836fd8fde17524713c9cd359f37c2
+- id: test_maintenance
+  heading: Test maintenance
+  heading_hash: b9694aa65524dd3da833e7bcd55a1ec8c9426881
+base_hash: 79d495632fa14a31004ff126a19bf6fcd33f33f6

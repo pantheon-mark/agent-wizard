@@ -96,6 +96,7 @@ from lib.update_resolution import (  # noqa: E402
     write_update_resolution,
 )
 from lib.run_upgrade import run_resolution_upgrade  # noqa: E402
+from install_path import install_wizard_on_path  # noqa: E402
 
 
 def populate_plan_analysis(
@@ -793,6 +794,30 @@ def cmd_self_upgrade(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_install_path(args: argparse.Namespace) -> int:
+    """`wizard install-path` — best-effort: make `wizard` runnable as a plain command.
+
+    Pure convenience. The operator's system always invokes the toolkit by full path, so
+    this never needs to succeed: it links the shim into a writable, already-on-PATH dir,
+    never uses sudo, never edits a profile, and never clobbers a `wizard` it did not make.
+    Always exits 0 unless the toolkit itself is incomplete (shim missing)."""
+    shim = _HERE / "wizard"  # the bash shim sits next to this engine
+    res = install_wizard_on_path(str(shim))
+    if args.json:
+        print(json.dumps({
+            "status": res.status,
+            "link_path": res.link_path,
+            "target": res.target,
+            "message": res.message,
+            "conflicts": res.conflicts,
+        }))
+    else:
+        print(res.message)
+        for c in res.conflicts:
+            print(f"  - left in place: {c}")
+    return 1 if res.status == "error" else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wizard_upgrade",
@@ -884,6 +909,14 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Git remote the self-update fetches from (default: origin). Advanced/testing.")
     sup_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON to stdout")
     sup_p.set_defaults(func=cmd_self_upgrade)
+
+    ip_p = sub.add_parser(
+        "install-path",
+        help="Best-effort: make `wizard` runnable as a plain command by linking it into a "
+             "folder already on your PATH (no sudo, never clobbers; optional convenience)",
+    )
+    ip_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON to stdout")
+    ip_p.set_defaults(func=cmd_install_path)
 
     return parser
 
