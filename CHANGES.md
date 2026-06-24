@@ -12,6 +12,20 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-24 — the safety check no longer interrupts your ordinary edits (v0.6.4)
+
+**Public-facing change:** Fixes a bug where your system's safety check would stop you to approve everyday edits to your own notes and documents — because plain words like "firm" or "High" were being mistaken for risky commands.
+
+- **It now decides by what an action actually does, not by the words you write.** Editing your own files (notes, logs, drafts) never triggers an approval prompt, no matter what they say. The system still pauses — as it always has — before anything that goes out in your name or can't be undone (sending email, writing to a shared sheet, deleting files, calling an outside service).
+- **Why this matters for your safety.** A check that interrupts you constantly trains you to click "approve" without reading — so when a genuinely risky action finally appears, it gets waved through too. Making the check quiet on ordinary work is what keeps your attention available for the moments that actually need it.
+- **A small note added.** Your operating guide now explains in plain language why "auto" mode still pauses before sending, sharing, or deleting — that pause is intentional and can't be switched off.
+
+This is a small fix-only change (`v0.6.4`, operator-explicit as always). Your own files and customizations are untouched; a backup is taken before anything is applied.
+
+`Source-Meta-Commit:` `5b1213f` (private build repo) · public repo commit `e1a5263`
+
+---
+
 ## 2026-06-23 — updating your system is now one safe step (v0.6.3)
 
 **Public-facing change:** When you ask your system to update itself, it now does the whole thing in one safe, operator-approved step — instead of you running two separate commands.
