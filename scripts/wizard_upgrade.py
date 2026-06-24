@@ -217,6 +217,47 @@ def _try_load_local_registry(registry_path: Path) -> dict | None:
         return None
 
 
+def _classify_local_miss(operator_dir: Path, target: str) -> int:
+    """Secondary safety net for MANUAL CLI use: when `upgrade-plan`/`upgrade --to V`
+    misses in the LOCAL toolkit registry, do NOT emit a bare 'not in registry' (which the
+    assistant read as 'no notes/prerelease -> hold off'). Time-boxed remote fetch distinguishes:
+      - TOOLKIT_BEHIND   : remote HAS V, local lacks it -> route to `self-upgrade` (refresh+apply)
+      - VERSION_NOT_FOUND: remote lacks V too -> honest 'not a published version'
+      - CURRENCY_UNCONFIRMED: remote unreachable/unverifiable -> never claim 'not found'
+    The bundle FILES live in the toolkit clone, so a behind toolkit genuinely cannot apply V
+    until refreshed; `self-upgrade --to V --apply` does the refresh+apply and re-verifies first.
+    Preview stays distinct from apply (never present --apply as the only route from a preview)."""
+    # short timeout: this is a fallback classifier, must not hang a local command.
+    fetch = fetch_remote_registry(operator_dir, timeout=5)
+    if fetch.ok and find_bundle_entry(fetch.registry, target) is not None:
+        print(
+            f"TOOLKIT_BEHIND: version {target} is published, but your local update tool is "
+            f"behind and does not carry it yet.\n"
+            f"  To apply it:    wizard self-upgrade --to {target} --apply\n"
+            f"                  (refreshes the tool to {target}, then applies — it re-verifies "
+            f"against the official source before changing anything).\n"
+            f"  To preview first: refresh the tool, then run  wizard upgrade-plan --to {target}",
+            file=sys.stderr,
+        )
+        return 1
+    if fetch.ok:
+        print(
+            f"VERSION_NOT_FOUND: {target} is not a published version (it is not in the official "
+            f"registry). Check the version, or run `wizard upgrade-check` to see what is available.",
+            file=sys.stderr,
+        )
+        return 1
+    fstat = fetch.failure_status.value if fetch.failure_status else "unreachable"
+    print(
+        f"CURRENCY_UNCONFIRMED: can't confirm {target} against the official update source right "
+        f"now ({fstat}). This is NOT a confirmation that the version doesn't exist. If an update "
+        f"notice showed it, your tool may simply be behind — run `wizard self-upgrade --to {target} "
+        f"--apply` when you're back online (it re-verifies before changing anything).",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def cmd_upgrade_check(args: argparse.Namespace) -> int:
     """`wizard upgrade-check` — typed honest-status contract, REMOTE-AUTHORITATIVE.
 
@@ -315,9 +356,10 @@ def _run_upgrade_plan(args: argparse.Namespace, plan_only_invoked_via_synonym: b
     operator_dir = manifest_path.parent.parent
     try:
         plan = compute_upgrade_plan(operator_dir, manifest, args.to, registry, registry_path=registry_path)
-    except BundleNotFoundError as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 1
+    except BundleNotFoundError:
+        # F-10: local-registry miss -> classify (toolkit-behind / not-found / unconfirmed) and
+        # route to self-upgrade instead of a bare 'not in registry'.
+        return _classify_local_miss(operator_dir, args.to)
     except UpgradeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -359,6 +401,10 @@ def cmd_apply(args: argparse.Namespace) -> int:
             manifest=manifest, manifest_path=manifest_path,
             ack=args.ack,
         )
+    except BundleNotFoundError:
+        # F-10: stale-toolkit apply of a remote-only version -> route to self-upgrade, not a bare
+        # 'not in registry'. (BundleNotFoundError subclasses UpgradeError, so catch it first.)
+        return _classify_local_miss(operator_dir, args.to)
     except UpgradeApplyError as e:
         # Refusal — no live writes. Surface the actionable message verbatim.
         print(f"upgrade refused: {e}", file=sys.stderr)

@@ -1,11 +1,11 @@
-"""S2.46 — the typed Update Advice Contract: recommendation stance is SYSTEM-COMPUTED
+"""The typed Update Advice Contract: recommendation stance is SYSTEM-COMPUTED
 from author-declared registry facts (safety_class + tier), never inferred by the LLM and
 NEVER keyed on the lifecycle `status` (prerelease is the universal pre-v1 status and carries
 no risk signal — keying on it is what produced F-10: the system dissuaded the operator from a
 safe fix because it was 'prerelease').
 
 These tests pin the pure function so the trust-critical verdict can't drift back into prose/
-inference. Cross-vendor design: external_review/s2.46_crossvendor_decisions_2026-06-24.md (D1).
+inference. Design recorded in the build project's decision records.
 """
 
 import unittest
@@ -72,6 +72,40 @@ class RecommendationStanceTests(unittest.TestCase):
         r = compute_recommendation(_entry(version="v0.6.4", safety_class="safety_fix"), tier="patch-behavioral")
         self.assertEqual(r["actionable_command"], "wizard self-upgrade --to v0.6.4 --apply")
         self.assertIn("upgrade-plan --to v0.6.4", r["preview_hint"])  # preview != apply (D3)
+
+
+class UpgradeCheckRenderTests(unittest.TestCase):
+    """render_upgrade_check must surface the system-computed advice (what's-new + stance +
+    safe command) and OMIT the bare `status` (prerelease) from operator-facing output (D4)."""
+
+    def _result(self):
+        from lib.upgrade import UpgradeCheckResult, compute_recommendation
+        entry = {
+            "foundation_bundle_version": "v0.6.4",
+            "release_date": "2026-06-24",
+            "status": "prerelease",
+            "tier": "patch-behavioral",
+            "changelog": "Fixes the receipt-gate false-positives.",
+            "safety_class": "safety_fix",
+            "recommendation_reason": "Fixes a safety-check bug that interrupted your edits.",
+        }
+        target = dict(entry)
+        target.update(compute_recommendation(entry, tier="patch-behavioral"))
+        return UpgradeCheckResult(
+            operator_project_path="/x", current_version="v0.6.3",
+            available_targets=[target], drift_report=None,
+            standing_approval_status="unavailable", notes=[],
+        )
+
+    def test_render_omits_prerelease_and_surfaces_advice(self):
+        from lib.upgrade import render_upgrade_check
+        out = render_upgrade_check(self._result())
+        self.assertNotIn("status=prerelease", out, "F-10: bare prerelease status must not show to the operator")
+        self.assertNotIn("status=", out)
+        self.assertIn("what's new:", out)
+        self.assertIn("recommendation: recommend_apply", out)
+        self.assertIn("wizard self-upgrade --to v0.6.4 --apply", out)
+        self.assertIn("v0.6.4", out)
 
 
 if __name__ == "__main__":

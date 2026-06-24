@@ -309,14 +309,13 @@ def render_update_status(outcome: "UpdateCheckOutcome") -> str:
 
 
 # ---------------------------------------------------------------------------
-# Update Advice Contract (S2.46 / F-10): the recommendation stance is SYSTEM-
+# Update Advice Contract: the recommendation stance is SYSTEM-
 # COMPUTED from author-declared registry facts, NOT inferred by the LLM and NEVER
 # keyed on the lifecycle `status`. F-10 incident: the emitted assistant improvised
 # "prerelease + no notes => hold off" against neutral prose and dissuaded the
 # operator from a safe fix. The trust-critical verdict lives here, in pure code the
 # assistant must REPORT (per the check-for-updates "tool status is authoritative;
-# do not infer" precedent + feedback_typed_status_below_llm_for_honest_reporting).
-# Cross-vendor design: external_review/s2.46_crossvendor_decisions_2026-06-24.md (D1).
+# do not infer" precedent). Design recorded in the build project's decision records.
 SAFETY_CLASSES = frozenset(
     {"safety_fix", "reliability_fix", "routine_improvement", "breaking_change", "unknown"}
 )
@@ -1440,6 +1439,12 @@ def compute_upgrade_check(
                 target_record["stop_condition"] = me.stop_condition
                 target_record["breaking_changes_summary"] = me.breaking_changes_summary
                 target_record["stabilization_exemption"] = me.stabilization_exemption
+            # Update Advice Contract: attach the system-computed recommendation +
+            # the operator-facing "what's new" so the assistant REPORTS the verdict (never infers
+            # it from `status`/notes). `changelog` is the remote entry's operator-facing summary.
+            target_record["changelog"] = entry.get("changelog", "")
+            _rec = compute_recommendation(entry, tier=target_record["tier"])
+            target_record.update(_rec)
             available.append(target_record)
         # Sort available targets semver-ascending so render order is deterministic + lowest target first.
         # load_registry guarantees every entry's version parses, so parse_semver returns a tuple (not None).
@@ -1843,11 +1848,25 @@ def render_upgrade_check(result: UpgradeCheckResult) -> str:
     if result.available_targets:
         lines.append("Available target versions:")
         for entry in result.available_targets:
+            # Operator-facing: omit the bare `status` (prerelease is the universal pre-v1 status
+            # and reads as a false warning — F-10; the raw field stays in --json). Surface the
+            # system-computed recommendation + what's-new + the safe apply command instead.
             lines.append(
                 f"  - {entry['foundation_bundle_version']} "
-                f"(release_date={entry.get('release_date', 'n/a')}; "
-                f"status={entry.get('status', 'n/a')}; tier={entry['tier']})"
+                f"(release_date={entry.get('release_date', 'n/a')}; tier={entry['tier']})"
             )
+            whats_new = entry.get("recommendation_reason") or entry.get("changelog")
+            if whats_new:
+                lines.append(f"      what's new: {whats_new}")
+            stance = entry.get("recommendation_stance")
+            if stance:
+                lines.append(f"      recommendation: {stance}")
+            cmd = entry.get("actionable_command")
+            if cmd:
+                lines.append(f"      to apply: {cmd}")
+            hint = entry.get("preview_hint")
+            if hint:
+                lines.append(f"      {hint}")
     else:
         lines.append("Available target versions: none (current_version is latest in registry)")
     lines.append("")

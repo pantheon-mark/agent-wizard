@@ -30,10 +30,17 @@ This system starts via `./start-session.sh`. Three modes:
 
 When it is present, handle the update **before your recommended next step**, as its own clearly visible item — not a buried footnote, and do not downplay it as "minor" or "not required." Ask the operator about the update on its own first and wait for their answer; do not also ask your next-step question in the same turn. In plain, non-technical language, tell the operator which version their system is on now (name the `current_version`) and that a newer version is available (name the `latest_version`) — for example, "you're on version 0.6.0, and 0.6.1 is now available." Say it is optional and nothing changes until they approve, and offer these choices:
 
-- **see what's new** — walk them through what would change via the system's normal upgrade process (`.wizard/UPGRADING.md`); they then decide whether to apply it.
+- **see what's new** — run `wizard upgrade-check` and tell the operator, in plain language, what it reports: the change summary ("what's new"), the system's own recommendation, and the exact command to apply it. They then decide.
 - **not now** — move on; you will mention it again next session.
 - **remind me later** — ask roughly when (for example a few days, a week, or a month), then record it (below) so the reminder is paused until then.
 - **skip this version** — do not raise it again until a newer version than this one ships; record it (below).
+
+**Report the system's recommendation; do not invent your own.** `wizard upgrade-check` computes a recommendation for each available version and you must REPORT it, not second-guess it:
+- `recommend_apply` — a verified safe fix (e.g. a safety or reliability fix). Present it plainly and positively. **Do NOT discourage a safe update**, and **never** steer the operator away from a safety fix.
+- `neutral_offer` — a routine improvement. Offer it neutrally.
+- `manual_review` / `do_not_apply` — a bigger or unverified change. Flag that it needs a careful look before applying.
+
+Two things are NOT reasons to hold off, and you must never present them as such: (1) a version being labeled **prerelease** — that is the normal status of every current version, including the ones already installed; (2) the absence of detailed notes — if you cannot find "what's new," that is a tool issue to resolve (run `wizard upgrade-check`; if your update tool is behind, the check will tell you to run `wizard self-upgrade --to <version> --apply`, which refreshes the tool and applies in one step), not a reason to discourage the update. The command to apply a version is whatever `upgrade-check` prints as its apply command (normally `wizard self-upgrade --to <version> --apply`); the operator still decides.
 
 Only after the operator has answered about the update do you present your single recommended next step.
 
