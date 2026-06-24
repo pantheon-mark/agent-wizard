@@ -12,6 +12,18 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-24 — one consistent update path (v0.6.8)
+
+**Public-facing change:** A small consistency fix so checking for and applying an update works the same way every time.
+
+- **One clear path.** When an update is available, your system checks it (which already tells you what's new and its recommendation), and once you approve, the assistant applies it for you. A separate preview step that the system's own instructions didn't actually use has been removed, so the flow no longer depends on which instruction the system happened to follow.
+
+This is a small fix-only change (`v0.6.8`, operator-explicit as always). Your own files and customizations are untouched; a backup is taken before anything is applied.
+
+`Source-Meta-Commit:` `6d04776` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-06-24 — updates are smoother: you keep your choices, and the system does the typing (v0.6.7)
 
 **Public-facing change:** When an update is available you keep the full set of choices, and once you approve one, your system runs it for you instead of asking you to type commands.

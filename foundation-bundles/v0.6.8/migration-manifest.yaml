@@ -1,0 +1,160 @@
+# Migration manifest for foundation bundle v0.6.8
+# v0.6.8 simplifies the check-for-updates skill to one check+apply path (CLAUDE.md-aligned).
+# Foundation docs byte-identical across the range. JSON sidecar is authoritative.
+
+_note: JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing
+  companion. Both files MUST stay in sync.
+artifact_notes:
+  CLAUDE.md: 'The system-update-notice rule: always offer the defer/skip choices, and run the update commands
+    for the operator after their yes (resolving the tool''s full path).'
+  wizard/skills/check-for-updates.md: Uses one clear update path -- check (reports what's new), then on
+    your yes the assistant applies it for you.
+migrations:
+- from: v0.6.7
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's
+    yes, the assistant applies it (wizard self-upgrade --to v0.6.8 --apply). 3. A backup is taken first;
+    the operator's own data, rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.7 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.6.8/ and set foundation_bundle_version back to v0.6.7.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow simplification to v0.6.8. Operating-layer update-flow simplification:
+    the check-for-updates skill now uses one clear path -- check (which already reports what''s new +
+    the recommendation), then, on the operator''s yes, the assistant applies it -- removing a separate
+    preview step that the system instructions did not use, so the update flow is consistent. No new capabilities;
+    foundation documents and schema are byte-identical to v0.6.7.'
+- from: v0.6.6
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's
+    yes, the assistant applies it (wizard self-upgrade --to v0.6.8 --apply). 3. A backup is taken first;
+    the operator's own data, rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.6 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.6.8/ and set foundation_bundle_version back to v0.6.6.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow simplification to v0.6.8. Operating-layer update-flow simplification:
+    the check-for-updates skill now uses one clear path -- check (which already reports what''s new +
+    the recommendation), then, on the operator''s yes, the assistant applies it -- removing a separate
+    preview step that the system instructions did not use, so the update flow is consistent. No new capabilities;
+    foundation documents and schema are byte-identical to v0.6.7. Combined jump from v0.6.6 straight to
+    v0.6.8: also delivers every operating-layer change between v0.6.6 and v0.6.8.'
+- from: v0.6.5
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's
+    yes, the assistant applies it (wizard self-upgrade --to v0.6.8 --apply). 3. A backup is taken first;
+    the operator's own data, rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.5 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.6.8/ and set foundation_bundle_version back to v0.6.5.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow simplification to v0.6.8. Operating-layer update-flow simplification:
+    the check-for-updates skill now uses one clear path -- check (which already reports what''s new +
+    the recommendation), then, on the operator''s yes, the assistant applies it -- removing a separate
+    preview step that the system instructions did not use, so the update flow is consistent. No new capabilities;
+    foundation documents and schema are byte-identical to v0.6.7. Combined jump from v0.6.5 straight to
+    v0.6.8: also delivers every operating-layer change between v0.6.5 and v0.6.8.'
+- from: v0.6.4
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's
+    yes, the assistant applies it (wizard self-upgrade --to v0.6.8 --apply). 3. A backup is taken first;
+    the operator's own data, rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.4 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.6.8/ and set foundation_bundle_version back to v0.6.4.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow simplification to v0.6.8. Operating-layer update-flow simplification:
+    the check-for-updates skill now uses one clear path -- check (which already reports what''s new +
+    the recommendation), then, on the operator''s yes, the assistant applies it -- removing a separate
+    preview step that the system instructions did not use, so the update flow is consistent. No new capabilities;
+    foundation documents and schema are byte-identical to v0.6.7. Combined jump from v0.6.4 straight to
+    v0.6.8: also delivers every operating-layer change between v0.6.4 and v0.6.8.'
+- from: v0.6.3
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's
+    yes, the assistant applies it (wizard self-upgrade --to v0.6.8 --apply). 3. A backup is taken first;
+    the operator's own data, rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.3 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.6.8/ and set foundation_bundle_version back to v0.6.3.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow simplification to v0.6.8. Operating-layer update-flow simplification:
+    the check-for-updates skill now uses one clear path -- check (which already reports what''s new +
+    the recommendation), then, on the operator''s yes, the assistant applies it -- removing a separate
+    preview step that the system instructions did not use, so the update flow is consistent. No new capabilities;
+    foundation documents and schema are byte-identical to v0.6.7. Combined jump from v0.6.3 straight to
+    v0.6.8: also delivers every operating-layer change between v0.6.3 and v0.6.8.'
+- from: v0.6.2
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's
+    yes, the assistant applies it (wizard self-upgrade --to v0.6.8 --apply). 3. A backup is taken first;
+    the operator's own data, rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.2 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.6.8/ and set foundation_bundle_version back to v0.6.2.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow simplification to v0.6.8. Operating-layer update-flow simplification:
+    the check-for-updates skill now uses one clear path -- check (which already reports what''s new +
+    the recommendation), then, on the operator''s yes, the assistant applies it -- removing a separate
+    preview step that the system instructions did not use, so the update flow is consistent. No new capabilities;
+    foundation documents and schema are byte-identical to v0.6.7. Combined jump from v0.6.2 straight to
+    v0.6.8: also delivers every operating-layer change between v0.6.2 and v0.6.8.'
+- from: v0.6.1
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's
+    yes, the assistant applies it (wizard self-upgrade --to v0.6.8 --apply). 3. A backup is taken first;
+    the operator's own data, rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.1 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.6.8/ and set foundation_bundle_version back to v0.6.1.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow simplification to v0.6.8. Operating-layer update-flow simplification:
+    the check-for-updates skill now uses one clear path -- check (which already reports what''s new +
+    the recommendation), then, on the operator''s yes, the assistant applies it -- removing a separate
+    preview step that the system instructions did not use, so the update flow is consistent. No new capabilities;
+    foundation documents and schema are byte-identical to v0.6.7. Combined jump from v0.6.1 straight to
+    v0.6.8: also delivers every operating-layer change between v0.6.1 and v0.6.8.'
+- from: v0.6.0
+  class: patch-behavioral
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's
+    yes, the assistant applies it (wizard self-upgrade --to v0.6.8 --apply). 3. A backup is taken first;
+    the operator's own data, rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.0 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.6.8/ and set foundation_bundle_version back to v0.6.0.
+  stop_condition: not_applicable
+  notes: 'Operating-layer update-flow simplification to v0.6.8. Operating-layer update-flow simplification:
+    the check-for-updates skill now uses one clear path -- check (which already reports what''s new +
+    the recommendation), then, on the operator''s yes, the assistant applies it -- removing a separate
+    preview step that the system instructions did not use, so the update flow is consistent. No new capabilities;
+    foundation documents and schema are byte-identical to v0.6.7. Combined jump from v0.6.0 straight to
+    v0.6.8: also delivers every operating-layer change between v0.6.0 and v0.6.8.'
+release_classification: patch_behavioral_prerelease
+release_date: '2026-06-24'
+schema_version: v1
+target_version: v0.6.8
+

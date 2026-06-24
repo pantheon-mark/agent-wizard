@@ -138,6 +138,19 @@
       "changelog": "Smooths out the update experience. When an update is available your system keeps offering the full set of choices -- see what's new, remind me later, skip this version, or not now -- even if you've asked it to lead with a single next step; remind-later and skip are remembered so the reminder actually pauses. And once you approve an update, the assistant runs the update commands for you (resolving the tool's location so they can't fail with 'command not found') rather than asking you to paste them into a terminal.",
       "bundle_tree_sha256": "sha256:f78aba364022acf6bac22cac2fb337f26fe45066960b022e206b481fd205f4c5",
       "bundle_manifest_sha256": "sha256:940d1134168cc0397977bbf43684e63bd49803f011e8e441b4c1a1017dcb5210"
+    },
+    {
+      "foundation_bundle_version": "v0.6.8",
+      "safety_class": "reliability_fix",
+      "recommendation_reason": "A small consistency fix to the update process -- your system now follows one clear path to check for and apply updates.",
+      "path": "foundation-bundles/v0.6.8/",
+      "release_date": "2026-06-24",
+      "source_commit": "6d04776",
+      "manifest": "foundation-bundles/v0.6.8/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "Simplifies and makes consistent how updates are checked and applied. Your system now uses one clear path -- it checks (which reports what's new and its recommendation), and once you approve, the assistant applies the update for you. A separate preview step that the system's own instructions did not actually use has been removed, so the update flow behaves the same way every time.",
+      "bundle_tree_sha256": "sha256:1fd52148d18e78cbe702019e2b1df9ce8fd52fb3f828d9d648e2549cd7459ee0",
+      "bundle_manifest_sha256": "sha256:4ea07ed66833e08552d68298d6b434bbe3e7dacaddcdcb340d74ece424484d86"
     }
   ]
 }
