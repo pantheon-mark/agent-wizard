@@ -8,7 +8,7 @@ Asserts:
        MA-OF-2  Orchestrator safety-net relocates stranded deliverables
        MA-OF-3  design-outbound-message skill runs before significant outbound messages
   3. MA-VS-1/2/4/5/6 unchanged (regression guard on unrelated rows).
-  4. No internal build IDs (e.g. "S2.51") appear in the template.
+  4. No internal build slice IDs (e.g. slice-identifier pattern) appear in the template.
 """
 
 import sys

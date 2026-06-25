@@ -164,6 +164,19 @@
       "changelog": "Makes the update process more reliable. When the system checks for or applies an update, it now always runs the update tool by its full path instead of a short name that was sometimes not recognized -- so the update step no longer trips over a 'command not found' message. Nothing about your data or what updates do has changed.",
       "bundle_tree_sha256": "sha256:74040c5a7e83a6615b2fc87c7e6b9ad0de5de9cf1ef4c1a088ba8dfd085f16de",
       "bundle_manifest_sha256": "sha256:668a919b4dcc1ec00da8c9d4250a5f0b63c19729b3954efc5cee1a4ba407ec49"
+    },
+    {
+      "foundation_bundle_version": "v0.7.0",
+      "safety_class": "routine_improvement",
+      "recommendation_reason": "Your system now knows where to put its outputs and how to format them for the right channel — outputs land in a predictable place, and significant messages get a design pass before they go out.",
+      "path": "foundation-bundles/v0.7.0/",
+      "release_date": "2026-06-25",
+      "source_commit": "5b65683",
+      "manifest": "foundation-bundles/v0.7.0/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "Your system now produces outputs in a consistent, predictable location (a deliverables/ folder with a clear naming convention established at setup). It also ships maintained output-quality guidance — channel-appropriate formatting for email and SMS, clearer message organization — that your agents consult when producing anything you will read or send. A design-pass skill runs before significant outbound messages to check rendering and organization against your preferences before anything is sent.",
+      "bundle_tree_sha256": "sha256:1f30a74a6306c21ed403a012d41f51e9e4c02f5b3da981baebc88b0ca72956b4",
+      "bundle_manifest_sha256": "sha256:7f087b4a00ee201944c6237543b3f3ec2520d6b1cd5250665c7f27a20d3299b2"
     }
   ]
 }

@@ -6,7 +6,9 @@
     "project_instructions.md": "Operator output quality parameters wired in from interview; agents reference the voice_and_style spec.",
     "agents/prompts/orchestrator_prompt.md": "Instructs orchestrator to apply the operator output quality spec from voice_and_style.md.",
     "agents/prompts/coordinator_prompt.md": "Instructs coordinator to apply the operator output quality spec from voice_and_style.md.",
-    "deliverables/README.md": "New deliverables directory index; describes operator output location naming conventions established at interview."
+    "deliverables/README.md": "New deliverables directory index; describes operator output location naming conventions established at interview.",
+    "docs/how_your_system_works.md": "Updated to cover the new design-outbound-message pass that runs before significant outgoing messages, and the deliverables/ output directory convention.",
+    "wizard/skills/design-outbound-message.md": "New skill that runs a design pass on any significant outbound message (email, digest, external audience) — reads voice_and_style.md, checks channel rendering and message organization, and returns the message ready to send."
   },
   "migrations": [
     {

@@ -25,19 +25,19 @@
       "path": "baselines/vision.md.hash.yaml"
     },
     {
-      "hash": "sha256:d1d31740efd5de67deeb0ed97145412b8e1f833daac467559d36fc8c658de857",
+      "hash": "sha256:48d75d6b572b8cdf22a541076cb2eacdc86ee2d651df771f2be05c61f9d17895",
       "path": "manifest.json"
     },
     {
-      "hash": "sha256:6ad6eecfba3209842bc49a545ff63ddffda75e2b1ea325b2e755fd2a57344593",
+      "hash": "sha256:16cfa2a9855f54c07a3d6d4d5d7bf807c15a598d1eeb3ddd4c8d4690bde9ebc4",
       "path": "manifest.yaml"
     },
     {
-      "hash": "sha256:668a919b4dcc1ec00da8c9d4250a5f0b63c19729b3954efc5cee1a4ba407ec49",
+      "hash": "sha256:7f087b4a00ee201944c6237543b3f3ec2520d6b1cd5250665c7f27a20d3299b2",
       "path": "migration-manifest.json"
     },
     {
-      "hash": "sha256:9445167d492ce4299409db9c10f05af9f1103fab1cc213d3273d7ee483d11ac7",
+      "hash": "sha256:f43f68229fd36c7a820795c1f47c88d63209d1f4ed831d862f4bf969d41649fc",
       "path": "migration-manifest.yaml"
     },
     {
@@ -45,7 +45,7 @@
       "path": "schemas/section-schema.yaml"
     },
     {
-      "hash": "sha256:4ebc40873b5e7c7ac3fc8a24b412f12195df61aa1e000d01b754045b259bfc00",
+      "hash": "sha256:9ccd9cb2ad7f2f14386bfd7218b3c5fcbe47efce8adfbcd1dfb6ca9395b8d49c",
       "path": "system-artifacts.json"
     },
     {
@@ -53,7 +53,7 @@
       "path": "templates/agents/acceptance_contract.md"
     },
     {
-      "hash": "sha256:b10181429b79689d5fcb30ff6fc9ec0c1080a99c3784ebd3cd3e8a8403270f87",
+      "hash": "sha256:a8bf262805b97de0aa81635bd179eb9cf06a97e998c3b583870800e3bc4dbf90",
       "path": "templates/agents/agent_prompt_template.md"
     },
     {
@@ -61,7 +61,7 @@
       "path": "templates/agents/cron_config.md"
     },
     {
-      "hash": "sha256:b94c3c5e787191afa7789f8e4f27ba133cc60b75c5b7d55ce4fda92f2c30a7b5",
+      "hash": "sha256:81ccb32dac858e1a6405a3201d2682ba98f6c98401d4318708557266c5d390e2",
       "path": "templates/agents/orchestrator_prompt.md"
     },
     {
@@ -125,6 +125,10 @@
       "path": "templates/decisions/decision_record_template.md"
     },
     {
+      "hash": "sha256:5264cd67a8b6229c69c193163b6822817866f38f6533c5d6d9e1785399c2f0fd",
+      "path": "templates/deliverables/README.md"
+    },
+    {
       "hash": "sha256:f29194e464094e78272da3a266a3fede67178cca66b6239ebfe6e9f6ffaa020c",
       "path": "templates/docs/architectural_review_staging.md"
     },
@@ -137,11 +141,11 @@
       "path": "templates/docs/future_items.md"
     },
     {
-      "hash": "sha256:2b543c91de70a72ad6081fc78762e0b706d389a770043a889c05e389406a3bea",
+      "hash": "sha256:d1481a621fba6062ea0c5d63019bcc87c403191c26810f07cb7a54076138c166",
       "path": "templates/docs/how_your_system_works.md"
     },
     {
-      "hash": "sha256:39547cc826674531123846916174e5f21056b6270f0a4b2bab74f01cbacc66f2",
+      "hash": "sha256:cf8681b0b8aa276af9225f22be62e4733a8cfff4a9f95ce0b339b1afd3300118",
       "path": "templates/docs/voice_and_style.md"
     },
     {
@@ -249,7 +253,7 @@
       "path": "templates/root/pending_decisions.md"
     },
     {
-      "hash": "sha256:753cc316b8d3f887ddb6924e5ecffe302418d831d4c0eb4f96649375788aaf6b",
+      "hash": "sha256:1e7c7e98f1737473277bcc698d5ad6aa7f9787b6c9039092dc5e4c8bbf4062ca",
       "path": "templates/root/project_instructions.md"
     },
     {
@@ -281,7 +285,7 @@
       "path": "templates/technical_architecture.md"
     },
     {
-      "hash": "sha256:d88e67bc63f664fd84ca6813add1422dac8b65fe6cb735cdd2564d4bf14934ee",
+      "hash": "sha256:4e42fecaec60d47e360ebdfc96cd18066fd36a9fb47f851458b13048ec426ffd",
       "path": "templates/test_cases.md"
     },
     {
@@ -311,6 +315,10 @@
     {
       "hash": "sha256:c70db33fce6105d4d5ea502253318d0a4f4015fa91e0509523c65e908b81535d",
       "path": "templates/wizard/skills/credential-setup.md"
+    },
+    {
+      "hash": "sha256:5a15322d0ca34e79562aaa99b28f7edc88fdede8848568221a30958703ed93ae",
+      "path": "templates/wizard/skills/design-outbound-message.md"
     },
     {
       "hash": "sha256:d132864b369366e03da8e2b66e1801ef1ccab140476b6e6424a538a33f4d863d",
@@ -354,12 +362,12 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-06-24T16:58:24Z",
-  "generator_version": "7559713c50a18bc7cce9de988d228eaf071ac875",
+  "generated_at": "2026-06-25T23:32:01Z",
+  "generator_version": "5b65683b90e9174504c8557328ae327a9b04dc03",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
-  "source_bundle_version": "v0.6.9",
-  "source_registry_entry_hash": "sha256:5433d04f4567ee8ad4f6484915c2da603916e674ef8f83c79317c9e28cab8a4d",
+  "source_bundle_version": "v0.7.0",
+  "source_registry_entry_hash": "sha256:c5850193e160603d6c36d53628e170fcf15f14ece651254c1b0ff323da671c69",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
   "template_tree_hash": "sha256:bcb0399d3483bdb00adf99f9b2cd3c72c549d1218cd0817aee3385860a5fdd1a",

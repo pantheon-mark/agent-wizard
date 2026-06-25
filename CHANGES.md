@@ -12,6 +12,20 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-25 — outputs land in a predictable place, and messages are formatted right before they go out (v0.7.0)
+
+**Public-facing change:** Your system now puts its outputs in a consistent, named location and formats them correctly for the channel — email looks like email, SMS is the right length, and significant messages get a check before they are sent.
+
+- **A home for your outputs.** Your deliverables now go into a `deliverables/` folder with a naming convention agreed at setup, so you always know where to look for what the system produced.
+- **Built-in output quality guidance.** Your system ships a maintained voice-and-style spec covering tone, technical level, formatting, and channel-specific rendering (email, SMS, digest). Your agents consult it when producing anything you will read or send — so outputs read consistently and look right in the channel they are going to.
+- **Design pass before significant messages go out.** A new skill runs before any substantial outbound message — it reads your preferences, checks formatting and organization for the target channel, and returns the message ready to send rather than asking you to review a rough draft.
+
+This is a feature addition (`v0.7.0`, operator-explicit as always). Your own files and customizations are untouched; a backup is taken before anything is applied. Foundation documents are byte-identical to `v0.6.9`.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-06-24 — updates never trip over "command not found" (v0.6.9)
 
 **Public-facing change:** A small reliability fix so checking for and applying an update never fails with a "command not found" message.
