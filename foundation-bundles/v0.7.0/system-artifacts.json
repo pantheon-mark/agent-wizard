@@ -1109,6 +1109,14 @@
       "delivery": "wizard",
       "merge_strategy": "warn_on_drift",
       "mode": "0644",
+      "relpath": "wizard/skills/design-outbound-message.md",
+      "render_kind": "copy",
+      "template_path": "templates/wizard/skills/design-outbound-message.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
       "relpath": "wizard/skills/next-phase.md",
       "render_kind": "copy",
       "template_path": "templates/wizard/skills/next-phase.md"

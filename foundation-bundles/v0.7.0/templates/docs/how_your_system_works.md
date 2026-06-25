@@ -69,3 +69,9 @@ Your agents keep detailed logs of everything they do — but they're instructed 
 ## Pre-flight checks
 
 Before your agents do anything, they first declare exactly what they're planning to change. If the plan looks unusually broad for that agent, the system pauses and asks you to confirm before a single file is touched.
+
+---
+
+## Outbound message design
+
+Before sending a significant message (email, digest, anything to a person), the system runs the design-outbound-message skill to render and organize it well.
