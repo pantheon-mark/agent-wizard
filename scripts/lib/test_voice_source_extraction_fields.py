@@ -200,7 +200,13 @@ class ProjectInstructionsShowsRealValues(unittest.TestCase):
     """The scaffold-emitted project_instructions.md shows the operator's values, not
     the scaffold constants — via build_scaffold_inputs precedence."""
 
-    def test_scaffold_inputs_override_constants(self):
+    def test_scaffold_merge_precedence_for_operator_values(self):
+        """Merge-precedence only: directly-injected fdi values override scaffold constants.
+
+        This proves the merge logic but does NOT drive the real derive->project pipeline
+        (foundation_doc_inputs is hand-mutated). See
+        test_real_pipeline_values_reach_scaffold_inputs for the end-to-end test.
+        """
         import copy
         from scaffold_emitter import build_scaffold_inputs, _default_scaffold_inputs
         from emission_plan import (validate_emission_plan, load_contract,
@@ -217,6 +223,61 @@ class ProjectInstructionsShowsRealValues(unittest.TestCase):
         self.assertEqual(defaults["NOTIFICATION_VERBOSITY"], "standard")  # constant default
         self.assertEqual(defaults["QA_REPORTING_STYLE"], "summary")
         self.assertEqual(merged["UP_TECHNICAL_LITERACY"], "plain language only")
+        self.assertEqual(merged["NOTIFICATION_VERBOSITY"], "Detailed")
+        self.assertEqual(merged["QA_REPORTING_STYLE"], "Live")
+
+    def test_real_pipeline_values_reach_scaffold_inputs(self):
+        """End-to-end: values from the real derive->project pipeline reach build_scaffold_inputs.
+
+        Uses _record_with_voice_answers (record-answer -> cmd_derive_field ->
+        cmd_confirm_field -> compile_transcript -> project) to produce a real
+        foundation_doc_inputs carrying UP_TECHNICAL_LITERACY / NOTIFICATION_VERBOSITY /
+        QA_REPORTING_STYLE, then inserts it into a plan and asserts build_scaffold_inputs
+        yields the operator's real values — NOT the scaffold constants
+        ("standard" / "summary" / CONFIGURE).
+
+        This is the load-bearing assertion that the prior test could not make: it
+        proves the full pipeline deposits these three keys into foundation_doc_inputs
+        as consumed by the emitter, not just that the merge layer honours them once
+        they arrive by hand.
+        """
+        import copy
+        import tempfile
+        from scaffold_emitter import build_scaffold_inputs, _default_scaffold_inputs
+        from emission_plan import (validate_emission_plan, load_contract,
+                                    default_contract_path)
+        from test_emission_plan import _valid_plan  # canonical valid plan fixture
+
+        # Build a real foundation_doc_inputs through the derive->project pipeline.
+        with tempfile.TemporaryDirectory() as d:
+            real_fdi = _record_with_voice_answers(
+                Path(d),
+                literacy="comfortable with technical terms",
+                verbosity="Detailed",
+                qa_style="Live",
+            )
+
+        # The three keys must have been deposited by the real pipeline.
+        self.assertEqual(real_fdi.get("UP_TECHNICAL_LITERACY"), "comfortable with technical terms",
+                         "pipeline must project UP_TECHNICAL_LITERACY")
+        self.assertEqual(real_fdi.get("NOTIFICATION_VERBOSITY"), "Detailed",
+                         "pipeline must project NOTIFICATION_VERBOSITY")
+        self.assertEqual(real_fdi.get("QA_REPORTING_STYLE"), "Live",
+                         "pipeline must project QA_REPORTING_STYLE")
+
+        # Merge those pipeline-produced values into a plan and verify scaffold sees them.
+        plan_dict = copy.deepcopy(_valid_plan())
+        plan_dict["foundation_doc_inputs"].update(real_fdi)
+        plan = validate_emission_plan(plan_dict, load_contract(default_contract_path()))
+        merged = build_scaffold_inputs(plan)
+
+        # Scaffold constants must be overridden by the pipeline-produced values.
+        defaults = _default_scaffold_inputs()
+        self.assertEqual(defaults["NOTIFICATION_VERBOSITY"], "standard",
+                         "scaffold constant is 'standard' — operator value must differ")
+        self.assertEqual(defaults["QA_REPORTING_STYLE"], "summary",
+                         "scaffold constant is 'summary' — operator value must differ")
+        self.assertEqual(merged["UP_TECHNICAL_LITERACY"], "comfortable with technical terms")
         self.assertEqual(merged["NOTIFICATION_VERBOSITY"], "Detailed")
         self.assertEqual(merged["QA_REPORTING_STYLE"], "Live")
 
