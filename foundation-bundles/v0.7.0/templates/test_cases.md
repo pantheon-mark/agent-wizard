@@ -419,10 +419,18 @@ foundation_only_mode: "{{FOUNDATION_ONLY_MODE}}"
 |---|---|---|
 | MA-VS-1 | voice_and_style.md present after wizard build | Seeded from operator profile, notification verbosity, QA reporting style, and vision document voice |
 | MA-VS-2 | Wizard seeds voice_and_style.md without new questions | Derived from existing wizard answers — no additional interview questions |
-| MA-VS-3 | User-facing agents consult voice_and_style.md | Confirmed in invocation scripts for agents producing user-facing or external-facing output |
+| MA-VS-3 | User-facing agents consult voice_and_style.md | Confirmed via the global rule in project_instructions.md and voice_and_style.md listed in additional_context_files for agents producing user-facing or external-facing output |
 | MA-VS-4 | Internal-only agents do not receive voice_and_style.md | Context scoping principle applied — internal agents excluded |
 | MA-VS-5 | Operator style preference updates voice_and_style.md | Orchestrator captures formatting or style preferences progressively |
 | MA-VS-6 | voice_and_style.md includes starter note | Note reads: "These are starting defaults... tell it when you like or don't like how something looks" |
+
+#### Operator-Facing Output
+
+| # | Test | Pass condition |
+|---|---|---|
+| MA-OF-1 | Operator deliverables land in deliverables/ with human-readable names | Files produced for the operator appear in the deliverables/ directory using the naming pattern defined at setup — not improvised per phase or written to work/agent_outputs/ |
+| MA-OF-2 | Orchestrator relocates a stranded deliverable from work/agent_outputs/ to deliverables/ | When the orchestrator finds an operator-facing file in work/agent_outputs/, it moves the file to deliverables/ and logs the relocation; files already in deliverables/ are not touched |
+| MA-OF-3 | System runs the design-outbound-message skill before significant outbound messages | Before sending an email, external message, or operator digest, the system runs the design-outbound-message skill against voice_and_style.md; internal-only artifacts are excluded from this step |
 
 ### System Coordination & Integration
 
