@@ -1,0 +1,137 @@
+{
+  "_note": "JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing companion. Both files MUST stay in sync.",
+  "artifact_notes": {
+    "docs/voice_and_style.md": "New operator output quality spec rendered from interview elicitation; defines tone, technical level, explanation depth, length preference, list and table style for all system outputs.",
+    "test_cases.md": "Expanded with operator output quality test cases (voice/style/rendering conformance).",
+    "project_instructions.md": "Operator output quality parameters wired in from interview; agents reference the voice_and_style spec.",
+    "agents/prompts/orchestrator_prompt.md": "Instructs orchestrator to apply the operator output quality spec from voice_and_style.md.",
+    "agents/prompts/coordinator_prompt.md": "Instructs coordinator to apply the operator output quality spec from voice_and_style.md.",
+    "deliverables/README.md": "New deliverables directory index; describes operator output location naming conventions established at interview."
+  },
+  "migrations": [
+    {
+      "from": "v0.6.9",
+      "class": "minor_additive",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it (\"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard\" self-upgrade --to v0.7.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.9 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.7.0/ and set foundation_bundle_version back to v0.6.9.",
+      "stop_condition": "not_applicable",
+      "notes": "Minor-additive release to v0.7.0: adds operator output quality specification (voice_and_style interview + deliverables/README.md), expands test_cases with output quality assertions, and updates project_instructions and agent prompts to reference the quality spec. No breaking changes; all prior operator project files remain valid."
+    },
+    {
+      "from": "v0.6.8",
+      "class": "minor_additive",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it (\"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard\" self-upgrade --to v0.7.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.8 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.7.0/ and set foundation_bundle_version back to v0.6.8.",
+      "stop_condition": "not_applicable",
+      "notes": "Minor-additive release to v0.7.0: adds operator output quality specification (voice_and_style interview + deliverables/README.md), expands test_cases with output quality assertions, and updates project_instructions and agent prompts to reference the quality spec. No breaking changes; all prior operator project files remain valid. Combined jump from v0.6.8 straight to v0.7.0: also delivers every operating-layer change between v0.6.8 and v0.7.0."
+    },
+    {
+      "from": "v0.6.7",
+      "class": "minor_additive",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it (\"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard\" self-upgrade --to v0.7.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.7 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.7.0/ and set foundation_bundle_version back to v0.6.7.",
+      "stop_condition": "not_applicable",
+      "notes": "Minor-additive release to v0.7.0: adds operator output quality specification (voice_and_style interview + deliverables/README.md), expands test_cases with output quality assertions, and updates project_instructions and agent prompts to reference the quality spec. No breaking changes; all prior operator project files remain valid. Combined jump from v0.6.7 straight to v0.7.0: also delivers every operating-layer change between v0.6.7 and v0.7.0."
+    },
+    {
+      "from": "v0.6.6",
+      "class": "minor_additive",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it (\"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard\" self-upgrade --to v0.7.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.6 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.7.0/ and set foundation_bundle_version back to v0.6.6.",
+      "stop_condition": "not_applicable",
+      "notes": "Minor-additive release to v0.7.0: adds operator output quality specification (voice_and_style interview + deliverables/README.md), expands test_cases with output quality assertions, and updates project_instructions and agent prompts to reference the quality spec. No breaking changes; all prior operator project files remain valid. Combined jump from v0.6.6 straight to v0.7.0: also delivers every operating-layer change between v0.6.6 and v0.7.0."
+    },
+    {
+      "from": "v0.6.5",
+      "class": "minor_additive",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it (\"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard\" self-upgrade --to v0.7.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.5 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.7.0/ and set foundation_bundle_version back to v0.6.5.",
+      "stop_condition": "not_applicable",
+      "notes": "Minor-additive release to v0.7.0: adds operator output quality specification (voice_and_style interview + deliverables/README.md), expands test_cases with output quality assertions, and updates project_instructions and agent prompts to reference the quality spec. No breaking changes; all prior operator project files remain valid. Combined jump from v0.6.5 straight to v0.7.0: also delivers every operating-layer change between v0.6.5 and v0.7.0."
+    },
+    {
+      "from": "v0.6.4",
+      "class": "minor_additive",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it (\"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard\" self-upgrade --to v0.7.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.4 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.7.0/ and set foundation_bundle_version back to v0.6.4.",
+      "stop_condition": "not_applicable",
+      "notes": "Minor-additive release to v0.7.0: adds operator output quality specification (voice_and_style interview + deliverables/README.md), expands test_cases with output quality assertions, and updates project_instructions and agent prompts to reference the quality spec. No breaking changes; all prior operator project files remain valid. Combined jump from v0.6.4 straight to v0.7.0: also delivers every operating-layer change between v0.6.4 and v0.7.0."
+    },
+    {
+      "from": "v0.6.3",
+      "class": "minor_additive",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it (\"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard\" self-upgrade --to v0.7.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.3 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.7.0/ and set foundation_bundle_version back to v0.6.3.",
+      "stop_condition": "not_applicable",
+      "notes": "Minor-additive release to v0.7.0: adds operator output quality specification (voice_and_style interview + deliverables/README.md), expands test_cases with output quality assertions, and updates project_instructions and agent prompts to reference the quality spec. No breaking changes; all prior operator project files remain valid. Combined jump from v0.6.3 straight to v0.7.0: also delivers every operating-layer change between v0.6.3 and v0.7.0."
+    },
+    {
+      "from": "v0.6.2",
+      "class": "minor_additive",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it (\"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard\" self-upgrade --to v0.7.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.2 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.7.0/ and set foundation_bundle_version back to v0.6.2.",
+      "stop_condition": "not_applicable",
+      "notes": "Minor-additive release to v0.7.0: adds operator output quality specification (voice_and_style interview + deliverables/README.md), expands test_cases with output quality assertions, and updates project_instructions and agent prompts to reference the quality spec. No breaking changes; all prior operator project files remain valid. Combined jump from v0.6.2 straight to v0.7.0: also delivers every operating-layer change between v0.6.2 and v0.7.0."
+    },
+    {
+      "from": "v0.6.1",
+      "class": "minor_additive",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it (\"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard\" self-upgrade --to v0.7.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.1 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.7.0/ and set foundation_bundle_version back to v0.6.1.",
+      "stop_condition": "not_applicable",
+      "notes": "Minor-additive release to v0.7.0: adds operator output quality specification (voice_and_style interview + deliverables/README.md), expands test_cases with output quality assertions, and updates project_instructions and agent prompts to reference the quality spec. No breaking changes; all prior operator project files remain valid. Combined jump from v0.6.1 straight to v0.7.0: also delivers every operating-layer change between v0.6.1 and v0.7.0."
+    },
+    {
+      "from": "v0.6.0",
+      "class": "minor_additive",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it (\"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard\" self-upgrade --to v0.7.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.0 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.7.0/ and set foundation_bundle_version back to v0.6.0.",
+      "stop_condition": "not_applicable",
+      "notes": "Minor-additive release to v0.7.0: adds operator output quality specification (voice_and_style interview + deliverables/README.md), expands test_cases with output quality assertions, and updates project_instructions and agent prompts to reference the quality spec. No breaking changes; all prior operator project files remain valid. Combined jump from v0.6.0 straight to v0.7.0: also delivers every operating-layer change between v0.6.0 and v0.7.0."
+    }
+  ],
+  "release_classification": "minor_additive_prerelease",
+  "release_date": "2026-06-25",
+  "schema_version": "v1",
+  "target_version": "v0.7.0"
+}
