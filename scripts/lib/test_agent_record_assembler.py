@@ -172,8 +172,8 @@ class AgentRecordAssemblerTests(unittest.TestCase):
         # both records carry the new informational fields
         self.assertEqual(recs["digest-helper"]["deliverable_root"], "deliverables")
         self.assertEqual(recs["validator"]["deliverable_root"], "deliverables")
-        self.assertIn("deliverable_naming_pattern", recs["digest-helper"])
-        self.assertIn("deliverable_naming_pattern", recs["validator"])
+        self.assertEqual(recs["digest-helper"]["deliverable_naming_pattern"], "<Type> — <subject> — <YYYY-MM-DD>.md")
+        self.assertEqual(recs["validator"]["deliverable_naming_pattern"], "<Type> — <subject> — <YYYY-MM-DD>.md")
 
 
 if __name__ == "__main__":
