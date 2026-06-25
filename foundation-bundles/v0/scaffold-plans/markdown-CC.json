@@ -55,7 +55,9 @@
     ],
     "permitted_write_directories_note": "The agent's task-output dir PLUS the control-plane operational paths every agent prompt mandates writing to (its checkpoint plan, its handoff envelope, three-strikes escalation to issues_log, and operational/audit logging). The agent's blast-radius hard gate checks declared writes against this set, so it MUST cover everything the prompt instructs — narrowing it to the output dir alone halts the agent on its first checkpoint write. Specific log files (not the whole logs/ dir) keep the boundary minimal.",
     "additional_context_files": ["approach.md"],
-    "output_format_specification": "markdown"
+    "output_format_specification": "markdown",
+    "deliverable_root": "deliverables",
+    "deliverable_naming_pattern": "<Type> — <subject> — <YYYY-MM-DD>.md"
   },
   "criticality_model_policy": {
     "critical":   {"primary_model_tier": "high",     "status_model_tier": "standard"},

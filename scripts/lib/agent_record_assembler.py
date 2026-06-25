@@ -121,18 +121,24 @@ def assemble_agent_records(intents: List[AgentIntent], scaffold_plan: ScaffoldPl
         tiers = policy[ai.criticality_tier]
         signals = "; ".join(s for s in ai.acceptance_signals if str(s).strip()) \
             or "the task's stated acceptance signals are met"
+        permitted = list(profile["permitted_write_directories"])
+        if getattr(ai, "operator_facing", False):
+            permitted.append(profile["deliverable_root"])
         rec: Dict[str, Any] = {
             "id": agent_id,
             "role_description": ai.role_intent,
             "criticality_tier": ai.criticality_tier,
             "primary_model_tier": tiers["primary_model_tier"],
             "status_model_tier": tiers["status_model_tier"],
-            "permitted_write_directories": list(profile["permitted_write_directories"]),
+            "permitted_write_directories": permitted,
             "additional_context_files": list(profile["additional_context_files"]),
             "step_completion_criteria": f"Each step is complete when: {signals}.",
             "task_completion_criteria": f"The task is complete when: {signals}.",
             "output_format_specification": profile["output_format_specification"],
             "output_directory": profile["output_directory"],
+            "operator_facing": bool(getattr(ai, "operator_facing", False)),
+            "deliverable_root": profile["deliverable_root"],
+            "deliverable_naming_pattern": profile["deliverable_naming_pattern"],
         }
         # Claim effect (requires_cron -> populate the cron_cadence plan field; carried + validated.
         # Wiring per-agent cadence into the emitted cron config is a later-phase item).

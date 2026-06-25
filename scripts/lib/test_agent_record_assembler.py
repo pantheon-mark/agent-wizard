@@ -156,5 +156,25 @@ class AgentRecordAssemblerTests(unittest.TestCase):
                 f"{uncovered}; permitted={permitted}")
 
 
+    def test_operator_facing_agent_gets_deliverables_in_write_scope(self):
+        """Operator-facing agents get deliverables/ in permitted_write_directories;
+        internal (non-operator-facing) agents do not. Record also carries
+        deliverable_root and deliverable_naming_pattern keys."""
+        intents = [
+            _ai(display_name="digest-helper", operator_facing=True),
+            _ai(display_name="validator", operator_facing=False),
+        ]
+        recs = {r["id"]: r for r in assemble_agent_records(intents, SP)}
+        # operator-facing agent gets deliverables/ in write scope
+        self.assertIn("deliverables", recs["digest-helper"]["permitted_write_directories"])
+        # internal agent does NOT get deliverables/
+        self.assertNotIn("deliverables", recs["validator"]["permitted_write_directories"])
+        # both records carry the new informational fields
+        self.assertEqual(recs["digest-helper"]["deliverable_root"], "deliverables")
+        self.assertEqual(recs["validator"]["deliverable_root"], "deliverables")
+        self.assertIn("deliverable_naming_pattern", recs["digest-helper"])
+        self.assertIn("deliverable_naming_pattern", recs["validator"])
+
+
 if __name__ == "__main__":
     unittest.main()
