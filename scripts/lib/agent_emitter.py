@@ -152,6 +152,21 @@ def _qa_resolved_inputs(plan: EmissionPlan) -> Dict[str, str]:
     }
 
 
+_OPERATOR_OUTPUT_POINTER_TEXT = (
+    "For any operator-facing deliverable, follow the deliverable location, naming, and "
+    "voice/channel rules in `project_instructions.md` and `docs/voice_and_style.md`."
+)
+
+
+def _operator_output_pointer(a) -> str:
+    """Return the operator-output routing pointer for a specialist agent.
+
+    operator-facing agents get the full pointer text; internal agents get an
+    empty string so the placeholder resolves without adding any content.
+    Mirrors how PERMITTED_WRITE_DIRECTORIES is set per-agent from the record."""
+    return _OPERATOR_OUTPUT_POINTER_TEXT if getattr(a, "operator_facing", False) else ""
+
+
 def _agent_prompt_resolved_inputs(plan: EmissionPlan, a) -> Dict[str, str]:
     """The EXACT substitution map emit_agent_layer feeds a specialist prompt."""
     return {
@@ -166,6 +181,7 @@ def _agent_prompt_resolved_inputs(plan: EmissionPlan, a) -> Dict[str, str]:
         "STEP_COMPLETION_CRITERIA": a.step_completion_criteria,
         "TASK_COMPLETION_CRITERIA": a.task_completion_criteria,
         "OUTPUT_FORMAT_SPECIFICATION": a.output_format_specification,
+        "OPERATOR_OUTPUT_POINTER": _operator_output_pointer(a),
         "MODEL_TIER": a.primary_model_tier,
         "MODEL_TIER_FAST": a.status_model_tier,
     }

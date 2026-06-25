@@ -189,6 +189,7 @@ def _default_scaffold_inputs() -> Dict[str, str]:
         "TIER_1_ADDITIONS": "",
         "WIZARD_SETUP_STUBS": "",
         "ADDITIONAL_GITIGNORE_ENTRIES": "",
+        "OPERATOR_OUTPUT_POINTER": "",
         "OUTPUT_TEMPLATES": "",
         "APPROVED_EXAMPLES": "",
         "ANTI_PATTERNS": "",

@@ -182,6 +182,21 @@ This system's autonomous (unattended/scheduled) work draws on the separate month
 
 ---
 
+## Operator-facing deliverables
+
+Write finished, operator-facing deliverables to `deliverables/` using the name
+pattern `<Type> — <subject> — <YYYY-MM-DD>.md` (for example,
+`Call write-up — accountant (Arnie Mayberg) — 2026-06-09.md`). Use
+`work/agent_outputs/` only for intermediate or scratch files. Before finalizing
+an operator-facing deliverable, consult `docs/voice_and_style.md` and render it
+for its channel (HTML for email, plain text for SMS/push — never raw markdown
+symbols).
+
+Your finished work lands in `deliverables/`. Older items created before this
+convention may still live in their original folders.
+
+---
+
 ## Per-Agent Directory Permissions
 
 *Centralized permission registry. Each agent's prompt file also contains its own permission boundary — this table is the single-view audit reference. Updated when agents are added, modified, or removed.*

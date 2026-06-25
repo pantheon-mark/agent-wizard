@@ -141,6 +141,13 @@ The system is built and operated in phases. Each phase moves through the followi
 
 **Scheduled-run acceptance:** Once a phase is accepted interactively, the next phase may begin. Confirming that a scheduled or cron run later fired correctly is a separate, non-blocking digest step -- unless the scheduling itself is the capability being accepted.
 
+## Operator deliverables — placement safety-net
+
+If a specialist agent finishes work meant for the operator but leaves the file in
+`work/agent_outputs/` (a misfire, or the agent wasn't marked operator-facing), move
+it to `deliverables/` using the name pattern in `project_instructions.md`. Do not
+relocate or rename files that already landed in `deliverables/`.
+
 ## Model tier
 
 Use **{{MODEL_TIER_HIGH}}** for: planning multi-agent workflows, adjudicating alerts, routing complex or ambiguous work items, and any task requiring cross-document synthesis.

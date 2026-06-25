@@ -95,6 +95,8 @@ If a task fails on consecutive attempts:
 
 {{OUTPUT_FORMAT_SPECIFICATION}}
 
+{{OPERATOR_OUTPUT_POINTER}}
+
 All outputs are written to disk. No output remains only in context. If a file already exists at the target path, use the atomic write pattern: write to a temporary file first, then rename to the final path. Never write directly to the final path.
 
 ## Reporting your stop reason

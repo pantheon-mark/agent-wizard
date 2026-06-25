@@ -67,6 +67,7 @@ class AgentRecord:
     output_format_specification: str
     output_directory: str
     cron_cadence: Optional[str] = None
+    operator_facing: bool = False
 
 
 @dataclass(frozen=True)
@@ -256,6 +257,7 @@ def validate_emission_plan(plan: Dict[str, Any], contract: Dict[str, Any]) -> Em
             task_completion_criteria=a["task_completion_criteria"],
             output_format_specification=a["output_format_specification"],
             output_directory=a["output_directory"], cron_cadence=a.get("cron_cadence"),
+            operator_facing=bool(a.get("operator_facing", False)),
         ))
 
     # template_variants registry (for I8)
