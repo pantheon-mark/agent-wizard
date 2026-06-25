@@ -279,6 +279,7 @@ def read_agent_intents(events: List[Dict[str, Any]]) -> List["AgentIntent"]:
             confidence=ev.get("confidence", "low"),
             insufficiency_flags=list(ev.get("insufficiency_flags", [])),
             source_spans=list(ev.get("source_spans", [])),
+            operator_facing=bool(ev.get("operator_facing", False)),
         ))
     return out
 

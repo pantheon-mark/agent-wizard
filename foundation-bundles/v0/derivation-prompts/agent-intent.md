@@ -18,12 +18,13 @@ This class produces one intent object per agent. All intent objects together for
 | `confidence` | `high`, `medium`, or `low` — your confidence that this intent object accurately reflects what the operator described |
 | `insufficiency_flags` | List of sub-fields where operator input was too thin to produce a reliable value |
 | `source_spans` | For each sub-field, the question ID(s) the value was drawn from |
+| `operator_facing` | `true` if this agent produces a finished artifact intended for the operator or an external recipient (a deliverable they read/receive); `false` for internal/scratch/validation agents. Derive from the role and output purpose plus the vision's audience-and-outputs. When unsure, prefer `false` — the orchestrator safety-net relocates a mis-marked deliverable, but over-marking an internal agent grants needless write scope. |
 
 ## Inputs
 
 Primary sources: AP-2, AP-3, ARCH-2, ARCH-3. Also draw from: `VISION_PURPOSE`, `VISION_GOALS`, `VISION_SCOPE_BOUNDARY`, `CORE_PURPOSE`, and any early-mention captures tagged to the approach or architecture steps.
 
-For each agent, trace `source_spans` field-by-field — do not apply a single blanket source to the whole intent object.
+For each agent, trace `source_spans` field-by-field — do not apply a single blanket source to the whole intent object. For `operator_facing`, cite the role/output answers (AP-2, AP-3, ARCH-2, ARCH-3) and the vision's audience-and-outputs field (V-3) as the authoritative source spans.
 
 ## Output contract
 

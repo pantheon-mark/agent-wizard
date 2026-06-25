@@ -256,6 +256,7 @@ def cmd_record_agent_intent(transcript: str, group: str, *,
                             requires_broad_fs_read: bool = False, confidence: str = "high",
                             insufficiency_flags: Optional[List[str]] = None,
                             source_spans: Optional[List[str]] = None,
+                            operator_facing: bool = False,
                             clock: Optional[Callable[[], str]] = None) -> Dict[str, Any]:
     """Record one structured AgentIntent (the agent-intent derivation; approach_roster). The
     intent carries operator-meaning + resource CLAIMS only — no fs/model/cron/permission values
@@ -275,7 +276,7 @@ def cmd_record_agent_intent(transcript: str, group: str, *,
                                        requires_external_network=requires_external_network,
                                        requires_broad_fs_read=requires_broad_fs_read),
         confidence=confidence, insufficiency_flags=list(insufficiency_flags or []),
-        source_spans=list(source_spans or []))
+        source_spans=list(source_spans or []), operator_facing=operator_facing)
     return TranscriptRecorder(Path(transcript), clock=clock).record_agent_intent(group, intent)
 
 

@@ -28,6 +28,19 @@ def _agent_intent(**kw):
     return AgentIntent(**base)
 
 
+def _minimal_agent_intent(operator_facing: bool = False, **kw):
+    base = dict(
+        display_name="Researcher", function_summary="Gathers source material.",
+        role_intent="Produce verified research briefs.", acceptance_signals=["brief has citations"],
+        output_purpose="research brief", criticality_tier="standard",
+        resource_claims=ResourceClaims(), confidence="high",
+        insufficiency_flags=[], source_spans=["ARCH-2#1"],
+        operator_facing=operator_facing,
+    )
+    base.update(kw)
+    return AgentIntent(**base)
+
+
 class BuildIntentTests(unittest.TestCase):
     def test_valid_intent_constructs(self):
         bi = BuildIntent(derived_record={"_audit": {}}, agent_intents=[_agent_intent()])
@@ -54,6 +67,14 @@ class BuildIntentTests(unittest.TestCase):
     def test_resource_claims_default_false(self):
         rc = ResourceClaims()
         self.assertFalse(rc.requires_cron or rc.requires_external_network or rc.requires_broad_fs_read)
+
+    def test_agent_intent_carries_operator_facing(self):
+        ai = _minimal_agent_intent(operator_facing=True)
+        self.assertTrue(ai.operator_facing)
+
+    def test_operator_facing_defaults_false_when_absent(self):
+        ai = _minimal_agent_intent()
+        self.assertFalse(ai.operator_facing)
 
     def test_constraint_violation_carries_operator_options(self):
         cv = ConstraintViolation(

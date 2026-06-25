@@ -85,6 +85,7 @@ class AgentIntent:
     confidence: str
     insufficiency_flags: List[str]
     source_spans: List[str]
+    operator_facing: bool = False
 
 
 @dataclass(frozen=True)
