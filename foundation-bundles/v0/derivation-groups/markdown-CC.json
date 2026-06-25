@@ -60,7 +60,7 @@
     {
       "group_id": "hitl_autonomy",
       "input_question_ids": ["FIN-1", "FIN-3", "FIN-4", "FIN-5", "UP-1", "UP-2", "UP-3", "UP-5", "NOTIF-1", "NOTIF-2", "NOTIF-3", "NOTIF-4", "NOTIF-5", "NOTIF-6", "NOTIF-7", "ARCH-4", "ERR-1", "ERR-2", "CONC-1", "START-1", "START-2", "QA-2", "DR", "REV"],
-      "target_fields": ["AUTONOMY_LEVEL", "HITL_MAP_ROWS", "AUTOMATION_CREDIT_POOL", "PROJECT_SHARE_POSTURE", "PROJECT_AUTOMATION_BUDGET", "EXHAUSTION_BEHAVIOR", "INTENSIVE_OPERATION_THRESHOLD"],
+      "target_fields": ["AUTONOMY_LEVEL", "HITL_MAP_ROWS", "AUTOMATION_CREDIT_POOL", "PROJECT_SHARE_POSTURE", "PROJECT_AUTOMATION_BUDGET", "EXHAUSTION_BEHAVIOR", "INTENSIVE_OPERATION_THRESHOLD", "UP_TECHNICAL_LITERACY", "NOTIFICATION_VERBOSITY"],
       "close_after": "step_13",
       "confirmation_marker": "group_hitl_autonomy_confirmed",
       "preview_docs": ["execution_plan.md"],
@@ -71,7 +71,7 @@
     {
       "group_id": "tests_audit",
       "input_question_ids": ["DEP-1", "GATE-1", "GATE-2", "GATE-3", "GATE-4", "QA-1", "QA-3", "QA-4", "ARCH-5", "DRIFT-1"],
-      "target_fields": ["AGENT_SPECIFIC_TESTS", "DRIFT_ANALYSIS_CADENCE", "INPUT_TYPE_INVENTORY", "DOMAIN_SENSITIVITY_SETTINGS", "SOURCE_REGISTRY_ROWS", "EXTERNAL_DEPENDENCY_ANNOTATION"],
+      "target_fields": ["AGENT_SPECIFIC_TESTS", "DRIFT_ANALYSIS_CADENCE", "INPUT_TYPE_INVENTORY", "DOMAIN_SENSITIVITY_SETTINGS", "SOURCE_REGISTRY_ROWS", "EXTERNAL_DEPENDENCY_ANNOTATION", "QA_REPORTING_STYLE"],
       "close_after": "step_13",
       "confirmation_marker": "group_tests_audit_confirmed",
       "preview_docs": ["test_cases.md", "audit_framework.md"],

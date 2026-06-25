@@ -71,10 +71,12 @@ def voice_settings_inputs(inputs: Dict[str, str]) -> Dict[str, str]:
         depth = "standard"
 
     # --- LENGTH_PREFERENCE ---
+    # Closed vocabulary is concise / standard (no "detailed" length value), so a
+    # detailed/live reporting style maps to standard like the default — the two are
+    # folded into one else branch (M-1: the prior explicit "detailed"->"standard"
+    # branch was dead, identical to the else).
     if "summary" in qa_style or "concise" in qa_style or "brief" in up4:
         length = "concise"
-    elif "detailed" in qa_style or "detail" in up4:
-        length = "standard"
     else:
         length = "standard"
 

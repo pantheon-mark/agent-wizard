@@ -314,7 +314,7 @@ interview_cli derive-field --field MVP_SUCCESS_CONDITION --value "<...>" --input
 
 ### Barrier 2 — hitl_autonomy (preview `execution_plan.md`)
 
-This group derives **seven** fields: the autonomy level, the human-in-the-loop policy map, and the **five financial-guardrail fields** that govern what the system spends on its own (the included monthly automation credit, this project's budget, the sharing posture, the exhaustion behavior, and the intensive-operation threshold). The financial source answers (FIN-1 plan / FIN-3 sharing / FIN-4 exhaustion) were captured at step 02; the dollar values are derived **here**, where the group closes — the wizard computes every dollar (the operator never set one).
+This group derives the autonomy level, the human-in-the-loop policy map, the **five financial-guardrail fields** that govern what the system spends on its own (the included monthly automation credit, this project's budget, the sharing posture, the exhaustion behavior, and the intensive-operation threshold), and **two verbatim voice-source captures** (the operator's technical literacy from UP-1 and notification verbosity from ERR-1, pulled forward so they reach `project_instructions.md` and the voice-and-style derivation). The financial source answers (FIN-1 plan / FIN-3 sharing / FIN-4 exhaustion) were captured at step 02; the dollar values are derived **here**, where the group closes — the wizard computes every dollar (the operator never set one).
 
 ```
 # --- Financial guardrail (the cost safety-envelope) ---
@@ -349,6 +349,18 @@ interview_cli confirm-field --field AUTONOMY_LEVEL --group hitl_autonomy --state
 # AUTONOMY_LEVEL (always present); add TIER_1_ADDITIONS only if the vision barrier produced it.
 interview_cli derive-field --field HITL_MAP_ROWS --value "<markdown table: Action | System behavior | Rationale; state BOTH what is permitted AND what is forbidden>" --inputs AUTONOMY_LEVEL
 interview_cli confirm-field --field HITL_MAP_ROWS --group hitl_autonomy --state accepted
+
+# --- Voice-source captures (extraction; verbatim from the operator's earlier answers) ---
+# UP_TECHNICAL_LITERACY (the operator's UP-1 technical-literacy characterization, captured at
+# step 03) and NOTIFICATION_VERBOSITY (the operator's ERR-1 verbosity choice, captured at step 11)
+# are pulled forward VERBATIM here so they project into foundation_doc_inputs — they fill the
+# operator-profile fields in project_instructions.md AND seed the voice-and-style derivation
+# (system output is written in the operator's preferred register). No new question; no separate
+# operator review (they confirmed these answers when first given). Use the exact stored values.
+interview_cli derive-field --field UP_TECHNICAL_LITERACY --value "<the operator's UP-1 answer, verbatim>" --sources UP-1
+interview_cli confirm-field --field UP_TECHNICAL_LITERACY --group hitl_autonomy --state accepted
+interview_cli derive-field --field NOTIFICATION_VERBOSITY --value "<the operator's ERR-1 choice: Minimal | Standard | Detailed>" --sources ERR-1
+interview_cli confirm-field --field NOTIFICATION_VERBOSITY --group hitl_autonomy --state accepted
 ```
 
 **Present the spending guardrail as an informational recap — never an approval gate (Operator Interaction Contract §1 + §5).** The operator already chose *how* spending should behave (their plan, the sharing posture, the exhaustion behavior) earlier in the interview; the dollar figures here are *derived* from those choices, and the share split and the threshold are wizard heuristics the operator has no basis to tune — exactly like the silent-default thresholds at the top of this step. So do **not** ask the operator to approve a budget or a threshold, and do **not** speak any internal structure to them: no group names, no "barrier", no step numbers, no contract-section references — to the operator this is one continuous "Operations" step, and earlier choices are referred to in plain terms ("earlier, when we talked about your plan and budget"), never by step number. Show the computed envelope **once**, as a brief plain recap, then move straight to the guided review. Pattern:
@@ -370,6 +382,12 @@ interview_cli derive-field --field DRIFT_ANALYSIS_CADENCE --value "<DRIFT_CADENC
 interview_cli confirm-field --field DRIFT_ANALYSIS_CADENCE --group tests_audit --state accepted
 interview_cli derive-field --field DOMAIN_SENSITIVITY_SETTINGS --value "<table: Domain | Sensitivity level | Rationale | Last reviewed>" --sources GATE-2   # decision: forced confirm
 interview_cli confirm-field --field DOMAIN_SENSITIVITY_SETTINGS --group tests_audit --state accepted
+# QA_REPORTING_STYLE (the operator's QA-1 reporting-style choice, captured at step 12) is pulled
+# forward VERBATIM here so it projects into foundation_doc_inputs — it fills the QA-reporting line in
+# project_instructions.md AND seeds the voice-and-style derivation (LENGTH_PREFERENCE). No new
+# question; no separate review (they chose it at QA-1). Use the exact stored value.
+interview_cli derive-field --field QA_REPORTING_STYLE --value "<the operator's QA-1 choice: Summary | Live>" --sources QA-1
+interview_cli confirm-field --field QA_REPORTING_STYLE --group tests_audit --state accepted
 # The content-only annotation of the canonical dependency record (purpose / what-stops + the
 # per-role detail enriched at steps 11 and 13). MUST be derived + confirmed BEFORE the two
 # projections below, which read it. Build the JSON array from the dependencies already in the

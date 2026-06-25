@@ -262,6 +262,11 @@ def _drive_hitl_autonomy_group(transcript, progress):
     _derive_confirm(transcript, "EXHAUSTION_BEHAVIOR", "hitl_autonomy", "wait", sources=["FIN-4"])
     cli.cmd_derive_projection(transcript, SHAPE, "PROJECT_AUTOMATION_BUDGET", clock=lambda: CLOCK)
     cli.cmd_derive_projection(transcript, SHAPE, "INTENSIVE_OPERATION_THRESHOLD", clock=lambda: CLOCK)
+    # Voice-source captures (extraction; verbatim from the operator's UP-1 / ERR-1 answers) — they
+    # project into foundation_doc_inputs to fill project_instructions.md + seed the voice derivation.
+    _derive_confirm(transcript, "UP_TECHNICAL_LITERACY", "hitl_autonomy",
+                    "plain language only", sources=["UP-1"])
+    _derive_confirm(transcript, "NOTIFICATION_VERBOSITY", "hitl_autonomy", "Standard", sources=["ERR-1"])
     return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
 
 
@@ -284,6 +289,8 @@ def _drive_tests_audit_group(transcript, progress):
     # IDENTITY + ANNOTATION, not hand-authored. They auto-project (no separate confirmation).
     cli.cmd_derive_projection(transcript, SHAPE, "INPUT_TYPE_INVENTORY", clock=lambda: CLOCK)
     cli.cmd_derive_projection(transcript, SHAPE, "SOURCE_REGISTRY_ROWS", clock=lambda: CLOCK)
+    # Voice-source capture (extraction; verbatim from the operator's QA-1 reporting-style answer).
+    _derive_confirm(transcript, "QA_REPORTING_STYLE", "tests_audit", "Summary", sources=["QA-1"])
     return TranscriptRecorder(Path(transcript), clock=lambda: CLOCK)
 
 
