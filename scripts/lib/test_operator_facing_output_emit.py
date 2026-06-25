@@ -429,12 +429,11 @@ class DesignOutboundSkillEmitTests(unittest.TestCase):
 class DeliverablesReadmeEmitTests(unittest.TestCase):
     """§7: deliverables/README.md is emitted into the operator system.
 
-    KNOWN WIRING GAP: as of the time these tests were written, this assertion
-    FAILS because `generate_operator_system` does not emit `deliverables/` — the
-    directory is absent from scaffold_emitter.SCAFFOLD_SUBDIRS and no other
-    emitter copies the render_kind:copy entry in system-artifacts.json at initial
-    emit time. This test documents the gap at full fidelity rather than weakening
-    the assertion.
+    `deliverables` was added to scaffold_emitter.SCAFFOLD_SUBDIRS so the directory is
+    created and the render_kind:copy entry in system-artifacts.json lands at initial emit.
+    The fix is unconditional (no version gate needed) because _scaffold_sources already
+    has an `if not d.exists(): continue` guard — older bundles that have no
+    templates/deliverables/ simply skip the subdir silently without error.
     """
 
     @classmethod
@@ -447,15 +446,15 @@ class DeliverablesReadmeEmitTests(unittest.TestCase):
         self.assertTrue(
             readme_path.exists(),
             "deliverables/README.md not emitted into operator system — "
-            "wiring gap: deliverables/ is in system-artifacts.json (render_kind:copy) "
-            "but SCAFFOLD_SUBDIRS does not include 'deliverables' and no other emitter "
-            "copies it at initial emit time"
+            "deliverables/ must be present in scaffold_emitter.SCAFFOLD_SUBDIRS"
         )
 
     def test_deliverables_readme_content(self):
         readme_path = self.staging / "deliverables" / "README.md"
-        if not readme_path.exists():
-            self.skipTest("deliverables/README.md not emitted (§7 known gap)")
+        self.assertTrue(
+            readme_path.exists(),
+            "deliverables/README.md not emitted (§7 scaffold gap not fixed)"
+        )
         text = readme_path.read_text(encoding="utf-8")
         self.assertIn(
             "Deliverables", text,

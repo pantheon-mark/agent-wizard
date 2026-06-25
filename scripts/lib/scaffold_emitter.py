@@ -41,7 +41,16 @@ from bundle_templates import (  # type: ignore
 
 # Operational directories emitted verbatim-with-substitution (flat one level each).
 # root/ maps to the staging root; the rest map to a same-named staging subdir.
-SCAFFOLD_SUBDIRS = ("root", "logs", "quality", "work", "docs", "security", "archive")
+SCAFFOLD_SUBDIRS = ("root", "logs", "quality", "work", "docs", "security", "archive", "deliverables")
+
+# Subset of SCAFFOLD_SUBDIRS that are OPTIONAL — introduced in a later bundle version
+# and absent from older bundles. scaffold_emitter._scaffold_sources already skips a
+# missing dir gracefully; this set tells _verify_template_dependencies (in
+# operator_system_emitter) to do the same rather than raising for bundles that
+# legitimately predate the feature.
+# deliverables/ was introduced in v0.7.0; older operating-layer bundles do not carry
+# templates/deliverables/ and should not be rejected for that.
+OPTIONAL_SCAFFOLD_SUBDIRS = frozenset({"deliverables"})
 
 # Scaffold + operating-layer templates are now sourced from the versioned system
 # bundle's templates/ tree (the single frozen template home), NOT the live working

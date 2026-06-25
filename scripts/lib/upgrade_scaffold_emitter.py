@@ -146,6 +146,10 @@ _EXACT_LIFECYCLE = {
     "execution_plan.md": "foundation_operator",
     "test_cases.md": "foundation_operator",
     "audit_framework.md": "foundation_wizard",
+    # deliverables/README.md is wizard-authored guidance (render_kind:copy in system-artifacts.json);
+    # the directory itself is runtime_state (covered by the _DIR_LIFECYCLE "deliverables/" prefix),
+    # but the README is inherited_content — exact override wins over directory prefix.
+    "deliverables/README.md": "inherited_content",
 }
 
 # Directory-prefix lifecycle rules (mirror the template tree's own semantics).
@@ -165,6 +169,8 @@ _DIR_LIFECYCLE = {
     "security/": "operator_config",
     "wizard/": "operator_fill_template",   # operator's build-session materials (review prompts / skill templates)
     ".claude/": "inherited_content",       # Claude Code config (statusline + context-monitor hook + settings); wizard-authored
+    "deliverables/": "runtime_state",      # operator-facing outputs written by agents at runtime; README.md
+                                           # is an exact-override exception (inherited_content below).
 }
 
 

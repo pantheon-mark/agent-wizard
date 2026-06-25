@@ -75,7 +75,7 @@ def _verify_template_dependencies(plan: EmissionPlan, build_repo_root: Path) -> 
         return  # foundation-only bundle: no operating-layer dependencies to verify
 
     # For operating-layer bundles, verify required bundle template subdirs exist.
-    from scaffold_emitter import SCAFFOLD_SUBDIRS  # type: ignore
+    from scaffold_emitter import SCAFFOLD_SUBDIRS, OPTIONAL_SCAFFOLD_SUBDIRS  # type: ignore
     from agent_emitter import (  # type: ignore
         _BUNDLE_ORCHESTRATOR_REL, _BUNDLE_SPECIALIST_REL, _BUNDLE_QA_REL,
         _BUNDLE_INVOCATION_REL, _BUNDLE_CRON_REL,
@@ -88,6 +88,8 @@ def _verify_template_dependencies(plan: EmissionPlan, build_repo_root: Path) -> 
         if not (bundle_templates / rel).is_file():
             missing.append(f"bundle/{plan.bundle_version}/templates/{rel}")
     for sub in SCAFFOLD_SUBDIRS:
+        if sub in OPTIONAL_SCAFFOLD_SUBDIRS:
+            continue  # optional dirs are legitimately absent from older bundles; skip
         if not (bundle_templates / sub).exists():
             missing.append(f"bundle/{plan.bundle_version}/templates/{sub}")
     if missing:
