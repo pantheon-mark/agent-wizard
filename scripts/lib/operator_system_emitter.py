@@ -41,6 +41,7 @@ from generator import (  # type: ignore
 from corpus_loader import load_corpus_pack  # type: ignore
 from scaffold_emitter import emit_scaffold, scaffold_template_placeholders  # type: ignore
 from authority_profile import autonomous_actions_summary  # type: ignore
+from voice_settings import voice_settings_inputs  # type: ignore
 from agent_emitter import emit_agent_layer  # type: ignore
 from foundation_doc_emitter import emit_foundation_docs  # type: ignore
 from operator_fill_emitter import emit_operator_fill_templates  # type: ignore
@@ -283,6 +284,7 @@ def emit_operator_system(plan: EmissionPlan, staging_dir: Path,
     scaffold_extra = {
         "INHERITED_OPERATING_PRINCIPLES": block,
         "AUTONOMOUS_ACTIONS": autonomous_actions_summary(autonomy_level),
+        **voice_settings_inputs(plan.foundation_doc_inputs),
     }
     core_purpose = str(plan.foundation_doc_inputs.get("CORE_PURPOSE", "")).strip()
     if core_purpose:

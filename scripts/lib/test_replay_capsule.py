@@ -216,17 +216,20 @@ class CapsuleV2OperatingBlockTests(unittest.TestCase):
     def _target_derived_scaffold_map(self, plan):
         """The substitution values a re-render legitimately RE-DERIVES from the target
         bundle (NOT read from the capsule): the bundle-shipped deterministic scaffold
-        defaults, the corpus/autonomy-derived blocks, and the resolved model strings.
+        defaults, the corpus/autonomy-derived blocks, the voice settings, and the
+        resolved model strings.
         Persisted values are deliberately excluded here — they come from the capsule."""
         from scaffold_emitter import _default_scaffold_inputs
         from corpus_emitter import render_claude_md_block
         from corpus_loader import load_corpus_pack
         from authority_profile import autonomous_actions_summary
+        from voice_settings import voice_settings_inputs
         records = load_corpus_pack()
         m = dict(_default_scaffold_inputs())
         m["INHERITED_OPERATING_PRINCIPLES"] = render_claude_md_block(plan, records)
         m["AUTONOMOUS_ACTIONS"] = autonomous_actions_summary(
             plan.foundation_doc_inputs.get("AUTONOMY_LEVEL", "1"))
+        m.update(voice_settings_inputs(plan.foundation_doc_inputs))
         m["MODEL_HIGH"] = plan.model_tiers["high"]
         m["MODEL_STANDARD"] = plan.model_tiers["standard"]
         m["MODEL_FAST"] = plan.model_tiers["fast"]

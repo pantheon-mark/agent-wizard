@@ -216,6 +216,7 @@ def build_operating_block(plan: EmissionPlan, build_repo_root: Path) -> Optional
     from corpus_loader import load_corpus_pack  # type: ignore
     from authority_profile import autonomous_actions_summary  # type: ignore
     from agent_emitter import build_agent_resolved_inputs  # type: ignore
+    from voice_settings import voice_settings_inputs  # type: ignore
 
     records = load_corpus_pack()
     block = render_claude_md_block(plan, records)
@@ -223,6 +224,7 @@ def build_operating_block(plan: EmissionPlan, build_repo_root: Path) -> Optional
     scaffold_extra = {
         "INHERITED_OPERATING_PRINCIPLES": block,
         "AUTONOMOUS_ACTIONS": autonomous_actions_summary(autonomy_level),
+        **voice_settings_inputs(plan.foundation_doc_inputs),
     }
     core_purpose = str(plan.foundation_doc_inputs.get("CORE_PURPOSE", "")).strip()
     if core_purpose:

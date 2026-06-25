@@ -234,6 +234,7 @@ def derive_scaffold_render_inputs(
     from corpus_loader import load_corpus_pack  # type: ignore
     from authority_profile import autonomous_actions_summary  # type: ignore
     from model_tiers import load_model_tiers  # type: ignore
+    from voice_settings import voice_settings_inputs  # type: ignore
 
     shim = _DerivationShim(system_shape, dict(foundation_doc_inputs))
     records = load_corpus_pack()
@@ -249,6 +250,7 @@ def derive_scaffold_render_inputs(
     inputs["AUTONOMOUS_ACTIONS"] = autonomous_actions_summary(
         foundation_doc_inputs.get("AUTONOMY_LEVEL", "1")
     )
+    inputs.update(voice_settings_inputs(foundation_doc_inputs))
     core_purpose = str(foundation_doc_inputs.get("CORE_PURPOSE", "")).strip()
     if core_purpose:
         inputs["PROJECT_PURPOSE"] = core_purpose
