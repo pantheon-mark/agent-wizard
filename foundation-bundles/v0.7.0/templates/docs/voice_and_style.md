@@ -26,6 +26,22 @@
 
 ---
 
+## Channel-appropriate rendering
+
+| Channel | Render as |
+|---|---|
+| Email | HTML — headings, bold, and lists rendered, never raw `#` / `*` / `—` symbols |
+| SMS / push (NTFY) | Plain text — short, no markdown symbols |
+| On-disk deliverable | Markdown |
+
+## Information architecture
+
+- Lead with what needs the operator's action; put status and housekeeping below it.
+- Suppress noise — collapse a long low-value list to a one-line count.
+- Show what changed since the last message ("since yesterday"), not just the current full state.
+
+---
+
 ## Output-specific templates
 
 *For recurring outputs to third parties. Add templates here as patterns emerge.*

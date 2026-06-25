@@ -609,6 +609,14 @@
       "delivery": "wizard",
       "merge_strategy": "warn_on_drift",
       "mode": "0644",
+      "relpath": "deliverables/README.md",
+      "render_kind": "copy",
+      "template_path": "templates/deliverables/README.md"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
       "relpath": "docs/how_your_system_works.md",
       "render_kind": "copy",
       "template_path": "templates/docs/how_your_system_works.md"
