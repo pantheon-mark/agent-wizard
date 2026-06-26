@@ -103,6 +103,65 @@ class TestSubprocessCurl(unittest.TestCase):
         self.assertGreaterEqual(len(net), 3)
 
 
+class TestSpoofedAnchor(unittest.TestCase):
+    def test_fake_allowed_module_dir_outside_anchor_is_flagged(self):
+        # A directory recreating the allowed module's NAME
+        # (agents/lib/external_write) somewhere OUTSIDE the real installed
+        # adapter location must NOT be exempted. Exemption is anchored to the
+        # real adapter dir (scan.py's own location), not to a floating name.
+        spoof = (
+            _FIXTURES
+            / "fake_anchor"
+            / "agents"
+            / "lib"
+            / "external_write"
+            / "sneaky.py"
+        )
+        v = scan_paths([spoof])
+        self.assertTrue(
+            v, "a spoofed look-alike adapter dir must NOT be exempted"
+        )
+        self.assertIn("forbidden_import", _kinds(v))
+
+    def test_explicit_allowed_root_override_exempts_only_that_tree(self):
+        # Caller can override the anchor. Passing the spoof tree's adapter dir as
+        # the explicit allowed_root exempts it; the real adapter dir is then NOT
+        # the anchor, but a file under the override IS exempt.
+        spoof_root = (
+            _FIXTURES / "fake_anchor" / "agents" / "lib" / "external_write"
+        )
+        spoof_file = spoof_root / "sneaky.py"
+        v = scan_paths([spoof_file], allowed_root=spoof_root)
+        self.assertEqual(
+            v, [], "file under the explicit allowed_root must be exempt"
+        )
+
+    def test_real_adapter_dir_is_default_anchor(self):
+        # With no override, the default anchor is scan.py's own dir (the real
+        # adapter dir), so real adapter code stays exempt.
+        v = scan_paths([_ADAPTER_DIR])
+        self.assertEqual(v, [], "real adapter code must be exempt by default")
+
+
+class TestMethodReferenceBypass(unittest.TestCase):
+    def test_mutation_method_referenced_not_called_is_flagged(self):
+        # fn = service.spreadsheets().values().update ; fn(...)  -- the mutation
+        # surface is referenced as an attribute load, not the immediate func of
+        # a Call. It must still be flagged.
+        v = scan_paths([_FIXTURES / "method_reference.py"])
+        self.assertTrue(v, "method-reference mutation bypass must be flagged")
+        self.assertIn("direct_api_call", _kinds(v))
+        direct = [x for x in v if x.kind == "direct_api_call"]
+        # update reference + batchUpdate reference.
+        self.assertGreaterEqual(len(direct), 2)
+
+
+class TestDenylistPycurl(unittest.TestCase):
+    def test_pycurl_import_flagged(self):
+        v = scan_paths([_FIXTURES / "forbidden_import_pycurl.py"])
+        self.assertIn("forbidden_import", _kinds(v))
+
+
 class TestDirectoryAggregation(unittest.TestCase):
     def test_directory_scan_aggregates_violations(self):
         v = scan_paths([_FIXTURES])

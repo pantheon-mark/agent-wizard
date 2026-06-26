@@ -21,16 +21,19 @@ Bypass classes CAUGHT at v0
 ------------------------------------------------------------------------------
   forbidden_import    -- importing a network / external-write client
                          (requests, urllib, http.client, googleapiclient,
-                         gspread, httpx, aiohttp, boto3, psycopg2, ...) anywhere
-                         outside the allowed module. Both ``import x`` and
-                         ``from x import y`` forms; submodules (urllib.request)
-                         match the banned top-level package.
-  direct_api_call     -- calling a known external-surface mutation method by
-                         name (values().update, batchUpdate, append,
-                         update_cells, ...). Caught wherever it appears,
-                         including inside a local helper function (so helper
-                         indirection is covered: the forbidden call inside the
-                         helper is itself reported).
+                         gspread, httpx, aiohttp, boto3, psycopg2, pycurl, ...)
+                         anywhere outside the allowed module. Both ``import x``
+                         and ``from x import y`` forms; submodules
+                         (urllib.request) match the banned top-level package.
+  direct_api_call     -- referencing a known external-surface mutation method
+                         by name (values().update, batchUpdate, append,
+                         update_cells, ...). Caught whether the mutation verb is
+                         the immediate func of a Call OR merely loaded as an
+                         attribute and called indirectly (``fn = svc...update;
+                         fn(...)``). Caught wherever it appears, including inside
+                         a local helper function (so helper indirection is
+                         covered: the forbidden reference inside the helper is
+                         itself reported).
   dynamic_import      -- importlib.import_module('requests') / __import__(...)
                          with a banned literal module name (defeats static
                          ``import`` detection).
@@ -57,11 +60,37 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
     attempt to symbolically execute the program.)
   * Non-Python entrypoints (JS / shell). The consult names these as eventual
     targets; this v0 scans Python only. A non-.py file is skipped.
+  * Import denylist is CURATED, not exhaustive. The forbidden-import roots are a
+    maintained list of known network / external-write clients. An unlisted
+    network client (a niche or future HTTP/DB library not yet enumerated in
+    ``_FORBIDDEN_IMPORT_ROOTS``) is a KNOWN false negative for the import check.
+    The direct-call, dynamic-import, and subprocess-network surfaces still apply
+    regardless of which client library is used, so an unlisted import alone does
+    not silently grant a clean bypass for the common mutation/shell-out shapes —
+    but the import-name denylist itself must be kept current as new clients
+    appear. This bound is disclosed; it is not a silent cap.
+
+------------------------------------------------------------------------------
+Allowed-module identity (anchored, NOT a floating directory name)
+------------------------------------------------------------------------------
+  Exemption is anchored to a single canonical absolute location: the real,
+  installed adapter directory. By default that is ``scan.py``'s own directory
+  (``Path(__file__).resolve().parent``) — scan.py lives INSIDE the allowed
+  module, so its location IS the adapter directory and cannot be spoofed by a
+  look-alike directory an author recreates elsewhere. A scanned file is exempt
+  IFF its resolved path is that anchor directory or a descendant of it. The
+  caller may override the anchor explicitly (``scan_paths(..., allowed_root=)``)
+  so build wiring can pass the canonical adapter dir. The dotted
+  ``allowed_module`` string is used for messaging only — it is NOT the exemption
+  credential. (Earlier versions keyed exemption on the directory NAME appearing
+  anywhere in the path; that was spoofable — a file under an attacker-created
+  ``.../agents/lib/external_write/`` anywhere on disk was silently exempted.
+  Fixed: identity is the absolute anchor, not a floating name.)
 """
 
 import ast
 from pathlib import Path
-from typing import List, NamedTuple, Sequence, Union
+from typing import List, NamedTuple, Optional, Sequence, Union
 
 
 class Violation(NamedTuple):
@@ -98,6 +127,9 @@ _FORBIDDEN_IMPORT_ROOTS = frozenset(
         "httplib",
         "httpx",
         "aiohttp",
+        "pycurl",
+        "treq",
+        "tornado",
         "googleapiclient",
         "gspread",
         "google",        # google.cloud.*, google-api-python-client surfaces
@@ -117,9 +149,17 @@ _FORBIDDEN_IMPORT_ROOTS = frozenset(
     }
 )
 
-# Mutation verbs on the Sheets values() handle (and similar connectors). These
-# are flagged when they terminate a surface-mutation attribute chain.
-_FORBIDDEN_SHEETS_VERBS = frozenset({"update", "batchUpdate", "append", "clear"})
+# Ambiguous mutation verbs that collide with builtin collection methods
+# (dict.values(), list.append()). Flagged ONLY when they terminate a
+# sheets-style surface chain (values()/spreadsheets()/sheet) — see
+# _check_surface_mutation.
+_FORBIDDEN_SHEETS_VERBS = frozenset({"update", "append", "clear"})
+
+# Unambiguous external-surface mutation method names — not English collection
+# methods, so flagged on name alone, in a single detection path (this replaces
+# the prior double-handling where batchUpdate was both a "sheets verb" and a
+# trailing special case).
+_UNAMBIGUOUS_SURFACE_VERBS = frozenset({"batchUpdate", "update_cells"})
 
 # Functions that perform a dynamic import.
 _DYNAMIC_IMPORT_FUNCS = frozenset({"__import__"})
@@ -137,34 +177,41 @@ _NETWORK_CLI_TOOLS = frozenset(
 
 
 # ---------------------------------------------------------------------------
-# Allowed-module identity (by file path — NOT by a string the script controls)
+# Allowed-module identity (anchored to ONE absolute location — NOT a name the
+# script controls and NOT a directory name that can be recreated elsewhere)
 # ---------------------------------------------------------------------------
 
-def _allowed_path_parts(allowed_module: str) -> tuple:
-    """Translate the dotted allowed-module name into path components.
+def _default_allowed_root() -> Path:
+    """The canonical allowed-module directory: scan.py's OWN installed location.
 
-    'agents.lib.external_write' -> ('agents', 'lib', 'external_write').
+    scan.py lives INSIDE the allowed module (``agents/lib/external_write/``), so
+    its parent directory IS the real adapter directory. This anchor cannot be
+    spoofed by a look-alike directory an author recreates somewhere else —
+    identity is the absolute installed path, not a floating name.
     """
-    return tuple(p for p in allowed_module.split(".") if p)
+    return Path(__file__).resolve().parent
 
 
-def _is_inside_allowed_module(file_path: Path, allowed_parts: tuple) -> bool:
-    """A file is INSIDE the allowed module iff its resolved path contains the
-    allowed package's directory components as a contiguous run.
+def _is_inside_allowed_module(file_path: Path, allowed_root: Path) -> bool:
+    """A file is INSIDE the allowed module iff its resolved path is the anchor
+    directory or a descendant of it.
 
-    Identity is decided by where the file lives on disk, not by any import
-    string the script could spoof — a script under an attacker-named directory
-    cannot claim exemption, and a malicious ``# agents.lib.external_write``
-    comment is irrelevant.
+    Identity is decided by absolute location, not by any name a script could
+    spoof: a file under an attacker-recreated ``.../agents/lib/external_write/``
+    directory ELSEWHERE on disk is NOT exempt, and a malicious
+    ``# agents.lib.external_write`` comment or import string is irrelevant.
     """
-    if not allowed_parts:
-        return False
-    parts = file_path.resolve().parts
-    n = len(allowed_parts)
-    for i in range(len(parts) - n + 1):
-        if parts[i : i + n] == allowed_parts:
+    resolved = file_path.resolve()
+    try:
+        # Path.is_relative_to is available in Python 3.9+. is_relative_to(self)
+        # is True, so the anchor directory itself is also exempt.
+        return resolved.is_relative_to(allowed_root)
+    except AttributeError:  # pragma: no cover - py<3.9 fallback
+        try:
+            resolved.relative_to(allowed_root)
             return True
-    return False
+        except ValueError:
+            return False
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +317,16 @@ class _Scanner(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         self._check_dynamic_import(node)
         self._check_subprocess_network(node)
-        self._check_direct_api_call(node)
+        # NOTE: surface-mutation detection is done in visit_Attribute, NOT here.
+        # That way a mutation verb is caught whether it is the immediate func of
+        # a Call (svc...update(...)) OR merely loaded and called indirectly
+        # (fn = svc...update; fn(...)). The Attribute node exists in BOTH shapes
+        # and the visitor reaches it via generic_visit, so there is exactly one
+        # detection path and no double-count.
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        self._check_surface_mutation(node)
         self.generic_visit(node)
 
     def _check_dynamic_import(self, node: ast.Call) -> None:
@@ -306,15 +362,20 @@ class _Scanner(ast.NodeVisitor):
                 elif base.id == "os" and func.attr in _OS_SHELL_FUNCS:
                     is_os_shell = True
         elif isinstance(func, ast.Name):
-            # bare run(...) / Popen(...) imported from subprocess
-            if func.id in _SUBPROCESS_FUNCS or func.id in {"system", "popen"}:
-                # Only treat as subprocess if a network tool literal is present;
-                # this avoids flagging unrelated run()/system() helpers.
+            # bare run(...) / Popen(...) (from subprocess import run) or bare
+            # system(...) / popen(...) (from os import system). Treated as a
+            # shell-out entrypoint here; whether it is flagged depends entirely
+            # on the network-tool literal check below — a run()/system() with no
+            # network CLI literal is NOT flagged.
+            if func.id in _SUBPROCESS_FUNCS:
                 is_subprocess = True
+            elif func.id in _OS_SHELL_FUNCS:
+                is_os_shell = True
 
         if not (is_subprocess or is_os_shell):
             return
 
+        # Flag only when a string-literal argument names a network CLI tool.
         for s in _literal_str_args(node):
             tool = _first_token(s)
             tool_base = Path(tool).name  # handle /usr/bin/curl
@@ -322,39 +383,46 @@ class _Scanner(ast.NodeVisitor):
                 self._add(node.lineno, "subprocess_network")
                 return
 
-    def _check_direct_api_call(self, node: ast.Call) -> None:
-        func = node.func
-        if not isinstance(func, ast.Attribute):
-            return
-        method = func.attr
+    def _check_surface_mutation(self, node: ast.Attribute) -> None:
+        """Flag a surface-mutation attribute REFERENCE.
 
-        # Surface-mutation chain: ...values().<verb>(...) where verb mutates.
+        This fires for an ``ast.Attribute`` whose ``.attr`` is a known
+        external-surface mutation verb, regardless of whether the attribute is
+        the immediate func of a Call (``svc...update(...)``) or merely loaded
+        and invoked indirectly (``fn = svc...update; fn(...)``). Detecting at the
+        attribute load — not at the Call — closes the method-reference bypass.
+
+        Chain gating is preserved to avoid false positives on benign
+        ``dict.values()`` / ``list.append()``: the ambiguous verbs
+        (update/append/clear) are flagged only when the attribute chain shows a
+        sheets-style surface handle. The unambiguous verbs (batchUpdate,
+        update_cells) are flagged on name alone.
+        """
+        method = node.attr
+
+        # Unambiguous external-surface verbs: flagged on name alone (single
+        # path — no separate later branch). These are not English collection
+        # methods, so there is no benign-collision risk.
+        if method in _UNAMBIGUOUS_SURFACE_VERBS:
+            self._add(node.lineno, "direct_api_call")
+            return
+
+        # Ambiguous verbs (update/append/clear) collide with dict/list methods;
+        # flag only when the attribute sits on a sheets-style surface chain.
         if method in _FORBIDDEN_SHEETS_VERBS:
             chain = _attr_chain_names(node)
-            # update/append/clear/batchUpdate are only forbidden when they sit
-            # on a sheets-style surface chain (values()/spreadsheets()) OR are
-            # the explicit batchUpdate verb (which is unambiguously a surface op).
-            if method == "batchUpdate":
-                self._add(node.lineno, "direct_api_call")
-                return
             if "values" in chain or "spreadsheets" in chain or "sheet" in chain:
                 self._add(node.lineno, "direct_api_call")
-                return
-            return
-
-        # Other unambiguous surface-mutation method names.
-        if method in {"batchUpdate", "update_cells"}:
-            self._add(node.lineno, "direct_api_call")
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def _scan_file(file_path: Path, allowed_parts: tuple) -> List[Violation]:
+def _scan_file(file_path: Path, allowed_root: Path) -> List[Violation]:
     if file_path.suffix != ".py":
         return []
-    if _is_inside_allowed_module(file_path, allowed_parts):
+    if _is_inside_allowed_module(file_path, allowed_root):
         return []
     try:
         source = file_path.read_text(encoding="utf-8")
@@ -381,20 +449,39 @@ def _iter_py_files(path: Path):
 def scan_paths(
     paths: Sequence[Union[str, Path]],
     allowed_module: str = "agents.lib.external_write",
+    allowed_root: Optional[Union[str, Path]] = None,
 ) -> List[Violation]:
     """Scan ``paths`` (files and/or directories) for external-write bypasses.
 
-    Code WITHIN ``allowed_module`` (the external_write package) is exempt — that
-    is where the real network calls legitimately live, decided by file path.
+    Code WITHIN the allowed module (the external_write package) is exempt — that
+    is where the real network calls legitimately live. Exemption is anchored to
+    a single absolute location, NOT to a directory name that can be recreated
+    elsewhere:
+
+      * ``allowed_root`` (when given) is the canonical adapter directory. A
+        scanned file is exempt iff its resolved path is that directory or a
+        descendant of it. Build wiring should pass the real adapter dir here.
+      * When ``allowed_root`` is None, the anchor defaults to scan.py's OWN
+        installed directory (``Path(__file__).resolve().parent``), which IS the
+        real adapter directory and cannot be spoofed by a look-alike directory.
+
+    ``allowed_module`` is the dotted name used for human-facing messaging only;
+    it is deliberately NOT the exemption credential (keying on the name was
+    spoofable — a file under an attacker-created ``.../agents/lib/external_write/``
+    anywhere on disk was silently exempted).
 
     Returns a list of :class:`Violation`, ordered by file path then line number.
     An empty list means the build passes this gate.
     """
-    allowed_parts = _allowed_path_parts(allowed_module)
+    anchor = (
+        Path(allowed_root).resolve()
+        if allowed_root is not None
+        else _default_allowed_root()
+    )
     violations: List[Violation] = []
     for raw in paths:
         p = Path(raw)
         for f in _iter_py_files(p):
-            violations.extend(_scan_file(f, allowed_parts))
+            violations.extend(_scan_file(f, anchor))
     violations.sort(key=lambda v: (v.path, v.lineno, v.kind))
     return violations
