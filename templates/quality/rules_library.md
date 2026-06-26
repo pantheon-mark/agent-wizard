@@ -10,6 +10,16 @@
 
 {{RULES_LIBRARY_ENTRIES}}
 
+### Standing rule — controlled-value writes
+
+| Field | Contents |
+|-------|---------|
+| Category | Write integrity |
+| Rule | When writing to a field that accepts only a fixed set of values (a dropdown, a status column, any field with a controlled vocabulary or allowed set), write only a value that is on that allowed set. Read the allowed set from the live surface and treat it as the source of truth. If the intended value is not on the allowed set, stop and ask — never write an out-of-vocabulary value. |
+| Conditions | Applies to every write to an external surface field that enforces a controlled vocabulary. Does not apply to free-text fields. Governs *which value* is written; it does not change *where* operator-facing deliverables go (the deliverable-folder rule still applies, unchanged). |
+| Applies to | Every agent that writes to an external surface, and the orchestrator when it writes directly. |
+| Status | Active |
+
 *Additional rules accumulate over time from: user feedback corrections, QA investigation outcomes validated by the user, advisor response decisions, and human review queue resolutions. Rules are never auto-deleted — obsolete rules are marked inactive.*
 
 ---

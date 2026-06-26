@@ -43,6 +43,100 @@ _BUNDLE_CRON_REL = "agents/cron_config.md"
 
 SCRIPT_MODE = 0o755
 
+# The external-write substrate (single home: wizard/agents/lib/external_write/). These files
+# are emitted into a system ONLY when its plan has a writes-back (boundary_output) dependency —
+# a system that writes back to nothing carries none of this lib (no dead code for non-writing
+# systems). Bundle-relative subpaths (inside <bundle>/templates/agents/lib/external_write/);
+# the ship target is agents/lib/external_write/ in the emitted tree.
+_EXTERNAL_WRITE_LIB_FILES = (
+    "operations.py",
+    "adapters.py",
+    "broker.py",
+    "scan.py",
+)
+_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
+_BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
+
+
+def _plan_has_writes_back(plan: "EmissionPlan") -> bool:
+    """True iff the plan's external-dependency identity record contains at least one
+    dependency that plays the boundary_output (writes-back) role.
+
+    Single source: reads the same EXTERNAL_DEPENDENCY_IDENTITY field the permission
+    derivation reads (the canonical identity record produced by interview step 09).
+    A foundation-only plan never writes back (no agent layer)."""
+    if plan.foundation_only_mode:
+        return False
+    import json
+    from dependency_projection import IDENTITY_FIELD, ROLE_BOUNDARY_OUTPUT  # type: ignore
+    raw = plan.foundation_doc_inputs.get(IDENTITY_FIELD)
+    if not raw or not str(raw).strip():
+        return False
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if not isinstance(data, list):
+        return False
+    for dep in data:
+        if isinstance(dep, dict) and ROLE_BOUNDARY_OUTPUT in (dep.get("roles") or []):
+            return True
+    return False
+
+
+def external_write_lib_emit_set(plan: "EmissionPlan") -> List[str]:
+    """The emitted-tree relpaths of the external_write lib files this plan should emit.
+
+    Returns the four lib files (operations/adapters/broker/scan under
+    agents/lib/external_write/) when the plan has a writes-back dependency; returns []
+    otherwise (no dead code for non-writing systems, and none for foundation-only plans).
+    This is the DECISION + file-selection function the agent-layer emitter consults; the
+    actual file copy depends on the source bundle carrying the lib (cut in a later bundle)."""
+    if not _plan_has_writes_back(plan):
+        return []
+    return [f"{_EXTERNAL_WRITE_LIB_REL}/{f}" for f in _EXTERNAL_WRITE_LIB_FILES]
+
+
+def _emit_external_write_lib(plan: "EmissionPlan", staging_dir: Path,
+                             build_repo_root: Path) -> List[Path]:
+    """Copy the external_write lib files into the staging tree when the plan writes back.
+
+    Sources from the frozen bundle templates tree (single home; same bundle the agent
+    templates come from). A bundle that does not yet carry the lib files (the lib ships in
+    a later bundle cut) yields no copy — the emit-set decision still reports them via
+    external_write_lib_emit_set; the physical emit is gated on the source existing."""
+    targets = external_write_lib_emit_set(plan)
+    if not targets:
+        return []
+    bt = _bundle_agent_templates_root(build_repo_root, plan.bundle_version)
+    src_dir = bt / _BUNDLE_EXTERNAL_WRITE_LIB_REL
+    written: List[Path] = []
+    out_dir = staging_dir / _EXTERNAL_WRITE_LIB_REL
+    init_src = src_dir / "__init__.py"
+    pkg_init_src = src_dir.parent / "__init__.py"
+    # Only emit when the source bundle actually carries the lib (deferred until the bundle
+    # cut ships it). The decision is reported regardless; the copy is source-gated.
+    if not src_dir.is_dir():
+        return []
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Package markers so the lib imports cleanly from the emitted tree.
+    if pkg_init_src.is_file():
+        dst = staging_dir / "agents" / "lib" / "__init__.py"
+        dst.write_text(pkg_init_src.read_text(encoding="utf-8"), encoding="utf-8")
+        written.append(dst)
+    if init_src.is_file():
+        dst = out_dir / "__init__.py"
+        dst.write_text(init_src.read_text(encoding="utf-8"), encoding="utf-8")
+        written.append(dst)
+    for fname in _EXTERNAL_WRITE_LIB_FILES:
+        src = src_dir / fname
+        if not src.is_file():
+            continue
+        dst = out_dir / fname
+        dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        written.append(dst)
+    return written
+
 
 def _bundle_agent_templates_root(build_repo_root: Path, version: Optional[str] = None) -> Path:
     """The frozen bundle templates/ tree that homes the agent-layer templates.
@@ -292,6 +386,12 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
         _cron_resolved_inputs(plan),
         "cron_config.md",
     ))
+
+    # --- External-write lib (emitted ONLY when the plan writes back to an external surface) ---
+    # A system that writes back to nothing carries none of this lib (no dead code). The copy is
+    # source-gated on the bundle carrying the lib files (decision reported by
+    # external_write_lib_emit_set; physical emit lands once the bundle ships them).
+    written += _emit_external_write_lib(plan, staging_dir, build_repo_root)
 
     # --- Roster (generated; the Orchestrator health check reads this) ---
     roster_out = agents_dir / "roster.md"

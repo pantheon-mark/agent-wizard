@@ -79,6 +79,12 @@ The technical reviews (MA-REV, MA-F) are preconditions the build session runs be
 
 See `build_progress.md` (the acceptance ledger, updated each session) and `wizard/skills/next-phase.md` (the skill for building phases 2 and later).
 
+### Standing rule — controlled-value writes
+
+When a field on an external surface accepts only a fixed set of values — a dropdown, a status column, a category, any field with a controlled vocabulary or allowed set — the system writes **only a value that is on that allowed set**. It does not invent a new value, abbreviate one, or substitute a near-match. The allowed set is read from the live surface (its own validation rules) and treated as the source of truth; if a value the system means to write is not on the allowed set, the system stops and asks rather than writing an out-of-vocabulary value. This is the value-validity half of write integrity: the build-time scanner ensures writes go *through* the approved external-write channel, and the approved channel validates the value *against the surface's allowed set* before writing. The two together keep every external write both routed and valid.
+
+This rule governs the *value* written into a controlled field. It is distinct from, and does not override, the deliverable-folder rule (operator-facing deliverables are written to their configured deliverable folder): one rule governs *which value* is written, the other governs *where* deliverables are written. Both apply.
+
 ---
 
 ## Financial Configuration

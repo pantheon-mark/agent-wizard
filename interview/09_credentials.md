@@ -111,13 +111,13 @@ Present the proposed dependency inventory. For each: a plain-language name, what
 
 **Wait for answer.**
 
-- If the operator confirms: proceed to the credential sub-pass.
+- If the operator confirms: proceed to the writes-back ownership sub-pass, then the credential sub-pass.
 - If the operator removes a dependency: note what capability is affected, confirm, and remove it.
 - If the operator adds one: add it with a proposed name, purpose, impact, and role(s). Confirm before proceeding.
 - If the operator corrects a role: use their correction. Every dependency must end with at least one role.
 - If the operator doesn't have a dependency set up yet: that's expected — nothing is obtained during the interview. Just confirm it belongs on the list.
 
-Store: DEPENDENCY_COUNT = number of confirmed dependencies. For each, hold its name, type (use "Unknown" if unclear), purpose, what-stops, and confirmed role(s).
+Store: DEPENDENCY_COUNT = number of confirmed dependencies. For each, hold its name, type (use "Unknown" if unclear), purpose, what-stops, confirmed role(s), and — for a writes-back (`boundary_output`-with-mutation) dependency — the owning agent confirmed in the writes-back ownership sub-pass.
 
 Write sub-step marker: Append `step_09_DEP-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
@@ -126,6 +126,26 @@ Write sub-step marker: Append `step_09_DEP-1: complete | <timestamp>` to `~/clau
 > No outside dependencies right now — that's fine. Your system still ships with secrets protected, in case you add one later. You can add a dependency at any time by telling the system about it.
 
 Then run the Recording section with those values and proceed to the success condition.
+
+---
+
+## Writes-back ownership sub-pass [DYNAMIC]
+
+*Run this only for the dependencies the operator confirmed the system **sends data out through by writing back to it** — a sheet it updates, a tracker it writes rows into, a record it changes (the `boundary_output` role where the system mutates the surface, not a fire-and-forget notification channel). Skip it entirely if none do.*
+
+For each such dependency, exactly one agent should own writing to it — the agent whose job includes updating that surface. The system routes every write to that surface through that owner (plus the coordinator, which is always allowed to write on the system's behalf). Knowing the owner is what lets the system grant the right agent permission to write there and refuse writes from anywhere else.
+
+**You propose the owner from the agent roster and what each agent does; the operator confirms.** Do not ask the operator to design this — name the agent you believe owns the write and why, and let them correct.
+
+**For each writes-back dependency, one at a time, say:**
+
+> **[Dependency name]** — your system writes back to this one. From the roster, the agent that does that work looks like **[proposed agent display name]** ([one plain phrase on why — e.g. "it's the one that updates your task statuses"]).
+>
+> Is that the right agent to own writing to **[dependency name]**? If another agent should own it, tell me which.
+
+**Wait for answer.** Record the confirmed owning agent's display name against that dependency. If the operator names a different agent, use their choice. If genuinely no single agent owns it yet, record the owner as unset — the coordinator still writes to it, but no specialist is granted the surface (the safe default).
+
+Write sub-step marker: Append `step_09_WRITES-BACK: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -262,10 +282,10 @@ python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wiza
 python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid CRED-5 --group orchestration_build --reason "session-lifetime explanation; no derivation source content"
 ```
 
-Now derive the canonical identity record — a JSON array, one object per confirmed dependency: `id` (a short stable slug, e.g. `google_sheet`), `name`, `type` (or `"Unknown"`), `roles` (the confirmed subset of `boundary_input` / `boundary_output` / `health_monitored` / `needs_credential` — `boundary_output` is a dependency the system only sends out through, e.g. a notification channel it assumes works), and a `credential_facet` (`env_var` / `cred_type` / `provider` / `provisional_expiry`) for the `needs_credential` ones. Then confirm it (the operator already confirmed the inventory inline above) and close the dependency group so step 09 can complete:
+Now derive the canonical identity record — a JSON array, one object per confirmed dependency: `id` (a short stable slug, e.g. `google_sheet`), `name`, `type` (or `"Unknown"`), `roles` (the confirmed subset of `boundary_input` / `boundary_output` / `health_monitored` / `needs_credential` — `boundary_output` is a dependency the system sends data out through, e.g. a sheet it writes back to or a notification channel it assumes works), a `credential_facet` (`env_var` / `cred_type` / `provider` / `provisional_expiry`) for the `needs_credential` ones, and — for each `boundary_output` dependency the system writes back to — an `owner_agent_id` set to the **slug of the owning agent confirmed in the writes-back ownership sub-pass** (the same slug form used for the agent roster: lowercase, non-alphanumeric characters replaced with `-`; e.g. the agent "Status Updater" becomes `status-updater`). Omit `owner_agent_id` for a writes-back dependency whose owner was left unset, and for every dependency that is not `boundary_output`. Then confirm it (the operator already confirmed the inventory inline above) and close the dependency group so step 09 can complete:
 
 ```
-python3 wizard/scripts/interview_cli.py derive-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field EXTERNAL_DEPENDENCY_IDENTITY --sources DEP-1 --value '<JSON array of {id, name, type, roles, credential_facet?}>'
+python3 wizard/scripts/interview_cli.py derive-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field EXTERNAL_DEPENDENCY_IDENTITY --sources DEP-1 --value '<JSON array of {id, name, type, roles, credential_facet?, owner_agent_id?}>'
 python3 wizard/scripts/interview_cli.py confirm-field --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --field EXTERNAL_DEPENDENCY_IDENTITY --group dependency_inventory --state accepted
 python3 wizard/scripts/interview_cli.py close-group --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --progress ~/claude-wizard-draft/wizard_progress.md --group dependency_inventory
 ```

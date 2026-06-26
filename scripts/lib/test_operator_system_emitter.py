@@ -486,5 +486,87 @@ class RealTranscriptUnusedInputWarning(unittest.TestCase):
                          f"unexpected unused-input warning(s) on real emit: {warning_lines}")
 
 
+class ExternalWriteLibEmitDecisionTests(unittest.TestCase):
+    """Task 7 (D): the emitter includes the external_write lib files in its emit-set when
+    (and only when) the plan has a writes-back (boundary_output) dependency.
+
+    Tested at the DECISION/FILE-SELECTION level. The full emit-from-registered-bundle
+    assertion is deferred to post-Task-8 (the bundle carrying these lib files is cut in
+    Task 8); see ExternalWriteLibDeferredEmitTests below.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.contract = load_contract(default_contract_path())
+
+    _LIB_FILES = (
+        "agents/lib/external_write/operations.py",
+        "agents/lib/external_write/adapters.py",
+        "agents/lib/external_write/broker.py",
+        "agents/lib/external_write/scan.py",
+    )
+
+    def _plan_with_deps(self, deps_json):
+        import copy
+        from test_emission_plan import _valid_plan
+        p = copy.deepcopy(_valid_plan())
+        p["foundation_doc_inputs"]["EXTERNAL_DEPENDENCY_IDENTITY"] = deps_json
+        return validate_emission_plan(p, self.contract)
+
+    def test_writes_back_plan_emits_lib(self):
+        import json
+        from agent_emitter import external_write_lib_emit_set
+        deps = json.dumps([{"id": "t", "name": "company_tracker", "type": "Sheet",
+                            "roles": ["boundary_output"], "owner_agent_id": "researcher"}])
+        plan = self._plan_with_deps(deps)
+        emit_set = set(external_write_lib_emit_set(plan))
+        for f in self._LIB_FILES:
+            self.assertIn(f, emit_set, f"writes-back plan must emit {f}")
+
+    def test_non_writes_back_plan_emits_no_lib(self):
+        import json
+        from agent_emitter import external_write_lib_emit_set
+        deps = json.dumps([{"id": "f", "name": "rss_feed", "type": "RSS",
+                            "roles": ["boundary_input"]}])
+        plan = self._plan_with_deps(deps)
+        self.assertEqual(external_write_lib_emit_set(plan), [],
+                         "a read-only plan must emit NONE of the external_write lib (no dead code)")
+
+    def test_no_dependencies_emits_no_lib(self):
+        from agent_emitter import external_write_lib_emit_set
+        from test_emission_plan import _valid_plan
+        plan = validate_emission_plan(_valid_plan(), self.contract)
+        self.assertEqual(external_write_lib_emit_set(plan), [],
+                         "a plan with no dependency record must emit NONE of the external_write lib")
+
+    def test_foundation_only_emits_no_lib(self):
+        import copy, json
+        from agent_emitter import external_write_lib_emit_set
+        from test_emission_plan import _valid_plan
+        p = copy.deepcopy(_valid_plan())
+        p["foundation_only_mode"] = True
+        p["agents"] = []
+        p["foundation_doc_inputs"]["EXTERNAL_DEPENDENCY_IDENTITY"] = json.dumps(
+            [{"id": "t", "name": "company_tracker", "type": "Sheet", "roles": ["boundary_output"]}])
+        plan = validate_emission_plan(p, self.contract)
+        self.assertEqual(external_write_lib_emit_set(plan), [],
+                         "foundation-only systems have no agent layer -> no external_write lib")
+
+
+class ExternalWriteLibDeferredEmitTests(unittest.TestCase):
+    """Task 7 (D) DEFERRED to post-Task-8: end-to-end assertion that a writes-back plan
+    actually writes agents/lib/external_write/*.py into the emitted tree.
+
+    Cannot be asserted now: emission copies these source files from a REGISTERED frozen
+    bundle, and the bundle carrying the external_write lib is not cut until Task 8.
+    The emit DECISION + file-selection logic is covered by ExternalWriteLibEmitDecisionTests.
+    """
+
+    @unittest.skip("DEFERRED to post-Task-8: emit-from-bundle external_write lib assertion "
+                   "requires the new bundle (cut in Task 8) that ships the lib files.")
+    def test_emitted_system_carries_external_write_lib(self):
+        raise NotImplementedError
+
+
 if __name__ == "__main__":
     unittest.main()

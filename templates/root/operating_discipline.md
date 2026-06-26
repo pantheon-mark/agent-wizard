@@ -76,6 +76,8 @@ When the system writes to an external service (a spreadsheet, a task tracker, a 
 
 These two controls together are what the system can honestly provide. They are not a runtime guarantee or an OS-level enforcement guarantee. A build session could, in principle, author a script that routes around the approved channel. The build-time scanner catches this — but it is a check that runs at build time, not a lock that prevents it at the moment of execution. An operator who intentionally edits a script to bypass the approved channel would defeat it. The system discloses this honestly: the protection is real and deliberate, and it is not the same as a guarantee at the operating-system level.
 
+There is a third part to write integrity, about *what* gets written rather than *how*: when a field accepts only a fixed set of values — a dropdown, a status column, any field with a controlled vocabulary or allowed set — the system writes only a value that is on that allowed set. It reads the allowed set from the live surface and treats it as the source of truth; if the value it means to write is not on the allowed set, it stops and asks rather than writing an out-of-vocabulary value. So the approved write channel both routes the write and validates the value before it goes out.
+
 ---
 
 ## Pre-write receipt (machine-checkable)

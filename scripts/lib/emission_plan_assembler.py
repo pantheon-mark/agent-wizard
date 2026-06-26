@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional
 import derived_record  # type: ignore
 from derivation_replay import project  # type: ignore
 from build_intent import BuildIntent, ConstraintViolation, validate_build_intent  # type: ignore
-from scaffold_plan import ScaffoldPlan  # type: ignore
+from scaffold_plan import ScaffoldPlan, derive_permission_map  # type: ignore
 from agent_record_assembler import assemble_agent_records  # type: ignore
 from corpus_loader import resolve_for_shape, to_plan_corpus_cells  # type: ignore
 from capability_projection import parse_increments, CapabilityProjectionError, BUCKET_MVP, BUCKET_ROADMAP  # type: ignore
@@ -173,6 +173,47 @@ def _build_progress_rows(fdi: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _parse_dependencies(fdi: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Parse the canonical external-dependency identity record (a JSON-string field on fdi)
+    into a list of dependency dicts. The identity record is the single source the wizard's
+    interview step-09 capture produces; here it feeds the permission derivation.
+
+    Returns [] when the field is absent, empty, or not a JSON array of objects (the
+    permission derivation then sees no writes-back dependency and grants no surface)."""
+    import json
+    from dependency_projection import IDENTITY_FIELD  # type: ignore  # single source of the key
+
+    raw = fdi.get(IDENTITY_FIELD)
+    if not raw or not str(raw).strip():
+        return []
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [d for d in data if isinstance(d, dict)]
+
+
+def _apply_permission_map(
+    agents: List[Dict[str, Any]],
+    permission_map: Dict[str, List[str]],
+) -> None:
+    """Fold the derived permission map back into each agent record's
+    permitted_write_directories IN PLACE.
+
+    The derived map is the SINGLE authority for an agent's permitted writes (it already
+    seeds from each record's existing permitted_write_directories, then adds the
+    deliverable folder + any external-write surface the agent owns). Replacing the record's
+    list with the derived list is what puts derive_permission_map on the ENFORCED path:
+    the agent prompt emitter substitutes this same list into PERMITTED_WRITE_DIRECTORIES,
+    so an owning agent's prompt now actually grants the writes-back surface."""
+    for rec in agents:
+        derived = permission_map.get(rec["id"])
+        if derived is not None:
+            rec["permitted_write_directories"] = list(derived)
+
+
 def _assemble_acceptance_contracts(
     fdi: Dict[str, Any],
     agent_intents: list,
@@ -290,6 +331,21 @@ def assemble_emission_plan(
 
     # Agents: none in foundation-only mode (I7); else fail-loud assembly (R8/R9).
     agents = [] if foundation_only else assemble_agent_records(intent.agent_intents, scaffold_plan)
+
+    # Permission derivation — ENFORCED PATH for write integrity. derive_permission_map folds
+    # each agent's base permitted writes + deliverable folder + any external-write surface it
+    # OWNS (a boundary_output dependency naming it as owner_agent_id) into one authoritative
+    # map, plus the orchestrator carve-out (the bound writer of every external-write surface).
+    # The result is written BACK into the agent records, so the agent-prompt emitter substitutes
+    # the granted surface into each agent's PERMITTED_WRITE_DIRECTORIES (the per-agent enforced
+    # boundary the agent reads from its own prompt). A permission derivation nothing applies would
+    # enforce nothing; this is where it is applied. (The orchestrator carve-out lives in the map;
+    # the orchestrator prompt's permitted set is fixed by the control plane and not re-templated
+    # here, so the carve-out is surfaced via the map only — the per-agent grant is the change that
+    # reaches an emitted file.)
+    dependencies = _parse_dependencies(fdi)
+    permission_map = derive_permission_map(scaffold_plan, agents, dependencies)
+    _apply_permission_map(agents, permission_map)
 
     # Corpus cells projected for this shape (all inline_payload -> template_variants stays empty).
     corpus_cells = to_plan_corpus_cells(resolve_for_shape(corpus_records, shape))

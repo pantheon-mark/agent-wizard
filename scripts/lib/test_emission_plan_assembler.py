@@ -141,5 +141,89 @@ class EmissionPlanAssemblerTests(unittest.TestCase):
         self.assertNotIn("graduated", rows)
 
 
+class WritesBackPermissionWiringTests(unittest.TestCase):
+    """Task 7 — derive_permission_map is wired onto the assembler (enforced) path.
+
+    The interview captures a writes-back dependency (boundary_output) with an
+    owner_agent_id; the assembler must fold the derived external-write grant into the
+    OWNING agent's permitted_write_directories AND the orchestrator's, and render the
+    AGENT_PERMISSION_ROWS table (the single-view audit surface in project_instructions.md)
+    from the derived map. A plan with NO writes-back dependency yields no external-write
+    grant.
+    """
+
+    def _writes_back_dep(self, owner="researcher", surface="company_tracker"):
+        import json
+        return json.dumps([{
+            "id": "tracker", "name": surface, "type": "Google Sheet",
+            "roles": ["boundary_output"], "owner_agent_id": owner,
+        }])
+
+    def _read_only_dep(self):
+        import json
+        return json.dumps([{
+            "id": "feed", "name": "rss_feed", "type": "RSS",
+            "roles": ["boundary_input"],
+        }])
+
+    def test_writes_back_grant_reaches_owning_agent_permitted_writes(self):
+        # B + C: owner_agent_id populated end-to-end -> the OWNING agent's emitted
+        # permitted_write_directories carries the external-write surface.
+        bi = BuildIntent(
+            derived_record=_dr(overrides={"EXTERNAL_DEPENDENCY_IDENTITY": self._writes_back_dep()}),
+            agent_intents=[_ai()],
+        )
+        plan = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        validate_emission_plan(plan, EP_CONTRACT)
+        researcher = next(a for a in plan["agents"] if a["id"] == "researcher")
+        self.assertIn("company_tracker", researcher["permitted_write_directories"])
+
+    def test_orchestrator_carveout_in_derived_map_on_emit_path(self):
+        # C (enforced surface): the derived permission map the assembler applies carries the
+        # orchestrator carve-out for the writes-back surface. Proven by re-deriving the map from
+        # the SAME plan inputs the assembler used and asserting the carve-out — the assembler's
+        # _apply_permission_map then folds the per-agent grants into the emitted agent records.
+        from scaffold_plan import derive_permission_map
+        bi = BuildIntent(
+            derived_record=_dr(overrides={"EXTERNAL_DEPENDENCY_IDENTITY": self._writes_back_dep()}),
+            agent_intents=[_ai()],
+        )
+        plan = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        import json
+        deps = json.loads(plan["foundation_doc_inputs"]["EXTERNAL_DEPENDENCY_IDENTITY"])
+        pmap = derive_permission_map(SP, plan["agents"], deps)
+        self.assertIn("company_tracker", pmap["orchestrator"])
+        self.assertIn("company_tracker", pmap["researcher"])
+
+    def test_non_owning_agent_does_not_get_surface(self):
+        # No dead grant: an agent that does not own the writes-back surface must not get it.
+        bi = BuildIntent(
+            derived_record=_dr(overrides={"EXTERNAL_DEPENDENCY_IDENTITY":
+                                          self._writes_back_dep(owner="someone-else")}),
+            agent_intents=[_ai()],
+        )
+        plan = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        researcher = next(a for a in plan["agents"] if a["id"] == "researcher")
+        self.assertNotIn("company_tracker", researcher["permitted_write_directories"])
+
+    def test_read_only_dependency_yields_no_write_grant(self):
+        # A boundary_input-only dependency must never produce an external-write grant.
+        bi = BuildIntent(
+            derived_record=_dr(overrides={"EXTERNAL_DEPENDENCY_IDENTITY": self._read_only_dep()}),
+            agent_intents=[_ai()],
+        )
+        plan = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        researcher = next(a for a in plan["agents"] if a["id"] == "researcher")
+        self.assertNotIn("rss_feed", researcher["permitted_write_directories"])
+
+    def test_no_dependencies_preserves_base_permitted_writes(self):
+        # With no dependency record, the fold is a no-op for grants but still applies the
+        # derived map (base paths preserved) — proving the derivation runs on every plan.
+        bi = BuildIntent(derived_record=_dr(), agent_intents=[_ai()])
+        plan = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        researcher = next(a for a in plan["agents"] if a["id"] == "researcher")
+        self.assertIn("work/agent_outputs", researcher["permitted_write_directories"])
+
+
 if __name__ == "__main__":
     unittest.main()

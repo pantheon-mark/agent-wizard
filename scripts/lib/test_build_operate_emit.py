@@ -726,6 +726,100 @@ class MaRevBypassScannerWiringTests(unittest.TestCase):
             self.assertIsNone(m, f"build ID found in {name}: {m}")
 
 
+class ControlledVocabularyRuleWiringTests(unittest.TestCase):
+    """Task 7 (E): the controlled-vocabulary standing rule is wired into the canonical
+    templates — write only values from the operator's allowed set / controlled vocabulary
+    for a controlled field. Asserted at the CANONICAL TEMPLATE-FILE level (the same reason
+    as MaRevBypassScannerWiringTests: emission sources from a frozen bundle cut in Task 8).
+
+    R-005 reconciliation: the deliverable-folders rule (operator-facing deliverables go to
+    their deliverable folder) and the controlled-vocabulary rule are distinct, non-conflicting
+    standing rules — the controlled-vocab rule governs the VALUE written to a controlled field;
+    the deliverable-folders rule governs WHERE operator-facing deliverables are written.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.pi_path = REPO_ROOT / "wizard" / "templates" / "root" / "project_instructions.md"
+        cls.od_path = REPO_ROOT / "wizard" / "templates" / "root" / "operating_discipline.md"
+        cls.rl_path = REPO_ROOT / "wizard" / "templates" / "quality" / "rules_library.md"
+        cls.pi_text = cls.pi_path.read_text(encoding="utf-8")
+        cls.od_text = cls.od_path.read_text(encoding="utf-8")
+        cls.rl_text = cls.rl_path.read_text(encoding="utf-8")
+
+    def test_project_instructions_states_controlled_vocab_rule(self):
+        """project_instructions.md carries the controlled-vocabulary standing rule."""
+        lower = self.pi_text.lower()
+        self.assertIn("controlled", lower,
+                      "project_instructions.md must carry the controlled-vocabulary standing rule")
+        self.assertTrue(
+            ("allowed" in lower) and ("value" in lower),
+            "the controlled-vocab rule must state writes use only values from the allowed set",
+        )
+
+    def test_operating_discipline_states_controlled_vocab_rule(self):
+        """operating_discipline.md (write-integrity section) states the value-validity rule."""
+        lower = self.od_text.lower()
+        self.assertIn("controlled", lower)
+        self.assertTrue(
+            ("allowed" in lower) and ("value" in lower),
+            "operating_discipline.md must state writes use only values from the allowed set",
+        )
+
+    def test_rules_library_documents_controlled_vocab_rule(self):
+        """rules_library.md documents the controlled-vocabulary standing rule."""
+        self.assertIn("controlled", self.rl_text.lower())
+
+    def test_r005_deliverable_folders_not_contradicted(self):
+        """R-005 reconciliation: deliverable-folders rule present and not contradicted by
+        the controlled-vocab rule (they govern different concerns — WHERE vs WHICH VALUE)."""
+        lower = self.pi_text.lower()
+        self.assertIn("deliverable", lower,
+                      "the deliverable-folders rule (R-005 concern) must remain present")
+        # No contradiction: the controlled-vocab rule must not forbid deliverable-folder writes.
+        self.assertNotIn("never write to a deliverable", lower)
+
+    def test_no_build_ids_in_controlled_vocab_prose(self):
+        """The controlled-vocab rule prose must not contain build-provenance tokens."""
+        import re
+        pattern = re.compile(r'S2\.[0-9]|RW-[0-9]|ADR-[0-9]|IDQ-[0-9]|AR-[0-9]|W-[0-9]|F-2[0-9]')
+        for name, text in [("templates/root/project_instructions.md", self.pi_text),
+                           ("templates/root/operating_discipline.md", self.od_text),
+                           ("templates/quality/rules_library.md", self.rl_text)]:
+            m = pattern.search(text)
+            self.assertIsNone(m, f"build ID found in {name}: {m}")
+
+
+class WritesBackOwnershipCaptureTests(unittest.TestCase):
+    """Task 7 (A): interview step 09 captures, per writes-back dependency, the owning agent,
+    and flows it into EXTERNAL_DEPENDENCY_IDENTITY as owner_agent_id."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cred_path = REPO_ROOT / "wizard" / "interview" / "09_credentials.md"
+        cls.cred_text = cls.cred_path.read_text(encoding="utf-8")
+
+    def test_step09_has_writes_back_ownership_capture(self):
+        lower = self.cred_text.lower()
+        self.assertIn("writes-back ownership", lower,
+                      "09_credentials.md must carry a writes-back ownership sub-pass")
+        self.assertIn("own", lower)
+
+    def test_step09_derivation_includes_owner_agent_id(self):
+        self.assertIn("owner_agent_id", self.cred_text,
+                      "09_credentials.md identity derivation must include owner_agent_id for writes-back deps")
+
+    def test_step09_owner_keyed_to_boundary_output(self):
+        # The owner is captured only for the writes-back (boundary_output) role.
+        self.assertIn("boundary_output", self.cred_text)
+
+    def test_no_build_ids_in_step09(self):
+        import re
+        pattern = re.compile(r'S2\.[0-9]|RW-[0-9]|ADR-[0-9]|IDQ-[0-9]|AR-[0-9]|W-[0-9]|F-2[0-9]')
+        m = pattern.search(self.cred_text)
+        self.assertIsNone(m, f"build ID found in 09_credentials.md: {m}")
+
+
 class Task8DeferredScannerEmitTests(unittest.TestCase):
     """T4-A (DEFERRED to post-Task-8): end-to-end assertion that the scanner wiring
     reaches an EMITTED operator system.
