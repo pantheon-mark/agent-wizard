@@ -196,15 +196,18 @@ class WritesBackPermissionWiringTests(unittest.TestCase):
         self.assertIn("company_tracker", pmap["researcher"])
 
     def test_non_owning_agent_does_not_get_surface(self):
-        # No dead grant: an agent that does not own the writes-back surface must not get it.
+        # No dead grant: an agent that is NOT the named owner must not get the surface.
+        # With the build-time owner_agent_id cross-check (Change 1), a set owner_agent_id
+        # that matches no emitted agent id now raises ConstraintViolation (fail-loud), so
+        # the plan never reaches emit — dead grants are prevented at the build boundary, not
+        # silently dropped in derive_permission_map. This test now asserts that behavior.
         bi = BuildIntent(
             derived_record=_dr(overrides={"EXTERNAL_DEPENDENCY_IDENTITY":
                                           self._writes_back_dep(owner="someone-else")}),
             agent_intents=[_ai()],
         )
-        plan = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
-        researcher = next(a for a in plan["agents"] if a["id"] == "researcher")
-        self.assertNotIn("company_tracker", researcher["permitted_write_directories"])
+        with self.assertRaises(ConstraintViolation):
+            assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
 
     def test_read_only_dependency_yields_no_write_grant(self):
         # A boundary_input-only dependency must never produce an external-write grant.
@@ -223,6 +226,113 @@ class WritesBackPermissionWiringTests(unittest.TestCase):
         plan = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
         researcher = next(a for a in plan["agents"] if a["id"] == "researcher")
         self.assertIn("work/agent_outputs", researcher["permitted_write_directories"])
+
+
+class OwnerAgentIdCrossCheckTests(unittest.TestCase):
+    """owner_agent_id cross-check: a set-but-unmatched owner_agent_id must fail the build
+    loudly (ConstraintViolation). An empty/unset owner_agent_id is NOT an error (it means
+    orchestrator-only; no specialist grant). A matched owner_agent_id works as before.
+
+    This guards the 'silent fallback breaks the operator plan without warning' anti-pattern:
+    if owner_agent_id is a typo or display-name/slug mismatch, the specialist grant silently
+    vanishes without this check — the orchestrator still gets the carve-out (security-safe)
+    but the operator's chosen specialist silently lacks permission.
+    """
+
+    def _dep_with_owner(self, owner):
+        import json
+        return json.dumps([{
+            "id": "tracker", "name": "company_tracker", "type": "Google Sheet",
+            "roles": ["boundary_output"], "owner_agent_id": owner,
+        }])
+
+    def _dep_no_owner(self):
+        import json
+        return json.dumps([{
+            "id": "tracker", "name": "company_tracker", "type": "Google Sheet",
+            "roles": ["boundary_output"],
+            # No owner_agent_id key — orchestrator-only default.
+        }])
+
+    def _dep_empty_owner(self):
+        import json
+        return json.dumps([{
+            "id": "tracker", "name": "company_tracker", "type": "Google Sheet",
+            "roles": ["boundary_output"], "owner_agent_id": "",
+        }])
+
+    def test_set_but_unmatched_owner_agent_id_fails_loud(self):
+        """A set owner_agent_id that matches no emitted agent id must raise ConstraintViolation."""
+        bi = BuildIntent(
+            derived_record=_dr(overrides={"EXTERNAL_DEPENDENCY_IDENTITY":
+                                          self._dep_with_owner("does-not-exist")}),
+            agent_intents=[_ai()],
+        )
+        with self.assertRaises(ConstraintViolation) as ctx:
+            assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        msg = str(ctx.exception)
+        # The error must name the offending owner_agent_id.
+        self.assertIn("does-not-exist", msg)
+
+    def test_unmatched_owner_error_names_available_agent_ids(self):
+        """The ConstraintViolation message must list the available agent ids so the operator
+        can diagnose a typo or display-name vs slug mismatch."""
+        bi = BuildIntent(
+            derived_record=_dr(overrides={"EXTERNAL_DEPENDENCY_IDENTITY":
+                                          self._dep_with_owner("typo-agent")}),
+            agent_intents=[_ai()],
+        )
+        with self.assertRaises(ConstraintViolation) as ctx:
+            assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        msg = str(ctx.exception)
+        # The error must mention the real agent id(s) so the operator can fix the typo.
+        self.assertIn("researcher", msg)
+
+    def test_absent_owner_agent_id_no_error_orchestrator_only(self):
+        """A boundary_output dep with NO owner_agent_id key is not an error — it's the
+        documented orchestrator-only default. The build must succeed."""
+        bi = BuildIntent(
+            derived_record=_dr(overrides={"EXTERNAL_DEPENDENCY_IDENTITY": self._dep_no_owner()}),
+            agent_intents=[_ai()],
+        )
+        # Must not raise.
+        plan = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        # Orchestrator still gets the carve-out.
+        from scaffold_plan import derive_permission_map
+        import json
+        deps = json.loads(plan["foundation_doc_inputs"]["EXTERNAL_DEPENDENCY_IDENTITY"])
+        pmap = derive_permission_map(SP, plan["agents"], deps)
+        self.assertIn("company_tracker", pmap["orchestrator"])
+        # The specialist (researcher) does NOT get the grant (no owner nominated).
+        researcher = next(a for a in plan["agents"] if a["id"] == "researcher")
+        self.assertNotIn("company_tracker", researcher["permitted_write_directories"])
+
+    def test_empty_string_owner_agent_id_no_error_orchestrator_only(self):
+        """A boundary_output dep with owner_agent_id='' is treated as unset (not an error).
+        The build must succeed and produce only the orchestrator carve-out."""
+        bi = BuildIntent(
+            derived_record=_dr(overrides={"EXTERNAL_DEPENDENCY_IDENTITY": self._dep_empty_owner()}),
+            agent_intents=[_ai()],
+        )
+        plan = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        # orchestrator still gets the surface.
+        from scaffold_plan import derive_permission_map
+        import json
+        deps = json.loads(plan["foundation_doc_inputs"]["EXTERNAL_DEPENDENCY_IDENTITY"])
+        pmap = derive_permission_map(SP, plan["agents"], deps)
+        self.assertIn("company_tracker", pmap["orchestrator"])
+
+    def test_matched_owner_agent_id_grants_specialist_as_before(self):
+        """A matched owner_agent_id grants the specialist as expected (regression guard:
+        the cross-check must not break the happy path)."""
+        bi = BuildIntent(
+            derived_record=_dr(overrides={"EXTERNAL_DEPENDENCY_IDENTITY":
+                                          self._dep_with_owner("researcher")}),
+            agent_intents=[_ai()],
+        )
+        plan = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers)
+        researcher = next(a for a in plan["agents"] if a["id"] == "researcher")
+        self.assertIn("company_tracker", researcher["permitted_write_directories"])
 
 
 if __name__ == "__main__":

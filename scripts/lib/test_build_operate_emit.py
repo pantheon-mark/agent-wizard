@@ -771,11 +771,32 @@ class ControlledVocabularyRuleWiringTests(unittest.TestCase):
         self.assertIn("controlled", self.rl_text.lower())
 
     def test_r005_deliverable_folders_not_contradicted(self):
-        """R-005 reconciliation: deliverable-folders rule present and not contradicted by
-        the controlled-vocab rule (they govern different concerns — WHERE vs WHICH VALUE)."""
+        """R-005 reconciliation: the controlled-vocab rule and the deliverable-folders rule
+        coexist without contradiction at the CANONICAL TEMPLATE level.
+
+        The template carries text explicitly stating the controlled-vocab rule does NOT
+        override the deliverable-folder rule, and that both apply — this is the in-template
+        coexistence assertion. Full coexistence at the emitted-bundle level is deferred until
+        the bundle cut (Task 8); this test covers what is verifiable now at the template level.
+
+        # TODO(bundle-cut): after Task 8 cuts the new bundle, add an emitted-plan assertion
+        # that both rules appear in the emitted project_instructions.md without contradiction.
+        """
         lower = self.pi_text.lower()
-        self.assertIn("deliverable", lower,
-                      "the deliverable-folders rule (R-005 concern) must remain present")
+        # The controlled-vocab rule must explicitly disclaim overriding the deliverable rule.
+        # The template text says "does not override, the deliverable-folder rule" (verbatim).
+        self.assertIn("does not override", lower,
+                      "the controlled-vocab rule must explicitly state it does NOT override "
+                      "the deliverable-folder rule (R-005 coexistence)")
+        # The template must explicitly say both rules apply — not just one.
+        self.assertIn("both apply", lower,
+                      "the template must state 'both apply' — confirming coexistence, not conflict")
+        # The deliverable-folder rule must be present and described as governing WHERE.
+        self.assertTrue(
+            "where" in lower and "deliverable" in lower,
+            "the deliverable-folders rule must be described as governing WHERE deliverables "
+            "are written (not overridden by the controlled-vocab rule)",
+        )
         # No contradiction: the controlled-vocab rule must not forbid deliverable-folder writes.
         self.assertNotIn("never write to a deliverable", lower)
 

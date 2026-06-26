@@ -195,6 +195,52 @@ def _parse_dependencies(fdi: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [d for d in data if isinstance(d, dict)]
 
 
+_ROLE_BOUNDARY_OUTPUT = "boundary_output"
+
+
+def _check_owner_agent_ids(
+    agents: List[Dict[str, Any]],
+    dependencies: List[Dict[str, Any]],
+) -> None:
+    """Validate that every set owner_agent_id in a boundary_output dependency matches
+    a real emitted agent id.
+
+    A MISSING or EMPTY owner_agent_id is NOT an error — it means orchestrator-only
+    (documented default). Only a SET-but-UNMATCHED owner_agent_id is an error: the
+    specialist grant would silently vanish in derive_permission_map (the phantom map
+    entry is dropped), leaving the operator's chosen specialist without permission and
+    no warning. This is the 'silent fallback breaks the operator plan' anti-pattern.
+
+    Raises ConstraintViolation with an actionable message naming the offending
+    owner_agent_id, the dependency surface, and the available agent ids.
+    """
+    from build_intent import ConstraintViolation  # type: ignore
+    agent_ids = {a["id"] for a in agents}
+    for dep in dependencies:
+        if _ROLE_BOUNDARY_OUTPUT not in dep.get("roles", []):
+            continue
+        owner = dep.get("owner_agent_id")
+        if not owner:
+            # Absent or empty: orchestrator-only default — not an error.
+            continue
+        if owner not in agent_ids:
+            surface = dep.get("name", "(unnamed)")
+            raise ConstraintViolation(
+                kind="unmatched_owner_agent_id",
+                subject=f"dependency.{surface}",
+                detail=(
+                    f"boundary_output dependency '{surface}' names owner_agent_id={owner!r} "
+                    f"but no emitted agent has that id. "
+                    f"The specialist grant would silently vanish with no write permission granted. "
+                    f"Available agent ids: {sorted(agent_ids)}"
+                ),
+                operator_options=[
+                    f"Correct owner_agent_id to one of: {sorted(agent_ids)}",
+                    "Remove owner_agent_id to use orchestrator-only mode (no specialist grant)",
+                ],
+            )
+
+
 def _apply_permission_map(
     agents: List[Dict[str, Any]],
     permission_map: Dict[str, List[str]],
@@ -344,6 +390,7 @@ def assemble_emission_plan(
     # here, so the carve-out is surfaced via the map only — the per-agent grant is the change that
     # reaches an emitted file.)
     dependencies = _parse_dependencies(fdi)
+    _check_owner_agent_ids(agents, dependencies)
     permission_map = derive_permission_map(scaffold_plan, agents, dependencies)
     _apply_permission_map(agents, permission_map)
 
