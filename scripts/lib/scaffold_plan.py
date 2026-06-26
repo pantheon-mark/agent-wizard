@@ -18,7 +18,7 @@ no third-party deps. JSON via stdlib json is the wizard-runtime data format.
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 
 EXPECTED_CONTRACT_ID = "scaffold-plan"
@@ -196,6 +196,132 @@ def load_scaffold_plan(
         criticality_model_policy=dict(data["criticality_model_policy"]),
         allowed_resource_claims=list(data["allowed_resource_claims"]),
     )
+
+
+# Role constant for a dependency the system writes back to (symmetric partner to
+# boundary_input).  A dependency with this role causes its surface name to be added
+# to the owning agent's permitted-write set AND to the orchestrator's permitted set
+# (the bound-orchestrator carve-out: the orchestrator is the legal invoker of the
+# named external-write operations for that surface).
+_ROLE_BOUNDARY_OUTPUT = "boundary_output"
+
+# The reserved id for the orchestrator in every emitted system.  The orchestrator
+# is always present in the permission map so callers can read its permitted set
+# without a special-case existence check.
+_ORCHESTRATOR_ID = "orchestrator"
+
+
+def derive_permission_map(
+    scaffold_plan: "ScaffoldPlan",
+    agent_records: List[Dict[str, Any]],
+    dependencies: List[Dict[str, Any]],
+) -> Dict[str, List[str]]:
+    """Derive the permission map — agent id -> ordered list of permitted paths/surfaces.
+
+    Rules applied (in this order; applied to each agent in agent_records plus the
+    orchestrator, which is always present):
+
+    1. **Base paths** — every agent starts with its existing
+       ``permitted_write_directories`` list from its agent record (the paths the
+       scaffold policy already granted).
+
+    2. **Deliverable folder** — if the agent record has ``operator_facing=True``
+       its ``deliverable_root`` is added to its permitted set (so operator-facing
+       deliverables are never written off-map).
+
+    3. **External-write surface (owning agent)** — for each dependency in
+       *dependencies* that carries the ``boundary_output`` role AND nominates an
+       ``owner_agent_id``, that dependency's ``name`` is added to the owning
+       agent's permitted set.  The ``name`` field is the external-surface
+       identifier (e.g. ``"company_tracker"``, ``"budget_sheet"``).
+
+    4. **External-write surface (orchestrator carve-out)** — the same surface name
+       is also added to the orchestrator's permitted set.  The orchestrator is the
+       single bound writer that may invoke the named external-write operations for
+       that surface; the grant makes this explicit and lets the blast-radius gate
+       check both the owning agent AND the orchestrator against the map.
+
+    Only ``boundary_output`` dependencies generate write grants.  A
+    ``boundary_input``-only dependency (the system reads from it) never yields a
+    write grant to any agent.  A dependency with no ``owner_agent_id`` still gets
+    the orchestrator carve-out (the orchestrator remains the single legal invoker)
+    but no specialist agent is granted the surface.
+
+    Parameters
+    ----------
+    scaffold_plan:
+        The loaded, validated scaffold plan for this system shape.  Carried here
+        for future shape-specific policy hooks; not yet queried beyond its
+        presence.
+    agent_records:
+        List of agent record dicts — each must contain ``id`` (str) and
+        ``permitted_write_directories`` (list of str).  Optionally carries
+        ``operator_facing`` (bool) and ``deliverable_root`` (str).  These are the
+        same records produced by ``agent_record_assembler.assemble_agent_records``.
+    dependencies:
+        List of dependency dicts — each must contain ``name`` (str) and ``roles``
+        (list of str).  Optionally carries ``owner_agent_id`` (str) — the id of
+        the specialist agent responsible for this write.  These are the dependency
+        identity records produced by the wizard's interview capture (step 09 in the
+        interview sequence; Task 7 wires them in; the derivation here is
+        independent of the wiring and can be tested with fixture data in advance).
+
+    Returns
+    -------
+    Dict[str, List[str]]
+        Mapping of agent id -> deduplicated, order-preserving list of permitted
+        paths/surfaces.  Always includes an ``"orchestrator"`` key even when no
+        writes-back dependency exists (the orchestrator has base control-plane
+        paths; callers can rely on the key existing without an existence check).
+        The orchestrator's base paths are the control-plane paths from the
+        scaffold plan's ``control_plane`` dict values.
+    """
+    # Collect the writes-back dependencies: (surface_name, owner_agent_id | None)
+    writes_back: List[tuple] = []
+    for dep in dependencies:
+        if _ROLE_BOUNDARY_OUTPUT in dep.get("roles", []):
+            surface_name = dep.get("name", "")
+            owner = dep.get("owner_agent_id")  # May be None if not yet wired.
+            writes_back.append((surface_name, owner))
+
+    # Build a working dict: agent_id -> ordered set (insertion-order-preserving).
+    pmap: Dict[str, list] = {}
+
+    def _add(agent_id: str, paths: List[str]) -> None:
+        if agent_id not in pmap:
+            pmap[agent_id] = []
+        seen: Set[str] = set(pmap[agent_id])
+        for p in paths:
+            if p and p not in seen:
+                pmap[agent_id].append(p)
+                seen.add(p)
+
+    # Seed each agent from its existing permitted_write_directories.
+    for rec in agent_records:
+        agent_id = rec["id"]
+        base = list(rec.get("permitted_write_directories") or [])
+        _add(agent_id, base)
+        # Rule 2: operator-facing agents add their deliverable_root.
+        if rec.get("operator_facing"):
+            dr = rec.get("deliverable_root")
+            if dr:
+                _add(agent_id, [dr])
+
+    # Seed the orchestrator from the control-plane paths.
+    orch_base = list(scaffold_plan.control_plane.values())
+    _add(_ORCHESTRATOR_ID, orch_base)
+
+    # Rules 3 + 4: writes-back grants.
+    for surface_name, owner_agent_id in writes_back:
+        if not surface_name:
+            continue
+        # Rule 3: owning agent gets the surface.
+        if owner_agent_id:
+            _add(owner_agent_id, [surface_name])
+        # Rule 4: orchestrator always gets the surface (bound carve-out).
+        _add(_ORCHESTRATOR_ID, [surface_name])
+
+    return pmap
 
 
 def main() -> int:
