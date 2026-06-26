@@ -56,9 +56,31 @@ You should not approve an irreversible action until you are comfortable with wha
 
 ---
 
+## What step 4 requires — and what happens if the plan changes
+
+Step 4 is a **distinct, separate approval turn**. It is not silent, implied, or bundled with any other step. Before approving, you receive a plain-language summary of exactly what is about to happen — what will be written, where, and what the effect is — rendered to a review file you can read at your own pace. You then give your explicit approval in that turn.
+
+**If the planned operations change after you have approved** — new items added, scope altered, a different target identified — your prior approval is void. The system stops, presents the updated plan, and requires a fresh approval before proceeding. A prior approval covers exactly the plan you approved, nothing more.
+
+This applies at every maturity level. As the system earns a track record, it may become less wordy about other steps — but step 4 never compresses and is never skipped.
+
+---
+
+## How write-integrity is enforced — and what it is not
+
+When the system writes to an external service (a spreadsheet, a task tracker, a shared document), the protection comes from two controls working together:
+
+1. **A build-time check** runs when each phase is built and technically reviewed. It scans the code for any path that writes to an external service without going through the approved write channel. A phase that has a bypassing write fails review and cannot proceed. This is the primary control.
+
+2. **You, as the approver of record.** The system is designed to make every external write visible and hard to rubber-stamp — but the approver of record is you. The system's job is to surface the action clearly and pause for your explicit yes before anything goes out.
+
+These two controls together are what the system can honestly provide. They are not a runtime guarantee or an OS-level enforcement guarantee. A build session could, in principle, author a script that routes around the approved channel. The build-time scanner catches this — but it is a check that runs at build time, not a lock that prevents it at the moment of execution. An operator who intentionally edits a script to bypass the approved channel would defeat it. The system discloses this honestly: the protection is real and deliberate, and it is not the same as a guarantee at the operating-system level.
+
+---
+
 ## Pre-write receipt (machine-checkable)
 
-The protections above are not just prose the agents are asked to follow. Before any high-risk action, the agent must write a small record to disk — a **pre-write receipt** — that captures the backup, the evidence-bound verification, the plan, and your verbatim approval. A check built into the system (a hook that runs before the action's tool call) looks for a fresh, valid receipt; if one is not present, the system stops and asks you to approve the action in a dialog rather than letting it run silently. This makes the four protections enforceable rather than advisory.
+The protections above are not just prose the agents are asked to follow. Before any high-risk action, the agent must write a small record to disk — a **pre-write receipt** — that captures the backup, the evidence-bound verification, the plan, and your verbatim approval. A backstop check built into the system looks for a fresh, valid receipt before the action runs; if one is not present, the system stops and asks you to approve the action in a dialog. This supports the protective sequence by catching cases where the receipt was not written before the action was attempted.
 
 The agent writes the receipt to `agents/handoffs/.prewrite_receipt.json` BEFORE the high-risk action, in exactly this shape:
 

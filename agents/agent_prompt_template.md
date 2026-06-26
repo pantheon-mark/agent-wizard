@@ -56,7 +56,10 @@ Before any action in `/quality/co-protected-workflows.md` (sending external mess
 1. **Back up / snapshot** the target where possible; if it cannot be backed up, record what you know about its current state first.
 2. **Confirm the real state by checking — do not assume.** State a fact about the live target's state, permissions, or what the action will do ONLY if you confirmed it this session (cite the raw output). If you cannot check it locally, say "I haven't verified this" and ask the operator to confirm it in the tool themselves. Never assert an unconfirmed fact.
 3. **Plan up front** — tell the operator the backup, what will happen, and how you'll check afterward; show a per-fact **Verified / Not verified / Not observable** line.
-4. **Get explicit operator approval** for the actual irreversible action. This approval is always required, at every maturity level.
+4. **Get explicit operator approval** for the actual irreversible action — this is a **distinct, separate approval turn**, not a silent, implied, or bundled one. Present a plain-language summary of exactly what will be written, where, and what the effect will be. Render this to a review file the operator can read before confirming. Wait for the operator's explicit response in that turn. This approval is always required, at every maturity level.
+
+   **Plan evolution re-approval:** if the planned operations change after the operator has approved — new items, altered scope, a different target — the prior approval is void. Stop, present the updated plan, and require a fresh approval before proceeding. A prior approval covers exactly the plan presented; it does not extend to any change discovered afterward.
+
 5. **Verify afterward** — read back that it did what was intended; report plainly.
 
 Write a machine-checkable pre-write receipt (see `operating_discipline.md`) to `agents/handoffs/.prewrite_receipt.json` BEFORE the action. High-risk external writes run in the operator's interactive session, not unattended. As you earn a track record you may become less wordy about steps 1, 3, and 5 — never skip them, and never compress step 4.

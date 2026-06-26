@@ -1,11 +1,20 @@
 #!/bin/bash
-# Pre-write receipt gate — a PreToolUse hook that protects high-risk, irreversible
+# Pre-write receipt gate — a PreToolUse backstop for high-risk, irreversible
 # external actions (sending email, writing a sheet, payments, deletes, external API
-# calls). Before such an action runs, the agent must have written a fresh, valid
-# pre-write receipt to agents/handoffs/.prewrite_receipt.json (backup + evidence-bound
+# calls). This hook is a backstop, not the primary enforcement mechanism. The
+# primary controls are the build-time bypass scanner (which rejects any write path
+# that routes around the approved write channel) and the operator acting as approver
+# of record. This hook handles the tool-shaped writes it CAN see (MCP write-verbs,
+# destructive bash commands); it is blind to interpreter-script runs (python3 x.py)
+# and other external-write paths outside its classification scope — those are the
+# build-time scanner's domain.
+#
+# Before such an action runs, the agent must have written a fresh, valid pre-write
+# receipt to agents/handoffs/.prewrite_receipt.json (backup + evidence-bound
 # verification + plan + the operator's verbatim approval). This hook checks for that
 # receipt and, if it is missing/invalid/expired, forces the operator's approval dialog
-# ("ask") instead of letting the action run silently.
+# ("ask") instead of letting the action run silently — a backstop for cases where the
+# receipt was not written before the action was attempted.
 #
 # Hook contract (Claude Code PreToolUse): reads a JSON event on stdin carrying
 # tool_name and tool_input; returns a decision via stdout JSON

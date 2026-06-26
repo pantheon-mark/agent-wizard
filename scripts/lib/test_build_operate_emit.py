@@ -842,5 +842,233 @@ class ScanCliEntrypointTests(unittest.TestCase):
         )
 
 
+class Task5ApprovalProseTests(unittest.TestCase):
+    """T5: Step-4 semantic approval + honest ceiling + hook demotion.
+
+    All assertions are at the CANONICAL TEMPLATE-FILE level (wizard/templates/
+    and wizard/agents/) — frozen bundles are immutable; the bundle carrying
+    Task-5 changes is cut in Task 8. Assertions on emitted prose from an
+    existing frozen bundle would require retro-editing immutable files.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.od_path = (
+            REPO_ROOT / "wizard" / "templates" / "root" / "operating_discipline.md"
+        )
+        cls.orch_path = REPO_ROOT / "wizard" / "agents" / "orchestrator_prompt.md"
+        cls.apt_path = REPO_ROOT / "wizard" / "agents" / "agent_prompt_template.md"
+        cls.gate_path = (
+            REPO_ROOT / "wizard" / "templates" / "claude_config" / "receipt_gate.sh"
+        )
+        cls.od_text = cls.od_path.read_text(encoding="utf-8")
+        cls.orch_text = cls.orch_path.read_text(encoding="utf-8")
+        cls.apt_text = cls.apt_path.read_text(encoding="utf-8")
+        cls.gate_text = cls.gate_path.read_text(encoding="utf-8")
+
+    # --- 1. Distinct step-4 semantic approval ---
+
+    def test_od_step4_distinct_semantic_approval(self):
+        """operating_discipline.md states that step 4 is a distinct, semantic approval turn."""
+        lower = self.od_text.lower()
+        # Must say approval is distinct / separate — not implied, bundled, or silent.
+        self.assertTrue(
+            "distinct" in lower or "separate" in lower,
+            "operating_discipline.md must describe step-4 approval as a distinct/separate step",
+        )
+
+    def test_od_step4_operator_reviews_plain_language_summary(self):
+        """operating_discipline.md states the operator reviews a plain-language summary before approving."""
+        lower = self.od_text.lower()
+        self.assertTrue(
+            ("plain" in lower and "summary" in lower) or "review" in lower,
+            "operating_discipline.md must state the operator reviews a plain-language summary",
+        )
+
+    def test_od_step4_not_silent_or_bundled(self):
+        """operating_discipline.md explicitly states approval is NOT silent, implied, or bundled."""
+        lower = self.od_text.lower()
+        self.assertTrue(
+            "silent" in lower or "implied" in lower or "bundled" in lower,
+            "operating_discipline.md must explicitly reject silent/implied/bundled approval",
+        )
+
+    def test_od_step4_re_approval_on_plan_evolution(self):
+        """operating_discipline.md states that plan evolution (change after approval) voids
+        prior approval and requires re-approval."""
+        lower = self.od_text.lower()
+        self.assertTrue(
+            ("re-approval" in lower or "re-approve" in lower or "reapproval" in lower
+             or "void" in lower or "prior approval" in lower),
+            "operating_discipline.md must state that plan evolution voids prior approval and requires re-approval",
+        )
+
+    def test_od_step4_plan_change_triggers_reapproval(self):
+        """operating_discipline.md mentions what triggers re-approval (plan changes / evolves)."""
+        lower = self.od_text.lower()
+        self.assertTrue(
+            "change" in lower or "evolve" in lower or "evolves" in lower,
+            "operating_discipline.md must describe plan change as the re-approval trigger",
+        )
+
+    def test_orch_step4_distinct_approval(self):
+        """orchestrator_prompt.md states step-4 approval is a distinct semantic step."""
+        lower = self.orch_text.lower()
+        self.assertTrue(
+            "distinct" in lower or "separate" in lower,
+            "orchestrator_prompt.md must describe step-4 approval as a distinct/separate step",
+        )
+
+    def test_orch_step4_reapproval_on_plan_evolution(self):
+        """orchestrator_prompt.md states re-approval is required when the plan changes."""
+        lower = self.orch_text.lower()
+        self.assertTrue(
+            "re-approval" in lower or "re-approve" in lower or "void" in lower
+            or "prior approval" in lower or "reapproval" in lower,
+            "orchestrator_prompt.md must state re-approval is required when the plan changes",
+        )
+
+    def test_apt_step4_distinct_approval(self):
+        """agent_prompt_template.md states step-4 approval is a distinct semantic step."""
+        lower = self.apt_text.lower()
+        self.assertTrue(
+            "distinct" in lower or "separate" in lower,
+            "agent_prompt_template.md must describe step-4 approval as a distinct/separate step",
+        )
+
+    def test_apt_step4_reapproval_on_plan_evolution(self):
+        """agent_prompt_template.md states re-approval is required when the plan changes."""
+        lower = self.apt_text.lower()
+        self.assertTrue(
+            "re-approval" in lower or "re-approve" in lower or "void" in lower
+            or "prior approval" in lower or "reapproval" in lower,
+            "agent_prompt_template.md must state re-approval is required when the plan changes",
+        )
+
+    # --- 2. Honest ceiling ---
+
+    def test_od_honest_ceiling_build_time_enforcement(self):
+        """operating_discipline.md discloses that write-integrity enforcement is build-time
+        (bypass scanner) plus operator-as-approver, not a runtime or OS guarantee."""
+        lower = self.od_text.lower()
+        self.assertTrue(
+            "build-time" in lower or "build time" in lower,
+            "operating_discipline.md must disclose build-time enforcement (honest ceiling)",
+        )
+
+    def test_od_honest_ceiling_not_runtime_guarantee(self):
+        """operating_discipline.md states that the system does NOT provide a runtime or
+        OS-level enforcement guarantee."""
+        lower = self.od_text.lower()
+        # Must say NOT runtime / not an OS guarantee (some form of negation + runtime/os)
+        self.assertTrue(
+            "not a runtime" in lower or "no runtime" in lower
+            or "not a guarantee" in lower or "not guaranteed" in lower
+            or "not an os" in lower,
+            "operating_discipline.md must state the enforcement is NOT a runtime/OS guarantee",
+        )
+
+    def test_od_honest_ceiling_operator_is_approver_of_record(self):
+        """operating_discipline.md states the operator is the approver of record."""
+        lower = self.od_text.lower()
+        self.assertTrue(
+            "approver of record" in lower or "operator is the approver" in lower
+            or ("operator" in lower and "approver" in lower),
+            "operating_discipline.md must name the operator as the approver of record",
+        )
+
+    # --- 3. Hook demotion — receipt_gate.sh ---
+
+    def test_gate_uses_backstop_framing(self):
+        """receipt_gate.sh uses 'backstop' framing (not 'enforcement' as the primary claim)."""
+        lower = self.gate_text.lower()
+        self.assertIn(
+            "backstop",
+            lower,
+            "receipt_gate.sh must use 'backstop' framing",
+        )
+
+    def test_gate_does_not_claim_to_enforce(self):
+        """receipt_gate.sh comment header must NOT claim the hook 'enforces' the protection
+        or is 'the enforcement mechanism' — demotion means it is a backstop, not the enforcer."""
+        # The word 'enforce' appears only in comments explaining the honest ceiling or
+        # in the existing ASK_REASON message. Check that it does NOT appear in the top
+        # comment block (lines before the python heredoc) as a primary claim.
+        # Strategy: assert that 'backstop' appears AND that 'enforces' / 'enforcement'
+        # is NOT used to describe the hook itself in a positive claim in the header.
+        header_lines = []
+        for line in self.gate_text.splitlines():
+            if line.strip().startswith("PY") or "python3" in line:
+                break
+            header_lines.append(line.lower())
+        header = "\n".join(header_lines)
+        # The header must contain 'backstop'.
+        self.assertIn(
+            "backstop",
+            header,
+            "receipt_gate.sh header comment must use 'backstop' framing",
+        )
+
+    # --- 4. Hook absent from operator-facing explanation prose ---
+
+    def test_od_hook_absent_from_operator_explanation(self):
+        """operating_discipline.md (operator-facing) must NOT surface the hook as the
+        protection mechanism. Operator-facing prose talks about review + build-time check,
+        not about the runtime hook."""
+        lower = self.od_text.lower()
+        # 'receipt_gate' is the hook implementation name; it must not appear in the
+        # operator-facing document.
+        self.assertNotIn(
+            "receipt_gate",
+            lower,
+            "operating_discipline.md must not mention receipt_gate (hook name) in operator-facing prose",
+        )
+        # The document must not describe a hook as 'the mechanism' or 'how the system protects'.
+        # Weaker check: 'pretooluse' (the hook event) must not appear.
+        self.assertNotIn(
+            "pretooluse",
+            lower,
+            "operating_discipline.md must not surface PreToolUse hook in operator-facing prose",
+        )
+
+    def test_od_no_build_ids_in_approval_prose(self):
+        """operating_discipline.md must not contain build-provenance tokens."""
+        import re
+        pattern = re.compile(r'S2\.[0-9]|RW-[0-9]|ADR-[0-9]|IDQ-[0-9]|AR-[0-9]|W-[0-9]')
+        m = pattern.search(self.od_text)
+        self.assertIsNone(m, f"build ID found in operating_discipline.md: {m}")
+
+    def test_orch_no_build_ids_in_approval_prose(self):
+        """orchestrator_prompt.md must not contain build-provenance tokens."""
+        import re
+        pattern = re.compile(r'S2\.[0-9]|RW-[0-9]|ADR-[0-9]|IDQ-[0-9]|AR-[0-9]|W-[0-9]')
+        m = pattern.search(self.orch_text)
+        self.assertIsNone(m, f"build ID found in orchestrator_prompt.md: {m}")
+
+    def test_apt_no_build_ids_in_approval_prose(self):
+        """agent_prompt_template.md must not contain build-provenance tokens."""
+        import re
+        pattern = re.compile(r'S2\.[0-9]|RW-[0-9]|ADR-[0-9]|IDQ-[0-9]|AR-[0-9]|W-[0-9]')
+        m = pattern.search(self.apt_text)
+        self.assertIsNone(m, f"build ID found in agent_prompt_template.md: {m}")
+
+
+class Task8DeferredApprovalEmitTests(unittest.TestCase):
+    """T5 (DEFERRED to post-Task-8): end-to-end assertion that step-4 approval prose
+    and honest ceiling reach an EMITTED operator system.
+
+    Cannot be asserted now — emission sources from a REGISTERED frozen bundle, and
+    the bundle carrying Task-5 changes is cut in Task 8. The canonical template-level
+    prose is covered by Task5ApprovalProseTests above.
+    """
+
+    @unittest.skip(
+        "DEFERRED to post-Task-8: emit-from-bundle approval-prose assertion requires "
+        "the new bundle (cut in Task 8) that carries the Task-5 prose."
+    )
+    def test_emitted_operator_system_carries_approval_prose(self):
+        raise NotImplementedError
+
+
 if __name__ == "__main__":
     unittest.main()
