@@ -485,3 +485,41 @@ def scan_paths(
             violations.extend(_scan_file(f, anchor))
     violations.sort(key=lambda v: (v.path, v.lineno, v.kind))
     return violations
+
+
+# ---------------------------------------------------------------------------
+# CLI entrypoint — run from its installed location inside the operator project
+# so that the __file__-anchored allowed-module exemption is correct.
+#
+# Usage:
+#   python3 agents/lib/external_write/scan.py <path> [<path> ...]
+#
+# Scans the given paths (files or directories) for external-write bypasses.
+# Exits 0 if no violations are found (build passes this gate).
+# Exits 1 and prints each violation if any are found (build FAILS).
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":  # pragma: no cover
+    import sys as _sys
+
+    _paths = _sys.argv[1:]
+    if not _paths:
+        print("Usage: python3 scan.py <path> [<path> ...]", file=_sys.stderr)
+        _sys.exit(2)
+
+    _violations = scan_paths(_paths)
+    if _violations:
+        for _v in _violations:
+            print(f"{_v.path}:{_v.lineno}: {_v.kind}")
+        print(
+            f"\n{len(_violations)} violation(s) found. "
+            "Every external write must route through the approved adapters "
+            "in agents/lib/external_write/. "
+            "The phase FAILS and cannot be accepted until every flagged write "
+            "is routed through the approved external-write operations.",
+            file=_sys.stderr,
+        )
+        _sys.exit(1)
+    else:
+        print("Bypass scan passed — no violations found.")
+        _sys.exit(0)

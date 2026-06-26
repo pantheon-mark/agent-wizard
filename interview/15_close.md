@@ -307,6 +307,14 @@ Then deliver CLOSE-14 immediately (the build prompt).
 >
 > Read each Phase 1 agent's prompt file at `agents/prompts/<agent>_prompt.md`. Verify that each one is complete and consistent with the foundation docs you read above. If anything is missing or misaligned, fix it silently before running. Do not surface technical architecture details to the operator; bring the agents to a runnable state on your own.
 >
+> Run the bypass scanner over the Phase 1 code to confirm every external write routes through the approved adapters:
+>
+> ```
+> python3 agents/lib/external_write/scan.py agents/
+> ```
+>
+> If the scanner reports any violation, the phase FAILS. Fix every flagged write by routing it through the approved external-write operations before continuing. Do not proceed to the supervised run until the scanner exits clean.
+>
 > **Step 3: Supervised run against a copy**
 >
 > Set up a copy or dummy target of any external state the agents will write to (for example, a copy of the master-list Sheet, not the live one). External state is not git-revertable, so the first run always goes against a copy. Run the Phase 1 agents with the operator present, narrating what each agent is doing and why.

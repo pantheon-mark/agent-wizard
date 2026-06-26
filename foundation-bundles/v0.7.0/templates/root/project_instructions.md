@@ -68,7 +68,7 @@ The system is built and operated as one continuous loop: build a capability (a p
 Each phase moves through the following sequence:
 
 1. **Built** -- the phase's agents and configuration are written.
-2. **Technically-reviewed** -- automated technical reviews run (MA-REV per component, MA-F phase-gate). These are preconditions. They confirm the system is structurally sound. They do not constitute acceptance.
+2. **Technically-reviewed** -- automated technical reviews run (MA-REV per component, MA-F phase-gate). These are preconditions. They confirm the system is structurally sound. They do not constitute acceptance. MA-REV includes running the bypass scanner (`agents/lib/external_write/scan.py`) over the phase's code: if the scanner reports any violation, the phase FAILS and cannot be accepted until every flagged write is routed through the approved external-write operations.
 3. **Supervised** -- the phase runs against a copy/dummy of external state, with one labelled inert demo cycle. The operator observes the actual business result.
 4. **Operator business acceptance** -- the operator reviews what the phase actually did and confirms the result meets the business need. This is the one acceptance the operator makes per phase. Only this step flips the phase to `accepted`.
 5. **Accepted** -- recorded in `build_progress.md`. The capability goes live or is scheduled.
