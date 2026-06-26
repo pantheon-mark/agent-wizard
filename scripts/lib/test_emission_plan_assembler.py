@@ -146,10 +146,12 @@ class WritesBackPermissionWiringTests(unittest.TestCase):
 
     The interview captures a writes-back dependency (boundary_output) with an
     owner_agent_id; the assembler must fold the derived external-write grant into the
-    OWNING agent's permitted_write_directories AND the orchestrator's, and render the
-    AGENT_PERMISSION_ROWS table (the single-view audit surface in project_instructions.md)
-    from the derived map. A plan with NO writes-back dependency yields no external-write
-    grant.
+    OWNING agent's permitted_write_directories AND the orchestrator's — this wiring
+    IS enforced and tested below. The operator-facing AGENT_PERMISSION_ROWS summary
+    table (the single-view audit surface in project_instructions.md) is populated from
+    the derived map in a separate render pass that requires a bundle-declared render
+    policy; that table fill is deferred and is NOT tested here. A plan with NO
+    writes-back dependency yields no external-write grant.
     """
 
     def _writes_back_dep(self, owner="researcher", surface="company_tracker"):

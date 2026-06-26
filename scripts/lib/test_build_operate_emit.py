@@ -1155,6 +1155,21 @@ class Task5ApprovalProseTests(unittest.TestCase):
             header,
             "receipt_gate.sh header comment must use 'backstop' framing",
         )
+        # Negative assertion: any occurrence of 'enforcement' in the header MUST
+        # appear only within the demoting phrase 'not the primary enforcement mechanism'.
+        # A bare 'this hook enforces' or 'the enforcement mechanism is this hook'
+        # would be a re-introduced over-claim that must fail this test.
+        # Strip out every occurrence of the approved demoting phrase then check no
+        # residual 'enforc' root remains — that would indicate a positive claim.
+        DEMOTING_PHRASE = "not the primary enforcement mechanism"
+        header_stripped = header.replace(DEMOTING_PHRASE, "")
+        self.assertNotIn(
+            "enforc",
+            header_stripped,
+            "receipt_gate.sh header must not claim enforcement outside the demoting "
+            "phrase 'not the primary enforcement mechanism' — a bare 'enforces' or "
+            "'enforcement mechanism' in the header is an over-claim the hook does not satisfy",
+        )
 
     # --- 4. Hook absent from operator-facing explanation prose ---
 

@@ -55,6 +55,22 @@ class _RejectingClient:
         return getattr(self, "_store", {}).get((object_id, field))
 
 
+class _MismatchReadBackClient:
+    """Simulates a surface that ACCEPTS the write but reads back a DIFFERENT value.
+    This tests the fail-closed read-back verification path in run_operation: after
+    a successful write the adapter reads the value back; if it does not match
+    op.new_value the operation is refused with 'read-back verification failed'.
+    """
+
+    def write(self, object_id, field, value):
+        """Accept the write — no exception."""
+        pass  # write appears to succeed
+
+    def read(self, object_id, field):
+        """Return a value that does NOT match what was written."""
+        return "__stale_or_wrong_value__"
+
+
 class _UnreadableValidationClient:
     """Simulates a surface where dataValidation rules are not machine-readable.
     The surface still rejects invalid values at write time (native-API fail-fast).
@@ -220,6 +236,47 @@ class TestExternalWriteAdapters(unittest.TestCase):
         receipt = _receipt(op, wrong_digest=True)
         result = run_operation(op, receipt, client)
         self.assertEqual(result.status, "refused")
+
+    # ------------------------------------------------------------------
+    # Test 5: read-back mismatch -> 'refused' with read-back failure reason
+    #
+    # After a write is accepted by the surface, run_operation reads the value
+    # back and compares it to op.new_value.  If they differ the operation is
+    # refused — this is the fail-closed trust path that guards against silent
+    # write failures (e.g. caching, propagation delay, write-then-read race).
+    # ------------------------------------------------------------------
+    def test_readback_mismatch_refused_with_verification_reason(self):
+        """A surface that accepts the write but reads back a different value must
+        cause run_operation to return status='refused' with a reason that indicates
+        read-back verification failure.  This guards the fail-closed trust path."""
+        op = Operation(
+            surface="google_sheets",
+            object_id="sheet:abc123",
+            field="Status",
+            new_value="Complete",
+            op_kind="set_status",
+            batch_id="batch-005",
+        )
+        client = _MismatchReadBackClient()
+        receipt = _receipt(op)
+        result = run_operation(op, receipt, client)
+        # Must be refused — not 'written' or 'needs_operator_choice'
+        self.assertEqual(
+            result.status,
+            "refused",
+            "run_operation must refuse when the read-back value does not match "
+            "the written value (fail-closed trust path)",
+        )
+        # The detail must indicate read-back verification failure so callers can
+        # distinguish this failure mode from a receipt-validation refusal.
+        self.assertIsNotNone(result.detail, "refused result must carry detail")
+        reason = result.detail.get("reason", "")
+        self.assertIn(
+            "read-back verification failed",
+            reason,
+            "refused detail reason must name 'read-back verification failed' so callers "
+            "can distinguish this failure from a receipt-validation refusal",
+        )
 
     # ------------------------------------------------------------------
     # Test 4: value-validity strategy — native-API fail-fast

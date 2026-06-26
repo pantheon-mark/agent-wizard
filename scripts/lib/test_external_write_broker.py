@@ -102,16 +102,33 @@ class TestSummaryPlainLanguage(unittest.TestCase):
 
     def test_summary_text_contains_no_raw_field_names_in_technical_form(self):
         """No raw internal field names in snake_case / camelCase technical form.
-        The contract forbids leaking wizard-internal labels (op_kind, batch_id,
-        object_id, new_value, approved_operation_digest, canonical_repr).
+        The contract forbids leaking wizard-internal labels: both schema field names
+        (op_kind, batch_id, object_id, new_value, approved_operation_digest,
+        canonical_repr) AND surface/op_kind internal keys (google_sheets, asana,
+        notion, airtable, smartsheet, set_status, complete_tasks, update_due_date,
+        add_note, set_priority) that the broker is required to translate to plain
+        language before surfacing to the operator.
         """
         forbidden_field_names = [
+            # Schema-level internal field names
             "op_kind",
             "batch_id",
             "object_id",
             "new_value",
             "canonical_repr",
             "approved_operation_digest",
+            # Surface internal keys (broker must translate via _plain_surface_name)
+            "google_sheets",
+            "asana",
+            "notion",
+            "airtable",
+            "smartsheet",
+            # Op-kind internal keys (broker must translate via _plain_op_kind)
+            "set_status",
+            "complete_tasks",
+            "update_due_date",
+            "add_note",
+            "set_priority",
         ]
         text = self.proposal.summary_text
         for name in forbidden_field_names:
@@ -164,16 +181,21 @@ class TestReviewFile(unittest.TestCase):
         self.assertGreater(len(content.strip()), 0, "review file must not be empty")
 
     def test_review_file_contains_operation_detail(self):
-        """Review file must describe what will be written (not raw JSON).
-        At minimum: the surface name (plain or internal form) and the value."""
+        """Review file must describe what will be written using plain language.
+        The Operator Interaction Contract forbids wizard-internal labels in
+        operator-facing text: the plain label ('google sheets') must be present
+        and the internal key ('google_sheets') must be absent."""
         path = Path(self.proposal.review_file_path)
         content = path.read_text(encoding="utf-8").lower()
-        # Must contain reference to at least one surface name.
-        # The broker may render the plain-language name ("google sheets") or
-        # the internal key ("google_sheets") — either is acceptable here.
-        has_surface = "google sheets" in content or "google_sheets" in content
-        self.assertTrue(has_surface,
-                        "review file must reference the target surface")
+        # Must contain the plain-language surface name — not the internal key.
+        self.assertIn("google sheets", content,
+                      "review file must reference the surface using its plain name")
+        # Must NOT contain the internal underscore form — that would violate the
+        # Operator Interaction Contract which forbids wizard-internal labels in
+        # operator-facing text.
+        self.assertNotIn("google_sheets", content,
+                         "review file must not expose the internal key 'google_sheets' "
+                         "in operator-facing content")
         # Must contain a value being written
         self.assertIn("complete", content,
                       "review file must include the value being written")
