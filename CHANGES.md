@@ -12,6 +12,21 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-26 — writes back to outside destinations now go through a checked, approved path (v0.8.0)
+
+**Public-facing change:** If your system sends data back out — to a spreadsheet, a tracker, or another outside service — it now does so through a checked path instead of writing directly. This protects against malformed or unapproved writes leaving your system.
+
+- **Values are checked before they leave.** Each value written to an external destination is validated against the set of values you allow, so an out-of-range or mistyped value is caught before it goes out, not after.
+- **Significant writes are proposed and approved.** Before a significant external write happens, your system describes it to you in plain language and records your approval, with a per-write receipt — so nothing meaningful goes out unseen.
+- **A build-time check flags anything trying to go around the safe path.** When you build or extend your system, a check scans for any write that bypasses the approved path and stops the step if it finds one.
+- **A single audit view of who can write where.** Each agent's permitted write destinations are derived automatically and shown in one audit table.
+
+Systems that do not write back to anything carry none of this — it is added only where it is needed. This is a feature addition (`v0.8.0`, operator-explicit as always). Your own files, data, rules, credentials, and logs are untouched; a backup is taken before anything is applied. Foundation documents are byte-identical to `v0.7.0`.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-06-25 — outputs land in a predictable place, and messages are formatted right before they go out (v0.7.0)
 
 **Public-facing change:** Your system now puts its outputs in a consistent, named location and formats them correctly for the channel — email looks like email, SMS is the right length, and significant messages get a check before they are sent.

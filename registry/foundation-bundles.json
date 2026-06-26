@@ -177,6 +177,19 @@
       "changelog": "Your system now produces outputs in a consistent, predictable location (a deliverables/ folder with a clear naming convention established at setup). It also ships maintained output-quality guidance — channel-appropriate formatting for email and SMS, clearer message organization — that your agents consult when producing anything you will read or send. A design-pass skill runs before significant outbound messages to check rendering and organization against your preferences before anything is sent.",
       "bundle_tree_sha256": "sha256:1f30a74a6306c21ed403a012d41f51e9e4c02f5b3da981baebc88b0ca72956b4",
       "bundle_manifest_sha256": "sha256:7f087b4a00ee201944c6237543b3f3ec2520d6b1cd5250665c7f27a20d3299b2"
+    },
+    {
+      "foundation_bundle_version": "v0.8.0",
+      "safety_class": "routine_improvement",
+      "recommendation_reason": "When your system writes back to an outside destination, it now does so through a checked path — values are validated against your allowed set, significant writes get a fresh plain-language approval, and a build-time check flags anything that tries to go around the safe path.",
+      "path": "foundation-bundles/v0.8.0/",
+      "release_date": "2026-06-26",
+      "source_commit": "f1db2b7",
+      "manifest": "foundation-bundles/v0.8.0/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "Adds write-integrity protection for systems that send data back out to an external destination (a spreadsheet, a tracker, an outside service). Writes now go through a checked path: each value is validated against the set of values you allow before it leaves, significant writes are proposed to you in plain language and recorded with your approval, and a build-time check flags any write that tries to bypass the safe path. Each agent's permitted write destinations are derived and shown in a single audit table. Systems that do not write back to anything carry none of this — it is added only where it is needed. Your own data, rules, credentials, and logs are untouched.",
+      "bundle_tree_sha256": "sha256:457ebd5344dc22777d31711ea18094acb2c46d88a9d0ef65c3d9a1f32a52fb25",
+      "bundle_manifest_sha256": "sha256:9c464713e3105e8d261ce41702d3ba191143934c1f34b41dba60c0c863e8c9e6"
     }
   ]
 }

@@ -553,19 +553,69 @@ class ExternalWriteLibEmitDecisionTests(unittest.TestCase):
                          "foundation-only systems have no agent layer -> no external_write lib")
 
 
-class ExternalWriteLibDeferredEmitTests(unittest.TestCase):
-    """Task 7 (D) DEFERRED to post-Task-8: end-to-end assertion that a writes-back plan
-    actually writes agents/lib/external_write/*.py into the emitted tree.
+class ExternalWriteLibEmitFromBundleTests(unittest.TestCase):
+    """Task 7 (D): end-to-end assertion that a writes-back plan built from the bundle
+    that ships the external_write lib (v0.8.0) actually writes
+    agents/lib/external_write/*.py into the emitted tree.
 
-    Cannot be asserted now: emission copies these source files from a REGISTERED frozen
-    bundle, and the bundle carrying the external_write lib is not cut until Task 8.
-    The emit DECISION + file-selection logic is covered by ExternalWriteLibEmitDecisionTests.
+    Emission copies these source files from the REGISTERED frozen bundle; v0.8.0 is the
+    bundle that ships the lib. A full emit of a writes-back plan from v0.8.0 must land
+    all four lib files (plus the package __init__ markers) so the emitted system can
+    import and run the checked write substrate. A read-only plan (no boundary_output
+    dependency) from the SAME bundle must land NONE of the lib (no dead code) — proving
+    the emit is gated on the writes-back signal, not merely on the bundle carrying the
+    source. The emit DECISION logic is also covered by ExternalWriteLibEmitDecisionTests;
+    this is the from-bundle physical-emit proof.
     """
 
-    @unittest.skip("DEFERRED to post-Task-8: emit-from-bundle external_write lib assertion "
-                   "requires the new bundle (cut in Task 8) that ships the lib files.")
-    def test_emitted_system_carries_external_write_lib(self):
-        raise NotImplementedError
+    _BUNDLE = "v0.8.0"
+    _LIB_FILES = (
+        "agents/lib/external_write/operations.py",
+        "agents/lib/external_write/adapters.py",
+        "agents/lib/external_write/broker.py",
+        "agents/lib/external_write/scan.py",
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        cls.contract = load_contract(default_contract_path())
+
+    def _plan(self, deps_json):
+        import copy
+        from test_emission_plan import _valid_plan
+        p = copy.deepcopy(_valid_plan())
+        p["bundle_version"] = self._BUNDLE
+        p["foundation_doc_inputs"]["EXTERNAL_DEPENDENCY_IDENTITY"] = deps_json
+        return validate_emission_plan(p, self.contract)
+
+    def test_writes_back_plan_emits_lib_files(self):
+        import json
+        deps = json.dumps([{"id": "t", "name": "company_tracker", "type": "Sheet",
+                            "roles": ["boundary_output"], "owner_agent_id": "researcher"}])
+        plan = self._plan(deps)
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name)
+        emit_operator_system(plan, staging, REPO_ROOT)
+        for rel in self._LIB_FILES:
+            self.assertTrue((staging / rel).is_file(),
+                            f"writes-back plan from {self._BUNDLE} must physically emit {rel}")
+        # Package markers so the lib imports cleanly from the emitted tree.
+        self.assertTrue((staging / "agents/lib/__init__.py").is_file(),
+                        "agents/lib/__init__.py package marker must be emitted")
+        self.assertTrue((staging / "agents/lib/external_write/__init__.py").is_file(),
+                        "agents/lib/external_write/__init__.py package marker must be emitted")
+
+    def test_read_only_plan_emits_no_lib_files(self):
+        import json
+        deps = json.dumps([{"id": "f", "name": "rss_feed", "type": "RSS",
+                            "roles": ["boundary_input"]}])
+        plan = self._plan(deps)
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name)
+        emit_operator_system(plan, staging, REPO_ROOT)
+        for rel in self._LIB_FILES:
+            self.assertFalse((staging / rel).exists(),
+                             f"read-only plan must emit NONE of the lib (no dead code); {rel} present")
 
 
 if __name__ == "__main__":

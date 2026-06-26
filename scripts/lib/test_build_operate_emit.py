@@ -820,24 +820,56 @@ class WritesBackOwnershipCaptureTests(unittest.TestCase):
         self.assertIsNone(m, f"build ID found in 09_credentials.md: {m}")
 
 
-class Task8DeferredScannerEmitTests(unittest.TestCase):
-    """T4-A (DEFERRED to post-Task-8): end-to-end assertion that the scanner wiring
-    reaches an EMITTED operator system.
+class Task8ScannerEmitTests(unittest.TestCase):
+    """T4-A: end-to-end assertion that the bypass-scanner wiring reaches an EMITTED
+    operator system built from the bundle that carries it (v0.8.0).
 
-    This cannot be asserted now: emission sources foundation templates from a
-    REGISTERED frozen bundle, and the bundle carrying the Task-4 scanner wiring
-    is not cut until Task 8. The canonical template-level wiring is covered by
-    MaRevBypassScannerWiringTests above. Once Task 8 cuts and registers the new
-    bundle whose templates carry this wiring, restore the end-to-end check:
-    emit_operator_system(plan_for_new_bundle, staging) and assert the emitted
-    project_instructions.md + agents/prompts/orchestrator_prompt.md name
-    scan.py with fail-closed semantics.
+    Emission sources the operating-layer templates from the REGISTERED frozen bundle;
+    v0.8.0 is the bundle whose templates carry the Task-4 scanner wiring. This re-emits
+    a full operator system from v0.8.0 and asserts the emitted project_instructions.md
+    and agents/prompts/orchestrator_prompt.md both name the scanner CLI by path and
+    state fail-closed-on-violation semantics. It would FAIL if the wiring were absent
+    from the cut bundle. The canonical template-level wiring is also covered by
+    MaRevBypassScannerWiringTests; this is the from-bundle proof.
     """
 
-    @unittest.skip("DEFERRED to post-Task-8: emit-from-bundle scanner-wiring assertion "
-                   "requires the new bundle (cut in Task 8) that carries the Task-4 wiring.")
-    def test_emitted_operator_system_carries_scanner_wiring(self):
-        raise NotImplementedError
+    _BUNDLE = "v0.8.0"
+
+    @classmethod
+    def setUpClass(cls):
+        from operator_system_emitter import emit_operator_system  # noqa: E402
+        dr = _dr_with_increments()
+        bi = BuildIntent(derived_record=dr, agent_intents=[_ai_collector(), _ai_summariser()])
+        plan_dict = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers,
+                                           bundle_version=cls._BUNDLE)
+        typed_plan = validate_emission_plan(plan_dict, EP_CONTRACT)
+        cls._tmp = tempfile.TemporaryDirectory()
+        staging = Path(cls._tmp.name)
+        emit_operator_system(typed_plan, staging, REPO_ROOT)
+        cls.pi_text = (staging / "project_instructions.md").read_text(encoding="utf-8")
+        cls.orch_text = (staging / "agents/prompts/orchestrator_prompt.md").read_text(encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_emitted_pi_names_bypass_scanner(self):
+        self.assertIn("agents/lib/external_write/scan.py", self.pi_text,
+                      "emitted project_instructions.md must name the bypass scanner CLI by path")
+
+    def test_emitted_pi_fail_closed_on_violation(self):
+        lower = self.pi_text.lower()
+        self.assertTrue(("fail" in lower) and ("violation" in lower),
+                        "emitted project_instructions.md must state the phase fails on a scanner violation")
+
+    def test_emitted_orchestrator_names_bypass_scanner(self):
+        self.assertIn("agents/lib/external_write/scan.py", self.orch_text,
+                      "emitted orchestrator_prompt.md must name the bypass scanner CLI by path")
+
+    def test_emitted_orchestrator_fail_closed_on_violation(self):
+        lower = self.orch_text.lower()
+        self.assertTrue(("fail" in lower) and ("violation" in lower),
+                        "emitted orchestrator_prompt.md must state the phase fails on a scanner violation")
 
 
 class Phase1BuildPromptScannerTests(unittest.TestCase):
@@ -1147,21 +1179,62 @@ class Task5ApprovalProseTests(unittest.TestCase):
         self.assertIsNone(m, f"build ID found in agent_prompt_template.md: {m}")
 
 
-class Task8DeferredApprovalEmitTests(unittest.TestCase):
-    """T5 (DEFERRED to post-Task-8): end-to-end assertion that step-4 approval prose
-    and honest ceiling reach an EMITTED operator system.
+class Task8ApprovalEmitTests(unittest.TestCase):
+    """T5: end-to-end assertion that the step-4 semantic-approval prose and the honest
+    ceiling reach an EMITTED operator system built from the bundle that carries them
+    (v0.8.0).
 
-    Cannot be asserted now — emission sources from a REGISTERED frozen bundle, and
-    the bundle carrying Task-5 changes is cut in Task 8. The canonical template-level
-    prose is covered by Task5ApprovalProseTests above.
+    Re-emits a full operator system from v0.8.0 and asserts the emitted
+    operating_discipline.md and agents/prompts/orchestrator_prompt.md describe a
+    distinct step-4 approval that re-approves on plan evolution, and that
+    operating_discipline.md discloses the build-time (honest-ceiling) enforcement.
+    Would FAIL if the Task-5 prose were absent from the cut bundle. The canonical
+    template-level prose is also covered by Task5ApprovalProseTests; this is the
+    from-bundle proof.
     """
 
-    @unittest.skip(
-        "DEFERRED to post-Task-8: emit-from-bundle approval-prose assertion requires "
-        "the new bundle (cut in Task 8) that carries the Task-5 prose."
-    )
-    def test_emitted_operator_system_carries_approval_prose(self):
-        raise NotImplementedError
+    _BUNDLE = "v0.8.0"
+
+    @classmethod
+    def setUpClass(cls):
+        from operator_system_emitter import emit_operator_system  # noqa: E402
+        dr = _dr_with_increments()
+        bi = BuildIntent(derived_record=dr, agent_intents=[_ai_collector(), _ai_summariser()])
+        plan_dict = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers,
+                                           bundle_version=cls._BUNDLE)
+        typed_plan = validate_emission_plan(plan_dict, EP_CONTRACT)
+        cls._tmp = tempfile.TemporaryDirectory()
+        staging = Path(cls._tmp.name)
+        emit_operator_system(typed_plan, staging, REPO_ROOT)
+        cls.od_text = (staging / "operating_discipline.md").read_text(encoding="utf-8")
+        cls.orch_text = (staging / "agents/prompts/orchestrator_prompt.md").read_text(encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_emitted_od_step4_distinct_approval(self):
+        lower = self.od_text.lower()
+        self.assertTrue(("distinct" in lower) or ("separate" in lower),
+                        "emitted operating_discipline.md must describe step-4 approval as distinct/separate")
+
+    def test_emitted_od_reapproval_on_plan_evolution(self):
+        lower = self.od_text.lower()
+        self.assertTrue(
+            ("re-approval" in lower or "re-approve" in lower or "reapproval" in lower
+             or "void" in lower or "prior approval" in lower),
+            "emitted operating_discipline.md must state plan evolution voids prior approval",
+        )
+
+    def test_emitted_od_honest_ceiling_build_time(self):
+        lower = self.od_text.lower()
+        self.assertIn("build-time", lower,
+                      "emitted operating_discipline.md must disclose build-time enforcement (honest ceiling)")
+
+    def test_emitted_orchestrator_step4_distinct_approval(self):
+        lower = self.orch_text.lower()
+        self.assertTrue(("distinct" in lower) or ("separate" in lower),
+                        "emitted orchestrator_prompt.md must describe step-4 approval as distinct/separate")
 
 
 if __name__ == "__main__":

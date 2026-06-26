@@ -1,0 +1,266 @@
+# Migration manifest for foundation bundle v0.8.0
+# v0.8.0 adds the external-write integrity feature: a checked write substrate
+# (operations, adapters, approval broker, bypass scanner) emitted only into systems
+# that write back, plus per-agent permitted-write derivation and a build-time scanner
+# gate wired into the operating-layer prose. Foundation docs schema unchanged.
+# JSON sidecar is authoritative.
+_note: JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML
+  is the human-facing companion. Both files MUST stay in sync.
+artifact_notes:
+  agents/lib/external_write/operations.py: New external-write operation model — validates
+    each write's values against the operator's allowed set before it leaves the system (native
+    fail-fast on an out-of-vocabulary value).
+  agents/lib/external_write/adapters.py: New per-destination write adapters — the only sanctioned
+    path to a real external write; a direct API call outside an adapter is a bypass.
+  agents/lib/external_write/broker.py: New approval broker — proposes a write in plain language,
+    records the operator's fresh approval, and writes a per-operation receipt.
+  agents/lib/external_write/scan.py: New bypass scanner CLI — flags any external write that
+    goes around the sanctioned adapter path; the build-time review step fails the phase on
+    a violation.
+  project_instructions.md: Build-and-operate review step now runs the bypass scanner and fails
+    the phase on a violation; carries the per-agent permission audit table and the controlled-vocabulary
+    write rule.
+  operating_discipline.md: Adds the write-integrity discipline — writes use only values from
+    the operator's allowed set, and significant external writes get a fresh plain-language
+    approval.
+  quality/rules_library.md: Documents the controlled-vocabulary standing rule and the external-write
+    approval discipline.
+  agents/prompts/orchestrator_prompt.md: Orchestrator runs the bypass scanner in the build-time
+    review and is the bound invoker of every external-write surface; fails the phase on a
+    scanner violation.
+  .claude/receipt_gate.sh: Runtime hook demoted to a backstop behind the build-time scanner
+    and the broker's fresh-approval check.
+migrations:
+- from: v0.7.0
+  class: minor_additive
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard"
+    self-upgrade --to v0.8.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.7.0 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.8.0/ and set foundation_bundle_version back
+    to v0.7.0.
+  stop_condition: not_applicable
+  notes: 'Minor-additive release to v0.8.0: adds the external-write integrity feature — a
+    checked write substrate (operations, adapters, an approval broker, and a build-time bypass
+    scanner) emitted only into systems that write back to an external destination, plus per-agent
+    permitted-write derivation and a build-time scanner gate wired into the operating-layer
+    prose. No breaking changes; all prior operator project files remain valid.'
+- from: v0.6.9
+  class: minor_additive
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard"
+    self-upgrade --to v0.8.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.9 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.8.0/ and set foundation_bundle_version back
+    to v0.6.9.
+  stop_condition: not_applicable
+  notes: 'Minor-additive release to v0.8.0: adds the external-write integrity feature — a
+    checked write substrate (operations, adapters, an approval broker, and a build-time bypass
+    scanner) emitted only into systems that write back to an external destination, plus per-agent
+    permitted-write derivation and a build-time scanner gate wired into the operating-layer
+    prose. No breaking changes; all prior operator project files remain valid. Combined jump
+    from v0.6.9 straight to v0.8.0: also delivers every operating-layer change between v0.6.9
+    and v0.8.0.'
+- from: v0.6.8
+  class: minor_additive
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard"
+    self-upgrade --to v0.8.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.8 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.8.0/ and set foundation_bundle_version back
+    to v0.6.8.
+  stop_condition: not_applicable
+  notes: 'Minor-additive release to v0.8.0: adds the external-write integrity feature — a
+    checked write substrate (operations, adapters, an approval broker, and a build-time bypass
+    scanner) emitted only into systems that write back to an external destination, plus per-agent
+    permitted-write derivation and a build-time scanner gate wired into the operating-layer
+    prose. No breaking changes; all prior operator project files remain valid. Combined jump
+    from v0.6.8 straight to v0.8.0: also delivers every operating-layer change between v0.6.8
+    and v0.8.0.'
+- from: v0.6.7
+  class: minor_additive
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard"
+    self-upgrade --to v0.8.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.7 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.8.0/ and set foundation_bundle_version back
+    to v0.6.7.
+  stop_condition: not_applicable
+  notes: 'Minor-additive release to v0.8.0: adds the external-write integrity feature — a
+    checked write substrate (operations, adapters, an approval broker, and a build-time bypass
+    scanner) emitted only into systems that write back to an external destination, plus per-agent
+    permitted-write derivation and a build-time scanner gate wired into the operating-layer
+    prose. No breaking changes; all prior operator project files remain valid. Combined jump
+    from v0.6.7 straight to v0.8.0: also delivers every operating-layer change between v0.6.7
+    and v0.8.0.'
+- from: v0.6.6
+  class: minor_additive
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard"
+    self-upgrade --to v0.8.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.6 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.8.0/ and set foundation_bundle_version back
+    to v0.6.6.
+  stop_condition: not_applicable
+  notes: 'Minor-additive release to v0.8.0: adds the external-write integrity feature — a
+    checked write substrate (operations, adapters, an approval broker, and a build-time bypass
+    scanner) emitted only into systems that write back to an external destination, plus per-agent
+    permitted-write derivation and a build-time scanner gate wired into the operating-layer
+    prose. No breaking changes; all prior operator project files remain valid. Combined jump
+    from v0.6.6 straight to v0.8.0: also delivers every operating-layer change between v0.6.6
+    and v0.8.0.'
+- from: v0.6.5
+  class: minor_additive
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard"
+    self-upgrade --to v0.8.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.5 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.8.0/ and set foundation_bundle_version back
+    to v0.6.5.
+  stop_condition: not_applicable
+  notes: 'Minor-additive release to v0.8.0: adds the external-write integrity feature — a
+    checked write substrate (operations, adapters, an approval broker, and a build-time bypass
+    scanner) emitted only into systems that write back to an external destination, plus per-agent
+    permitted-write derivation and a build-time scanner gate wired into the operating-layer
+    prose. No breaking changes; all prior operator project files remain valid. Combined jump
+    from v0.6.5 straight to v0.8.0: also delivers every operating-layer change between v0.6.5
+    and v0.8.0.'
+- from: v0.6.4
+  class: minor_additive
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard"
+    self-upgrade --to v0.8.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.4 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.8.0/ and set foundation_bundle_version back
+    to v0.6.4.
+  stop_condition: not_applicable
+  notes: 'Minor-additive release to v0.8.0: adds the external-write integrity feature — a
+    checked write substrate (operations, adapters, an approval broker, and a build-time bypass
+    scanner) emitted only into systems that write back to an external destination, plus per-agent
+    permitted-write derivation and a build-time scanner gate wired into the operating-layer
+    prose. No breaking changes; all prior operator project files remain valid. Combined jump
+    from v0.6.4 straight to v0.8.0: also delivers every operating-layer change between v0.6.4
+    and v0.8.0.'
+- from: v0.6.3
+  class: minor_additive
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard"
+    self-upgrade --to v0.8.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.3 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.8.0/ and set foundation_bundle_version back
+    to v0.6.3.
+  stop_condition: not_applicable
+  notes: 'Minor-additive release to v0.8.0: adds the external-write integrity feature — a
+    checked write substrate (operations, adapters, an approval broker, and a build-time bypass
+    scanner) emitted only into systems that write back to an external destination, plus per-agent
+    permitted-write derivation and a build-time scanner gate wired into the operating-layer
+    prose. No breaking changes; all prior operator project files remain valid. Combined jump
+    from v0.6.3 straight to v0.8.0: also delivers every operating-layer change between v0.6.3
+    and v0.8.0.'
+- from: v0.6.2
+  class: minor_additive
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard"
+    self-upgrade --to v0.8.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.2 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.8.0/ and set foundation_bundle_version back
+    to v0.6.2.
+  stop_condition: not_applicable
+  notes: 'Minor-additive release to v0.8.0: adds the external-write integrity feature — a
+    checked write substrate (operations, adapters, an approval broker, and a build-time bypass
+    scanner) emitted only into systems that write back to an external destination, plus per-agent
+    permitted-write derivation and a build-time scanner gate wired into the operating-layer
+    prose. No breaking changes; all prior operator project files remain valid. Combined jump
+    from v0.6.2 straight to v0.8.0: also delivers every operating-layer change between v0.6.2
+    and v0.8.0.'
+- from: v0.6.1
+  class: minor_additive
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard"
+    self-upgrade --to v0.8.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.1 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.8.0/ and set foundation_bundle_version back
+    to v0.6.1.
+  stop_condition: not_applicable
+  notes: 'Minor-additive release to v0.8.0: adds the external-write integrity feature — a
+    checked write substrate (operations, adapters, an approval broker, and a build-time bypass
+    scanner) emitted only into systems that write back to an external destination, plus per-agent
+    permitted-write derivation and a build-time scanner gate wired into the operating-layer
+    prose. No breaking changes; all prior operator project files remain valid. Combined jump
+    from v0.6.1 straight to v0.8.0: also delivers every operating-layer change between v0.6.1
+    and v0.8.0.'
+- from: v0.6.0
+  class: minor_additive
+  requires_operator_approval: true
+  supported: true
+  breaking_changes_summary: ''
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard"
+    self-upgrade --to v0.8.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.0 (or any version in the supported range). A backup is taken automatically.
+  rollback: Restore from .wizard/backups/pre-v0.8.0/ and set foundation_bundle_version back
+    to v0.6.0.
+  stop_condition: not_applicable
+  notes: 'Minor-additive release to v0.8.0: adds the external-write integrity feature — a
+    checked write substrate (operations, adapters, an approval broker, and a build-time bypass
+    scanner) emitted only into systems that write back to an external destination, plus per-agent
+    permitted-write derivation and a build-time scanner gate wired into the operating-layer
+    prose. No breaking changes; all prior operator project files remain valid. Combined jump
+    from v0.6.0 straight to v0.8.0: also delivers every operating-layer change between v0.6.0
+    and v0.8.0.'
+release_classification: minor_additive_prerelease
+release_date: '2026-06-26'
+schema_version: v1
+target_version: v0.8.0
