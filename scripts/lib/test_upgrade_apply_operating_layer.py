@@ -769,5 +769,236 @@ class ControlPlaneRendererRegistry(unittest.TestCase):
         )
 
 
+# ===========================================================================
+# Regression test: old capsule (pre-v0.7.0) missing OPERATOR_OUTPUT_POINTER
+# ===========================================================================
+
+class OldCapsuleNewPlaceholderFallsBackToDefault(unittest.TestCase):
+    """Regression guard for the v0.7.0 OPERATOR_OUTPUT_POINTER upgrade-refusal bug.
+
+    When a pre-v0.7.0 operator project upgrades to a bundle whose agent-layer
+    template references {{OPERATOR_OUTPUT_POINTER}}, the old capsule's by_relpath
+    entry for that agent file does NOT contain OPERATOR_OUTPUT_POINTER (it was added
+    in v0.7.0).  Before the fix, _render_operating_layer used by_relpath[rel] as the
+    sole sub_inputs dict, so the missing key caused an UpgradeApplyError (refusal).
+    After the fix, _default_scaffold_inputs() is seeded first so OPERATOR_OUTPUT_POINTER
+    defaults to "" and the render succeeds.
+
+    Two assertions:
+      1. Render succeeds (no UpgradeApplyError / no GeneratorError) and
+         OPERATOR_OUTPUT_POINTER resolves to "" (the safe empty default from
+         _default_scaffold_inputs) in the rendered output.
+      2. A capsule-provided value WINS over the default for a key the capsule
+         already carries (e.g. PROJECT_NAME, which is also in _default_scaffold_inputs
+         as a placeholder text).
+
+    This test calls _render_operating_layer directly (unit-level) to isolate the
+    fixed code path from the full apply_upgrade transaction.
+    """
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    # --- helpers ----------------------------------------------------------------
+
+    def _build_synthetic_bundle(self, build_root: Path, version: str) -> None:
+        """Write the minimal synthetic bundle needed by _render_operating_layer.
+
+        The agent-layer template references {{OPERATOR_OUTPUT_POINTER}} (the new v0.7.0
+        placeholder) plus {{PROJECT_NAME}} (an existing key the capsule carries).
+        Foundation doc templates are included so derive_scaffold_render_inputs resolves.
+        The required-docs contract is copied from the real authority.
+        """
+        bundle_dir = build_root / "wizard" / "foundation-bundles" / version
+        templates_dir = bundle_dir / "templates"
+        agent_tpl_dir = templates_dir / "agents" / "prompts"
+        agent_tpl_dir.mkdir(parents=True, exist_ok=True)
+
+        # Agent-layer template: references OPERATOR_OUTPUT_POINTER (new) + PROJECT_NAME (old).
+        agent_tpl = agent_tpl_dir / "coordinator_prompt.md"
+        agent_tpl.write_text(
+            "# Coordinator -- {{PROJECT_NAME}}\n\n"
+            "Output pointer: {{OPERATOR_OUTPUT_POINTER}}\n\n"
+            "Stable agent body.\n",
+            encoding="utf-8",
+        )
+
+        # Foundation doc templates (minimal; needed by derive_scaffold_render_inputs).
+        for doc in _FOUNDATION_DOCS:
+            (templates_dir / doc).write_text(
+                _foundation_template(doc, version), encoding="utf-8"
+            )
+
+        # system-artifacts.json: declare the agent-layer file.
+        contract = {
+            "contract_id": "system-artifacts",
+            "contract_version": "system-artifacts-v1",
+            "bundle_version": version,
+            "artifacts": [
+                {
+                    "delivery": "wizard",
+                    "relpath": "agents/prompts/coordinator_prompt.md",
+                    "render_kind": "render",
+                    "merge_strategy": "three_way",
+                    "mode": "0644",
+                    "template_path": "templates/agents/prompts/coordinator_prompt.md",
+                    "inputs": {
+                        "persisted": ["PROJECT_NAME"],
+                        "derived": ["OPERATOR_OUTPUT_POINTER"],
+                    },
+                }
+            ],
+        }
+        (bundle_dir / "system-artifacts.json").write_text(
+            json.dumps(contract, indent=2) + "\n", encoding="utf-8"
+        )
+
+        # Provenance sidecar (read by upgrade path helpers).
+        (bundle_dir / "foundation-bundle.provenance.json").write_text(
+            json.dumps({"generator_version": f"gen-{version}"}) + "\n", encoding="utf-8"
+        )
+
+        # Required-docs contract (copied verbatim from the real authority).
+        contract_dst = (
+            build_root / "wizard" / "foundation-bundles" / "v0" / "contracts"
+            / "foundation-manifest-hash-baseline-v1.json"
+        )
+        contract_dst.parent.mkdir(parents=True, exist_ok=True)
+        contract_dst.write_text(_REAL_CONTRACT.read_text(encoding="utf-8"), encoding="utf-8")
+
+    def _build_old_capsule(self) -> dict:
+        """Build a pre-v0.7.0 capsule whose by_relpath entry for the agent file
+        lacks OPERATOR_OUTPUT_POINTER -- simulating an operator project set up before
+        that placeholder was introduced in v0.7.0."""
+        return {
+            "schema_version": "replay-capsule-v2",
+            "foundation_bundle_version": "v0.6.9",
+            "generator_version": "g" * 40,
+            "system_shape": "markdown-CC",
+            "foundation_only_mode": False,
+            "canonicalization_version": "v1",
+            "hash_algorithm": "sha256-lf",
+            "foundation_doc_inputs": {
+                "PROJECT_NAME": "OldProject",
+                "WIZARD_VERSION": "v0.6.9",
+            },
+            "operating": {
+                "resolved_scaffold_inputs": {},
+                # by_relpath carries the agent file's substitution dict as recorded at
+                # v0.6.9 emit -- OPERATOR_OUTPUT_POINTER is intentionally absent here,
+                # simulating the real state of any pre-v0.7.0 operator project.
+                "by_relpath": {
+                    "agents/prompts/coordinator_prompt.md": {
+                        "PROJECT_NAME": "OldProject",
+                        # OPERATOR_OUTPUT_POINTER deliberately absent: not in old capsules.
+                    }
+                },
+            },
+        }
+
+    # --- test methods -----------------------------------------------------------
+
+    @unittest.skipUnless(
+        _REAL_CONTRACT.exists(),
+        "requires the real foundation-manifest-hash-baseline-v1.json (build repo not found)"
+    )
+    def test_missing_placeholder_falls_back_to_empty_default(self):
+        """_render_operating_layer must NOT raise UpgradeApplyError when an old capsule's
+        by_relpath entry lacks OPERATOR_OUTPUT_POINTER but the new bundle template references it.
+        The placeholder must resolve to "" (the _default_scaffold_inputs safe default), not
+        left as a raw {{...}} and not cause a refusal."""
+        from upgrade_apply import _render_operating_layer, UpgradeApplyError as UAError  # noqa: E402
+
+        version = "v0.7.0-regtest"
+        build_root = self.tmp / "build_repo_fallback"
+        self._build_synthetic_bundle(build_root, version)
+
+        capsule = self._build_old_capsule()
+        capsule_inputs = capsule["foundation_doc_inputs"]
+
+        # Must not raise -- this is the regression: old capsule missing a new key.
+        try:
+            rendered = _render_operating_layer(
+                version,
+                ["agents/prompts/coordinator_prompt.md"],
+                capsule=capsule,
+                capsule_inputs=capsule_inputs,
+                project_name="OldProject",
+                build_repo_root=build_root,
+            )
+        except UAError as exc:
+            self.fail(
+                "REGRESSION: _render_operating_layer raised UpgradeApplyError on an old "
+                "capsule missing OPERATOR_OUTPUT_POINTER (pre-fix behaviour restored):\n"
+                f"{exc}"
+            )
+
+        content = rendered["agents/prompts/coordinator_prompt.md"]
+
+        # The raw placeholder must not survive into the rendered output.
+        self.assertNotIn(
+            "{{OPERATOR_OUTPUT_POINTER}}",
+            content,
+            "OPERATOR_OUTPUT_POINTER was not substituted -- raw placeholder leaked into output",
+        )
+        # The resolved value from _default_scaffold_inputs is ""; the rendered line
+        # becomes "Output pointer: \n" (key replaced by its empty-string default).
+        self.assertIn(
+            "Output pointer: \n",
+            content,
+            "OPERATOR_OUTPUT_POINTER did not resolve to the expected empty-string default; "
+            "check that _default_scaffold_inputs() seeds sub_inputs before the capsule overlay",
+        )
+
+    @unittest.skipUnless(
+        _REAL_CONTRACT.exists(),
+        "requires the real foundation-manifest-hash-baseline-v1.json (build repo not found)"
+    )
+    def test_capsule_provided_value_wins_over_default(self):
+        """A key the capsule's by_relpath entry DOES provide must use the capsule value,
+        not the _default_scaffold_inputs fallback -- capsule values always win over defaults."""
+        from upgrade_apply import _render_operating_layer  # noqa: E402
+
+        version = "v0.7.0-regtest"
+        build_root = self.tmp / "build_repo_win"
+        self._build_synthetic_bundle(build_root, version)
+
+        capsule = self._build_old_capsule()
+        # PROJECT_NAME is in the capsule's by_relpath entry; _default_scaffold_inputs
+        # carries a different sentinel for it -- the capsule value "OldProject" must win.
+        capsule_inputs = capsule["foundation_doc_inputs"]
+
+        rendered = _render_operating_layer(
+            version,
+            ["agents/prompts/coordinator_prompt.md"],
+            capsule=capsule,
+            capsule_inputs=capsule_inputs,
+            project_name="OldProject",
+            build_repo_root=build_root,
+        )
+        content = rendered["agents/prompts/coordinator_prompt.md"]
+
+        # The capsule's PROJECT_NAME "OldProject" must appear in the heading.
+        self.assertIn(
+            "# Coordinator -- OldProject",
+            content,
+            "capsule-provided PROJECT_NAME was overridden by the scaffold default "
+            "(capsule values must always win over _default_scaffold_inputs fallback)",
+        )
+        # The scaffold default for PROJECT_NAME contains "operator-configures"; it must
+        # not appear (that would mean the default stomped the capsule value).
+        self.assertNotIn(
+            "operator-configures",
+            content,
+            "scaffold default text leaked into output -- capsule value did not win "
+            "over _default_scaffold_inputs; check the overlay order (defaults seeded first, "
+            "then capsule overlaid on top)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

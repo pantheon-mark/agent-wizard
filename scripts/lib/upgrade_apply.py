@@ -55,6 +55,7 @@ from bundle_templates import (  # type: ignore
     _bundle_dir,
     BundleTemplateError,
 )
+from scaffold_emitter import _default_scaffold_inputs  # type: ignore
 from generator import render_foundation_docs  # type: ignore
 from replay_capsule import REPLAY_CAPSULE_REL, capsule_supports_operating_replay  # type: ignore
 from section_merge import section_three_way_merge  # type: ignore
@@ -322,8 +323,14 @@ def _render_operating_layer(
                     f"{rel!r}: {e}. No files were changed."
                 ) from e
             if rel in by_relpath:
-                # Agent-layer file: the capsule's resolved dict is self-contained.
-                sub_inputs = dict(by_relpath[rel])
+                # Agent-layer file: the capsule's resolved dict carries the persisted
+                # per-agent substitutions.  New template placeholders added by later
+                # bundle versions are not in old capsules; supplement with scaffold
+                # defaults so the upgrade does not refuse on a missing key that has a
+                # safe empty default (e.g. OPERATOR_OUTPUT_POINTER, added in v0.7.0).
+                # Capsule-stored values always win over the defaults.
+                sub_inputs = dict(_default_scaffold_inputs())
+                sub_inputs.update(by_relpath[rel])
             else:
                 sub_inputs = scaffold_inputs
             missing_keys: List[str] = []
