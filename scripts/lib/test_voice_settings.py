@@ -17,11 +17,25 @@ class VoiceSettingsTests(unittest.TestCase):
         from voice_settings import voice_settings_inputs  # noqa: F401
         self.fn = voice_settings_inputs
 
+    # --- data-driven gate: no source fields -> no injection ---
+
+    def test_no_source_fields_returns_empty(self):
+        """An input lacking every voice source field injects nothing (gate closed).
+
+        This is the conformance-restoring contract: a pre-v0.7.0 estate's capsule
+        has none of the voice source fields, so voice_settings_inputs returns {} and
+        the scaffold sentinels stand, leaving render(released version, old capsule)
+        byte-for-byte reproducible.
+        """
+        self.assertEqual(self.fn({}), {})
+        # Unrelated keys present, but none is a voice source field -> still empty.
+        self.assertEqual(self.fn({"AUTONOMY_LEVEL": "1", "CORE_PURPOSE": "x"}), {})
+
     # --- completeness + closed-value discipline ---
 
     def test_voice_values_complete_and_closed(self):
-        """Empty input yields all six keys with safe closed values (no sentinel)."""
-        out = self.fn({})
+        """With a source field present, all six keys appear with closed values (no sentinel)."""
+        out = self.fn({"UP_TECHNICAL_LITERACY": "mixed"})
         self.assertEqual(
             set(out),
             {"TONE", "TECHNICAL_LEVEL", "EXPLANATION_DEPTH",
@@ -88,18 +102,18 @@ class VoiceSettingsTests(unittest.TestCase):
 
     def test_tone_is_plain_and_direct(self):
         """TONE is always 'plain-and-direct' (never 'warm' per project voice rule)."""
-        out = self.fn({})
+        out = self.fn({"UP_TECHNICAL_LITERACY": "mixed"})
         self.assertEqual(out["TONE"], "plain-and-direct")
         self.assertNotIn("warm", out["TONE"].lower())
 
     def test_list_style_is_bullets(self):
-        """LIST_STYLE is 'bullets' across all inputs."""
-        out = self.fn({})
+        """LIST_STYLE is 'bullets' whenever voice values are injected."""
+        out = self.fn({"UP_TECHNICAL_LITERACY": "mixed"})
         self.assertEqual(out["LIST_STYLE"], "bullets")
 
     def test_table_style_is_tables_when_comparing(self):
-        """TABLE_STYLE is 'tables-when-comparing' across all inputs."""
-        out = self.fn({})
+        """TABLE_STYLE is 'tables-when-comparing' whenever voice values are injected."""
+        out = self.fn({"UP_TECHNICAL_LITERACY": "mixed"})
         self.assertEqual(out["TABLE_STYLE"], "tables-when-comparing")
 
     # --- no-configure sentinels at the inject site ---

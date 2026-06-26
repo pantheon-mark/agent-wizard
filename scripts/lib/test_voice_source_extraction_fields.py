@@ -282,5 +282,85 @@ class ProjectInstructionsShowsRealValues(unittest.TestCase):
         self.assertEqual(merged["QA_REPORTING_STYLE"], "Live")
 
 
+class VoiceInjectionGatedOnSourceFields(unittest.TestCase):
+    """Replay-conformance fix: the voice-value injection is GATED on the voice source
+    fields actually being present in foundation_doc_inputs.
+
+    The regression: Task 3 added voice injection unconditionally, which RETROACTIVELY
+    changed what a released version (e.g. v0.6.9) re-renders for docs/voice_and_style.md.
+    A pre-v0.7.0 estate's capsule lacks the voice source fields, so it was installed with
+    sentinel values; once injection ran unconditionally the re-render produced voice
+    DEFAULTS instead, no longer reproducing the installed manifest base_hash, and the
+    replay-conformance gate (correctly) REFUSED the upgrade.
+
+    The fix data-gates the injection: with NO source field present, no voice keys are
+    injected and the scaffold sentinels stand — so render(released version, old capsule)
+    reproduces the installed sentinel content. With a source field present (a v0.7.0
+    build), the derived values are injected as before.
+
+    These tests exercise the real upgrade-time re-derivation entry point
+    (derive_scaffold_render_inputs) so they cover all the injection sites uniformly
+    (the gate lives inside voice_settings_inputs).
+    """
+
+    SHAPE = "markdown-CC"
+    SENTINEL = "(operator-configures during setup)"
+    VOICE_KEYS = (
+        "TONE", "TECHNICAL_LEVEL", "EXPLANATION_DEPTH",
+        "LENGTH_PREFERENCE", "LIST_STYLE", "TABLE_STYLE",
+    )
+
+    def _repo_root(self):
+        return Path(__file__).resolve().parents[2]  # wizard/
+
+    def test_old_capsule_without_source_fields_round_trips_to_sentinels(self):
+        """render(v0.6.9, capsule WITHOUT voice source fields) leaves the voice keys at
+        their installed sentinel values — no spurious drift, conformance restored."""
+        from bundle_templates import derive_scaffold_render_inputs
+        old_capsule_fdi = {"AUTONOMY_LEVEL": "1", "CORE_PURPOSE": "pre-v0.7.0 system"}
+        out = derive_scaffold_render_inputs(
+            system_shape=self.SHAPE,
+            foundation_doc_inputs=old_capsule_fdi,
+            project_name="LegacyEstate",
+            target_version="v0.6.9",
+            build_repo_root=self._repo_root(),
+        )
+        for k in self.VOICE_KEYS:
+            self.assertEqual(
+                out.get(k), self.SENTINEL,
+                f"old-capsule voice key {k!r} must fall back to the installed sentinel "
+                f"(got {out.get(k)!r}); a derived value here is the conformance regression",
+            )
+
+    def test_v070_capsule_with_source_fields_injects_derived_values(self):
+        """render(v0.7.0, capsule WITH a voice source field) injects derived voice values
+        (NOT sentinels) — the v0.7.0 behavior stays intact."""
+        from bundle_templates import derive_scaffold_render_inputs
+        new_capsule_fdi = {
+            "AUTONOMY_LEVEL": "1",
+            "CORE_PURPOSE": "v0.7.0 system",
+            "UP_TECHNICAL_LITERACY": "plain language only",
+            "NOTIFICATION_VERBOSITY": "Detailed",
+            "QA_REPORTING_STYLE": "summary",
+        }
+        out = derive_scaffold_render_inputs(
+            system_shape=self.SHAPE,
+            foundation_doc_inputs=new_capsule_fdi,
+            project_name="ModernEstate",
+            target_version="v0.7.0",
+            build_repo_root=self._repo_root(),
+        )
+        # Derived values, not sentinels.
+        for k in self.VOICE_KEYS:
+            self.assertNotEqual(
+                out.get(k), self.SENTINEL,
+                f"v0.7.0 capsule voice key {k!r} must be a derived value, not the sentinel",
+            )
+        self.assertEqual(out["TONE"], "plain-and-direct")
+        self.assertEqual(out["TECHNICAL_LEVEL"], "plain")       # from UP_TECHNICAL_LITERACY
+        self.assertEqual(out["EXPLANATION_DEPTH"], "detailed")  # from NOTIFICATION_VERBOSITY
+        self.assertEqual(out["LENGTH_PREFERENCE"], "concise")   # from QA_REPORTING_STYLE
+
+
 if __name__ == "__main__":
     unittest.main()
