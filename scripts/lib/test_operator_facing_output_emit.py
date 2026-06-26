@@ -267,6 +267,19 @@ class OperatorFacingAgentPromptTests(unittest.TestCase):
             f"found permitted writes: {self.permitted}"
         )
 
+    def test_voice_and_style_in_additional_context_files(self):
+        # MA-VS-3: operator-facing agent's additional_context_files must include
+        # docs/voice_and_style.md so the agent reads the voice doc from disk.
+        # The emitted prompt renders additional_context_files via _md_bullets; we
+        # check the Additional context files section of the rendered prompt text.
+        m = re.search(r"Additional context files.*?\n((?:[^\n]*\n)*?)(?:\n##|\Z)",
+                      self.rp, re.I | re.S)
+        section = m.group(0) if m else self.rp
+        self.assertIn(
+            "voice_and_style.md", section,
+            "operator-facing agent additional context must include docs/voice_and_style.md (MA-VS-3)"
+        )
+
 
 # ---------------------------------------------------------------------------
 # §4 Internal agent prompt

@@ -124,6 +124,9 @@ def assemble_agent_records(intents: List[AgentIntent], scaffold_plan: ScaffoldPl
         permitted = list(profile["permitted_write_directories"])
         if getattr(ai, "operator_facing", False):
             permitted.append(profile["deliverable_root"])
+        context_files = list(profile["additional_context_files"])
+        if getattr(ai, "operator_facing", False):
+            context_files.append("docs/voice_and_style.md")
         rec: Dict[str, Any] = {
             "id": agent_id,
             "role_description": ai.role_intent,
@@ -131,7 +134,7 @@ def assemble_agent_records(intents: List[AgentIntent], scaffold_plan: ScaffoldPl
             "primary_model_tier": tiers["primary_model_tier"],
             "status_model_tier": tiers["status_model_tier"],
             "permitted_write_directories": permitted,
-            "additional_context_files": list(profile["additional_context_files"]),
+            "additional_context_files": context_files,
             "step_completion_criteria": f"Each step is complete when: {signals}.",
             "task_completion_criteria": f"The task is complete when: {signals}.",
             "output_format_specification": profile["output_format_specification"],

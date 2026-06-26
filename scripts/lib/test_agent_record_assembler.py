@@ -175,6 +175,22 @@ class AgentRecordAssemblerTests(unittest.TestCase):
         self.assertEqual(recs["digest-helper"]["deliverable_naming_pattern"], "<Type> — <subject> — <YYYY-MM-DD>.md")
         self.assertEqual(recs["validator"]["deliverable_naming_pattern"], "<Type> — <subject> — <YYYY-MM-DD>.md")
 
+    def test_operator_facing_agent_gets_voice_and_style_in_context(self):
+        """MA-VS-3: operator-facing agents receive docs/voice_and_style.md in
+        additional_context_files (alongside approach.md). MA-VS-4: internal agents
+        do NOT receive voice_and_style.md in additional_context_files."""
+        intents = [
+            _ai(display_name="digest-writer", operator_facing=True),
+            _ai(display_name="data-processor", operator_facing=False),
+        ]
+        recs = {r["id"]: r for r in assemble_agent_records(intents, SP)}
+        # operator-facing agent gets both approach.md and docs/voice_and_style.md
+        self.assertIn("approach.md", recs["digest-writer"]["additional_context_files"])
+        self.assertIn("docs/voice_and_style.md", recs["digest-writer"]["additional_context_files"])
+        # internal agent gets only approach.md (no voice doc)
+        self.assertIn("approach.md", recs["data-processor"]["additional_context_files"])
+        self.assertNotIn("docs/voice_and_style.md", recs["data-processor"]["additional_context_files"])
+
 
 if __name__ == "__main__":
     unittest.main()
