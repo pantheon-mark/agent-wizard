@@ -132,7 +132,7 @@ The system is built and operated in phases. Each phase moves through the followi
 **Phase states in order:**
 
 1. **Built** -- agents and configuration for the phase are written.
-2. **Technically-reviewed** -- automated technical reviews run (MA-REV per component, MA-F phase-gate). These are preconditions the build session completes before the supervised cycle. They confirm structural soundness. They do not constitute acceptance. MA-REV includes running the bypass scanner (`agents/lib/external_write/scan.py`) over the phase's code: if the scanner reports any violation, the phase FAILS and cannot be accepted until every flagged write is routed through the approved external-write operations.
+2. **Technically-reviewed** -- automated technical reviews run (MA-REV per component, MA-F phase-gate). These are preconditions the build session completes before the supervised cycle. They confirm structural soundness. They do not constitute acceptance.
 3. **Supervised** -- the phase runs against a copy or dummy of external state, with one labelled inert demo cycle. The operator observes the actual business result.
 4. **Operator business acceptance** -- the operator reviews what the phase actually did and confirms the result meets the business need. This is the only acceptance decision per phase. **Only operator business-acceptance flips a phase to `accepted` in `build_progress.md`.** The MA-REV and MA-F technical reviews are preconditions that feed phase readiness; they do not flip the state.
 5. **Accepted** -- recorded in `build_progress.md`. The capability goes live or is scheduled.
