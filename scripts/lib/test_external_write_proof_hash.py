@@ -64,5 +64,40 @@ class TestProofHash(unittest.TestCase):
         self.assertFalse(is_accepted(k, []))
 
 
+    def test_implementation_hash_changes_when_dependency_file_content_changes(self):
+        import shutil
+        import tempfile
+        # Build a temp dir that mirrors _LIB_DIR so compute_implementation_hash
+        # can resolve all dependency files for set_status.
+        # The dependency_set is ("adapters.py", "broker.py", "operations.py", "verifiers.py");
+        # compute_implementation_hash resolves them as lib_dir / fname.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            # Copy only the dependency files (and contracts.py / verification_modes.py
+            # which are imported by the module but are not in the dependency_set —
+            # they do not need to be present in the temp dir for the hash to resolve).
+            dep_names = ("adapters.py", "broker.py", "operations.py", "verifiers.py")
+            for fname in dep_names:
+                shutil.copy2(_LIB_DIR / fname, tmp_path / fname)
+
+            # --- stability leg: two calls on the same bytes must agree ---
+            h1 = compute_implementation_hash("set_status", lib_dir=tmp_path)
+            h2 = compute_implementation_hash("set_status", lib_dir=tmp_path)
+            self.assertEqual(h1, h2, "hash must be deterministic across calls")
+            self.assertEqual(len(h1), SHA256_HEX_LEN)
+
+            # --- sensitivity leg: mutating ONE byte in a dependency file must
+            #     produce a different hash ---
+            target = tmp_path / "adapters.py"
+            with target.open("ab") as f:
+                f.write(b"\n# mutation-sentinel\n")
+            h_mutated = compute_implementation_hash("set_status", lib_dir=tmp_path)
+            self.assertNotEqual(
+                h1,
+                h_mutated,
+                "hash must change when a dependency file's bytes change",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
