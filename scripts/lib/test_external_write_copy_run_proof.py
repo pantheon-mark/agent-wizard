@@ -90,6 +90,20 @@ class TestCopyRunProof(unittest.TestCase):
         p["copy_undo_proof"]["undo_verification"]["evidence_ref"] = "operator_attested"
         self.assertFalse(validate_copy_run_proof(p).ok)
 
+    def test_undo_verification_rejected_on_forbidden_lineage_source(self):
+        # Mirror of test_apply_verification_must_pass_clause_a, but targeting the
+        # undo path. Injecting a registry-forbidden source (apply_report) into
+        # undo_verification.source_lineage.post_write_sources must cause
+        # validate_copy_run_proof to return not-ok, proving the undo path goes
+        # through Clause A's lineage lock (step 8b). An undo "verified" against
+        # the writer's own output is the exact failure we prevent.
+        p = _proof()
+        p["copy_undo_proof"]["undo_verification"]["source_lineage"][
+            "post_write_sources"] = ["apply_report"]
+        r = validate_copy_run_proof(p)
+        self.assertFalse(r.ok)
+        self.assertIn("apply_report", r.reason)
+
     def test_missing_undo_receipt_ref_fails(self):
         p = _proof(); p["copy_undo_proof"]["undo_receipt_ref"] = ""
         self.assertFalse(validate_copy_run_proof(p).ok)
