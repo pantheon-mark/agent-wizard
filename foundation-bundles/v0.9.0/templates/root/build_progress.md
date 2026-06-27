@@ -56,7 +56,8 @@ then undo, with the restoration independently confirmed — and, where the chang
 on structure that must survive ordinary use (stable IDs, anchors, cross-references,
 hidden helper columns), ordinary actions (sort, filter, insert, delete, move) were
 performed on the copy and the structure was shown to survive. A phase with external
-writes is not accepted until that proof is recorded.
+writes is not accepted until that proof is recorded and validated by the build session
+running `agents/lib/external_write/copy_run_proof.py` (`validate_copy_run_proof`).
 
 ---
 

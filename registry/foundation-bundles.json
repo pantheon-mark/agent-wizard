@@ -201,7 +201,7 @@
       "manifest": "foundation-bundles/v0.9.0/manifest.yaml",
       "status": "prerelease",
       "changelog": "Changes your system makes to data outside itself now carry an integrity contract: success is confirmed through an independent route (never by re-reading its own write), new write logic is proven on a copy before first live use, and undo is proven to restore your data.",
-      "bundle_tree_sha256": "sha256:e6a255f1d294792ab616a8a8e34fde4078d9d7863588f8980b90d4a5ac11ff70",
+      "bundle_tree_sha256": "sha256:3271e7ba7acec75eaa0e975e9f03f76b8aa73459606fcb5b3dc3cbd5a25d3942",
       "bundle_manifest_sha256": "sha256:67de430a13c232e46dc10d2ade1bac076e25178e5aac1ee3747f668e45c93c4d"
     }
   ]

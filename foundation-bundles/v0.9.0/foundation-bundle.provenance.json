@@ -277,7 +277,7 @@
       "path": "templates/root/SESSION_STATE.md"
     },
     {
-      "hash": "sha256:c08f052090ca0d81e1bedbc7f849f20430fdd96ada956d6c3f91dfab8636d4a7",
+      "hash": "sha256:ff09e50e4fa8c8ac18a8c6750233fe8625b5a64096761ccac329ff8b194c9038",
       "path": "templates/root/build_progress.md"
     },
     {
@@ -301,7 +301,7 @@
       "path": "templates/root/pending_decisions.md"
     },
     {
-      "hash": "sha256:b161483f593695f3b8c2741678442a61474f7dd016b10722f2c4439cb360c0d8",
+      "hash": "sha256:b4d97b30e81ecf7da0e70837dfdea65ba62e59b041d9f0cc494b4c3d7b634f30",
       "path": "templates/root/project_instructions.md"
     },
     {
@@ -410,14 +410,14 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-06-27T11:34:18Z",
-  "generator_version": "4e062ee489ff5dc9967a393465d716106a89931e",
+  "generated_at": "2026-06-27T11:55:34Z",
+  "generator_version": "b7621dd2fe9881c66510cc01ce2eb91047ec2240",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.9.0",
-  "source_registry_entry_hash": "sha256:39edaad104b6517fbed9671e010b782906389ff6adea75ecca930feb26e10e39",
+  "source_registry_entry_hash": "sha256:73e7e9da0e5e26276e3821a4acce34934807f6adf2e5e205cf9ec4369b9c01cf",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
-  "template_tree_hash": "sha256:7a3e2f79522d26a4d19f27cdf82598f28cad980b79118696db6f81ee883486b1",
+  "template_tree_hash": "sha256:38ec64f21be3af61e49a6e4d34f566c098e1e9d5df47d1f3aafbe637b733e91a",
   "worktree_clean": false
 }
