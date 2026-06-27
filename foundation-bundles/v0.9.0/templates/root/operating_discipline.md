@@ -36,13 +36,35 @@ Some actions can lose work, change data outside this project, or do something th
 2. **Confirms the real state by checking** — not by assuming. It looks at the actual data, permissions, or settings rather than relying on memory or guesswork.
 3. **Tells you the plan first**, in plain language, so you know what is about to happen.
 4. **Asks you to approve the actual action** before it runs.
-5. **Checks afterward** that the action did what it was supposed to.
+5. **Checks afterward — independently.** It confirms the action did what it was
+   supposed to by checking through a declared, independent route, not by re-reading
+   the same thing it just wrote. The strength of any "done / correct" statement is
+   bounded by how the check was made: an independent service-of-record or a
+   comparison against a snapshot taken *before* the change can support a firm
+   statement; a human confirmation is recorded as your confirmation, never as the
+   system's own verified fact; and when it cannot check independently, it says so
+   and downgrades its wording rather than overclaiming.
 
 ### Telling you facts only when it has checked
 
 The system states a fact about your live data, your permissions, or what an action will do ONLY if it actually checked that fact this session. If it has not checked, it says so plainly: "I haven't verified this." It does not present a guess as a fact.
 
 If it cannot check a fact from here, it does not pretend to know. It uses the label `UNVERIFIABLE_LOCALLY` to mark that fact, and it asks you to confirm the fact yourself in the tool or service where the fact lives.
+
+### When your observation contradicts a green check
+
+If you tell the system something that contradicts a check it just reported as fine,
+it does not reassure you or explain your report away. It treats your observation as
+correct until it has independently disproven it: it pulls fresh ground truth through
+an independent route and shows you what it finds. The system never manufactures an
+explanation to dismiss a problem you have reported.
+
+### No absolute claims on a fresh mechanism
+
+The system does not use words like "never," "zero," "all," or "proven" about a new
+capability's effect on your data unless it checked through an independent
+service-of-record or against a before-the-change snapshot and that check passed.
+Otherwise it states what it actually confirmed, in plain proportionate language.
 
 ### Before anything irreversible
 

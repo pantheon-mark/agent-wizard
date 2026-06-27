@@ -49,6 +49,15 @@ Tri-state verdict:
   provisionally-accepted and the deferred check becomes a forced precondition for the
   next phase (recorded in the "Deferred core precondition" column).
 
+**External-write phases — copy-run proof.** For a phase whose capability writes to data
+outside this project, Layer-B acceptance additionally requires a recorded copy-run
+proof: the new write was run against a copy of your real data class and shown to apply,
+then undo, with the restoration independently confirmed — and, where the change relies
+on structure that must survive ordinary use (stable IDs, anchors, cross-references,
+hidden helper columns), ordinary actions (sort, filter, insert, delete, move) were
+performed on the copy and the structure was shown to survive. A phase with external
+writes is not accepted until that proof is recorded.
+
 ---
 
 ## How to update this file
