@@ -73,6 +73,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from external_write.operations import Operation
+from external_write.proof_hash import (
+    compute_implementation_hash,
+    compute_contract_hash,
+    AcceptedWriteKey,
+    is_accepted,
+    ACCEPTED_WRITE_REGISTRY,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +131,24 @@ class Receipt:
     operator_confirmation: str
     expires_at: str
     op_receipts: Dict[str, Dict[str, str]] = field(default_factory=dict)
+
+
+class CopyRunProofRequired(Exception):
+    """Raised by confirm() when an operation's (implementation_hash, contract_hash)
+    is not on the accepted-write list. First live use of new-or-changed write logic
+    must be proven against a copy (a copy_run_proof) before any receipt is minted.
+    Enforcement ceiling: build-time + operator-as-approver, NOT a runtime guarantee."""
+
+    def __init__(self, op_kind: str, implementation_hash: str, contract_hash: str):
+        self.op_kind = op_kind
+        self.implementation_hash = implementation_hash
+        self.contract_hash = contract_hash
+        super().__init__(
+            f"operation {op_kind!r} has not been proven against a copy: its write "
+            "logic + contract are not on the accepted-write list. Produce a "
+            "copy_run_proof (apply -> undo -> verify-restored on a copy of the "
+            "operator's data class) before first live use."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -317,13 +342,24 @@ class ApprovalBroker:
             pending_token=token,
         )
 
-    def confirm(self, pending_token: str, operator_response: str) -> Receipt:
+    def confirm(self, pending_token: str, operator_response: str, *,
+                accepted_write_registry=ACCEPTED_WRITE_REGISTRY,
+                lib_dir=None, enforce_proof_gate: bool = False) -> Receipt:
         """Confirm a pending proposal and mint a receipt.
 
         Parameters
         ----------
-        pending_token:       The token returned by the most recent propose() call.
-        operator_response:   The operator's verbatim confirmation text.
+        pending_token:            The token returned by the most recent propose() call.
+        operator_response:        The operator's verbatim confirmation text.
+        accepted_write_registry:  Iterable of AcceptedWriteKey entries. Defaults to
+                                  ACCEPTED_WRITE_REGISTRY (empty tuple by default).
+        lib_dir:                  Optional directory to resolve write-affecting dependency
+                                  files for implementation hash computation.
+        enforce_proof_gate:       When True, the Clause C proof gate is active: each op's
+                                  (implementation_hash, contract_hash) must appear in
+                                  accepted_write_registry or CopyRunProofRequired is raised
+                                  before any receipt is minted. Defaults to False so all
+                                  existing callers remain unaffected.
 
         Returns
         -------
@@ -335,14 +371,31 @@ class ApprovalBroker:
 
         Raises
         ------
-        KeyError  — token not found (unknown or already voided).
+        KeyError              — token not found (unknown or already voided).
+        CopyRunProofRequired  — enforce_proof_gate=True and an op's hashes are not
+                                accepted. Token remains live for re-confirmation.
         """
         if pending_token not in self._pending:
             raise KeyError(
                 f"pending_token not found or already voided: {pending_token!r}"
             )
 
-        ops, combined = self._pending.pop(pending_token)
+        ops, combined = self._pending[pending_token]
+
+        # Clause C proof gate: block first live use of new-or-changed write logic.
+        if enforce_proof_gate:
+            for op in ops:
+                key = AcceptedWriteKey(
+                    implementation_hash=compute_implementation_hash(
+                        op.op_kind, lib_dir=lib_dir),
+                    contract_hash=compute_contract_hash(op.op_kind),
+                )
+                if not is_accepted(key, accepted_write_registry):
+                    raise CopyRunProofRequired(
+                        op.op_kind, key.implementation_hash, key.contract_hash)
+
+        # Gate passed (or disabled): consume the token and mint.
+        del self._pending[pending_token]
         if self._active_token == pending_token:
             self._active_token = None
 

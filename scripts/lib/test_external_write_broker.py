@@ -365,5 +365,75 @@ class TestPendingTokenVoidOnChange(unittest.TestCase):
             self.broker.confirm("nonexistent-token-xyz", operator_response="yes")
 
 
+class TestProofGate(unittest.TestCase):
+    """Clause C: confirm() blocks first live use until the op's hashes are accepted."""
+
+    def _broker_and_token(self):
+        from external_write.broker import ApprovalBroker
+        from external_write.operations import Operation
+        broker = ApprovalBroker()
+        op = Operation(surface="google_sheets", object_id="s:1", field="Status",
+                       new_value="Complete", op_kind="set_status", batch_id="b")
+        proposal = broker.propose([op])
+        return broker, proposal.pending_token, op
+
+    def test_gate_off_by_default_still_mints(self):
+        broker, token, _ = self._broker_and_token()
+        receipt = broker.confirm(token, "yes go ahead")
+        self.assertTrue(receipt.op_receipts)
+
+    def test_gate_blocks_when_not_accepted(self):
+        from external_write.broker import CopyRunProofRequired
+        from external_write.proof_hash import SHA256_HEX_LEN
+        broker, token, op = self._broker_and_token()
+        with self.assertRaises(CopyRunProofRequired) as ctx:
+            broker.confirm(token, "yes", enforce_proof_gate=True,
+                           accepted_write_registry=())
+        self.assertEqual(ctx.exception.op_kind, "set_status")
+        self.assertEqual(len(ctx.exception.implementation_hash), SHA256_HEX_LEN)
+
+    def test_gate_passes_when_hashes_are_accepted(self):
+        from external_write.proof_hash import (
+            compute_implementation_hash, compute_contract_hash, AcceptedWriteKey,
+        )
+        broker, token, op = self._broker_and_token()
+        key = AcceptedWriteKey(
+            implementation_hash=compute_implementation_hash(op.op_kind),
+            contract_hash=compute_contract_hash(op.op_kind),
+        )
+        receipt = broker.confirm(token, "yes", enforce_proof_gate=True,
+                                 accepted_write_registry=(key,))
+        self.assertTrue(receipt.op_receipts)
+
+    def test_blocked_confirm_leaves_token_live(self):
+        # A gate-blocked confirm() must NOT pop the pending token.
+        # The op can be re-proposed/re-confirmed once the hashes are accepted.
+        # Token pops only on gate pass (this is the named guarantee in the plan body).
+        from external_write.broker import CopyRunProofRequired
+        from external_write.proof_hash import (
+            compute_implementation_hash, compute_contract_hash, AcceptedWriteKey,
+        )
+        broker, token, op = self._broker_and_token()
+
+        # Step 1: confirm with empty registry -> gate blocks, raises CopyRunProofRequired.
+        with self.assertRaises(CopyRunProofRequired):
+            broker.confirm(token, "yes", enforce_proof_gate=True,
+                           accepted_write_registry=())
+
+        # Step 2: the token must still be live in _pending (not consumed).
+        self.assertIn(token, broker._pending)
+
+        # Step 3: a second confirm with the correct hashes succeeds with the SAME token.
+        key = AcceptedWriteKey(
+            implementation_hash=compute_implementation_hash(op.op_kind),
+            contract_hash=compute_contract_hash(op.op_kind),
+        )
+        receipt = broker.confirm(token, "yes", enforce_proof_gate=True,
+                                 accepted_write_registry=(key,))
+        self.assertTrue(receipt.op_receipts)
+        # Token is now consumed.
+        self.assertNotIn(token, broker._pending)
+
+
 if __name__ == "__main__":
     unittest.main()
