@@ -1273,5 +1273,42 @@ class Task8ApprovalEmitTests(unittest.TestCase):
                         "emitted orchestrator_prompt.md must describe step-4 approval as distinct/separate")
 
 
+class TestS253ContractDelta(unittest.TestCase):
+    def _read(self, rel):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[3]
+        return (root / rel).read_text(encoding="utf-8")
+
+    def test_operating_discipline_has_independent_check_and_pushback(self):
+        text = self._read("wizard/templates/root/operating_discipline.md")
+        self.assertIn("Checks afterward — independently", text)
+        self.assertIn("When your observation contradicts a green check", text)
+        self.assertIn("No absolute claims on a fresh mechanism", text)
+
+    def test_operating_discipline_keeps_honest_ceiling(self):
+        text = self._read("wizard/templates/root/operating_discipline.md")
+        self.assertNotIn("runtime guarantee", text.lower().replace("not a runtime", "X"))
+
+    def test_build_progress_requires_copy_run_proof_for_external_writes(self):
+        text = self._read("wizard/templates/root/build_progress.md")
+        self.assertIn("copy-run proof", text)
+        self.assertIn("undo", text)
+
+    def test_emit_set_lists_all_ten_lib_files(self):
+        import agent_emitter
+        for name in ("verification_modes.py", "contracts.py", "verifiers.py",
+                     "boundary.py", "proof_hash.py", "copy_run_proof.py"):
+            self.assertIn(name, agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+
+    def test_no_build_ids_in_changed_wizard_prose(self):
+        import re
+        for rel in ("wizard/templates/root/operating_discipline.md",
+                    "wizard/templates/root/build_progress.md"):
+            text = self._read(rel)
+            self.assertIsNone(re.search(r"\bF-\d+\b", text))
+            self.assertIsNone(re.search(r"\bADR-\d{4}\b", text))
+            self.assertIsNone(re.search(r"\bIDQ-\d+\b", text))
+
+
 if __name__ == "__main__":
     unittest.main()

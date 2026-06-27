@@ -12,6 +12,21 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-27 — changes your system makes to data outside itself now carry an integrity contract (v0.9.0)
+
+**Public-facing change:** When your system writes back to an outside destination, it now confirms that the write actually did what it was supposed to — through an independent check, not by re-reading its own output. New write logic is proven on a copy of your real data before it is used live, and undo is shown to restore your data before the feature is accepted.
+
+- **Independent confirmation.** After any write to an outside destination, the system confirms the result through a separate, declared route — not by reading what it just wrote. If it cannot check independently, it says so and uses cautious wording instead of claiming success.
+- **Copy-run proof before live use.** Before a new write capability is accepted, it must be run on a copy of your real data class, shown to apply and then to undo, with the restoration confirmed. A write phase is not accepted until that proof is recorded.
+- **No absolute claims without evidence.** The system does not say "never," "zero," or "proven" about a new capability's effect on your data unless it checked through an independent route and the check passed. Otherwise it tells you exactly what it confirmed, in plain language.
+- **Operator contradictions are taken seriously.** If you tell the system something contradicts a check it just reported as fine, it does not reassure you or explain your report away. It pulls fresh ground truth through an independent route and shows you what it finds.
+
+This is a feature addition (`v0.9.0`, operator-explicit as always). Foundation documents are byte-identical to `v0.8.0`. Your own files, data, rules, credentials, and logs are untouched; a backup is taken before anything is applied.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-06-26 — writes back to outside destinations now go through a checked, approved path (v0.8.0)
 
 **Public-facing change:** If your system sends data back out — to a spreadsheet, a tracker, or another outside service — it now does so through a checked path instead of writing directly. This protects against malformed or unapproved writes leaving your system.

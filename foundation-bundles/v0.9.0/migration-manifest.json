@@ -1,0 +1,55 @@
+{
+  "_note": "JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing companion. Both files MUST stay in sync.",
+  "artifact_notes": {
+    "agents/lib/external_write/verification_modes.py": "Adds the verification-mode contract — defines how a check's result is classified (machine-verified, operator-attested, or unverifiable-locally) so every \"done / correct\" statement carries its method of confirmation.",
+    "agents/lib/external_write/contracts.py": "Defines the integrity-contract data structure binding an external write to its authority check, boundary proof, and recovery proof.",
+    "agents/lib/external_write/verifiers.py": "Implements the independent-route verifier — confirms an external write's effect through a declared route that is separate from the write path itself.",
+    "agents/lib/external_write/boundary.py": "Enforces the write-boundary contract — checks that a write stays within its declared scope and that the scope survives ordinary use.",
+    "agents/lib/external_write/proof_hash.py": "Produces and verifies copy-run proofs — content-addressed records that a new write was run on a copy, applied, then undone with the result independently confirmed.",
+    "agents/lib/external_write/copy_run_proof.py": "Orchestrates the full copy-run proof sequence (copy, apply, confirm, undo, confirm restoration) and records the proof artifact.",
+    "operating_discipline.md": "Step 5 sharpened — checks are now independent-route by requirement; contradictions from the operator are treated as correct until independently disproven; no absolute claims allowed on a fresh mechanism without an independent check.",
+    "build_progress.md": "Layer-B acceptance for external-write phases now requires a recorded copy-run proof before a phase can be marked accepted."
+  },
+  "migrations": [
+    {
+      "from": "v0.8.0",
+      "class": "minor_additive",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it (\"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard\" self-upgrade --to v0.9.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.8.0 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.9.0/ and set foundation_bundle_version back to v0.8.0.",
+      "stop_condition": "not_applicable",
+      "notes": "Minor-additive release to v0.9.0: adds the External Data Change Integrity Contract — six new lib modules (verification_modes, contracts, verifiers, boundary, proof_hash, copy_run_proof) that give external writes an independent-check, copy-first proof, and proven undo. Operating-discipline prose updated with independent-check and pushback rules. No breaking changes; all prior operator project files remain valid."
+    },
+    {
+      "from": "v0.7.0",
+      "class": "minor_additive",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it (\"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard\" self-upgrade --to v0.9.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.7.0 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.9.0/ and set foundation_bundle_version back to v0.7.0.",
+      "stop_condition": "not_applicable",
+      "notes": "Minor-additive release to v0.9.0: adds the External Data Change Integrity Contract plus all changes between v0.7.0 and v0.9.0. No breaking changes; all prior operator project files remain valid. Combined jump from v0.7.0 straight to v0.9.0."
+    },
+    {
+      "from": "v0.6.9",
+      "class": "minor_additive",
+      "requires_operator_approval": true,
+      "supported": true,
+      "breaking_changes_summary": "",
+      "migration_steps": "1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it (\"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard\" self-upgrade --to v0.9.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.",
+      "preflight": "Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.9 (or any version in the supported range). A backup is taken automatically.",
+      "rollback": "Restore from .wizard/backups/pre-v0.9.0/ and set foundation_bundle_version back to v0.6.9.",
+      "stop_condition": "not_applicable",
+      "notes": "Minor-additive release to v0.9.0: adds the External Data Change Integrity Contract plus all changes between v0.6.9 and v0.9.0. No breaking changes; all prior operator project files remain valid. Combined jump from v0.6.9 straight to v0.9.0."
+    }
+  ],
+  "release_classification": "minor_additive_prerelease",
+  "release_date": "2026-06-27",
+  "schema_version": "v1",
+  "target_version": "v0.9.0"
+}

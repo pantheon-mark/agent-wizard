@@ -190,6 +190,19 @@
       "changelog": "Adds write-integrity protection for systems that send data back out to an external destination (a spreadsheet, a tracker, an outside service). Writes now go through a checked path: each value is validated against the set of values you allow before it leaves, significant writes are proposed to you in plain language and recorded with your approval, and a build-time check flags any write that tries to bypass the safe path. Each agent's permitted write destinations are derived and shown in a single audit table. Systems that do not write back to anything carry none of this — it is added only where it is needed. Your own data, rules, credentials, and logs are untouched.",
       "bundle_tree_sha256": "sha256:457ebd5344dc22777d31711ea18094acb2c46d88a9d0ef65c3d9a1f32a52fb25",
       "bundle_manifest_sha256": "sha256:9c464713e3105e8d261ce41702d3ba191143934c1f34b41dba60c0c863e8c9e6"
+    },
+    {
+      "foundation_bundle_version": "v0.9.0",
+      "safety_class": "reliability_fix",
+      "recommendation_reason": "Adds an integrity contract for changes your system makes to data outside itself — independent verification, copy-first proof, and proven undo.",
+      "path": "foundation-bundles/v0.9.0/",
+      "release_date": "2026-06-27",
+      "source_commit": "pending",
+      "manifest": "foundation-bundles/v0.9.0/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "Changes your system makes to data outside itself now carry an integrity contract: success is confirmed through an independent route (never by re-reading its own write), new write logic is proven on a copy before first live use, and undo is proven to restore your data.",
+      "bundle_tree_sha256": "sha256:7461462bdd4ed5017ca246bd84d897d5c5f5719d0bdb7c45aabb4fc66e920518",
+      "bundle_manifest_sha256": "sha256:67de430a13c232e46dc10d2ade1bac076e25178e5aac1ee3747f668e45c93c4d"
     }
   ]
 }

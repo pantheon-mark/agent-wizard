@@ -53,6 +53,12 @@ _EXTERNAL_WRITE_LIB_FILES = (
     "adapters.py",
     "broker.py",
     "scan.py",
+    "verification_modes.py",
+    "contracts.py",
+    "verifiers.py",
+    "boundary.py",
+    "proof_hash.py",
+    "copy_run_proof.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
