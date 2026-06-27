@@ -307,5 +307,58 @@ class TestExternalWriteAdapters(unittest.TestCase):
         self.assertIsNotNone(allowed, "detail must include allowed set parsed from surface rejection")
 
 
+class TestPostwriteVerificationAttach(unittest.TestCase):
+    """Clause A attachment: a supplied post-write verification record is validated
+    after read-back; back-compat is preserved when none is supplied."""
+
+    def _op(self):
+        return Operation(
+            surface="google_sheets", object_id="sheet:abc123", field="Status",
+            new_value="Complete", op_kind="set_status", batch_id="batch-pv",
+        )
+
+    def _good_verification(self, op):
+        from external_write.verifiers import POSTWRITE_VERIFICATION_SCHEMA
+        return {
+            "schema": POSTWRITE_VERIFICATION_SCHEMA,
+            "verification_mode": "prestate_snapshot_diff",
+            "claim_strength": "verified",
+            "verifier_id": "prestate_snapshot_diff_v1",
+            "source_lineage": {
+                "pre_write_sources": ["prewrite_csv_backup"],
+                "post_write_sources": ["live_surface_read"],
+                # Must cover the registry's forbidden_verification_inputs for this verifier.
+                "forbidden_sources": [
+                    "writer_generated_id_map",
+                    "live_id_column_as_truth",
+                    "apply_report",
+                ],
+            },
+            "invariant_checked": "row ids stable",
+            "evidence_ref": "agents/handoffs/.pv_evidence.txt",
+        }
+
+    def test_no_verification_keeps_legacy_written(self):
+        op = self._op()
+        result = run_operation(op, _receipt(op), _AcceptingClient())
+        self.assertEqual(result.status, "written")
+
+    def test_valid_verification_returns_written_with_claim(self):
+        op = self._op()
+        result = run_operation(op, _receipt(op), _AcceptingClient(),
+                               postwrite_verification=self._good_verification(op))
+        self.assertEqual(result.status, "written")
+        self.assertEqual(result.detail["verification"]["claim_strength"], "verified")
+
+    def test_forbidden_lineage_verification_refused(self):
+        op = self._op()
+        rec = self._good_verification(op)
+        rec["source_lineage"]["post_write_sources"] = ["apply_report"]
+        result = run_operation(op, _receipt(op), _AcceptingClient(),
+                               postwrite_verification=rec)
+        self.assertEqual(result.status, "refused")
+        self.assertIn("apply_report", result.detail["reason"])
+
+
 if __name__ == "__main__":
     unittest.main()

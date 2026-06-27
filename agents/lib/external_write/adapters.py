@@ -13,7 +13,7 @@ All writes go through run_operation, which enforces:
      surfaces where machine-readable validation rules are cheap to fetch; it is
      not the default). For surfaces where dataValidation is not readable ahead
      of time, the native-reject path is the sole gate — and it fires reliably.
-  4. Read-back verification on success.
+  4. Read-back verification on success, then optional mode-bounded post-write verification (Clause A).
 
 Value-validity strategy (native-API fail-fast):
   - DEFAULT: attempt write -> catch surface ValueError / rejection -> parse
@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional, Sequence
 
 from external_write.operations import Operation, Result
+from external_write.verifiers import validate_postwrite_verification
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +120,8 @@ def _parse_allowed_from_error(message: str) -> Optional[list]:
 # Core dispatch
 # ---------------------------------------------------------------------------
 
-def run_operation(op: Operation, receipt: Any, client: Any) -> Result:
+def run_operation(op: Operation, receipt: Any, client: Any,
+                  postwrite_verification: Any = None) -> Result:
     """Run a named external-write operation with receipt validation and fail-fast
     value-validity enforcement.
 
@@ -169,4 +171,23 @@ def run_operation(op: Operation, receipt: Any, client: Any) -> Result:
             },
         )
 
-    return Result(status="written")
+    # Step 4: optional post-write verification (Clause A — Authority).
+    # When a caller supplies a postwrite-verification-v1 record, the success claim
+    # is bounded by the record's mode and rejected on declared-dependency overlap.
+    # Back-compat: no record -> the read-back-confirmed write is reported as before.
+    if postwrite_verification is None:
+        return Result(status="written")
+
+    vresult = validate_postwrite_verification(op, postwrite_verification)
+    if not vresult.ok:
+        return Result(status="refused", detail={"reason": vresult.reason})
+
+    return Result(
+        status="written",
+        detail={
+            "verification": {
+                "claim_strength": vresult.claim_strength.value,
+                "verifier_id": postwrite_verification["verifier_id"],
+            }
+        },
+    )
