@@ -1296,9 +1296,29 @@ class TestS253ContractDelta(unittest.TestCase):
 
     def test_emit_set_lists_all_ten_lib_files(self):
         import agent_emitter
-        for name in ("verification_modes.py", "contracts.py", "verifiers.py",
+        for name in ("operations.py", "adapters.py", "broker.py", "scan.py",
+                     "verification_modes.py", "contracts.py", "verifiers.py",
                      "boundary.py", "proof_hash.py", "copy_run_proof.py"):
             self.assertIn(name, agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+
+    def test_emit_set_empty_for_read_only_system(self):
+        """A plan whose dependencies are all read-only (boundary_input only, no boundary_output)
+        must produce an empty emit set — the skip logic must not regress to always-emit."""
+        import copy, json
+        import agent_emitter
+        from test_emission_plan import _valid_plan
+        from emission_plan import validate_emission_plan, load_contract, default_contract_path
+        contract = load_contract(default_contract_path())
+        p = copy.deepcopy(_valid_plan())
+        # A single boundary_input-only dependency: no writes-back role.
+        p["foundation_doc_inputs"]["EXTERNAL_DEPENDENCY_IDENTITY"] = json.dumps(
+            [{"id": "rss", "name": "rss_feed", "type": "RSS", "roles": ["boundary_input"]}]
+        )
+        plan = validate_emission_plan(p, contract)
+        result = agent_emitter.external_write_lib_emit_set(plan)
+        self.assertEqual(result, [],
+                         "read-only plan (no boundary_output dependency) must emit NONE of the "
+                         "external_write lib — skip logic has regressed if this is non-empty")
 
     def test_no_build_ids_in_changed_wizard_prose(self):
         import re

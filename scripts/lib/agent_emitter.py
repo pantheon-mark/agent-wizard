@@ -93,11 +93,17 @@ def _plan_has_writes_back(plan: "EmissionPlan") -> bool:
 def external_write_lib_emit_set(plan: "EmissionPlan") -> List[str]:
     """The emitted-tree relpaths of the external_write lib files this plan should emit.
 
-    Returns the four lib files (operations/adapters/broker/scan under
-    agents/lib/external_write/) when the plan has a writes-back dependency; returns []
-    otherwise (no dead code for non-writing systems, and none for foundation-only plans).
+    Returns all ten lib files under agents/lib/external_write/ when the plan has a
+    writes-back dependency: the original four substrate files (operations, adapters,
+    broker, scan) plus the six contract-and-verification modules (verification_modes,
+    contracts, verifiers, boundary, proof_hash, copy_run_proof).
+
+    Returns [] when the plan has no writes-back (boundary_output) dependency — no dead
+    code for read-only systems, and none for foundation-only plans (which have no agent
+    layer at all).
+
     This is the DECISION + file-selection function the agent-layer emitter consults; the
-    actual file copy depends on the source bundle carrying the lib (cut in a later bundle)."""
+    actual file copy depends on the source bundle carrying the lib."""
     if not _plan_has_writes_back(plan):
         return []
     return [f"{_EXTERNAL_WRITE_LIB_REL}/{f}" for f in _EXTERNAL_WRITE_LIB_FILES]
