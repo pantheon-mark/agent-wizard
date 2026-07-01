@@ -4,125 +4,130 @@
 
 I did the hard part so you don't have to.
 
-I spent a long time — hours, across many sessions — working inside Claude, figuring out how to build something that actually works reliably. Claude screwing up files. Losing context halfway through. Having to explain the same thing again because it forgot. Outputs that looked right but weren't. Pushing back, correcting it, rebuilding, trying again. All of it in pursuit of a level of quality I knew was possible but couldn't just ask for.
+I spent a long time, across many sessions, working inside Claude to figure out how to build something that actually works reliably. Claude screwing up files. Losing context halfway through. Having to explain the same thing again because it forgot. Outputs that looked right but weren't. Pushing back, correcting it, rebuilding, trying again, all in pursuit of a level of quality I knew was possible but couldn't just ask for.
 
-What came out of that is a wizard — a guided setup process with all of those hard-won lessons baked directly into it. The guardrails, the structure, the sequencing, the right questions to ask you in the right order. Thirty years of software development experience — security, versioning, quality controls — embedded into how the thing gets built, so you don't have to know any of that going in.
+What came out of that is a wizard, a guided setup that takes everything I learned and puts it to work for you from the start. Thirty years of building software, including security, version history, and quality controls, is built into how your system gets put together, so you don't have to know any of that going in.
 
-If you've been curious about Claude and wondered whether you could build something real with it, this is for you.
+If you've been curious about Claude Code and didn't know where to start, this is for you.
+
+---
+
+## What this is
+
+This is an on-ramp, for people who can tell something powerful is possible with Claude Code but have no idea where to begin, and who would rather not learn the hard way which shortcuts cause problems later.
+
+What you end up with is a small team of helpers that runs on your own Mac and does work for you. The way to picture it is a general contractor who brings in specialized subcontractors, each good at one part of the job, instead of one person trying to do the whole build alone. That is how your system is put together: several focused helpers, coordinated so they don't trip over each other, rather than one assistant trying to juggle everything (which is usually where things start to wobble). You don't set that up. The wizard does, with the safeguards and good habits I've worked out already built in.
+
+You don't describe what you want and get a finished product handed back, and you don't set it up once and walk away. What you get is a real, working setup with professional protections already in place, and something you can understand, run, and grow yourself as you learn how it works.
+
+Picture a well-built starter home, already up to code, that comes with a general contractor and a team of subcontractors. You move in and learn how it runs, and when you want to add a room, they handle the parts you don't know how to do.
+
+This is the first version. It will keep growing and improving, and that is where you come in. The first people using it aren't just users. You are helping shape it, by using it for real and telling me what works, what doesn't, and where it should go next. That feedback is what steers it.
+
+---
+
+## How this is different from just using ChatGPT or Claude
+
+You might wonder how this is different from opening ChatGPT or Claude and asking it for help.
+
+When you use a chat, you drive every step. You ask, it answers, and when you close the window it forgets and nothing happens until you come back. It is a conversation.
+
+This is something that runs. It is set up once with everything it needs, it does work on a schedule whether or not you are watching, it remembers your project and your standards from one day to the next, it keeps a record of what it has done, and it stays inside the limits and protections you set. A chat helps you do a task. This handles work for you over time.
 
 ---
 
 ## What you could build
 
-It doesn't have to be for work. It doesn't have to be sophisticated or serious. And it doesn't have to be personal — it can absolutely be a business tool.
+It doesn't have to be for work, and it doesn't have to be serious or sophisticated. The common thread is something you do over and over, where you are either taking in a lot of information or keeping track of a lot of moving pieces, and you keep thinking *I need help staying on top of this.*
 
-It could be something that manages your family calendar — pulling together everyone's schedules, flagging conflicts, keeping things from falling through the cracks. It could connect to Instacart or Amazon and handle your grocery or household ordering, with you just texting or messaging it the things you want to add. It could monitor things you care about and tell you when something worth knowing happens. It could handle research you do over and over again so the answer is waiting for you instead of something you have to go find.
+Some things people might build:
 
-On the work side, it could track client deliverables and flag when something is overdue before the client notices. It could monitor your industry — news, regulatory changes, competitor moves — and surface what actually matters to your business. It could coordinate contractors or vendors, keeping track of who is doing what and what needs follow-up. It could manage a small team's workflow, routing tasks and catching things that stall. It could handle the recurring operational work that eats your morning every day — the reports, the status checks, the data gathering — and have it done before you sit down.
+- **Run a household.** Pull everyone's schedules together, flag the conflicts, and keep things from falling through the cracks. Connect it to a service like Instacart or Amazon and just message it what to add to the week's order.
+- **Stay ahead of work that slips.** Track your deliverables and get a nudge when something is going to be late, before a client or a deadline reminds you.
+- **Keep watch on something you care about.** Your industry, a new regulation, a competitor, a topic in the news, and hear about it only when something genuinely worth knowing happens.
+- **Hand off a chore you repeat.** The same research every week, the same status report, done and waiting for you instead of sitting on your list.
+- **Clear the recurring morning work.** The status checks, the data gathering, the reports that eat the start of your day, done before you sit down.
+- **Keep a many-piece project organized.** Who is doing what, what needs follow-up, what has stalled, held together so nothing gets lost.
 
-The common thread is: things you do repeatedly, where you're either consuming a lot of information or managing a lot of moving pieces, and where you find yourself thinking *I need help staying on top of this.* Work, personal, business, family — any of it.
+It can also reach into the tools you already use, like sending an email, updating a spreadsheet you work in, or placing an order through a service you connect it to. Anything that leaves your computer or spends money waits for your okay first. That approval step is built in on purpose.
 
-You describe what you need. The system gets built around that.
-
----
-
-## Why this is harder than it looks — and why that matters
-
-If you've already tried building something complex with Claude on your own, you probably hit some version of the same problems I did. The further you get into it, the more things start to drift. Instructions get forgotten. Outputs become inconsistent. The thing that worked in the first session stops working in the third. And then there are the problems you might not even notice until something goes wrong — security gaps, no version history, no way to recover if a file gets overwritten.
-
-These aren't signs that you did something wrong. They're the predictable result of trying to build something complex without a development framework underneath it. Most people who know how to build software professionally wouldn't attempt this without one. The difference is they know what they're missing. Most people who are new to this don't.
-
-That's what I've spent the time figuring out, and that's what's built into the wizard.
+You describe your situation, your system gets built around it, and you grow it from there.
 
 ---
 
-## What the wizard actually does
+## How it works: the four parts of the journey
 
-When you run the wizard, it has a conversation with you. It asks you specific questions — not open-ended "what do you want to build" questions, but targeted ones designed to pull out the information that actually matters for how the system gets built. It proposes options based on what you've told it. You confirm, adjust, or redirect. By the end, it has everything it needs.
+**1. Install.** A one-time setup of the tools on your Mac. The manual walks you through every step, and it is mostly waiting for downloads.
 
-Then it builds your system. The agents, the structure, the configuration, the safeguards — all of it assembled based on what you described, with the best practices and guardrails I've developed built in automatically. You don't have to know what those are. They're just there.
+**2. Interview.** The wizard sits down with you and asks focused questions about what you need. Not a blank "what do you want," but specific ones, where it proposes a starting point and you confirm, adjust, or redirect. By the end it understands your situation well enough to build for it.
 
-When the system is running, it works on a schedule. It does its tasks, writes down what it did, and sends you a regular summary — what happened, what it found, what needs your attention. You review it, handle the handful of things that genuinely need you, and let the rest go.
+**3. Build.** You build your system one capability at a time. Add one piece, run it on your real work, confirm it does the right thing, fix anything that is off, then move to the next. You always have something working, and you learn how it runs as you go.
 
----
+**4. Operate.** You run it. Early on you are hands-on, reviewing and correcting and calibrating. As it proves itself on your real work, it handles more and asks less. Over time, operating becomes maintaining and enhancing it: keeping it healthy and adding to it as your needs grow.
 
-## What the journey looks like
-
-There are four stages, and they feel different from each other.
-
-**Stage one: setup.** The wizard asks you questions, Claude designs and configures your system, and by the end you have everything built and ready to run. You're answering questions and making decisions, but you're not building anything technical — the wizard handles that. Plan for a few hours.
-
-**Stage two: early operation.** You're hands-on and present. You review what the system produces, evaluate whether the outputs are actually good, and correct things that are off. This is where you learn how it runs and where the system learns your standard. Plan for daily attention during this phase. It isn't passive yet.
-
-**Stage three: maturing.** The system handles more on its own. You're reviewing rather than operating — reading a summary, handling the handful of things that genuinely need your judgment, and letting the rest go. This is where the investment starts paying back.
-
-**Stage four: mature operation.** You're steering direction, not running the machine. The system does its work. You set priorities and handle decisions that require you. The rest is automatic.
-
-How long does each stage take? Setup is measured in hours. Early operation is weeks. Getting to mature operation depends on what you're building and how much calibration it needs — for a focused routine operation, a few weeks; for something more complex, longer.
+It earns its independence by proving itself. It does not start with it.
 
 ---
 
-## What you bring, what Claude brings
+## What you get, and what it protects you from
 
-You bring the use case — the problem you're trying to solve, the context that makes it real, and the judgment calls that only you can make. You don't need to understand how any of the technical machinery works. You don't need to be able to read code, configure software, or know what any of the technical terms mean. That's not your job here.
+Whatever you build, every system comes with the same foundation underneath, the parts a professional would insist on and a beginner wouldn't know to ask for. You don't set any of it up or need to understand it.
 
-Claude brings the architecture, the configuration, and the operation. The wizard translates what you describe into a complete working system — agents designed for your specific situation, safeguards calibrated to your preferences, a structure that runs reliably without requiring you to understand how it's built.
+How it works with you:
 
-The division of labor is simple: you know what needs to be done and what a good result looks like. Claude figures out how to build something that delivers it.
+- It gives you a short, plain summary of what it did and the few things that actually need you, instead of a wall of technical output.
+- It stops and asks before anything that matters, like spending money, sending something out in your name, or doing something that can't be undone, and it waits for your decision.
+- You control how much it is allowed to do on its own, and you widen that as you learn to trust it. It never expands its own authority.
 
----
+How it gets better the more you use it:
 
-## What you're protected from
+- It remembers your project and where you left off, so every session picks up cleanly instead of starting over.
+- When you correct it, it turns that correction into a standing rule, so it doesn't make the same mistake twice.
+- It keeps its own guiding documents up to date as your project changes, and it checks its own work, flagging what it is unsure about rather than guessing.
 
-The wizard isn't just about getting something built. It's about getting something built that keeps working, that you can trust, and that doesn't surprise you.
+How it protects you:
 
-A few specific things I've protected you from:
+- Your money. A spending limit you set, with a heads-up before it is reached. It is a careful estimate with a safety margin, and it is honest about being an estimate rather than a hard wall.
+- Your data. Before it changes anything outside itself, it works on a copy first and proves it can put things back, and it won't tell you something worked unless it actually checked. Everything is saved and version-tracked, so nothing is lost and changes can be undone.
+- Your privacy. Your information stays on your Mac unless you connect it to something, and personal details are kept out of its records.
+- Your footing. When something breaks, you hear about it in plain language with what to do next, never a cryptic error left for you to decode. It also keeps its own tools current and walks you through any update.
 
-**The context and quality problems.** The way the system is structured — how agents are scoped, how they hand off to each other, how they store their work — is designed specifically to avoid the degradation and drift that happens when you try to do too much in a single unstructured session.
-
-**The security and versioning gaps.** The things a software developer would know to do automatically — protecting credentials, keeping version history, building in recovery points — are built in from the start, not bolted on later if you happen to think of them. The system runs on your computer. Your data doesn't leave your machine unless you explicitly connect it to something external.
-
-**Spending money you didn't approve.** The system has hard limits. It won't spend beyond what you've authorized. You'll know when it's approaching a threshold before it gets there.
-
-**Not knowing when something broke.** If something goes wrong, you'll hear about it in plain language, with specific guidance on what to do. You won't be left staring at an error message wondering what happened.
-
-**Starting over every time something goes wrong.** Everything is written to disk. Every significant action is logged. If something needs to be recovered or rolled back, the history is there.
-
----
-
-## How you'll know it's working
-
-At each stage, "working" means something different.
-
-After setup, working means the system runs without error and produces outputs that roughly match what you asked for. Don't expect perfection here — expect a starting point.
-
-In early operation, working means the outputs are improving. You're correcting less than you were last week. The things you flag are different from the things you flagged before — you're past the obvious problems and into the calibration work.
-
-When the system is maturing, working means the digest is useful. The items that need your attention actually need your attention. The rest is handled.
-
-When it's fully mature, working is often visible in what you stop doing — the task you used to do every morning that just isn't there anymore, the thing you used to forget that now gets caught before you think to look. That's the clearest signal. Not what gets done, but what disappears from your plate.
+This is still AI, and it is the first version, so it will still get things wrong sometimes. What these protections change is how often that happens and how much it costs you when it does. Mistakes are rarer, and far less likely to turn into something you can't undo. That is also why you stay close to it early and check its work: you are the judge, and the guardrails are there to catch what matters while you learn how far to trust it.
 
 ---
 
 ## What this will actually require from you
 
-Before you go further, I want to be honest with you about what you're signing up for. This is not a "tell it what you want and it builds it in ten minutes" situation. Think of it less like ordering something and more like being the owner of a small software development project — where you are also the client, the project manager, and the person who has to show up every day, at least at the start.
+I want to be honest about what you are signing up for. This is closer to being the owner of a small project, where you are also the client, the manager, and the person who shows up every day at the start, than it is to ordering something.
 
-The initial wizard process alone could take hours. Getting through the full build — all your agents designed, built, tested, and running — could take days or weeks depending on what you're building and how much iteration it needs. And even once it's running, the early weeks require daily attention: reviewing what it did, evaluating whether the outputs are actually good, correcting things that are off, and gradually getting it calibrated to the standard you actually want.
+Setup is hours. Getting the full system built, calibrated, and trusted is weeks, depending on what you are building. The early weeks need daily attention: reviewing what it did, judging whether the output is good, correcting what is off. That lightens as it matures. It earns its autonomy, it does not begin with it.
 
-That investment does lighten over time. A mature, well-calibrated system needs much less from you than a new one. But it earns that autonomy — it doesn't start with it.
+So the most important question to ask first is whether the juice is worth the squeeze. If the thing you want help with is real and the value is real, the equation works. If you are not sure, that is worth sitting with before you start. The people who get the most out of this go in clear-eyed, with something they genuinely care about getting off their plate.
 
-This means the most important question to ask yourself before you begin is whether the juice is worth the squeeze. What you're asking the system to do needs to genuinely return that investment to you — in time you get back, in money earned, in quality improved, in something you couldn't do at all without it. If the use case is real and the value is real, that equation works. If you're not sure it's worth it, that uncertainty is worth sitting with before you start.
+---
 
-I'm not saying this to discourage you. I'm saying it because the people who get the most out of this are the ones who go in clear-eyed, with a use case they genuinely care about and a real sense of what a working version would be worth to them. That clarity is what carries you through the setup phase and into the part where the system starts paying for itself.
+## What it can't do yet, and where it's headed
+
+Being honest about the edges matters as much as the promises. Today it builds one kind of thing: a team of helpers that run on your own Mac. You can reach it from your phone through the Claude app if you want to check in or kick something off while you are away. What it can't do yet:
+
+- It can't run as a service out on the internet that other people log into. It runs on your machine, for you.
+- It can't be operated by a whole team at once, with separate accounts and permissions.
+- It can't run completely on its own from day one. Early on, it needs you.
+
+Where it's headed, which is direction and not a promise:
+
+- Building other kinds of systems, beyond a team of helpers on your Mac. A standalone program you run, or a tool you open in a browser, once those can be handed to someone non-technical as safely as this is.
+- A version that lives online and can be shared by a team, with the same protections built in.
+- More help operating a system over the long haul, so maintaining and improving it gets the same guided treatment that building it does.
+- Bringing in something you or someone else already started, and rebuilding it on this same safe foundation instead of starting over.
 
 ---
 
 ## What you actually need to get started
 
-You need a paid Claude account. You need a Mac. You need a reasonably clear idea of something in your life or work where you find yourself thinking *I need help managing this* — and a genuine belief that solving it would be worth the effort.
+A paid Claude account. A Mac. And a reasonably clear idea of something in your life or work where you keep thinking *I need help managing this*, plus a genuine belief that solving it would be worth the effort.
 
-You don't need to know how to code. You don't need to understand how any of this works under the hood. The wizard handles all of that. Your job is to know your own situation well enough to describe what would be useful — and you already do.
+You don't need to know how to code, or understand how any of this works under the hood. The wizard handles that. Your job is to know your own situation well enough to describe what would be useful, and you already do.
 
 ---
 
@@ -130,7 +135,7 @@ You don't need to know how to code. You don't need to understand how any of this
 
 The manual picks up from here. It walks you through installing the tools and launching the wizard, step by step, from the very beginning. Everything after that is guided.
 
-This is the path I would walk you through if I were sitting next to you. I've tried to build it so it works even when I'm not.
+This is the path I would walk you through if I were sitting next to you. I built it so it works even when I'm not.
 
 ---
 
