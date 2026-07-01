@@ -130,7 +130,7 @@ Write sub-step marker: Append `step_00_CHECK-2: complete | <timestamp>` to `~/cl
 
 **If Node.js is not installed — say this to the user:**
 
-> Node.js isn't installed yet. Node.js is what allows your agent team to run scheduled tasks and operate in the background without you needing to be present. Here's the command to install it:
+> Node.js isn't installed yet. Claude Code is delivered as a Node package, so Node.js needs to be in place before Claude Code will run. Your finished system does not run on Node itself; this is only what Claude Code is delivered as. Here's the command to install it:
 >
 > ```
 > brew install node
