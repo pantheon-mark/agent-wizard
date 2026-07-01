@@ -12,6 +12,18 @@ Entries appear newest-first.
 
 ---
 
+## 2026-06-30 — clearer setup and orientation documents (documentation only)
+
+**Public-facing change:** The about and manual documents were rewritten to be clearer and more accurate. This is a documentation update only. Nothing changes about how a system is built or operated, and there is no new version to apply.
+
+- **A rewritten manual** covering the three things you do yourself: installing the tools, the interview, and building your system one capability at a time. It describes what the interview is like and the kinds of things it asks about, notes that you may be offered an optional system update at the start of a session, and gives troubleshooting for the situations most likely to come up while setting up.
+- **A rewritten about document** that sets expectations plainly: what this is, what it protects you from, what it asks of you, and what it cannot do yet.
+- **A small accuracy fix** in the setup questions: the note about Node.js now correctly says it is only how Claude Code is delivered, not something your finished system runs on.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-06-27 — changes your system makes to data outside itself now carry an integrity contract (v0.9.0)
 
 **Public-facing change:** When your system writes back to an outside destination, it now confirms that the write actually did what it was supposed to — through an independent check, not by re-reading its own output. New write logic is proven on a copy of your real data before it is used live, and undo is shown to restore your data before the feature is accepted.
