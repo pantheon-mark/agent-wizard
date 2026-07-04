@@ -18,14 +18,21 @@
 #       and uncommitted. Backstops orchestrator_prompt.md session-close step 7.
 #
 # THE SAFETY CRUX — the policy-aware commit (SessionEnd):
-#   1. Code-vs-data classification. What is safe to commit = code / docs / state.
-#      What must NEVER be committed = data / secrets (see security/gitignore_manifest.md
-#      for the plain-language classification this script enforces). The classification
-#      is: a path is "sensitive" (never-commit) if it is git-ignored by the project's
-#      own .gitignore (the enforcement file), OR if it matches a built-in secret/data
-#      pattern set below (defense in depth — so a MISCONFIGURED .gitignore that fails to
-#      list a secret still cannot leak it through this guard). Everything else is
-#      code/docs/state and is committed.
+#   1. Code-vs-data classification, FAIL-SAFE / deny-by-default. The guard's #1 invariant
+#      is NEVER auto-commit data or secrets, so it auto-commits ONLY what it can
+#      POSITIVELY classify as safe = code / docs / known config (see
+#      security/gitignore_manifest.md for the plain-language classification this script
+#      enforces). A path is auto-committed only if it matches the built-in SAFE allowlist
+#      (source/doc/config-source extensions, known code/config basenames, or the system's
+#      own state/config at a KNOWN path such as .claude/settings.json or
+#      .wizard/manifest.json). Anything it CANNOT positively classify — data-shaped files,
+#      unknown extensions, ambiguous paths, a `.json` that is not a known config file — is
+#      NOT committed and is SURFACED for an explicit operator decision (never silently
+#      committed, never silently dropped). This is deny-by-default: a NEW data extension
+#      nobody enumerated is refused because it is not on the safe list, not allowed because
+#      it is not on a deny list. A separate built-in secret/data DENY set is still enforced
+#      (defense in depth) so a MISCONFIGURED .gitignore cannot leak a secret and so a data
+#      file is refused even under a known config path.
 #   2. F-30 already-tracked detection. `.gitignore` only stops UNtracked files; a file
 #      committed BEFORE its ignore rule existed stays tracked forever — illusory
 #      protection (the estate had master_list_copy.csv tracked; policy stated, never
@@ -34,10 +41,12 @@
 #      WITHOUT deleting the operator's working file), and surfaces a HISTORY-SCRUB prompt
 #      — untracking stops future commits but the secret still lives in past history until
 #      scrubbed (git filter-repo / BFG). It never silently leaves a tracked secret.
-#   3. It builds the add-list by ENUMERATING changes and FILTERING OUT every sensitive
-#      path — so a sensitive path is never `git add`ed in the first place — then a
-#      belt-and-suspenders backstop unstages anything sensitive that slipped in before
-#      committing. The committed tree can never contain a data/secret file.
+#   3. It builds the add-list by ENUMERATING changes and keeping ONLY the positively-safe
+#      paths — so a data/secret/ambiguous path is never `git add`ed in the first place;
+#      those are collected and SURFACED instead. A belt-and-suspenders backstop then
+#      unstages anything staged that is not positively safe (except the F-30 rm --cached
+#      deletions) and surfaces it too. The committed tree can never contain a data/secret
+#      file, and nothing is ever silently discarded.
 #
 # FAIL-OPEN, ALWAYS. Every git error, missing tool, or internal bug degrades to a
 # warning and exit 0. A commit-hygiene bug must never wedge or block a session. git
@@ -77,27 +86,69 @@ try:
     if r.returncode != 0 or r.stdout.strip() != "true":
         sys.exit(0)
 
-    # --- Code-vs-data classification (the never-commit set) ------------------
-    # Built-in secret/data patterns, enforced INDEPENDENTLY of .gitignore so a
-    # misconfigured ignore file still cannot leak these through the guard. This mirrors
-    # the Secrets + Privacy categories in security/gitignore_manifest.md. Errs toward
-    # NOT committing data: a data file the operator genuinely wants tracked they commit
-    # themselves — the guard's job is to never auto-commit data/secrets.
+    # --- Code-vs-data classification (FAIL-SAFE / deny-by-default) -----------
+    # Two independent sets:
+    #   (A) a POSITIVE SAFE allowlist -> the ONLY things auto-committed;
+    #   (B) a built-in secret/data DENY set -> hard never-commit, used for F-30
+    #       already-tracked detection AND to refuse a data/secret file even when it
+    #       sits under a known config path.
+    # Anything that is neither git-ignored nor positively safe is SURFACED for an
+    # explicit operator decision (never committed, never silently dropped).
+
+    # (B) Built-in secret/data patterns, enforced INDEPENDENTLY of .gitignore so a
+    # misconfigured ignore file still cannot leak these through the guard. Mirrors the
+    # Secrets + Data categories in security/gitignore_manifest.md.
     SENSITIVE_BASENAME_GLOBS = [
         ".env", ".env.*", "*.env",
         "*.pem", "*.key", "*.p12", "*.pfx", "*.pkcs12", "*.keystore", "*.jks",
         "id_rsa", "id_rsa.*", "id_ed25519", "id_ed25519.*", "id_dsa", "id_ecdsa",
         "credentials.json", "*credentials*.json", "service-account*.json",
+        # data / dataset / dump formats — never auto-committed anywhere:
         "*.csv", "*.tsv", "*.xlsx", "*.xls",
         "*.sqlite", "*.sqlite3", "*.db", "*.parquet",
+        "*.jsonl", "*.ndjson", "*.pkl", "*.pickle", "*.npy", "*.npz",
+        "*.dat", "*.feather", "*.arrow", "*.avro", "*.h5", "*.hdf5",
     ]
     SENSITIVE_PATH_MARKERS = ("logs/", "security/session_cookies/")
+
+    # (A) Positively-safe allowlist. A data format NEVER appears here.
+    #   - source / doc / config-SOURCE extensions (human-authored, not data);
+    #   - known code/config basenames that carry no or a non-safe extension;
+    #   - the system's own state/config addressable by a KNOWN path — this is the ONLY
+    #     way a .json (or other non-safe-extension config) is auto-committed.
+    SAFE_EXTS = {
+        # scripts / source
+        ".py", ".sh", ".bash", ".zsh", ".fish", ".pl", ".rb",
+        ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
+        ".go", ".rs", ".java", ".kt", ".c", ".cc", ".cpp", ".h", ".hpp",
+        ".cs", ".php", ".lua", ".r", ".swift", ".scala",
+        # documentation / markup
+        ".md", ".markdown", ".rst", ".adoc", ".html", ".htm",
+        ".css", ".scss", ".sass", ".less",
+        # configuration SOURCE (human-authored config, not data)
+        ".yml", ".yaml", ".toml", ".cfg", ".ini", ".conf", ".properties",
+    }
+    SAFE_BASENAMES = {
+        ".gitignore", ".gitattributes", ".editorconfig", ".dockerignore",
+        ".gitmodules", "makefile", "dockerfile", "license", "readme",
+        "requirements.txt", "constraints.txt",
+    }
+    KNOWN_CONFIG_PATHS = {
+        ".claude/settings.json", ".claude/settings.local.json",
+        ".wizard/manifest.json",
+    }
+    KNOWN_CONFIG_PREFIXES = (".claude/", ".wizard/")
 
     def _norm(p):
         p = p.strip().strip('"')
         if p.startswith("./"):
             p = p[2:]
         return p
+
+    def _ext(base):
+        # lowercase extension incl. the dot; "" for a dotfile (.gitignore) or no-ext file.
+        i = base.rfind(".")
+        return base[i:].lower() if i > 0 else ""
 
     def _matches_builtin(path):
         path = _norm(path)
@@ -121,7 +172,27 @@ try:
         return git("check-ignore", "-q", "--", path).returncode == 0
 
     def _is_sensitive(path):
+        # The hard never-commit signal (built-in secret/data OR git-ignored). Used for
+        # F-30 already-tracked detection and SessionStart surfacing.
         return _matches_builtin(path) or _is_gitignored(path)
+
+    def _is_safe_to_commit(path):
+        # The POSITIVE gate: True only for things we can positively classify as safe to
+        # auto-commit. A data/secret file is never safe — even under a known config path.
+        p = _norm(path)
+        base = os.path.basename(p)
+        if _matches_builtin(p):
+            return False
+        if base.lower() in SAFE_BASENAMES:
+            return True
+        if _ext(base) in SAFE_EXTS:
+            return True
+        if p in KNOWN_CONFIG_PATHS:
+            return True
+        for pre in KNOWN_CONFIG_PREFIXES:
+            if p.startswith(pre):
+                return True
+        return False
 
     def _status_paths():
         # `git status --porcelain -z`: NUL-delimited "XY <path>[NUL<orig>]" records.
@@ -203,8 +274,9 @@ try:
                 "silently ignore it."
             )
 
-    # --- Build the add-list: enumerate changes, FILTER OUT every sensitive path
-    # (so a sensitive path is never `git add`ed at all), then add only the safe set. ---
+    # --- Build the add-list (FAIL-SAFE): auto-commit ONLY positively-safe paths.
+    # Everything that is neither git-ignored nor positively safe is SURFACED for an
+    # explicit operator decision — never committed, never silently dropped. ---
     paths = _status_paths()
     if paths is None:
         # status failed — fail-open, but still surface any F-30 scrub note.
@@ -213,23 +285,32 @@ try:
         sys.exit(0)
 
     safe = []
+    surface = []
     for p in paths:
         p = _norm(p)
         if not p:
             continue
-        if _is_sensitive(p):
-            continue  # never add data/secrets
-        safe.append(p)
+        if _is_gitignored(p):
+            continue  # deliberately excluded by the operator's .gitignore — not noise
+        if _is_safe_to_commit(p):
+            safe.append(p)
+        else:
+            surface.append(p)  # data-shaped / unknown / ambiguous -> operator decides
 
     if safe:
         git("add", "--", *safe)
 
-    # --- Backstop: unstage anything sensitive that slipped into the index -----
+    # --- Backstop (also fail-safe): unstage anything staged that is NOT positively safe,
+    # except the F-30 rm --cached deletions we intentionally staged above. Anything
+    # unstaged here is surfaced too, so nothing is ever silently dropped. ---
     r = git("diff", "--cached", "--name-only", "-z")
     staged = [f for f in r.stdout.split("\x00") if f] if r.returncode == 0 else []
-    slipped = [f for f in staged if _is_sensitive(f) and f not in tracked_bad]
+    slipped = [f for f in staged if not _is_safe_to_commit(f) and f not in tracked_bad]
     if slipped:
         git("reset", "-q", "HEAD", "--", *slipped)
+        for f in slipped:
+            if f not in surface:
+                surface.append(f)
 
     # --- Commit only if something is staged. ---------------------------------
     if git("diff", "--cached", "--quiet").returncode != 0:
@@ -241,6 +322,18 @@ try:
             _out("[COMMIT HYGIENE] Could not auto-commit outstanding work: "
                  + (cr.stderr.strip() or "unknown git error")
                  + ". Commit it manually before closing so there is a clean baseline.\n")
+
+    # --- Surface everything that was NOT auto-committed (fail-safe requirement). ------
+    if surface:
+        _out(
+            "[COMMIT HYGIENE — REVIEW NEEDED] These changed files were NOT auto-committed "
+            "because the guard could not positively classify them as safe (code / docs / "
+            "known config). They may be data or secrets. Nothing here was committed and "
+            "nothing was discarded — review each and either commit it yourself (if it is "
+            "code/config the guard did not recognize) or move/ignore it (if it is data or "
+            "a secret):\n  "
+            + "\n  ".join(sorted(set(surface))) + "\n"
+        )
 
     if scrub_note:
         _out(scrub_note + "\n")

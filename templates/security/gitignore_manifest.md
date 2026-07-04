@@ -45,17 +45,34 @@
 always-on commit-hygiene guard (`.claude/commit_hygiene.sh`) applies at every session
 close, so "reversible because it is git-tracked" is enforced, not merely assumed.
 
-| Class | Examples | Committed? |
-|-------|----------|-----------|
-| **Code / docs / state** | source (`.py`, `.sh`), documents (`.md`), configuration and small state files (`.json`, `.txt`) that define how the system works | **Yes — committed automatically** |
-| **Data** | datasets and record exports (`.csv`, `.tsv`, `.xlsx`, `.xls`, `.sqlite`, `.db`, `.parquet`) | **Never committed** |
-| **Secrets** | `.env`, private keys (`*.pem`, `*.key`, `id_rsa*`), credential/service-account JSON, session cookies | **Never committed** |
+**The guard is fail-safe (deny-by-default).** It auto-commits *only* what it can
+**positively** classify as safe. Anything it cannot — data-shaped files, unknown file
+types, ambiguous paths, a `.json` that is not a known config file — is **never
+auto-committed**; instead it is **surfaced for your decision** (never silently committed,
+never silently discarded). A brand-new data extension nobody enumerated is refused because
+it is not on the safe list, not allowed because it is not on a deny list.
 
-The guard classifies a path as *never-commit* if it is git-ignored by this project's
-`.gitignore` **or** matches a built-in secret/data pattern — the built-in set is a
-defense-in-depth backstop, so a `.gitignore` that forgets to list a secret still cannot
-leak it. It errs toward *not* committing data: a data file you genuinely want tracked,
-you commit yourself.
+| Class | Examples | Auto-committed? |
+|-------|----------|-----------------|
+| **Code / docs** | source (`.py`, `.sh`, `.js`, …), documents (`.md`, `.rst`), configuration source (`.yml`, `.yaml`, `.toml`, `.cfg`, `.ini`), and known config files by name (`.gitignore`, `Makefile`, `requirements.txt`) | **Yes — committed automatically** |
+| **System config / state by known path** | `.claude/settings.json`, `.wizard/manifest.json`, and the system's own state/tracker files under its config directories | **Yes — committed automatically** |
+| **Data** | datasets, record exports, and dumps — `.csv`, `.tsv`, `.xlsx`, `.sqlite`, `.db`, `.parquet`, `.jsonl`, `.ndjson`, `.pkl`, `.npy`, `.dat`, **a `.json` that is a data export rather than a known config file**, and any unknown / data-shaped extension | **No — surfaced for your decision, never auto-committed** |
+| **Secrets** | `.env`, private keys (`*.pem`, `*.key`, `id_rsa*`), credential/service-account JSON, session cookies | **No — never committed** |
+
+**Config vs. data — the `.json` / `.txt` rule.** A `.json` is committed only when it sits
+at a **known configuration path** (for example `.claude/settings.json` or
+`.wizard/manifest.json`). A `.json` anywhere else — or any data-shaped file such as
+`client_export.json`, a `.jsonl` event log, or a `.pkl` model dump — is treated as data:
+the guard will not auto-commit it and will surface it so you can decide. `.txt` is likewise
+**not** blanket-committable: a `.txt` is committed only when it is a known config file by
+name (e.g. `requirements.txt`); a `.txt` data dump is surfaced, not committed.
+
+The never-commit set is enforced two ways: a path is refused if it is git-ignored by this
+project's `.gitignore` **or** if it matches a built-in secret/data pattern — the built-in
+set is a defense-in-depth backstop, so a `.gitignore` that forgets to list a secret still
+cannot leak it, and a data file is refused even if it is placed under a known config path.
+Because classification is deny-by-default, the guard errs firmly toward *not* committing: a
+data file you genuinely want tracked, you commit yourself.
 
 **Already-tracked detection (the `.gitignore` illusory-protection gap).** `.gitignore`
 only stops files that are *not yet tracked*. A data or secret file that was committed

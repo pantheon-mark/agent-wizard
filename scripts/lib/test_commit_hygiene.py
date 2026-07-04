@@ -87,19 +87,80 @@ class CommitHygieneBehaviorTests(unittest.TestCase):
         out = _git(self.repo, "show", "--name-only", "--pretty=format:", "HEAD").stdout
         return set(f for f in out.split() if f)
 
-    # ---- Piece 4: positive — code/docs/state committed --------------------
-    def test_code_docs_state_are_committed_on_session_end(self):
+    # ---- Piece 4: positive — code/docs + KNOWN-PATH config committed -------
+    # NOTE (Important-1 fix): under the fail-safe (deny-by-default) posture a bare
+    # `state.json` at the repo root is NO LONGER auto-committed — a `.json` is committed
+    # ONLY at a known config path (.claude/settings.json, .wizard/manifest.json). This
+    # test was corrected from asserting the old allow-by-default behavior (root state.json
+    # committed) to the new posture; a separate test proves a root/data `.json` surfaces.
+    def test_code_docs_and_known_config_are_committed_on_session_end(self):
         (self.repo / "notes.md").write_text("doc\n", encoding="utf-8")
         (self.repo / "run.py").write_text("print(1)\n", encoding="utf-8")
-        (self.repo / "state.json").write_text('{"a":1}\n', encoding="utf-8")
+        # the system's own config/state at KNOWN paths (the only way a .json commits):
+        (self.repo / ".claude").mkdir()
+        (self.repo / ".claude" / "settings.json").write_text('{"a":1}\n', encoding="utf-8")
+        (self.repo / ".wizard").mkdir()
+        (self.repo / ".wizard" / "manifest.json").write_text('{"v":1}\n', encoding="utf-8")
         before = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
         r = self._run("SessionEnd")
         self.assertEqual(r.returncode, 0, r.stderr)
         after = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
         self.assertNotEqual(before, after, "SessionEnd made no commit for outstanding work")
         tracked = self._tracked()
-        for f in ("notes.md", "run.py", "state.json"):
-            self.assertIn(f, tracked, f"{f} (code/docs/state) was not committed")
+        for f in ("notes.md", "run.py", ".claude/settings.json", ".wizard/manifest.json"):
+            self.assertIn(f, tracked, f"{f} (code/docs/known-config) was not committed")
+
+    # ---- Piece 4 (Important-1 fix): data-shaped UNLISTED extensions are NOT
+    # auto-committed and ARE surfaced (deny-by-default) --------------------
+    def test_data_shaped_unlisted_extensions_are_not_committed_but_surfaced(self):
+        # None of these are on the (old) built-in deny list a reviewer could enumerate;
+        # under allow-by-default they would have been silently auto-committed. Under
+        # deny-by-default they are not safe -> not committed -> surfaced.
+        data_files = ("events.jsonl", "stream.ndjson", "model.pkl",
+                      "array.npy", "dump.dat", "table.parquet")
+        for f in data_files:
+            (self.repo / f).write_text("payload\n", encoding="utf-8")
+        # a legitimate doc alongside proves the guard still commits the safe part
+        (self.repo / "ok.md").write_text("doc\n", encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        tracked = self._tracked()
+        for f in data_files:
+            self.assertNotIn(f, tracked, f"deny-by-default failed: data file committed: {f}")
+        self.assertIn("ok.md", tracked, "guard failed to commit the legitimate doc")
+        # never silently dropped: each unsafe file is surfaced for an operator decision
+        out = r.stdout + r.stderr
+        self.assertIn("REVIEW NEEDED", out, "unsafe files were not surfaced for decision")
+        for f in data_files:
+            self.assertIn(f, out, f"unsafe file {f} was neither committed nor surfaced")
+
+    # ---- Piece 4 (Important-1 fix): a .json DATA export at a non-config path is
+    # treated as data (NOT auto-committed), while a known-config .json commits ----
+    def test_json_data_export_at_nonconfig_path_is_not_committed(self):
+        (self.repo / "client_export.json").write_text('[{"pii":"x"}]\n', encoding="utf-8")
+        # a KNOWN-path config .json in the same run must still commit
+        (self.repo / ".claude").mkdir()
+        (self.repo / ".claude" / "settings.json").write_text('{"ok":1}\n', encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        tracked = self._tracked()
+        self.assertNotIn("client_export.json", tracked,
+                         "a non-config .json data export was auto-committed")
+        self.assertIn(".claude/settings.json", tracked,
+                      "a known-config .json was not committed")
+        self.assertIn("client_export.json", r.stdout + r.stderr,
+                      "the surfaced .json data export was silently dropped")
+
+    # ---- Piece 4 (Important-1 fix): an entirely UNKNOWN extension is not
+    # auto-committed (deny-by-default) and is surfaced ---------------------
+    def test_unknown_extension_is_not_committed_but_surfaced(self):
+        (self.repo / "mystery.xyzq").write_text("who knows\n", encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("mystery.xyzq", self._tracked(),
+                         "an unknown-extension file was auto-committed")
+        self.assertIn("mystery.xyzq", r.stdout + r.stderr,
+                      "an unknown-extension file was neither committed nor surfaced")
 
     # ---- Piece 4: negative — data/secrets NEVER committed -----------------
     def test_secrets_and_data_are_never_committed(self):
