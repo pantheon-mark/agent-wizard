@@ -197,6 +197,11 @@ def _default_scaffold_inputs() -> Dict[str, str]:
         # references this placeholder yet (canonical-only per D-B1-a; bundle-cut at B2), so this
         # default is currently inert — seeded now so it resolves the moment the template is bundled.
         "CAPABILITY_DESCRIPTOR_REGISTRY_ROWS": "",
+        # co-protected-workflows.md's projected "Registered capability workflows" row body
+        # (B1-6). No bundle template references this placeholder yet (canonical-only per
+        # D-B1-a; bundle-cut at B2), so this default is currently inert — seeded now so it
+        # resolves the moment the template is bundled.
+        "CO_PROTECTED_CAPABILITY_ROWS": "",
         "ADVISOR_ENTRIES": "",
         "AUTONOMOUS_ACTIONS": "",
         "TIER_1_ADDITIONS": "",

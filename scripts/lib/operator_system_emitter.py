@@ -246,6 +246,11 @@ def _full_system_consumed_keys(plan: EmissionPlan, build_repo_root: Path) -> set
              {{CAPABILITY_DESCRIPTOR_REGISTRY_ROWS}} placeholder until the template is bundled
              at B2; this declaration prevents a false unused-input warning the moment an
              assembler starts populating the key, ahead of that bundle cut.
+           - CO_PROTECTED_CAPABILITY_ROWS (B1-6): co_protected_workflows.py's projected
+             "Registered capability workflows" row body added to
+             wizard/templates/quality/co-protected-workflows.md. Same canonical-only situation
+             as CAPABILITY_DESCRIPTOR_REGISTRY_ROWS above — declared here for the same reason
+             (no bundle cut yet at B1; D-B1-a).
 
     Source 3 is intentionally a small, named declared set rather than threading a
     consumed-key return through every emitter — see the slice's mechanism note. A
@@ -254,6 +259,7 @@ def _full_system_consumed_keys(plan: EmissionPlan, build_repo_root: Path) -> set
     from dependency_projection import IDENTITY_FIELD, ANNOTATION_FIELD  # type: ignore
     from corpus_emitter import INSTALLED_DATE_KEY  # type: ignore
     from capability_descriptor_registry import MARKDOWN_FIELD as DESCRIPTOR_REGISTRY_ROWS_FIELD  # type: ignore
+    from co_protected_workflows import MARKDOWN_FIELD as CO_PROTECTED_ROWS_FIELD  # type: ignore
 
     consumed: set = set()
     consumed |= required_foundation_placeholders(plan.bundle_version, build_repo_root)
@@ -267,6 +273,7 @@ def _full_system_consumed_keys(plan: EmissionPlan, build_repo_root: Path) -> set
         "AUTONOMY_LEVEL",            # orchestrator direct read (autonomy summary) + scaffold placeholder
         "PROJECT_NAME",              # plan.project_name + scaffold/agent structural field
         DESCRIPTOR_REGISTRY_ROWS_FIELD,  # CAPABILITY_DESCRIPTOR_REGISTRY_ROWS (B1-2; see above)
+        CO_PROTECTED_ROWS_FIELD,     # CO_PROTECTED_CAPABILITY_ROWS (B1-6; see above)
     }
     return consumed
 

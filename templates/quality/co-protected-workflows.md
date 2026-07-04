@@ -50,6 +50,20 @@ Any action that could create a legal obligation, regulatory exposure, or complia
 
 ---
 
+## Registered capability workflows
+
+*Per-capability high-risk workflows, derived automatically from this system's confirmed external-dependency capability descriptors. Unlike the five categories above (fixed at every wizard setup), this section is generated fresh from what THIS system actually does — so a capability the plan never anticipated still gets a concrete, matchable pattern here instead of staying invisible until someone remembers to add it by hand.*
+
+*Only capabilities whose risk class requires protection are listed: `irreversible_external`, `standing_automation`, and `sensitive_data` — plus any capability with a missing or unrecognized risk class, which is always treated as `irreversible_external` and never silently treated as safe. A capability classified `read_only_local` or `reversible_external` is deliberately NOT listed here — listing every capability regardless of risk would train reviewers to rubber-stamp this table instead of reading it.*
+
+*`standing_automation` capabilities (server-side filters, rules, or scheduled jobs) are recognized here as their own action class. They may enter the ceremony-maturity ladder — starting supervised and earning autonomy over a run of clean outcomes — but their recovery floor NEVER graduates: maturity graduates supervision and narration, never the backup/recover safety net. Every row for this class states that explicitly.*
+
+| Capability | Action class | Risk class | What's protected |
+|-----------|-------------|-----------|------------------|
+{{CO_PROTECTED_CAPABILITY_ROWS}}
+
+---
+
 ## How protection works
 
 1. The QA agent reads this file at every security audit invocation.
