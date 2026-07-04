@@ -37,6 +37,7 @@ from typing import Any, Optional, Sequence
 
 from external_write.operations import Operation, Result
 from external_write.verifiers import validate_postwrite_verification
+from external_write.write_gate import evaluate_write_gate, InvocationLedger
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +122,11 @@ def _parse_allowed_from_error(message: str) -> Optional[list]:
 # ---------------------------------------------------------------------------
 
 def run_operation(op: Operation, receipt: Any, client: Any,
-                  postwrite_verification: Any = None) -> Result:
+                  postwrite_verification: Any = None, *,
+                  target: Optional[str] = None,
+                  descriptor_set: Any = None,
+                  cap_ledger: Optional[InvocationLedger] = None,
+                  clock: Any = None) -> Result:
     """Run a named external-write operation with receipt validation and fail-fast
     value-validity enforcement.
 
@@ -133,11 +138,33 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     client:  A surface client stub or real client.  Must implement:
                client.write(object_id, field, value) -> None  (raises ValueError on bad value)
                client.read(object_id, field) -> Any
+    target:  (B1-4, keyword-only) the machine-readable target signal for a gated (high-risk)
+             op: LIVE_TARGET ('live') or a declared test target ('copy'/'bounded_sample'/
+             'dry_run'/'native_undo'). An op on the copy-surface convention is an implicit copy
+             target. For a gated op an ABSENT target fails safe to refuse. Ignored for the
+             ungated seeded status ops (read_only_local / reversible_external): the gate is a
+             no-op for them and their behavior is byte-identical to pre-B1-4.
+    descriptor_set: (B1-4) the accepted-descriptor set (B1-2 shape). None => loaded fail-safe
+             from disk (absent until B2 => nothing accepted => live refused).
+    cap_ledger: (B1-4) the InvocationLedger enforcing the deterministic blast-radius cap on
+             live irreversible ops. Absent on a live irreversible op => fail-safe refuse.
+    clock:   (B1-4/F-22) a no-arg callable returning a UTC datetime; every date this code writes
+             comes from it. Defaults to the system clock; injected only for deterministic tests.
 
     Returns
     -------
     Result with status in {'written', 'needs_operator_choice', 'refused'}.
     """
+
+    # Step 0 (B1-4): the deterministic pre-write gate — the single chokepoint's fail-safe heart.
+    # Runs BEFORE receipt validation and before anything touches the surface. A no-op for the
+    # ungated seeded status ops; refuses fail-safe for every missing input on a gated op.
+    decision = evaluate_write_gate(
+        op, target=target, descriptor_set=descriptor_set,
+        cap_ledger=cap_ledger, clock=clock)
+    if not decision.permitted:
+        return decision.refusal
+    _gate_audit = decision.audit
 
     # Step 1: receipt validation — refuse before touching the surface.
     reason = _validate_receipt(op, receipt)
@@ -175,19 +202,23 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     # When a caller supplies a postwrite-verification-v1 record, the success claim
     # is bounded by the record's mode and rejected on declared-dependency overlap.
     # Back-compat: no record -> the read-back-confirmed write is reported as before.
+    # The gate's audit record (e.g. the F-22 clock-stamped irreversibility acknowledgement) is
+    # merged into the success detail; it is None for the ungated status ops, so their written
+    # Result stays byte-identical (detail=None) to pre-B1-4.
     if postwrite_verification is None:
-        return Result(status="written")
+        return Result(status="written",
+                      detail=dict(_gate_audit) if _gate_audit else None)
 
     vresult = validate_postwrite_verification(op, postwrite_verification)
     if not vresult.ok:
         return Result(status="refused", detail={"reason": vresult.reason})
 
-    return Result(
-        status="written",
-        detail={
-            "verification": {
-                "claim_strength": vresult.claim_strength.value,
-                "verifier_id": postwrite_verification["verifier_id"],
-            }
-        },
-    )
+    detail: dict = {
+        "verification": {
+            "claim_strength": vresult.claim_strength.value,
+            "verifier_id": postwrite_verification["verifier_id"],
+        }
+    }
+    if _gate_audit:
+        detail.update(_gate_audit)
+    return Result(status="written", detail=detail)
