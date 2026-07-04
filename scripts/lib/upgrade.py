@@ -896,6 +896,23 @@ def find_bundle_entry(registry: Dict[str, Any], version: str) -> Optional[Dict[s
     return None
 
 
+def latest_bundle_version(registry: Dict[str, Any]) -> str:
+    """Return the highest-semver `foundation_bundle_version` in the registry.
+
+    Selects by parsed semver (so `v0.10.0` > `v0.9.0`), NOT by registry order or lexical sort.
+    This is the same latest-selection the upgrade path relies on, so a fresh build (emit) and an
+    upgraded build cannot drift onto different bundles. Assumes a `load_registry`-validated
+    registry (every version already parses). Raises RegistryError on an empty bundle list.
+    """
+    bundles = registry.get("bundles") or []
+    if not bundles:
+        raise RegistryError("registry has no bundles; cannot resolve latest version")
+    return max(
+        (entry["foundation_bundle_version"] for entry in bundles),
+        key=parse_semver,
+    )
+
+
 # ===== Registry schema versions =====
 # The registry's `registry_schema_version` (preferred) — or the legacy top-level
 # `schema_version`, or absent -> legacy — selects the bundle-path resolution rule.

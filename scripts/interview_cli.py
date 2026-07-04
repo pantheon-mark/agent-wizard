@@ -348,10 +348,28 @@ def cmd_check_shape_state(draft: str, *, expect_phase: Optional[str] = None,
     return state  # type: ignore[return-value]
 
 
+def _resolve_emit_bundle_version(bundle_version: Optional[str], build_repo_root: str) -> str:
+    """Resolve the foundation bundle to emit from.
+
+    An explicit version wins; otherwise default to the registry's LATEST bundle (the same
+    latest-selection the upgrade path uses), so a fresh build always emits the current bundle
+    by construction rather than a stale hardcode — and emit + upgrade cannot drift onto
+    different bundles.
+    """
+    if bundle_version is not None:
+        return bundle_version
+    from bundle_templates import wizard_subroot  # type: ignore  # sibling under lib/
+    from upgrade import load_registry, latest_bundle_version  # type: ignore
+    registry_path = (
+        wizard_subroot(Path(build_repo_root)) / "registry" / "foundation-bundles.json"
+    )
+    return latest_bundle_version(load_registry(registry_path))
+
+
 def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_root: str, *,
                     project_name: str = "operator-system",
                     foundation_only_mode: bool = False,
-                    bundle_version: str = "v0.6.0",
+                    bundle_version: Optional[str] = None,
                     clock: Optional[Callable[[], str]] = None,
                     generator_version_override: Optional[str] = None) -> Dict[str, Any]:
     """Emit the complete operator system from the recorded transcript via the fail-closed bridge
@@ -372,6 +390,9 @@ def cmd_emit_system(transcript: str, shape: str, target_dir: str, build_repo_roo
     from interview_bridge import build_operator_system_from_transcript  # type: ignore
     from datetime import date  # local: only the emit boundary stamps the build date
 
+    # Resolve the bundle to emit from BEFORE it is stamped (WIZARD_VERSION) or used to select the
+    # source bundle: an explicit version wins, else default to the registry's latest (never stale).
+    bundle_version = _resolve_emit_bundle_version(bundle_version, build_repo_root)
     last_updated = clock() if clock else date.today().isoformat()
     auto_values = {
         "SYSTEM_SHAPE": shape,
@@ -545,8 +566,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp.add_argument("--foundation-only", dest="foundation_only_mode", action="store_true",
                     help="emit the foundation-only branch (carrier sets this from the step-15 "
                          "entry guard; supplies FOUNDATION_ONLY_MODE=true)")
-    sp.add_argument("--bundle-version", dest="bundle_version", default="v0.6.0",
-                    help="the foundation bundle to emit from; also stamped as WIZARD_VERSION")
+    sp.add_argument("--bundle-version", dest="bundle_version", default=None,
+                    help="the foundation bundle to emit from; also stamped as WIZARD_VERSION. "
+                         "Omit to default to the registry's LATEST bundle (recommended).")
     sp.add_argument("--generator-version-override", dest="generator_version_override")
 
     args = p.parse_args(argv)
