@@ -151,6 +151,73 @@ class CommitHygieneBehaviorTests(unittest.TestCase):
         self.assertIn("client_export.json", r.stdout + r.stderr,
                       "the surfaced .json data export was silently dropped")
 
+    # ---- Piece 4 (Important-2 fix): system-owned control-plane state paths
+    # ARE auto-committed — agents/handoffs/ (control-plane handoff envelopes +
+    # pre-write receipt) and security/capability_descriptors.json (the system
+    # descriptor set) — widening the allowlist that Important-1 had narrowed
+    # too far and started surfacing these as REVIEW NEEDED every session. ----
+    def test_system_control_plane_state_paths_are_committed(self):
+        # Seed agents/ and security/ as ALREADY-TRACKED (the wizard scaffolds both
+        # at close, per CLAUDE.md's "Operations" list, before any handoff or
+        # descriptor file is ever written) so the new files below are reported by
+        # `git status` at file granularity rather than collapsed into a brand-new
+        # top-level "agents/"/"security/" directory entry — matching real topology.
+        (self.repo / "agents").mkdir()
+        (self.repo / "agents" / "roster.md").write_text("roster\n", encoding="utf-8")
+        (self.repo / "security").mkdir()
+        (self.repo / "security" / "README.md").write_text("sec\n", encoding="utf-8")
+        _git(self.repo, "add", "agents/roster.md", "security/README.md")
+        _git(self.repo, "commit", "-q", "-m", "seed agents/ and security/ scaffolding")
+
+        (self.repo / "agents" / "handoffs").mkdir(parents=True)
+        (self.repo / "agents" / "handoffs" / "builder_task1_handoff.json").write_text(
+            '{"task_id":"task1"}\n', encoding="utf-8")
+        (self.repo / "agents" / "handoffs" / ".prewrite_receipt.json").write_text(
+            '{"ok":true}\n', encoding="utf-8")
+        (self.repo / "security" / "capability_descriptors.json").write_text(
+            '{"descriptors":[]}\n', encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        tracked = self._tracked()
+        for f in (
+            "agents/handoffs/builder_task1_handoff.json",
+            "agents/handoffs/.prewrite_receipt.json",
+            "security/capability_descriptors.json",
+        ):
+            self.assertIn(f, tracked, f"{f} (system control-plane state) was not committed")
+
+    # ---- Regression guard (Important-2 fix): the widening above must NOT
+    # re-open the data-exposure vector Important-1 closed. A data .json at a
+    # non-config path, and credential/secret paths — including ones that live
+    # UNDER security/ but are NOT the specific descriptor path just allow-
+    # listed — must still surface / not be committed. ----------------------
+    def test_widened_allowlist_does_not_reopen_data_or_secret_exposure(self):
+        # data-shaped .json at a non-config, non-control-plane path
+        (self.repo / "client_export2.json").write_text('[{"pii":"y"}]\n', encoding="utf-8")
+        # credential paths under security/ that are NOT the allow-listed descriptor file
+        (self.repo / "security" / "session_cookies").mkdir(parents=True)
+        (self.repo / "security" / "session_cookies" / "x").write_text(
+            "cookie-data\n", encoding="utf-8")
+        (self.repo / ".env").write_text("API_KEY=supersecret\n", encoding="utf-8")
+        (self.repo / "id_rsa").write_text("-----BEGIN KEY-----\n", encoding="utf-8")
+        (self.repo / "root_dump.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        tracked = self._tracked()
+        for bad in (
+            "client_export2.json",
+            "security/session_cookies/x",
+            ".env",
+            "id_rsa",
+            "root_dump.csv",
+        ):
+            self.assertNotIn(bad, tracked,
+                              f"widened allowlist re-opened exposure for: {bad}")
+        out = r.stdout + r.stderr
+        for surfaced in ("client_export2.json", "id_rsa", "root_dump.csv"):
+            self.assertIn(surfaced, out,
+                          f"{surfaced} was neither committed nor surfaced (silently dropped)")
+
     # ---- Piece 4 (Important-1 fix): an entirely UNKNOWN extension is not
     # auto-committed (deny-by-default) and is surfaced ---------------------
     def test_unknown_extension_is_not_committed_but_surfaced(self):

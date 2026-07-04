@@ -136,8 +136,19 @@ try:
     KNOWN_CONFIG_PATHS = {
         ".claude/settings.json", ".claude/settings.local.json",
         ".wizard/manifest.json",
+        # system-owned control-plane state (NOT operator data) — the descriptor
+        # set per capability_descriptor_registry.md:5.
+        "security/capability_descriptors.json",
     }
-    KNOWN_CONFIG_PREFIXES = (".claude/", ".wizard/")
+    KNOWN_CONFIG_PREFIXES = (
+        ".claude/", ".wizard/",
+        # control-plane handoff envelopes + pre-write receipt — system-authored
+        # state per orchestrator_prompt.md:81,113,169 + operating_discipline.md:109.
+        # Deliberately narrow: "agents/handoffs/" only, NOT "security/" broadly —
+        # security/session_cookies/ etc. must stay non-committed (see
+        # SENSITIVE_PATH_MARKERS above, checked first via _matches_builtin).
+        "agents/handoffs/",
+    )
 
     def _norm(p):
         p = p.strip().strip('"')
