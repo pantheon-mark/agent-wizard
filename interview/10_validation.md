@@ -1,13 +1,13 @@
-# 10 — Input Validation
+# 10: Input Validation
 
 ## What this file does
-Configure the validation gate — the layer that checks everything coming into the system before agents act on it. Claude proposes the input type inventory and domain sensitivity settings from the confirmed vision, approach, and architecture content (read from the transcript; the docs are not on disk yet). The user confirms and adjusts but does not design. The answers are recorded to the transcript and pre-populate the generated `quality/validation_gate_config.md` at close — nothing is written mid-interview.
+Configure the validation gate, the layer that checks everything coming into the system before agents act on it. Claude proposes the input type inventory and domain sensitivity settings from the confirmed vision, approach, and architecture content (read from the transcript; the docs are not on disk yet). The user confirms and adjusts but does not design. The answers are recorded to the transcript and pre-populate the generated `quality/validation_gate_config.md` at close. Nothing is written mid-interview.
 
 ## When this file runs
 After `09_credentials.md` completes: `step_09: complete` is in `~/claude-wizard-draft/wizard_progress.md`. The staging-file `CREDENTIALS_CONFIRMED` mirror is a human-readable convenience, not the gate.
 
 ## Prerequisites
-`step_09: complete` in `~/claude-wizard-draft/wizard_progress.md`, and `group_vision_confirmed` + `group_approach_roster_confirmed` recorded in `~/claude-wizard-draft/wizard_transcript.jsonl`. The vision and approach/architecture content is confirmed in the transcript; the foundation documents themselves are emitted by the generator at close (`15_close.md`), so they are not on disk yet — read the confirmed content from the transcript, not from disk files.
+`step_09: complete` in `~/claude-wizard-draft/wizard_progress.md`, and `group_vision_confirmed` + `group_approach_roster_confirmed` recorded in `~/claude-wizard-draft/wizard_transcript.jsonl`. The vision and approach/architecture content is confirmed in the transcript; the foundation documents themselves are emitted by the generator at close (`15_close.md`), so they are not on disk yet. Read the confirmed content from the transcript, not from disk files.
 
 ---
 
@@ -27,7 +27,7 @@ Do not begin GATE-1 until you are confident the full phase will complete before 
 
 ## Sub-step resume check
 
-Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_10_*` (e.g., `step_10_GATE-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_10_*` (e.g., `step_10_GATE-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker. Do not re-ask completed questions, as their answers are already stored in the staging file.
 
 If all sub-step markers for this step are present but the step-level marker (`step_10: complete`) is not, proceed directly to the success condition.
 
@@ -37,7 +37,7 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 Before doing anything else in this step:
 
-1. **Schema-version check (per handoff contract consumer rule).** Read `~/claude-wizard-draft/wizard_session_draft.md`; locate the `schema_versions` block under shape_hypothesis. Verify `schema_major == 1`. If `schema_major` mismatches the consumer expected major (currently `1`), abort with operator-facing internal-state error: "I hit a wizard-internal version mismatch — the staging file's shape-detection schema major is `<actual>`, but this version of the wizard expects major `1`. Your project file is saved. Please update the wizard OR resume with the matching wizard version." Exit cleanly; do NOT proceed.
+1. **Schema-version check (per handoff contract consumer rule).** Read `~/claude-wizard-draft/wizard_session_draft.md`; locate the `schema_versions` block under shape_hypothesis. Verify `schema_major == 1`. If `schema_major` mismatches the consumer expected major (currently `1`), abort with operator-facing internal-state error: "I hit a wizard-internal version mismatch: the staging file's shape-detection schema major is `<actual>`, but this version of the wizard expects major `1`. Your project file is saved. Please update the wizard OR resume with the matching wizard version." Exit cleanly; do NOT proceed.
 
 2. Locate the `shape_hypothesis.fallback_mode_offered` field.
 
@@ -50,7 +50,7 @@ Before doing anything else in this step:
 4. Branch:
    - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
    - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
-   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
+   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error: wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
 
 5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error. Halt with internal-error message; foundation state preserved. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
 
@@ -58,70 +58,70 @@ Before doing anything else in this step:
 
 ## Operator Interaction Contract
 
-Before the validation questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it — ground the proposed input inventory and sensitivity settings in the operator's vision, approach, and architecture, keep the ask balanced, plain voice, no filler.
+Before the validation questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it: ground the proposed input inventory and sensitivity settings in the operator's vision, approach, and architecture, keep the ask balanced, plain voice, no filler.
 
 ---
 
-## Step opening — progress and preview
+## Step opening: progress and preview
 
 **Say:**
 
-> **Step 11 of 16 — Input validation**
+> **Step 11 of 16: Input validation**
 > We'll configure how carefully the system checks incoming data before acting on it.
 
 ---
 
 ## How to run this phase
 
-The operator already described their external dependencies once, at step 09. Read the confirmed `EXTERNAL_DEPENDENCY_IDENTITY` record from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`) and take the dependencies tagged with the **`boundary_input`** role — the ones that send data into the system. **Do NOT re-enumerate inputs from scratch.** This step confirms that subset is the complete set of inputs the validation gate should check, and captures one new detail per input: what could go wrong with it (the validation risk). Domain sensitivity (GATE-2) is a separate, per-domain setting and is captured fresh.
+The operator already described their external dependencies once, at step 09. Read the confirmed `EXTERNAL_DEPENDENCY_IDENTITY` record from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`) and take the dependencies tagged with the **`boundary_input`** role, the ones that send data into the system. **Do NOT re-enumerate inputs from scratch.** This step confirms that subset is the complete set of inputs the validation gate should check, and captures one new detail per input: what could go wrong with it (the validation risk). Domain sensitivity (GATE-2) is a separate, per-domain setting and is captured fresh.
 
 **The user does not design the validation configuration.** You present the `boundary_input` subset they already confirmed and the validation detail; they confirm or adjust.
 
-Note: agent-to-agent handoffs are not routed through the validation gate. This gate governs inputs arriving at the system boundary — from external sources, users, and integrations.
+Note: agent-to-agent handoffs are not routed through the validation gate. This gate governs inputs arriving at the system boundary: from external sources, users, and integrations.
 
 ---
 
-## GATE-1 — Confirm the inputs + capture their validation risk [DYNAMIC]
+## GATE-1: Confirm the inputs + capture their validation risk [DYNAMIC]
 
-Present the `boundary_input` subset of the dependencies the operator already confirmed at step 09 — the ones that send data in. Do not re-ask what they are; confirm the subset is complete and capture, per input, what could go wrong with it.
+Present the `boundary_input` subset of the dependencies the operator already confirmed at step 09, the ones that send data in. Do not re-ask what they are; confirm the subset is complete and capture, per input, what could go wrong with it.
 
 **Say:**
 
-> Before your agents start working, everything coming into the system gets checked — to catch problems before they cause bad outputs. From what you told me earlier, these are the things your system takes data from:
+> Before your agents start working, everything coming into the system gets checked, to catch problems before they cause bad outputs. From what you told me earlier, these are the things your system takes data from:
 >
-> **[Dependency name — from the step-09 list, the boundary_input ones]**
-> What could go wrong here: [specific risk — e.g., "customer names can contain formatting that breaks downstream reports" or "dates can be ambiguous without a format check"]. So on the way in, the system checks for that.
+> **[Dependency name, from the step-09 list, the boundary_input ones]**
+> What could go wrong here: [specific risk, e.g., "customer names can contain formatting that breaks downstream reports" or "dates can be ambiguous without a format check"]. So on the way in, the system checks for that.
 >
 > **[Repeat for each boundary_input dependency.]**
 >
-> Did I miss anything that sends data into your system — or is anything here actually not an input? And for each one, does that risk sound right?
+> Did I miss anything that sends data into your system, or is anything here actually not an input? And for each one, does that risk sound right?
 
 **Wait for answer.**
 
 - If the user confirms: capture the per-input validation risk (this becomes the `boundary_input_facet` of the canonical record's annotation) and proceed to GATE-2.
-- If the user says something is NOT actually an input: that is a role correction to the dependency record — note it (the `boundary_input` role comes off that dependency) and update the list.
-- If the user names something that sends data in but is NOT in the step-09 list: that is a new dependency (or a new role on an existing one) for the canonical record — capture it (name + what-stops + the `boundary_input` role) so it is added to `EXTERNAL_DEPENDENCY_IDENTITY`; it then flows into the validation gate automatically.
+- If the user says something is NOT actually an input: that is a role correction to the dependency record. Note it (the `boundary_input` role comes off that dependency) and update the list.
+- If the user names something that sends data in but is NOT in the step-09 list: that is a new dependency (or a new role on an existing one) for the canonical record. Capture it (name + what-stops + the `boundary_input` role) so it is added to `EXTERNAL_DEPENDENCY_IDENTITY`; it then flows into the validation gate automatically.
 - If an input source is uncertain: mark it as pending. Note it clearly. It must be resolved before the system runs fully.
-- **If no dependency plays the `boundary_input` role** (the system receives all data internally — nothing crosses the boundary inward): confirm with the user ("Based on what you told me, nothing sends data into your system from outside — it all comes from inside. Is that right?"). If confirmed, write `VALIDATION_CONFIGURED = true` and `INPUT_TYPE_COUNT = 0`. In the Recording section record GATE-1 = `"none (no inbound dependencies)"` and GATE-2 = `"none (no external input domains)"` (NOT skips). The `INPUT_TYPE_INVENTORY` projection then renders a valid EMPTY table (no boundary_input rows). Proceed to GATE-3 and GATE-4 (the override and pushback explanations still apply to internal validation).
+- **If no dependency plays the `boundary_input` role** (the system receives all data internally, nothing crosses the boundary inward): confirm with the user ("Based on what you told me, nothing sends data into your system from outside. It all comes from inside. Is that right?"). If confirmed, write `VALIDATION_CONFIGURED = true` and `INPUT_TYPE_COUNT = 0`. In the Recording section record GATE-1 = `"none (no inbound dependencies)"` and GATE-2 = `"none (no external input domains)"` (NOT skips). The `INPUT_TYPE_INVENTORY` projection then renders a valid EMPTY table (no boundary_input rows). Proceed to GATE-3 and GATE-4 (the override and pushback explanations still apply to internal validation).
 
-**Propagate a role change back to the canonical record before continuing.** When the operator adds an input, removes one ("that's not actually an input"), or otherwise re-roles a dependency here, that is an edit to the step-09 canonical record (`EXTERNAL_DEPENDENCY_IDENTITY`), which is already confirmed and closed — not just a validation-facet note. Re-record `DEP-1` with the change, then re-derive + re-confirm `EXTERNAL_DEPENDENCY_IDENTITY` and re-close the `dependency_inventory` group (the same three commands as step 09's Recording section; the group's `source_hash` updates). Without this, the `INPUT_TYPE_INVENTORY` projection keeps the old roles and the operator's correction never reaches the emitted file. (Capturing the per-input risk facet is separate and still happens in this step's Recording section below.)
+**Propagate a role change back to the canonical record before continuing.** When the operator adds an input, removes one ("that's not actually an input"), or otherwise re-roles a dependency here, that is an edit to the step-09 canonical record (`EXTERNAL_DEPENDENCY_IDENTITY`), which is already confirmed and closed, not just a validation-facet note. Re-record `DEP-1` with the change, then re-derive + re-confirm `EXTERNAL_DEPENDENCY_IDENTITY` and re-close the `dependency_inventory` group (the same three commands as step 09's Recording section; the group's `source_hash` updates). Without this, the `INPUT_TYPE_INVENTORY` projection keeps the old roles and the operator's correction never reaches the emitted file. (Capturing the per-input risk facet is separate and still happens in this step's Recording section below.)
 
 Write sub-step marker: Append `step_10_GATE-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
-## GATE-2 — Domain sensitivity configuration [DYNAMIC]
+## GATE-2: Domain sensitivity configuration [DYNAMIC]
 
 For each domain area in the confirmed vision, approach, and agent roster: propose a sensitivity level with a one-sentence rationale. The user confirms, adjusts, or asks questions.
 
 **Sensitivity levels:**
-- **Low** — Flag only clear structural problems. Let borderline inputs through with a note.
-- **Medium** — Flag structural problems and unusual patterns. Ask the user to confirm anything that looks off.
-- **High** — Flag structural problems and anything semantically unexpected. Pause and ask before acting on flagged inputs.
+- **Low:** Flag only clear structural problems. Let borderline inputs through with a note.
+- **Medium:** Flag structural problems and unusual patterns. Ask the user to confirm anything that looks off.
+- **High:** Flag structural problems and anything semantically unexpected. Pause and ask before acting on flagged inputs.
 
 **Say:**
 
-> The system can be more or less cautious depending on the area. Some domains are more sensitive than others — a wrong date in a financial calculation is more dangerous than a wrong date in a blog post draft.
+> The system can be more or less cautious depending on the area. Some domains are more sensitive than others: a wrong date in a financial calculation is more dangerous than a wrong date in a blog post draft.
 >
 > Here's what I'm proposing for your system:
 >
@@ -138,19 +138,19 @@ For each domain area in the confirmed vision, approach, and agent roster: propos
 - If the user adjusts a sensitivity level: update it and note the user's reasoning in the config. Confirm before proceeding.
 - If the user asks what a sensitivity level means in practice: give a concrete example using their domain ("At High, if your system receives a client name that contains characters it hasn't seen before, it will pause and ask you before using it in a report. At Low, it would use it and flag it in the log.").
 
-The confirmed input inventory (GATE-1) and domain sensitivity (GATE-2) are *recorded* to the transcript in the Recording section at the end of this step — nothing is written to a project directory mid-interview. The `quality/validation_gate_config.md` file is generated at close (`15_close.md`), pre-populated from these recorded answers via the `INPUT_TYPE_INVENTORY` + `DOMAIN_SENSITIVITY_SETTINGS` derived fields.
+The confirmed input inventory (GATE-1) and domain sensitivity (GATE-2) are *recorded* to the transcript in the Recording section at the end of this step. Nothing is written to a project directory mid-interview. The `quality/validation_gate_config.md` file is generated at close (`15_close.md`), pre-populated from these recorded answers via the `INPUT_TYPE_INVENTORY` + `DOMAIN_SENSITIVITY_SETTINGS` derived fields.
 
 Write sub-step marker: Append `step_10_GATE-2: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
-## GATE-3 — Override behavior [EXPLANATION]
+## GATE-3: Override behavior [EXPLANATION]
 
 **Say:**
 
 > When the system flags something and you tell me you meant it, I'll accept it and note it down.
 >
-> If you find yourself doing that a lot in the same area — the system keeps flagging things you're fine with — that's a signal the sensitivity is set too high for that area. You can lower it any time by just telling me.
+> If you find yourself doing that a lot in the same area (the system keeps flagging things you're fine with), that's a signal the sensitivity is set too high for that area. You can lower it any time by just telling me.
 >
 > Over time, the system learns what you normally accept in each area and gets better at telling the difference between a real problem and a pattern you've already signed off on.
 
@@ -160,15 +160,15 @@ Write sub-step marker: Append `step_10_GATE-3: complete | <timestamp>` to `~/cla
 
 ---
 
-## GATE-4 — Hard vs. soft pushback [EXPLANATION]
+## GATE-4: Hard vs. soft pushback [EXPLANATION]
 
 **Say:**
 
 > Two types of problems get handled differently.
 >
-> **Things the system won't accept until fixed:** If something is structurally wrong — the wrong format, a missing required field, data that can't be parsed — the system will stop and tell you what's broken. It won't try to proceed with broken input.
+> **Things the system won't accept until fixed:** If something is structurally wrong (the wrong format, a missing required field, data that can't be parsed), the system will stop and tell you what's broken. It won't try to proceed with broken input.
 >
-> **Things the system flags and asks you about:** If something looks unusual but could be intentional, the system will describe what it found and ask you to confirm before continuing. You can say "yes, I meant that" and it will proceed — and note that you approved it.
+> **Things the system flags and asks you about:** If something looks unusual but could be intentional, the system will describe what it found and ask you to confirm before continuing. You can say "yes, I meant that" and it will proceed, and note that you approved it.
 >
 > The first kind protects you from silent failures. The second keeps you in control without stopping work unnecessarily.
 
@@ -180,14 +180,14 @@ Write sub-step marker: Append `step_10_GATE-4: complete | <timestamp>` to `~/cla
 
 ## Confirm validation configuration (no mid-interview disk write)
 
-After GATE-1 through GATE-4, do NOT write any file to a project directory. The project directory does not exist yet (it is created at close), and writing one here would crash the close-emit's non-empty-target guard. The `quality/validation_gate_config.md` file is generated at close from the GATE-1/GATE-2 answers you record in the next section — the `INPUT_TYPE_INVENTORY` and `DOMAIN_SENSITIVITY_SETTINGS` derived fields pre-populate the emitted file's input-type inventory and domain-sensitivity tables. (The emitted file's structural rules column and an Override Log section populate at runtime.)
+After GATE-1 through GATE-4, do NOT write any file to a project directory. The project directory does not exist yet (it is created at close), and writing one here would crash the close-emit's non-empty-target guard. The `quality/validation_gate_config.md` file is generated at close from the GATE-1/GATE-2 answers you record in the next section. The `INPUT_TYPE_INVENTORY` and `DOMAIN_SENSITIVITY_SETTINGS` derived fields pre-populate the emitted file's input-type inventory and domain-sensitivity tables. (The emitted file's structural rules column and an Override Log section populate at runtime.)
 
 **Say:**
 
 > Validation is configured. Here's what that means in practice:
 >
 > - **[n] input types** your system will check before agents act on them
-> - [**[n] sources** still pending — those will need to be confirmed before the system runs fully] *(omit if none pending)*
+> - [**[n] sources** still pending: those will need to be confirmed before the system runs fully] *(omit if none pending)*
 > - Sensitivity settings: [list domains and levels in one line, e.g., "Financial: High, Content: Medium, Admin: Low"]
 >
 > Next we'll configure how the system handles errors and quality issues.
@@ -227,7 +227,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 10.
 
-**If neither condition is true:** Skip this section entirely — do not show any prompt.
+**If neither condition is true:** Skip this section entirely. Do not show any prompt.
 
 ---
 
@@ -243,7 +243,7 @@ Proceed to `11_error_handling.md`.
 
 ## Foundation-only adapted path
 
-**Disposition: ADAPT — capture validation rules as foundation section; skip implementation config file.**
+**Disposition: ADAPT. Capture validation rules as foundation section; skip implementation config file.**
 
 Conduct the validation interview from the existing step content above (GATE-1 through GATE-4; Claude proposes input types + domain sensitivity from vision + approach + architecture).
 

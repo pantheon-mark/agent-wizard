@@ -1,8 +1,8 @@
-# Foundation-only-mode gate — derived mode profile + per-step entry-guard pattern
+# Foundation-only-mode gate: derived mode profile + per-step entry-guard pattern
 
 ## What this file does
 
-Provides the single-source-of-truth for foundation-only-mode behavior across wizard interview steps 05-15. Specifies (a) the mode profile fields foundation-only-mode behavior gates on (Section 1; centralized projection, NOT independent capabilities, NOT persisted); (b) the derivation rule that maps the `shape_hypothesis.fallback_mode_offered` enum label to mode profile values (Section 2); (c) the entry-guard pattern each of `05_vision.md` through `15_close.md` follows (Section 3; placement varies — post-recheck for steps 05 + 08, file-start for the other 9 files); (d) the honest-characterization disclosure rules (Section 4); (e) the foundation doc set definition (Section 5); (f) the stop-condition DOCUMENT-path integration shape (Section 6); (g) a cross-reference to step 15's close-ceremony adaptation (Section 7); (h) the mechanism stack record (Section 8).
+Provides the single-source-of-truth for foundation-only-mode behavior across wizard interview steps 05-15. Specifies (a) the mode profile fields foundation-only-mode behavior gates on (Section 1; centralized projection, NOT independent capabilities, NOT persisted); (b) the derivation rule that maps the `shape_hypothesis.fallback_mode_offered` enum label to mode profile values (Section 2); (c) the entry-guard pattern each of `05_vision.md` through `15_close.md` follows (Section 3; placement varies: post-recheck for steps 05 + 08, file-start for the other 9 files); (d) the honest-characterization disclosure rules (Section 4); (e) the foundation doc set definition (Section 5); (f) the stop-condition DOCUMENT-path integration shape (Section 6); (g) a cross-reference to step 15's close-ceremony adaptation (Section 7); (h) the mechanism stack record (Section 8).
 
 This file is **read-only** by per-step entry guards. Per-step files do NOT modify the mode profile fields or the derivation rule. The `shape_hypothesis.fallback_mode_offered` label (set by shape-detection at step 01/02 initial emit OR at the unsupported-shape transition per `wizard/shape_detection.md` § 6) is the persisted source-of-truth; mode profile fields derive at the moment of use (NOT persisted).
 
@@ -27,15 +27,15 @@ If the entry guard fires AND the label is missing from staging file, that is a w
 ## Reference spec
 
 - The originating slice spec (build-side; not distributed) is the design provenance for this module.
-- `wizard/shape_detection.md` § 6 — unsupported-shape transition (sets `fallback_mode_offered`)
-- the relevant product spec section + § 4.4 — operator-facing contract
+- `wizard/shape_detection.md` § 6: unsupported-shape transition (sets `fallback_mode_offered`)
+- the relevant product spec section + § 4.4: operator-facing contract
 - the honest-characterization rule
 
 ---
 
-## Section 1 — Mode profile (centralized projection; not independent capabilities)
+## Section 1: Mode profile (centralized projection; not independent capabilities)
 
-Foundation-only-mode behavior gates on a **mode profile** — four fields that are a **deterministic projection** of the single `shape_hypothesis.fallback_mode_offered` enum label. They are NOT independent capabilities (unlike `control_matrix_active` capability fields in the shape detection contract, which are independent per shape × control combination). They are NOT persisted to the staging file at v0; per-step entry guards re-derive from the label at use.
+Foundation-only-mode behavior gates on a **mode profile**: four fields that are a **deterministic projection** of the single `shape_hypothesis.fallback_mode_offered` enum label. They are NOT independent capabilities (unlike `control_matrix_active` capability fields in the shape detection contract, which are independent per shape × control combination). They are NOT persisted to the staging file at v0; per-step entry guards re-derive from the label at use.
 
 *(Naming honesty: this is centralized mode projection, not a peer of capability contracts. The projection earns its keep ONLY through (a) version-checking the handoff contract before reading the label, AND (b) being transition-order-safe in step 05 + step 08 where pre-step re-checks can mutate the label.)*
 
@@ -52,7 +52,7 @@ Future v1 may persist projection fields for debugging or contract-observability;
 
 ---
 
-## Section 2 — Derivation rule (label → mode profile)
+## Section 2: Derivation rule (label → mode profile)
 
 Per-step entry guards consult this table to determine behavior:
 
@@ -65,7 +65,7 @@ Per-step entry guards consult this table to determine behavior:
 
 **Derivation invariants:**
 
-1. The dominant branch adds behavior for is `produce_system_implementation == false` AND `produce_foundation_docs == true` — i.e., the `foundation-only` row.
+1. The dominant branch adds behavior for is `produce_system_implementation == false` AND `produce_foundation_docs == true`, i.e., the `foundation-only` row.
 2. `complete` and `not_offered` both yield `produce_system_implementation == true`; per-step entry guards treat them identically (normal-behavior path). The label distinction is preserved upstream for shape-detection diagnostic value but does not branch behavior at steps 05-15.
 3. `scope-out` yields `produce_foundation_docs == false`. The wizard does NOT reach steps 05-15 in scope-out path (exit fired at unsupported-shape transition per `wizard/shape_detection.md` § 6). The row is included for completeness; per-step entry guards never fire under scope-out. If an entry guard fires WITH `fallback_mode_offered == scope-out`, that is an internal-state error (see Section 3).
 
@@ -73,7 +73,7 @@ Per-step entry guards consult this table to determine behavior:
 
 ---
 
-## Section 3 — Per-step entry-guard pattern
+## Section 3: Per-step entry-guard pattern
 
 Each of `05_vision.md` through `15_close.md` includes a foundation-only-mode entry-guard sub-step. **Placement depends on whether the step contains a pre-step shape-detection re-check**:
 
@@ -105,16 +105,16 @@ Before doing anything else in this step (or, for steps 05 + 08, before any step-
 5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error per `_pre_step_05_recheck.md` prerequisite check pattern. Halt; do NOT proceed. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
 ```
 
-The entry-guard sub-step is **verbatim across all 11 step files** (steps 05 through 15) — only the placement differs (post-recheck for 05 + 08; file-start for the other 9). Consistency is load-bearing per the prior retrospective lesson #2 (spec-update-must-propagate-to-producers): if this pattern needs revision, it must be revised here AND in all 11 step files in the same revision; never in only one.
+The entry-guard sub-step is **verbatim across all 11 step files** (steps 05 through 15). Only the placement differs (post-recheck for 05 + 08; file-start for the other 9). Consistency is load-bearing per the prior retrospective lesson #2 (spec-update-must-propagate-to-producers): if this pattern needs revision, it must be revised here AND in all 11 step files in the same revision; never in only one.
 
 Each step file has two behavior paths after the entry guard:
 
-1. **Normal behavior path** — the step's existing content (immediately below the entry guard); followed when `produce_system_implementation == true`
-2. **Foundation-only adapted path** — a new section titled `## Foundation-only adapted path` appended at the end of each step file; followed when `produce_system_implementation == false`; the foundation-only disposition table (PRODUCE / ADAPT-capture / ADAPT-split / ADAPT-rebuild)
+1. **Normal behavior path**: the step's existing content (immediately below the entry guard); followed when `produce_system_implementation == true`
+2. **Foundation-only adapted path**: a new section titled `## Foundation-only adapted path` appended at the end of each step file; followed when `produce_system_implementation == false`; the foundation-only disposition table (PRODUCE / ADAPT-capture / ADAPT-split / ADAPT-rebuild)
 
 ---
 
-## Section 4 — Honest-characterization disclosure rules
+## Section 4: Honest-characterization disclosure rules
 
 Per the honest-characterization rule.
 
@@ -142,7 +142,7 @@ Default markdown path with no transition fired. No special disclosure beyond nor
 
 ---
 
-## Section 5 — Foundation doc set definition
+## Section 5: Foundation doc set definition
 
 In foundation-only mode (`produce_system_implementation == false` AND `produce_foundation_docs == true`), the **foundation doc set** is exactly four files, written to the operator project directory at step 15 close:
 
@@ -155,8 +155,8 @@ In foundation-only mode (`produce_system_implementation == false` AND `produce_f
 
 **SKIP from foundation doc set in foundation-only mode:**
 
-- `test_cases.md` — implementation-validation-shape artifact; not foundation-level
-- `audit_framework.md` — implementation-audit-shape artifact; not foundation-level
+- `test_cases.md`: implementation-validation-shape artifact; not foundation-level
+- `audit_framework.md`: implementation-audit-shape artifact; not foundation-level
 
 **Per-step captured-input sections** (ADAPT-capture pattern for steps 07, 09, 10, 11, 12, 13, 14): captured operator inputs land as sub-sections of `technical_architecture.md` § "Operational requirements". Specifically:
 
@@ -191,7 +191,7 @@ NO first-build-prompt generation.
 
 ---
 
-## Section 6 — Stop-condition DOCUMENT-path integration
+## Section 6: Stop-condition DOCUMENT-path integration
 
 Per `wizard/shape_detection.md` § 8.5 + `_pre_step_05_recheck.md` Step 2b: stop conditions fired in foundation-only mode produce DOCUMENT-path entries (NOT HALT). Those entries flow into `technical_architecture.md` § "Regulatory & compliance gaps (foundation-only mode)" at step 15 close.
 
@@ -215,13 +215,13 @@ Per `wizard/shape_detection.md` § 8.5 + `_pre_step_05_recheck.md` Step 2b: stop
 
 ---
 
-## Section 7 — Close ceremony adaptation pointer
+## Section 7: Close ceremony adaptation pointer
 
 Step 15 close (`15_close.md`) implements the foundation-only-mode close ceremony. Full per-sub-step disposition lives at `15_close.md` § "Foundation-only adapted path"; this section is a summary cross-reference only.
 
 **Summary of step 15 adaptation:**
 
-- CLOSE-ASSEMBLY produces the 4-file foundation doc set per Section 5 + `project_instructions.md` (ADAPT — foundation-only voice per Section 4) + `manual.md` (ADAPT — pointer doc only per Section 4) + `next_steps.md` (NEW — path-forward guidance with honest-characterization disclosure per Section 4)
+- CLOSE-ASSEMBLY produces the 4-file foundation doc set per Section 5 + `project_instructions.md` (ADAPT: foundation-only voice per Section 4) + `manual.md` (ADAPT: pointer doc only per Section 4) + `next_steps.md` (NEW: path-forward guidance with honest-characterization disclosure per Section 4)
 - SKIP all implementation file writes (agent prompts, scripts, `.env`, `.gitignore`, `start-session.sh`, `session_bootstrap.md`)
 - SKIP all implementation directory creation (`/agents/`, `/quality/`, `/work/`, `/logs/`, `/security/`, `/docs/`, `/archive/`)
 - SKIP `git init` and GitHub remote setup
@@ -230,7 +230,7 @@ Step 15 close (`15_close.md`) implements the foundation-only-mode close ceremony
 
 ---
 
-## Section 8 — Mechanism stack record (D2 § mechanism-stack-template)
+## Section 8: Mechanism stack record (D2 § mechanism-stack-template)
 
 Per the operational change safety spec mechanism-stack-template.
 
@@ -271,10 +271,10 @@ mvp_lifecycle: foundation-tier (gates behavior across 11 interview steps; load-b
 ## Cross-references
 
 - The originating slice spec (build-side; not distributed) is the design provenance for this module.
-- The originating slice spec (build-side; not distributed) — unsupported-shape transition + foundation-only-mode contract origin.
-- `wizard/shape_detection.md` § A.5 + § 8.5 — DOCUMENT-path semantics
-- `wizard/handoff_contracts/shape_detection_v0.md` — `fallback_mode_offered` field source
-- the per-shape control matrix — honest characterization rule
-- the operational change safety spec § mechanism-stack-template — mechanism stack record format for `mech-foundation-only-mode-v0`
-- the relevant product spec section + § 4.4 — operator-facing contract
-- `_pre_step_05_recheck.md` Step 2b — DOCUMENT-path source for stop-condition gap entries
+- The originating slice spec (build-side; not distributed): unsupported-shape transition + foundation-only-mode contract origin.
+- `wizard/shape_detection.md` § A.5 + § 8.5: DOCUMENT-path semantics
+- `wizard/handoff_contracts/shape_detection_v0.md`: `fallback_mode_offered` field source
+- the per-shape control matrix: honest characterization rule
+- the operational change safety spec § mechanism-stack-template: mechanism stack record format for `mech-foundation-only-mode-v0`
+- the relevant product spec section + § 4.4: operator-facing contract
+- `_pre_step_05_recheck.md` Step 2b: DOCUMENT-path source for stop-condition gap entries

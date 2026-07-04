@@ -1,13 +1,13 @@
-# 03 — User Profile
+# 03: User Profile
 
 ## What this file does
-Establish the user profile across five dimensions. These answers calibrate how the system communicates with this specific user — the language it uses, how much detail it provides, when it asks for approval versus acts on its own, and how involved the user wants to be day-to-day. The profile governs all downstream communication and involvement calibration.
+Establish the user profile across five dimensions. These answers calibrate how the system communicates with this specific user: the language it uses, how much detail it provides, when it asks for approval versus acts on its own, and how involved the user wants to be day-to-day. The profile governs all downstream communication and involvement calibration.
 
 ## When this file runs
 After `02_financial.md` completes.
 
 ## Prerequisites
-Step 02 (financial guardrails) complete — FIN-1 (plan) and the sharing/exhaustion answers (FIN-3/FIN-4, and FIN-5 if paid-overflow) answered and stored in the staging file.
+Step 02 (financial guardrails) complete: FIN-1 (plan) and the sharing/exhaustion answers (FIN-3/FIN-4, and FIN-5 if paid-overflow) answered and stored in the staging file.
 
 ---
 
@@ -27,50 +27,50 @@ Do not begin UP-1 until you are confident the full phase will complete before co
 
 ## Sub-step resume check
 
-Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_03_*` (e.g., `step_03_UP-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_03_*` (e.g., `step_03_UP-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker. Do not re-ask completed questions, as their answers are already stored in the staging file.
 
 If all sub-step markers for this step are present but the step-level marker (`step_03: complete`) is not, proceed directly to the success condition.
 
 ---
 
-## Step opening — progress, preview, and orientation
+## Step opening: progress, preview, and orientation
 
 **Say:**
 
-> **Step 4 of 16 — Getting to know you**
+> **Step 4 of 16: Getting to know you**
 > I'll learn how you like to work so the system matches your style.
 >
-> Before we dive in — two things to know:
+> Before we dive in, two things to know:
 >
-> This whole process takes about an hour, though it can vary. The wizard saves everything as we go — you can close it and come back anytime without losing your progress. Feel free to take a break whenever you need one.
+> This whole process takes about an hour, though it can vary. The wizard saves everything as we go. You can close it and come back anytime without losing your progress. Feel free to take a break whenever you need one.
 >
-> Also — these are conversation starters, not a form. Feel free to ask me to clarify anything, push back on something, or share more than what I asked. We'll work through it together.
+> Also, these are conversation starters, not a form. Feel free to ask me to clarify anything, push back on something, or share more than what I asked. We'll work through it together.
 
 ---
 
 ## How to conduct this section
 
-These are five conversational questions, not a form. Ask them in order, but let the user's answers flow naturally — they may volunteer information that covers multiple dimensions in one response. If that happens, note what was captured and confirm before moving on.
+These are five conversational questions, not a form. Ask them in order, but let the user's answers flow naturally. They may volunteer information that covers multiple dimensions in one response. If that happens, note what was captured and confirm before moving on.
 
-The goal is a genuine sense of this person: how they think, what they need, where they want to be hands-on vs. hands-off. Listen for signals beyond the literal answer — someone who describes a complex multi-stakeholder operation probably has high domain expertise even if they say they're "not technical."
+The goal is a genuine sense of this person: how they think, what they need, where they want to be hands-on vs. hands-off. Listen for signals beyond the literal answer. Someone who describes a complex multi-stakeholder operation probably has high domain expertise even if they say they're "not technical."
 
-**Apply the Operator Interaction Contract** (`wizard/interview/_operator_interaction_contract.md`) to every question in this section — ground each one in what the operator already told you (project, working definition, earlier answers), keep the ask balanced (examples frame, never pre-fill), keep it plain (no internal vocabulary like "agent"/"task" where a plain phrase works), and keep it short. Read the contract now if you have not this session.
+**Apply the Operator Interaction Contract** (`wizard/interview/_operator_interaction_contract.md`) to every question in this section: ground each one in what the operator already told you (project, working definition, earlier answers), keep the ask balanced (examples frame, never pre-fill), keep it plain (no internal vocabulary like "agent"/"task" where a plain phrase works), and keep it short. Read the contract now if you have not this session.
 
-**If the user says "I don't know" or gives a vague/uncertain answer to any question:** propose a reasonable default based on what you know so far — their project purpose, their answers to earlier questions, and the context from Phase 1. Say: "Based on what you've told me so far, I'd suggest [proposed characterization]. Does that sound about right, or would you describe it differently?" This follows the wizard question design principle: Claude proposes, user confirms. No question should stall because the user can't articulate a preference from scratch.
+**If the user says "I don't know" or gives a vague/uncertain answer to any question:** propose a reasonable default based on what you know so far: their project purpose, their answers to earlier questions, and the context from Phase 1. Say: "Based on what you've told me so far, I'd suggest [proposed characterization]. Does that sound about right, or would you describe it differently?" This follows the wizard question design principle: Claude proposes, user confirms. No question should stall because the user can't articulate a preference from scratch.
 
 ---
 
-## UP-1 — Technical literacy
+## UP-1: Technical literacy
 
 **Ask the user:**
 
-> When it comes to technical tools and systems — things like software, automation, code — how would you describe your comfort level? Not what you know, but how you like to be talked to about it.
+> When it comes to technical tools and systems (things like software, automation, code), how would you describe your comfort level? Not what you know, but how you like to be talked to about it.
 >
-> For example: do you prefer plain language and no jargon, or are you comfortable with technical terms if they're useful? There's no right answer — I'm just calibrating how I explain things to you.
+> For example: do you prefer plain language and no jargon, or are you comfortable with technical terms if they're useful? There's no right answer. I'm just calibrating how I explain things to you.
 
 **Wait for answer.** Use their response to calibrate language complexity throughout all subsequent wizard steps. If they say "plain language, no jargon," use no unexplained technical terms from here forward. If they're comfortable with technical detail, you can be more precise. Confirm your interpretation in one sentence.
 
-Store: UP_TECHNICAL_LITERACY = brief characterization (e.g. "plain language only", "comfortable with technical terms", "mixed — technical okay for system stuff but not code")
+Store: UP_TECHNICAL_LITERACY = brief characterization (e.g. "plain language only", "comfortable with technical terms", "mixed: technical okay for system stuff but not code")
 
 Update staging file.
 
@@ -78,17 +78,17 @@ Write sub-step marker: Append `step_03_UP-1: complete | <timestamp>` to `~/claud
 
 ---
 
-## UP-2 — Information preference
+## UP-2: Information preference
 
 **Ask the user:**
 
-> When the system tells you something happened — say it finished a piece of work you'd asked for, or it ran into something it needs your input on — do you generally want the reasoning and context behind it, or just the short version: what happened and what to do?
+> When the system tells you something happened (say it finished a piece of work you'd asked for, or it ran into something it needs your input on), do you generally want the reasoning and context behind it, or just the short version: what happened and what to do?
 
-*(Ground the examples in the operator's own system where it helps — e.g. for an estate helper, "it updated your task list" / "it found a deadline coming up" — per the Operator Interaction Contract § 2: examples frame, keep both readings open, never pre-fill.)*
+*(Ground the examples in the operator's own system where it helps (e.g. for an estate helper, "it updated your task list" / "it found a deadline coming up"), per the Operator Interaction Contract § 2: examples frame, keep both readings open, never pre-fill.)*
 
 **Wait for answer.** Common responses: "short version", "I like to understand why", "depends on the situation". If "depends," ask a quick follow-up: "When does the longer version feel useful to you?"
 
-Store: UP_INFORMATION_PREFERENCE = brief characterization (e.g. "bottom-line-up-front", "context-first", "situational — detail for decisions, summary for routine")
+Store: UP_INFORMATION_PREFERENCE = brief characterization (e.g. "bottom-line-up-front", "context-first", "situational: detail for decisions, summary for routine")
 
 Update staging file.
 
@@ -96,13 +96,13 @@ Write sub-step marker: Append `step_03_UP-2: complete | <timestamp>` to `~/claud
 
 ---
 
-## UP-3 — Decision preference
+## UP-3: Decision preference
 
 **Ask the user:**
 
-> When the system is about to do something significant — not routine tasks, but things like sending a message on your behalf, making a change to an important document, or spending more than usual — do you want it to ask you first, or tell you after it's done?
+> When the system is about to do something significant (not routine tasks, but things like sending a message on your behalf, making a change to an important document, or spending more than usual), do you want it to ask you first, or tell you after it's done?
 >
-> You can have different preferences for different types of actions — just tell me how you think about it.
+> You can have different preferences for different types of actions. Just tell me how you think about it.
 
 **Wait for answer.** Most users will want "ask first" for significant actions and "tell me after" for routine ones. Note any specific distinctions they make (e.g. "ask first for anything external, auto for internal stuff").
 
@@ -114,15 +114,15 @@ Write sub-step marker: Append `step_03_UP-3: complete | <timestamp>` to `~/claud
 
 ---
 
-## UP-4 — Domain expertise
+## UP-4: Domain expertise
 
 **Ask the user:**
 
-> What areas do you know really well — where your judgment is the authority? And are there areas where you'd rely on outside advisors or where you think having a dedicated specialist agent would be valuable?
+> What areas do you know really well, where your judgment is the authority? And are there areas where you'd rely on outside advisors or where you think having a dedicated specialist agent would be valuable?
 >
 > Think about the kind of work this system will be doing. What parts of that do you know cold, and what parts are less certain?
 
-**Wait for answer.** This is one of the most important questions — it directly informs which domains the system treats with high sensitivity (inputs in areas the user knows well get more scrutiny; inputs in areas of uncertainty may need advisor routing). Listen for both explicit expertise ("I know finance inside out") and implicit expertise revealed by how they describe their work.
+**Wait for answer.** This is one of the most important questions. It directly informs which domains the system treats with high sensitivity (inputs in areas the user knows well get more scrutiny; inputs in areas of uncertainty may need advisor routing). Listen for both explicit expertise ("I know finance inside out") and implicit expertise revealed by how they describe their work.
 
 Store: UP_DOMAIN_EXPERTISE = list of strong-expertise areas and uncertain/advisor-dependent areas
 
@@ -132,7 +132,7 @@ Write sub-step marker: Append `step_03_UP-4: complete | <timestamp>` to `~/claud
 
 ---
 
-## UP-5 — Involvement appetite
+## UP-5: Involvement appetite
 
 **Ask the user:**
 
@@ -150,25 +150,25 @@ Write sub-step marker: Append `step_03_UP-5: complete | <timestamp>` to `~/claud
 
 ---
 
-## UP-6 — Regulatory-applicability probe
+## UP-6: Regulatory-applicability probe
 
 Per `wizard/shape_detection.md` § 8.1 (canonical two-step probe pattern) two-step probe pattern. The probe captures whether the operator's project has regulatory exposure (GDPR / HIPAA / PCI-DSS / SOX / COPPA-or-GDPR-K / sector-specific) and which framework specifically applies. Used by pre-step-05 re-check to evaluate the 4 stop conditions per D1 § 6.3.
 
-### UP-6.1 — Data-type question (lead-in + propositional list)
+### UP-6.1: Data-type question (lead-in + propositional list)
 
 **Say:**
 
-> Two more questions about the data your system will handle. These help me check whether your project's regulatory exposure is compatible with the system shape we've detected — so I don't generate something that won't work for your actual needs.
+> Two more questions about the data your system will handle. These help me check whether your project's regulatory exposure is compatible with the system shape we've detected, so I don't generate something that won't work for your actual needs.
 >
 > Will the system handle any of the following on a regular basis?
 >
-> 1. **Health information about identifiable people** — patient records, medical histories, insurance claims
-> 2. **Personal data of people in the EU/EEA** — names, contact info, behavioral data, etc.
+> 1. **Health information about identifiable people**: patient records, medical histories, insurance claims
+> 2. **Personal data of people in the EU/EEA**: names, contact info, behavioral data, etc.
 > 3. **Credit card or payment card numbers**
-> 4. **Financial reporting data subject to audit** — for publicly-traded companies or their auditors
+> 4. **Financial reporting data subject to audit**: for publicly-traded companies or their auditors
 > 5. **Data from children under 13** (or under 16 in the EU)
-> 6. **Other regulated data** — government records, education records, sector-specific (energy, telecoms, etc.)
-> 7. **None of the above** — no regulated data
+> 6. **Other regulated data**: government records, education records, sector-specific (energy, telecoms, etc.)
+> 7. **None of the above**: no regulated data
 >
 > Which of these apply? (You can say "none," one item, or multiple items.)
 
@@ -191,7 +191,7 @@ regulatory_exposure:
   probed_timestamp: <ISO 8601>
 ```
 
-Append the `## Regulatory exposure` section to staging file with the above content. Skip UP-6.2 (no per-framework role/scope follow-up needed — there is no matched framework). **Still perform UP-6.3's `handoff_phase` advance** (`provisional_shape_emit` → `regulatory_exposure_populated`): UP-6 has completed, and the pre-step-05 re-check (`_pre_step_05_recheck.md`) requires `handoff_phase` to already read `regulatory_exposure_populated` per `shape_detection.md` § "Step 03 UP-6 completion." Then proceed to **UP-7 (authority profile)** — NOT directly to the synthesis step; UP-7 sits between UP-6 and synthesis and must still run.
+Append the `## Regulatory exposure` section to staging file with the above content. Skip UP-6.2 (no per-framework role/scope follow-up needed; there is no matched framework). **Still perform UP-6.3's `handoff_phase` advance** (`provisional_shape_emit` → `regulatory_exposure_populated`): UP-6 has completed, and the pre-step-05 re-check (`_pre_step_05_recheck.md`) requires `handoff_phase` to already read `regulatory_exposure_populated` per `shape_detection.md` § "Step 03 UP-6 completion." Then proceed to **UP-7 (authority profile)**, NOT directly to the synthesis step; UP-7 sits between UP-6 and synthesis and must still run.
 
 **If operator says any of #1-#6 apply:** continue to UP-6.2.
 
@@ -199,7 +199,7 @@ Append the `## Regulatory exposure` section to staging file with the above conte
 
 Propose a default per the conversation context (per the wizard's question-design principle: propose, user confirms). If their project description and step 02-03 answers give no signal of regulated data: propose "I'll assume none of these apply unless you correct me." If signals point to potential regulation (e.g., they mentioned customers / payments / health context during P1-2): propose specific candidates and ask them to confirm or remove items.
 
-### UP-6.2 — Role/scope question (per matched framework)
+### UP-6.2: Role/scope question (per matched framework)
 
 For EACH framework operator marked applicable in UP-6.1, ask the corresponding role/scope question per D1 § 6.1:
 
@@ -217,7 +217,7 @@ If controller/processor: `gdpr_applicable: yes`. If only own data: `gdpr_applica
 
 **If #3 (payment card numbers):**
 
-> Are you (or the system) subject to a card brand's PCI-DSS contractual scope — for example, accepting card payments as a merchant or processor?
+> Are you (or the system) subject to a card brand's PCI-DSS contractual scope (for example, accepting card payments as a merchant or processor)?
 
 If yes: `pci_dss_applicable: yes`. If no (e.g., reading card numbers from operator's own statements for personal budget tracking, not processing payments): `pci_dss_applicable: no`.
 
@@ -244,9 +244,9 @@ other_sector_specific:
     applicable: yes
 ```
 
-If operator says "I know it's regulated but I don't know which framework": store `no_compliance_claim_framework_identification: unknown` — this is the trigger for stop condition #4 at pre-step-05 re-check.
+If operator says "I know it's regulated but I don't know which framework": store `no_compliance_claim_framework_identification: unknown`. This is the trigger for stop condition #4 at pre-step-05 re-check.
 
-### UP-6.3 — Final emit
+### UP-6.3: Final emit
 
 After UP-6.1 + UP-6.2 complete, write the full `## Regulatory exposure` section to staging file. **Also update `handoff_phase` from `provisional_shape_emit` to `regulatory_exposure_populated`** so downstream consumers know the regulatory data is now available.
 
@@ -270,7 +270,7 @@ regulatory_exposure:
   probed_timestamp: <ISO 8601>
 ```
 
-**Then update `handoff_phase` field** (locate the existing line in the staging file's `## Shape detection` section — it currently reads `handoff_phase: provisional_shape_emit`; rewrite to):
+**Then update `handoff_phase` field** (locate the existing line in the staging file's `## Shape detection` section: it currently reads `handoff_phase: provisional_shape_emit`; rewrite to):
 
 ```yaml
 handoff_phase: regulatory_exposure_populated
@@ -282,11 +282,11 @@ Write sub-step marker: Append `step_03_UP-6: complete | <timestamp>` to `~/claud
 
 ---
 
-## UP-7 — Authority profile (how much the system acts on its own)
+## UP-7: Authority profile (how much the system acts on its own)
 
-This sets how much the system does on its own versus checking with you first. **Two short confirmations — both require an explicit pick**, not a passive "sounds good": they set the system's safety limits, and an inferred-then-rubber-stamped answer is not a real authorization. For **UP-7a** (how high-stakes the work is), propose a starting level from what the user has already told you (UP-1 through UP-6 + their project) and have them pick. For **UP-7b** (reversibility), use their prior answers ONLY to ground the examples — do NOT propose which option; it is a **factual** question about their environment that they must answer themselves (proposing an answer to a non-technical operator just produces a rubber-stamp). If the user is unsure, walk the options with a concrete example from their project and let them choose.
+This sets how much the system does on its own versus checking with you first. **Two short confirmations, both require an explicit pick**, not a passive "sounds good": they set the system's safety limits, and an inferred-then-rubber-stamped answer is not a real authorization. For **UP-7a** (how high-stakes the work is), propose a starting level from what the user has already told you (UP-1 through UP-6 + their project) and have them pick. For **UP-7b** (reversibility), use their prior answers ONLY to ground the examples. Do NOT propose which option; it is a **factual** question about their environment that they must answer themselves (proposing an answer to a non-technical operator just produces a rubber-stamp). If the user is unsure, walk the options with a concrete example from their project and let them choose.
 
-### UP-7a — How high-stakes is the work? (require an explicit choice)
+### UP-7a: How high-stakes is the work? (require an explicit choice)
 
 Propose a level from their UP-6 answer (regulated data) + project description, then ask them to pick directly.
 
@@ -296,9 +296,9 @@ Propose a level from their UP-6 answer (regulated data) + project description, t
 >
 > From what you've told me so far, I'd guess **[proposed level + one-line why]**. Because this sets the system's safety limits, I'd like you to choose directly:
 >
-> 1. **High** — a mistake would be costly or hard to undo (for example: it touches money, handles regulated or sensitive data, takes irreversible actions, or acts outwardly on your behalf)
-> 2. **Medium** — everyday operations; mistakes are recoverable but still matter
-> 3. **Low** — experimental, low-stakes, or easily-reversed work
+> 1. **High**: a mistake would be costly or hard to undo (for example: it touches money, handles regulated or sensitive data, takes irreversible actions, or acts outwardly on your behalf)
+> 2. **Medium**: everyday operations; mistakes are recoverable but still matter
+> 3. **Low**: experimental, low-stakes, or easily-reversed work
 >
 > Which one fits best?
 
@@ -308,19 +308,19 @@ Record: `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/cl
 
 Write sub-step marker: Append `step_03_DR: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
-### UP-7b — Are the system's actions reversible? (require an explicit choice — a FACTUAL question, not a preference)
+### UP-7b: Are the system's actions reversible? (require an explicit choice, a FACTUAL question, not a preference)
 
-This sets the system's safety ceiling. Map the operator's factual answer to the stored enum **under the hood** — do NOT show enum labels, and do NOT propose which option (proposing an answer here just yields a rubber-stamp from a non-technical operator). Use their earlier answers only to ground the examples. State the implication plainly.
+This sets the system's safety ceiling. Map the operator's factual answer to the stored enum **under the hood**. Do NOT show enum labels, and do NOT propose which option (proposing an answer here just yields a rubber-stamp from a non-technical operator). Use their earlier answers only to ground the examples. State the implication plainly.
 
 **Say** (ground the examples in their own system, per the section rule):
 
-> One more on the safety side — I need you to pick this one directly, because it sets a real limit on how much the system does on its own. It's not about what you'd *prefer* — it's about what's actually *true* of the work it'll do: **if it does something you didn't want, how permanent is that?**
+> One more on the safety side. I need you to pick this one directly, because it sets a real limit on how much the system does on its own. It's not about what you'd *prefer*. It's about what's actually *true* of the work it'll do: **if it does something you didn't want, how permanent is that?**
 >
-> Think about the specific things it'll do for you — [grounded examples from their system, e.g. drafting emails you still send yourself, updating your task list, logging call notes, researching] — and tell me which is most accurate:
+> Think about the specific things it'll do for you, [grounded examples from their system, e.g. drafting emails you still send yourself, updating your task list, logging call notes, researching], and tell me which is most accurate:
 >
-> 1. **Mostly permanent** — a lot of what it does would be hard, costly, or impossible to take back (for example: sending messages on its own, spending money, or deleting things for good)
-> 2. **A mix** — some of it undoes easily, but some creates messier or outside-world consequences
-> 3. **Mostly reversible** — almost anything it does can be rolled back at little cost (for example: it only drafts, edits notes you can fix, or just reads and researches)
+> 1. **Mostly permanent**: a lot of what it does would be hard, costly, or impossible to take back (for example: sending messages on its own, spending money, or deleting things for good)
+> 2. **A mix**: some of it undoes easily, but some creates messier or outside-world consequences
+> 3. **Mostly reversible**: almost anything it does can be rolled back at little cost (for example: it only drafts, edits notes you can fix, or just reads and researches)
 >
 > The more permanent its actions are, the more it will check with you before doing them.
 
@@ -330,7 +330,7 @@ Record: `python3 wizard/scripts/interview_cli.py record-answer --transcript ~/cl
 
 Write sub-step marker: Append `step_03_REV: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
-**How these are used (do not explain unless asked):** these answers, with the autonomy/involvement answers (UP-3, UP-5), become the operator's authority profile. The system's starting autonomy level is the **most cautious** of what the user wants and what the risk/reversibility allow — and because this is a brand-new system, it begins a notch more cautious and earns more independence over time. Routine, low-risk upkeep always runs on its own; the system never asks before *everything*. The derived level + the resulting ask-first rules are shown to the user for confirmation at the execution-plan preview later — they are not finalized here.
+**How these are used (do not explain unless asked):** these answers, with the autonomy/involvement answers (UP-3, UP-5), become the operator's authority profile. The system's starting autonomy level is the **most cautious** of what the user wants and what the risk/reversibility allow, and because this is a brand-new system, it begins a notch more cautious and earns more independence over time. Routine, low-risk upkeep always runs on its own; the system never asks before *everything*. The derived level + the resulting ask-first rules are shown to the user for confirmation at the execution-plan preview later. They are not finalized here.
 
 ---
 
@@ -340,11 +340,11 @@ After all five user-profile answers plus the two authority confirmations (UP-7a/
 
 **Say:**
 
-> Before we continue, here's how I've understood your preferences — I want to make sure I've got this right:
+> Before we continue, here's how I've understood your preferences. I want to make sure I've got this right:
 >
 > [One paragraph synthesizing UP-1 through UP-5 in plain language. Cover: how they like to receive information, how much detail they want, when they want to be asked vs. informed, their areas of expertise, and how hands-on they expect to be. Write this as a description of the person, not a list of attributes.]
 >
-> [Then a one-line bridge so the authority answers (UP-7a/b) aren't silently dropped from the read-back: acknowledge that the safety settings just captured — how high-stakes the work is, and how reversible its actions are — are recorded but NOT being finalized here; they'll be shown as concrete "ask-first" rules at the execution-plan preview, for confirmation in context. Example: "I've also got your safety settings from a moment ago — how careful it should be, and how reversible its actions are. I'm not locking those in here; you'll see exactly how they turn into 'ask-first' rules when we lay out the plan, and you can confirm them then."]
+> [Then a one-line bridge so the authority answers (UP-7a/b) aren't silently dropped from the read-back: acknowledge that the safety settings just captured (how high-stakes the work is, and how reversible its actions are) are recorded but NOT being finalized here; they'll be shown as concrete "ask-first" rules at the execution-plan preview, for confirmation in context. Example: "I've also got your safety settings from a moment ago: how careful it should be, and how reversible its actions are. I'm not locking those in here; you'll see exactly how they turn into 'ask-first' rules when we lay out the plan, and you can confirm them then."]
 >
 > Does that sound right? Anything to adjust?
 
@@ -354,7 +354,7 @@ Store: UP_PROFILE_SUMMARY = the confirmed paragraph
 
 Update staging file with the confirmed summary.
 
-**Record to the event transcript.** The user-profile answers feed two derivation groups whose barriers fire later: UP-4 (domain expertise) is an `approach_roster` source; UP-1/UP-2/UP-3/UP-5 are `hitl_autonomy` sources (they shape the HITL map + the provisional autonomy default). Record them now, after confirmation (UP-6 is shape-detection data, not a derivation-group source — it stays in the staging file only):
+**Record to the event transcript.** The user-profile answers feed two derivation groups whose barriers fire later: UP-4 (domain expertise) is an `approach_roster` source; UP-1/UP-2/UP-3/UP-5 are `hitl_autonomy` sources (they shape the HITL map + the provisional autonomy default). Record them now, after confirmation (UP-6 is shape-detection data, not a derivation-group source; it stays in the staging file only):
 
 ```
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid UP-1 --group hitl_autonomy --value "<UP_TECHNICAL_LITERACY>"
@@ -382,13 +382,13 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 03.
 
-**If neither condition is true:** Skip this section entirely — do not show any prompt.
+**If neither condition is true:** Skip this section entirely. Do not show any prompt.
 
 ---
 
 ## Success condition
 
-All five user-profile dimensions answered and confirmed, plus the two authority confirmations recorded (UP-7a domain risk + UP-7b reversibility — each an explicit factual choice). Profile summary stored.
+All five user-profile dimensions answered and confirmed, plus the two authority confirmations recorded (UP-7a domain risk + UP-7b reversibility, each an explicit factual choice). Profile summary stored.
 
 **Write completion marker:** Append `step_03: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

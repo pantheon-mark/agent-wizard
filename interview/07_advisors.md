@@ -1,4 +1,4 @@
-# 07 — Advisor Identification
+# 07: Advisor Identification
 
 ## What this file does
 Identify the advisors the system will route decisions to. Claude proposes a list of relevant advisor types based on the vision document, the user confirms or adjusts, and each confirmed advisor is recorded with their domain. Explain the two-path advisor workflow in plain language. Seed the advisor knowledge base with a header entry for each confirmed advisor. Generate a first interview guide for each confirmed advisor.
@@ -27,7 +27,7 @@ Do not begin ADV-1 until you are confident the full phase will complete before c
 
 ## Sub-step resume check
 
-Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_07_*` (e.g., `step_07_ADV-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_07_*` (e.g., `step_07_ADV-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker. Do not re-ask completed questions, as their answers are already stored in the staging file.
 
 If all sub-step markers for this step are present but the step-level marker (`step_07: complete`) is not, proceed directly to the success condition.
 
@@ -37,7 +37,7 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 Before doing anything else in this step:
 
-1. **Schema-version check (per handoff contract consumer rule).** Read `~/claude-wizard-draft/wizard_session_draft.md`; locate the `schema_versions` block under shape_hypothesis. Verify `schema_major == 1`. If `schema_major` mismatches the consumer expected major (currently `1`), abort with operator-facing internal-state error: "I hit a wizard-internal version mismatch — the staging file's shape-detection schema major is `<actual>`, but this version of the wizard expects major `1`. Your project file is saved. Please update the wizard OR resume with the matching wizard version." Exit cleanly; do NOT proceed.
+1. **Schema-version check (per handoff contract consumer rule).** Read `~/claude-wizard-draft/wizard_session_draft.md`; locate the `schema_versions` block under shape_hypothesis. Verify `schema_major == 1`. If `schema_major` mismatches the consumer expected major (currently `1`), abort with operator-facing internal-state error: "I hit a wizard-internal version mismatch. The staging file's shape-detection schema major is `<actual>`, but this version of the wizard expects major `1`. Your project file is saved. Please update the wizard OR resume with the matching wizard version." Exit cleanly; do NOT proceed.
 
 2. Locate the `shape_hypothesis.fallback_mode_offered` field.
 
@@ -50,7 +50,7 @@ Before doing anything else in this step:
 4. Branch:
    - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
    - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
-   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
+   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error: wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
 
 5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error. Halt with internal-error message; foundation state preserved. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
 
@@ -58,30 +58,30 @@ Before doing anything else in this step:
 
 ## Operator Interaction Contract
 
-Before you propose the advisor list below, read `wizard/interview/_operator_interaction_contract.md` and apply it — ground the proposed advisors in the operator's vision and earlier answers, keep the ask balanced, plain voice, no filler. Record only advisors the operator confirms (contract § 3).
+Before you propose the advisor list below, read `wizard/interview/_operator_interaction_contract.md` and apply it: ground the proposed advisors in the operator's vision and earlier answers, keep the ask balanced, plain voice, no filler. Record only advisors the operator confirms (contract § 3).
 
 ---
 
-## Step opening — progress and preview
+## Step opening: progress and preview
 
 **Say:**
 
-> **Step 8 of 16 — Advisors**
+> **Step 8 of 16: Advisors**
 > We'll identify the people whose expertise your system should draw on.
 
 ---
 
-## ADV-1 — Propose advisor types [DYNAMIC]
+## ADV-1: Propose advisor types [DYNAMIC]
 
-Before speaking, read the confirmed vision document and approach document. Identify the domain, industry, data sources, and business activities the system will handle. Derive the advisor list from the user's actual use case — propose advisors whose expertise matches the decisions this specific system will face. Do not default to financial and legal advisors unless the vision document describes financial or legal work. A personal/caregiving system may need a medical professional or care coordinator; a real estate system may need a property manager or tax advisor; a creative project may need no traditional advisors at all.
+Before speaking, read the confirmed vision document and approach document. Identify the domain, industry, data sources, and business activities the system will handle. Derive the advisor list from the user's actual use case: propose advisors whose expertise matches the decisions this specific system will face. Do not default to financial and legal advisors unless the vision document describes financial or legal work. A personal/caregiving system may need a medical professional or care coordinator; a real estate system may need a property manager or tax advisor; a creative project may need no traditional advisors at all.
 
 **Say:**
 
 > Based on what you've described, here are the types of advisors who are likely to come up as your system makes decisions:
 >
-> - **[Advisor type 1]** — [domain and decision type, derived from vision]
-> - **[Advisor type 2]** — [domain and decision type, derived from vision]
-> - **[Advisor type 3, if applicable]** — [domain and decision type]
+> - **[Advisor type 1]**: [domain and decision type, derived from vision]
+> - **[Advisor type 2]**: [domain and decision type, derived from vision]
+> - **[Advisor type 3, if applicable]**: [domain and decision type]
 >
 > Do any of these not apply? Is there anyone missing? You can also say "not sure" for any of them.
 
@@ -94,8 +94,8 @@ Before speaking, read the confirmed vision document and approach document. Ident
 - If the user asks what an advisor type means: answer plainly and let them decide.
 
 For each confirmed or unconfirmed advisor, collect:
-- **Role or name** — the user may know the actual person ("my accountant Sarah") or just the role ("accountant"). Either is fine. Record whichever they provide.
-- **Domain** — what kinds of decisions this advisor weighs in on
+- **Role or name**: the user may know the actual person ("my accountant Sarah") or just the role ("accountant"). Either is fine. Record whichever they provide.
+- **Domain**: what kinds of decisions this advisor weighs in on
 
 Store: ADVISORS = list of confirmed advisors, each with role/name and domain. Store: ADVISOR_COUNT = number of confirmed advisors.
 
@@ -103,7 +103,7 @@ Update staging file.
 
 Write sub-step marker: Append `step_07_ADV-1: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
-**Record to the event transcript.** ADV-1 (the confirmed advisor list) is an `approach_roster` source answer. ADV-2 (workflow explanation) and ADV-3/ADV-4 (knowledge-base + interview-guide generation) gather no separate operator source content — they are recorded as source skips (the registry treats them as skip-satisfied). Record ADV-1 now (and the skips once those steps run / are bypassed):
+**Record to the event transcript.** ADV-1 (the confirmed advisor list) is an `approach_roster` source answer. ADV-2 (workflow explanation) and ADV-3/ADV-4 (knowledge-base + interview-guide generation) gather no separate operator source content. They are recorded as source skips (the registry treats them as skip-satisfied). Record ADV-1 now (and the skips once those steps run / are bypassed):
 
 ```
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ADV-1 --group approach_roster --value "<the confirmed advisor list: role/name + domain per advisor, or 'no advisors' if none>"
@@ -112,29 +112,29 @@ python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard
 python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid ADV-4 --group approach_roster --reason "downstream interview-guide generation; no operator source input"
 ```
 
-The advisor knowledge base is now emitted by the generator from the `ADVISOR_ENTRIES` derivation (no longer written mid-interview — see ADV-3); the per-advisor interview guides are still produced below (ADV-4). The skips record only that those steps capture no new operator source input.
+The advisor knowledge base is now emitted by the generator from the `ADVISOR_ENTRIES` derivation (no longer written mid-interview; see ADV-3); the per-advisor interview guides are still produced below (ADV-4). The skips record only that those steps capture no new operator source input.
 
 **If zero advisors confirmed (user removed all proposed advisors):** Skip ADV-2 through ADV-4 entirely (still record the ADV-1 answer above as "no advisors" and the ADV-2/ADV-3/ADV-4 skips so the group stays complete). Store ADVISOR_COUNT = 0 and ADVISORS_SEEDED = true in the staging file. Say:
 
-> No advisors for now — that's fine. If you identify someone later whose expertise would be useful, you can add them at any time by telling the system "add an advisor." The system will walk you through the same setup.
+> No advisors for now, that's fine. If you identify someone later whose expertise would be useful, you can add them at any time by telling the system "add an advisor." The system will walk you through the same setup.
 
 Proceed directly to the success condition.
 
 ---
 
-## ADV-2 — Explain the two-path workflow [FIXED — topic]
+## ADV-2: Explain the two-path workflow [FIXED: topic]
 
 After the advisor list is confirmed, explain how the system will work with those advisors.
 
-**Tune the application promise to the operator's autonomy level (Operator Interaction Contract § 1; UP-3 / UP-7).** Recording and surfacing saved advisor guidance — with provenance (who said it, when, under what conditions) — is the same at every level. *Application* differs: at ask-first / low-autonomy settings the system surfaces the saved rule and still asks; only at higher autonomy does it apply routine saved rules on its own. Do NOT promise "automatic judgment," "it already knows how they think," or "you'll consult them less often" to a low-autonomy operator — that over-claims what they will actually get, and significant decisions always return to the operator regardless of level.
+**Tune the application promise to the operator's autonomy level (Operator Interaction Contract § 1; UP-3 / UP-7).** Recording and surfacing saved advisor guidance, with provenance (who said it, when, under what conditions), is the same at every level. *Application* differs: at ask-first / low-autonomy settings the system surfaces the saved rule and still asks; only at higher autonomy does it apply routine saved rules on its own. Do NOT promise "automatic judgment," "it already knows how they think," or "you'll consult them less often" to a low-autonomy operator. That over-claims what they will actually get, and significant decisions always return to the operator regardless of level.
 
 **Say:**
 
-> When your system reaches a decision that needs outside expertise — something your accountant, lawyer, or another advisor should weigh in on — there are two ways to handle it.
+> When your system reaches a decision that needs outside expertise, something your accountant, lawyer, or another advisor should weigh in on, there are two ways to handle it.
 >
 > **The quick way:** you ask your advisor, get their answer, and just tell me what they said. I'll record it and move on. This works fine for simple questions with clear answers.
 >
-> **The thorough way** — the one I'll suggest for anything significant: before you talk to them, I'll prepare a set of questions so the conversation covers what matters. You have the meeting, bring me the transcript or your notes, and I'll record the answer and the reasoning behind it — the rule your advisor is applying — with a note of who said it and when. The next time a similar decision comes up, I'll surface that saved guidance so you're not starting from scratch. Whether the system acts on a saved rule on its own or checks with you first follows the same rules you set for everything else — anything significant always comes to you.
+> **The thorough way**, the one I'll suggest for anything significant: before you talk to them, I'll prepare a set of questions so the conversation covers what matters. You have the meeting, bring me the transcript or your notes, and I'll record the answer and the reasoning behind it, the rule your advisor is applying, with a note of who said it and when. The next time a similar decision comes up, I'll surface that saved guidance so you're not starting from scratch. Whether the system acts on a saved rule on its own or checks with you first follows the same rules you set for everything else. Anything significant always comes to you.
 >
 > I'll always tell you which approach I'm recommending for each decision.
 
@@ -144,11 +144,11 @@ Write sub-step marker: Append `step_07_ADV-2: complete | <timestamp>` to `~/clau
 
 ---
 
-## ADV-3 — Confirm the advisor entries are captured (the knowledge base is emitted at the end) [DYNAMIC]
+## ADV-3: Confirm the advisor entries are captured (the knowledge base is emitted at the end) [DYNAMIC]
 
-**The advisor knowledge base is no longer written during the interview.** The generator emits `quality/advisor_knowledge_base.md` at the end from the `ADVISOR_ENTRIES` field — derived (`extraction`) from the confirmed advisor list (`ADV-1`) at the step-08 `approach_roster` barrier (see `08_architecture.md`). Do NOT create or write that file here; the generator owns it like every other system file (this retires the mid-interview write).
+**The advisor knowledge base is no longer written during the interview.** The generator emits `quality/advisor_knowledge_base.md` at the end from the `ADVISOR_ENTRIES` field, derived (`extraction`) from the confirmed advisor list (`ADV-1`) at the step-08 `approach_roster` barrier (see `08_architecture.md`). Do NOT create or write that file here; the generator owns it like every other system file (this retires the mid-interview write).
 
-This step only ensures the advisor list is recorded (`ADV-1`, captured above). The reference shape the step-08 derivation produces — one block per confirmed advisor — is:
+This step only ensures the advisor list is recorded (`ADV-1`, captured above). The reference shape the step-08 derivation produces, one block per confirmed advisor, is:
 
 ```
 ## [Advisor Role or Name]
@@ -159,13 +159,13 @@ This step only ensures the advisor list is recorded (`ADV-1`, captured above). T
 **Notes:** [any initial notes the user provided, or "None"]
 ```
 
-If no advisors were confirmed, `ADVISOR_ENTRIES` is derived as an empty value and the generator emits the knowledge base with its preamble and no entries (advisors can be added later). The interview does not assemble the preamble — the template carries it.
+If no advisors were confirmed, `ADVISOR_ENTRIES` is derived as an empty value and the generator emits the knowledge base with its preamble and no entries (advisors can be added later). The interview does not assemble the preamble. The template carries it.
 
 Write sub-step marker: Append `step_07_ADV-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
-## ADV-4 — Generate first interview guides [DYNAMIC]
+## ADV-4: Generate first interview guides [DYNAMIC]
 
 For each confirmed advisor, generate a first interview guide seeded with questions relevant to the system being built.
 
@@ -176,27 +176,27 @@ Use the advisor's role as the filename slug (e.g., `accountant-interview-guide.m
 Each interview guide format:
 
 ```
-# Interview Guide — [Advisor Role or Name]
+# Interview Guide: [Advisor Role or Name]
 
 **Purpose:** Help [Advisor Role] understand the system and provide
 guidance on the decisions it will face in their domain.
 
 **How to use this guide:** Share the relevant sections with your
-advisor before or during your meeting. Bring back their answers —
-or a transcript or notes from the conversation — and Claude will extract the rules
+advisor before or during your meeting. Bring back their answers
+(or a transcript or notes from the conversation) and Claude will extract the rules
 and record them in the advisor knowledge base.
 
 ---
 
 ## About the system
 
-[2–3 sentences drawn from the vision document describing what the
+[2-3 sentences drawn from the vision document describing what the
 system does, in plain language the advisor can understand. No
 technical details.]
 
 ## Questions for [Advisor Role]
 
-[5–8 questions tailored to the advisor's domain and the specific
+[5-8 questions tailored to the advisor's domain and the specific
 decisions the system will face. Ground these in the vision document
 and approach document. Questions should surface rules and reasoning,
 not just yes/no answers.]
@@ -207,7 +207,7 @@ not just yes/no answers.]
 
 ## Follow-up areas if time allows
 
-[2–3 additional questions for deeper coverage — lower priority than
+[2-3 additional questions for deeper coverage, lower priority than
 the main list above.]
 ```
 
@@ -215,7 +215,7 @@ Write each guide to disk before proceeding.
 
 Write an audit log entry for each advisor identified:
 
-> Advisor identified during wizard setup — role/name: [role or name], domain: [domain], knowledge base header entry seeded, interview guide written to [file path]
+> Advisor identified during wizard setup, role/name: [role or name], domain: [domain], knowledge base header entry seeded, interview guide written to [file path]
 
 Update staging file: ADVISORS_SEEDED = true
 
@@ -239,7 +239,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 07.
 
-**If neither condition is true:** Skip this section entirely — do not show any prompt.
+**If neither condition is true:** Skip this section entirely. Do not show any prompt.
 
 ---
 
@@ -255,7 +255,7 @@ Proceed to `08_architecture.md`.
 
 ## Foundation-only adapted path
 
-**Disposition: ADAPT — capture advisor list as foundation-doc section; skip implementation-emit.**
+**Disposition: ADAPT, capture advisor list as foundation-doc section; skip implementation-emit.**
 
 Conduct the advisor identification interview from the existing step content above (Claude proposes advisor list; operator confirms / adjusts; each advisor recorded with domain).
 

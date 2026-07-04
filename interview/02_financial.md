@@ -1,7 +1,7 @@
-# 02 — Financial Guardrails
+# 02: Financial Guardrails
 
 ## What this file does
-Establish the financial guardrails for any work the system does **on its own** (unattended/scheduled runs). Three operator-facing elements: which Claude plan the operator is on (which sizes the included monthly automation allowance and gates out Free), how much of that allowance this project may use when several systems share it, and what the system should do if it ever uses the allowance up. The wizard does all dollar arithmetic internally — the operator never sets a dollar figure except at the one real-money boundary (paid overflow). These answers are derived into `project_instructions.md` and the system's cost log, and enforced from day one.
+Establish the financial guardrails for any work the system does **on its own** (unattended/scheduled runs). Three operator-facing elements: which Claude plan the operator is on (which sizes the included monthly automation allowance and gates out Free), how much of that allowance this project may use when several systems share it, and what the system should do if it ever uses the allowance up. The wizard does all dollar arithmetic internally. The operator never sets a dollar figure except at the one real-money boundary (paid overflow). These answers are derived into `project_instructions.md` and the system's cost log, and enforced from day one.
 
 ## When this file runs
 After `01_phase1_capture.md` completes. The staging file exists and is being updated after each answer.
@@ -27,30 +27,30 @@ Do not begin FIN-1 until you are confident the full phase will complete before c
 
 ## Sub-step resume check
 
-Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_02_*` (e.g., `step_02_FIN-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_02_*` (e.g., `step_02_FIN-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker. Do not re-ask completed questions, as their answers are already stored in the staging file.
 
 If all sub-step markers for this step are present but the step-level marker (`step_02: complete`) is not, proceed directly to the success condition.
 
 ---
 
-## Step opening — progress and preview
+## Step opening: progress and preview
 
 **Say:**
 
-> **Step 3 of 16 — Spending and limits**
+> **Step 3 of 16: Spending and limits**
 > A couple of quick questions so your system knows its boundaries when it works on its own.
 
 ---
 
 ## Operator Interaction Contract
 
-Before the questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it — ground the framing in what the operator told you about their system, keep the ask balanced, plain voice, no filler. This step has copy-paste-exact elements (plan names, the `claude.ai/settings/billing` URL) that stay verbatim per rule #3; the contract's "intent, not script" latitude covers conversational wording only.
+Before the questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it: ground the framing in what the operator told you about their system, keep the ask balanced, plain voice, no filler. This step has copy-paste-exact elements (plan names, the `claude.ai/settings/billing` URL) that stay verbatim per rule #3; the contract's "intent, not script" latitude covers conversational wording only.
 
 ---
 
-## How the credit model works (wizard-internal — do NOT recite to the operator)
+## How the credit model works (wizard-internal, do NOT recite to the operator)
 
-Read this; do not read it aloud. From 2026-06-15, work the system does **headlessly/on a schedule** (the Agent SDK / `claude -p` path the Orchestrator uses for unattended runs) draws a **separate monthly dollar "automation credit"** included with the operator's plan — distinct from their interactive 5h/7d Claude use, which it cannot touch. Pool size by plan (per-user, NOT pooled across teammates, no rollover):
+Read this; do not read it aloud. From 2026-06-15, work the system does **headlessly/on a schedule** (the Agent SDK / `claude -p` path the Orchestrator uses for unattended runs) draws a **separate monthly dollar "automation credit"** included with the operator's plan, distinct from their interactive 5h/7d Claude use, which it cannot touch. Pool size by plan (per-user, NOT pooled across teammates, no rollover):
 
 | Plan | Included monthly automation credit (`AUTOMATION_CREDIT_POOL`) |
 |------|------|
@@ -61,7 +61,7 @@ Read this; do not read it aloud. From 2026-06-15, work the system does **headles
 | Team Premium (per seat) | $100 |
 | Free | none |
 
-`last_verified: 2026-06-11` against `support.claude.com/articles/15036540`. **Version-dependent** (effective 2026-06-15; re-verify these figures before relying — pricing/credit facts rot). *(Enterprise plans also carry a credit — $20 usage-based / $200 seat-Premium — but are not yet a FIN-1 option; if an operator is on Enterprise, treat as Max-tier sizing and note the gap.)* The credit is a **one-time opt-in the operator must claim once** ("your plan includes…" is false until claimed). **There is no programmatic balance read**, so the generated system meters its OWN estimated spend (tokens × API rate; already counted in `cost_efficiency_log.md`) with a conservative safety margin — a documented v0 bridge. The included pool is a platform hard-boundary: at $0, unattended requests stop unless the operator has enabled paid overflow ("usage credits").
+`last_verified: 2026-06-11` against `support.claude.com/articles/15036540`. **Version-dependent** (effective 2026-06-15; re-verify these figures before relying, pricing/credit facts rot). *(Enterprise plans also carry a credit, $20 usage-based / $200 seat-Premium, but are not yet a FIN-1 option; if an operator is on Enterprise, treat as Max-tier sizing and note the gap.)* The credit is a **one-time opt-in the operator must claim once** ("your plan includes…" is false until claimed). **There is no programmatic balance read**, so the generated system meters its OWN estimated spend (tokens × API rate; already counted in `cost_efficiency_log.md`) with a conservative safety margin, a documented v0 bridge. The included pool is a platform hard-boundary: at $0, unattended requests stop unless the operator has enabled paid overflow ("usage credits").
 
 **Budget arithmetic (wizard computes; operator never sets it):**
 - `PROJECT_AUTOMATION_BUDGET` = `AUTOMATION_CREDIT_POOL` × share fraction, where share = ~0.9 if `PROJECT_SHARE_POSTURE = sole`, ~0.4 if `one-of-several` (conservative, leaves room for the operator's other systems). Express as a rounded dollar figure.
@@ -70,11 +70,11 @@ Read this; do not read it aloud. From 2026-06-15, work the system does **headles
 
 ---
 
-## FIN-1 — Plan identification
+## FIN-1: Plan identification
 
 **Ask the user:**
 
-> Which Claude plan are you on? *(I use this to size how much your system can do on its own each month — you won't have to work any of that out.)*
+> Which Claude plan are you on? *(I use this to size how much your system can do on its own each month. You won't have to work any of that out.)*
 >
 > - **Pro**
 > - **Max 5x**
@@ -83,15 +83,15 @@ Read this; do not read it aloud. From 2026-06-15, work the system does **headles
 > - **Team Premium**
 > - **Free**
 >
-> Not sure? Open claude.ai/settings/billing — your plan's at the top.
+> Not sure? Open claude.ai/settings/billing. Your plan's at the top.
 
 **Wait for answer.**
 
 **If Free:**
 
-> The wizard needs a paid Claude plan — Pro at minimum — to build and run an agent system. The free tier doesn't include the automation allowance agents need to operate.
+> The wizard needs a paid Claude plan, Pro at minimum, to build and run an agent system. The free tier doesn't include the automation allowance agents need to operate.
 >
-> You can upgrade at claude.ai/settings/billing. Pro ($20/month) is enough to get started. Come back and resume when you've upgraded — everything you've told me so far is saved.
+> You can upgrade at claude.ai/settings/billing. Pro ($20/month) is enough to get started. Come back and resume when you've upgraded. Everything you've told me so far is saved.
 
 Store: `PLAN_TYPE = "free"`
 
@@ -105,7 +105,7 @@ Store: `PLAN_TYPE = "free"`
 
 **If unsure / can't determine:**
 
-> No problem — check claude.ai/settings/billing when you can; it shows your plan at the top. For now I'll set this up for Pro-level limits, which is the safest starting point, and you can tell me to adjust it later.
+> No problem, check claude.ai/settings/billing when you can; it shows your plan at the top. For now I'll set this up for Pro-level limits, which is the safest starting point, and you can tell me to adjust it later.
 
 Store: `PLAN_TYPE = "unknown"` (treat as Pro for sizing).
 
@@ -115,54 +115,54 @@ Write sub-step marker: Append `step_02_FIN-1: complete | <timestamp>` to `~/clau
 
 ---
 
-## Claim check (paid plans only — brief)
+## Claim check (paid plans only, brief)
 
 **Say:**
 
-> One quick thing: that monthly automation allowance is something you turn on once for your account. If you haven't yet, you can activate it at claude.ai/settings/billing — I'll remind you again when we set the system live. Want me to note that as a setup step? *(yes/no)*
+> One quick thing: that monthly automation allowance is something you turn on once for your account. If you haven't yet, you can activate it at claude.ai/settings/billing. I'll remind you again when we set the system live. Want me to note that as a setup step? *(yes/no)*
 
 Note the answer in the staging file under `## Setup reminders` if yes (`[→ setup] Claim/activate Agent SDK automation credit`). Do not block on it.
 
 ---
 
-## Orientation (one plain line — sets up both choices)
+## Orientation (one plain line, sets up both choices)
 
 **Say:**
 
-> Your plan includes some "runs on its own" time each month — work your system does in the background when you're not around — at no extra cost, up to a point. Two quick choices about that.
+> Your plan includes some "runs on its own" time each month (work your system does in the background when you're not around) at no extra cost, up to a point. Two quick choices about that.
 
-*(Ground the framing in what the operator told you about their system where it helps — per the Operator Interaction Contract § 2: frame with their context, keep the ask neutral, never pre-fill the answer.)*
+*(Ground the framing in what the operator told you about their system where it helps, per the Operator Interaction Contract § 2: frame with their context, keep the ask neutral, never pre-fill the answer.)*
 
 ---
 
-## FIN-3 — Sharing posture
+## FIN-3: Sharing posture
 
 **Ask the user:**
 
 > Is this your only system, or might you run a few? Anything you build shares that same monthly allowance.
 >
-> - **Just this one, for now** — it can use most of what your plan includes.
-> - **One of a few** — I'll keep it modest so there's room for the others. *(Add another later and I'll rebalance them.)*
+> - **Just this one, for now**: it can use most of what your plan includes.
+> - **One of a few**: I'll keep it modest so there's room for the others. *(Add another later and I'll rebalance them.)*
 
 **Wait for answer.** Store: `PROJECT_SHARE_POSTURE = "sole"` or `"one-of-several"`. (If genuinely unsure, default `sole` and note it's adjustable.)
 
-*Honest note (say only if asked how the limit is kept):* the system tracks its own estimated use and eases off as it nears its share; because there's no live balance read yet, it keeps a safety margin and errs on the cautious side. The included allowance itself can't be overspent — at the limit, unattended work simply stops.
+*Honest note (say only if asked how the limit is kept):* the system tracks its own estimated use and eases off as it nears its share; because there's no live balance read yet, it keeps a safety margin and errs on the cautious side. The included allowance itself can't be overspent. At the limit, unattended work simply stops.
 
 Write sub-step marker: Append `step_02_FIN-3: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
-## FIN-4 — Exhaustion behavior
+## FIN-4: Exhaustion behavior
 
 **Ask the user:**
 
 > If it ever uses up that monthly amount, what should it do?
 >
-> - **Wait** — stop, and pick back up next month. No extra cost.
-> - **Keep helping when you're around** — stop working on its own, but still help out whenever you're using it. No extra cost.
-> - **Keep going on its own** — keep running past what's included, which costs a little extra. You set the limit, and I'll always tell you before it spends.
+> - **Wait**: stop, and pick back up next month. No extra cost.
+> - **Keep helping when you're around**: stop working on its own, but still help out whenever you're using it. No extra cost.
+> - **Keep going on its own**: keep running past what's included, which costs a little extra. You set the limit, and I'll always tell you before it spends.
 >
-> Not sure? I'll choose **Wait** — it never costs extra, and you can change any of this later just by telling me.
+> Not sure? I'll choose **Wait**. It never costs extra, and you can change any of this later just by telling me.
 
 **Wait for answer.** Store: `EXHAUSTION_BEHAVIOR = "wait"` | `"interactive-fallback"` (keep helping when you're around) | `"paid-overflow"` (keep going on its own). Default unsure → `"wait"`.
 
@@ -170,28 +170,28 @@ Write sub-step marker: Append `step_02_FIN-4: complete | <timestamp>` to `~/clau
 
 ---
 
-## FIN-5 — Paid-overflow setup (CONDITIONAL — only if FIN-4 == "paid-overflow")
+## FIN-5: Paid-overflow setup (CONDITIONAL, only if FIN-4 == "paid-overflow")
 
-**If `EXHAUSTION_BEHAVIOR != "paid-overflow"`: skip the questions in this section** — but FIN-5 is still **recorded as a skip** in the recording block below. The `hitl_autonomy` barrier lists FIN-5 in `skip_satisfied_if`, so it must be answered OR explicitly skipped, never simply absent (an absent FIN-5 blocks the barrier close).
+**If `EXHAUSTION_BEHAVIOR != "paid-overflow"`: skip the questions in this section**, but FIN-5 is still **recorded as a skip** in the recording block below. The `hitl_autonomy` barrier lists FIN-5 in `skip_satisfied_if`, so it must be answered OR explicitly skipped, never simply absent (an absent FIN-5 blocks the barrier close).
 
 **Team-plan billing-authority gate (only if `PLAN_TYPE == "team"`):**
 
-> Quick check — on a Team plan, only an account owner/admin can turn on paid usage. Are you the person who can change billing settings for this plan? *(yes / no / not sure)*
+> Quick check: on a Team plan, only an account owner/admin can turn on paid usage. Are you the person who can change billing settings for this plan? *(yes / no / not sure)*
 
 **If no / not sure:**
 
-> No problem — turning on paid overflow needs an account owner, so I won't set that up now (your admin can switch it on later). Without it, here's what your system can do at no extra cost — which would you prefer?
+> No problem, turning on paid overflow needs an account owner, so I won't set that up now (your admin can switch it on later). Without it, here's what your system can do at no extra cost. Which would you prefer?
 >
-> - **Wait** — stop when it reaches the monthly amount, and pick back up next month.
-> - **Keep helping when you're around** — stop working on its own, but still help out whenever you're using it.
+> - **Wait**: stop when it reaches the monthly amount, and pick back up next month.
+> - **Keep helping when you're around**: stop working on its own, but still help out whenever you're using it.
 
-**Wait for answer.** Store `EXHAUSTION_BEHAVIOR = "wait"` or `"interactive-fallback"` per the operator's choice (no default — let the operator decide between the two no-cost behaviors). Add to staging `## Setup reminders`: `[→ setup] Operator chose paid overflow but needs a Team admin to enable usage credits — revisit once enabled.` Skip the rest of FIN-5.
+**Wait for answer.** Store `EXHAUSTION_BEHAVIOR = "wait"` or `"interactive-fallback"` per the operator's choice (no default, let the operator decide between the two no-cost behaviors). Add to staging `## Setup reminders`: `[→ setup] Operator chose paid overflow but needs a Team admin to enable usage credits — revisit once enabled.` Skip the rest of FIN-5.
 
 **If yes (or non-Team plan), continue:**
 
 > Two quick things:
 >
-> 1. How much extra per month are you comfortable spending? I'd start with a **$[propose a small default — e.g. $20]** cap — does that work, or would you prefer a different number?
+> 1. How much extra per month are you comfortable spending? I'd start with a **$[propose a small default, e.g. $20]** cap. Does that work, or would you prefer a different number?
 > 2. You'll switch on extra usage in your Claude billing settings, and **leave auto-reload off** so your cap is a real ceiling. I'll show you exactly how when we set the system live.
 >
 > Once it's on paid usage, I'll alert you when it starts and as it nears your limit, keep a safety margin, and stop before the cap.
@@ -210,11 +210,11 @@ Write sub-step marker: Append `step_02_FIN-5: complete | <timestamp>` to `~/clau
 
 > Got it. Your system will do its own background work within what your plan includes, and if it ever reaches that point it'll **[wait for next month / keep helping when you're around / keep going at up to $[PAYG_CAP]]**. I'll also pause for your OK before any unusually large single task. You can change any of this later just by telling me.
 
-This step **captures the operator's plain choices only** (plan, sharing posture, exhaustion behavior, and the paid-overflow cap if chosen) — recorded as the FIN source answers below. Do **not** compute or store `PROJECT_AUTOMATION_BUDGET` or `INTENSIVE_OPERATION_THRESHOLD` here: those dollar values are derived deterministically at the operations step where the financial guardrail group closes, from these same source answers. (The arithmetic above is wizard-internal context so you can answer honestly if the operator asks how the limit is kept — it is not a compute-to-staging instruction.)
+This step **captures the operator's plain choices only** (plan, sharing posture, exhaustion behavior, and the paid-overflow cap if chosen), recorded as the FIN source answers below. Do **not** compute or store `PROJECT_AUTOMATION_BUDGET` or `INTENSIVE_OPERATION_THRESHOLD` here: those dollar values are derived deterministically at the operations step where the financial guardrail group closes, from these same source answers. (The arithmetic above is wizard-internal context so you can answer honestly if the operator asks how the limit is kept; it is not a compute-to-staging instruction.)
 
 ---
 
-## P02-end — Shape-detection fallback probes (CONDITIONAL)
+## P02-end: Shape-detection fallback probes (CONDITIONAL)
 
 Per `wizard/shape_detection.md` § 2.2 + § 3 promotion logic. Read the `## Shape detection` section in `~/claude-wizard-draft/wizard_session_draft.md`:
 
@@ -226,11 +226,11 @@ Per `wizard/shape_detection.md` § 2.2 + § 3 promotion logic. Read the `## Shap
 
 **Say:**
 
-> Quick check — your project's a little harder to categorize from the first four questions, so I have a few more to nail it down. Same yes/no/unsure pattern.
+> Quick check: your project's a little harder to categorize from the first four questions, so I have a few more to nail it down. Same yes/no/unsure pattern.
 
 ---
 
-### P02-FB-1 — State-memory probe (probe-5)
+### P02-FB-1: State-memory probe (probe-5)
 
 **Ask the user:**
 
@@ -244,11 +244,11 @@ Write sub-step marker: Append `step_02_P02-FB-1: complete | <timestamp>` to `~/c
 
 ---
 
-### P02-FB-2 — Regular-pattern probe (probe-6)
+### P02-FB-2: Regular-pattern probe (probe-6)
 
 **Ask the user:**
 
-> Does it need to do something automatically, on a regular pattern — like every day, every Monday morning, every hour?
+> Does it need to do something automatically, on a regular pattern, like every day, every Monday morning, every hour?
 
 **Accept:** yes / no / unsure.
 
@@ -258,11 +258,11 @@ Write sub-step marker: Append `step_02_P02-FB-2: complete | <timestamp>` to `~/c
 
 ---
 
-### P02-FB-3 — Operator-confirm probe (probe-7)
+### P02-FB-3: Operator-confirm probe (probe-7)
 
 **Ask the user:**
 
-> Should the system ask you before doing anything important — like making a booking, sending money, or contacting someone?
+> Should the system ask you before doing anything important, like making a booking, sending money, or contacting someone?
 
 **Accept:** yes / no / unsure.
 
@@ -272,7 +272,7 @@ Write sub-step marker: Append `step_02_P02-FB-3: complete | <timestamp>` to `~/c
 
 ---
 
-### P02-FB-4 — Document-output probe (probe-8)
+### P02-FB-4: Document-output probe (probe-8)
 
 **Ask the user:**
 
@@ -286,7 +286,7 @@ Write sub-step marker: Append `step_02_P02-FB-4: complete | <timestamp>` to `~/c
 
 ---
 
-### P02-FB-5 — Classifier final emit [INTERNAL]
+### P02-FB-5: Classifier final emit [INTERNAL]
 
 Do not ask the operator anything. Apply the classifier per `wizard/shape_detection.md` § 2.3 + § 3 across ALL 8 probes (step 01 + step 02 fallback):
 
@@ -338,7 +338,7 @@ Write sub-step marker: Append `step_02_P02-FB-5: complete | <timestamp>` to `~/c
 
 ---
 
-## P02-FB-6 — Unsupported-shape transition (CONDITIONAL; fires only when step 02 final emit is HIGH-or-MEDIUM-confidence non-markdown)
+## P02-FB-6: Unsupported-shape transition (CONDITIONAL; fires only when step 02 final emit is HIGH-or-MEDIUM-confidence non-markdown)
 
 **Trigger condition (comply with the relevant product spec section honest-disclosure-at-step-02 mandate; trigger uses unambiguous field combination):**
 
@@ -350,7 +350,7 @@ If trigger does NOT match (markdown-agents final emit; OR LOW-confidence `unknow
 
 **If trigger matches:** fire the unsupported-shape transition per `wizard/shape_detection.md` § 6 NOW (do not defer to pre-step-05).
 
-Behavior is identical to step 01's P1-9 — same operator-facing message, same two-choice path, same staging-file updates. Substitute the classified shape in plain language per the same pattern.
+Behavior is identical to step 01's P1-9: same operator-facing message, same two-choice path, same staging-file updates. Substitute the classified shape in plain language per the same pattern.
 
 Say to operator (verbatim; same template as step 01 P1-9):
 
@@ -358,9 +358,9 @@ Say to operator (verbatim; same template as step 01 P1-9):
 >
 > Two options:
 >
-> **(a) Stop here — wait for a future wizard release.** Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. When the wizard adds support for your shape, we can pick up.
+> **(a) Stop here. Wait for a future wizard release.** Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. When the wizard adds support for your shape, we can pick up.
 >
-> **(b) Foundation-only mode.** I can produce a foundation-doc set for your project — the planning documents (vision, approach, technical architecture, etc.) abstracted from implementation shape. You'd take those docs to Claude Code directly to build the implementation yourself, OR wait for v2 shape support. I won't generate the system implementation itself (no agents, scripts, or run files).
+> **(b) Foundation-only mode.** I can produce a foundation-doc set for your project: the planning documents (vision, approach, technical architecture, etc.) abstracted from implementation shape. You'd take those docs to Claude Code directly to build the implementation yourself, OR wait for v2 shape support. I won't generate the system implementation itself (no agents, scripts, or run files).
 >
 > Which would you like? (Say "a" or "b".)
 
@@ -398,13 +398,13 @@ python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wiza
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid FIN-4 --group hitl_autonomy --value "<exhaustion behavior: wait | interactive-fallback | paid-overflow>"
 ```
 
-FIN-5 must be recorded **either way** — the `hitl_autonomy` barrier lists it in `skip_satisfied_if`, so it must be answered or explicitly skipped, never simply absent (absence blocks the barrier close for every operator who does not set a cap). If `EXHAUSTION_BEHAVIOR == "paid-overflow"` AND a cap was set, record the cap:
+FIN-5 must be recorded **either way**: the `hitl_autonomy` barrier lists it in `skip_satisfied_if`, so it must be answered or explicitly skipped, never simply absent (absence blocks the barrier close for every operator who does not set a cap). If `EXHAUSTION_BEHAVIOR == "paid-overflow"` AND a cap was set, record the cap:
 
 ```
 python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid FIN-5 --group hitl_autonomy --value "<payg cap, e.g. $20>"
 ```
 
-Otherwise — the operator chose `wait` or `interactive-fallback`, or chose paid overflow but a Team admin must enable it later (so no cap was set now) — record FIN-5 as a skip:
+Otherwise (the operator chose `wait` or `interactive-fallback`, or chose paid overflow but a Team admin must enable it later, so no cap was set now), record FIN-5 as a skip:
 
 ```
 python3 wizard/scripts/interview_cli.py skip-answer --transcript ~/claude-wizard-draft/wizard_transcript.jsonl --qid FIN-5 --group hitl_autonomy --reason "no paid-overflow cap set; not applicable"
@@ -428,13 +428,13 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 02.
 
-**If neither condition is true:** Skip this section entirely — do not show any prompt.
+**If neither condition is true:** Skip this section entirely. Do not show any prompt.
 
 ---
 
 ## Success condition
 
-FIN-1 (plan identified — or hard-gated on Free), FIN-3 (sharing posture), and FIN-4 (exhaustion behavior) answered and stored; FIN-5 recorded **either** as an answer (the paid-overflow cap, when `EXHAUSTION_BEHAVIOR == "paid-overflow"` and a cap was set) **or** as an explicit skip (otherwise) — never simply absent, since the `hitl_autonomy` barrier requires FIN-5 answered-or-skipped to close.
+FIN-1 (plan identified, or hard-gated on Free), FIN-3 (sharing posture), and FIN-4 (exhaustion behavior) answered and stored; FIN-5 recorded **either** as an answer (the paid-overflow cap, when `EXHAUSTION_BEHAVIOR == "paid-overflow"` and a cap was set) **or** as an explicit skip (otherwise), never simply absent, since the `hitl_autonomy` barrier requires FIN-5 answered-or-skipped to close.
 
 **Write completion marker:** Append `step_02: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

@@ -1,7 +1,7 @@
-# 13 — Operations Settings
+# 13: Operations Settings
 
 ## What this file does
-Configure how the system behaves during operation. Three technical thresholds (retry threshold, gate conflict timeout, deferred alert limit) are set as **silent defaults** from the system profile — the user has no basis for choosing these values. User-facing questions cover chunk confirmation preference, drift analysis cadence, and scale tier. This step records its operations answers to the event transcript and, at its end, **closes the three operational logical groups** — `orchestration_build`, then `hitl_autonomy`, then `tests_audit` (in that order; the order is load-bearing — see "How to run this phase"). It does **not** write `technical_architecture.md`, `execution_plan.md`, `test_cases.md`, `audit_framework.md`, or `project_instructions.md` — those are emitted by the generator at the end of the interview from the confirmed transcript.
+Configure how the system behaves during operation. Three technical thresholds (retry threshold, gate conflict timeout, deferred alert limit) are set as **silent defaults** from the system profile. The user has no basis for choosing these values. User-facing questions cover chunk confirmation preference, drift analysis cadence, and scale tier. This step records its operations answers to the event transcript and, at its end, **closes the three operational logical groups**: `orchestration_build`, then `hitl_autonomy`, then `tests_audit` (in that order; the order is load-bearing, see "How to run this phase"). It does **not** write `technical_architecture.md`, `execution_plan.md`, `test_cases.md`, `audit_framework.md`, or `project_instructions.md`. Those are emitted by the generator at the end of the interview from the confirmed transcript.
 
 ## When this file runs
 After `12_qa_settings.md` completes: `step_12: complete` is in `~/claude-wizard-draft/wizard_progress.md`. The staging-file `QA_CONFIGURED` mirror is a human-readable convenience, not the gate.
@@ -27,7 +27,7 @@ Do not begin CONC-1 until you are confident the full phase will complete before 
 
 ## Sub-step resume check
 
-Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_13_*` (e.g., `step_13_AUTO-DEFAULTS: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_13_*` (e.g., `step_13_AUTO-DEFAULTS: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker; do not re-ask completed questions, as their answers are already stored in the staging file.
 
 If all sub-step markers for this step are present but the step-level marker (`step_13: complete`) is not, proceed directly to the success condition.
 
@@ -37,7 +37,7 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 Before doing anything else in this step:
 
-1. **Schema-version check (per handoff contract consumer rule).** Read `~/claude-wizard-draft/wizard_session_draft.md`; locate the `schema_versions` block under shape_hypothesis. Verify `schema_major == 1`. If `schema_major` mismatches the consumer expected major (currently `1`), abort with operator-facing internal-state error: "I hit a wizard-internal version mismatch — the staging file's shape-detection schema major is `<actual>`, but this version of the wizard expects major `1`. Your project file is saved. Please update the wizard OR resume with the matching wizard version." Exit cleanly; do NOT proceed.
+1. **Schema-version check (per handoff contract consumer rule).** Read `~/claude-wizard-draft/wizard_session_draft.md`; locate the `schema_versions` block under shape_hypothesis. Verify `schema_major == 1`. If `schema_major` mismatches the consumer expected major (currently `1`), abort with operator-facing internal-state error: "I hit a wizard-internal version mismatch. The staging file's shape-detection schema major is `<actual>`, but this version of the wizard expects major `1`. Your project file is saved. Please update the wizard OR resume with the matching wizard version." Exit cleanly; do NOT proceed.
 
 2. Locate the `shape_hypothesis.fallback_mode_offered` field.
 
@@ -50,7 +50,7 @@ Before doing anything else in this step:
 4. Branch:
    - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
    - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
-   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
+   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error. The wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
 
 5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error. Halt with internal-error message; foundation state preserved. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
 
@@ -58,38 +58,38 @@ Before doing anything else in this step:
 
 ## Operator Interaction Contract
 
-Before the operations questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it — ground each question in what the operator already told you, keep the ask balanced, plain voice, no filler.
+Before the operations questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it: ground each question in what the operator already told you, keep the ask balanced, plain voice, no filler.
 
 ---
 
-## Step opening — progress and preview
+## Step opening: progress and preview
 
 **Say:**
 
-> **Step 14 of 16 — Operations**
-> Last set of preferences — how the system behaves day to day.
+> **Step 14 of 16: Operations**
+> Last set of preferences: how the system behaves day to day.
 
 ---
 
 ## How to run this phase
 
-This phase sets operational behavior. Three technical thresholds (CONC-1 retry threshold, CONC-2 gate conflict timeout, START-1 deferred alert limit) are **silent defaults** — the user has no basis for choosing these values and the recommendations are accepted >90% of the time. They are derived from the system profile and presented as a summary, not asked as questions.
+This phase sets operational behavior. Three technical thresholds (CONC-1 retry threshold, CONC-2 gate conflict timeout, START-1 deferred alert limit) are **silent defaults**. The user has no basis for choosing these values and the recommendations are accepted >90% of the time. They are derived from the system profile and presented as a summary, not asked as questions.
 
 The remaining topics require genuine user input: chunk confirmation preference (START-2), drift analysis cadence (DRIFT-1), and scale tier (SCALE-1 through SCALE-4). Work through them in sequence after presenting the auto-configured defaults.
 
-**Recording (event transcript).** Record each operations answer to `~/claude-wizard-draft/wizard_transcript.jsonl`, tagged to the group it feeds: CONC-2 + SCALE-1/2/3/4 → `orchestration_build`; CONC-1 + START-1 + START-2 → `hitl_autonomy`; DRIFT-1 → `tests_audit`. The record-answer line is shown at each step below. **No foundation-doc or `project_instructions.md` file is written here** — the scale tier and everything else are emitted by the generator at the end.
+**Recording (event transcript).** Record each operations answer to `~/claude-wizard-draft/wizard_transcript.jsonl`, tagged to the group it feeds: CONC-2 + SCALE-1/2/3/4 → `orchestration_build`; CONC-1 + START-1 + START-2 → `hitl_autonomy`; DRIFT-1 → `tests_audit`. The record-answer line is shown at each step below. **No foundation-doc or `project_instructions.md` file is written here**. The scale tier and everything else are emitted by the generator at the end.
 
-**Group closes at the end of this step (order is load-bearing).** After all answers are recorded, this step closes the three operational groups **in registry order: `orchestration_build` FIRST, then `hitl_autonomy`, then `tests_audit`.** The order matters because `execution_plan.md` (the `hitl_autonomy` preview) renders fields derived in `orchestration_build` (the MVP/build-phase/execution fields) — the cumulative-confirmed preview inputs only contain them once `orchestration_build` has closed. Closing out of order would fail the strict single-doc preview render.
+**Group closes at the end of this step (order is load-bearing).** After all answers are recorded, this step closes the three operational groups **in registry order: `orchestration_build` FIRST, then `hitl_autonomy`, then `tests_audit`.** The order matters because `execution_plan.md` (the `hitl_autonomy` preview) renders fields derived in `orchestration_build` (the MVP/build-phase/execution fields). The cumulative-confirmed preview inputs only contain them once `orchestration_build` has closed. Closing out of order would fail the strict single-doc preview render.
 
 **Before starting:** Read the confirmed vision, the confirmed agent roster, and the system profile (domain sensitivity from step 10, involvement level from step 03) to derive the silent defaults and tailor rationale to this specific system.
 
 ---
 
-## Auto-configured defaults — CONC-1, CONC-2, START-1 [SILENT DEFAULTS]
+## Auto-configured defaults: CONC-1, CONC-2, START-1 [SILENT DEFAULTS]
 
-*These values are set automatically from the system profile. Do not ask the user — a non-technical user has no basis for choosing between these technical thresholds, and the recommendations are accepted >90% of the time.*
+*These values are set automatically from the system profile. Do not ask the user. A non-technical user has no basis for choosing between these technical thresholds, and the recommendations are accepted >90% of the time.*
 
-**Before presenting:** Read the confirmed vision content and agent roster from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`) — the foundation documents are not on disk until close. Assess workflow complexity for CONC-2:
+**Before presenting:** Read the confirmed vision content and agent roster from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`). The foundation documents are not on disk until close. Assess workflow complexity for CONC-2:
 - **Simple** (few agents, mostly sequential handoffs, low concurrency): set `GATE_CONFLICT_TIMEOUT = 30 seconds`
 - **Moderate** (several agents, some parallel activity, shared resources): set `GATE_CONFLICT_TIMEOUT = 2 minutes`
 - **Complex** (many agents, high concurrency, shared databases or external APIs): set `GATE_CONFLICT_TIMEOUT = 5 minutes`
@@ -103,11 +103,11 @@ Write all three values to the staging file:
 
 > Before we get into the questions that need your input, here's how I've configured the technical settings based on your system's design:
 >
-> - **Retry threshold:** 3 automatic attempts before escalating to you — enough to handle brief glitches without spinning on a real problem
-> - **Resource conflict timeout:** **[derived value]** — [one-sentence rationale from workflow complexity assessment, e.g., "your agents mostly work in sequence, so a 30-second wait catches real problems without false alarms"]
-> - **Deferred alert limit:** 3 deferrals before an alert is escalated as overdue — stops unresolved issues from sitting quietly in the queue
+> - **Retry threshold:** 3 automatic attempts before escalating to you, enough to handle brief glitches without spinning on a real problem
+> - **Resource conflict timeout:** **[derived value]**: [one-sentence rationale from workflow complexity assessment, e.g., "your agents mostly work in sequence, so a 30-second wait catches real problems without false alarms"]
+> - **Deferred alert limit:** 3 deferrals before an alert is escalated as overdue: stops unresolved issues from sitting quietly in the queue
 >
-> These are tuned for your setup and adjustable anytime — just tell me if you'd like to change any of them.
+> These are tuned for your setup and adjustable anytime. Just tell me if you'd like to change any of them.
 
 Do not wait for a response. Proceed to START-2.
 
@@ -123,24 +123,24 @@ python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wiza
 
 ---
 
-## START-2 — Chunk confirmation preference [FIXED — topic]
+## START-2: Chunk confirmation preference [FIXED: topic]
 
 **Say:**
 
-> When your system is working through a list of tasks — fixing a batch of issues, updating several documents, running a sequence of steps — you have a choice in how it proceeds.
+> When your system is working through a list of tasks (fixing a batch of issues, updating several documents, running a sequence of steps), you have a choice in how it proceeds.
 >
-> **Option 1 — Confirm each step:** The system completes one step, tells you what it did and what it's about to do next, and waits for your go-ahead before continuing. Nothing moves forward without your sign-off.
+> **Option 1, confirm each step:** The system completes one step, tells you what it did and what it's about to do next, and waits for your go-ahead before continuing. Nothing moves forward without your sign-off.
 >
-> **Option 2 — Confirm only the important ones:** The system works through lower-risk steps on its own and only stops when it reaches something that needs your judgment — an action that's harder to reverse, touches something sensitive, or has broader consequences.
+> **Option 2, confirm only the important ones:** The system works through lower-risk steps on its own and only stops when it reaches something that needs your judgment: an action that's harder to reverse, touches something sensitive, or has broader consequences.
 >
-> I'd suggest starting with **confirm each step**. As you get more familiar with how your system behaves, you can move to the second option and let it handle routine steps on its own. You're not locked in — you can switch at any time.
+> I'd suggest starting with **confirm each step**. As you get more familiar with how your system behaves, you can move to the second option and let it handle routine steps on its own. You're not locked in. You can switch at any time.
 >
 > Which would you like to start with?
 
 **Wait for answer.**
 
 - If the user chooses confirm each: confirm "Confirm-each to start. You can move to confirm-important-only once you're comfortable with how the system makes decisions."
-- If the user chooses confirm important only: confirm their choice. Note: "Good — the system will still tell you about every step it takes, it just won't wait for approval on the routine ones."
+- If the user chooses confirm important only: confirm their choice. Note: "Good, the system will still tell you about every step it takes, it just won't wait for approval on the routine ones."
 - If the user asks what counts as "important": "Anything that affects a document your other processes depend on, that communicates externally, that involves money, or that's hard to reverse. The system applies the same Tier 1 rules you confirmed earlier."
 
 Write the configured value to the staging file: `CHUNK_CONFIRMATION = [Confirm each / Confirm important only]`.
@@ -151,32 +151,32 @@ Write sub-step marker: Append `step_13_START-2: complete | <timestamp>` to `~/cl
 
 ---
 
-## DRIFT-1 — Drift analysis cadence [FIXED — topic]
+## DRIFT-1: Drift analysis cadence [FIXED: topic]
 
-**Before asking:** Read the confirmed vision content from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`) — the foundation documents are not on disk until close. Assess system complexity and how frequently the user's domain evolves:
+**Before asking:** Read the confirmed vision content from the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`). The foundation documents are not on disk until close. Assess system complexity and how frequently the user's domain evolves:
 - **Simple system or stable domain:** Recommend **monthly**.
 - **Moderate complexity or moderately evolving domain:** Recommend **biweekly**.
 - **Complex system, multiple integrations, or rapidly changing domain:** Recommend **weekly**.
 
 **Say:**
 
-> Over time, any system can drift — it keeps doing what it was originally built to do, but the world around it has changed. A data source restructured its output. A process your system supports was updated. A goal shifted.
+> Over time, any system can drift: it keeps doing what it was originally built to do, but the world around it has changed. A data source restructured its output. A process your system supports was updated. A goal shifted.
 >
-> Drift analysis is when your system checks its own behavior against the vision document you confirmed at the start — asking "is what I'm doing still what I was built to do?"
+> Drift analysis is when your system checks its own behavior against the vision document you confirmed at the start, asking "is what I'm doing still what I was built to do?"
 >
 > **How often should that check happen?**
 >
-> Based on [one-sentence rationale referencing system complexity or domain — e.g., "your system handles several integrations in a domain that changes regularly" or "your system is focused on a narrow, stable workflow"], I'd recommend **[recommended cadence]** as a starting point.
+> Based on [one-sentence rationale referencing system complexity or domain, e.g., "your system handles several integrations in a domain that changes regularly" or "your system is focused on a narrow, stable workflow"], I'd recommend **[recommended cadence]** as a starting point.
 >
-> That means once [weekly / every two weeks / monthly], the system reviews its own activity logs against your vision document and flags anything that looks like drift — for your review, never for autonomous correction without your input.
+> That means once [weekly / every two weeks / monthly], the system reviews its own activity logs against your vision document and flags anything that looks like drift, for your review, never for autonomous correction without your input.
 >
 > Does that cadence feel right, or would you prefer more or less frequent checks?
 
 **Wait for answer.**
 
 - If the user accepts the recommendation: confirm the cadence and proceed.
-- If the user chooses differently: accept without pushback. If they choose less frequent than monthly, note gently: "That's fine — worth knowing that drift tends to accumulate quietly, so you may want to revisit this as the system matures."
-- If the user asks what happens when drift is detected: "The system flags it in your digest with a plain-language description — 'I noticed I've been doing X, but your vision document says the goal is Y. Here's what I think should change. Do you want me to adjust?' It never silently reorients itself."
+- If the user chooses differently: accept without pushback. If they choose less frequent than monthly, note gently: "That's fine. Worth knowing that drift tends to accumulate quietly, so you may want to revisit this as the system matures."
+- If the user asks what happens when drift is detected: "The system flags it in your digest with a plain-language description: 'I noticed I've been doing X, but your vision document says the goal is Y. Here's what I think should change. Do you want me to adjust?' It never silently reorients itself."
 
 Write the configured value to the staging file: `DRIFT_CADENCE = [Weekly / Biweekly / Monthly]`.
 
@@ -186,25 +186,25 @@ Write sub-step marker: Append `step_13_DRIFT-1: complete | <timestamp>` to `~/cl
 
 ---
 
-## Scale tier — SCALE-1, SCALE-2, SCALE-3 [FIXED]
+## Scale tier: SCALE-1, SCALE-2, SCALE-3 [FIXED]
 
 **Say:**
 
-> Last set of questions before we wrap up. These help me understand the scale your system will need to operate at — not technical details, just how your day-to-day actually works.
+> Last set of questions before we wrap up. These help me understand the scale your system will need to operate at: not technical details, just how your day-to-day actually works.
 
 Ask each question in sequence. Wait for the answer before moving to the next.
 
 **SCALE-1:**
 
-**Before asking:** From the confirmed transcript, identify the operator's largest single category of tracked items — the primary working set the system spends most of its effort on (e.g., the master task list). Ground the question in that example per the Operator Interaction Contract. Do NOT ask the operator to total unlike categories together: tasks, advisors, accounts, and properties are different kinds of things at different orders of magnitude, and a non-technical operator cannot meaningfully combine them into one number. Ask for the size of the *biggest single group*, since that is the volume that drives sizing.
+**Before asking:** From the confirmed transcript, identify the operator's largest single category of tracked items, the primary working set the system spends most of its effort on (e.g., the master task list). Ground the question in that example per the Operator Interaction Contract. Do NOT ask the operator to total unlike categories together: tasks, advisors, accounts, and properties are different kinds of things at different orders of magnitude, and a non-technical operator cannot meaningfully combine them into one number. Ask for the size of the *biggest single group*, since that is the volume that drives sizing.
 
-> Of all the things your system keeps track of, what's the biggest single group — and roughly how many are in it? Most setups have one main set the system works through (tasks, clients, cases, records, properties — whatever fits yours), and that's the one that matters for sizing the system. Smaller groups, like a few advisors or a couple of accounts, don't change it. A rough number is fine.
+> Of all the things your system keeps track of, what's the biggest single group, and roughly how many are in it? Most setups have one main set the system works through (tasks, clients, cases, records, properties, whatever fits yours), and that's the one that matters for sizing the system. Smaller groups, like a few advisors or a couple of accounts, don't change it. A rough number is fine.
 
 **Wait for answer.**
 
 **SCALE-2:**
 
-> How often does your system need to process or refresh information — a few times a day, hourly, or continuously?
+> How often does your system need to process or refresh information: a few times a day, hourly, or continuously?
 
 **Wait for answer.**
 
@@ -226,7 +226,7 @@ python3 wizard/scripts/interview_cli.py record-answer --transcript ~/claude-wiza
 
 ---
 
-## SCALE-4 — Tier confirmation [DYNAMIC]
+## SCALE-4: Tier confirmation [DYNAMIC]
 
 **Before stating the tier:** Map the user's three answers to a provisional tier using the following guide:
 
@@ -240,7 +240,7 @@ When answers span tiers, round to the higher tier if two or more indicators poin
 
 **Say:**
 
-> Based on what you've described, I'm treating this as a **Tier [S / M / L]** system — [one-sentence rationale, e.g., "you're working with hundreds of records and processing happens a few times a day, so the system doesn't need to be built for high-throughput operation" or "with thousands of records processed hourly and meaningful peaks, the system needs to handle concurrent load reliably"].
+> Based on what you've described, I'm treating this as a **Tier [S / M / L]** system: [one-sentence rationale, e.g., "you're working with hundreds of records and processing happens a few times a day, so the system doesn't need to be built for high-throughput operation" or "with thousands of records processed hourly and meaningful peaks, the system needs to handle concurrent load reliably"].
 >
 > This is a starting assumption. Once your agents are running with real data, I'll check whether what I actually observe matches. Does that sound right?
 
@@ -248,7 +248,7 @@ When answers span tiers, round to the higher tier if two or more indicators poin
 
 - If the user confirms: proceed.
 - If the user adjusts the tier: accept the adjustment. Ask "What's different from what you described?" so the rationale is accurate. Record the user-confirmed tier.
-- If the user is uncertain: "That's fine — I'll start with [tier] and watch how the system actually behaves. If what I observe is consistently different, I'll flag it and we'll revisit."
+- If the user is uncertain: "That's fine. I'll start with [tier] and watch how the system actually behaves. If what I observe is consistently different, I'll flag it and we'll revisit."
 
 Write the configured value to the staging file: `SCALE_TIER = [S / M / L] (provisional)`.
 
@@ -258,13 +258,13 @@ Write sub-step marker: Append `step_13_SCALE-4: complete | <timestamp>` to `~/cl
 
 ---
 
-## Close the three operational groups — derive, render, confirm, close (IN ORDER)
+## Close the three operational groups: derive, render, confirm, close (IN ORDER)
 
-All inputs for the three operational groups are now captured (across steps 01-13). Instead of writing any foundation-doc or `project_instructions.md` file, derive each group's fields, show the operator the rendered preview, take one round of changes, and close the group. **Close in this order — `orchestration_build`, then `hitl_autonomy`, then `tests_audit`** — because the hitl preview (`execution_plan.md`) renders orchestration_build's fields, which are only in the cumulative confirmed set once orchestration_build has closed.
+All inputs for the three operational groups are now captured (across steps 01-13). Instead of writing any foundation-doc or `project_instructions.md` file, derive each group's fields, show the operator the rendered preview, take one round of changes, and close the group. **Close in this order: `orchestration_build`, then `hitl_autonomy`, then `tests_audit`**, because the hitl preview (`execution_plan.md`) renders orchestration_build's fields, which are only in the cumulative confirmed set once orchestration_build has closed.
 
-Throughout: synthesis/policy fields cite prior **confirmed field keys** via `--inputs` (not question-IDs); extraction/classification fields cite question-IDs via `--sources`. The class derivation prompts live at `wizard/foundation-bundles/v0/derivation-prompts/<class>.md`; the field manifest (`wizard/foundation-bundles/v0/field-manifests/markdown-CC.json`) names each field's class, decision coupling, and which doc it previews. Render each preview with the same `preview-group` command shape used at the vision/approach barriers (pass all five `--auto` globals + `--source-version v0.4.0 --build-repo-root <wizard build repo root>`), and **always add `--include-unconfirmed --out-file ~/claude-wizard-draft/<doc>_PREVIEW.md`** so each preview renders the just-derived draft (before confirming) into an operator-clean review file the operator opens in a viewer (Operator Interaction Contract § 4) — never paste preview content into chat. Confirm with the one-round pattern; **forced confirmation on every decision/policy field** (CAPABILITY_INCREMENTS, SCALE_TIER, AUTONOMY_LEVEL, HITL_MAP_ROWS, DRIFT_ANALYSIS_CADENCE). Decision fields with operator-facing weight (the MVP/roadmap boundary and the human-in-the-loop map) are confirmed as **guided reviews**, not artifact audits — see the per-barrier notes. Not every barrier has an operator-facing review: the `tests_audit` docs are technical QA artifacts the operator cannot meaningfully assess, so that barrier derives, confirms, and closes **without** a doc-review (see Barrier 3).
+Throughout: synthesis/policy fields cite prior **confirmed field keys** via `--inputs` (not question-IDs); extraction/classification fields cite question-IDs via `--sources`. The class derivation prompts live at `wizard/foundation-bundles/v0/derivation-prompts/<class>.md`; the field manifest (`wizard/foundation-bundles/v0/field-manifests/markdown-CC.json`) names each field's class, decision coupling, and which doc it previews. Render each preview with the same `preview-group` command shape used at the vision/approach barriers (pass all five `--auto` globals + `--source-version v0.4.0 --build-repo-root <wizard build repo root>`), and **always add `--include-unconfirmed --out-file ~/claude-wizard-draft/<doc>_PREVIEW.md`** so each preview renders the just-derived draft (before confirming) into an operator-clean review file the operator opens in a viewer (Operator Interaction Contract § 4). Never paste preview content into chat. Confirm with the one-round pattern; **forced confirmation on every decision/policy field** (CAPABILITY_INCREMENTS, SCALE_TIER, AUTONOMY_LEVEL, HITL_MAP_ROWS, DRIFT_ANALYSIS_CADENCE). Decision fields with operator-facing weight (the MVP/roadmap boundary and the human-in-the-loop map) are confirmed as **guided reviews**, not artifact audits. See the per-barrier notes. Not every barrier has an operator-facing review: the `tests_audit` docs are technical QA artifacts the operator cannot meaningfully assess, so that barrier derives, confirms, and closes **without** a doc-review (see Barrier 3).
 
-### Barrier 1 — orchestration_build (preview `technical_architecture.md`)
+### Barrier 1: orchestration_build (preview `technical_architecture.md`)
 
 Derive the extraction/classification fields first so the synthesis fields can cite them. The
 credential + integration surfaces now derive from the canonical dependency record captured at step
@@ -308,13 +308,13 @@ interview_cli derive-field --field MVP_MINIMUM_VIABLE_STATE --value "<...>" --in
 interview_cli derive-field --field MVP_SUCCESS_CONDITION --value "<...>" --inputs CAPABILITY_INCREMENTS,VISION_SUCCESS_CRITERIA
 ```
 
-(`interview_cli` = `python3 wizard/scripts/interview_cli.py ... --transcript ~/claude-wizard-draft/wizard_transcript.jsonl` — `--shape markdown-CC` for derive-field/derive-projection.) Confirm each derived field (`confirm-field --group orchestration_build --state accepted`; forced confirm on the decision fields SCALE_TIER + CREDENTIAL_CHECK_CADENCE + **CAPABILITY_INCREMENTS**). **`derive-projection` fields are NOT separately confirmed** — a projection is a deterministic view of an already-confirmed source (it auto-projects); this now includes CREDENTIAL_REGISTRY_ROWS **and BUILD_PHASES_ROWS + MVP_ROADMAP_BOUNDARY** (both views of the confirmed CAPABILITY_INCREMENTS).
+(`interview_cli` = `python3 wizard/scripts/interview_cli.py ... --transcript ~/claude-wizard-draft/wizard_transcript.jsonl`, `--shape markdown-CC` for derive-field/derive-projection.) Confirm each derived field (`confirm-field --group orchestration_build --state accepted`; forced confirm on the decision fields SCALE_TIER + CREDENTIAL_CHECK_CADENCE + **CAPABILITY_INCREMENTS**). **`derive-projection` fields are NOT separately confirmed**. A projection is a deterministic view of an already-confirmed source (it auto-projects); this now includes CREDENTIAL_REGISTRY_ROWS **and BUILD_PHASES_ROWS + MVP_ROADMAP_BOUNDARY** (both views of the confirmed CAPABILITY_INCREMENTS).
 
-**Confirm CAPABILITY_INCREMENTS as a GUIDED review, not a JSON audit (Operator Interaction Contract §4 + §1).** Do not show the operator the JSON or ask them to check a table. Walk the split in plain terms grounded in their own system: name what the system will do *first* (the MVP — the smallest version worth trusting), then what is *in scope but planned for after that* (the roadmap), then anything that is *only a possibility for later* and what would trigger it. Then ask one judgeable question — e.g. "Does it make sense to get [the MVP capabilities] working and trusted first, and bring [the deferred ones] in afterward — or is any of the later work something you'd need from day one?" Record their adjustments; a moved capability changes the bucket, which re-renders the phase table and the boundary automatically. Render `technical_architecture.md` via `preview-group --group orchestration_build`, show the operator the rendered markdown, one round of changes, then `close-group --group orchestration_build`.
+**Confirm CAPABILITY_INCREMENTS as a GUIDED review, not a JSON audit (Operator Interaction Contract §4 + §1).** Do not show the operator the JSON or ask them to check a table. Walk the split in plain terms grounded in their own system: name what the system will do *first* (the MVP, the smallest version worth trusting), then what is *in scope but planned for after that* (the roadmap), then anything that is *only a possibility for later* and what would trigger it. Then ask one judgeable question, e.g. "Does it make sense to get [the MVP capabilities] working and trusted first, and bring [the deferred ones] in afterward, or is any of the later work something you'd need from day one?" Record their adjustments; a moved capability changes the bucket, which re-renders the phase table and the boundary automatically. Render `technical_architecture.md` via `preview-group --group orchestration_build`, show the operator the rendered markdown, one round of changes, then `close-group --group orchestration_build`.
 
-### Barrier 2 — hitl_autonomy (preview `execution_plan.md`)
+### Barrier 2: hitl_autonomy (preview `execution_plan.md`)
 
-This group derives the autonomy level, the human-in-the-loop policy map, the **five financial-guardrail fields** that govern what the system spends on its own (the included monthly automation credit, this project's budget, the sharing posture, the exhaustion behavior, and the intensive-operation threshold), and **two verbatim voice-source captures** (the operator's technical literacy from UP-1 and notification verbosity from ERR-1, pulled forward so they reach `project_instructions.md` and the voice-and-style derivation). The financial source answers (FIN-1 plan / FIN-3 sharing / FIN-4 exhaustion) were captured at step 02; the dollar values are derived **here**, where the group closes — the wizard computes every dollar (the operator never set one).
+This group derives the autonomy level, the human-in-the-loop policy map, the **five financial-guardrail fields** that govern what the system spends on its own (the included monthly automation credit, this project's budget, the sharing posture, the exhaustion behavior, and the intensive-operation threshold), and **two verbatim voice-source captures** (the operator's technical literacy from UP-1 and notification verbosity from ERR-1, pulled forward so they reach `project_instructions.md` and the voice-and-style derivation). The financial source answers (FIN-1 plan / FIN-3 sharing / FIN-4 exhaustion) were captured at step 02; the dollar values are derived **here**, where the group closes. The wizard computes every dollar (the operator never set one).
 
 ```
 # --- Financial guardrail (the cost safety-envelope) ---
@@ -363,17 +363,17 @@ interview_cli derive-field --field NOTIFICATION_VERBOSITY --value "<the operator
 interview_cli confirm-field --field NOTIFICATION_VERBOSITY --group hitl_autonomy --state accepted
 ```
 
-**Present the spending guardrail as an informational recap — never an approval gate (Operator Interaction Contract §1 + §5).** The operator already chose *how* spending should behave (their plan, the sharing posture, the exhaustion behavior) earlier in the interview; the dollar figures here are *derived* from those choices, and the share split and the threshold are wizard heuristics the operator has no basis to tune — exactly like the silent-default thresholds at the top of this step. So do **not** ask the operator to approve a budget or a threshold, and do **not** speak any internal structure to them: no group names, no "barrier", no step numbers, no contract-section references — to the operator this is one continuous "Operations" step, and earlier choices are referred to in plain terms ("earlier, when we talked about your plan and budget"), never by step number. Show the computed envelope **once**, as a brief plain recap, then move straight to the guided review. Pattern:
+**Present the spending guardrail as an informational recap, never an approval gate (Operator Interaction Contract §1 + §5).** The operator already chose *how* spending should behave (their plan, the sharing posture, the exhaustion behavior) earlier in the interview; the dollar figures here are *derived* from those choices, and the share split and the threshold are wizard heuristics the operator has no basis to tune, exactly like the silent-default thresholds at the top of this step. So do **not** ask the operator to approve a budget or a threshold, and do **not** speak any internal structure to them: no group names, no "barrier", no step numbers, no contract-section references. To the operator this is one continuous "Operations" step, and earlier choices are referred to in plain terms ("earlier, when we talked about your plan and budget"), never by step number. Show the computed envelope **once**, as a brief plain recap, then move straight to the guided review. Pattern:
 
-> On spending: your plan includes about **[pool]** a month of automation credit the system can use on its own. I've set aside about **[budget]** of it for this system [because you're running several projects / because this is your only project], and it'll flag anything that would cost more than about **[threshold]** before running it. When that runs low it [checks with you before spending more / waits until next month / uses your paid overflow up to your cap] — the choice you made earlier. Adjustable anytime.
+> On spending: your plan includes about **[pool]** a month of automation credit the system can use on its own. I've set aside about **[budget]** of it for this system [because you're running several projects / because this is your only project], and it'll flag anything that would cost more than about **[threshold]** before running it. When that runs low it [checks with you before spending more / waits until next month / uses your paid overflow up to your cap], the choice you made earlier. Adjustable anytime.
 
-This is transparency plus a correction window, not a decision beat: record `PROJECT_SHARE_POSTURE` and `EXHAUSTION_BEHAVIOR` as confirmed (they reflect the operator's earlier choices, now shown back). If the recap prompts a correction (e.g. "actually this is my only project"), re-derive the affected field and re-run the two budget/threshold projections before confirming. The dollar figures themselves are not an operator decision — they are shown for transparency because they govern real spending, not for approval.
+This is transparency plus a correction window, not a decision beat: record `PROJECT_SHARE_POSTURE` and `EXHAUSTION_BEHAVIOR` as confirmed (they reflect the operator's earlier choices, now shown back). If the recap prompts a correction (e.g. "actually this is my only project"), re-derive the affected field and re-run the two budget/threshold projections before confirming. The dollar figures themselves are not an operator decision. They are shown for transparency because they govern real spending, not for approval.
 
-`AUTONOMY_LEVEL` is a decision field derived from the operator's confirmed authority answers (it is no longer a provisional placeholder). Surface the basis in the rationale you record — including that the trust posture is `probationary` at first build (which caps the level at 2) and lifts over time. `HITL_MAP_ROWS` is a policy rule set: it MUST state explicit negative permissions; it derives from `AUTONOMY_LEVEL` (the per-class autonomous-vs-ask-first posture) plus the always-stop-and-ask elevations the operator confirmed at the vision step (cite `TIER_1_ADDITIONS` in `--inputs` only when that field exists), plus the operator's always-ask summary from the architecture step. The budget and threshold do **not** render into this preview (`execution_plan.md`) — they land in the system's instructions and cost log at emission; the operator confirmed the plain choices that produce them at step 02, and the dollar values are deterministic. The paid-overflow cap is only present if the operator chose paid overflow, and it was handled at step 02 — it is not derived here. Render `execution_plan.md` via `preview-group --group hitl_autonomy` (it renders orchestration_build's MVP / build-phase / boundary fields too — that is why orchestration_build closed first), show the operator, one round, then `close-group --group hitl_autonomy`.
+`AUTONOMY_LEVEL` is a decision field derived from the operator's confirmed authority answers (it is no longer a provisional placeholder). Surface the basis in the rationale you record, including that the trust posture is `probationary` at first build (which caps the level at 2) and lifts over time. `HITL_MAP_ROWS` is a policy rule set: it MUST state explicit negative permissions; it derives from `AUTONOMY_LEVEL` (the per-class autonomous-vs-ask-first posture) plus the always-stop-and-ask elevations the operator confirmed at the vision step (cite `TIER_1_ADDITIONS` in `--inputs` only when that field exists), plus the operator's always-ask summary from the architecture step. The budget and threshold do **not** render into this preview (`execution_plan.md`). They land in the system's instructions and cost log at emission; the operator confirmed the plain choices that produce them at step 02, and the dollar values are deterministic. The paid-overflow cap is only present if the operator chose paid overflow, and it was handled at step 02. It is not derived here. Render `execution_plan.md` via `preview-group --group hitl_autonomy` (it renders orchestration_build's MVP / build-phase / boundary fields too; that is why orchestration_build closed first), show the operator, one round, then `close-group --group hitl_autonomy`.
 
-**Review the human-in-the-loop map as a GUIDED review, not a permissions audit (Operator Interaction Contract §4 + §1).** The rendered `execution_plan.md` contains a permissions table; handing a non-technical operator a table to audit puts the burden on the wrong person — they have no basis to know whether the rows are right. Instead, walk the load-bearing distinction in plain terms, grounded in their system: the small number of things the system will **do on its own and just tell you about** (the routine, reversible work) versus the things it will **always check with you before doing** (money, anything sent outside, anything hard to undo, anything you marked sensitive). Surface the autonomy level plainly — at the current level it leans toward checking first, and that loosens over time as you build trust — without naming internal tiers or levels as jargon. Then ask one judgeable question, e.g. "Is there anything here it would handle on its own that you'd rather it check with you about first — or anything it checks with you on that you'd be glad to let it just handle?" Record adjustments to the map; the rendered file is still produced for them to open, but the *review* is the plain walk plus that question, not the table itself.
+**Review the human-in-the-loop map as a GUIDED review, not a permissions audit (Operator Interaction Contract §4 + §1).** The rendered `execution_plan.md` contains a permissions table; handing a non-technical operator a table to audit puts the burden on the wrong person. They have no basis to know whether the rows are right. Instead, walk the load-bearing distinction in plain terms, grounded in their system: the small number of things the system will **do on its own and just tell you about** (the routine, reversible work) versus the things it will **always check with you before doing** (money, anything sent outside, anything hard to undo, anything you marked sensitive). Surface the autonomy level plainly (at the current level it leans toward checking first, and that loosens over time as you build trust) without naming internal tiers or levels as jargon. Then ask one judgeable question, e.g. "Is there anything here it would handle on its own that you'd rather it check with you about first, or anything it checks with you on that you'd be glad to let it just handle?" Record adjustments to the map; the rendered file is still produced for them to open, but the *review* is the plain walk plus that question, not the table itself.
 
-### Barrier 3 — tests_audit (preview `test_cases.md` + `audit_framework.md`)
+### Barrier 3: tests_audit (preview `test_cases.md` + `audit_framework.md`)
 
 ```
 interview_cli derive-field --field AGENT_SPECIFIC_TESTS --value "<markdown list of per-agent acceptance tests>" --inputs APPROACH_SOLUTION_BRIEF
@@ -399,7 +399,7 @@ interview_cli derive-projection --field INPUT_TYPE_INVENTORY    # the boundary_i
 interview_cli derive-projection --field SOURCE_REGISTRY_ROWS    # the health_monitored subset -> source_registry.md
 ```
 
-**Deferred-items capture (WI-013):** while in this group, scan the interview for items the operator explicitly deferred ("not now", "later", "phase 2") and capture them as deferred-item content. NOTE (build-side): the emitted `future_items.md` target for these is not yet a manifest field — its re-home is owed before close-assembly retirement (tracked with the advisor-KB gap); do not block the tests_audit close on it at v0. **No operator-facing review of these two docs.** `test_cases.md` and `audit_framework.md` are technical QA artifacts a non-technical operator cannot meaningfully assess, and the agent-specific tests are derived restatements of behavior the operator already confirmed (the human-in-the-loop map, the approach), so they surface no new decision — the one operator-meaningful setting here, the drift cadence, was already chosen at DRIFT-1. So derive + confirm the fields above and `close-group --group tests_audit` **without an operator doc-review** (you may still render the previews to a file for the build record). As you wrap the operations step, give the operator ONE plain informational line — for transparency, not feedback — e.g. "Your system will be tested for correctness, reliability, security, and everyday operability, and it re-checks itself against your vision every two weeks." The real holistic operator review of the assembled documents is the next step (`14_document_review.md`).
+**Deferred-items capture (WI-013):** while in this group, scan the interview for items the operator explicitly deferred ("not now", "later", "phase 2") and capture them as deferred-item content. NOTE (build-side): the emitted `future_items.md` target for these is not yet a manifest field. Its re-home is owed before close-assembly retirement (tracked with the advisor-KB gap); do not block the tests_audit close on it at v0. **No operator-facing review of these two docs.** `test_cases.md` and `audit_framework.md` are technical QA artifacts a non-technical operator cannot meaningfully assess, and the agent-specific tests are derived restatements of behavior the operator already confirmed (the human-in-the-loop map, the approach), so they surface no new decision: the one operator-meaningful setting here, the drift cadence, was already chosen at DRIFT-1. So derive + confirm the fields above and `close-group --group tests_audit` **without an operator doc-review** (you may still render the previews to a file for the build record). As you wrap the operations step, give the operator ONE plain informational line (for transparency, not feedback), e.g. "Your system will be tested for correctness, reliability, security, and everyday operability, and it re-checks itself against your vision every two weeks." The real holistic operator review of the assembled documents is the next step (`14_document_review.md`).
 
 ---
 
@@ -418,9 +418,9 @@ interview_cli derive-projection --field SOURCE_REGISTRY_ROWS    # the health_mon
 >
 > Next we'll review the documents your system has produced so far and set up your GitHub backup.
 
-Update staging file: `OPERATIONS_CONFIGURED = true`. **No foundation-doc or `project_instructions.md` file was written — the scale tier and all operational settings are emitted by the generator at the end from the confirmed transcript.**
+Update staging file: `OPERATIONS_CONFIGURED = true`. **No foundation-doc or `project_instructions.md` file was written. The scale tier and all operational settings are emitted by the generator at the end from the confirmed transcript.**
 
-Write sub-step marker: Append `step_13_WRITE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`. (Only after all three operational `group_*_confirmed` markers are recorded — a `step_13` marker before its groups close is an illegal state.)
+Write sub-step marker: Append `step_13_WRITE: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`. (Only after all three operational `group_*_confirmed` markers are recorded. A `step_13` marker before its groups close is an illegal state.)
 
 ---
 
@@ -440,15 +440,15 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 13.
 
-**If neither condition is true:** Skip this section entirely — do not show any prompt.
+**If neither condition is true:** Skip this section entirely. Do not show any prompt.
 
 ---
 
 ## Success condition
 
-CONC-1, CONC-2, START-1, START-2, DRIFT-1, and SCALE-1 through SCALE-4 recorded to the transcript (tagged to their groups). **All three operational groups closed** (`group_orchestration_build_confirmed`, `group_hitl_autonomy_confirmed`, `group_tests_audit_confirmed` recorded, in that order): each group's fields derived and confirmed (forced confirmation on the decision/policy fields). The `orchestration_build` and `hitl_autonomy` previews are shown to the operator as guided reviews; the `tests_audit` docs (technical QA artifacts) are NOT operator-reviewed — derived, confirmed, and closed with a one-line informational note only. **No `technical_architecture.md`, `execution_plan.md`, `test_cases.md`, `audit_framework.md`, or `project_instructions.md` file was written** — they are emitted by the generator at the end. `OPERATIONS_CONFIGURED = true` in the staging file.
+CONC-1, CONC-2, START-1, START-2, DRIFT-1, and SCALE-1 through SCALE-4 recorded to the transcript (tagged to their groups). **All three operational groups closed** (`group_orchestration_build_confirmed`, `group_hitl_autonomy_confirmed`, `group_tests_audit_confirmed` recorded, in that order): each group's fields derived and confirmed (forced confirmation on the decision/policy fields). The `orchestration_build` and `hitl_autonomy` previews are shown to the operator as guided reviews; the `tests_audit` docs (technical QA artifacts) are NOT operator-reviewed: derived, confirmed, and closed with a one-line informational note only. **No `technical_architecture.md`, `execution_plan.md`, `test_cases.md`, `audit_framework.md`, or `project_instructions.md` file was written**. They are emitted by the generator at the end. `OPERATIONS_CONFIGURED = true` in the staging file.
 
-**Write completion marker:** Append `step_13: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`. (Only after all three operational `group_*_confirmed` markers are recorded — the step marker is illegal before its groups close.)
+**Write completion marker:** Append `step_13: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`. (Only after all three operational `group_*_confirmed` markers are recorded. The step marker is illegal before its groups close.)
 
 Proceed to `14_document_review.md`.
 
@@ -456,7 +456,7 @@ Proceed to `14_document_review.md`.
 
 ## Foundation-only adapted path
 
-**Disposition: ADAPT — same recording + the three operational barriers; the foundation-only emission split happens at the generator, not here.**
+**Disposition: ADAPT. Same recording + the three operational barriers; the foundation-only emission split happens at the generator, not here.**
 
 Conduct the operations interview exactly as the normal path above (CONC-1, CONC-2, START-1, START-2, DRIFT-1, SCALE-1 through SCALE-4, recorded to the transcript), and close the three operational groups exactly as above (orchestration_build → hitl_autonomy → tests_audit; pass `--auto FOUNDATION_ONLY_MODE=true` to each `preview-group`).
 

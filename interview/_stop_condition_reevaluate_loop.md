@@ -1,18 +1,18 @@
-# Stop-condition halt → re-evaluate-shape loop — canonical state machine
+# Stop-condition halt → re-evaluate-shape loop: canonical state machine
 
 ## What this file does
 
-Provides the single-source-of-truth for the **stop-condition halt → re-evaluate-shape loop** — the wizard's behavior when (a) a stop condition fires at pre-step-05 OR pre-step-08 in the HALT path AND (b) the operator picks one of two recovery options:
+Provides the single-source-of-truth for the **stop-condition halt → re-evaluate-shape loop**: the wizard's behavior when (a) a stop condition fires at pre-step-05 OR pre-step-08 in the HALT path AND (b) the operator picks one of two recovery options:
 
-- **"(b) Change the shape and re-evaluate"** — wizard runs the step 02 fallback probes again with the regulatory exposure surfaced; classifier re-emits; stop conditions re-evaluate. If the new shape passes, continue. If not, offer terminal choice.
-- **"(c) Re-evaluate regulatory exposure"** — wizard re-asks the step 03 UP-6 framework-applicability probes; mutates `regulatory_exposure` if operator clarifies; re-evaluates stop conditions against unchanged shape. If conditions cleared, continue. If not, offer terminal choice.
+- **"(b) Change the shape and re-evaluate"**: wizard runs the step 02 fallback probes again with the regulatory exposure surfaced; classifier re-emits; stop conditions re-evaluate. If the new shape passes, continue. If not, offer terminal choice.
+- **"(c) Re-evaluate regulatory exposure"**: wizard re-asks the step 03 UP-6 framework-applicability probes; mutates `regulatory_exposure` if operator clarifies; re-evaluates stop conditions against unchanged shape. If conditions cleared, continue. If not, offer terminal choice.
 
-The wizard does NOT silently fizzle the operator into foundation-only mode at halt — the loop runs transparently; the operator's path through the loop's terminal state is operator-elected at every step.
+The wizard does NOT silently fizzle the operator into foundation-only mode at halt. The loop runs transparently; the operator's path through the loop's terminal state is operator-elected at every step.
 
 This module is invoked from two producer sites:
 
-- `wizard/interview/_pre_step_05_recheck.md` Step 2a — when a stop condition fires in the HALT path (operator on full-system-generation path; `fallback_mode_offered: not_offered`)
-- `wizard/interview/_pre_step_08_recheck.md` Step 2 — when a late-emergence stop condition fires (vision / approach / advisors content newly implicates a framework)
+- `wizard/interview/_pre_step_05_recheck.md` Step 2a: when a stop condition fires in the HALT path (operator on full-system-generation path; `fallback_mode_offered: not_offered`)
+- `wizard/interview/_pre_step_08_recheck.md` Step 2: when a late-emergence stop condition fires (vision / approach / advisors content newly implicates a framework)
 
 ## When this file runs
 
@@ -31,15 +31,15 @@ If any prerequisite is missing, this is a wizard-internal-state error per the pr
 ## Reference spec
 
 - The originating slice spec (build-side; not distributed) is the design provenance for this module.
-- `wizard/shape_detection.md` § 8.3 (4 stop conditions) + § 8.4 (HALT path) + § 6 (unsupported-shape transition) — canonical contracts this loop implements
-- `wizard/handoff_contracts/shape_detection_v0.md` § 9 `shape_revision` block + § 7 consumer rules — schema for loop state
+- `wizard/shape_detection.md` § 8.3 (4 stop conditions) + § 8.4 (HALT path) + § 6 (unsupported-shape transition): canonical contracts this loop implements
+- `wizard/handoff_contracts/shape_detection_v0.md` § 9 `shape_revision` block + § 7 consumer rules: schema for loop state
 - the relevant product spec section (unsupported-shape transition) + § 5.2 F-1 (shape detection contract)
 
 ---
 
-## Section 1 — Loop entry contract (called by producers)
+## Section 1: Loop entry contract (called by producers)
 
-Producers invoke this module with the following inputs (passed via shared staging file context — no explicit parameter list at v0 markdown-skill stage):
+Producers invoke this module with the following inputs (passed via shared staging file context: no explicit parameter list at v0 markdown-skill stage):
 
 | Input | Source | Semantics |
 |---|---|---|
@@ -73,9 +73,9 @@ After this module returns, the producer reads `shape_revision.history[<last>].ou
 
 ---
 
-## Section 2 — Loop entry: (b) Change the shape and re-evaluate
+## Section 2: Loop entry: (b) Change the shape and re-evaluate
 
-### Step 2.1 — Increment iteration counter
+### Step 2.1: Increment iteration counter
 
 Read `shape_revision` block from staging (if absent, initialize with `iteration: 0, iteration_cap: 2, history: []`). Compute:
 
@@ -83,19 +83,19 @@ Read `shape_revision` block from staging (if absent, initialize with `iteration:
 new_iteration = (shape_revision.iteration or 0) + 1
 ```
 
-If `new_iteration > shape_revision.iteration_cap` (default cap = 2): **iteration cap reached.** Skip to § 7 Terminal: forced — do not run a third probe round.
+If `new_iteration > shape_revision.iteration_cap` (default cap = 2): **iteration cap reached.** Skip to § 7 Terminal: forced. Do not run a third probe round.
 
 If under cap: continue to Step 2.2. Set `shape_revision.pending: true`.
 
-### Step 2.2 — Honest-characterization disclosure
+### Step 2.2: Honest-characterization disclosure
 
 Say verbatim to operator:
 
-> Let me re-check the shape with the regulatory exposure in mind. v1 of the wizard supports only the `markdown-agents` shape for full system generation — alternative shapes (Python service, hosted cloud, multi-user-datastore, etc.) are on the v2+ roadmap. The most likely outcomes from re-running the probes: (i) you converge to foundation-only mode; (ii) you choose to exit and resume later when v2 supports your shape. There's a small chance the re-evaluation surfaces a shape we hadn't considered — let me re-run the probes and see where we land.
+> Let me re-check the shape with the regulatory exposure in mind. v1 of the wizard supports only the `markdown-agents` shape for full system generation. Alternative shapes (Python service, hosted cloud, multi-user-datastore, etc.) are on the v2+ roadmap. The most likely outcomes from re-running the probes: (i) you converge to foundation-only mode; (ii) you choose to exit and resume later when v2 supports your shape. There's a small chance the re-evaluation surfaces a shape we hadn't considered. Let me re-run the probes and see where we land.
 
 This disclosure is **NOT optional** per the honest-characterization rule. Operators must understand the v1-shape-set constraint before consenting to the loop.
 
-### Step 2.3 — Re-ask step 02 fallback probes (P-5, P-6, P-7)
+### Step 2.3: Re-ask step 02 fallback probes (P-5, P-6, P-7)
 
 Re-ask **only the step 02 fallback probes** (P-5 / P-6 / P-7), NOT step 01 probes P-1 through P-4.
 
@@ -106,21 +106,21 @@ For each of P-5, P-6, P-7 in order (probes defined at `wizard/shape_detection.md
 
 Example for P-5 (`is_continuous_running`):
 
-> Earlier you said the system [<paraphrase prior answer — e.g., "needs to keep running continuously" / "doesn't need to keep running on its own">]. Given that [<framework name from `regulatory_exposure`>] applies, the system would need to support [<capability requirement summarized from § 8.3 stop condition that fired — e.g., "enforced audit-trail" / "enforced encryption-at-rest" / "enforced access control with DSR endpoints">]. Does that change your answer? Does the system actually need to keep running on its own continuously? (yes / no / unsure)
+> Earlier you said the system [<paraphrase prior answer, e.g., "needs to keep running continuously" / "doesn't need to keep running on its own">]. Given that [<framework name from `regulatory_exposure`>] applies, the system would need to support [<capability requirement summarized from § 8.3 stop condition that fired, e.g., "enforced audit-trail" / "enforced encryption-at-rest" / "enforced access control with DSR endpoints">]. Does that change your answer? Does the system actually need to keep running on its own continuously? (yes / no / unsure)
 
-Repeat the pattern for P-6 (`is_multi_user`) and P-7 (`requires_external_systems`) — each with the same framework-constraint framing.
+Repeat the pattern for P-6 (`is_multi_user`) and P-7 (`requires_external_systems`), each with the same framework-constraint framing.
 
-### Step 2.4 — Classifier re-emit
+### Step 2.4: Classifier re-emit
 
 After collecting new P-5/P-6/P-7 answers, the classifier re-emits per `wizard/shape_detection.md` § 2.3 signal-to-shape decision table. The re-emit MAY:
 
 - Produce same `shape: markdown-agents` (likely outcome if probe answers didn't materially change)
-- Produce `shape: python-service-operator-facing` / `claude-skills` / `node-ui` / `multi-user-datastore` / `hosted-cloud` / `mixed` (rare — would have been caught at step 01 originally; possible if probes were originally answered with low-confidence and operator now revises)
+- Produce `shape: python-service-operator-facing` / `claude-skills` / `node-ui` / `multi-user-datastore` / `hosted-cloud` / `mixed` (rare: would have been caught at step 01 originally; possible if probes were originally answered with low-confidence and operator now revises)
 - Produce `shape: unknown` (if probes yielded LOW after re-ask)
 
 Update `shape_hypothesis.shape`, `shape_hypothesis.confidence`, `shape_hypothesis.operator_signals.*` per re-emit.
 
-### Step 2.5 — Re-populate `control_matrix_active`
+### Step 2.5: Re-populate `control_matrix_active`
 
 If new `shape != prior shape`: re-populate `control_matrix_active` per `wizard/shape_detection.md` § 7 + the per-shape control-matrix column for new shape. For `mixed` shapes, weakest-path-across-components per § 8.3.
 
@@ -130,16 +130,16 @@ Proceed to § 6 stop-condition re-evaluation.
 
 ---
 
-## Section 3 — Iteration cap + counter semantics
+## Section 3: Iteration cap + counter semantics
 
 **Iteration cap = 2** at v0 (calibration-pending; first-real-operator-data may revise).
 
 **Semantics of cap = 2:** two loop iterations are permitted; on entering a third loop iteration, force terminal per § 7. Concretely:
 
-- `iteration: 0` — operator never entered the loop (initial state before any (b)/(c) pick)
-- `iteration: 1` — operator picked (b) or (c) once; iteration 1 has run or is running
-- `iteration: 2` — operator picked (b) or (c) twice; iteration 2 has run or is running; on completion, branch table sets internal state `forced_terminal` → § 7 final-choice prompt → terminal outcome foundation_only or scope_out
-- `iteration: > 2` — cannot reach this state under the cap; on attempted entry at `new_iteration = 3`, module skips iteration body and routes directly to § 7 Terminal: forced final-choice prompt
+- `iteration: 0`: operator never entered the loop (initial state before any (b)/(c) pick)
+- `iteration: 1`: operator picked (b) or (c) once; iteration 1 has run or is running
+- `iteration: 2`: operator picked (b) or (c) twice; iteration 2 has run or is running; on completion, branch table sets internal state `forced_terminal` → § 7 final-choice prompt → terminal outcome foundation_only or scope_out
+- `iteration: > 2`: cannot reach this state under the cap; on attempted entry at `new_iteration = 3`, module skips iteration body and routes directly to § 7 Terminal: forced final-choice prompt
 
 When `new_iteration > iteration_cap`, the loop forces terminal choice per § 7. No third probe re-ask runs; the operator is offered only foundation-only OR scope-out.
 
@@ -147,40 +147,40 @@ When `new_iteration > iteration_cap`, the loop forces terminal choice per § 7. 
 
 ---
 
-## Section 4 — Loop entry: (c) Re-evaluate regulatory exposure
+## Section 4: Loop entry: (c) Re-evaluate regulatory exposure
 
 The (c) regulatory-exposure re-evaluation path is supported at v0.
 
-### Step 4.1 — Increment iteration counter
+### Step 4.1: Increment iteration counter
 
 Same logic as § 2.1. Cap applies to (b) and (c) combined; an operator who picks (c) on iteration 1 then (b) on iteration 2 has used both iterations.
 
-### Step 4.2 — Honest-characterization disclosure
+### Step 4.2: Honest-characterization disclosure
 
 **Two disclosure variants** depending on which condition fired:
 
 **Variant A: conditions 1, 2, or 3 fired** (framework named: HIPAA / GDPR / PCI-DSS). Say verbatim:
 
-> OK, let me re-ask the regulatory questions. The stop condition that fired was that [<framework>] applies — if your project actually doesn't fall under [<framework>]'s scope, the stop condition won't fire on re-evaluation. Common reasons operators initially answer "yes" to [<framework>] but later revise to "no":
+> OK, let me re-ask the regulatory questions. The stop condition that fired was that [<framework>] applies. If your project actually doesn't fall under [<framework>]'s scope, the stop condition won't fire on re-evaluation. Common reasons operators initially answer "yes" to [<framework>] but later revise to "no":
 >
 > [<framework-specific examples, choose by framework:>]
-> — **HIPAA:** "HIPAA only applies if you're a covered entity (health-care provider, plan, or clearinghouse) OR a business associate handling protected health information (PHI) on their behalf. Not just any health-related project."
-> — **GDPR:** "GDPR applies if you have EU customers OR EU-based users (regardless of payment / commercial relationship). Not just any project that might be accessed from the EU."
-> — **PCI-DSS:** "PCI-DSS applies if your system stores, processes, or transmits cardholder data (CHD) — full PANs, sensitive auth data. Not just any project that accepts payments via a hosted gateway."
+> - **HIPAA:** "HIPAA only applies if you're a covered entity (health-care provider, plan, or clearinghouse) OR a business associate handling protected health information (PHI) on their behalf. Not just any health-related project."
+> - **GDPR:** "GDPR applies if you have EU customers OR EU-based users (regardless of payment / commercial relationship). Not just any project that might be accessed from the EU."
+> - **PCI-DSS:** "PCI-DSS applies if your system stores, processes, or transmits cardholder data (CHD): full PANs, sensitive auth data. Not just any project that accepts payments via a hosted gateway."
 
-**Variant B: condition 4 fired** (regulated + framework not identified — the framework is unknown, so disclosure cannot cite a specific framework). Say verbatim:
+**Variant B: condition 4 fired** (regulated + framework not identified: the framework is unknown, so disclosure cannot cite a specific framework). Say verbatim:
 
 > OK, let me re-ask the regulatory questions. The stop condition that fired was "regulated data is involved but the specific compliance framework isn't yet identified." There are two ways to clear this:
 >
-> (i) **Identify the specific framework that applies.** If you can name the framework (e.g., HIPAA / GDPR / PCI-DSS / SOX / COPPA / sector-specific), I can re-evaluate with that framework's actual capability requirements — the loop may converge to foundation-only OR exit OR (rarely) a passing path.
+> (i) **Identify the specific framework that applies.** If you can name the framework (e.g., HIPAA / GDPR / PCI-DSS / SOX / COPPA / sector-specific), I can re-evaluate with that framework's actual capability requirements. The loop may converge to foundation-only OR exit OR (rarely) a passing path.
 >
 > (ii) **Revise the regulated-data flag itself.** If on reflection your project doesn't actually involve regulated data (e.g., you initially marked health information but you're producing aggregate de-identified statistics not subject to HIPAA), the stop condition won't fire on re-evaluation.
 >
-> Common reasons operators initially mark a regulated bucket but framework is unknown: (1) "I work with sensitive data but I'm not sure which regulation applies"; (2) "I picked the closest bucket but the actual framework is sector-specific (e.g., FERPA for education, GLBA for finance, COPPA for under-13 users)." Either route — framework identification OR regulated-flag revision — is a valid loop exit.
+> Common reasons operators initially mark a regulated bucket but framework is unknown: (1) "I work with sensitive data but I'm not sure which regulation applies"; (2) "I picked the closest bucket but the actual framework is sector-specific (e.g., FERPA for education, GLBA for finance, COPPA for under-13 users)." Either route (framework identification OR regulated-flag revision) is a valid loop exit.
 
-### Step 4.3 — Re-ask UP-6 probes
+### Step 4.3: Re-ask UP-6 probes
 
-For the framework that fired the stop condition (and any related framework — e.g., re-asking HIPAA may also re-ask `no_compliance_claim` related questions), re-fire the UP-6 framework-applicability probe per `wizard/interview/03_user_profile.md` UP-6 patterns.
+For the framework that fired the stop condition (and any related framework, e.g., re-asking HIPAA may also re-ask `no_compliance_claim` related questions), re-fire the UP-6 framework-applicability probe per `wizard/interview/03_user_profile.md` UP-6 patterns.
 
 For each framework field (`hipaa_applicable` / `gdpr_applicable` / `pci_dss_applicable` / `sox_applicable` / `coppa_or_gdpr_k_applicable` / `other_sector_specific[*].applicable` / `no_compliance_claim` / `no_compliance_claim_framework_identification`):
 
@@ -190,39 +190,39 @@ For each framework field (`hipaa_applicable` / `gdpr_applicable` / `pci_dss_appl
 
 **Condition-4 variant of UP-6 re-ask** (framework not identified): in addition to the per-field revision questions above, also offer the framework-identification path:
 
-- Ask: "If you can identify the specific framework that applies to your project's regulated data, tell me which one — HIPAA / GDPR / PCI-DSS / SOX / COPPA / or sector-specific (e.g., FERPA, GLBA, financial-services-specific, healthcare-adjacent). Identifying the framework lets me evaluate against its actual capability requirements."
-- If operator identifies a framework: update `regulatory_exposure.no_compliance_claim_framework_identification: unknown → no` (per UP-6 source semantics at `03_user_profile.md` line 264 — `no` means "no unresolved framework-identification gap"; the framework identification clears the condition-4 trigger; using the contract-defined enum `yes | no | unknown`) AND populate the corresponding `*_applicable: yes` field (e.g., `hipaa_applicable: yes` if operator identified HIPAA; for sector-specific frameworks, append `{ framework: <name>, applicable: yes }` entry to `other_sector_specific[]` per UP-6 line 236-241 pattern). Append a revision entry to `shape_revision.history[<current iteration>].regulatory_exposure_revised[]` with `reason: framework_identification`.
+- Ask: "If you can identify the specific framework that applies to your project's regulated data, tell me which one: HIPAA / GDPR / PCI-DSS / SOX / COPPA / or sector-specific (e.g., FERPA, GLBA, financial-services-specific, healthcare-adjacent). Identifying the framework lets me evaluate against its actual capability requirements."
+- If operator identifies a framework: update `regulatory_exposure.no_compliance_claim_framework_identification: unknown → no` (per UP-6 source semantics at `03_user_profile.md` line 264: `no` means "no unresolved framework-identification gap"; the framework identification clears the condition-4 trigger; using the contract-defined enum `yes | no | unknown`) AND populate the corresponding `*_applicable: yes` field (e.g., `hipaa_applicable: yes` if operator identified HIPAA; for sector-specific frameworks, append `{ framework: <name>, applicable: yes }` entry to `other_sector_specific[]` per UP-6 line 236-241 pattern). Append a revision entry to `shape_revision.history[<current iteration>].regulatory_exposure_revised[]` with `reason: framework_identification`.
 - If operator picks "I still can't identify it but I'm sure regulated data is involved": preserve `no_compliance_claim_framework_identification: unknown`; condition 4 will still fire on re-evaluation; route to next-iteration or forced-terminal per § 6 branch table.
 
-### Step 4.4 — Re-evaluate stop conditions
+### Step 4.4: Re-evaluate stop conditions
 
 Run stop-condition evaluation per `wizard/interview/_pre_step_05_recheck.md` Step 2 logic against updated `regulatory_exposure` + unchanged `control_matrix_active` (shape is unchanged in (c) path; new conditions may fire if condition-4 variant resolved to a specific framework that now triggers conditions 1/2/3 against the unchanged shape's capabilities).
 
 If conditions cleared (no stop condition fires post-revision): mark `outcome: continued` + `terminal_reason: regulatory_exposure_revised_clears_conditions`; proceed to § 7 Terminal: continued.
 
-If conditions still fire: proceed to § 6 with same shape + revised regulatory state. Note: condition-4 path may transition into conditions 1/2/3 firing when operator identifies the framework — that's expected behavior; loop continues from § 6 branch table.
+If conditions still fire: proceed to § 6 with same shape + revised regulatory state. Note: condition-4 path may transition into conditions 1/2/3 firing when operator identifies the framework. That's expected behavior; loop continues from § 6 branch table.
 
 ---
 
-## Section 5 — (Reserved for future expansion — not used at v0)
+## Section 5: (Reserved for future expansion, not used at v0)
 
 This section is intentionally blank at v0. Reserved for a potential third operator path "(d) commit to operator-side compliance review" if first-real-operator-data shows demand for an in-wizard compliance-review-acknowledgment surface distinct from (a) save-and-exit. Currently (a) save-and-exit subsumes this case operationally.
 
 ---
 
-## Section 6 — Stop-condition re-evaluation after iteration
+## Section 6: Stop-condition re-evaluation after iteration
 
 Run the same logic as `wizard/interview/_pre_step_05_recheck.md` Step 2 against the **post-iteration state**:
 
 - **Capability-based evaluation** (mixed-shape weakest-path across components per § 8.3)
-- **HALT-vs-DOCUMENT path split** — but note that this loop only runs in the HALT path (operator on `fallback_mode_offered: not_offered`); DOCUMENT-path stop conditions don't enter this loop.
+- **HALT-vs-DOCUMENT path split**, but note that this loop only runs in the HALT path (operator on `fallback_mode_offered: not_offered`); DOCUMENT-path stop conditions don't enter this loop.
 
-Branching after re-evaluation (internal branch state may differ from producer-visible terminal outcome per § 1 — see "internal branch state" column):
+Branching after re-evaluation (internal branch state may differ from producer-visible terminal outcome per § 1, see "internal branch state" column):
 
 | Post-iteration state | Internal branch state | Producer-visible outcome | terminal_reason | Action |
 |---|---|---|---|---|
 | New shape is v1-supported (`markdown-agents`) AND no conditions fire | `continued` | `continued` | `passing_shape_re_emit` (for (b) path) OR `regulatory_exposure_revised_clears_conditions` (for (c) path) | Terminal: continued; record outcome; return to producer |
-| New shape is NOT v1-supported (`python-service-operator-facing` / `claude-skills` / `node-ui` / `multi-user-datastore` / `hosted-cloud` / `mixed`) | `unsupported_shape_transition` | `foundation_only` OR `scope_out` (depending on operator pick unsupported-shape transition) | `unsupported_shape_transition` | Trigger unsupported-shape transition per `wizard/shape_detection.md` § 6 — operator offered foundation-only OR scope-out contract; module records the operator's pick as terminal outcome |
+| New shape is NOT v1-supported (`python-service-operator-facing` / `claude-skills` / `node-ui` / `multi-user-datastore` / `hosted-cloud` / `mixed`) | `unsupported_shape_transition` | `foundation_only` OR `scope_out` (depending on operator pick unsupported-shape transition) | `unsupported_shape_transition` | Trigger unsupported-shape transition per `wizard/shape_detection.md` § 6: operator offered foundation-only OR scope-out contract; module records the operator's pick as terminal outcome |
 | New shape is `markdown-agents` AND conditions still fire AND iteration < cap | `next_iteration` | `next_iteration` | (not populated; not a terminal state) | Re-offer (a)/(b)/(c) at producer; module returns; producer re-invokes module on next (b)/(c) pick (or exits on (a)) |
 | New shape is `markdown-agents` AND conditions still fire AND iteration == cap | `forced_terminal` (internal) | `foundation_only` OR `scope_out` (per operator's (i)/(ii) pick at § 7 forced disclosure) | `iteration_cap_reached` | § 7 Terminal: forced disclosure said by module; module reads operator's (i)/(ii) pick; sets producer-visible outcome accordingly |
 | New shape is `unknown` (LOW confidence after re-ask) | `forced_terminal` (internal; treated same as conditions-still-fire-at-cap) | `foundation_only` OR `scope_out` | `iteration_cap_reached` (with unknown-shape note in history) | § 7 forced disclosure; operator offered foundation-only OR scope-out |
@@ -233,7 +233,7 @@ Record producer-visible outcome in `shape_revision.history[<last>].outcome` per 
 
 ---
 
-## Section 7 — Terminal-state branching
+## Section 7: Terminal-state branching
 
 ### Terminal: continued
 
@@ -259,7 +259,7 @@ Return to producer with `outcome: continued`. Producer proceeds.
 
 State: operator picked foundation-only at unsupported-shape transition OR at forced-terminal final-choice prompt (§ 7 Terminal: forced).
 
-**Cross-slice mutation: roll ACTIVE terminal stop conditions into DOCUMENT-path block.** When loop terminal foundation-only is reached, the **active terminal-state fired stop conditions** (those firing at the terminal evaluation, after operator revisions during the loop) must be rolled into `stop_conditions.documented_in_foundation` so the gate module's § 6 surfaces them as compliance-gap entries in `technical_architecture.md`. WITHOUT this mutation, the foundation-only mode's gate module would see `documented_in_foundation: []` (or absent) and omit the compliance-gaps section entirely — that would be a silent loss of the operator's regulatory-mismatch documentation (violating the honest-characterization rule).
+**Cross-slice mutation: roll ACTIVE terminal stop conditions into DOCUMENT-path block.** When loop terminal foundation-only is reached, the **active terminal-state fired stop conditions** (those firing at the terminal evaluation, after operator revisions during the loop) must be rolled into `stop_conditions.documented_in_foundation` so the gate module's § 6 surfaces them as compliance-gap entries in `technical_architecture.md`. WITHOUT this mutation, the foundation-only mode's gate module would see `documented_in_foundation: []` (or absent) and omit the compliance-gaps section entirely. That would be a silent loss of the operator's regulatory-mismatch documentation (violating the honest-characterization rule).
 
 **Active vs transitional distinction.** When the loop transitions through conditions (e.g., condition 4 fires at entry → operator identifies HIPAA via (c) path → condition 4 resolved + condition 1 fires post-revision → terminal foundation-only), only conditions firing **at terminal evaluation** are active compliance gaps; transitional conditions resolved during the loop (e.g., condition 4 resolved by framework-identification) are NOT active gaps and MUST NOT appear in `documented_in_foundation`. Including a resolved condition would emit a false "regulated-but-unnamed-framework" gap in technical_architecture.md, contradicting the actual loop outcome (framework was identified; the gap is HIPAA-on-markdown-agents, not regulation-without-framework).
 
@@ -300,7 +300,7 @@ stop_conditions:
 
 The unsupported-shape-transition foundation-only message is reused verbatim (no new operator-facing message required at this seam; foundation-only entry is structurally same regardless of how operator reached it):
 
-> Foundation-only mode confirmed. I'll generate the planning documents for your project — vision, approach, technical architecture, and so on — abstracted from the implementation shape. You'll take those docs to Claude Code directly to build the implementation. We won't generate the actual agents, scripts, or run files.
+> Foundation-only mode confirmed. I'll generate the planning documents for your project (vision, approach, technical architecture, and so on) abstracted from the implementation shape. You'll take those docs to Claude Code directly to build the implementation. We won't generate the actual agents, scripts, or run files.
 
 Return to producer with `outcome: foundation_only`. Producer proceeds (downstream foundation-only-mode entry guards per `_foundation_only_mode_gate.md` handle the path; § 6 DOCUMENT-path integration reads `stop_conditions.documented_in_foundation` and emits compliance-gap section into `technical_architecture.md` at step 15 close).
 
@@ -336,36 +336,36 @@ Say verbatim to operator:
 
 > We've cycled through [<iteration count>] iterations of re-evaluation. v1 supports only `markdown-agents` shape, and `markdown-agents` doesn't meet [<framework>] compliance per stop condition [<condition number>]. Your remaining options are:
 >
-> **(i) Foundation-only mode** — I generate planning documents for your project; you implement separately, OR wait for v2 shape support that meets [<framework>] compliance natively.
+> **(i) Foundation-only mode.** I generate planning documents for your project; you implement separately, OR wait for v2 shape support that meets [<framework>] compliance natively.
 >
-> **(ii) Save and exit** — resume when v2 supports your shape, OR after you've completed an operator-side compliance review and revised your regulatory exposure assessment.
+> **(ii) Save and exit.** Resume when v2 supports your shape, OR after you've completed an operator-side compliance review and revised your regulatory exposure assessment.
 >
 > Which would you like? (Say "i" or "ii".)
 
 If operator picks (i): set producer-visible `outcome: foundation_only` + `terminal_reason: iteration_cap_reached`; route to Terminal: foundation-only handling (including `stop_conditions.documented_in_foundation` mutation per cross-slice rule above).
 If operator picks (ii): set producer-visible `outcome: scope_out` + `terminal_reason: iteration_cap_reached`; route to Terminal: scope_out handling.
 
-There is no third (b) loop entry from forced-terminal — the cap is hard. The producer NEVER sees `outcome: forced_terminal`; the module records the final operator-elected outcome (foundation_only or scope_out) instead.
+There is no third (b) loop entry from forced-terminal. The cap is hard. The producer NEVER sees `outcome: forced_terminal`; the module records the final operator-elected outcome (foundation_only or scope_out) instead.
 
 ---
 
-## Section 8 — Honest-characterization disclosure rules
+## Section 8: Honest-characterization disclosure rules
 
 Per the honest-characterization rule.
 
 The disclosure surfaces at three points:
 
-1. **At loop iteration entry (operator picks (b) at halt)** — per § 2.2 verbatim
-2. **At loop iteration entry (operator picks (c) at halt)** — per § 4.2 verbatim
-3. **At forced-terminal** — per § 7 Terminal: forced verbatim
+1. **At loop iteration entry (operator picks (b) at halt)**, per § 2.2 verbatim
+2. **At loop iteration entry (operator picks (c) at halt)**, per § 4.2 verbatim
+3. **At forced-terminal**, per § 7 Terminal: forced verbatim
 
-The disclosure is **NOT optional** — silent fallback into foundation-only without disclosure would violate the honest-characterization rule.
+The disclosure is **NOT optional**. Silent fallback into foundation-only without disclosure would violate the honest-characterization rule.
 
 **NOT silent fallback.** Foundation-only at terminal is operator-elected (operator picks "i" at forced-terminal OR (b) at unsupported-shape transition). The loop's value is operator-agency + honest discovery, not "find a passing shape silently."
 
 ---
 
-## Section 9 — Persistence schema
+## Section 9: Persistence schema
 
 Per the persistence-schema design + handoff contract § 9.
 
@@ -397,11 +397,11 @@ shape_revision:
 
 **Cross-slice mutation companion (terminal foundation_only only).** When `outcome: foundation_only` is recorded, the module also mutates the staging file's `stop_conditions` block per § 7 Terminal: foundation-only:
 
-- `fired: [<active terminal conditions only>]` — those still firing at terminal evaluation, post-all-loop-revisions (NOT historical fired list across all iterations; per advisor finding active-vs-transitional distinction)
-- `documented_in_foundation: [<same as fired>]` — POPULATED so gate module § 6 emits gaps for these
-- `resolved_during_loop: [<conditions that fired during loop but were resolved before terminal>]` — OPTIONAL audit-trail field; records transitional resolutions for diagnostic provenance; empty if no transitional resolution occurred
-- `halted: true → false` — flipped at terminal foundation-only
-- `resolved_via: stop_condition_reevaluate_loop_foundation_only` — provenance
+- `fired: [<active terminal conditions only>]`: those still firing at terminal evaluation, post-all-loop-revisions (NOT historical fired list across all iterations; per advisor finding active-vs-transitional distinction)
+- `documented_in_foundation: [<same as fired>]`: POPULATED so gate module § 6 emits gaps for these
+- `resolved_during_loop: [<conditions that fired during loop but were resolved before terminal>]`: OPTIONAL audit-trail field; records transitional resolutions for diagnostic provenance; empty if no transitional resolution occurred
+- `halted: true → false`: flipped at terminal foundation-only
+- `resolved_via: stop_condition_reevaluate_loop_foundation_only`: provenance
 
 This is NOT in the `shape_revision` block; it's an out-of-block mutation required for cross-slice integration with the foundation-only-mode gate module's § 6. gate module § 6 reads `documented_in_foundation` only; `resolved_during_loop` is audit-only and NOT consumed by the gate module (verified R2).
 
@@ -411,7 +411,7 @@ This is NOT in the `shape_revision` block; it's an out-of-block mutation require
 
 ---
 
-## Section 10 — Mechanism stack record (D2 § mechanism-stack-template)
+## Section 10: Mechanism stack record (D2 § mechanism-stack-template)
 
 Per the operational change safety spec mechanism-stack-template.
 
@@ -459,13 +459,13 @@ mvp_lifecycle: foundation-tier (gates operator-recovery path from regulatory-con
 ## Cross-references
 
 - The originating slice spec (build-side; not distributed) is the design provenance for this module.
-- `wizard/shape_detection.md` § 8.3 (stop conditions) + § 8.4 (HALT path) — stop-condition + halt protocol contracts this loop implements.
-- `wizard/interview/_foundation_only_mode_gate.md` — foundation-only-mode interaction at terminal: foundation-only branch.
+- `wizard/shape_detection.md` § 8.3 (stop conditions) + § 8.4 (HALT path): stop-condition + halt protocol contracts this loop implements.
+- `wizard/interview/_foundation_only_mode_gate.md`: foundation-only-mode interaction at terminal: foundation-only branch.
 - `wizard/shape_detection.md` § 8.3 (4 stop conditions) + § 8.4 (HALT path; cross-references this module) + § 6 (unsupported-shape transition)
 - `wizard/handoff_contracts/shape_detection_v0.md` § 7 (consumer rules) + § 9 (shape_revision block)
-- `wizard/interview/_pre_step_05_recheck.md` Step 2a — producer site #1 invocation point
-- `wizard/interview/_pre_step_08_recheck.md` Step 2 — producer site #2 invocation point
-- `wizard/interview/_foundation_only_mode_gate.md` — terminal-state handoff target (when loop converges to foundation-only)
-- the per-shape control matrix — honest characterization rule
-- the operational change safety spec § mechanism-stack-template — mechanism stack record format
-- the relevant product spec section + § 5.2 F-1 — requirements
+- `wizard/interview/_pre_step_05_recheck.md` Step 2a: producer site #1 invocation point
+- `wizard/interview/_pre_step_08_recheck.md` Step 2: producer site #2 invocation point
+- `wizard/interview/_foundation_only_mode_gate.md`: terminal-state handoff target (when loop converges to foundation-only)
+- the per-shape control matrix: honest characterization rule
+- the operational change safety spec § mechanism-stack-template: mechanism stack record format
+- the relevant product spec section + § 5.2 F-1: requirements

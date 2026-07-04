@@ -1,7 +1,7 @@
-# 11 — Error Handling
+# 11: Error Handling
 
 ## What this file does
-Configure how the system communicates when something goes wrong: notification verbosity (user choice) and the three-strikes threshold (silent default — auto-configured at 3 attempts). Includes a plain-language explanation of the difference between build-time and runtime errors. Writes configured values to the staging file for use in `project_instructions.md`.
+Configure how the system communicates when something goes wrong: notification verbosity (user choice) and the three-strikes threshold (silent default: auto-configured at 3 attempts). Includes a plain-language explanation of the difference between build-time and runtime errors. Writes configured values to the staging file for use in `project_instructions.md`.
 
 ## When this file runs
 After `10_validation.md` completes: `step_10: complete` is in `~/claude-wizard-draft/wizard_progress.md`. The staging-file `VALIDATION_CONFIGURED` mirror is a human-readable convenience, not the gate.
@@ -27,7 +27,7 @@ Do not begin ERR-1 until you are confident the full phase will complete before c
 
 ## Sub-step resume check
 
-Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_11_*` (e.g., `step_11_ERR-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker — do not re-ask completed questions, as their answers are already stored in the staging file.
+Read `~/claude-wizard-draft/wizard_progress.md`. If it contains any sub-step markers matching `step_11_*` (e.g., `step_11_ERR-1: complete`), this step was partially completed in a prior session. Skip to the first question section below that does NOT have a corresponding completion marker. Do not re-ask completed questions, as their answers are already stored in the staging file.
 
 If all sub-step markers for this step are present but the step-level marker (`step_11: complete`) is not, proceed directly to the success condition.
 
@@ -37,7 +37,7 @@ If all sub-step markers for this step are present but the step-level marker (`st
 
 Before doing anything else in this step:
 
-1. **Schema-version check (per handoff contract consumer rule).** Read `~/claude-wizard-draft/wizard_session_draft.md`; locate the `schema_versions` block under shape_hypothesis. Verify `schema_major == 1`. If `schema_major` mismatches the consumer expected major (currently `1`), abort with operator-facing internal-state error: "I hit a wizard-internal version mismatch — the staging file's shape-detection schema major is `<actual>`, but this version of the wizard expects major `1`. Your project file is saved. Please update the wizard OR resume with the matching wizard version." Exit cleanly; do NOT proceed.
+1. **Schema-version check (per handoff contract consumer rule).** Read `~/claude-wizard-draft/wizard_session_draft.md`; locate the `schema_versions` block under shape_hypothesis. Verify `schema_major == 1`. If `schema_major` mismatches the consumer expected major (currently `1`), abort with operator-facing internal-state error: "I hit a wizard-internal version mismatch: the staging file's shape-detection schema major is `<actual>`, but this version of the wizard expects major `1`. Your project file is saved. Please update the wizard OR resume with the matching wizard version." Exit cleanly; do NOT proceed.
 
 2. Locate the `shape_hypothesis.fallback_mode_offered` field.
 
@@ -50,7 +50,7 @@ Before doing anything else in this step:
 4. Branch:
    - If `produce_system_implementation == true` (label is `complete` OR `not_offered`): follow the rest of this file's existing step content below this entry guard (the wizard's normal behavior for this step).
    - If `produce_system_implementation == false` AND `produce_foundation_docs == true` (label is `foundation-only`): skip the existing step content and follow the section titled `## Foundation-only adapted path` at the end of this file.
-   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error — wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
+   - If `produce_foundation_docs == false` (label is `scope-out`): wizard-internal-state error: wizard should have exited at the unsupported-shape transition; do NOT proceed past this step. Halt with internal-error message; foundation state preserved.
 
 5. If `fallback_mode_offered` is missing from staging file entirely: wizard-internal-state error. Halt with internal-error message; foundation state preserved. Tell operator: "I hit an internal state error in the wizard. The shape hypothesis is missing. Your project file is saved at `~/claude-wizard-draft/wizard_session_draft.md`. Please resume the wizard; it'll pick up at the right step." Exit cleanly.
 
@@ -58,44 +58,44 @@ Before doing anything else in this step:
 
 ## Operator Interaction Contract
 
-Before the questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it — ground each setting in what the operator already told you, keep the ask balanced, plain voice, no filler.
+Before the questions below, read `wizard/interview/_operator_interaction_contract.md` and apply it: ground each setting in what the operator already told you, keep the ask balanced, plain voice, no filler.
 
 ---
 
-## Step opening — progress and preview
+## Step opening: progress and preview
 
 **Say:**
 
-> **Step 12 of 16 — Error handling**
+> **Step 12 of 16: Error handling**
 > We'll decide how the system tells you when something goes wrong.
 
 ---
 
 ## How to run this phase
 
-ERR-1 is a genuine personal preference — the user chooses notification verbosity from rendered examples. ERR-2 (retry threshold) is a **silent default** — the recommendation is accepted >90% of the time and the user has no basis for choosing a different value. It is set automatically and presented as an informational note, not a question. ERR-3 is an explanation the user confirms they understand. Work through them in order.
+ERR-1 is a genuine personal preference: the user chooses notification verbosity from rendered examples. ERR-2 (retry threshold) is a **silent default**: the recommendation is accepted >90% of the time and the user has no basis for choosing a different value. It is set automatically and presented as an informational note, not a question. ERR-3 is an explanation the user confirms they understand. Work through them in order.
 
 ---
 
-## ERR-1 — Notification verbosity [FIXED — topic]
+## ERR-1: Notification verbosity [FIXED: topic]
 
-Present three rendered examples of the same hypothetical error at each verbosity level. **Use the user's actual system context** — pick one of the agents from the confirmed roster and create a realistic error scenario grounded in the user's domain, read from the confirmed vision and approach content in the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`); the foundation documents emit at close, so they are not on disk yet. Do not use generic examples. The user makes a better choice when they see how notifications will actually look in their system.
+Present three rendered examples of the same hypothetical error at each verbosity level. **Use the user's actual system context**: pick one of the agents from the confirmed roster and create a realistic error scenario grounded in the user's domain, read from the confirmed vision and approach content in the transcript (`~/claude-wizard-draft/wizard_transcript.jsonl`); the foundation documents emit at close, so they are not on disk yet. Do not use generic examples. The user makes a better choice when they see how notifications will actually look in their system.
 
 **Say:**
 
-> When something goes wrong in your system, you'll get a notification. Here's the same problem written three different ways — choose the one that feels right for how you want to be kept informed.
+> When something goes wrong in your system, you'll get a notification. Here's the same problem written three different ways: choose the one that feels right for how you want to be kept informed.
 
 ---
 
-Then present three rendered examples. **Build these from the user's actual system** — pick one agent from the confirmed roster and create a realistic error for that agent's domain. The examples below are fallback structure only — replace the agent name, error scenario, and domain details with the user's real system context.
+Then present three rendered examples. **Build these from the user's actual system**: pick one agent from the confirmed roster and create a realistic error for that agent's domain. The examples below are fallback structure only. Replace the agent name, error scenario, and domain details with the user's real system context.
 
-> **Option 1 — Minimal**
+> **Option 1: Minimal**
 >
 > > [Agent name] failed. Run `./start-session.sh --resume --alert` to address.
 
 ---
 
-> **Option 2 — Standard**
+> **Option 2: Standard**
 >
 > > Your [agent name] couldn't [what it was trying to do] ([plain-language reason]). It tried [N] times and stopped. [What was or wasn't affected].
 > >
@@ -103,9 +103,9 @@ Then present three rendered examples. **Build these from the user's actual syste
 
 ---
 
-> **Option 3 — Detailed**
+> **Option 3: Detailed**
 >
-> > **[Agent name] — [failure type]**
+> > **[Agent name]: [failure type]**
 > >
 > > Your [agent name] tried to [specific action] at [time] and [what went wrong]. It retried [N] more times and stopped after [total] attempts. [Specific scope of impact].
 > >
@@ -117,13 +117,13 @@ Then present three rendered examples. **Build these from the user's actual syste
 
 ---
 
-> Which of these feels right — Minimal, Standard, or Detailed?
+> Which of these feels right: Minimal, Standard, or Detailed?
 
 **Wait for answer.**
 
 - If the user chooses one: confirm the choice and proceed.
-- If the user asks if they can change it later: "Yes — tell me at any point and I'll update it."
-- If the user is unsure: suggest Standard as the default — enough context to act without being overwhelming.
+- If the user asks if they can change it later: "Yes, tell me at any point and I'll update it."
+- If the user is unsure: suggest Standard as the default, enough context to act without being overwhelming.
 
 One note: critical alerts always use full detail regardless of your preference. If the system needs to stop completely, you'll always get the complete picture. This setting governs everything below that level.
 
@@ -133,15 +133,15 @@ Write sub-step marker: Append `step_11_ERR-1: complete | <timestamp>` to `~/clau
 
 ---
 
-## ERR-2 — Three-strikes threshold [SILENT DEFAULT]
+## ERR-2: Three-strikes threshold [SILENT DEFAULT]
 
-*This value is set automatically. Do not ask the user — a non-technical user has no basis for choosing between 2, 3, or 5 retries, and the default is accepted >90% of the time.*
+*This value is set automatically. Do not ask the user: a non-technical user has no basis for choosing between 2, 3, or 5 retries, and the default is accepted >90% of the time.*
 
 Write to the staging file: `THREE_STRIKES_THRESHOLD = 3`
 
 **After confirming the user's ERR-1 verbosity choice, add:**
 
-> I've also configured your system's retry threshold — when something goes wrong, the system will try to fix it automatically up to **3 attempts** before stopping and asking you. That's enough to handle brief glitches without spinning on a real problem. You can adjust this anytime.
+> I've also configured your system's retry threshold: when something goes wrong, the system will try to fix it automatically up to **3 attempts** before stopping and asking you. That's enough to handle brief glitches without spinning on a real problem. You can adjust this anytime.
 
 Do not wait for a response. Proceed to ERR-3.
 
@@ -149,15 +149,15 @@ Write sub-step marker: Append `step_11_ERR-2: complete | <timestamp>` to `~/clau
 
 ---
 
-## ERR-3 — Build vs. runtime distinction [EXPLANATION]
+## ERR-3: Build vs. runtime distinction [EXPLANATION]
 
 **Say:**
 
-> One more thing before we move on — there's an important difference between two types of errors, and I want to make sure it makes sense before your build starts.
+> One more thing before we move on: there's an important difference between two types of errors, and I want to make sure it makes sense before your build starts.
 >
-> **Errors during building** — when we build your agents, Claude Code will run into problems. That's normal. It's the same as any construction project: something doesn't fit, it gets adjusted. These errors are part of the process. You'll see them as part of the build output, and they get resolved as part of building.
+> **Errors during building:** when we build your agents, Claude Code will run into problems. That's normal. It's the same as any construction project: something doesn't fit, it gets adjusted. These errors are part of the process. You'll see them as part of the build output, and they get resolved as part of building.
 >
-> **Errors during operation** — once your system is running, errors mean something unexpected happened in the real world. A connection went down, data arrived in an unexpected format, an agent hit a limit. These trigger the recovery machinery: the three-strikes threshold, the alert system, the work queue.
+> **Errors during operation:** once your system is running, errors mean something unexpected happened in the real world. A connection went down, data arrived in an unexpected format, an agent hit a limit. These trigger the recovery machinery: the three-strikes threshold, the alert system, the work queue.
 >
 > The difference matters because you should expect to see errors during the build phase and not be alarmed by them. The alert system you just configured is for when your system is up and running.
 >
@@ -177,7 +177,7 @@ After ERR-1 through ERR-3, the configured values are in the staging file. They w
 
 > Error handling is configured. Your system will alert you at **[verbosity level]** and escalate to you after **[n] attempts** at any failing step.
 >
-> Next we'll set up quality preferences — how your QA agent works and how confident your system needs to be before it shows you results.
+> Next we'll set up quality preferences: how your QA agent works and how confident your system needs to be before it shows you results.
 
 Update staging file: ERROR_HANDLING_CONFIGURED = true
 
@@ -210,7 +210,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 Write the response (or "skipped") to `wizard_test_notes.md` in the project directory, tagged with step 11.
 
-**If neither condition is true:** Skip this section entirely — do not show any prompt.
+**If neither condition is true:** Skip this section entirely. Do not show any prompt.
 
 ---
 
@@ -226,7 +226,7 @@ Proceed to `12_qa_settings.md`.
 
 ## Foundation-only adapted path
 
-**Disposition: ADAPT — capture error-handling approach as foundation section; skip runtime config writes.**
+**Disposition: ADAPT. Capture error-handling approach as foundation section; skip runtime config writes.**
 
 Conduct the error-handling interview from the existing step content above (ERR-1 through ERR-3; notification verbosity + three-strikes threshold).
 
