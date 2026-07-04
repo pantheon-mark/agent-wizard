@@ -315,6 +315,14 @@ Then deliver CLOSE-14 immediately (the build prompt).
 >
 > If the scanner reports any violation, the phase FAILS. Fix every flagged write by routing it through the approved external-write operations before continuing. Do not proceed to the supervised run until the scanner exits clean.
 >
+> If Phase 1 includes a guarded external write -- an irreversible, standing-automation, or sensitive-data action -- also run the descriptor-coverage gate alongside the scanner. It confirms every guarded external mutator is covered by a descriptor-declared, ACCEPTED phase of the right risk class:
+>
+> ```
+> python3 agents/lib/external_write/coverage_gate.py agents/
+> ```
+>
+> If the coverage gate reports any uncovered mutator -- or a missing/unreadable accepted-descriptor set -- the phase FAILS. The gate fails closed: a missing input never passes, so a guarded external mutator cannot be accepted until a covering phase is accepted (which produces its accepted-descriptor set). Do not proceed to the supervised run until both the scanner and the coverage gate exit clean.
+>
 > **Step 3: Supervised run against a copy**
 >
 > Set up a copy or dummy target of any external state the agents will write to (for example, a copy of the master-list Sheet, not the live one). External state is not git-revertable, so the first run always goes against a copy. Run the Phase 1 agents with the operator present, narrating what each agent is doing and why.
