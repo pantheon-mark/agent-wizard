@@ -65,6 +65,14 @@ def _contract_canon(op_kind: str) -> dict:
         "dependency_set": list(c.dependency_set),
         "verifier_set": list(c.verifier_set),
         "introduces_persistent_binding": c.introduces_persistent_binding,
+        # B1-3 / D-B1-b (LOCKED): these three risk fields are deliberately hash-bound
+        # so a post-hoc change to any of them — most importantly a risk_class
+        # downgrade — changes both compute_contract_hash and compute_implementation_hash
+        # (the latter includes this canon via compute_implementation_hash's own
+        # "contract" section below) and invalidates any previously-accepted proof.
+        "risk_class": c.risk_class,
+        "requires_accepted_phase": c.requires_accepted_phase,
+        "blast_radius_cap": c.blast_radius_cap,
         "verifiers": [_verifier_canon(vid) for vid in sorted(c.verifier_set)],
     }
 

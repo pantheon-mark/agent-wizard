@@ -14,6 +14,8 @@ from external_write.proof_hash import (  # noqa: E402
     ACCEPTED_WRITE_REGISTRY,
     SHA256_HEX_LEN,
 )
+import external_write.contracts as _contracts  # noqa: E402
+from external_write.contracts import OperationContract  # noqa: E402
 
 _LIB_DIR = _AGENTS_LIB / "external_write"
 
@@ -97,6 +99,90 @@ class TestProofHash(unittest.TestCase):
                 h_mutated,
                 "hash must change when a dependency file's bytes change",
             )
+
+    # -- B1-3: risk fields are hash-bound (D-B1-b) -------------------------
+
+    def test_risk_class_downgrade_changes_contract_hash_and_invalidates_stale_proof(self):
+        """D-B1-b: risk_class enters _contract_canon. A post-hoc downgrade of
+        delete_record's risk_class must change compute_contract_hash's output, and a
+        registry entry accepted under the OLD hash must be rejected by is_accepted
+        once the contract has been downgraded (fail-safe: a stale accepted proof does
+        not carry over a risk-class change)."""
+        original = _contracts.OPERATION_CONTRACTS["delete_record"]
+        pre_downgrade_key = AcceptedWriteKey(
+            implementation_hash=compute_implementation_hash("delete_record", lib_dir=_LIB_DIR),
+            contract_hash=compute_contract_hash("delete_record"),
+        )
+        downgraded = OperationContract(
+            op_kind=original.op_kind, writes=original.writes, produces=original.produces,
+            dependency_set=original.dependency_set, verifier_set=original.verifier_set,
+            introduces_persistent_binding=original.introduces_persistent_binding,
+            risk_class="reversible_external",  # the downgrade under test
+            requires_accepted_phase=original.requires_accepted_phase,
+            blast_radius_cap=original.blast_radius_cap,
+        )
+        try:
+            _contracts.OPERATION_CONTRACTS["delete_record"] = downgraded
+            post_downgrade_hash = compute_contract_hash("delete_record")
+            self.assertNotEqual(pre_downgrade_key.contract_hash, post_downgrade_hash,
+                                 "downgrading risk_class must change the contract hash")
+            post_downgrade_key = AcceptedWriteKey(
+                implementation_hash=compute_implementation_hash("delete_record", lib_dir=_LIB_DIR),
+                contract_hash=post_downgrade_hash,
+            )
+            # The registry only holds the pre-downgrade key (as if accepted before the
+            # downgrade). A fresh confirm() would recompute post_downgrade_key and find
+            # no match -> the stale accepted proof is correctly rejected.
+            self.assertFalse(is_accepted(post_downgrade_key, [pre_downgrade_key]))
+        finally:
+            _contracts.OPERATION_CONTRACTS["delete_record"] = original
+
+    def test_requires_accepted_phase_change_alone_changes_contract_hash(self):
+        original = _contracts.OPERATION_CONTRACTS["delete_record"]
+        h_before = compute_contract_hash("delete_record")
+        flipped = OperationContract(
+            op_kind=original.op_kind, writes=original.writes, produces=original.produces,
+            dependency_set=original.dependency_set, verifier_set=original.verifier_set,
+            introduces_persistent_binding=original.introduces_persistent_binding,
+            risk_class=original.risk_class,
+            requires_accepted_phase=not original.requires_accepted_phase,
+            blast_radius_cap=original.blast_radius_cap,
+        )
+        try:
+            _contracts.OPERATION_CONTRACTS["delete_record"] = flipped
+            h_after = compute_contract_hash("delete_record")
+            self.assertNotEqual(h_before, h_after)
+        finally:
+            _contracts.OPERATION_CONTRACTS["delete_record"] = original
+
+    def test_blast_radius_cap_change_alone_changes_contract_hash(self):
+        original = _contracts.OPERATION_CONTRACTS["delete_record"]
+        h_before = compute_contract_hash("delete_record")
+        widened = OperationContract(
+            op_kind=original.op_kind, writes=original.writes, produces=original.produces,
+            dependency_set=original.dependency_set, verifier_set=original.verifier_set,
+            introduces_persistent_binding=original.introduces_persistent_binding,
+            risk_class=original.risk_class,
+            requires_accepted_phase=original.requires_accepted_phase,
+            blast_radius_cap=(original.blast_radius_cap or 0) + 100,
+        )
+        try:
+            _contracts.OPERATION_CONTRACTS["delete_record"] = widened
+            h_after = compute_contract_hash("delete_record")
+            self.assertNotEqual(h_before, h_after)
+        finally:
+            _contracts.OPERATION_CONTRACTS["delete_record"] = original
+
+    def test_existing_status_op_contract_hash_unaffected_by_delete_record_addition(self):
+        """Non-breaking behavior: adding delete_record must not change set_status's own
+        contract hash (each op_kind's canon is computed independently)."""
+        # This is a regression guard, not a golden hash: it recomputes from the live
+        # contract and only asserts internal self-consistency (deterministic + distinct
+        # from delete_record), never a hand-written expected digest.
+        h_status = compute_contract_hash("set_status")
+        h_status_again = compute_contract_hash("set_status")
+        self.assertEqual(h_status, h_status_again)
+        self.assertNotEqual(h_status, compute_contract_hash("delete_record"))
 
 
 if __name__ == "__main__":

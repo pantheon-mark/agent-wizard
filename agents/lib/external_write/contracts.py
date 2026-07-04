@@ -14,6 +14,25 @@ Each named operation declares, up front and machine-readably:
                         row mappings, linked records, metadata used for future writes).
                         This is the NARROW trigger for durability checks; False for
                         in-place status edits / one-shot / append-only surfaces.
+  * risk_class        — the op_kind's risk class, drawn from RISK_CLASSES below (mirrors
+                        the authoritative vocabulary in wizard/scripts/lib/
+                        dependency_projection.py RISK_CLASSES — B1-1; kept equal by a
+                        cross-tree consistency test since external_write cannot import
+                        the build-side module). Defaults to "reversible_external" so
+                        every contract predating this field keeps its prior behavior.
+  * requires_accepted_phase — True iff running this op requires a covering ACCEPTED
+                        descriptor phase (enforced by B1-4's adapter, not here).
+                        Defaults to False (existing status ops stay ungated by this
+                        flag; they are already gated by the broker + copy_run_proof).
+  * blast_radius_cap  — the op_kind's default cap on invocations per window, or None
+                        for no inherent cap (enforced by B1-4; the per-capability
+                        descriptor cap from B1-2 overrides this at enforcement time).
+                        Defaults to None.
+
+  D-B1-b (LOCKED): risk_class / requires_accepted_phase / blast_radius_cap are
+  hash-bound — they enter proof_hash._contract_canon so a post-hoc risk-class
+  downgrade (or any change to these fields) changes the contract hash and
+  invalidates a previously-accepted proof. Fail-safe by construction.
 
 A verifier declares its source lineage so the post-write validator can reject a
 verification whose declared source overlaps the operation's forbidden inputs (the
@@ -59,6 +78,24 @@ class OperationContract:
     dependency_set: Tuple[str, ...]
     verifier_set: Tuple[str, ...]
     introduces_persistent_binding: bool
+    # B1-3 risk fields (each default preserves pre-B1-3 behavior for every contract
+    # built before this change; see the module docstring and D-B1-b above).
+    risk_class: str = "reversible_external"
+    requires_accepted_phase: bool = False
+    blast_radius_cap: Optional[int] = None
+
+
+# The risk-class vocabulary, mirrored VERBATIM from wizard/scripts/lib/
+# dependency_projection.RISK_CLASSES (B1-1). external_write cannot import the
+# build-side module (separate root-of-trust tree — D-B1-a), so this is a deliberate
+# duplication guarded by a cross-tree equality test
+# (test_external_write_contracts.test_risk_classes_constant_matches_build_side_vocabulary,
+# which runs from wizard/scripts and can import both trees). If you change the values
+# here, update dependency_projection.RISK_CLASSES in the same commit, or that test fails.
+RISK_CLASSES = frozenset({
+    "read_only_local", "reversible_external", "irreversible_external",
+    "sensitive_data", "standing_automation",
+})
 
 
 # The lib modules whose source determines write behavior for the seeded in-place
@@ -99,7 +136,16 @@ VERIFIER_REGISTRY: dict = {
 
 
 def _status_contract(op_kind: str, field: str) -> OperationContract:
-    """Build a contract for an in-place status-style write (the default seeded shape)."""
+    """Build a contract for an in-place status-style write (the default seeded shape).
+
+    All seeded status ops are in-place edits on an external tracker: they ARE
+    reversible (via prestate snapshot restore), so risk_class is set explicitly
+    to "reversible_external" rather than relying on the dataclass default — the
+    intent is a deliberate classification, not an unset field that happens to
+    match the default. requires_accepted_phase / blast_radius_cap are left at
+    their defaults (False / None): these ops are already gated by the broker +
+    copy_run_proof and must not be newly restricted by B1-3.
+    """
     return OperationContract(
         op_kind=op_kind,
         writes=(field,),
@@ -107,6 +153,61 @@ def _status_contract(op_kind: str, field: str) -> OperationContract:
         dependency_set=_WRITE_AFFECTING_MODULES,
         verifier_set=("prestate_snapshot_diff_v1",),
         introduces_persistent_binding=False,
+        risk_class="reversible_external",
+    )
+
+
+def _delete_record_contract() -> OperationContract:
+    """The first NON-status, irreversible op_kind (B1-3 requirement 3).
+
+    delete_record is the generic, domain-neutral shape every irreversible external
+    delete follows (no email/Gmail-specific naming — this is the template other
+    surfaces' delete ops are cut from).
+
+      writes=("__record__",) — a delete removes the whole record, not one column
+        value; "__record__" is a sentinel (matching this module's other
+        dunder-sentinel convention, e.g. section_merge._PREAMBLE_KEY) distinct from
+        a real field name like "Status" or "Due Date".
+      produces=() — a delete does not create a new artifact.
+      dependency_set — the same write-affecting modules as every other op; the
+        module set that determines write behavior does not change for a delete.
+      verifier_set=("prestate_snapshot_diff_v1",) — a naive round-trip read-back
+        cannot verify a delete (there is nothing left to read). The registered
+        prestate_snapshot_diff_v1 verifier is nonetheless the defensible choice:
+        its declared invariant is a pre-write-snapshot vs. live-post-write-read
+        diff, and "the record present in the prestate snapshot is now ABSENT from
+        the live read" is exactly that invariant, applied to presence rather than
+        value equality. It reuses the already-registered, already-lineage-locked
+        verifier (pre_write_sources=prewrite_csv_backup, post_write_sources=
+        live_surface_read, forbidden=writer_generated_id_map/live_id_column_as_
+        truth/apply_report) rather than inventing a new platform_audit_log
+        VerifierDef whose forbidden-input lineage this task was not asked to
+        design. (See the B1-3 report for the full justification.)
+      introduces_persistent_binding=False — a delete does not introduce or rely on
+        any persistent binding future operations depend on; it removes a record,
+        it does not create stable IDs/anchors/cross-refs for later writes to key
+        off of. (This is the narrow trigger defined in the module docstring; a
+        delete does not trip it.)
+      risk_class="irreversible_external" — the whole reason this op_kind exists:
+        it is the FAIL_SAFE_RISK_CLASS in dependency_projection.py, the
+        most-protected member of RISK_CLASSES.
+      requires_accepted_phase=True — an irreversible delete may only run under a
+        covering ACCEPTED descriptor phase (enforced by B1-4).
+      blast_radius_cap=5 — irreversible ops never batch, and the slice policy
+        ceiling is ~10/session; 5 is a conservative interim per-op_kind default,
+        comfortably under that ceiling, that B1-2's per-capability descriptor cap
+        can override downward (never upward past this) at B1-4 enforcement time.
+    """
+    return OperationContract(
+        op_kind="delete_record",
+        writes=("__record__",),
+        produces=(),
+        dependency_set=_WRITE_AFFECTING_MODULES,
+        verifier_set=("prestate_snapshot_diff_v1",),
+        introduces_persistent_binding=False,
+        risk_class="irreversible_external",
+        requires_accepted_phase=True,
+        blast_radius_cap=5,
     )
 
 
@@ -116,6 +217,7 @@ OPERATION_CONTRACTS: dict = {
     "update_due_date": _status_contract("update_due_date", "Due Date"),
     "add_note": _status_contract("add_note", "Note"),
     "set_priority": _status_contract("set_priority", "Priority"),
+    "delete_record": _delete_record_contract(),
 }
 
 

@@ -128,6 +128,17 @@ class TestPostwriteVerification(unittest.TestCase):
         del rec["source_lineage"]["forbidden_sources"]
         self.assertFalse(validate_postwrite_verification(_op(), rec).ok)
 
+    def test_delete_record_flows_through_get_contract_and_verifiers(self):
+        """B1-3: the first irreversible op_kind (delete_record) must validate a
+        conforming postwrite-verification-v1 record through the normal Clause A
+        path, using its declared verifier (prestate_snapshot_diff_v1) to attest the
+        record is now absent from the live surface."""
+        rec = _good_record()
+        rec["invariant_checked"] = "the record present in the prestate snapshot is absent from the live post-write read"
+        r = validate_postwrite_verification(_op("delete_record"), rec)
+        self.assertTrue(r.ok, r.reason)
+        self.assertEqual(r.claim_strength, ClaimStrength.VERIFIED)
+
     def test_forbidden_sources_must_cover_registry_forbidden(self):
         # The record's forbidden_sources must be a superset (⊇) of the registry
         # verifier's forbidden_verification_inputs.  Omitting one registry-forbidden

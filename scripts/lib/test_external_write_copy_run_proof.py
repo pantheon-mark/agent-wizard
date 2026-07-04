@@ -65,6 +65,14 @@ class TestCopyRunProof(unittest.TestCase):
         self.assertIsInstance(r, ProofResult)
         self.assertTrue(r.ok, r.reason)
 
+    def test_delete_record_copy_run_proof_passes_with_empty_durability(self):
+        """B1-3: the first irreversible op_kind flows through the copy_run_proof
+        validator like any other non-binding op — delete_record does not introduce
+        persistent binding, so durability_checks must (and does, here) stay empty."""
+        r = validate_copy_run_proof(_proof(op_kind="delete_record"))
+        self.assertIsInstance(r, ProofResult)
+        self.assertTrue(r.ok, r.reason)
+
     def test_missing_proof_fails(self):
         self.assertFalse(validate_copy_run_proof({}).ok)
 
