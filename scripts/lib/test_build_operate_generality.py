@@ -826,12 +826,25 @@ class SupervisedCopyTargetSourceGuardTest(unittest.TestCase):
         self._assert_no_generic_placeholder(self.bundle_next_phase_text,
                                             "bundle v0.6.2 templates/wizard/skills/next-phase.md")
 
+    @unittest.expectedFailure
     def test_bundle_next_phase_matches_dev_home(self):
         """The emitted bundle next-phase.md is byte-identical to the dev home (single source
-        of truth kept in sync by hand convention; no sync script exists)."""
+        of truth kept in sync by hand convention; no sync script exists).
+
+        KNOWN PENDING DIVERGENCE (B1-7, canonical-only slice D-B1-a). B1-7 added the
+        commit-hygiene build-flow prose to the DEV-HOME wizard/skills/next-phase.md
+        (Piece 5 "Clean baseline before building" + Piece 6 "commit each accepted phase as
+        its own revertable unit"). D-B1-a forbids touching any frozen foundation-bundle in
+        this slice, so the dev home now intentionally LEADS every bundle copy; byte-identity
+        is re-established when B2 re-cuts the bundle. This is marked expectedFailure — not
+        deleted — deliberately: it stays visible as the tracked re-sync obligation, and the
+        moment B2 re-cuts the bundle (dev-home == bundle again) unittest reports it as an
+        UNEXPECTED SUCCESS and fails the suite, forcing this marker to be removed. The
+        dev-home content itself (the Piece 5/6 additions) is guarded by
+        test_commit_hygiene.CommitHygieneEmittedProseTests."""
         self.assertEqual(
             self.bundle_next_phase_text, self.next_phase_text,
-            "bundle v0.6.2 next-phase.md template diverged from wizard/skills/next-phase.md; "
+            "bundle next-phase.md template diverged from wizard/skills/next-phase.md; "
             "the two homes must be kept byte-identical",
         )
 

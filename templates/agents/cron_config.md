@@ -28,6 +28,31 @@
 
 ---
 
+## Committing scheduled-run output (commit hygiene)
+
+Every scheduled run must leave the repository in a clean, committed state — the same
+discipline an interactive session follows. A scheduled run produces output too (log
+entries, state updates, queue changes), and if that output is left uncommitted it piles
+up as unexplained working-tree noise that masks real changes and destroys the "revert to
+the last clean commit" safety net. So each scheduled job must do one of two things with
+what it writes:
+
+- **Self-commit its output.** The Orchestrator's session-close sequence runs on a
+  scheduled run exactly as it does interactively, and the always-on commit-hygiene guard
+  (`.claude/commit_hygiene.sh`, wired to `SessionEnd`) commits the code/docs/state it
+  produced — never data or secrets. This is the default: a scheduled run ends with its
+  work committed.
+- **Write only to git-ignored scratch.** If a job produces purely transient working files
+  that should not be versioned (scratch downloads, intermediate artifacts), it writes them
+  under a git-ignored scratch location so they never appear as uncommitted changes. Data
+  and secrets always go to git-ignored paths regardless (see
+  `security/gitignore_manifest.md`).
+
+A scheduled job must never leave real, committable changes sitting uncommitted in the
+working tree.
+
+---
+
 ## Maintenance mode behavior
 
 When `maintenance_mode.md` exists in the project root, all scheduled runs are skipped. This is the same session-lock file the Orchestrator creates while a session is active and clears when it finishes — so a scheduled run never collides with an in-progress session, and a deliberate maintenance pause stops scheduled work too. The cron job logs the skip reason and the scheduled time — it does not fail silently.

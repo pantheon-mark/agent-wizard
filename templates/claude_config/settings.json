@@ -17,6 +17,26 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/commit_hygiene.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/commit_hygiene.sh\" || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/commit_hygiene.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/commit_hygiene.sh\" || true",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "PreToolUse": [

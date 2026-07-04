@@ -62,6 +62,19 @@ Tell the operator:
 
 Once all credentials the phase needs are in place, continue.
 
+## Clean baseline before building (do this before Step 4)
+
+Before you build anything, make sure there is a clean, committed baseline to fall back to.
+Building on top of a pile of uncommitted changes means that if this phase goes wrong, there
+is no single clean point to revert to — the safety net that makes this reversible depends on
+a clean starting commit.
+
+Check the working tree: run `git status --porcelain`. If it reports nothing, the tree is
+clean — continue to Step 4. If it reports uncommitted changes, do not start building yet.
+First resolve them: commit the ones that are real code/docs/state (never data or secrets —
+see `security/gitignore_manifest.md`), or set aside anything that is genuinely
+work-in-progress, so the tree is clean before this phase begins. Only then continue.
+
 ## Step 4: Technical verification (silent)
 
 Read each agent prompt file for this phase at `agents/prompts/<agent>_prompt.md`. Verify each one is complete and consistent with the live foundation docs: the roster and approach in `approach.md`, the orchestration model and integrations in `technical_architecture.md`, and the autonomy boundary in `execution_plan.md`. If anything is missing or misaligned, fix it before running.
@@ -101,6 +114,8 @@ Capture the operator's answers as you go.
 ### If the operator accepts
 
 Record the verdict to `build_progress.md` with today's date and a one-sentence summary of what was accepted. Set the State column to `accepted`, Layer-A and Layer-B to their verdicts.
+
+**Commit this phase as its own revertable unit.** Once the phase is accepted, commit its work as a single, self-contained commit — the code, docs, and state this phase produced (never data or secrets — see `security/gitignore_manifest.md`), with a message naming the phase, for example `Phase NN accepted: <one-line capability>`. Keeping each accepted capability in its own commit means any one phase can be reverted cleanly on its own without unwinding the others. Do not let one commit blend two phases' work together.
 
 Tell the operator plainly: this phase is done. If there are more phases in `execution_plan.md`, let them know they can run this skill again when they are ready to continue.
 
