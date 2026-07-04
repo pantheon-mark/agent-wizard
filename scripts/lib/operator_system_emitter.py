@@ -238,7 +238,14 @@ def _full_system_consumed_keys(plan: EmissionPlan, build_repo_root: Path) -> set
              of the VISION_* fields); recorded in fdi but rendered into no doc directly,
            - CORPUS_INSTALLED_DATE / AUTONOMY_LEVEL / PROJECT_NAME: read directly by an
              emitter/orchestrator (corpus_emitter install marker; the autonomy summary;
-             plan.project_name) rather than substituted from a template body.
+             plan.project_name) rather than substituted from a template body,
+           - CAPABILITY_DESCRIPTOR_REGISTRY_ROWS (B1-2): capability_descriptor_registry.py's
+             QA-view row body. Declared here (not left to source 2) because its template
+             (wizard/templates/quality/capability_descriptor_registry.md) is canonical-only at
+             B1 (D-B1-a — no bundle cut yet), so scaffold_template_placeholders() cannot see its
+             {{CAPABILITY_DESCRIPTOR_REGISTRY_ROWS}} placeholder until the template is bundled
+             at B2; this declaration prevents a false unused-input warning the moment an
+             assembler starts populating the key, ahead of that bundle cut.
 
     Source 3 is intentionally a small, named declared set rather than threading a
     consumed-key return through every emitter — see the slice's mechanism note. A
@@ -246,6 +253,7 @@ def _full_system_consumed_keys(plan: EmissionPlan, build_repo_root: Path) -> set
     from capability_projection import INCREMENTS_FIELD  # type: ignore
     from dependency_projection import IDENTITY_FIELD, ANNOTATION_FIELD  # type: ignore
     from corpus_emitter import INSTALLED_DATE_KEY  # type: ignore
+    from capability_descriptor_registry import MARKDOWN_FIELD as DESCRIPTOR_REGISTRY_ROWS_FIELD  # type: ignore
 
     consumed: set = set()
     consumed |= required_foundation_placeholders(plan.bundle_version, build_repo_root)
@@ -258,6 +266,7 @@ def _full_system_consumed_keys(plan: EmissionPlan, build_repo_root: Path) -> set
         "CORE_PURPOSE",              # vision-group extraction source (renders into no doc directly)
         "AUTONOMY_LEVEL",            # orchestrator direct read (autonomy summary) + scaffold placeholder
         "PROJECT_NAME",              # plan.project_name + scaffold/agent structural field
+        DESCRIPTOR_REGISTRY_ROWS_FIELD,  # CAPABILITY_DESCRIPTOR_REGISTRY_ROWS (B1-2; see above)
     }
     return consumed
 

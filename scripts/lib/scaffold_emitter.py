@@ -193,6 +193,10 @@ def _default_scaffold_inputs() -> Dict[str, str]:
         "INPUT_TYPE_INVENTORY": "",
         "DOMAIN_SENSITIVITY_SETTINGS": "",
         "SOURCE_REGISTRY_ROWS": "",
+        # capability_descriptor_registry.md's QA-view row body (B1-2). No bundle template
+        # references this placeholder yet (canonical-only per D-B1-a; bundle-cut at B2), so this
+        # default is currently inert — seeded now so it resolves the moment the template is bundled.
+        "CAPABILITY_DESCRIPTOR_REGISTRY_ROWS": "",
         "ADVISOR_ENTRIES": "",
         "AUTONOMOUS_ACTIONS": "",
         "TIER_1_ADDITIONS": "",
