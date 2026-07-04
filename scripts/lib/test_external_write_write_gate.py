@@ -2,7 +2,7 @@
 wiring into run_operation.
 
 The gate is the runtime-enforcement heart of the safety substrate: the single deterministic
-chokepoint (ADR-0039) enforcing test-target-until-accepted, the blast-radius cap, and the
+chokepoint enforcing test-target-until-accepted, the blast-radius cap, and the
 F-22 / F-28 / F-29 fail-safe properties. Every test here is paired positive/negative and the
 OVERRIDING property under test is: a missing input (absent target, absent/unreadable descriptor
 set, unknown risk) must NEVER open the gate.

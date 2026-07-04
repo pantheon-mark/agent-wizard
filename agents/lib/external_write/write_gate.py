@@ -1,8 +1,8 @@
 """B1-4 — the deterministic pre-write gate: the runtime-enforcement heart of the safety
 substrate.
 
-`run_operation` (adapters.py) is the single chokepoint every external write passes through
-(ADR-0039). This module supplies the deterministic gate it runs BEFORE anything touches the
+`run_operation` (adapters.py) is the single chokepoint every external write passes through.
+This module supplies the deterministic gate it runs BEFORE anything touches the
 surface, making the design's core invariant mechanically true:
 
     No high-risk external action may run unless it is covered by a descriptor-declared,
