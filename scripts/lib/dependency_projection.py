@@ -5,7 +5,16 @@ confirms — two payload fields:
 
   EXTERNAL_DEPENDENCY_IDENTITY   (JSON array; the integration-boundary decision surface):
       [{id, name, type, roles:[boundary_input|boundary_output|health_monitored|needs_credential],
-        credential_facet?:{env_var, cred_type, provider, provisional_expiry}}]
+        credential_facet?:{env_var, cred_type, provider, provisional_expiry},
+        action_class?, risk_class?, recovery_profile_ref?, declared_test_target?,
+        blast_radius_cap?}]
+      The five `action_class?`..`blast_radius_cap?` fields are the typed capability descriptor
+      (B1-1; design §5.2 domain-neutral action taxonomy, §4.5/§4.7/F-28/F-29 risk-enforcement
+      classes) — OPTIONAL and default-safe when absent. See ACTION_CLASSES / RISK_CLASSES /
+      TEST_TARGETS below for their closed vocabularies, and `resolve_risk_class` for the
+      fail-safe resolution an absent/unrecognized `risk_class` must get (F-28: NEVER
+      read_only_local). They are stored/validated here only — B1-2 projects a descriptor
+      registry from them, B1-3 mirrors risk_class into the OperationContract, B1-4 enforces caps.
   EXTERNAL_DEPENDENCY_ANNOTATION (JSON array; content-only):
       [{id, purpose, what_stops, boundary_input_facet?:{input_risk}, health_facet?:{}}]
 
@@ -60,6 +69,40 @@ ROLE_PROJECTION: Dict[str, Optional[str]] = {
 }
 VALID_ROLES = frozenset(ROLE_PROJECTION)
 
+# --- typed capability descriptor vocabulary (B1-1) ---------------------------------------------
+# Five OPTIONAL per-dependency fields (design §5.2 domain-neutral action taxonomy; §4.5/§4.7/
+# F-28/F-29 risk-enforcement classes). Named module constants because B1-3's OperationContract
+# reuses the SAME `risk_class` string values verbatim — this module owns the source-of-truth
+# spelling for that cross-file seam.
+
+# design §5.2: "classify / transform / route / notify / mutate / delete / send-execute /
+# synchronize / retain-archive / recover / audit" plus `read_only` for a capability that only
+# reads (no side effect at all — distinct from the read_only_local RISK class below).
+ACTION_CLASSES = frozenset({
+    "classify", "transform", "route", "notify", "mutate", "delete", "send_execute",
+    "synchronize", "retain_archive", "recover", "audit", "read_only",
+})
+
+# design §4.5/§4.7/F-28/F-29: the enforcement-relevant risk class. READ_ONLY_LOCAL is the one
+# class the downstream guard must NEVER reach by silent fallback — a read-only local ingest must
+# not trip the same fail-closed path as an external delete/send, but nothing UNCLASSIFIED may
+# ever land here either (see resolve_risk_class / FAIL_SAFE_RISK_CLASS below).
+READ_ONLY_LOCAL = "read_only_local"
+RISK_CLASSES = frozenset({
+    READ_ONLY_LOCAL, "reversible_external", "irreversible_external", "sensitive_data",
+    "standing_automation",
+})
+
+# The class an absent/unrecognized risk_class resolves to (F-28: the MOST-protected class, never
+# the safe one). irreversible_external is the most-protected member of RISK_CLASSES: it is the
+# class Leg 3 (design §4.7) gates hardest (recovery-proof + blast-radius cap + per-item approval).
+FAIL_SAFE_RISK_CLASS = "irreversible_external"
+
+# design §4.5 ("only against the declared test target (copy / bounded-batch), never live"),
+# §4.7 ("dry-run by default" for the irreversible-action mode), §5.1 ("native undo" as a
+# Recovery Profile rung) — normalized to snake_case value strings.
+TEST_TARGETS = frozenset({"copy", "bounded_sample", "dry_run", "native_undo"})
+
 # Setup-time-honest literals (the fabrication discipline): nothing about observed runtime health
 # is known when the wizard runs, so it is never derived.
 RUNTIME_PLACEHOLDER = "(set at runtime)"
@@ -104,7 +147,65 @@ def parse_identity(identity_json: str) -> List[Dict[str, Any]]:
                 raise DependencyProjectionError(
                     f"{IDENTITY_FIELD}: dependency {rid!r} has unknown role {role!r}; "
                     f"valid roles: {sorted(VALID_ROLES)}")
+        _validate_descriptor_fields(r, rid)
     return rows
+
+
+def _validate_descriptor_fields(r: Dict[str, Any], rid: str) -> None:
+    """Validate the five OPTIONAL typed-capability-descriptor fields (B1-1) on one dependency
+    row. Every field is default-safe when absent — this only rejects a field that IS present
+    and malformed. Fail loud (DependencyProjectionError), matching the role-validation style
+    above, rather than resolving-to-safe: an unknown risk_class is caught here at capture time,
+    and resolve_risk_class() below is the runtime defense-in-depth for values that reach it
+    without having gone through this validator (F-28)."""
+    if "action_class" in r:
+        action_class = r.get("action_class")
+        if action_class not in ACTION_CLASSES:
+            raise DependencyProjectionError(
+                f"{IDENTITY_FIELD}: dependency {rid!r} has unknown action_class {action_class!r}; "
+                f"valid action classes: {sorted(ACTION_CLASSES)}")
+    if "risk_class" in r:
+        risk_class = r.get("risk_class")
+        if risk_class not in RISK_CLASSES:
+            raise DependencyProjectionError(
+                f"{IDENTITY_FIELD}: dependency {rid!r} has unknown risk_class {risk_class!r}; "
+                f"valid risk classes: {sorted(RISK_CLASSES)}")
+    if "recovery_profile_ref" in r:
+        ref = r.get("recovery_profile_ref")
+        if not (isinstance(ref, str) and ref.strip()):
+            raise DependencyProjectionError(
+                f"{IDENTITY_FIELD}: dependency {rid!r} has an empty recovery_profile_ref "
+                f"(omit the field entirely if there is no Recovery Profile yet)")
+    if "declared_test_target" in r:
+        target = r.get("declared_test_target")
+        if target not in TEST_TARGETS:
+            raise DependencyProjectionError(
+                f"{IDENTITY_FIELD}: dependency {rid!r} has unknown declared_test_target "
+                f"{target!r}; valid test targets: {sorted(TEST_TARGETS)}")
+    if "blast_radius_cap" in r:
+        cap = r.get("blast_radius_cap")
+        if cap is not None:
+            if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
+                raise DependencyProjectionError(
+                    f"{IDENTITY_FIELD}: dependency {rid!r} has invalid blast_radius_cap "
+                    f"{cap!r}; must be a positive integer, or null/omitted for no cap set yet")
+
+
+def resolve_risk_class(dep: Dict[str, Any]) -> str:
+    """F-28, the load-bearing safety property: resolve a dependency's effective risk_class,
+    FAIL-SAFE. Returns the literal `risk_class` value when it is present AND a member of
+    RISK_CLASSES (including READ_ONLY_LOCAL itself — an explicit safe classification is
+    honored). Returns FAIL_SAFE_RISK_CLASS (the MOST-protected class) for every other case:
+    absent, None, or any value not in RISK_CLASSES. This function must NEVER return
+    READ_ONLY_LOCAL for an absent or unrecognized value — that silent downgrade is exactly
+    the failure F-28 forbids (an unclassified writer must never be treated as a harmless
+    read-only-local ingest). Defense-in-depth alongside the parse_identity-time hard
+    validation error above: this also protects a dependency dict that reached this function
+    without having gone through parse_identity."""
+    risk_class = dep.get("risk_class")
+    if isinstance(risk_class, str) and risk_class in RISK_CLASSES:
+        return risk_class
+    return FAIL_SAFE_RISK_CLASS
 
 
 def parse_annotation(annotation_json: str) -> Dict[str, Dict[str, Any]]:

@@ -181,5 +181,166 @@ class BoundaryOutputRoleTest(unittest.TestCase):
         self.assertIsNone(dp.ROLE_PROJECTION["boundary_output"])
 
 
+# --- B1-1: typed capability descriptor fields --------------------------------------------------
+# Per-dependency OPTIONAL fields (design §5.2 domain-neutral action taxonomy; §4.5/§4.7/F-28/F-29
+# risk-enforcement classes): action_class, risk_class, recovery_profile_ref, declared_test_target,
+# blast_radius_cap. All default-safe when absent (backward compat with every pre-B1-1 record).
+
+def _dep(id_="d1", **extra):
+    row = {"id": id_, "name": "Dep", "type": "Unknown", "roles": ["boundary_output"]}
+    row.update(extra)
+    return row
+
+
+class DescriptorFieldVocabularyTest(unittest.TestCase):
+    """Pin the exact vocabulary strings — B1-3's OperationContract reuses these verbatim."""
+
+    def test_action_classes_are_the_domain_neutral_taxonomy(self):
+        self.assertEqual(dp.ACTION_CLASSES, frozenset({
+            "classify", "transform", "route", "notify", "mutate", "delete", "send_execute",
+            "synchronize", "retain_archive", "recover", "audit", "read_only",
+        }))
+
+    def test_risk_classes_include_read_only_local_as_the_named_safe_class(self):
+        self.assertEqual(dp.RISK_CLASSES, frozenset({
+            "read_only_local", "reversible_external", "irreversible_external",
+            "sensitive_data", "standing_automation",
+        }))
+        self.assertEqual(dp.READ_ONLY_LOCAL, "read_only_local")
+        self.assertIn(dp.READ_ONLY_LOCAL, dp.RISK_CLASSES)
+
+    def test_test_targets_are_the_declared_set(self):
+        self.assertEqual(dp.TEST_TARGETS, frozenset({
+            "copy", "bounded_sample", "dry_run", "native_undo",
+        }))
+
+    def test_fail_safe_risk_class_is_not_read_only_local(self):
+        """The class the resolver falls back to must itself never be the safe class."""
+        self.assertNotEqual(dp.FAIL_SAFE_RISK_CLASS, dp.READ_ONLY_LOCAL)
+        self.assertIn(dp.FAIL_SAFE_RISK_CLASS, dp.RISK_CLASSES)
+
+
+class DescriptorFieldValidationTest(unittest.TestCase):
+    def test_record_with_none_of_the_new_fields_still_validates(self):
+        """Backward compat: a pre-B1-1 record (no descriptor fields at all) is still valid."""
+        rows = dp.parse_identity(json.dumps([_dep()]))
+        self.assertEqual(len(rows), 1)
+
+    def test_well_formed_action_class_accepted(self):
+        rows = dp.parse_identity(json.dumps([_dep(action_class="mutate")]))
+        self.assertEqual(rows[0]["action_class"], "mutate")
+
+    def test_malformed_action_class_rejected(self):
+        with self.assertRaises(dp.DependencyProjectionError):
+            dp.parse_identity(json.dumps([_dep(action_class="teleport")]))
+
+    def test_well_formed_risk_class_accepted(self):
+        rows = dp.parse_identity(json.dumps([_dep(risk_class="irreversible_external")]))
+        self.assertEqual(rows[0]["risk_class"], "irreversible_external")
+
+    def test_malformed_risk_class_rejected(self):
+        with self.assertRaises(dp.DependencyProjectionError):
+            dp.parse_identity(json.dumps([_dep(risk_class="mostly_fine")]))
+
+    def test_well_formed_recovery_profile_ref_accepted(self):
+        rows = dp.parse_identity(json.dumps([_dep(recovery_profile_ref="mailbox_native_undo")]))
+        self.assertEqual(rows[0]["recovery_profile_ref"], "mailbox_native_undo")
+
+    def test_empty_recovery_profile_ref_rejected(self):
+        with self.assertRaises(dp.DependencyProjectionError):
+            dp.parse_identity(json.dumps([_dep(recovery_profile_ref="")]))
+
+    def test_well_formed_declared_test_target_accepted(self):
+        rows = dp.parse_identity(json.dumps([_dep(declared_test_target="bounded_sample")]))
+        self.assertEqual(rows[0]["declared_test_target"], "bounded_sample")
+
+    def test_malformed_declared_test_target_rejected(self):
+        with self.assertRaises(dp.DependencyProjectionError):
+            dp.parse_identity(json.dumps([_dep(declared_test_target="live")]))
+
+    def test_positive_blast_radius_cap_accepted(self):
+        rows = dp.parse_identity(json.dumps([_dep(blast_radius_cap=10)]))
+        self.assertEqual(rows[0]["blast_radius_cap"], 10)
+
+    def test_null_blast_radius_cap_accepted(self):
+        """An explicit JSON null means 'no cap set yet' — distinct from a bad value."""
+        rows = dp.parse_identity(json.dumps([_dep(blast_radius_cap=None)]))
+        self.assertIsNone(rows[0]["blast_radius_cap"])
+
+    def test_zero_blast_radius_cap_rejected(self):
+        with self.assertRaises(dp.DependencyProjectionError):
+            dp.parse_identity(json.dumps([_dep(blast_radius_cap=0)]))
+
+    def test_negative_blast_radius_cap_rejected(self):
+        with self.assertRaises(dp.DependencyProjectionError):
+            dp.parse_identity(json.dumps([_dep(blast_radius_cap=-1)]))
+
+    def test_non_integer_blast_radius_cap_rejected(self):
+        with self.assertRaises(dp.DependencyProjectionError):
+            dp.parse_identity(json.dumps([_dep(blast_radius_cap="10")]))
+
+    def test_boolean_blast_radius_cap_rejected(self):
+        """bool is a subclass of int in Python — must not sneak past as a valid cap."""
+        with self.assertRaises(dp.DependencyProjectionError):
+            dp.parse_identity(json.dumps([_dep(blast_radius_cap=True)]))
+
+    def test_all_five_descriptor_fields_together_accepted(self):
+        rows = dp.parse_identity(json.dumps([_dep(
+            action_class="send_execute", risk_class="irreversible_external",
+            recovery_profile_ref="mailbox_native_undo", declared_test_target="dry_run",
+            blast_radius_cap=5,
+        )]))
+        row = rows[0]
+        self.assertEqual(row["action_class"], "send_execute")
+        self.assertEqual(row["risk_class"], "irreversible_external")
+        self.assertEqual(row["recovery_profile_ref"], "mailbox_native_undo")
+        self.assertEqual(row["declared_test_target"], "dry_run")
+        self.assertEqual(row["blast_radius_cap"], 5)
+
+
+class DescriptorFieldSurvivesRoundTripTest(unittest.TestCase):
+    """'Fields survive role re-propagation' (interview steps 10/11/12 re-derive the whole
+    canonical record): parse_identity must pass every descriptor field straight through
+    unchanged, not project/strip to a fixed key set — the same guarantee that lets a
+    re-derivation preserve descriptor fields the operator already set."""
+
+    def test_parse_identity_preserves_all_descriptor_fields_on_the_returned_row(self):
+        original = _dep(
+            action_class="notify", risk_class="reversible_external",
+            recovery_profile_ref="ntfy_channel", declared_test_target="copy",
+            blast_radius_cap=3,
+        )
+        rows = dp.parse_identity(json.dumps([original]))
+        self.assertEqual(rows[0], original)
+
+
+class FailSafeRiskResolverTest(unittest.TestCase):
+    """F-28, the load-bearing safety property: an absent or unrecognized risk_class on a
+    dependency must resolve to the MOST-protected class, never silently to read_only_local."""
+
+    def test_unknown_risk_class_resolves_to_protected(self):
+        dep = _dep(risk_class="totally_made_up")
+        self.assertEqual(dp.resolve_risk_class(dep), dp.FAIL_SAFE_RISK_CLASS)
+
+    def test_absent_risk_class_on_a_writer_resolves_to_protected(self):
+        dep = _dep(action_class="delete")  # a writer; no risk_class set at all
+        self.assertEqual(dp.resolve_risk_class(dep), dp.FAIL_SAFE_RISK_CLASS)
+
+    def test_explicit_read_only_local_resolves_to_read_only_local(self):
+        dep = _dep(action_class="read_only", risk_class=dp.READ_ONLY_LOCAL)
+        self.assertEqual(dp.resolve_risk_class(dep), dp.READ_ONLY_LOCAL)
+
+    def test_unknown_never_resolves_to_read_only_local_regression_pin(self):
+        """Pins F-28: this is the exact regression a future 'simplify the resolver' edit could
+        introduce (falling back to the safe class instead of the protected one). If a future
+        edit makes resolve_risk_class default unknown/absent to READ_ONLY_LOCAL, this fails."""
+        for dep in (_dep(risk_class="nonsense"), _dep(), _dep(risk_class=None), _dep(risk_class=123)):
+            resolved = dp.resolve_risk_class(dep)
+            self.assertNotEqual(
+                resolved, dp.READ_ONLY_LOCAL,
+                f"resolve_risk_class must never silently downgrade {dep!r} to read_only_local")
+            self.assertEqual(resolved, dp.FAIL_SAFE_RISK_CLASS)
+
+
 if __name__ == "__main__":
     unittest.main()
