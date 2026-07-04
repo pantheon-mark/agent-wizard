@@ -21,7 +21,10 @@ Design points settled from the code (see the B1-4 report):
     run_operation, whose test-target vocabulary REUSES dependency_projection.TEST_TARGETS and
     whose copy value reuses copy_run_proof's copy-surface convention: an Operation whose
     surface is COPY_SURFACE ("copy_surface") is implicitly a copy target even with no explicit
-    target. For a gated op an ABSENT target (no arg + a non-copy surface) fails safe to refuse
+    target. A declared test target is honored ONLY when the op physically targets a recognized
+    test/copy surface (is_test_surface); a test-target claim on a live surface is refused (I1),
+    because the target string is a caller assertion and the write lands on op.surface.
+    For a gated op an ABSENT target (no arg + a non-copy surface) fails safe to refuse
     — the gate never defaults to live. Extending the Operation record was rejected: its
     canonical_repr / digest is hash-bound (broker receipts key off it) and a target is an
     execution-context signal, not part of the operation's approved identity.
@@ -78,6 +81,22 @@ LIVE_TARGET = "live"
 # copy_run_proof's copy-surface convention (copy_run_proof._synthetic_op). An Operation on this
 # surface is inherently a copy target. Reusing it is why B1-4 introduces no parallel mechanism.
 COPY_SURFACE = "copy_surface"
+
+# The recognized bounded/copy/test surfaces (I1): physical surfaces a write can land on WITHOUT
+# reaching the operator's live record. A declared test target (copy/bounded_sample/dry_run/
+# native_undo) is a caller ASSERTION about intent; it is honored only when the op physically
+# targets one of these surfaces — otherwise a caller could pass target="copy" on a live surface
+# and the write would still hit the live record. The sole convention today is copy_run_proof's
+# COPY_SURFACE; a real bounded_sample / dry_run surface is a B2 concern and must be added here
+# EXPLICITLY (never inferred), exactly like the vocabulary constants above.
+TEST_SURFACES = frozenset({COPY_SURFACE})
+
+
+def is_test_surface(surface: Any) -> bool:
+    """True iff `surface` is a recognized bounded/copy/test surface — one a write cannot use to
+    reach the operator's live record. Deterministic and fail-safe: an unrecognized surface is
+    NOT a test surface, so a claimed test target on it is refused (I1)."""
+    return surface in TEST_SURFACES
 
 
 # ---------------------------------------------------------------------------
@@ -250,9 +269,11 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
       1. Resolve the contract + effective risk class (F-28 fail-safe classification).
       2. read_only_local => never trips (design §4.5): permit untouched.
       3. Not gated (reversible_external, ungated) => permit untouched (byte-identical to pre-B1-4).
-      4. Gated => resolve target: absent => refuse; a recognized test target => permit (bounded
-         test, no acceptance/cap needed — no live blast radius); live => require a covering
-         accepted entry, then the recovery floor (F-29) and the blast-radius cap.
+      4. Gated => resolve target: absent => refuse; a recognized test target ON a recognized
+         test/copy surface => permit (bounded test, no acceptance/cap needed — no live blast
+         radius); a test target on a live surface => refuse (I1 — the target claim must bind to
+         the write surface); live => require a covering accepted entry, then the recovery floor
+         (F-29) and the blast-radius cap.
     """
     if clock is None:
         clock = system_clock
@@ -285,8 +306,20 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
             op_kind=op.op_kind, risk_class=risk_class)
 
     if resolved in TEST_TARGETS:
-        # Bounded test against the declared test target — always allowed, acceptance-independent,
-        # no live blast radius, so no cap and no ledger required.
+        # I1: a declared test target is a caller ASSERTION; it is honored ONLY when the op's
+        # surface is a recognized test/copy surface. A test target claimed on a live (non-test)
+        # surface must NOT permit — client.write would otherwise hit the live record. Fail-safe:
+        # bind the target claim to where the write physically lands.
+        if not is_test_surface(op.surface):
+            return _refuse(
+                f"gated operation refused: target {resolved!r} is a declared test target but "
+                f"the surface {op.surface!r} is not a recognized test/copy surface — a "
+                "test-target claim on a live surface is never honored (the write would hit the "
+                "live record). Route the operation to a copy/bounded test surface, or declare "
+                f"the affirmative live target and satisfy the accepted-phase gate.",
+                op_kind=op.op_kind, risk_class=risk_class, surface=op.surface)
+        # Bounded test against a recognized test/copy surface — always allowed, acceptance-
+        # independent, no live blast radius, so no cap and no ledger required.
         return _PERMIT
 
     if resolved != LIVE_TARGET:

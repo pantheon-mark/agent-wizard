@@ -141,7 +141,9 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     target:  (B1-4, keyword-only) the machine-readable target signal for a gated (high-risk)
              op: LIVE_TARGET ('live') or a declared test target ('copy'/'bounded_sample'/
              'dry_run'/'native_undo'). An op on the copy-surface convention is an implicit copy
-             target. For a gated op an ABSENT target fails safe to refuse. Ignored for the
+             target. A declared test target is honored ONLY when the op targets a recognized
+             test/copy surface (is_test_surface); a test-target claim on a live surface is
+             refused (I1). For a gated op an ABSENT target fails safe to refuse. Ignored for the
              ungated seeded status ops (read_only_local / reversible_external): the gate is a
              no-op for them and their behavior is byte-identical to pre-B1-4.
     descriptor_set: (B1-4) the accepted-descriptor set (B1-2 shape). None => loaded fail-safe

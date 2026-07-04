@@ -30,6 +30,8 @@ from external_write.write_gate import (  # noqa: E402
     evaluate_write_gate,
     system_clock,
     COPY_SURFACE,
+    TEST_SURFACES,
+    is_test_surface,
     LIVE_TARGET,
     TEST_TARGETS,
     GATED_RISK_CLASSES,
@@ -100,6 +102,15 @@ class TestGateVocabularyMatchesBuildSide(unittest.TestCase):
         # The target signal reuses copy_run_proof's copy-surface convention.
         from external_write.copy_run_proof import _synthetic_op
         self.assertEqual(_synthetic_op("delete_record", "__record__").surface, COPY_SURFACE)
+
+    def test_is_test_surface_recognizes_copy_surface_only(self):
+        # I1 predicate: COPY_SURFACE is the sole recognized test/copy surface today; a live
+        # surface (and anything unrecognized) is fail-safe NOT a test surface.
+        self.assertIn(COPY_SURFACE, TEST_SURFACES)
+        self.assertTrue(is_test_surface(COPY_SURFACE))
+        self.assertFalse(is_test_surface("google_sheets"))
+        self.assertFalse(is_test_surface(""))
+        self.assertFalse(is_test_surface(None))
 
 
 # ---------------------------------------------------------------------------
@@ -207,10 +218,30 @@ class TestDeleteRecordGating(unittest.TestCase):
         self.assertIn("accepted", result.detail["reason"].lower())
 
     def test_declared_test_target_allowed_without_acceptance(self):
-        op = _op("delete_record")
+        # A declared test target needs no acceptance — but it is honored only on a recognized
+        # test/copy surface (I1). COPY_SURFACE is that surface; the target claim binds to it.
+        op = _op("delete_record", surface=COPY_SURFACE, object_id="copy:0")
         result = run_operation(op, _receipt(op), _AcceptingClient(),
                                target="copy", descriptor_set=[])
         self.assertEqual(result.status, "written")
+
+    def test_test_target_on_live_surface_refused(self):
+        # I1: target="copy" (a declared TEST_TARGET) claimed on a LIVE (non-test) surface must
+        # be REFUSED. The target is a caller assertion; it must bind to where the write lands,
+        # or client.write would hit the live record with no acceptance / cap / audit.
+        op = _op("delete_record", surface="google_sheets", object_id="obj:live")
+        result = run_operation(op, _receipt(op), _AcceptingClient(),
+                               target="copy", descriptor_set=[])
+        self.assertEqual(result.status, "refused")
+        self.assertIn("surface", result.detail["reason"].lower())
+
+    def test_every_test_target_on_live_surface_refused(self):
+        # Not just 'copy' — EVERY declared test target claimed on a live surface is refused.
+        for tt in sorted(TEST_TARGETS):
+            op = _op("delete_record", surface="google_sheets", object_id=f"obj:{tt}")
+            result = run_operation(op, _receipt(op), _AcceptingClient(),
+                                   target=tt, descriptor_set=[])
+            self.assertEqual(result.status, "refused", tt)
 
     def test_copy_surface_convention_is_a_test_target(self):
         # Reusing copy_run_proof's copy-surface convention: surface==copy_surface is
@@ -367,7 +398,8 @@ class TestF29StandingAutomation(unittest.TestCase):
         self.assertEqual(r.status, "refused")
 
     def test_standing_automation_test_target_allowed(self):
-        op = _op("_standing_probe", field="Field")
+        # Honored on a recognized test/copy surface (I1); a live-surface copy claim would refuse.
+        op = _op("_standing_probe", field="Field", surface=COPY_SURFACE, object_id="copy:0")
         r = run_operation(op, _receipt(op), _AcceptingClient(),
                           target="copy", descriptor_set=[])
         self.assertEqual(r.status, "written")
