@@ -6,6 +6,14 @@ inside (copy_apply_proof / copy_undo_proof) and EACH verify step must pass the
 Authority clause's independent verification (an undo-proof without independent verify
 is just another false green).
 
+capability_id binds the proof to the SPECIFIC capability it proves (the descriptor id it will
+be accepted against). It is stamped by the producer (the supervised copy-run in the operator
+system) and ASSERTED by the acceptance ceremony (proof.capability_id == descriptor.id) so a
+valid proof for a different same-op-kind / same-risk capability can never cross-authorize.
+It is optional to this structural validator (older copy-run flows that never reach acceptance
+do not need it) but MANDATORY at the trust surface: the ceremony refuses a proof that is absent
+or mismatched. When present it must be a non-empty string.
+
 durability_checks[] is folded in: for operations that introduce or
 rely on persistent binding across operator-visible data, ordinary operator actions
 (sort/filter/insert/delete/move) are performed against the new structure on the copy
@@ -74,6 +82,14 @@ def validate_copy_run_proof(proof: Any) -> ProofResult:
     for fld in _REQUIRED_FIELDS:
         if fld not in proof:
             return _fail(f"copy_run_proof is missing required field {fld!r}")
+
+    # capability_id is optional to this structural validator but, when present, must be a
+    # non-empty string (the ceremony asserts it equals the target descriptor id — the trust
+    # surface, not this validator, enforces presence + match).
+    if "capability_id" in proof:
+        cid = proof["capability_id"]
+        if not (isinstance(cid, str) and cid.strip()):
+            return _fail("capability_id, when present, must be a non-empty string")
 
     op_kind = proof["op_kind"]
     contract = get_contract(op_kind)

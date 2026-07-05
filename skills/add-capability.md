@@ -146,9 +146,25 @@ Two parts of this cascade are load-bearing and must not be skipped:
 
 **The typed capability descriptor.** The output of defining a capability includes a small typed record of what it is authorized to be — its resources, its action class, its risk class, a reference to its Recovery Profile, the specific safe target its trial run is allowed to touch, and, for anything irreversible, the hard cap on how many such actions can happen in a window. This descriptor is written marked not-yet-accepted. It is the typed authorization the system's deterministic safety gates actually read — the plan text is a plain-language projection of it, not the thing the gates trust. Crucially, defining the descriptor authorizes nothing live: live use is unlocked only later, after the build proves the recovery path on a copy and the operator formally accepts the capability. Until then, the descriptor stands as "declared, not accepted," and the safety gates hold the capability to its safe trial target only.
 
-## Step F — Hand off to build it
+## Step F — Land the trust records, then hand off to build it
 
-With the capability written into the plan, the build progress, the acceptance file, and the roster, the plan and reality match again — so the plan's own authority check now passes honestly, and the work belongs to the next-phase skill. Hand off to it. It builds the capability, runs it supervised against the copy or bounded target the Recovery Profile chose (with its labelled trial-run drill), and takes the operator's business acceptance using machinery it already has. Do not rebuild any of that here.
+### Land the typed record and teach the guard (silent)
+
+Before handing off, the typed record of what this capability is authorized to be must actually be written down, and — for a high-risk capability — the quality guard taught to watch for it, in one fail-safe pass. Do this through the system's own writer, never by editing the safety records by hand.
+
+Gather the fields you settled above into a small working file — the capability's id, its plain name, its one action class, its risk class, a reference to its Recovery Profile, the specific safe target its trial run may touch, the hard cap on how many irreversible actions may happen in one window (where it applies), and the plan phase this belongs to — and write it to a working JSON file (for example under `agents/handoffs/`). Then run, silently, from the project root:
+
+```
+python3 agents/lib/external_write/capability_registration.py --descriptor "<path to that working JSON file>"
+```
+
+This lands the typed record marked not-yet-accepted and, for a high-risk capability, refreshes the quality guard's list in the same pass — all or nothing, so the guard is never left blind to a capability that was written down. It never turns anything on; granting live use comes later, only after the build proves the recovery path on a copy and the operator formally accepts.
+
+If it declines, stop. Do not write the record by hand as a fallback and do not hand off. Tell the operator plainly, in business terms, what is missing or not yet safe (for example, the capability needs its plan phase set first, or its safe trial target named), fix that, and run it again. Only a clean landing unlocks the hand-off.
+
+### Hand off to build it
+
+With the typed record landed and the plan, build progress, acceptance file, and roster all updated, the plan and reality match again — so the plan's own authority check now passes honestly, and the work belongs to the next-phase skill. Hand off to it. It builds the capability, runs it supervised against the copy or bounded target the Recovery Profile chose (with its labelled trial-run drill), and takes the operator's business acceptance — the moment live use is granted — using machinery it already has. Do not rebuild any of that here.
 
 The operator should experience one continuous flow, not a stop-and-restart. Close the define half by telling them plainly what was set up and offering the single next step — building it — the way the walkthrough does:
 

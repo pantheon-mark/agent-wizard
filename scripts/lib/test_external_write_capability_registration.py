@@ -440,6 +440,7 @@ class CeremonyRoundTripTest(unittest.TestCase):
             "schema": COPY_RUN_PROOF_SCHEMA,
             "operation_id": "op-001",
             "op_kind": "delete_record",
+            "capability_id": "google_sheets",
             "data_class": "rows",
             "copy_source_ref": "copies/copy.csv",
             "prestate_snapshot_ref": "copies/copy.prestate.csv",

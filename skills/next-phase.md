@@ -105,6 +105,14 @@ When the phase DOES include a real irreversible or outbound action, name it:
 
 The drill must be unmistakably labelled. Its purpose is to demonstrate the guardrail once, visibly, before the operator accepts the phase.
 
+### Recording the trial as proof (silent — only when this phase writes to external state)
+
+If this phase introduces a capability that writes to external state that is not undoable from git — anything the safety records mark as needing live authorization — the supervised trial is not just narrated, it is recorded, because the operator's acceptance later depends on a real, checked trial having happened.
+
+During the copy run, carry the change all the way through on the copy: make the change, undo it, and independently confirm the copy came back to exactly its starting state (apply → undo → verify-restored). Record that trial as the capability's copy-run proof at `agents/handoffs/<capability_id>.copy_run_proof.json`, and record inside it the id of the exact capability it proves — a proof stands only for the one capability it was run for, never for a similar one. Read the capability's id and its owning phase from `security/capability_descriptors.json` (the entry for this phase whose `accepted` is still false). Do not surface any of this to the operator; it is the evidence the acceptance step checks, not something they read.
+
+If the copy run cannot be carried through to a verified restore, do not proceed to acceptance. Tell the operator plainly, in business terms, that the trial did not come back cleanly and the capability is not ready to be turned on, and stop.
+
 ## Step 6: Business acceptance
 
 Read `agents/acceptance/phase_NN_acceptance.md` (the file for this phase). Walk the operator through each question in that file. Do not re-list or rephrase the questions here -- read them from the file and follow them. The acceptance file is the single source for what to ask.
@@ -112,6 +120,24 @@ Read `agents/acceptance/phase_NN_acceptance.md` (the file for this phase). Walk 
 Capture the operator's answers as you go.
 
 ### If the operator accepts
+
+Capture the operator's acceptance in their own words, exactly as they gave it — do not paraphrase it, and never supply it for them. Their explicit "yes" is what authorizes everything that follows; if they did not clearly say yes, they have not accepted.
+
+**Authorize live use (only for a capability that writes to external state).** If this phase introduced a capability that needs live authorization — the one you recorded a copy-run proof for in Step 5 — the operator's acceptance is the moment it becomes allowed to touch the live version of that external state. Until this moment the safety records hold it to its safe trial target only; turning it on for real is a deliberate, separate act, gated on a real trial having passed and on the operator's explicit yes.
+
+Do this through the system's acceptance step rather than by editing any safety record by hand — hand-editing the record that grants live use is never an acceptable shortcut. Run, silently, from the project root:
+
+```
+python3 agents/lib/external_write/operator_acceptance.py \
+  --capability-id "<the capability's id from security/capability_descriptors.json>" \
+  --phase-id "<its owning phase from the same file>" \
+  --copy-run-proof "agents/handoffs/<capability_id>.copy_run_proof.json" \
+  --operator-confirmation "<the operator's acceptance, verbatim>"
+```
+
+This mints the acceptance record from the operator's exact words and runs the one deterministic step that grants live use, but only if every safety condition still holds — the trial proof is valid and belongs to this exact capability, the risk level has not been quietly lowered since the trial, and the phase matches. If it declines, do not claim the capability is live. Tell the operator plainly, in business terms, what is not yet satisfied (for example, the safe trial needs to be re-run), and treat the phase as not accepted until it succeeds. Never present a capability as turned on when the acceptance step refused.
+
+When it succeeds, tell the operator plainly that the capability is now live and what that means for the external state it touches, in the terms that actually apply to it: if a change it makes can be brought back — a restore to a saved point, a trash it can be pulled from for a set window, a targeted backup — say so and say for how long; and where a change genuinely cannot be undone, say exactly that rather than borrowing reassurance from the fact that the capability itself can be removed later. Removing the capability is a separate thing from undoing what it did; never let one stand in for the other.
 
 Record the verdict to `build_progress.md` with today's date and a one-sentence summary of what was accepted. Set the State column to `accepted`, Layer-A and Layer-B to their verdicts.
 

@@ -76,8 +76,9 @@ def _verification():
 
 
 def _proof(op_kind=PROOF_OP_KIND, *, contract_hash=None, implementation_hash=None,
-           durability=None, accepted_for_live_use=True):
-    return {
+           durability=None, accepted_for_live_use=True, capability_id="google_sheets",
+           include_capability_id=True):
+    p = {
         "schema": COPY_RUN_PROOF_SCHEMA,
         "operation_id": "op-001",
         "op_kind": op_kind,
@@ -100,6 +101,9 @@ def _proof(op_kind=PROOF_OP_KIND, *, contract_hash=None, implementation_hash=Non
         "contract_hash": (contract_hash if contract_hash is not None
                           else compute_contract_hash(op_kind)),
     }
+    if include_capability_id:
+        p["capability_id"] = capability_id
+    return p
 
 
 def _receipt(capability_id, *, phase_id=PHASE, copy_run_proof_ref="proof.json",
@@ -335,6 +339,38 @@ class AcceptanceCeremonyTest(unittest.TestCase):
         res = c.call()
         self.assertFalse(res.accepted)
         self.assertEqual(c.original_bytes(), orig)
+
+    # -- Invariant 4b: proof BOUND to the specific capability (T3 Minor) ---
+
+    def test_proof_capability_id_mismatch_refuses(self):
+        # A valid copy_run_proof produced for a DIFFERENT capability (even same op_kind /
+        # same risk class) must not authorize accepting THIS capability. The proof↔capability
+        # join is at the specific-capability altitude, not merely the risk class.
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets")],
+                  proof=_proof(capability_id="asana"))
+        orig = c.original_bytes()
+        res = c.call(capability_id="google_sheets")
+        self.assertFalse(res.accepted)
+        self.assertIn("capability", (res.reason or "").lower())
+        self.assertEqual(c.original_bytes(), orig)
+
+    def test_proof_without_capability_id_refuses(self):
+        # Fail-safe: a proof that does not name the capability it proves cannot authorize
+        # acceptance (an unbound proof is exactly the ambiguity this binding closes).
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets")],
+                  proof=_proof(include_capability_id=False))
+        orig = c.original_bytes()
+        res = c.call(capability_id="google_sheets")
+        self.assertFalse(res.accepted)
+        self.assertEqual(c.original_bytes(), orig)
+
+    def test_proof_capability_id_match_accepts(self):
+        # The match case is the happy path: a proof naming this exact capability accepts.
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets")],
+                  proof=_proof(capability_id="google_sheets"))
+        res = c.call(capability_id="google_sheets")
+        self.assertTrue(res.accepted, res.reason)
+        self.assertEqual(c.accepted_flag("google_sheets"), True)
 
     # -- Invariant 5: operator-acceptance receipt present + bound ---------
 

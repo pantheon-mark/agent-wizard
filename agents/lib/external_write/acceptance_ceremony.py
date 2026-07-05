@@ -41,6 +41,10 @@ ceremony flips exactly that descriptor's ``accepted`` to ``true`` IFF every inva
      ``validate_copy_run_proof``). Absent, failed, or unverifiable → refuse. (delete_record and
      every gated class have a success representation via the copy machinery — the ceremony
      invents no irreversible bypass.)
+  4b. PROOF BOUND TO THIS CAPABILITY — the proof's ``capability_id`` must be present and equal
+     the target descriptor's id (== ``capability_id``). Without this the proof↔capability join
+     sits at RISK-CLASS altitude: a valid proof for a DIFFERENT same-op-kind / same-risk
+     capability would cross-authorize. Absent / non-string / mismatched → refuse.
   5. OPERATOR-ACCEPTANCE RECEIPT PRESENT + BOUND — the receipt B2-T6's next-phase Step-6 produces,
      bound to this exact acceptance (its ``capability_id`` / ``phase_id`` / ``copy_run_proof_ref``
      match the ceremony inputs and it carries a non-empty verbatim operator confirmation). Else
@@ -376,6 +380,26 @@ def accept_capability_for_live_use(
     if not proof_result.ok:
         return _refuse(
             f"copy_run_proof did not validate (apply/undo/verify-restored): {proof_result.reason}",
+            capability_id, phase_id)
+
+    # --- Invariant 4b: proof BOUND to THIS specific capability ----------------------------
+    # The proof must name the exact capability it proves and it must equal the target
+    # descriptor's id (== capability_id). Without this, a valid proof produced for a DIFFERENT
+    # same-op-kind / same-risk-class capability could satisfy the ceremony — the join would sit
+    # at risk-class altitude, not at the specific capability. Fail-safe: an absent, non-string,
+    # or mismatched proof capability_id refuses (a proof that does not name its capability cannot
+    # authorize accepting one).
+    proof_capability_id = proof.get("capability_id")
+    if not (isinstance(proof_capability_id, str) and proof_capability_id):
+        return _refuse(
+            "copy_run_proof carries no capability_id — it does not name the capability it "
+            "proves, so it cannot authorize accepting this one",
+            capability_id, phase_id)
+    if proof_capability_id != capability_id:
+        return _refuse(
+            f"copy_run_proof capability_id {proof_capability_id!r} does not match the target "
+            f"capability {capability_id!r} — the proof belongs to a different capability; "
+            "refusing (a same-risk proof must not cross-authorize)",
             capability_id, phase_id)
 
     # --- Invariant 2: no risk downgrade, verified against the hash-bound canon -------------
