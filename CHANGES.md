@@ -12,6 +12,18 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-05 — your system now picks up right where you left off (v0.10.2)
+
+**Public-facing change:** When you come back to your system — at the start of a session or after a pause — it now leads with the step you actually left off on (including a paused or half-finished task), instead of picking an unrelated item off a date list. And when it saves where things stand, it records only the version you are on right now, never a guess like "no update expected next time" that a later check could prove wrong.
+
+- **Picks up where you left off.** A saved next step, or a note left when you paused, is now what your system leads with when you come back — even if that step was only partway done or set aside for a while.
+- **Never guesses about the future.** When your system records where things stand, it writes down only the version you are on right now. It no longer writes a prediction about what will be true next time, since that is always checked fresh anyway.
+- This is a behavioral fix to two of your system's setup documents (`v0.10.2`, operator-explicit as always). Foundation documents are byte-identical to `v0.10.1`.
+
+`Source-Meta-Commit:` `PENDING` (private build repo) · public repo commit `PENDING`
+
+---
+
 ## 2026-07-05 — test a new capability safely before you accept it (v0.10.1)
 
 **Public-facing change:** When your system is trying out a new capability that changes things outside itself, it can now safely test it two new ways before you accept it — a small, capped batch on your real data (with a proven undo path), or a preview run that changes nothing at all.

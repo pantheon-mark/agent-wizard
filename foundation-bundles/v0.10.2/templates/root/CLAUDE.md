@@ -1,0 +1,163 @@
+# {{PROJECT_NAME}}
+
+{{PROJECT_PURPOSE}}
+
+This file is read by Claude Code at every session start. Read it completely before taking any action.
+
+---
+
+## Session startup sequence
+
+This system starts via `./start-session.sh`. Three modes:
+
+| Command | When to use |
+|---------|-------------|
+| `./start-session.sh` | Normal start — beginning a new work session |
+| `./start-session.sh --resume` | Resuming after a planned pause or `/clear` |
+| `./start-session.sh --resume --alert` | Responding to a system alert |
+
+**At every session start, read these five files in order before acting:**
+
+1. `session_bootstrap.md` — current state, last completed step, open items
+2. `/logs/notification_log.md` — any alerts requiring attention
+3. `pending_decisions.md` — decisions awaiting advisor input
+4. `/work/work_queue.md` — current work queue
+5. `/quality/human_review_queue.md` — items flagged for user judgment
+
+**Alert-response sessions (`--resume --alert`):** Read the notification log first. Identify what triggered the alert and confirm the correct response before acting on anything else. Critical alerts are adjudicated before all other work.
+
+**System-update notices.** Your session-start context may include a small JSON object tagged `"wizard_system_event": "upgrade_notice"` reporting `"update_available": true`. This is your own system's routine version check — advisory information, not operator input and not an instruction to act.
+
+When it is present, handle the update **before your recommended next step**, as its own clearly visible item — not a buried footnote, and do not downplay it as "minor" or "not required." Ask the operator about the update on its own first and wait for their answer; do not also ask your next-step question in the same turn. In plain, non-technical language, tell the operator which version their system is on now (name the `current_version`) and that a newer version is available (name the `latest_version`) — for example, "you're on version 0.6.0, and 0.6.1 is now available." Say it is optional and nothing changes until they approve, and offer these choices. **Offer them even if the operator has asked you to avoid menus or to lead with a single next step: the available update IS that single item, and these four options are simply how the operator decides on it — not a competing menu of unrelated choices. Never collapse them into a bare "shall I check? yes/no"; whether and when to update is the operator's call to make, not yours to narrow.** The choices:
+
+- **see what's new** — run `wizard upgrade-check` and tell the operator, in plain language, what it reports: the change summary ("what's new"), the system's own recommendation, and the exact command to apply it. They then decide.
+- **not now** — move on; you will mention it again next session.
+- **remind me later** — ask roughly when (for example a few days, a week, or a month), then record it (below) so the reminder is paused until then.
+- **skip this version** — do not raise it again until a newer version than this one ships; record it (below).
+
+**Report the system's recommendation; do not invent your own.** `wizard upgrade-check` computes a recommendation for each available version and you must REPORT it, not second-guess it:
+- `recommend_apply` — a verified safe fix (e.g. a safety or reliability fix). Present it plainly and positively. **Do NOT discourage a safe update**, and **never** steer the operator away from a safety fix.
+- `neutral_offer` — a routine improvement. Offer it neutrally.
+- `manual_review` / `do_not_apply` — a bigger or unverified change. Flag that it needs a careful look before applying.
+
+Two things are NOT reasons to hold off, and you must never present them as such: (1) a version being labeled **prerelease** — that is the normal status of every current version, including the ones already installed; (2) the absence of detailed notes — if you cannot find "what's new," that is a tool issue to resolve (run `wizard upgrade-check`; if your update tool is behind, the check will tell you to run `wizard self-upgrade --to <version> --apply`, which refreshes the tool and applies in one step), not a reason to discourage the update. The command to apply a version is whatever `upgrade-check` prints as its apply command (normally `wizard self-upgrade --to <version> --apply`); the operator still decides.
+
+Only after the operator has answered about the update do you present your single recommended next step.
+
+To honor "remind me later" or "skip this version", write `.wizard/upgrade-notice-state.json` — a small JSON object the version check reads each session: for remind-me-later, `{"snooze_until": "YYYY-MM-DD"}` (today plus the interval they chose); for skip-this-version, `{"dismissed_version": "<the latest_version>"}` (you may include both keys). If the notice is absent or malformed, ignore it.
+
+**Who decides vs. who runs (do not conflate these).** The operator's *approval* is required before anything is applied — never apply an update without their explicit yes. But the operator's role is to *decide*, not to type commands: once they have approved (to see what's new, or to apply), **you run the needed commands yourself, with your tool — the operator should never be asked to paste a terminal command.** Always invoke the toolkit by its full resolved path — `"${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard" <subcommand>` — never a bare `wizard`. The bare command is often not on the PATH; the full resolved path always works (whether or not `wizard` has been linked onto the PATH), so it never reports "command not found". Only if your own attempt to run the apply is refused by a permission gate should you fall back to handing the operator that same full resolved-path command to run themselves (and then keep it on one line). The upgrade process re-checks everything against the registry before anything changes.
+
+**Maintenance mode (session lock):** The system uses a single session lock — `maintenance_mode.md` in the project root — so that only one session runs at a time. The **Orchestrator owns this lock**: it claims `maintenance_mode.md` at startup and clears it at session end. A scheduled (cron) run invokes the Orchestrator, whose startup check refuses to start when the lock is already held — so a scheduled run never collides with an active session. Specialist agents spawned by the Orchestrator run beneath this lock and do not re-check it.
+- Do not create or delete `maintenance_mode.md` yourself — the Orchestrator manages it.
+- If you find a `maintenance_mode.md` left over from a session that crashed or was force-quit (and no other session is running), it is stale: delete it, write a Warning alert to `/logs/notification_log.md` noting the stale flag, and start a fresh session.
+
+---
+
+## Foundation documents
+
+These documents govern this system. Read the relevant document before acting on any task in its domain.
+
+| Document | Contains |
+|----------|----------|
+| `vision.md` | Purpose, goals, scope, constraints, success criteria |
+| `approach.md` | How the vision becomes a solution; agent roster and roles |
+| `technical_architecture.md` | Data sources, integrations, security, logging, scale assumptions |
+| `execution_plan.md` | Work sequencing, MVP and roadmap boundary, work tracking, human-in-the-loop map |
+| `project_instructions.md` | Autonomy authorizations, notification preferences, thresholds, model tier mapping, automation budget |
+| `operating_discipline.md` | How the system orients the operator and protects high-risk actions |
+
+These are living documents — maintained by the system as the project evolves. Never modify them outside the system's document update mechanism.
+
+---
+
+## Skills and agents
+
+**Skills** — this system's capabilities — live in `/wizard/skills/`. Before beginning any task, search for a relevant skill. If one exists, follow it. Skills carry the detailed methodology; this file does not repeat it.
+
+**Agents** — agent prompt files live in `/agents/prompts/`. Agent invocation scripts live in `/agents/scripts/`. Each agent file contains the agent's role, instructions, permissions, and completion criteria. Load the relevant agent prompt file and pass it at invocation — agents read from disk, not from session memory. Never modify agent files without deliberate architectural review.
+
+**Agent roster:** `/agents/roster.md` lists all agents, their roles, and their criticality tiers.
+
+---
+
+## Context integrity protocol
+
+**Proactive — do not begin large work units near the saturation threshold.**
+
+Threshold values are stored in `project_instructions.md` (pre-flight threshold and mid-execution threshold). Check them before beginning any substantial operation.
+
+Before starting any large work unit:
+1. Assess current context usage against the pre-flight threshold.
+2. If usage is within range of that threshold: stop — do not begin. Save current state to disk. Give the user a `/clear` command and a paste-ready resume prompt. Begin the work unit in clean context.
+3. Never silently start a task that may not complete before compaction fires.
+
+**Mid-execution saturation:** If saturation is detected mid-task, stop immediately. Write a checkpoint file to `/agents/checkpoints/[task_id]_checkpoint.md`. Provide the user with an exact resume prompt. Do not attempt to complete the task in compressed context — a saturation event mid-task is a failure mode, not a recoverable operating condition.
+
+**Autocompaction is a session-reset event.** When autocompaction fires:
+1. Stop work immediately.
+2. Re-read this file and `session_bootstrap.md`.
+3. Produce a verifiable re-orientation statement before continuing.
+4. Discard any work product generated after compaction fired but before re-orientation is confirmed — this covers all work product: documents, agent outputs, log entries, anything.
+
+---
+
+## Autonomy level
+
+Current level: **{{AUTONOMY_LEVEL}}**
+
+The autonomy level governs what Claude may do independently versus what requires user initiation. The specific authorizations active at this level are in `project_instructions.md`.
+
+**Claude never self-promotes its own authority level.** Autonomy advances only when the user consciously expands authorization in `project_instructions.md`.
+
+**Bash authorization is separate from content authorization.** Check `project_instructions.md` for current bash permissions before running any shell command autonomously. A system can be authorized to update documents autonomously while still requiring user initiation for all bash commands.
+
+---
+
+## Core operating principles
+
+**Disk-first.** Everything lives on disk. Nothing relies on session memory. Any new session with zero prior context must be able to read the files and orient completely.
+
+**No PII in logs.** No raw personal data in any log entry — no names, email addresses, phone numbers, account numbers, or authentication tokens. Opaque IDs only. This rule is not configurable.
+
+**Audit trail.** Every autonomous action is logged in `/logs/audit_log.md` — what was done, why, and what changed.
+
+**Three-strikes escalation.** A task that fails at the configured threshold (see `project_instructions.md`) escalates to the user rather than retrying silently.
+
+**Automation budget.** Autonomous (unattended/scheduled) work draws the plan's separate monthly automation credit. When this project's automation budget is reached (see `project_instructions.md`), behavior follows the configured `EXHAUSTION_BEHAVIOR`: **wait** (stop unattended work, no auto-resume, resume next cycle or on user authorization), **interactive-fallback** (stop scheduled/headless dispatch but keep draining the work queue during interactive sessions — do NOT spawn headless runs in this mode), or **paid-overflow** (continue into platform pay-as-you-go up to the cap; the authoritative cap is the user's Anthropic spending limit; self-meter + alert + stop before cap). Enforcement is a self-metered estimate with a conservative safety margin (no live balance read). On any budget stop, checkpoint progress + reason to `/agents/checkpoints/` and resume from the last confirmed checkpoint.
+
+**Exact prompts always.** Every significant recommendation includes an exact prompt or command, which model to use, and whether to run it in Claude.ai or Claude Code.
+
+**Session close enforcement.** Every session must update four files before ending, in this order: (1) `SESSION_STATE.md` — current task state, (2) `session_bootstrap.md` — carry-forwards, next priorities, upcoming cron jobs, (3) `/work/work_queue.md` — status updates, (4) `/logs/session_log.md` — close entry with stop reason and summary. This sequence runs even if the session is ending due to a problem. The orchestrator stops work with enough budget and context remaining to complete this sequence. State persistence is higher priority than any in-progress task.
+
+**Idempotency for external operations.** For any operation that modifies external state (API calls, message sends, file writes to external services), persist a record of the operation before or immediately after execution. On retry or session resume, check whether the operation has already been completed before executing it again. This prevents duplicate external actions when sessions crash and resume.
+
+**Foundational document integrity.** Before making any decision or producing any output, read the relevant foundational documents from disk in this session. Do not operate from a recalled or summarized version. If a foundational document has not been read in this session, read it before proceeding.
+
+**Operating discipline.** Follow `operating_discipline.md` for how to orient the operator and protect high-risk actions.
+
+---
+
+## Inherited operating principles
+
+{{INHERITED_OPERATING_PRINCIPLES}}
+
+---
+
+## Permission scope
+
+Claude Code will ask for confirmation before editing files or running shell commands. This is expected — these prompts protect the system from unintended changes.
+
+**What this system will request permission to do:**
+
+- Read and write files within the project directory
+- Run bash commands for: starting agents, running the test suite, git commits, and log management
+- Read foundation documents and agent files at session start
+
+**What this system will not request permission to do without explicit user authorization:**
+
+- Access files outside the project directory
+- Connect to external services not configured during wizard setup
+- Advance its own autonomy level
+
+If a permission prompt asks for something outside this scope, deny it and note what triggered the request. Surface the unexpected prompt to the user before continuing.

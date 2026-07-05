@@ -229,6 +229,19 @@
       "changelog": "When your system is trying out a new capability that changes things outside itself, it can now safely test it two new ways before you accept it — a small, capped batch on your real data (with a proven undo path), or a preview run that changes nothing at all. A capped limit and your per-item approval bound the small-batch test; the preview never writes anything.",
       "bundle_tree_sha256": "sha256:922d0cea9565aa85061073646382b2d5cb1f16f16818a0e8d0ade50c6d36a4a3",
       "bundle_manifest_sha256": "sha256:7705106059e40ac37e8c46fabdc12cf4a08785f96fd9abf4559143a62d720721"
+    },
+    {
+      "foundation_bundle_version": "v0.10.2",
+      "safety_class": "routine_improvement",
+      "recommendation_reason": "When you come back to your system, it now leads with the step you actually left off on instead of an unrelated item off a date list, and it never records a guess about a future version check.",
+      "path": "foundation-bundles/v0.10.2/",
+      "release_date": "2026-07-05",
+      "source_commit": "PENDING",
+      "manifest": "foundation-bundles/v0.10.2/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "When you come back to your system — at the start of a session or after a pause — it now leads with the step you actually left off on (including a paused or half-finished task), instead of picking an unrelated item off a date list. And when it saves where things stand, it records only the version you are on right now, never a guess like \"no update expected next time\" that a later check could prove wrong.",
+      "bundle_tree_sha256": "sha256:f4492cf8f9f2cdcfa040e85c4dddedf6bb8379925114b2d048a0d8c7ae9b048a",
+      "bundle_manifest_sha256": "sha256:f59f9d85bc32da5e61a360eea895397339a6fdb419bfcb156209de5f58da10e9"
     }
   ]
 }
