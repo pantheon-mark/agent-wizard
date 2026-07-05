@@ -223,7 +223,7 @@
       "recommendation_reason": "Your system can now test a new capability that changes things outside itself before you accept it — on a small, capped slice of your real data with a proven undo path, or in a preview that changes nothing at all.",
       "path": "foundation-bundles/v0.10.1/",
       "release_date": "2026-07-05",
-      "source_commit": "PENDING",
+      "source_commit": "5393f61",
       "manifest": "foundation-bundles/v0.10.1/manifest.yaml",
       "status": "prerelease",
       "changelog": "When your system is trying out a new capability that changes things outside itself, it can now safely test it two new ways before you accept it — a small, capped batch on your real data (with a proven undo path), or a preview run that changes nothing at all. A capped limit and your per-item approval bound the small-batch test; the preview never writes anything.",
