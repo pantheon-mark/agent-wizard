@@ -173,6 +173,22 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     if reason:
         return Result(status="refused", detail={"reason": reason})
 
+    # Step 1.5 (T2): dry_run no-mutation guarantee. The gate (Step 0) permits `dry_run`
+    # UNCONDITIONALLY (T1) precisely because THIS adapter guarantees it never reaches
+    # client.write (the sole external-write site, below) — nor the client.read read-back,
+    # nor post-write verification. A dry_run is a preview of whether the REAL write would
+    # be permitted: the gate and receipt validation above still run in full, in order, so
+    # a dry_run of a would-be-refused op still reports refused (fail-safe overriding).
+    # Once both pass, report the write that WOULD happen without ever performing it.
+    # Reuses status="written" (see adapters test module / write_gate T1 tests, which
+    # already assert status=="written" for dry_run) with an unambiguous dry_run=True
+    # detail marker — no consumer of Result.status distinguishes a real write from this.
+    if target == "dry_run":
+        detail: dict = {"dry_run": True, "simulated_value": op.new_value}
+        if _gate_audit:
+            detail.update(_gate_audit)
+        return Result(status="written", detail=detail)
+
     # Step 2: attempt write via the surface's validating path.
     try:
         client.write(op.object_id, op.field, op.new_value)

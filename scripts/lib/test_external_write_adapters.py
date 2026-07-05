@@ -71,6 +71,25 @@ class _MismatchReadBackClient:
         return "__stale_or_wrong_value__"
 
 
+class _RaisingClient:
+    """A spy client whose write/read RAISE if ever called. Used to prove a dry_run op
+    never reaches the sole external-write site (nor a read-back call) — T2's core
+    no-mutation guarantee. Any call to either method is treated as a test failure via
+    the raised AssertionError."""
+
+    def write(self, object_id, field, value):
+        raise AssertionError(
+            "client.write must NEVER be called for a dry_run operation "
+            f"(called with object_id={object_id!r}, field={field!r}, value={value!r})"
+        )
+
+    def read(self, object_id, field):
+        raise AssertionError(
+            "client.read must NEVER be called for a dry_run operation "
+            f"(called with object_id={object_id!r}, field={field!r})"
+        )
+
+
 class _UnreadableValidationClient:
     """Simulates a surface where dataValidation rules are not machine-readable.
     The surface still rejects invalid values at write time (native-API fail-fast).
@@ -358,6 +377,143 @@ class TestPostwriteVerificationAttach(unittest.TestCase):
                                postwrite_verification=rec)
         self.assertEqual(result.status, "refused")
         self.assertIn("apply_report", result.detail["reason"])
+
+
+class TestDryRunNoMutation(unittest.TestCase):
+    """T2 — the adapter-side no-mutation guarantee that makes T1's unconditional
+    dry_run gate permit safe. `client.write` is the SOLE external-write site
+    (adapters.py); these tests prove a dry_run op never reaches it (nor a
+    read-back client.read, nor postwrite verification), while the full pre-write
+    pipeline (gate, then receipt validation) still runs in order first."""
+
+    def _ungated_op(self, batch_id="dry-1"):
+        # op_kind="set_status" is one of the seeded, ungated status ops
+        # (risk_class="reversible_external") — the gate is a no-op for it either way.
+        return Operation(
+            surface="google_sheets",
+            object_id="sheet:abc123",
+            field="Status",
+            new_value="Complete",
+            op_kind="set_status",
+            batch_id=batch_id,
+        )
+
+    def _gated_op(self, batch_id="dry-2"):
+        # op_kind="delete_record" is gated (risk_class="irreversible_external",
+        # requires_accepted_phase=True, blast_radius_cap=5) — normally refused live
+        # without a covering accepted descriptor + cap ledger. dry_run permits it
+        # unconditionally at the gate (T1); this class proves the adapter never lets
+        # that permit reach client.write.
+        return Operation(
+            surface="google_sheets",
+            object_id="obj:dry-delete",
+            field="__record__",
+            new_value="<deleted>",
+            op_kind="delete_record",
+            batch_id=batch_id,
+        )
+
+    # ------------------------------------------------------------------
+    # Core no-mutation proof: a spy client whose .write RAISES if ever called.
+    # ------------------------------------------------------------------
+    def test_dry_run_never_calls_client_write_or_read(self):
+        op = self._ungated_op()
+        client = _RaisingClient()
+        receipt = _receipt(op)
+        # Must NOT raise — client.write/client.read are never invoked for dry_run.
+        result = run_operation(op, receipt, client, target="dry_run")
+        self.assertIsInstance(result, Result)
+        self.assertEqual(result.status, "written")
+        self.assertIsNotNone(result.detail)
+        self.assertTrue(result.detail.get("dry_run") is True,
+                        "dry_run Result.detail must unambiguously mark dry_run=True")
+
+    def test_dry_run_of_gated_op_never_calls_client_write(self):
+        # Same proof, but on a GATED op that would be refused live (no accepted
+        # descriptor, no cap ledger) — dry_run still permits at the gate (T1) and the
+        # adapter still never reaches client.write.
+        op = self._gated_op()
+        client = _RaisingClient()
+        receipt = _receipt(op)
+        result = run_operation(op, receipt, client, target="dry_run")
+        self.assertEqual(result.status, "written")
+        self.assertTrue(result.detail.get("dry_run") is True)
+
+    # ------------------------------------------------------------------
+    # Fail-safe overriding: receipt validation precedes the no-write return.
+    # ------------------------------------------------------------------
+    def test_dry_run_with_missing_receipt_is_refused(self):
+        op = self._ungated_op(batch_id="dry-3")
+        client = _RaisingClient()
+        result = run_operation(op, None, client, target="dry_run")
+        self.assertEqual(result.status, "refused")
+
+    def test_dry_run_with_expired_receipt_is_refused(self):
+        op = self._ungated_op(batch_id="dry-4")
+        client = _RaisingClient()
+        receipt = _receipt(op, expired=True)
+        result = run_operation(op, receipt, client, target="dry_run")
+        self.assertEqual(result.status, "refused")
+
+    def test_dry_run_with_wrong_digest_receipt_is_refused(self):
+        op = self._ungated_op(batch_id="dry-5")
+        client = _RaisingClient()
+        receipt = _receipt(op, wrong_digest=True)
+        result = run_operation(op, receipt, client, target="dry_run")
+        self.assertEqual(result.status, "refused")
+
+    # ------------------------------------------------------------------
+    # dry_run of a gated op with NO covering/declared descriptor and no cap: still
+    # permitted at the gate (T1 unconditional dry_run permit) and still no client.write.
+    # ------------------------------------------------------------------
+    def test_dry_run_of_gated_op_with_no_descriptor_or_cap_still_returns_dry_run_result(self):
+        op = self._gated_op(batch_id="dry-6")
+        client = _RaisingClient()
+        receipt = _receipt(op)
+        result = run_operation(
+            op, receipt, client, target="dry_run",
+            descriptor_set=[], cap_ledger=None,
+        )
+        self.assertEqual(result.status, "written")
+        self.assertTrue(result.detail.get("dry_run") is True)
+
+    # ------------------------------------------------------------------
+    # Faithful preview: the simulated value is surfaced in detail.
+    # ------------------------------------------------------------------
+    def test_dry_run_detail_carries_simulated_value(self):
+        op = self._ungated_op(batch_id="dry-7")
+        client = _RaisingClient()
+        receipt = _receipt(op)
+        result = run_operation(op, receipt, client, target="dry_run")
+        self.assertEqual(result.detail.get("simulated_value"), op.new_value)
+
+    # ------------------------------------------------------------------
+    # Non-dry_run behavior is unaffected: client.write is still called.
+    # ------------------------------------------------------------------
+    def test_non_dry_run_live_op_still_calls_client_write(self):
+        op = self._ungated_op(batch_id="dry-8")
+        client = _AcceptingClient()
+        receipt = _receipt(op)
+        result = run_operation(op, receipt, client)  # no target -> unaffected path
+        self.assertEqual(result.status, "written")
+        self.assertEqual(client.read("sheet:abc123", "Status"), "Complete")
+
+    def test_copy_target_op_still_calls_client_write(self):
+        # target="copy" on a recognized test/copy surface is a REAL write to that
+        # surface (unchanged/byte-identical I1 behavior) — only dry_run is no-write.
+        op = Operation(
+            surface="copy_surface",
+            object_id="obj:copy-1",
+            field="__record__",
+            new_value="<x>",
+            op_kind="delete_record",
+            batch_id="dry-9",
+        )
+        client = _AcceptingClient()
+        receipt = _receipt(op)
+        result = run_operation(op, receipt, client, target="copy")
+        self.assertEqual(result.status, "written")
+        self.assertEqual(client.read("obj:copy-1", "__record__"), "<x>")
 
 
 if __name__ == "__main__":
