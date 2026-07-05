@@ -236,7 +236,7 @@
       "recommendation_reason": "When you come back to your system, it now leads with the step you actually left off on instead of an unrelated item off a date list, and it never records a guess about a future version check.",
       "path": "foundation-bundles/v0.10.2/",
       "release_date": "2026-07-05",
-      "source_commit": "PENDING",
+      "source_commit": "0afa672",
       "manifest": "foundation-bundles/v0.10.2/manifest.yaml",
       "status": "prerelease",
       "changelog": "When you come back to your system — at the start of a session or after a pause — it now leads with the step you actually left off on (including a paused or half-finished task), instead of picking an unrelated item off a date list. And when it saves where things stand, it records only the version you are on right now, never a guess like \"no update expected next time\" that a later check could prove wrong.",
