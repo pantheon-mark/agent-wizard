@@ -1,13 +1,21 @@
-"""Tests for the B1-5 descriptor-coverage gate (external_write.coverage_gate).
+"""Tests for the B1-5/B2-T1 descriptor-coverage gate (external_write.coverage_gate).
 
 The coverage gate is the SECOND deterministic build-time safety gate, run in MA-REV
 ALONGSIDE the AST bypass scanner (scan.py) but SEPARATE from it. scan.py answers "does any
 write bypass the adapter package?"; this gate answers "is every guarded mutator covered by a
-descriptor-declared, ACCEPTED phase of the right risk class?"
+DECLARED, structurally-valid descriptor of the right risk class?"
+
+As of B2-T1, ACCEPTANCE is NOT checked here — a descriptor's ``accepted`` field is irrelevant to
+this gate. ACCEPTANCE for live writes is enforced at RUNTIME by the sibling ``write_gate`` (a
+capability runs against its declared test target until a covering phase is accepted). This split
+exists because descriptors are always emitted ``accepted: false`` and only become accepted after
+an operator accepts the BUILT capability — requiring acceptance at build time would deadlock the
+operator-originated-enhancement flow (a capability can't be accepted until built, but a
+build-time acceptance requirement would block the build until accepted).
 
 The OVERRIDING property under test is fail-closed EVERYWHERE: an absent / unreadable / malformed
 descriptor set, a join MISS for a real mutator, or any ambiguity must NEVER pass the gate. A
-write-shaped (gated) mutator with no accepted covering descriptor always FAILS. read_only_local
+write-shaped (gated) mutator with no DECLARED covering descriptor always FAILS. read_only_local
 NEVER trips.
 
 Uses synthetic descriptor-set + contract fixtures (the physical descriptor emission is B2);
@@ -30,7 +38,7 @@ from external_write import contracts as contracts_mod  # noqa: E402
 from external_write.coverage_gate import (  # noqa: E402
     evaluate_coverage_gate,
     run_coverage_gate,
-    covering_accepted_descriptor,
+    covering_declared_descriptor,
     CoverageDecision,
     CoverageFailure,
     GATED_RISK_CLASSES,
@@ -83,19 +91,21 @@ def _kinds(decision):
 # ---------------------------------------------------------------------------
 
 class TestJoinFunction(unittest.TestCase):
-    def test_join_matches_on_risk_class_and_accepted(self):
+    def test_join_matches_on_risk_class_when_accepted(self):
         ds = [_desc(risk_class="irreversible_external", accepted=True)]
-        self.assertIsNotNone(covering_accepted_descriptor("irreversible_external", ds))
+        self.assertIsNotNone(covering_declared_descriptor("irreversible_external", ds))
+
+    def test_join_matches_on_risk_class_when_unaccepted(self):
+        # B2-T1 NEW behavior: the join no longer checks ``accepted`` at all. A DECLARED entry of
+        # the matching risk_class covers the mutator regardless of acceptance status.
+        ds = [_desc(risk_class="irreversible_external", accepted=False)]
+        self.assertIsNotNone(covering_declared_descriptor("irreversible_external", ds))
 
     def test_join_miss_on_risk_class_mismatch_returns_none(self):
         # A real mutator (irreversible) against a descriptor of a DIFFERENT risk class:
         # join MISS => must return None so the caller fails closed (carried req #2).
         ds = [_desc(risk_class="reversible_external", accepted=True)]
-        self.assertIsNone(covering_accepted_descriptor("irreversible_external", ds))
-
-    def test_join_miss_on_unaccepted_returns_none(self):
-        ds = [_desc(risk_class="irreversible_external", accepted=False)]
-        self.assertIsNone(covering_accepted_descriptor("irreversible_external", ds))
+        self.assertIsNone(covering_declared_descriptor("irreversible_external", ds))
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +118,21 @@ class TestCoverageVerdict(unittest.TestCase):
         d = evaluate_coverage_gate(
             scan_violations=[],
             descriptor_set=[_desc(risk_class="irreversible_external", accepted=True)],
+            contracts_map=_GATED,
+        )
+        self.assertTrue(d.passed, d.failures)
+        self.assertEqual(d.failures, [])
+
+    def test_declared_but_unaccepted_descriptor_covers_and_passes(self):
+        # B2-T1 NEW/INTENTIONAL behavior change: a descriptor that is DECLARED (well-formed,
+        # matching risk_class) but NOT accepted (accepted: false — the state every descriptor is
+        # emitted in) now COVERS the guarded mutator and the gate PASSES. Under the prior
+        # (pre-B2-T1) semantics this same input FAILED with unaccepted_acceptance_requiring_
+        # descriptor / uncovered_mutator. Acceptance for live writes is now runtime's job
+        # (write_gate), not this build-time gate's.
+        d = evaluate_coverage_gate(
+            scan_violations=[],
+            descriptor_set=[_desc(risk_class="irreversible_external", accepted=False)],
             contracts_map=_GATED,
         )
         self.assertTrue(d.passed, d.failures)
@@ -144,22 +169,25 @@ class TestCoverageVerdict(unittest.TestCase):
         self.assertFalse(d.passed)
         self.assertIn("uncovered_mutator", _kinds(d))
 
-    def test_acceptance_requiring_descriptor_with_no_accepted_phase_fails(self):
-        # (c) An acceptance-requiring descriptor (standing_automation) with accepted:false FAILS,
-        # even though the irreversible mutator is itself covered.
+    def test_declared_unaccepted_standing_automation_descriptor_does_not_fail_alone(self):
+        # B2-T1 REMOVED leg (c): a standing_automation descriptor present in the set with
+        # accepted:false must NOT, by itself, fail the gate anymore (the old
+        # unaccepted_acceptance_requiring_descriptor leg is gone; acceptance is runtime's job).
+        # The irreversible mutator is covered by its own declared-but-unaccepted descriptor too.
         d = evaluate_coverage_gate(
             scan_violations=[],
             descriptor_set=[
-                _desc(risk_class="irreversible_external", accepted=True),
+                _desc(risk_class="irreversible_external", accepted=False),
                 _desc(id="cron_job", risk_class="standing_automation", accepted=False),
             ],
             contracts_map=_GATED,
         )
-        self.assertFalse(d.passed)
-        self.assertIn("unaccepted_acceptance_requiring_descriptor", _kinds(d))
+        self.assertTrue(d.passed, d.failures)
+        self.assertEqual(d.failures, [])
 
     def test_read_only_local_descriptor_with_no_accepted_phase_passes(self):
-        # read_only_local NEVER trips: a read_only_local descriptor needs no accepted phase.
+        # read_only_local NEVER trips: a read_only_local descriptor needs no declared/accepted
+        # phase at all.
         d = evaluate_coverage_gate(
             scan_violations=[],
             descriptor_set=[
@@ -171,8 +199,9 @@ class TestCoverageVerdict(unittest.TestCase):
         self.assertTrue(d.passed, d.failures)
 
     def test_reversible_external_descriptor_with_no_accepted_phase_passes(self):
-        # reversible_external is not acceptance-requiring (broker + copy_run_proof enforce it),
-        # so a reversible descriptor with accepted:false does not trip leg (c).
+        # reversible_external is not acceptance-requiring even under the OLD semantics (broker +
+        # copy_run_proof enforce it); under B2-T1 acceptance is irrelevant here regardless of
+        # risk class, so a reversible descriptor with accepted:false is unaffected either way.
         d = evaluate_coverage_gate(
             scan_violations=[],
             descriptor_set=[

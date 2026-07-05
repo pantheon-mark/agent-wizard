@@ -1,4 +1,4 @@
-"""B1-5 — the deterministic descriptor-COVERAGE gate: the second build-time safety gate.
+"""B1-5 / B2-T1 — the deterministic descriptor-COVERAGE gate: the second build-time safety gate.
 
 Run in MA-REV ALONGSIDE the AST bypass scanner (``scan.py``) but SEPARATE from it. The two
 gates answer complementary questions and together make the design invariant enforceable at
@@ -6,9 +6,18 @@ build time:
 
   * ``scan.py`` (unchanged, imported here, kept PURE): "does any write BYPASS the adapter
     package?" — a deterministic AST/call-graph check over the operator's scripts.
-  * THIS gate: "is every GUARDED mutator covered by a descriptor-declared, ACCEPTED phase of
+  * THIS gate: "is every GUARDED mutator covered by a DECLARED, structurally-valid descriptor of
     the right risk class?" — a deterministic projection over the in-code operation contracts
-    (``contracts.py``) joined against the machine-readable accepted-descriptor set (B1-2).
+    (``contracts.py``) joined against the machine-readable declared-descriptor set (B1-2).
+
+As of B2-T1, this gate does NOT check ``accepted``. ACCEPTANCE for live writes is enforced at
+RUNTIME by the sibling ``write_gate`` (a capability runs against its declared test target until a
+covering phase is accepted). The split exists because a descriptor is ALWAYS emitted with
+``accepted: false`` and only becomes accepted after an operator accepts the BUILT capability —
+requiring acceptance at BUILD time would deadlock the operator-originated-enhancement flow (a
+capability cannot be accepted until it is built, but a build-time acceptance requirement would
+block the build until it is accepted). So: build-time checks DECLARATION, runtime checks
+ACCEPTANCE. The two are deliberately different gates enforcing different halves of the invariant.
 
 THE OVERRIDING PROPERTY is fail-closed EVERYWHERE. A missing input — an absent/unreadable/empty
 descriptor set, a malformed entry, a join MISS for a real mutator, any ambiguity — must NEVER
@@ -21,9 +30,11 @@ The deterministic algorithm
 ------------------------------------------------------------------------------
 Inputs (all deterministic; no clock, no randomness, no LLM):
   1. ``scan_violations`` — the output of ``scan.scan_paths()`` over the phase's code.
-  2. ``descriptor_set``  — the machine-readable accepted-descriptor set (B1-2
-     ``render_descriptor_registry_json`` shape), loaded fail-closed (``[]`` when absent) via the
-     SAME loader convention B1-4 uses (``write_gate.load_accepted_descriptor_set``).
+  2. ``descriptor_set``  — the machine-readable descriptor set (B1-2
+     ``render_descriptor_registry_json`` shape; entries may be accepted or unaccepted — this gate
+     does not care), loaded fail-closed (``[]`` when absent) via the SAME loader convention B1-4
+     uses (``write_gate.load_accepted_descriptor_set``). (B2-T2 will point the build-time loader
+     at the declared-registry file specifically; unchanged in this task.)
   3. ``contracts_map``   — op_kind -> ``OperationContract`` (defaults to the real
      ``contracts.OPERATION_CONTRACTS``): the authoritative, in-code enumeration of the named
      external-write operations. This is the "guarded mutator" demand side.
@@ -39,21 +50,20 @@ The gate FAILS (phase fails, fail-closed) when ANY leg holds:
   (doing so would be fail-OPEN — a garbage entry could "cover" an irreversible mutator); it
   fails the gate outright.  [kind: ``malformed_descriptor_entry``]
 
-  (b)/(d) A write-shaped GUARDED mutator has NO covering ACCEPTED descriptor entry of its risk
+  (b)/(d) A write-shaped GUARDED mutator has NO covering DECLARED descriptor entry of its risk
       class — i.e. the op->descriptor join (below) MISSES. A guarded mutator is any op_kind whose
       contract's effective risk_class is in ``GATED_RISK_CLASSES`` OR whose contract sets
       ``requires_accepted_phase=True`` (exactly ``write_gate``'s gating boundary). A writer with
       no covering descriptor is NEVER treated as covered (carried req #1); a join miss fails
       closed and never falls through to pass (carried req #2).  [kind: ``uncovered_mutator``]
 
-  (c) A descriptor whose ``risk_class`` requires acceptance (any ``GATED_RISK_CLASSES`` member)
-      has ``accepted != True``. This supply-side sweep catches acceptance-requiring descriptors
-      that no current mutator happens to demand. ``read_only_local`` and ``reversible_external``
-      descriptors are exempt (the latter is enforced by the broker + copy_run_proof, not by the
-      descriptor/acceptance mechanism).  [kind: ``unaccepted_acceptance_requiring_descriptor``]
-
-It PASSES only when the scan is clean AND every guarded mutator has an accepted covering
-descriptor AND every acceptance-requiring descriptor is accepted.
+It PASSES only when the scan is clean AND every guarded mutator has a DECLARED covering
+descriptor of the right risk class. ACCEPTANCE is deliberately NOT checked here — a descriptor
+with ``accepted: false`` covers a mutator just as well as one with ``accepted: true``. Whether a
+live write is actually allowed to run is enforced at RUNTIME by ``write_gate`` (against its
+declared test target until a covering phase is accepted); this build-time gate only guarantees
+that a descriptor was DECLARED for every guarded mutator, so runtime always has something to
+check acceptance against.
 
 ------------------------------------------------------------------------------
 The single explicit op -> descriptor join (carried req #2)
@@ -65,18 +75,17 @@ exactly the SECONDARY join condition ``write_gate._covering_entry`` already uses
 (where ``surface`` is the primary key). At build time no surface is available on the contract, so
 this gate joins one altitude up, on ``risk_class`` alone:
 
-    ``covering_accepted_descriptor(risk_class, descriptor_set)`` returns the first descriptor
-    entry whose ``risk_class`` equals the mutator's effective risk_class AND whose ``accepted``
-    is exactly ``True`` — or ``None`` (a join MISS => the caller fails closed).
+    ``covering_declared_descriptor(risk_class, descriptor_set)`` returns the first descriptor
+    entry whose ``risk_class`` equals the mutator's effective risk_class — regardless of
+    ``accepted`` — or ``None`` (a join MISS => the caller fails closed).
 
 This is the SINGLE explicit join function; there is no other path from a mutator to a descriptor.
 Its known bound is disclosed, not silent: surface-level precision (does THIS surface's capability
-have an accepted phase?) is the RUNTIME ``write_gate``'s job — it joins on surface. This
-build-time gate enforces the contract-altitude invariant (every guarded op_kind's risk class has
-an accepted covering phase, and every acceptance-requiring descriptor is accepted). The two legs
-interlock: leg (b)/(d) needs an accepted descriptor of the mutator's risk to exist, and leg (c)
-needs EVERY acceptance-requiring descriptor accepted, so a coarse risk-class match can never let
-an un-accepted acceptance-requiring descriptor slip through.
+have an accepted phase?) is the RUNTIME ``write_gate``'s job — it joins on surface AND checks
+``accepted``. This build-time gate enforces only the contract-altitude DECLARATION invariant
+(every guarded op_kind's risk class has a declared covering phase); it deliberately does not
+enforce ACCEPTANCE — that is entirely runtime's job, checked against the same descriptor once a
+surface is known.
 
 Vocabulary constants (``GATED_RISK_CLASSES``, ``READ_ONLY_LOCAL``, ``FAIL_SAFE_RISK_CLASS``) are
 imported from ``write_gate`` — a single source, already duplicated from the build-side tree
@@ -119,8 +128,7 @@ _KNOWN_RISK_CLASSES = GATED_RISK_CLASSES | {READ_ONLY_LOCAL, "reversible_externa
 class CoverageFailure(NamedTuple):
     """One reason the coverage gate failed.
 
-    kind:   one of 'bypass_scan_violation', 'malformed_descriptor_entry',
-            'uncovered_mutator', 'unaccepted_acceptance_requiring_descriptor'.
+    kind:   one of 'bypass_scan_violation', 'malformed_descriptor_entry', 'uncovered_mutator'.
             Specific enough that a build-failure message tells the operator/agent WHAT to fix.
     detail: a human-readable description of the specific failing item.
     """
@@ -162,23 +170,23 @@ def _is_guarded_mutator(contract: OperationContract) -> bool:
 # The single explicit op -> descriptor join (carried req #2)
 # ---------------------------------------------------------------------------
 
-def covering_accepted_descriptor(
+def covering_declared_descriptor(
     risk_class: str, descriptor_set: Sequence[Dict[str, Any]]
 ) -> Optional[Dict[str, Any]]:
     """THE join function. Return the first descriptor entry that COVERS a guarded mutator of the
     given effective ``risk_class``, or ``None`` (a join MISS — the caller fails closed).
 
-    Covering requires BOTH: the entry's ``risk_class`` equals the mutator's effective risk_class
-    (the only attribute the surface-agnostic contract layer and the per-dependency descriptor
-    layer share; write_gate uses it as its secondary join condition), AND ``accepted`` is exactly
-    ``True``. Entries are assumed already validated well-formed by the caller (malformed entries
-    fail the gate before the join runs), so this never fail-safe-resolves a bad risk_class."""
+    Covering requires ONLY that the entry's ``risk_class`` equals the mutator's effective
+    risk_class (the only attribute the surface-agnostic contract layer and the per-dependency
+    descriptor layer share; write_gate uses it as its secondary join condition). ``accepted`` is
+    NOT checked — this build-time gate verifies DECLARATION, not acceptance; acceptance for live
+    writes is runtime's job (write_gate). Entries are assumed already validated well-formed by
+    the caller (malformed entries fail the gate before the join runs), so this never
+    fail-safe-resolves a bad risk_class."""
     for e in descriptor_set:
         if not isinstance(e, dict):
             continue
         if e.get("risk_class") != risk_class:
-            continue
-        if e.get("accepted") is not True:
             continue
         return e
     return None
@@ -234,34 +242,21 @@ def evaluate_coverage_gate(
     # never be silently resolved into a covering entry.
     failures.extend(_validate_entries(descriptor_set))
 
-    # (b)/(d) Demand side: every guarded mutator must have an accepted covering descriptor.
+    # (b)/(d) Demand side: every guarded mutator must have a DECLARED covering descriptor. This
+    # gate does NOT check acceptance (B2-T1) — acceptance for live writes is runtime's job
+    # (write_gate); a descriptor with accepted:false covers a mutator here just as well as one
+    # with accepted:true.
     for op_kind in sorted(contracts_map):
         contract = contracts_map[op_kind]
         if not _is_guarded_mutator(contract):
             continue  # read_only_local / plain reversible_external ops need no descriptor
         rc = _effective_contract_risk_class(contract)
-        if covering_accepted_descriptor(rc, descriptor_set) is None:
+        if covering_declared_descriptor(rc, descriptor_set) is None:
             failures.append(CoverageFailure(
                 "uncovered_mutator",
-                f"guarded mutator {op_kind!r} (risk_class {rc!r}) has no covering ACCEPTED "
-                "descriptor phase of that risk class — join MISS. A writer with no accepted "
+                f"guarded mutator {op_kind!r} (risk_class {rc!r}) has no covering DECLARED "
+                "descriptor phase of that risk class — join MISS. A writer with no declared "
                 "covering descriptor is never treated as covered."))
-
-    # (c) Supply side: every acceptance-requiring descriptor must be accepted. read_only_local
-    # and reversible_external descriptors are exempt.
-    for i, e in enumerate(descriptor_set):
-        if not isinstance(e, dict):
-            continue  # already reported malformed above
-        rc = e.get("risk_class")
-        if rc not in GATED_RISK_CLASSES:
-            continue  # read_only_local / reversible_external need no accepted phase
-        if e.get("accepted") is not True:
-            ident = e.get("id") or e.get("name") or f"#{i}"
-            failures.append(CoverageFailure(
-                "unaccepted_acceptance_requiring_descriptor",
-                f"descriptor {ident!r} (risk_class {rc!r}) requires acceptance but is not "
-                "accepted — run against its declared test target until a covering phase is "
-                "accepted."))
 
     return CoverageDecision(passed=not failures, failures=failures)
 
@@ -272,8 +267,11 @@ def run_coverage_gate(
     allowed_root: Optional[Union[str, Path]] = None,
 ) -> CoverageDecision:
     """CLI-shaped helper: scan ``paths`` for bypasses (via the PURE ``scan_paths``), load the
-    accepted-descriptor set fail-closed (via B1-4's loader — ``[]`` when absent/unreadable), read
-    the real operation contracts, and evaluate the gate. Mirrors scan.py's invocation shape."""
+    descriptor set fail-closed (via B1-4's accepted-descriptor loader — ``[]`` when
+    absent/unreadable; unchanged for this task — B2-T2 will point the build-time loader at the
+    declared-registry file specifically), read the real operation contracts, and evaluate the
+    gate. This gate does not use the ``accepted`` field of any entry it loads. Mirrors scan.py's
+    invocation shape."""
     violations = scan_paths(paths, allowed_root=allowed_root)
     descriptor_set = load_accepted_descriptor_set(descriptor_set_path)
     return evaluate_coverage_gate(
@@ -288,8 +286,9 @@ def run_coverage_gate(
 #   python3 agents/lib/external_write/coverage_gate.py <path> [<path> ...] \
 #       [--descriptor-set <path-to-accepted_descriptor_set.json>]
 #
-# Exits 0 if the gate passes (scan clean AND every guarded mutator covered by an accepted
-# descriptor AND every acceptance-requiring descriptor accepted).
+# Exits 0 if the gate passes (scan clean AND every guarded mutator covered by a DECLARED
+# descriptor of the right risk class). ACCEPTANCE is NOT checked here — that is enforced at
+# runtime by write_gate.
 # Exits 1 and prints each failure if the gate fails (phase FAILS, fail-closed).
 # ---------------------------------------------------------------------------
 
@@ -323,14 +322,17 @@ if __name__ == "__main__":  # pragma: no cover
             print(f"{_f.kind}: {_f.detail}")
         print(
             f"\n{len(_decision.failures)} coverage failure(s). The descriptor-coverage gate "
-            "FAILS: every guarded external mutator must be covered by a descriptor-declared, "
-            "ACCEPTED phase of the right risk class, and every acceptance-requiring descriptor "
-            "must be accepted. The phase cannot be accepted until every failure is resolved. "
-            "(A missing/unreadable descriptor set fails closed — it never passes.)",
+            "FAILS: every guarded external mutator must be covered by a DECLARED, "
+            "structurally-valid descriptor of the right risk class. (This gate does not check "
+            "acceptance — a live write is only allowed to run once its covering descriptor is "
+            "accepted, which write_gate enforces at runtime.) The build cannot proceed until "
+            "every failure is resolved. (A missing/unreadable descriptor set fails closed — it "
+            "never passes.)",
             file=_sys.stderr,
         )
         _sys.exit(1)
     else:
-        print("Descriptor-coverage gate passed — every guarded mutator is covered by an "
-              "accepted descriptor phase and no acceptance-requiring descriptor is un-accepted.")
+        print("Descriptor-coverage gate passed — every guarded mutator is covered by a "
+              "declared descriptor phase of the right risk class. (Acceptance for live writes "
+              "is enforced separately, at runtime, by write_gate.)")
         _sys.exit(0)
