@@ -62,7 +62,7 @@ This is a feature addition (`v0.10.0`, operator-explicit as always). Foundation 
 
 This is a feature addition (`v0.9.0`, operator-explicit as always). Foundation documents are byte-identical to `v0.8.0`. Your own files, data, rules, credentials, and logs are untouched; a backup is taken before anything is applied.
 
-`Source-Meta-Commit:` `84cc910` (private build repo) · public repo commit `dc6ef61`
+`Source-Meta-Commit:` `84cc910` (private build repo) · public repo commit `dc6ef61` · registry `source_commit` backfilled to `84cc910` (2026-07-05 provenance housekeeping; was `pending`)
 
 ---
 

@@ -197,7 +197,7 @@
       "recommendation_reason": "Adds an integrity contract for changes your system makes to data outside itself — independent verification, copy-first proof, and proven undo.",
       "path": "foundation-bundles/v0.9.0/",
       "release_date": "2026-06-27",
-      "source_commit": "pending",
+      "source_commit": "84cc910",
       "manifest": "foundation-bundles/v0.9.0/manifest.yaml",
       "status": "prerelease",
       "changelog": "Changes your system makes to data outside itself now carry an integrity contract: success is confirmed through an independent route (never by re-reading its own write), new write logic is proven on a copy before first live use, and undo is proven to restore your data.",
