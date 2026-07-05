@@ -1,0 +1,141 @@
+# Migration manifest for foundation bundle v0.10.1
+# Patch-behavioral release over v0.10.0: adds two new safe ways to test an external-write
+# capability before it goes live (bounded live-sample with proven undo; no-mutation dry-run
+# preview). Combined-jump entries from v0.9.0/v0.8.0/v0.7.0/v0.6.9 deliver the v0.10.0
+# enhancement-flow content plus this patch in one step. JSON sidecar is authoritative.
+_note: JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing
+  companion. Both files MUST stay in sync.
+artifact_notes:
+  .claude/commit_hygiene.sh: An always-on guard that keeps a clean baseline before building and commits
+    each accepted phase as its own revertable unit.
+  agents/lib/external_write/acceptance_ceremony.py: The sole deterministic writer that flips a built capability's
+    descriptor from not-accepted to accepted, once the operator has approved it.
+  agents/lib/external_write/adapters.py: Now guarantees a dry_run preview never reaches the external write,
+    the read-back, or verification — it can only report what a real write would have done.
+  agents/lib/external_write/capability_registration.py: Registers an operator-originated capability (one
+    the operator asks for mid-run) into the descriptor set with its risk class and protections.
+  agents/lib/external_write/coverage_gate.py: 'Build-time gate: checks that every declared write-back
+    capability has a matching risk descriptor before a phase can be built (declaration coverage, not acceptance).'
+  agents/lib/external_write/operations.py: Now distinguishes, in the recorded operation detail, between
+    a real write confirmed by read-back and a dry_run simulation that touched nothing, so the two are
+    never confused in the record.
+  agents/lib/external_write/operator_acceptance.py: The path by which the operator acts on an acceptance
+    — recording their decision so the acceptance ceremony can proceed.
+  agents/lib/external_write/write_gate.py: 'Runtime gate: now recognizes two safe test-target classes
+    ahead of a live write — a capped, undo-proven live-sample test and a no-mutation dry-run preview —
+    enforced by live blast radius, not by the word "test".'
+  docs/document_impact_map.md: Records the operator-originated-capability registration as a document-impacting
+    event.
+  operating_discipline.md: Updated so off-plan requests are routed into the enhancement flow, and update
+    notices are carved out of the single-next-step rule.
+  project_instructions.md: Updated to describe the enhancement flow and its voice rules for handling off-plan
+    requests.
+  quality/capability_descriptor_registry.md: A readable view of the capability descriptor set for quality
+    review. Operator-reviewed on upgrade.
+  quality/co-protected-workflows.md: Now lists the workflows tied to each registered capability so co-protected
+    steps are visible. Operator-reviewed on upgrade.
+  security/capability_descriptors.json: New machine-readable record of every write-back capability your
+    system has, its risk class, and whether you have accepted it. Operator-reviewed on upgrade (never
+    overwritten).
+  wizard/skills/add-capability.md: 'New skill: when you ask for something outside the current plan, your
+    system routes the request into a define-then-build-then-accept flow instead of doing it ad hoc.'
+  wizard/skills/next-phase.md: Off-plan next-phase requests are now routed into the add-capability enhancement
+    flow.
+migrations:
+- breaking_changes_summary: ''
+  class: patch-behavioral
+  from: v0.10.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's
+    yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard" self-upgrade --to
+    v0.10.1 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs
+    are never touched.
+  notes: 'Patch-behavioral release to v0.10.1: adds two new safe ways to test an external-write capability
+    on real data before it goes live — a small, capped live-sample test with a proven undo path, and a
+    preview run that changes nothing at all. No new capabilities register and no breaking changes; foundation
+    documents and schema are byte-identical to v0.10.0.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.10.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.10.1/ and set foundation_bundle_version back to v0.10.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.9.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's
+    yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard" self-upgrade --to
+    v0.10.1 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs
+    are never touched.
+  notes: 'Minor-additive combined jump from v0.9.0 straight to v0.10.1: delivers the operator-originated-enhancement
+    flow (the build-time coverage gate and runtime write gate, the acceptance ceremony, capability registration
+    and operator-acceptance modules, a new add-capability skill, a machine-readable capability descriptor
+    set, and an always-on commit-hygiene guard) PLUS the new pre-acceptance test surfaces (a small, capped
+    live-sample test with a proven undo path, and a no-mutation preview run). No breaking changes; all
+    prior operator project files remain valid.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.9.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.10.1/ and set foundation_bundle_version back to v0.9.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.8.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's
+    yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard" self-upgrade --to
+    v0.10.1 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs
+    are never touched.
+  notes: 'Minor-additive combined jump from v0.8.0 straight to v0.10.1: delivers the operator-originated-enhancement
+    flow (the build-time coverage gate and runtime write gate, the acceptance ceremony, capability registration
+    and operator-acceptance modules, a new add-capability skill, a machine-readable capability descriptor
+    set, and an always-on commit-hygiene guard) PLUS the new pre-acceptance test surfaces (a small, capped
+    live-sample test with a proven undo path, and a no-mutation preview run). No breaking changes; all
+    prior operator project files remain valid.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.8.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.10.1/ and set foundation_bundle_version back to v0.8.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.7.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's
+    yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard" self-upgrade --to
+    v0.10.1 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs
+    are never touched.
+  notes: 'Minor-additive combined jump from v0.7.0 straight to v0.10.1: delivers the operator-originated-enhancement
+    flow (the build-time coverage gate and runtime write gate, the acceptance ceremony, capability registration
+    and operator-acceptance modules, a new add-capability skill, a machine-readable capability descriptor
+    set, and an always-on commit-hygiene guard) PLUS the new pre-acceptance test surfaces (a small, capped
+    live-sample test with a proven undo path, and a no-mutation preview run). No breaking changes; all
+    prior operator project files remain valid.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.7.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.10.1/ and set foundation_bundle_version back to v0.7.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.6.9
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's
+    yes, the assistant applies it ("${WIZARD_HOME:-$HOME/agent-wizard}/scripts/wizard" self-upgrade --to
+    v0.10.1 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs
+    are never touched.
+  notes: 'Minor-additive combined jump from v0.6.9 straight to v0.10.1: delivers the operator-originated-enhancement
+    flow (the build-time coverage gate and runtime write gate, the acceptance ceremony, capability registration
+    and operator-acceptance modules, a new add-capability skill, a machine-readable capability descriptor
+    set, and an always-on commit-hygiene guard) PLUS the new pre-acceptance test surfaces (a small, capped
+    live-sample test with a proven undo path, and a no-mutation preview run). No breaking changes; all
+    prior operator project files remain valid.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.9 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.10.1/ and set foundation_bundle_version back to v0.6.9.
+  stop_condition: not_applicable
+  supported: true
+release_classification: patch_behavioral_prerelease
+release_date: '2026-07-05'
+schema_version: v1
+target_version: v0.10.1

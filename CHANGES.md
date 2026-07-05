@@ -12,6 +12,18 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-05 — test a new capability safely before you accept it (v0.10.1)
+
+**Public-facing change:** When your system is trying out a new capability that changes things outside itself, it can now safely test it two new ways before you accept it — a small, capped batch on your real data (with a proven undo path), or a preview run that changes nothing at all.
+
+- **A small, capped test on your real data.** A capped limit and your per-item approval bound the test, so trying a new capability out never runs unchecked against everything at once.
+- **A preview that changes nothing.** The system can also show you exactly what a new capability would do without writing anything at all — a true no-op preview, never a partial or simulated write.
+- This is a behavioral fix to how new capabilities are tested before acceptance (`v0.10.1`, operator-explicit as always). Foundation documents are byte-identical to `v0.10.0`.
+
+`Source-Meta-Commit:` `<PENDING>` (private build repo) · public repo commit `<PENDING>`
+
+---
+
 ## 2026-07-05 — add a new capability to your system after it is built, with the same guardrails as the original build (v0.10.0)
 
 **Public-facing change:** This turns on the "add a new capability" feature whose groundwork shipped earlier. When you ask your system for something outside its current plan, it no longer does it ad hoc — it defines the new capability, builds it, and records your acceptance before it goes live, with the same care and guardrails as the original build.

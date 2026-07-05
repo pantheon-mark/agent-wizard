@@ -216,6 +216,19 @@
       "changelog": "Adds the operator-originated-enhancement flow: when you ask for something outside the current plan, your system now defines it, builds it, and records your acceptance before it goes live — with a build-time coverage check and a runtime write gate that ensure every capability that writes outside your system is declared, risk-classified, and approved by you. Includes a new add-capability skill, a machine-readable record of your system's write-back capabilities and their acceptance state, and an always-on commit-hygiene guard that keeps a clean baseline before building and commits each accepted phase as its own revertable unit. Systems that never write outside themselves carry none of the write-gating. Your own data, rules, credentials, and logs are untouched.",
       "bundle_tree_sha256": "sha256:5e52f449d647203146e0bbe6ece526652e61fb54ccb63108e92b4c26306f00df",
       "bundle_manifest_sha256": "sha256:6f06b47dde604627b87ae227751ba623eb99a756d19548b49cb477e0e7cd69f2"
+    },
+    {
+      "foundation_bundle_version": "v0.10.1",
+      "safety_class": "routine_improvement",
+      "recommendation_reason": "Your system can now test a new capability that changes things outside itself before you accept it — on a small, capped slice of your real data with a proven undo path, or in a preview that changes nothing at all.",
+      "path": "foundation-bundles/v0.10.1/",
+      "release_date": "2026-07-05",
+      "source_commit": "PENDING",
+      "manifest": "foundation-bundles/v0.10.1/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "When your system is trying out a new capability that changes things outside itself, it can now safely test it two new ways before you accept it — a small, capped batch on your real data (with a proven undo path), or a preview run that changes nothing at all. A capped limit and your per-item approval bound the small-batch test; the preview never writes anything.",
+      "bundle_tree_sha256": "sha256:922d0cea9565aa85061073646382b2d5cb1f16f16818a0e8d0ade50c6d36a4a3",
+      "bundle_manifest_sha256": "sha256:7705106059e40ac37e8c46fabdc12cf4a08785f96fd9abf4559143a62d720721"
     }
   ]
 }
