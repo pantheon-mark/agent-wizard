@@ -20,7 +20,7 @@ Entries appear newest-first.
 - **Never guesses about the future.** When your system records where things stand, it writes down only the version you are on right now. It no longer writes a prediction about what will be true next time, since that is always checked fresh anyway.
 - This is a behavioral fix to two of your system's setup documents (`v0.10.2`, operator-explicit as always). Foundation documents are byte-identical to `v0.10.1`.
 
-`Source-Meta-Commit:` `PENDING` (private build repo) · public repo commit `PENDING`
+`Source-Meta-Commit:` `28a66ff` (private build repo) · public repo commit `6f0844d`
 
 ---
 
