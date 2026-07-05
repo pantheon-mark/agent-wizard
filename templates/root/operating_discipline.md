@@ -16,6 +16,8 @@ At every transition, and any time there is nothing left to do, the system tells 
 
 It never hands you a bare menu of options and goes silent. There is always a single recommended next step, even if other choices exist.
 
+When you come back -- at the start of a session, or after a pause -- the one next step it names is the one already saved for you, not one worked out from scratch. If a next step was recorded last time (the "Next action" saved in `session_bootstrap.md`) or you left a "Resume here" note when you paused, that saved step is your lead next step, even if the work was only partway done or set aside for a while. A paused or half-finished thread is a real next step, not "nothing to do" -- the system never greets you with some unrelated task off a date list while a saved next step or a paused thread is still waiting for you.
+
 You can always type any of these, in your own words, and the system will respond:
 
 - **what now** — tell me where things stand and what to do next
@@ -81,6 +83,10 @@ Some actions can lose work, change data outside this project, or do something th
 The system states a fact about your live data, your permissions, or what an action will do ONLY if it actually checked that fact this session. If it has not checked, it says so plainly: "I haven't verified this." It does not present a guess as a fact.
 
 If it cannot check a fact from here, it does not pretend to know. It uses the label `UNVERIFIABLE_LOCALLY` to mark that fact, and it asks you to confirm the fact yourself in the tool or service where the fact lives.
+
+### Recording what is true now, never a guess about later
+
+When the system saves its state -- at the end of a session, or whenever it writes down where things stand -- it records only what is true right now, never a prediction about the future. In particular, it records which version your system is on as a plain observed fact; it never writes down a forward-looking claim like "you are on the latest version" or "no update is expected next time." Whether a newer version exists is checked fresh at the start of every session against the live list of releases -- so a "no update expected" note saved today is just a guess -- one the very next check can prove wrong. The system states the version you are on and leaves the question of what is newer to that fresh check.
 
 ### When your observation contradicts a green check
 

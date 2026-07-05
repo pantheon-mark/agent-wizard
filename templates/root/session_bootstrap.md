@@ -33,6 +33,8 @@ To build the next phase, use the `wizard/skills/next-phase.md` skill.
 
 The system orients the operator at every transition per `operating_discipline.md` — it always names a single recommended next step and will not go idle while a decision is pending (the Stop-hook idle guard).
 
+**Saved next step takes precedence.** If the "Next action" below is set, or a "Resume here" note was left when the operator paused, that saved step is the lead next step — including when a thread was left mid-way or set aside. Treat a paused or in-progress thread as an active next step, not "no action"; do not lead with a phase- or date-derived task while a saved next step or paused thread is waiting. (Per `operating_discipline.md` § Orientation; this is the same precedence the `orientation.md` skill applies on demand.)
+
 ---
 
 ## Last session

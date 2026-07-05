@@ -743,9 +743,11 @@ class ControlledVocabularyRuleWiringTests(unittest.TestCase):
         cls.pi_path = REPO_ROOT / "wizard" / "templates" / "root" / "project_instructions.md"
         cls.od_path = REPO_ROOT / "wizard" / "templates" / "root" / "operating_discipline.md"
         cls.rl_path = REPO_ROOT / "wizard" / "templates" / "quality" / "rules_library.md"
+        cls.sb_path = REPO_ROOT / "wizard" / "templates" / "root" / "session_bootstrap.md"
         cls.pi_text = cls.pi_path.read_text(encoding="utf-8")
         cls.od_text = cls.od_path.read_text(encoding="utf-8")
         cls.rl_text = cls.rl_path.read_text(encoding="utf-8")
+        cls.sb_text = cls.sb_path.read_text(encoding="utf-8")
 
     def test_project_instructions_states_controlled_vocab_rule(self):
         """project_instructions.md carries the controlled-vocabulary standing rule."""
@@ -769,6 +771,42 @@ class ControlledVocabularyRuleWiringTests(unittest.TestCase):
     def test_rules_library_documents_controlled_vocab_rule(self):
         """rules_library.md documents the controlled-vocabulary standing rule."""
         self.assertIn("controlled", self.rl_text.lower())
+
+    def test_operating_discipline_states_saved_next_step_precedence(self):
+        """F-23: operating_discipline.md Orientation states the SAVED / paused next step is the
+        lead next step — a paused or in-progress thread is a real next step, not 'no action'."""
+        lower = self.od_text.lower()
+        self.assertIn("lead next step", lower,
+                      "operating_discipline.md must name the saved step as the LEAD next step")
+        self.assertIn("paused", lower,
+                      "operating_discipline.md must state a paused thread is a real next step")
+        self.assertIn("real next step", lower,
+                      "operating_discipline.md must state a paused/half-finished thread is a "
+                      "real next step, not 'nothing to do'")
+
+    def test_session_bootstrap_states_saved_next_step_precedence(self):
+        """F-23: the session_bootstrap template tells the session-start reader the saved 'Next
+        action' / 'Resume here' note takes precedence over a phase/date-derived next step."""
+        lower = self.sb_text.lower()
+        self.assertIn("saved next step takes precedence", lower,
+                      "session_bootstrap.md must state the saved next step takes precedence")
+        self.assertTrue(
+            ("resume here" in lower) and ("next action" in lower),
+            "session_bootstrap.md must reference the saved 'Next action' and paused 'Resume here' note",
+        )
+
+    def test_operating_discipline_forbids_forward_version_prediction(self):
+        """F-25: operating_discipline.md states the system records only the OBSERVED current
+        version, never a forward-looking 'no update expected / on latest' prediction in state."""
+        lower = self.od_text.lower()
+        self.assertIn("forward-looking", lower,
+                      "operating_discipline.md must forbid recording a forward-looking claim")
+        self.assertIn("no update", lower,
+                      "operating_discipline.md must name the 'no update expected' anti-pattern")
+        self.assertTrue(
+            ("checked fresh" in lower) or ("fresh at the start" in lower),
+            "operating_discipline.md must state version currency is re-checked fresh each session",
+        )
 
     def test_r005_deliverable_folders_not_contradicted(self):
         """R-005 reconciliation: the controlled-vocab rule and the deliverable-folders rule
