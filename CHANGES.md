@@ -12,6 +12,17 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-04 — groundwork for a coming "add a new capability" feature (no operator-facing change yet)
+
+**Public-facing change:** None yet. This publishes the internal safety groundwork for a feature that is still being built: the ability to add a brand-new capability to your system *after* it is already built, with the same care and guardrails as the original build. The groundwork is dormant — nothing about how your system is built or operated changes, and there is no new version to apply. The feature itself, and the version that turns it on, arrive in a later update.
+
+- Behind the scenes, the machinery that will keep a newly-added capability safe was put in place: a plain description of exactly what a new capability may and may not do; a check that refuses to run a risky action against your real data until you have accepted it (a copy or a small test batch goes first); a limit on how much an irreversible action can touch at once; and a save-your-work helper so that "undo" is always real rather than assumed.
+- All of it is inactive until the feature ships. Your files, data, rules, credentials, and logs are untouched.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-06-30 — clearer setup and orientation documents (documentation only)
 
 **Public-facing change:** The about and manual documents were rewritten to be clearer and more accurate. This is a documentation update only. Nothing changes about how a system is built or operated, and there is no new version to apply.
