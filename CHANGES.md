@@ -20,7 +20,7 @@ Entries appear newest-first.
 - **A preview that changes nothing.** The system can also show you exactly what a new capability would do without writing anything at all — a true no-op preview, never a partial or simulated write.
 - This is a behavioral fix to how new capabilities are tested before acceptance (`v0.10.1`, operator-explicit as always). Foundation documents are byte-identical to `v0.10.0`.
 
-`Source-Meta-Commit:` `<PENDING>` (private build repo) · public repo commit `<PENDING>`
+`Source-Meta-Commit:` `caa3264` (private build repo) · public repo commit `20b3561`
 
 ---
 
