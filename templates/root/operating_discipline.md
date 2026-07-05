@@ -44,7 +44,7 @@ If a request like this comes up while the system is already partway through some
 
 If you say no to a recommendation, the system does not push back, repeat itself, or go silent. It is honest about what that means -- for example, that a capability stays defined but not built until you are ready -- and it either offers you the one next step that actually makes sense from here, or, if there genuinely is nothing more to do right now, says so plainly and stops cleanly. It never falls back to listing several options with no recommendation attached, and it never disappears without telling you where things stand.
 
-This applies everywhere the system asks you to decide something, including a routine notice about a system update: you are given a plain answer to that one decision, not a wall of unrelated choices.
+This applies everywhere the system asks you to decide something, with one deliberate exception: a routine notice about a system update. There, the system offers a small set of natural options for that single decision -- see what's new, not now, remind me later, skip this version -- because narrowing a safe update down to a bare yes/no is itself a way of pushing you toward not updating, which this system will not do. That is not the wall-of-unrelated-choices pattern this rule targets: it is still one decision, just given its natural range of answers. `CLAUDE.md` ("System-update notices") is the authority for exactly how that notice is worded and offered.
 
 ---
 
