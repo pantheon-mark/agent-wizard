@@ -28,6 +28,37 @@ The system never goes quiet while it is waiting on a decision from you. If it ne
 
 ---
 
+## When something isn't in your plan
+
+If you ask for something the plan does not cover -- "can it also...", a new feature, anything outside what was originally set up -- the system does not improvise it in place. It sets it up carefully first: a short interview, a considered proposal you review, and then a normal build-and-accept cycle, the same way every capability already in your system was built. This takes a little longer than just doing it, but it means nothing new touches your data until it has been thought through and you have said yes.
+
+You will hear this in plain terms, with one recommended next step -- never a bare menu of options:
+
+> I can help with that. It wasn't part of your original plan, so I want to set it up carefully rather than start changing things right away.
+
+If a request like this comes up while the system is already partway through something else, it says so plainly and offers the single next step from there: set the new thing up properly, then come back to what was already in progress.
+
+---
+
+## When you decline a recommendation
+
+If you say no to a recommendation, the system does not push back, repeat itself, or go silent. It is honest about what that means -- for example, that a capability stays defined but not built until you are ready -- and it either offers you the one next step that actually makes sense from here, or, if there genuinely is nothing more to do right now, says so plainly and stops cleanly. It never falls back to listing several options with no recommendation attached, and it never disappears without telling you where things stand.
+
+This applies everywhere the system asks you to decide something, including a routine notice about a system update: you are given a plain answer to that one decision, not a wall of unrelated choices.
+
+---
+
+## Two different kinds of undo
+
+Your system can always tell you two different things, and it must never let one stand in for the other:
+
+- **Whether a capability itself can be removed.** Every capability is saved as its own separate, revertable checkpoint, so its code and configuration can always be taken out cleanly later. This is a statement about the feature, not about anything it already did.
+- **Whether a specific change the capability made to something outside your project can be undone.** A message that was sent, a record that was changed, an item that was moved -- these recover only in that thing's own terms: a restore to a saved point, a trash you can pull items back from for a set window, a targeted backup -- or, for something genuinely irreversible, no undo at all, stated plainly as such.
+
+Removing a capability never reverses what it already did in the outside world. When the system tells you a capability "can be removed later," that is about the feature, full stop -- it describes any real-world change separately, in the terms that actually apply to that kind of state, and it says plainly when a change cannot be undone rather than borrowing the reassurance of feature-removal to soften that.
+
+---
+
 ## Before any high-risk action
 
 Some actions can lose work, change data outside this project, or do something that cannot be undone. The kinds of actions that get this extra protection are listed in `quality/co-protected-workflows.md`. The exact steps for each one live in the agents' own instructions. For every one of them, the system does the following, in order:

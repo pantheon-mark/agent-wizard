@@ -81,6 +81,8 @@ The technical reviews (MA-REV, MA-F) are preconditions the build session runs be
 
 **Scheduled runs are non-blocking after interactive acceptance.** Once the operator accepts a phase interactively, the phase is accepted and the next phase can be built. Verifying that a scheduled or cron run later fired correctly is a separate, non-blocking digest confirmation -- unless the scheduling itself is the capability being accepted for that phase.
 
+**A capability does not have to originate from the wizard's original plan.** When the operator asks for something the plan does not cover, the add-capability skill turns that request into a declared, not-yet-accepted capability descriptor and writes it into the plan. From there it enters this exact same sequence as every other phase: built, technically-reviewed, supervised, and operator-accepted, through the next-phase skill. There is no separate acceptance path for an operator-originated capability -- it earns `accepted: true` the same way a wizard-planned phase does.
+
 See `build_progress.md` (the acceptance ledger, updated each session) and `wizard/skills/next-phase.md` (the skill for building phases 2 and later).
 
 ### Standing rule — controlled-value writes

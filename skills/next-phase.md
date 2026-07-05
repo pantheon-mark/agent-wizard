@@ -44,9 +44,17 @@ Read `execution_plan.md` and find the first phase in the build order that does n
 
 State plainly to the operator: which phase this is, what capability it adds, and which agents are involved (one or two sentences from `execution_plan.md` -- no architecture details).
 
-### If the plan no longer matches what has been built
+### If the request is for something the plan does not cover
 
-If you open `execution_plan.md` and find that the phases, agent names, or scope no longer match what `build_progress.md` shows as already built or accepted, do not improvise a fix. Stop and tell the operator:
+If the operator is asking you to build or bring up something that `execution_plan.md` does not describe anywhere -- a new capability the plan simply never had, not a build-order mismatch -- this is not a broken plan to send back to the wizard. It is a new, off-plan request, and it has a proper front door. Do not dead-end here. Tell the operator plainly and route them there:
+
+> This isn't in your plan yet -- let's set it up properly.
+
+Then hand off to the add-capability skill. Do not attempt to define, scope, or design the new capability yourself here -- that is entirely add-capability's job; your role is only to recognize that the request is off-plan and route it. Once add-capability has written the capability into the plan, the plan and reality match again, so this skill's own check above passes honestly and you build it the same careful way as every other phase, next time you are asked to continue.
+
+### If the plan itself no longer matches what has been built
+
+If, instead, you open `execution_plan.md` and find that the phases, agent names, or scope described there no longer match what `build_progress.md` shows as already built or accepted -- a genuine drift between the plan and reality, not a new request -- do not improvise a fix. Stop and tell the operator:
 
 > The build plan in `execution_plan.md` no longer matches what has already been built. This skill brings up phases as they were planned. It does not redesign the plan. To continue, either re-run the wizard to produce a new plan that reflects what you want to build, or use the system's upgrade flow if one has been set up. Come back to this skill after the plan is updated.
 
