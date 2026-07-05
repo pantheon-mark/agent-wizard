@@ -32,9 +32,9 @@ Inputs (all deterministic; no clock, no randomness, no LLM):
   1. ``scan_violations`` — the output of ``scan.scan_paths()`` over the phase's code.
   2. ``descriptor_set``  — the machine-readable descriptor set (B1-2
      ``render_descriptor_registry_json`` shape; entries may be accepted or unaccepted — this gate
-     does not care), loaded fail-closed (``[]`` when absent) via the SAME loader convention B1-4
-     uses (``write_gate.load_accepted_descriptor_set``). (B2-T2 will point the build-time loader
-     at the declared-registry file specifically; unchanged in this task.)
+     does not care), loaded fail-closed (``[]`` when absent) via the SAME loader B1-4 uses
+     (``write_gate.load_descriptor_set``), pointed at the ONE descriptor-set file every emitted
+     writes-back system carries (``security/capability_descriptors.json`` — B2-T2).
   3. ``contracts_map``   — op_kind -> ``OperationContract`` (defaults to the real
      ``contracts.OPERATION_CONTRACTS``): the authoritative, in-code enumeration of the named
      external-write operations. This is the "guarded mutator" demand side.
@@ -114,7 +114,7 @@ from external_write.contracts import (
     OPERATION_CONTRACTS, OperationContract, RISK_CLASSES,
 )
 from external_write.write_gate import (
-    load_accepted_descriptor_set,
+    load_descriptor_set,
     GATED_RISK_CLASSES,
     READ_ONLY_LOCAL,
     FAIL_SAFE_RISK_CLASS,
@@ -267,13 +267,12 @@ def run_coverage_gate(
     allowed_root: Optional[Union[str, Path]] = None,
 ) -> CoverageDecision:
     """CLI-shaped helper: scan ``paths`` for bypasses (via the PURE ``scan_paths``), load the
-    descriptor set fail-closed (via B1-4's accepted-descriptor loader — ``[]`` when
-    absent/unreadable; unchanged for this task — B2-T2 will point the build-time loader at the
-    declared-registry file specifically), read the real operation contracts, and evaluate the
-    gate. This gate does not use the ``accepted`` field of any entry it loads. Mirrors scan.py's
-    invocation shape."""
+    descriptor set fail-closed (via B1-4's loader — ``[]`` when absent/unreadable; defaults to
+    ``security/capability_descriptors.json``, project-root-relative — B2-T2), read the real
+    operation contracts, and evaluate the gate. This gate does not use the ``accepted`` field of
+    any entry it loads. Mirrors scan.py's invocation shape."""
     violations = scan_paths(paths, allowed_root=allowed_root)
-    descriptor_set = load_accepted_descriptor_set(descriptor_set_path)
+    descriptor_set = load_descriptor_set(descriptor_set_path)
     return evaluate_coverage_gate(
         scan_violations=violations, descriptor_set=descriptor_set)
 

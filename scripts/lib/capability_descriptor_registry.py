@@ -42,6 +42,7 @@ Stdlib-only, pip-install-free.
 """
 
 import json
+from pathlib import Path
 from typing import Any, Dict, List
 
 from dependency_projection import (  # type: ignore
@@ -124,6 +125,115 @@ def build_descriptor_entries(identity_json: str) -> List[Dict[str, Any]]:
             "recovery_profile_ref": row.get("recovery_profile_ref"),
             "declared_test_target": row.get("declared_test_target"),
             "blast_radius_cap": row.get("blast_radius_cap"),
+            "accepted": False,
+        })
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# Base declared descriptors (B2-T2)
+# ---------------------------------------------------------------------------
+#
+# The coverage gate's demand side (external_write.coverage_gate.evaluate_coverage_gate) iterates
+# the STATIC external_write.contracts.OPERATION_CONTRACTS registry — the built-in op_kind
+# delete_record (risk_class irreversible_external, requires_accepted_phase=True) is ALWAYS
+# registered for any writes-back system, whether or not the operator declared any capability of
+# their own. With zero descriptors, coverage FAILS on delete_record alone (`uncovered_mutator`),
+# so every fresh writes-back system needs a BASE declared descriptor covering each built-in
+# guarded op_kind's risk class before it can ever pass coverage.
+#
+# The emitted descriptor set for a system = base_declared_descriptors() + the operator's
+# declared-capability descriptors (build_descriptor_entries(), added by the emit/cascade in a
+# later task). This module supplies only the base half.
+
+# Reserved id/name prefix for a base descriptor. A real operator-declared dependency id/name is a
+# free-form string the operator or the interview chose for an actual surface (e.g.
+# "google_sheets"); this dunder-bracketed, colon-delimited sentinel is not a shape any real
+# surface identifier takes, so write_gate._covering_entry's id/name==op.surface join can never
+# match a base entry against a live operation — even in the (never-taken) case where a base
+# entry's `accepted` were somehow True. Base entries are always emitted accepted:false and this
+# module never mutates that.
+BASE_DESCRIPTOR_ID_PREFIX = "__builtin__:"
+
+# op_kind -> the action_class (dependency_projection.ACTION_CLASSES vocabulary) that best
+# describes the built-in operation, for the op_kinds this producer knows how to represent. A
+# guarded op_kind not listed here (a future addition to OPERATION_CONTRACTS) falls back to the
+# generic "mutate" action class rather than a fabricated specific one.
+_BUILTIN_ACTION_CLASS_BY_OP_KIND = {
+    "delete_record": "delete",
+}
+_BUILTIN_ACTION_CLASS_DEFAULT = "mutate"
+
+
+def _agents_lib_path() -> str:
+    """The wizard/agents/lib directory (the external_write package's parent), computed from this
+    file's own location so it resolves regardless of caller cwd."""
+    return str(Path(__file__).resolve().parents[2] / "agents" / "lib")
+
+
+def _guarded_op_kinds_by_risk_class() -> "Dict[str, List[str]]":
+    """Read the REAL external_write.contracts.OPERATION_CONTRACTS registry (a one-directional
+    cross-tree import: external_write cannot import the build-side tree — D-B1-a — but the build
+    side importing external_write's pure declarative registries introduces no cycle), grouped by
+    effective risk class, restricted to GUARDED (coverage-requiring) op_kinds. Mirrors
+    external_write.coverage_gate._is_guarded_mutator's exact boundary by calling it directly, so
+    this can never silently drift from what the coverage gate actually demands: read_only_local
+    and plain reversible_external (non-requires_accepted_phase) op_kinds are excluded; every
+    op_kind whose effective risk_class is in GATED_RISK_CLASSES, or whose contract sets
+    requires_accepted_phase=True, is included under its effective risk_class."""
+    import sys
+    agents_lib = _agents_lib_path()
+    if agents_lib not in sys.path:
+        sys.path.insert(0, agents_lib)
+    from external_write.contracts import OPERATION_CONTRACTS  # type: ignore
+    from external_write.coverage_gate import (  # type: ignore
+        _is_guarded_mutator, _effective_contract_risk_class,
+    )
+    by_risk: Dict[str, List[str]] = {}
+    for op_kind in sorted(OPERATION_CONTRACTS):
+        contract = OPERATION_CONTRACTS[op_kind]
+        if not _is_guarded_mutator(contract):
+            continue
+        rc = _effective_contract_risk_class(contract)
+        by_risk.setdefault(rc, []).append(op_kind)
+    return by_risk
+
+
+def base_declared_descriptors() -> List[Dict[str, Any]]:
+    """The BASE declared (accepted:false) descriptor entries every emitted writes-back system
+    must carry: one per DISTINCT effective risk class among the built-in GUARDED op_kinds in
+    external_write.contracts.OPERATION_CONTRACTS (today: exactly one, for delete_record's
+    irreversible_external). Each entry has EXACTLY the ENTRY_KEYS schema, `accepted` ALWAYS
+    False, a reserved BASE_DESCRIPTOR_ID_PREFIX-prefixed id/name (never a real capability
+    surface), the covering risk_class, and an action_class reflecting the built-in op (delete
+    for delete_record; "mutate" for any op_kind this producer does not specifically recognize).
+    recovery_profile_ref / declared_test_target / blast_radius_cap are None — a base entry
+    describes only that the built-in op EXISTS and is unaccepted, not any specific test-target or
+    recovery commitment (those are the operator-declared capability's job).
+
+    Deterministic: sorted by risk_class, so identical OPERATION_CONTRACTS input always yields
+    identical output order.
+
+    The emitted descriptor set for a system = base_declared_descriptors() + the operator's
+    build_descriptor_entries() (added by the emit/cascade in a later task)."""
+    by_risk = _guarded_op_kinds_by_risk_class()
+    entries: List[Dict[str, Any]] = []
+    for risk_class in sorted(by_risk):
+        op_kinds = by_risk[risk_class]
+        action_class = _BUILTIN_ACTION_CLASS_DEFAULT
+        for op_kind in op_kinds:
+            if op_kind in _BUILTIN_ACTION_CLASS_BY_OP_KIND:
+                action_class = _BUILTIN_ACTION_CLASS_BY_OP_KIND[op_kind]
+                break
+        base_id = f"{BASE_DESCRIPTOR_ID_PREFIX}{risk_class}"
+        entries.append({
+            "id": base_id,
+            "name": base_id,
+            "action_class": action_class,
+            "risk_class": risk_class,
+            "recovery_profile_ref": None,
+            "declared_test_target": None,
+            "blast_radius_cap": None,
             "accepted": False,
         })
     return entries

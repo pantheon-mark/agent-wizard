@@ -1301,6 +1301,54 @@ class TestS253ContractDelta(unittest.TestCase):
                      "boundary.py", "proof_hash.py", "copy_run_proof.py"):
             self.assertIn(name, agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
+    def test_emit_set_lists_the_two_b2t2_gate_files(self):
+        # B2-T2: coverage_gate.py (build-time) + write_gate.py (runtime) are enrolled in the
+        # lib-emit tuple alongside the ten B1 files above (twelve total).
+        import agent_emitter
+        for name in ("coverage_gate.py", "write_gate.py"):
+            self.assertIn(name, agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 12)
+
+    def _writes_back_plan(self):
+        import copy, json
+        from test_emission_plan import _valid_plan
+        from emission_plan import validate_emission_plan, load_contract, default_contract_path
+        contract = load_contract(default_contract_path())
+        p = copy.deepcopy(_valid_plan())
+        p["foundation_doc_inputs"]["EXTERNAL_DEPENDENCY_IDENTITY"] = json.dumps(
+            [{"id": "sheet", "name": "sheet", "type": "Spreadsheet", "roles": ["boundary_output"]}]
+        )
+        return validate_emission_plan(p, contract)
+
+    def test_emit_set_includes_gate_files_for_a_writes_back_plan(self):
+        import agent_emitter
+        plan = self._writes_back_plan()
+        result = agent_emitter.external_write_lib_emit_set(plan)
+        for rel in ("agents/lib/external_write/coverage_gate.py",
+                    "agents/lib/external_write/write_gate.py"):
+            self.assertIn(rel, result)
+
+    def test_gate_files_not_yet_physically_copied_current_bundle_lacks_them(self):
+        # Canonical enrollment ONLY (B2-T2 scope boundary): the bundle physically carrying
+        # coverage_gate.py / write_gate.py, system-artifacts.json, and parity entries is B2-T9.
+        # _emit_external_write_lib's per-file copy is source-gated (`if not src.is_file():
+        # continue`), so enrolling these two names today must NOT write them into staging while
+        # the current bundle doesn't ship them — the enrollment is inert until B2-T9 cuts the
+        # bundle. If this test starts failing because a bundle now DOES carry these files, that
+        # is expected once B2-T9 lands; update/remove this guard then.
+        import tempfile
+        from pathlib import Path
+        from agent_emitter import emit_agent_layer
+        plan = self._writes_back_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            staging = Path(tmp)
+            emit_agent_layer(plan, staging, REPO_ROOT)
+            out_dir = staging / "agents" / "lib" / "external_write"
+            for name in ("coverage_gate.py", "write_gate.py"):
+                self.assertFalse(
+                    (out_dir / name).exists(),
+                    f"{name} was physically emitted — expected inert until B2-T9's bundle cut")
+
     def test_emit_set_empty_for_read_only_system(self):
         """A plan whose dependencies are all read-only (boundary_input only, no boundary_output)
         must produce an empty emit set — the skip logic must not regress to always-emit."""

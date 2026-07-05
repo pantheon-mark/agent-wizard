@@ -117,25 +117,34 @@ def _iso_z(dt: datetime) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Fail-safe accepted-descriptor-set loader
+# Fail-safe descriptor-set loader
 # ---------------------------------------------------------------------------
 
-# Physical emission of the accepted-descriptor set into the operator's security/ directory is
-# deferred to B2 (canonical-only, D-B1-a). Until B2 wires a path here it stays None, so the
-# loader returns an empty set and every live gated op fails safe to refuse.
-ACCEPTED_DESCRIPTOR_SET_PATH: Optional[str] = None
+# B2-T2: the project-root-relative path to the ONE descriptor-set file every emitted
+# writes-back system carries (security/capability_descriptors.json). It holds the FULL
+# descriptor set — every declared descriptor, `accepted` flags varying — not only the accepted
+# ones; the prior name (ACCEPTED_DESCRIPTOR_SET_PATH) misled at a trust surface. BOTH gates read
+# this SAME file: this module (write_gate, runtime) filters on `accepted: true` + surface match;
+# the build-time coverage gate (coverage_gate.py) ignores `accepted` entirely and checks only
+# DECLARATION. The loader's `open(path)` resolves against cwd — both the coverage-gate CLI and
+# agent invocations run from the operator project root (see coverage_gate.py's CLI docstring and
+# the project's operating rule that agents run from project root), so this project-root-relative
+# path resolves correctly from either caller.
+DESCRIPTOR_SET_PATH: Optional[str] = "security/capability_descriptors.json"
 
 
-def load_accepted_descriptor_set(path: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Load the machine-readable accepted-descriptor set (B1-2 render_descriptor_registry_json
-    shape: a JSON array of entries with id/name/action_class/risk_class/recovery_profile_ref/
-    declared_test_target/blast_radius_cap/accepted).
+def load_descriptor_set(path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Load the machine-readable descriptor set (B1-2 render_descriptor_registry_json shape: a
+    JSON array of entries with id/name/action_class/risk_class/recovery_profile_ref/
+    declared_test_target/blast_radius_cap/accepted). Holds the FULL set — every declared
+    descriptor, `accepted` flags varying; write_gate filters on `accepted: true` (+ surface
+    match) below, the build-time coverage gate ignores `accepted` entirely.
 
     FAIL-SAFE by construction: any missing input — no path configured, absent file, unreadable
-    file, malformed JSON, or a non-array payload — returns [] (nothing accepted), so a live
-    gated op is refused. It NEVER raises and NEVER treats an unreadable set as permissive."""
+    file, malformed JSON, or a non-array payload — returns [] (nothing accepted/declared), so a
+    live gated op is refused. It NEVER raises and NEVER treats an unreadable set as permissive."""
     if path is None:
-        path = ACCEPTED_DESCRIPTOR_SET_PATH
+        path = DESCRIPTOR_SET_PATH
     if not path:
         return []
     try:
@@ -329,7 +338,7 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
             op_kind=op.op_kind)
 
     # resolved == LIVE_TARGET — require a covering ACCEPTED descriptor phase.
-    ds = load_accepted_descriptor_set() if descriptor_set is None else descriptor_set
+    ds = load_descriptor_set() if descriptor_set is None else descriptor_set
     covering = _covering_entry(ds, op, risk_class)
     if covering is None:
         return _refuse(

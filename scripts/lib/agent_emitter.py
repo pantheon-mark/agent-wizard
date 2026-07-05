@@ -59,6 +59,8 @@ _EXTERNAL_WRITE_LIB_FILES = (
     "boundary.py",
     "proof_hash.py",
     "copy_run_proof.py",
+    "coverage_gate.py",
+    "write_gate.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
@@ -93,10 +95,14 @@ def _plan_has_writes_back(plan: "EmissionPlan") -> bool:
 def external_write_lib_emit_set(plan: "EmissionPlan") -> List[str]:
     """The emitted-tree relpaths of the external_write lib files this plan should emit.
 
-    Returns all ten lib files under agents/lib/external_write/ when the plan has a
+    Returns all twelve lib files under agents/lib/external_write/ when the plan has a
     writes-back dependency: the original four substrate files (operations, adapters,
-    broker, scan) plus the six contract-and-verification modules (verification_modes,
-    contracts, verifiers, boundary, proof_hash, copy_run_proof).
+    broker, scan), the six contract-and-verification modules (verification_modes,
+    contracts, verifiers, boundary, proof_hash, copy_run_proof), and the two B1-4/B1-5
+    safety-gate modules (coverage_gate — build-time descriptor-coverage gate; write_gate —
+    runtime pre-write gate) enrolled at B2-T2 (canonical enrollment only; the physical bundle
+    copy + system-artifacts.json + parity entries land at B2-T9 — the copy below is already
+    source-gated on the bundle carrying the file, so this enrollment is a no-op until then).
 
     Returns [] when the plan has no writes-back (boundary_output) dependency — no dead
     code for read-only systems, and none for foundation-only plans (which have no agent

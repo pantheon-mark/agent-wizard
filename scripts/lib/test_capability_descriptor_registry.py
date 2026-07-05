@@ -249,5 +249,104 @@ class BackwardCompatTest(unittest.TestCase):
         self.assertIn("Sheet", body)
 
 
+# ---------------------------------------------------------------------------
+# Base declared descriptors (B2-T2)
+# ---------------------------------------------------------------------------
+#
+# Cross-tree imports of external_write's coverage_gate / write_gate mirror the precedent already
+# established by test_external_write_contracts.test_risk_classes_constant_matches_build_side_
+# vocabulary: a TEST file in wizard/scripts/lib may import wizard/agents/lib (the direction
+# external_write itself may never import — D-B1-a).
+_AGENTS_LIB = Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib"
+sys.path.insert(0, str(_AGENTS_LIB))
+
+from external_write.contracts import OPERATION_CONTRACTS  # type: ignore  # noqa: E402
+from external_write.coverage_gate import (  # type: ignore  # noqa: E402
+    evaluate_coverage_gate,
+    _is_guarded_mutator,
+    _effective_contract_risk_class,
+)
+from external_write.write_gate import _covering_entry  # type: ignore  # noqa: E402
+from external_write.operations import Operation  # type: ignore  # noqa: E402
+
+
+class BaseDeclaredDescriptorsSchemaTest(unittest.TestCase):
+    def test_every_entry_has_exactly_the_entry_keys(self):
+        for e in cdr.base_declared_descriptors():
+            self.assertEqual(set(e.keys()), set(cdr.ENTRY_KEYS))
+
+    def test_every_entry_is_unaccepted(self):
+        for e in cdr.base_declared_descriptors():
+            self.assertIs(e["accepted"], False)
+
+    def test_id_and_name_carry_the_reserved_prefix(self):
+        for e in cdr.base_declared_descriptors():
+            self.assertTrue(e["id"].startswith(cdr.BASE_DESCRIPTOR_ID_PREFIX), e["id"])
+            self.assertTrue(e["name"].startswith(cdr.BASE_DESCRIPTOR_ID_PREFIX), e["name"])
+
+    def test_deterministic_across_calls(self):
+        self.assertEqual(cdr.base_declared_descriptors(), cdr.base_declared_descriptors())
+
+    def test_delete_record_risk_class_is_represented(self):
+        risk_classes = {e["risk_class"] for e in cdr.base_declared_descriptors()}
+        self.assertIn("irreversible_external", risk_classes)
+
+    def test_delete_record_action_class_is_delete(self):
+        entries = {e["risk_class"]: e for e in cdr.base_declared_descriptors()}
+        self.assertEqual(entries["irreversible_external"]["action_class"], "delete")
+
+
+class BaseDeclaredDescriptorsCoverageTest(unittest.TestCase):
+    """The hard requirement (B2-T2 brief item 2): for every guarded op_kind in the REAL
+    OPERATION_CONTRACTS registry, the base descriptor set includes a DECLARED covering
+    descriptor of its effective risk class, so evaluate_coverage_gate PASSES on the base set
+    alone with a clean scan — a fresh writes-back system with zero operator-declared
+    capabilities still passes coverage."""
+
+    def test_base_set_alone_passes_coverage_gate_with_clean_scan(self):
+        decision = evaluate_coverage_gate(
+            scan_violations=[], descriptor_set=cdr.base_declared_descriptors())
+        self.assertTrue(decision.passed, decision.failures)
+        self.assertEqual(decision.failures, [])
+
+    def test_every_guarded_op_kind_has_a_covering_base_entry(self):
+        base = cdr.base_declared_descriptors()
+        base_risk_classes = {e["risk_class"] for e in base}
+        for op_kind, contract in OPERATION_CONTRACTS.items():
+            if not _is_guarded_mutator(contract):
+                continue
+            rc = _effective_contract_risk_class(contract)
+            self.assertIn(rc, base_risk_classes,
+                          f"guarded op_kind {op_kind!r} (risk_class {rc!r}) has no covering "
+                          "base declared descriptor")
+
+    def test_non_guarded_op_kinds_need_no_base_entry(self):
+        # Sanity: the base set does not manufacture coverage for ops that need none (status ops).
+        base = cdr.base_declared_descriptors()
+        base_risk_classes = {e["risk_class"] for e in base}
+        for op_kind in ("set_status", "complete_tasks", "update_due_date",
+                        "add_note", "set_priority"):
+            contract = OPERATION_CONTRACTS[op_kind]
+            self.assertFalse(_is_guarded_mutator(contract), op_kind)
+
+
+class BaseDeclaredDescriptorsSurfaceJoinSafetyTest(unittest.TestCase):
+    """A base entry's reserved id/name must never join against a real live surface at runtime —
+    even in the hypothetical where a base entry were `accepted`. Base entries are never emitted
+    accepted:true by this producer; this test asserts the surface-join safety independently of
+    that fact, by forcing accepted=True on a copy for the probe."""
+
+    def test_base_entry_never_covers_a_realistic_live_surface(self):
+        for base_entry in cdr.base_declared_descriptors():
+            forced = dict(base_entry, accepted=True)  # hypothetical only — never real
+            for surface in ("google_sheets", "gmail", "airtable", "notion", "salesforce", ""):
+                op = Operation(surface=surface, object_id="obj:1", field="__record__",
+                               new_value="<x>", op_kind="delete_record", batch_id="b1")
+                covering = _covering_entry([forced], op, base_entry["risk_class"])
+                self.assertIsNone(
+                    covering,
+                    f"base entry {base_entry['id']!r} must never cover real surface {surface!r}")
+
+
 if __name__ == "__main__":
     unittest.main()

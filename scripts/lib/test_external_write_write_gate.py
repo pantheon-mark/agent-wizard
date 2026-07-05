@@ -26,7 +26,7 @@ from external_write.contracts import OperationContract, get_contract  # noqa: E4
 from external_write import write_gate  # noqa: E402
 from external_write.write_gate import (  # noqa: E402
     InvocationLedger,
-    load_accepted_descriptor_set,
+    load_descriptor_set,
     evaluate_write_gate,
     system_clock,
     COPY_SURFACE,
@@ -118,12 +118,31 @@ class TestGateVocabularyMatchesBuildSide(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestDescriptorSetLoader(unittest.TestCase):
+    def test_wired_path_is_the_one_descriptor_set_file(self):
+        # B2-T2: the constant is SET (no longer None) to the one canonical descriptor-set file
+        # every emitted writes-back system carries — the SAME file the build-time coverage gate
+        # reads (project-root-relative; both the coverage-gate CLI and agent invocations run
+        # from the operator project root).
+        self.assertEqual(write_gate.DESCRIPTOR_SET_PATH, "security/capability_descriptors.json")
+
     def test_no_path_configured_returns_empty(self):
-        self.assertEqual(load_accepted_descriptor_set(None), [])
+        # True "absent config" fail-safe: DESCRIPTOR_SET_PATH itself unset (None) must still
+        # yield [] even though the module now wires a real default in normal operation.
+        original = write_gate.DESCRIPTOR_SET_PATH
+        write_gate.DESCRIPTOR_SET_PATH = None
+        try:
+            self.assertEqual(load_descriptor_set(None), [])
+        finally:
+            write_gate.DESCRIPTOR_SET_PATH = original
+
+    def test_default_wired_path_absent_on_disk_returns_empty(self):
+        # The real wired default resolves relative to cwd; when no such file exists there
+        # (the normal case for this test's cwd) the loader still fails safe to [].
+        self.assertEqual(load_descriptor_set(None), [])
 
     def test_absent_file_returns_empty(self):
         self.assertEqual(
-            load_accepted_descriptor_set("/nonexistent/definitely/missing.json"), [])
+            load_descriptor_set("/nonexistent/definitely/missing.json"), [])
 
     def test_malformed_file_returns_empty(self):
         p = Path(_AGENTS_LIB).parent  # any dir; write to a scratch temp
@@ -131,21 +150,21 @@ class TestDescriptorSetLoader(unittest.TestCase):
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             f.write("{ this is not valid json")
             name = f.name
-        self.assertEqual(load_accepted_descriptor_set(name), [])
+        self.assertEqual(load_descriptor_set(name), [])
 
     def test_non_array_payload_returns_empty(self):
         import tempfile
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             f.write('{"not": "an array"}')
             name = f.name
-        self.assertEqual(load_accepted_descriptor_set(name), [])
+        self.assertEqual(load_descriptor_set(name), [])
 
     def test_valid_array_loads(self):
         import tempfile, json as _json
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             _json.dump([_accepted_entry()], f)
             name = f.name
-        loaded = load_accepted_descriptor_set(name)
+        loaded = load_descriptor_set(name)
         self.assertEqual(len(loaded), 1)
         self.assertEqual(loaded[0]["id"], "google_sheets")
 
