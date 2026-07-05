@@ -13,11 +13,11 @@ THE OVERRIDING PROPERTY is fail-safe: on ANY missing, ambiguous, or invalid inpu
 REFUSES — it does not write, it leaves ``accepted: false``, and it returns a clear failure. It
 never guesses a bypass. Every validation branch below defaults to refuse.
 
-Enforcement ceiling (deliberate, disclosed — ADR-0039 L44 / IDQ-074): this is a BUILD-TIME +
-OPERATOR-AS-APPROVER gate, NOT a runtime or OS-level guarantee. A post-build hand edit of the
-descriptor file can still flip the field; the ceremony is the sole LEGITIMATE path to acceptance
-and makes NO claim of tamper-proofness. It removes the accidental / model-authored acceptance, not
-the deliberate operator edit.
+Enforcement ceiling (deliberate, disclosed): this is a BUILD-TIME + OPERATOR-AS-APPROVER gate,
+NOT a runtime or OS-level guarantee. A post-build hand edit of the descriptor file can still flip
+the field; the ceremony is the sole LEGITIMATE path to acceptance and makes NO claim of
+tamper-proofness. It removes the accidental / model-authored acceptance, not the deliberate
+operator edit.
 
 The deterministic algorithm (no LLM, no clock or randomness in the decision)
 -----------------------------------------------------------------------------
@@ -36,10 +36,11 @@ ceremony flips exactly that descriptor's ``accepted`` to ``true`` IFF every inva
      ``risk_class`` downgrade — breaks the recomputed hash). Else refuse.
   3. BLAST-RADIUS CAP PRESENT — a gated descriptor must carry a positive-integer
      ``blast_radius_cap`` on the descriptor itself. Else refuse.
-  4. VALIDATED COPY_RUN_PROOF — an ADR-0040 ``copy_run_proof-v1`` artifact whose verdict is
-     success (apply AND undo AND verify-restored, per ``validate_copy_run_proof``). Absent,
-     failed, or unverifiable → refuse. (delete_record and every gated class have a success
-     representation via the copy machinery — the ceremony invents no irreversible bypass.)
+  4. VALIDATED COPY_RUN_PROOF — a ``copy_run_proof-v1`` artifact (the copy-run-proof contract)
+     whose verdict is success (apply AND undo AND verify-restored, per
+     ``validate_copy_run_proof``). Absent, failed, or unverifiable → refuse. (delete_record and
+     every gated class have a success representation via the copy machinery — the ceremony
+     invents no irreversible bypass.)
   5. OPERATOR-ACCEPTANCE RECEIPT PRESENT + BOUND — the receipt B2-T6's next-phase Step-6 produces,
      bound to this exact acceptance (its ``capability_id`` / ``phase_id`` / ``copy_run_proof_ref``
      match the ceremony inputs and it carries a non-empty verbatim operator confirmation). Else
