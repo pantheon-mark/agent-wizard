@@ -191,14 +191,14 @@ class EmitGatingTest(unittest.TestCase):
             out = agent_emitter._emit_capability_descriptor_set(plan, Path(tmp), REPO_ROOT)
         self.assertEqual(out, [], "a read-only system must get no descriptor set")
 
-    def test_writes_back_source_gated_inert_until_bundle_cut(self):
-        # The real repo bundle for the plan's version does not carry the template yet (T9b);
-        # the emit must be a no-op (source-gated), NOT a crash.
-        plan = _writes_back_plan(_writes_back_identity())
-        with tempfile.TemporaryDirectory() as tmp:
-            out = agent_emitter._emit_capability_descriptor_set(plan, Path(tmp), REPO_ROOT)
-        self.assertEqual(out, [],
-                         "inert until T9b copies the template into the bundle (source-gated)")
+    # RETIRED at the v0.10.0 bundle cut (B2-T9b): the former
+    # test_writes_back_source_gated_inert_until_bundle_cut asserted the descriptor-set emit was
+    # a no-op against the REAL repo bundle (inert, source-gated, pending the bundle carrying the
+    # template). The v0.10.0 cut copied templates/security/capability_descriptors.json into the
+    # latest bundle, so a writes-back plan on the latest bundle now DOES emit the set — the
+    # inertness guard is obsolete and was removed (its self-documented retirement trigger). The
+    # real end-to-end emit against a bundle carrying the template is covered by
+    # test_writes_back_emits_coverage_passing_json_when_bundle_carries_template below.
 
     def test_writes_back_emits_coverage_passing_json_when_bundle_carries_template(self):
         # Construct a temp build-repo-root whose bundle DOES carry the JSON template, exercising

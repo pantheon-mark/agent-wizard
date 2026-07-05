@@ -1336,26 +1336,15 @@ class TestS253ContractDelta(unittest.TestCase):
                     "agents/lib/external_write/write_gate.py"):
             self.assertIn(rel, result)
 
-    def test_gate_files_not_yet_physically_copied_current_bundle_lacks_them(self):
-        # Canonical enrollment ONLY (B2-T2 scope boundary): the bundle physically carrying
-        # coverage_gate.py / write_gate.py, system-artifacts.json, and parity entries is B2-T9.
-        # _emit_external_write_lib's per-file copy is source-gated (`if not src.is_file():
-        # continue`), so enrolling these two names today must NOT write them into staging while
-        # the current bundle doesn't ship them — the enrollment is inert until B2-T9 cuts the
-        # bundle. If this test starts failing because a bundle now DOES carry these files, that
-        # is expected once B2-T9 lands; update/remove this guard then.
-        import tempfile
-        from pathlib import Path
-        from agent_emitter import emit_agent_layer
-        plan = self._writes_back_plan()
-        with tempfile.TemporaryDirectory() as tmp:
-            staging = Path(tmp)
-            emit_agent_layer(plan, staging, REPO_ROOT)
-            out_dir = staging / "agents" / "lib" / "external_write"
-            for name in ("coverage_gate.py", "write_gate.py"):
-                self.assertFalse(
-                    (out_dir / name).exists(),
-                    f"{name} was physically emitted — expected inert until B2-T9's bundle cut")
+    # RETIRED at the v0.10.0 bundle cut (B2-T9b): the former
+    # test_gate_files_not_yet_physically_copied_current_bundle_lacks_them asserted
+    # coverage_gate.py / write_gate.py were NOT yet physically emitted (inert, source-gated,
+    # pending the bundle cut). The v0.10.0 cut copied them into the latest bundle, so they ARE
+    # now emitted for a writes-back plan — the inertness guard is obsolete and was removed
+    # (its self-documented retirement trigger). Physical emission of the flow lib for a
+    # writes-back plan against the latest bundle is now covered by
+    # test_emit_set_includes_gate_files_for_a_writes_back_plan (enrollment) + the
+    # source↔bundle diff at cut time.
 
     def test_emit_set_empty_for_read_only_system(self):
         """A plan whose dependencies are all read-only (boundary_input only, no boundary_output)

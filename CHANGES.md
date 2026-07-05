@@ -12,6 +12,22 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-05 — add a new capability to your system after it is built, with the same guardrails as the original build (v0.10.0)
+
+**Public-facing change:** This turns on the "add a new capability" feature whose groundwork shipped earlier. When you ask your system for something outside its current plan, it no longer does it ad hoc — it defines the new capability, builds it, and records your acceptance before it goes live, with the same care and guardrails as the original build.
+
+- **Off-plan requests are routed into a define → build → accept flow.** A new add-capability skill picks up any request outside the current plan and walks it through the same phased build-and-accept loop your system was created with, instead of acting immediately.
+- **Every capability that writes outside your system is declared and risk-classified.** A machine-readable record lists each write-back capability, its risk class, and whether you have accepted it. A build-time check refuses to build a capability whose risks are not declared, and a runtime write gate refuses to run one you have not accepted.
+- **You accept before it goes live.** A capability is proven on a copy or a small test batch first; only after you accept it — recorded deterministically — does it act on your real data.
+- **An always-on commit-hygiene guard.** Your system keeps a clean baseline before building and commits each accepted phase as its own revertable unit, so "undo" is always real.
+- Systems that never write outside themselves carry none of the write-gating. Your own files, data, rules, credentials, and logs are untouched, and a backup is taken before anything is applied.
+
+This is a feature addition (`v0.10.0`, operator-explicit as always). Foundation documents are byte-identical to `v0.9.0`.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-07-04 — groundwork for a coming "add a new capability" feature (no operator-facing change yet)
 
 **Public-facing change:** None yet. This publishes the internal safety groundwork for a feature that is still being built: the ability to add a brand-new capability to your system *after* it is already built, with the same care and guardrails as the original build. The groundwork is dormant — nothing about how your system is built or operated changes, and there is no new version to apply. The feature itself, and the version that turns it on, arrive in a later update.

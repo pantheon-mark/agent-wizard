@@ -203,6 +203,19 @@
       "changelog": "Changes your system makes to data outside itself now carry an integrity contract: success is confirmed through an independent route (never by re-reading its own write), new write logic is proven on a copy before first live use, and undo is proven to restore your data.",
       "bundle_tree_sha256": "sha256:3271e7ba7acec75eaa0e975e9f03f76b8aa73459606fcb5b3dc3cbd5a25d3942",
       "bundle_manifest_sha256": "sha256:67de430a13c232e46dc10d2ade1bac076e25178e5aac1ee3747f668e45c93c4d"
+    },
+    {
+      "foundation_bundle_version": "v0.10.0",
+      "safety_class": "routine_improvement",
+      "recommendation_reason": "Your system can now safely take on new capabilities you ask for mid-run — it defines, builds, and gets your acceptance before anything goes live.",
+      "path": "foundation-bundles/v0.10.0/",
+      "release_date": "2026-07-05",
+      "source_commit": "pending",
+      "manifest": "foundation-bundles/v0.10.0/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "Adds the operator-originated-enhancement flow: when you ask for something outside the current plan, your system now defines it, builds it, and records your acceptance before it goes live — with a build-time coverage check and a runtime write gate that ensure every capability that writes outside your system is declared, risk-classified, and approved by you. Includes a new add-capability skill, a machine-readable record of your system's write-back capabilities and their acceptance state, and an always-on commit-hygiene guard that keeps a clean baseline before building and commits each accepted phase as its own revertable unit. Systems that never write outside themselves carry none of the write-gating. Your own data, rules, credentials, and logs are untouched.",
+      "bundle_tree_sha256": "sha256:5e52f449d647203146e0bbe6ece526652e61fb54ccb63108e92b4c26306f00df",
+      "bundle_manifest_sha256": "sha256:6f06b47dde604627b87ae227751ba623eb99a756d19548b49cb477e0e7cd69f2"
     }
   ]
 }

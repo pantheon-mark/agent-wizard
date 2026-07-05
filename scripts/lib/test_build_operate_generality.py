@@ -642,12 +642,19 @@ class SupervisedCopyTargetSourceGuardTest(unittest.TestCase):
     def setUpClass(cls):
         cls.close14_path = REPO_ROOT / "wizard" / "interview" / "15_close.md"
         cls.next_phase_path = REPO_ROOT / "wizard" / "skills" / "next-phase.md"
-        # The EMITTED home of the next-phase skill: the latest bundle's template.
+        # The EMITTED home of the next-phase skill: the LATEST bundle's template.
         # Operators receive this copy (operator_fill_emitter sources skills from the
         # bundle templates/ tree, not from wizard/skills/). The drill fix must land
         # here too, or emitted/upgraded systems keep the un-grounded instruction.
+        # Resolved dynamically from the registry (not a pinned version) so the byte-identity
+        # guard below tracks whatever the newest cut is — the moment a future edit lands in
+        # the dev-home skill without a re-cut, this test fails against the latest bundle.
+        from upgrade import latest_bundle_version, load_registry  # noqa: E402
+        _latest = latest_bundle_version(
+            load_registry(REPO_ROOT / "wizard" / "registry" / "foundation-bundles.json")
+        )
         cls.bundle_next_phase_path = (
-            REPO_ROOT / "wizard" / "foundation-bundles" / "v0.6.2"
+            REPO_ROOT / "wizard" / "foundation-bundles" / _latest
             / "templates" / "wizard" / "skills" / "next-phase.md"
         )
         cls.close14_text = cls.close14_path.read_text(encoding="utf-8")
@@ -814,34 +821,31 @@ class SupervisedCopyTargetSourceGuardTest(unittest.TestCase):
     def test_bundle_next_phase_drill_grounded_in_phase_agents(self):
         """Emitted bundle next-phase.md drill requires grounding in this phase's agents."""
         self._assert_drill_grounded(self.bundle_next_phase_text,
-                                    "bundle v0.6.2 templates/wizard/skills/next-phase.md")
+                                    "latest-bundle templates/wizard/skills/next-phase.md")
 
     def test_bundle_next_phase_drill_has_no_irreversible_action_fallback(self):
         """Emitted bundle next-phase.md drill carries the no-irreversible-action fallback."""
         self._assert_drill_fallback(self.bundle_next_phase_text,
-                                    "bundle v0.6.2 templates/wizard/skills/next-phase.md")
+                                    "latest-bundle templates/wizard/skills/next-phase.md")
 
     def test_bundle_next_phase_drill_generic_placeholder_removed(self):
         """Emitted bundle next-phase.md no longer offers the un-grounded generic placeholder."""
         self._assert_no_generic_placeholder(self.bundle_next_phase_text,
-                                            "bundle v0.6.2 templates/wizard/skills/next-phase.md")
+                                            "latest-bundle templates/wizard/skills/next-phase.md")
 
-    @unittest.expectedFailure
     def test_bundle_next_phase_matches_dev_home(self):
         """The emitted bundle next-phase.md is byte-identical to the dev home (single source
         of truth kept in sync by hand convention; no sync script exists).
 
-        KNOWN PENDING DIVERGENCE (B1-7, canonical-only slice D-B1-a). B1-7 added the
-        commit-hygiene build-flow prose to the DEV-HOME wizard/skills/next-phase.md
-        (Piece 5 "Clean baseline before building" + Piece 6 "commit each accepted phase as
-        its own revertable unit"). D-B1-a forbids touching any frozen foundation-bundle in
-        this slice, so the dev home now intentionally LEADS every bundle copy; byte-identity
-        is re-established when B2 re-cuts the bundle. This is marked expectedFailure — not
-        deleted — deliberately: it stays visible as the tracked re-sync obligation, and the
-        moment B2 re-cuts the bundle (dev-home == bundle again) unittest reports it as an
-        UNEXPECTED SUCCESS and fails the suite, forcing this marker to be removed. The
-        dev-home content itself (the Piece 5/6 additions) is guarded by
-        test_commit_hygiene.CommitHygieneEmittedProseTests."""
+        RE-SYNCED at the v0.10.0 bundle cut (B2-T9b). B1-7 had added the commit-hygiene
+        build-flow prose (Piece 5 "Clean baseline before building" + Piece 6 "commit each
+        accepted phase as its own revertable unit") + B2 added the enhancement-flow routing
+        to the DEV-HOME wizard/skills/next-phase.md while D-B1-a forbade touching any frozen
+        bundle, so the dev home LED every bundle copy through B1/B2. The v0.10.0 cut copied
+        the dev-home skill into the latest bundle byte-identically, restoring identity — so
+        this guard is now a live (no-longer-expectedFailure) forcing function: any future
+        edit to the dev-home skill without a re-cut fails this test against the latest bundle
+        (resolved dynamically in setUpClass)."""
         self.assertEqual(
             self.bundle_next_phase_text, self.next_phase_text,
             "bundle next-phase.md template diverged from wizard/skills/next-phase.md; "

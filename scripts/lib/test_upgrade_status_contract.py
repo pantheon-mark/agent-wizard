@@ -301,11 +301,13 @@ class CliTypedStatusTest(unittest.TestCase):
             self.assertIn("reason_code", data)
 
     def test_checked_current_exit_zero(self):
-        from upgrade import EXIT_CHECKED_CURRENT, load_registry
+        from upgrade import EXIT_CHECKED_CURRENT, load_registry, latest_bundle_version
         reg = load_registry(_REAL_REGISTRY)
-        latest = sorted(
-            (e["foundation_bundle_version"] for e in reg["bundles"]),
-        )[-1]
+        # Use the SAME semver-based latest selection the upgrade code uses. A lexical
+        # sorted(...)[-1] returns "v0.9.0" over "v0.10.0" (since "9" > "1" at char 3),
+        # which diverges from the runtime's parse_semver ordering once a two-digit minor
+        # (v0.10.0) is registered — the fixture must mirror the code's own latest.
+        latest = latest_bundle_version(reg)
         with tempfile.TemporaryDirectory() as td:
             proj = Path(td)
             mp = _make_operator_manifest(proj, latest)  # already latest -> current
