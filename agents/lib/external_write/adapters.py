@@ -185,8 +185,6 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     # detail marker — no consumer of Result.status distinguishes a real write from this.
     if target == "dry_run":
         detail: dict = {"dry_run": True, "simulated_value": op.new_value}
-        if _gate_audit:
-            detail.update(_gate_audit)
         return Result(status="written", detail=detail)
 
     # Step 2: attempt write via the surface's validating path.

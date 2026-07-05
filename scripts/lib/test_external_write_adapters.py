@@ -488,6 +488,23 @@ class TestDryRunNoMutation(unittest.TestCase):
         self.assertEqual(result.detail.get("simulated_value"), op.new_value)
 
     # ------------------------------------------------------------------
+    # Postwrite verification is ignored for dry_run: a supplied (non-None)
+    # postwrite_verification must not be consulted, and client.write/client.read
+    # must still never be called (same _RaisingClient spy proof as above).
+    # ------------------------------------------------------------------
+    def test_dry_run_ignores_postwrite_verification_still_no_write(self):
+        op = self._ungated_op(batch_id="dry-10")
+        client = _RaisingClient()
+        receipt = _receipt(op)
+        result = run_operation(
+            op, receipt, client,
+            postwrite_verification={"anything": "non-none-should-be-ignored"},
+            target="dry_run",
+        )
+        self.assertEqual(result.status, "written")
+        self.assertTrue(result.detail.get("dry_run") is True)
+
+    # ------------------------------------------------------------------
     # Non-dry_run behavior is unaffected: client.write is still called.
     # ------------------------------------------------------------------
     def test_non_dry_run_live_op_still_calls_client_write(self):

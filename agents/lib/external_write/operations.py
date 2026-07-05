@@ -82,7 +82,10 @@ class Result:
     Attributes
     ----------
     status: One of:
-        'written'              — write succeeded and read-back confirmed.
+        'written'              — EITHER the write succeeded and read-back confirmed,
+                                  OR this was a dry_run simulation: no external write
+                                  and no read-back occurred, and detail['dry_run'] is
+                                  True to mark the distinction unambiguously.
         'needs_operator_choice' — surface rejected the value as out-of-vocab;
                                   detail['allowed'] carries the surface's allowed set.
         'refused'              — receipt was missing, invalid, expired, or digest
