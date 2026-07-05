@@ -45,5 +45,4 @@ When a change event occurs, the system consults this map to identify which docum
 
 | Change event | Foundation documents to update | Operational documents to update | Notes |
 |-------------|-------------------------------|--------------------------------|-------|
-
-*No project-specific categories yet.*
+| New capability added (off-plan request set up as a proper step) | `approach.md` (roster section), `technical_architecture.md`, `execution_plan.md` (a new phase for building it) | `/agents/roster.md`, `/agents/prompts/` (the owning agent), `/agents/acceptance/` (a new acceptance file), the build-progress ledger (a not-started row), `/security/` capability records (the typed capability entry, bound to its plan phase, declared but not accepted), `/quality/co-protected-workflows.md` (registers the new high-risk action class so the quality check can see it), `/security/credentials_registry.md` if access is needed | Vision or plan-scope changes are surfaced to the user for confirmation (see exception above). For a high-risk capability, the safety record and the co-protected registration are written together — a high-risk capability is never recorded without the quality check being taught to watch for it. |

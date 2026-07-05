@@ -107,6 +107,37 @@ class SchemaTest(unittest.TestCase):
         self.assertIs(e["accepted"], False)
 
 
+class PhaseIdSchemaTest(unittest.TestCase):
+    """B2-T5: phase_id is an additive per-entry key on the descriptor schema (the acceptance
+    ceremony reads it; it binds an operator-declared capability to its plan phase). At
+    build/interview time no phase is known, so it defaults to None; the operate-time cascade
+    populates it."""
+
+    def test_phase_id_is_in_entry_keys(self):
+        self.assertIn("phase_id", cdr.ENTRY_KEYS)
+
+    def test_built_entry_carries_phase_id_defaulting_none(self):
+        rows = [_dep("d1", "Mailer", action_class="send_execute")]
+        e = cdr.build_descriptor_entries(_json(rows))[0]
+        self.assertIn("phase_id", e)
+        self.assertIsNone(e["phase_id"])
+
+    def test_built_entry_passes_through_phase_id_when_present(self):
+        rows = [_dep("d1", "Mailer", action_class="send_execute", phase_id="phase_09")]
+        e = cdr.build_descriptor_entries(_json(rows))[0]
+        self.assertEqual(e["phase_id"], "phase_09")
+
+    def test_base_descriptor_phase_id_is_none(self):
+        for e in cdr.base_declared_descriptors():
+            self.assertIn("phase_id", e)
+            self.assertIsNone(e["phase_id"])
+
+    def test_json_render_includes_phase_id_key(self):
+        rows = [_dep("d1", "Mailer", action_class="send_execute")]
+        parsed = json.loads(cdr.render_descriptor_registry_json(_json(rows)))
+        self.assertIn("phase_id", parsed[0])
+
+
 class FailSafeRiskClassTest(unittest.TestCase):
     """F-28 regression pin: risk_class in the registry is ALWAYS fail-safe-resolved, never the
     raw absent/unknown value, and never silently lands on read_only_local by omission."""

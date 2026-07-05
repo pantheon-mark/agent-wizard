@@ -66,9 +66,16 @@ _DESCRIPTOR_FIELDS = (
 )
 
 # The machine-readable entry's exact key order (the cross-task contract for B1-4 / B1-5).
+# `phase_id` is an ADDITIVE per-entry key: it binds an operator-declared capability to the plan
+# phase it was defined under, and the acceptance ceremony REQUIRES it before it will ever flip a
+# descriptor to accepted:true (a descriptor with no phase binding can never be accepted — fail-
+# safe). It defaults to None here: at build/interview time no plan phase is known; the operate-
+# time add-capability cascade (which lands a descriptor via the operator-side registration helper)
+# is what populates it. The coverage gate and the runtime write gate read only their own keys and
+# ignore phase_id entirely, so adding it is transparent to them.
 ENTRY_KEYS = (
     "id", "name", "action_class", "risk_class", "recovery_profile_ref",
-    "declared_test_target", "blast_radius_cap", "accepted",
+    "declared_test_target", "blast_radius_cap", "accepted", "phase_id",
 )
 
 # This projection's field names (for derivation_inputs_for / project, mirroring
@@ -111,6 +118,8 @@ def build_descriptor_entries(identity_json: str) -> List[Dict[str, Any]]:
       declared_test_target  -- raw value if present, else None
       blast_radius_cap      -- raw value if present, else None
       accepted              -- ALWAYS False (D-B1-b: runtime marking is a later slice)
+      phase_id              -- raw value if present, else None (at build time no plan phase is
+                               known; the operate-time cascade populates it — see ENTRY_KEYS)
     """
     rows = parse_identity(identity_json)  # fail-closed; validates every present descriptor field
     entries: List[Dict[str, Any]] = []
@@ -126,6 +135,7 @@ def build_descriptor_entries(identity_json: str) -> List[Dict[str, Any]]:
             "declared_test_target": row.get("declared_test_target"),
             "blast_radius_cap": row.get("blast_radius_cap"),
             "accepted": False,
+            "phase_id": row.get("phase_id"),
         })
     return entries
 
@@ -235,6 +245,9 @@ def base_declared_descriptors() -> List[Dict[str, Any]]:
             "declared_test_target": None,
             "blast_radius_cap": None,
             "accepted": False,
+            # A base placeholder is never accepted and never passed to the ceremony, so it owns
+            # no plan phase; phase_id is null (the schema tolerates it — see ENTRY_KEYS).
+            "phase_id": None,
         })
     return entries
 
