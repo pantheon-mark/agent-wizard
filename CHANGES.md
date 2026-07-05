@@ -19,7 +19,7 @@ Entries appear newest-first.
 - Behind the scenes, the machinery that will keep a newly-added capability safe was put in place: a plain description of exactly what a new capability may and may not do; a check that refuses to run a risky action against your real data until you have accepted it (a copy or a small test batch goes first); a limit on how much an irreversible action can touch at once; and a save-your-work helper so that "undo" is always real rather than assumed.
 - All of it is inactive until the feature ships. Your files, data, rules, credentials, and logs are untouched.
 
-`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `cbda1fd` (private build repo) · public repo commit `35e4fa2`
 
 ---
 
@@ -31,7 +31,7 @@ Entries appear newest-first.
 - **A rewritten about document** that sets expectations plainly: what this is, what it protects you from, what it asks of you, and what it cannot do yet.
 - **A small accuracy fix** in the setup questions: the note about Node.js now correctly says it is only how Claude Code is delivered, not something your finished system runs on.
 
-`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `6875073` (private build repo) · public repo commit `abfefb7`
 
 ---
 
@@ -46,7 +46,7 @@ Entries appear newest-first.
 
 This is a feature addition (`v0.9.0`, operator-explicit as always). Foundation documents are byte-identical to `v0.8.0`. Your own files, data, rules, credentials, and logs are untouched; a backup is taken before anything is applied.
 
-`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `84cc910` (private build repo) · public repo commit `dc6ef61`
 
 ---
 
@@ -61,7 +61,7 @@ This is a feature addition (`v0.9.0`, operator-explicit as always). Foundation d
 
 Systems that do not write back to anything carry none of this — it is added only where it is needed. This is a feature addition (`v0.8.0`, operator-explicit as always). Your own files, data, rules, credentials, and logs are untouched; a backup is taken before anything is applied. Foundation documents are byte-identical to `v0.7.0`.
 
-`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `5984ca2` (private build repo) · public repo commit `2b69fd3`
 
 ---
 
@@ -75,7 +75,7 @@ Systems that do not write back to anything carry none of this — it is added on
 
 This is a feature addition (`v0.7.0`, operator-explicit as always). Your own files and customizations are untouched; a backup is taken before anything is applied. Foundation documents are byte-identical to `v0.6.9`.
 
-`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `72b9f70` (private build repo) · public repo commit `08a4adc`
 
 ---
 
@@ -88,7 +88,7 @@ This is a feature addition (`v0.7.0`, operator-explicit as always). Your own fil
 
 This is a small fix-only change (`v0.6.9`, operator-explicit as always). Your own files and customizations are untouched; a backup is taken before anything is applied. Foundation documents are byte-identical to `v0.6.8`.
 
-`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `44638d8` (private build repo) · public repo commit `5dfd8bd`
 
 ---
 
