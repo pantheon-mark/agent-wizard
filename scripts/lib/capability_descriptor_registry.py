@@ -256,9 +256,64 @@ def render_descriptor_registry_json(identity_json: str) -> str:
     """Canonical JSON text for the machine-readable descriptor set: a JSON array of
     build_descriptor_entries() entries, each key in ENTRY_KEYS order (insertion order is
     preserved by dict + json.dumps without sort_keys — the order documented as the cross-task
-    contract), indent=2, trailing newline, deterministic (no clock / no randomness)."""
+    contract), indent=2, trailing newline, deterministic (no clock / no randomness).
+
+    Note: this renders the DECLARED half only. The COMPLETE set every emitted writes-back
+    system carries (base + declared) is render_initial_descriptor_set_json below — that is what
+    security/capability_descriptors.json is emitted with, and what the coverage gate reads."""
     entries = build_descriptor_entries(identity_json)
     return json.dumps(entries, indent=2, ensure_ascii=False) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# The COMPLETE initial emitted descriptor set (base + declared) — B2-T9a
+# ---------------------------------------------------------------------------
+#
+# The field the emitted security/capability_descriptors.json template placeholder carries,
+# filled at emit with the initial descriptor set. Distinct from REGISTRY_FIELD (the machine-set
+# contract name) and MARKDOWN_FIELD (the QA-view markdown row body): this is the emitted
+# JSON-DOCUMENT field the writes-back-gated agent-layer emitter substitutes into the template.
+EMIT_FIELD = "CAPABILITY_DESCRIPTORS_JSON"
+
+
+def build_initial_descriptor_set(identity_json: str) -> List[Dict[str, Any]]:
+    """The COMPLETE initial descriptor set every emitted writes-back system carries:
+    base_declared_descriptors() (ALWAYS — one per distinct built-in guarded risk class, so a
+    fresh writes-back build passes the coverage gate on delete_record et al. and is not
+    dead-on-arrival) PLUS the operator's declared-capability descriptors
+    (build_descriptor_entries() from the canonical EXTERNAL_DEPENDENCY_IDENTITY record). EVERY
+    entry accepted:false (D-B1-b fail-safe; runtime acceptance is a later flow, never emit).
+
+    Deterministic order: base entries (base_declared_descriptors is sorted by risk_class) first,
+    then the declared entries in input order. Deduped by id, first occurrence winning — a base
+    sentinel id (__builtin__:<risk_class>) can never collide with a real operator surface id, so
+    the dedup is defensive.
+
+    Two entries may legitimately share a risk_class (e.g. the base irreversible_external entry
+    plus an operator-declared irreversible capability). That is NOT a duplicate and both are
+    kept: the build-time coverage gate joins on risk_class (the first covering entry suffices)
+    while the runtime write_gate joins on surface (id/name), so a second same-risk entry is
+    meaningful there. Only identical ids are deduped."""
+    entries: List[Dict[str, Any]] = []
+    seen_ids: set = set()
+    for entry in base_declared_descriptors() + build_descriptor_entries(identity_json):
+        eid = entry.get("id")
+        if eid in seen_ids:
+            continue
+        seen_ids.add(eid)
+        entries.append(entry)
+    return entries
+
+
+def render_initial_descriptor_set_json(identity_json: str) -> str:
+    """Canonical JSON text for the INITIAL emitted descriptor set (base + declared): a JSON
+    array of build_initial_descriptor_set() entries, each key in ENTRY_KEYS order, indent=2,
+    NO trailing newline (the emitted template file supplies the final newline after the
+    placeholder). Deterministic (no clock / no randomness). This is exactly what
+    security/capability_descriptors.json is emitted with for a writes-back system, and what the
+    build-time coverage gate (external_write.coverage_gate) reads back."""
+    entries = build_initial_descriptor_set(identity_json)
+    return json.dumps(entries, indent=2, ensure_ascii=False)
 
 
 def _md_cell(text: Any) -> str:

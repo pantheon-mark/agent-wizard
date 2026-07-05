@@ -1303,11 +1303,19 @@ class TestS253ContractDelta(unittest.TestCase):
 
     def test_emit_set_lists_the_two_b2t2_gate_files(self):
         # B2-T2: coverage_gate.py (build-time) + write_gate.py (runtime) are enrolled in the
-        # lib-emit tuple alongside the ten B1 files above (twelve total).
+        # lib-emit tuple alongside the ten B1 files above.
         import agent_emitter
         for name in ("coverage_gate.py", "write_gate.py"):
             self.assertIn(name, agent_emitter._EXTERNAL_WRITE_LIB_FILES)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 12)
+
+    def test_emit_set_lists_the_three_b2t9a_flow_files(self):
+        # B2-T9a: the operator-originated-enhancement flow modules are enrolled so the flow's
+        # runtime + build-time machinery actually ships (fifteen lib files total).
+        import agent_emitter
+        for name in ("acceptance_ceremony.py", "capability_registration.py",
+                     "operator_acceptance.py"):
+            self.assertIn(name, agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 15)
 
     def _writes_back_plan(self):
         import copy, json

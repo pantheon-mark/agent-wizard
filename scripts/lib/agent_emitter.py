@@ -61,9 +61,24 @@ _EXTERNAL_WRITE_LIB_FILES = (
     "copy_run_proof.py",
     "coverage_gate.py",
     "write_gate.py",
+    # B2-T9a: the operator-originated-enhancement flow runtime + build-time machinery. Without
+    # these three the flow's substrate ships but the flow itself is dead — a built capability
+    # can never be accepted (ceremony), a new capability can never be registered (registration),
+    # and the operator can never act on an acceptance (operator_acceptance).
+    "acceptance_ceremony.py",
+    "capability_registration.py",
+    "operator_acceptance.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
+
+# B2-T9a — the initial machine-readable descriptor set the build-time coverage gate reads. Its
+# emitted-tree relpath, and the bundle-relative subpath of the JSON template (a full-body
+# {{CAPABILITY_DESCRIPTORS_JSON}} placeholder) that fills it. Emitted ONLY for a writes-back plan
+# and source-gated on the bundle carrying the template (canonical-only at T9a; the bundle copy +
+# system-artifacts.json entry + parity are T9b) — inert until then, mirroring the lib emit.
+_CAPABILITY_DESCRIPTOR_SET_REL = "security/capability_descriptors.json"
+_BUNDLE_CAPABILITY_DESCRIPTOR_TEMPLATE_REL = "security/capability_descriptors.json"
 
 
 def _plan_has_writes_back(plan: "EmissionPlan") -> bool:
@@ -95,14 +110,16 @@ def _plan_has_writes_back(plan: "EmissionPlan") -> bool:
 def external_write_lib_emit_set(plan: "EmissionPlan") -> List[str]:
     """The emitted-tree relpaths of the external_write lib files this plan should emit.
 
-    Returns all twelve lib files under agents/lib/external_write/ when the plan has a
+    Returns all fifteen lib files under agents/lib/external_write/ when the plan has a
     writes-back dependency: the original four substrate files (operations, adapters,
     broker, scan), the six contract-and-verification modules (verification_modes,
-    contracts, verifiers, boundary, proof_hash, copy_run_proof), and the two B1-4/B1-5
+    contracts, verifiers, boundary, proof_hash, copy_run_proof), the two B1-4/B1-5
     safety-gate modules (coverage_gate — build-time descriptor-coverage gate; write_gate —
-    runtime pre-write gate) enrolled at B2-T2 (canonical enrollment only; the physical bundle
-    copy + system-artifacts.json + parity entries land at B2-T9 — the copy below is already
-    source-gated on the bundle carrying the file, so this enrollment is a no-op until then).
+    runtime pre-write gate) enrolled at B2-T2, and the three B2 operator-originated-enhancement
+    flow modules (acceptance_ceremony, capability_registration, operator_acceptance) enrolled at
+    B2-T9a (canonical enrollment only; the physical bundle copy + system-artifacts.json + parity
+    entries land at B2-T9b — the copy below is already source-gated on the bundle carrying the
+    file, so this enrollment is a no-op until then).
 
     Returns [] when the plan has no writes-back (boundary_output) dependency — no dead
     code for read-only systems, and none for foundation-only plans (which have no agent
@@ -154,6 +171,47 @@ def _emit_external_write_lib(plan: "EmissionPlan", staging_dir: Path,
         dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
         written.append(dst)
     return written
+
+
+def _emit_capability_descriptor_set(plan: "EmissionPlan", staging_dir: Path,
+                                    build_repo_root: Path) -> List[Path]:
+    """Emit security/capability_descriptors.json — the INITIAL machine-readable descriptor set
+    the build-time coverage gate reads back — for a writes-back plan (B2-T9a).
+
+    Gated IDENTICALLY to the external_write lib (via _plan_has_writes_back): a read-only or
+    foundation-only system carries no descriptor set — no dead artifact, and its coverage gate
+    never runs. Source-gated on the emitted bundle carrying the JSON template (canonical-only at
+    T9a; the bundle copy + system-artifacts.json entry + parity land at T9b), so this is inert
+    until then — the same source-gating as _emit_external_write_lib.
+
+    The emitted content is the COMPLETE initial set: base_declared_descriptors() (ALWAYS present,
+    so a fresh writes-back build passes the coverage gate and is not dead-on-arrival) + the
+    operator's declared-capability descriptors, every entry accepted:false. Filled into the
+    template's full-body {{CAPABILITY_DESCRIPTORS_JSON}} placeholder via the same strict,
+    fail-fast substitution every other template uses (JSON single-braces are not {{KEY}}
+    placeholders, so the JSON body passes through cleanly). The value is a producer projection
+    over the canonical EXTERNAL_DEPENDENCY_IDENTITY record: a value already projected into
+    foundation_doc_inputs under EMIT_FIELD wins (forward-compat with a persisted-field wiring at
+    T9b), else it is computed here — so the set is GUARANTEED present for every writes-back build
+    regardless of interview-carrier state (the reachability property T9a delivers)."""
+    if not _plan_has_writes_back(plan):
+        return []
+    import capability_descriptor_registry as cdr  # type: ignore  # sibling under lib/
+    from dependency_projection import IDENTITY_FIELD  # type: ignore
+    bt = _bundle_agent_templates_root(build_repo_root, plan.bundle_version)
+    template_path = bt / _BUNDLE_CAPABILITY_DESCRIPTOR_TEMPLATE_REL
+    if not template_path.is_file():
+        # Source-gated: the bundle does not carry the template yet (T9b's copy). Inert until then.
+        return []
+    fdi = plan.foundation_doc_inputs or {}
+    value = fdi.get(cdr.EMIT_FIELD)
+    if value is None or not str(value).strip():
+        identity_json = fdi.get(IDENTITY_FIELD) or "[]"
+        value = cdr.render_initial_descriptor_set_json(str(identity_json))
+    out_path = staging_dir / _CAPABILITY_DESCRIPTOR_SET_REL
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    return [_emit_from_template(template_path, out_path, {cdr.EMIT_FIELD: str(value)},
+                                "capability_descriptors.json")]
 
 
 def _bundle_agent_templates_root(build_repo_root: Path, version: Optional[str] = None) -> Path:
@@ -410,6 +468,11 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
     # source-gated on the bundle carrying the lib files (decision reported by
     # external_write_lib_emit_set; physical emit lands once the bundle ships them).
     written += _emit_external_write_lib(plan, staging_dir, build_repo_root)
+
+    # --- Initial capability-descriptor set (writes-back only) — the build-time coverage gate
+    # reads security/capability_descriptors.json; without it a fresh writes-back build fails
+    # closed (dead on arrival). Same writes-back + source gating as the lib emit above. ---
+    written += _emit_capability_descriptor_set(plan, staging_dir, build_repo_root)
 
     # --- Roster (generated; the Orchestrator health check reads this) ---
     roster_out = agents_dir / "roster.md"

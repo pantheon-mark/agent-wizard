@@ -76,7 +76,16 @@ _BUNDLE_CLAUDE_CONFIG_REL = "claude_config"
 # but .env is emitted EMPTY by operator_fill_emitter, not from this template — the
 # scaffold walk must skip it.
 EXCLUDE_BASENAMES = {"_index.md", "env_template"}
-EXCLUDE_RELPATHS = {"quality/rules_library.md"}  # corpus single-home (corpus_emitter)
+EXCLUDE_RELPATHS = {
+    "quality/rules_library.md",  # corpus single-home (corpus_emitter)
+    # security/capability_descriptors.json is emitted ONLY for a writes-back plan, by the
+    # agent-layer emitter (agent_emitter._emit_capability_descriptor_set), gated exactly like the
+    # external_write lib. The unconditional scaffold walk must NOT emit it — a read-only system
+    # would otherwise get a dead descriptor set. This exclusion is inert until T9b copies the
+    # template into the bundle's templates/security/; it is placed here now so the moment the
+    # bundle carries it, the scaffold walk already skips it. (B2-T9a)
+    "security/capability_descriptors.json",
+}
 
 # Source-basename -> emitted-basename renames.
 RENAME = {"gitignore_template": ".gitignore"}
