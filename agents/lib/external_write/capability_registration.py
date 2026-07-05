@@ -25,8 +25,17 @@ Fail-safe / fail-closed properties (every branch defaults to refuse + write noth
     co-protected-registered, not invisible;
   * for a GATED capability the co-protected table MUST be present and locatable; if it is not, the
     descriptor is not landed;
-  * if the co-protected write fails AFTER the descriptor-set write, the descriptor set is rolled
-    back to its exact prior bytes — the pair is all-or-nothing.
+  * for a GATED capability the co-protected table is written FIRST, the descriptor set SECOND —
+    reversed from the naive order — so a hard crash (SIGKILL / power loss) between the two
+    ``os.replace`` calls is fail-SAFE, not fail-open: it leaves at worst a harmless PHANTOM guard
+    row with no matching descriptor (over-protective, never blind), and a retry regenerates the
+    co-protected table from the FULL descriptor set (reconciling the phantom row away) and lands
+    the descriptor idempotently — self-healing. The opposite order (descriptor first) would leave
+    a live gated descriptor with NO guard row on crash — the exact blindness this helper exists to
+    prevent — and could never self-heal, because a retry would hit the duplicate-id refusal
+    forever with the guard still blind;
+  * if the descriptor-set write fails AFTER the co-protected write, the co-protected table is
+    rolled back to its exact prior text — the pair is all-or-nothing.
 
 Boundary discipline (D-B1-a): this module lives in the external_write package (emitted into the
 operator system) and MUST NOT import the build-side tree. The few build-side constants it needs
@@ -345,53 +354,57 @@ def register_declared_capability(
 
     gated = risk_class in CO_PROTECTED_RISK_CLASSES
 
-    # --- for a GATED capability, regenerate the co-protected table (mandatory-by-construction) ---
-    new_co_text: Optional[str] = None
-    if gated:
-        try:
-            with open(co_protected_path, encoding="utf-8") as f:
-                co_text = f.read()
-        except Exception as e:
-            return _refuse(
-                f"the co-protected-workflows table is missing / unreadable ({e}); a high-risk "
-                "capability is not registered while the QA guard would stay blind to it", cap_id)
-        try:
-            rows = co_protected_rows_from_entries(new_entries)
-            new_co_text = _rewrite_co_protected_table(co_text, rows)
-        except CapabilityRegistrationError as e:
-            return _refuse(str(e), cap_id)
-
-    # --- write the descriptor set, capturing the exact prior bytes for rollback ---
-    try:
-        original_text = Path(descriptor_set_path).read_text(encoding="utf-8")
-    except Exception as e:
-        return _refuse(f"could not read the descriptor set for a safe update: {e}", cap_id)
-    try:
-        _atomic_write_text(descriptor_set_path, _descriptor_set_text(new_entries))
-    except Exception as e:
-        return _refuse(f"could not write the descriptor set; no change made: {e}", cap_id)
-
     if not gated:
+        # No co-protected step for a non-gated capability — the descriptor set is the only write.
+        try:
+            _atomic_write_text(descriptor_set_path, _descriptor_set_text(new_entries))
+        except Exception as e:
+            return _refuse(f"could not write the descriptor set; no change made: {e}", cap_id)
         return RegistrationResult(
             registered=True, reason=None, capability_id=cap_id, co_protected_updated=False,
             descriptor_set_path=descriptor_set_path, co_protected_path=None)
 
-    # --- write the co-protected table; roll the descriptor set back on failure (all-or-nothing) ---
+    # --- GATED: regenerate the co-protected table from the FULL descriptor set (mandatory-by-
+    # construction), then write it FIRST — before the descriptor set. See the module docstring for
+    # why this order (not the reverse) is the fail-safe one: a crash between the two ``os.replace``
+    # calls leaves at worst a harmless phantom guard row (never a blind guard on a live descriptor),
+    # and a retry reconciles the phantom and lands the descriptor idempotently.
+    try:
+        with open(co_protected_path, encoding="utf-8") as f:
+            original_co_text = f.read()
+    except Exception as e:
+        return _refuse(
+            f"the co-protected-workflows table is missing / unreadable ({e}); a high-risk "
+            "capability is not registered while the QA guard would stay blind to it", cap_id)
+    try:
+        rows = co_protected_rows_from_entries(new_entries)
+        new_co_text = _rewrite_co_protected_table(original_co_text, rows)
+    except CapabilityRegistrationError as e:
+        return _refuse(str(e), cap_id)
+
     try:
         _atomic_write_text(co_protected_path, new_co_text)
     except Exception as e:
-        # Roll back the descriptor set to its exact prior bytes (a direct write, independent of the
-        # atomic replace that just failed) so the capability is never left half-registered.
+        return _refuse(
+            f"could not write the co-protected guard table; no change made: {e}", cap_id)
+
+    # --- write the descriptor set; roll the co-protected table back on failure (all-or-nothing) ---
+    try:
+        _atomic_write_text(descriptor_set_path, _descriptor_set_text(new_entries))
+    except Exception as e:
+        # Roll back the co-protected table to its exact prior text (a direct write, independent of
+        # the atomic replace that just failed) so the guard table never carries a phantom row for a
+        # capability that was never actually registered.
         try:
-            Path(descriptor_set_path).write_text(original_text, encoding="utf-8")
+            Path(co_protected_path).write_text(original_co_text, encoding="utf-8")
         except Exception as rb:  # pragma: no cover - defensive
             return _refuse(
-                f"co-protected write failed ({e}) AND descriptor-set rollback failed ({rb}); the "
-                "descriptor set may be left with an unregistered capability — resolve manually",
-                cap_id)
+                f"descriptor-set write failed ({e}) AND co-protected rollback failed ({rb}); the "
+                "co-protected table may carry a phantom guard row for an unregistered capability — "
+                "resolve manually", cap_id)
         return _refuse(
-            f"could not regenerate the co-protected guard table ({e}); rolled the descriptor set "
-            "back — the capability was NOT registered", cap_id)
+            f"could not write the descriptor set ({e}); rolled the co-protected guard table back — "
+            "the capability was NOT registered", cap_id)
 
     return RegistrationResult(
         registered=True, reason=None, capability_id=cap_id, co_protected_updated=True,

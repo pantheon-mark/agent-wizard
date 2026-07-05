@@ -148,6 +148,23 @@ class DriftPinTest(unittest.TestCase):
         self.assertEqual(cr._PROTECTION_NOTE, cpw._PROTECTION_NOTE)
         self.assertEqual(cr.STANDING_AUTOMATION_FLOOR_NOTE, cpw.STANDING_AUTOMATION_FLOOR_NOTE)
 
+    def test_table_header_matches_real_template_file(self):
+        # CO_PROTECTED_TABLE_HEADER is the anchor _rewrite_co_protected_table locates the table by.
+        # It is a literal duplicate of the emitted template's header row; if a future template
+        # reword changes that row without this constant following, every GATED registration would
+        # hit "no table header" and refuse forever. Read the REAL template file (not a fixture) so
+        # a reword can't silently drift past this test.
+        template_path = (Path(__file__).resolve().parents[3] / "wizard" / "templates" /
+                         "quality" / "co-protected-workflows.md")
+        self.assertTrue(template_path.is_file(), f"template not found at {template_path}")
+        template_text = template_path.read_text(encoding="utf-8")
+        header_lines = [line for line in template_text.split("\n")
+                        if line.strip() == cr.CO_PROTECTED_TABLE_HEADER]
+        self.assertEqual(
+            len(header_lines), 1,
+            "CO_PROTECTED_TABLE_HEADER must match exactly one line in the real template — a "
+            "template reword has drifted from the duplicated constant in capability_registration.py")
+
 
 class HappyPathTest(unittest.TestCase):
     def setUp(self):
@@ -318,18 +335,20 @@ class FailSafeTest(unittest.TestCase):
         self.assertIn(e["risk_class"], GATED_RISK_CLASSES)
         self.assertTrue(res.co_protected_updated)
 
-    def test_descriptor_set_rolled_back_if_co_protected_write_fails(self):
-        # All-or-nothing: if the co-protected write fails AFTER the descriptor-set write, the
-        # descriptor set is restored — never left half-registered.
+    def test_co_protected_rolled_back_if_descriptor_set_write_fails(self):
+        # All-or-nothing, REVERSED order: the co-protected table is written FIRST; if the
+        # descriptor-set write (SECOND) then fails, the co-protected table is rolled back to its
+        # exact prior text — never left with a phantom row for an unregistered capability.
         p = _Project(self.tmp, descriptors=_base())
-        orig = p.set_bytes()
+        orig_set = p.set_bytes()
+        orig_co = p.co_bytes()
         real_replace = os.replace
         calls = {"n": 0}
 
         def _second_replace_boom(src, dst):
             calls["n"] += 1
-            if calls["n"] >= 2:  # first replace = descriptor set; second = co-protected
-                raise OSError("simulated co-protected write failure")
+            if calls["n"] >= 2:  # first replace = co-protected table; second = descriptor set
+                raise OSError("simulated descriptor-set write failure")
             return real_replace(src, dst)
 
         cr.os.replace = _second_replace_boom
@@ -338,8 +357,54 @@ class FailSafeTest(unittest.TestCase):
         finally:
             cr.os.replace = real_replace
         self.assertFalse(res.registered)
-        self.assertEqual(p.set_bytes(), orig, "descriptor set must be rolled back on co-protected failure")
+        self.assertEqual(p.set_bytes(), orig_set,
+                         "descriptor set must be untouched when its own write fails")
+        self.assertEqual(p.co_bytes(), orig_co,
+                         "co-protected table must be rolled back on descriptor-set failure")
         self.assertNotIn("mailbox_cleanup", {e["id"] for e in p.entries()})
+        self.assertNotIn("Mailbox cleanup", p.co_path.read_text(encoding="utf-8"))
+
+    def test_co_protected_is_written_before_descriptor_set_for_gated_capability(self):
+        # Crash-window proof: for a GATED capability the co-protected table's write MUST be
+        # ordered before the descriptor set's write, so a crash between the two leaves at worst a
+        # harmless phantom guard row (fail-safe) rather than a live descriptor with no guard row
+        # (fail-open / blind). Monkeypatch the atomic writer to record call order by path.
+        p = _Project(self.tmp, descriptors=_base())
+        order = []
+        real_atomic_write = cr._atomic_write_text
+
+        def _recording_write(path, text):
+            order.append(path)
+            return real_atomic_write(path, text)
+
+        cr._atomic_write_text = _recording_write
+        try:
+            res = p.call(_declared(id="mailbox_cleanup"))
+        finally:
+            cr._atomic_write_text = real_atomic_write
+        self.assertTrue(res.registered, res.reason)
+        self.assertEqual(len(order), 2)
+        self.assertEqual(order[0], str(p.co_path),
+                         "co-protected table must be written before the descriptor set")
+        self.assertEqual(order[1], str(p.set_path))
+
+    def test_retry_after_phantom_guard_row_self_heals(self):
+        # Self-healing property: if a phantom guard row exists (as it would after a crash in the
+        # window between the two writes) but the descriptor was never landed, a retry is NOT
+        # blocked by the duplicate-id refusal (the descriptor doesn't exist yet) and regenerates
+        # the co-protected table from the full set, reconciling the phantom row.
+        p = _Project(self.tmp, descriptors=_base())
+        phantom_co_text = cr._rewrite_co_protected_table(
+            p.co_path.read_text(encoding="utf-8"),
+            cr.co_protected_rows_from_entries([_declared(id="mailbox_cleanup",
+                                                          name="Mailbox cleanup")]))
+        p.co_path.write_text(phantom_co_text, encoding="utf-8")
+        self.assertNotIn("mailbox_cleanup", {e["id"] for e in p.entries()})
+
+        retry = p.call(_declared(id="mailbox_cleanup", name="Mailbox cleanup"))
+        self.assertTrue(retry.registered, retry.reason)
+        self.assertIn("mailbox_cleanup", {e["id"] for e in p.entries()})
+        self.assertIn("Mailbox cleanup", p.co_path.read_text(encoding="utf-8"))
 
 
 class CeremonyRoundTripTest(unittest.TestCase):
