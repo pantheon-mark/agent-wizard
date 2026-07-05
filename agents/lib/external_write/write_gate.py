@@ -74,6 +74,27 @@ GATED_RISK_CLASSES = frozenset({
 # dependency_projection.TEST_TARGETS. A gated op may run against any of these before acceptance.
 TEST_TARGETS = frozenset({"copy", "bounded_sample", "dry_run", "native_undo"})
 
+# T1 (bounded_sample/dry_run/native_undo test surfaces, 2026-07-05): TEST_TARGETS splits into
+# two safety classes by LIVE BLAST RADIUS, not by the word "test" — a bounded live sample is a
+# subset of the LIVE resource and cannot be made safe by surface separation the way copy is.
+# The two classes below partition TEST_TARGETS EXACTLY (pinned by a test in
+# test_external_write_write_gate.py) so a future test-target string can never silently default
+# into the wrong safety class.
+#
+#   ISOLATED_TEST_TARGETS   — no live blast radius at all. `copy` is surface-based
+#     (COPY_SURFACE, descriptor-independent) — unchanged/byte-identical. `dry_run` permits
+#     unconditionally at THIS gate; that permit is SAFE only because a separate task's adapter
+#     guarantees dry_run never reaches client.write (the gate authorizes the intent, the
+#     adapter enforces no-mutation) — see evaluate_write_gate below.
+#   LIVE_BOUNDED_TEST_TARGETS — a REAL live write to a bounded subset of the live resource
+#     (perform-then-revert for native_undo; a bounded live sample for bounded_sample). These
+#     are NOT surface-isolated, so they run the SAME live-enforcement funnel as an accepted
+#     live write (recovery floor + mandatory cap + ledger) — the only relaxation vs. the
+#     accepted live path is dropping the `accepted: true` requirement (a DECLARED capability
+#     whose declared_test_target exactly matches suffices; see _declared_entry below).
+ISOLATED_TEST_TARGETS = frozenset({"copy", "dry_run"})
+LIVE_BOUNDED_TEST_TARGETS = frozenset({"bounded_sample", "native_undo"})
+
 # The explicit live-target signal. A gated op must carry target=LIVE_TARGET affirmatively to
 # even attempt a live write — it can never reach live by omission.
 LIVE_TARGET = "live"
@@ -247,6 +268,33 @@ def _covering_entry(descriptor_set: Sequence[Dict[str, Any]], op: Operation,
     return None
 
 
+def _declared_entry(descriptor_set: Sequence[Dict[str, Any]], op: Operation, risk_class: str,
+                    target: str) -> Optional[Dict[str, Any]]:
+    """Return the first DECLARED descriptor entry that covers this op for a LIVE_BOUNDED test
+    `target`, or None. Distinct from `_covering_entry` (that function is left byte-unchanged;
+    this is a separate lookup, not a conditional weakening of it — leaking the accepted-live
+    path would be a T1 regret-mode risk).
+
+    Same surface/risk-class join as `_covering_entry` (op's capability id/name match; declared
+    risk_class equals the op's effective risk_class), but:
+      (a) does NOT require `accepted` — a LIVE_BOUNDED write is exactly the PRE-acceptance
+          mechanism (a declared capability, not an accepted one).
+      (b) additionally requires `e.get("declared_test_target") == target` EXACTLY.
+          `declared_test_target` is a single validated string (not a collection) — an entry
+          declared for 'copy' does not cover a 'bounded_sample' request, and vice versa."""
+    for e in descriptor_set:
+        if not isinstance(e, dict):
+            continue
+        if e.get("id") != op.surface and e.get("name") != op.surface:
+            continue
+        if e.get("risk_class") != risk_class:
+            continue
+        if e.get("declared_test_target") != target:
+            continue
+        return e
+    return None
+
+
 def _effective_cap(contract: Optional[OperationContract],
                    covering: Optional[Dict[str, Any]]) -> Optional[int]:
     """Effective blast-radius cap = the SMALLEST of the caps present (the per-capability
@@ -267,6 +315,72 @@ def _ledger_key(op: Operation) -> str:
     return f"{op.surface}::{op.op_kind}"
 
 
+def _enforce_live_funnel(op: Operation, risk_class: str, contract: Optional[OperationContract],
+                         entry: Dict[str, Any], cap_ledger: Optional[InvocationLedger],
+                         clock: Any) -> GateDecision:
+    """The SHARED live-enforcement funnel (R4/T1): the recovery floor (F-29), the mandatory
+    blast-radius cap + ledger, and the irreversibility audit. Called by BOTH the LIVE path
+    (`entry` from `_covering_entry`, accepted required) and the LIVE_BOUNDED path (`entry` from
+    `_declared_entry`, accepted NOT required) — the only difference between the two callers is
+    which lookup produced `entry`; every live bound past that point is identical (constraint:
+    the LIVE_BOUNDED relaxation vs. LIVE drops ONLY `accepted:true`). Duplicating this logic
+    across two branches was rejected as a drift risk (gemini regret-mode finding)."""
+    # F-29 recovery floor — NON-GRADUATING for standing_automation: a live standing_automation
+    # op requires a recovery profile on its entry, and NO autonomy/maturity signal can waive it
+    # (there is no such parameter on this gate — the floor is structural, not narrated).
+    if risk_class == "standing_automation":
+        ref = entry.get("recovery_profile_ref")
+        if not (isinstance(ref, str) and ref.strip()):
+            return _refuse(
+                "live standing_automation refused: the non-graduating recovery floor is not "
+                "satisfied — the entry declares no recovery_profile_ref (a backup/recover "
+                "path). Maturity graduates supervision, never this safety net.",
+                op_kind=op.op_kind, risk_class=risk_class)
+
+    # Blast-radius cap — deterministic, outside the LLM. R5/S-1 (T1): MANDATORY for every
+    # gated risk class on a live OR live-bounded write, not only irreversible_external — an
+    # unbounded gated live write (live or live-bounded) is never permitted.
+    effective_cap = _effective_cap(contract, entry)
+    if effective_cap is None:
+        return _refuse(
+            "live gated op refused: no blast-radius cap could be determined (neither a "
+            "contract default nor a per-capability descriptor cap). An unbounded gated live "
+            "write is never permitted.",
+            op_kind=op.op_kind, risk_class=risk_class)
+    if cap_ledger is None:
+        return _refuse(
+            "live gated op refused: no invocation ledger supplied, so the blast-radius cap "
+            f"({effective_cap}) cannot be enforced. Refusing rather than running an untracked "
+            "gated action.",
+            op_kind=op.op_kind, risk_class=risk_class, blast_radius_cap=effective_cap)
+    key = _ledger_key(op)
+    if cap_ledger.count(key) >= effective_cap:
+        return _refuse(
+            f"live gated op refused: blast-radius cap of {effective_cap} reached for this "
+            "capability in the current window (single-object Operation: one object_id = one "
+            "write = one cap slot; gated actions never batch).",
+            op_kind=op.op_kind, risk_class=risk_class, blast_radius_cap=effective_cap)
+    cap_ledger.record(key)
+
+    # F-22 + design §4.7: a live irreversible action writes an explicit, clock-stamped
+    # "this cannot be reversed" acknowledgement. The timestamp comes from the clock, NEVER
+    # a passed-in string.
+    audit: Optional[Dict[str, Any]] = None
+    if risk_class == FAIL_SAFE_RISK_CLASS:
+        audit = {
+            "irreversibility_acknowledgement": {
+                "reversible": False,
+                "note": "This action cannot be reversed.",
+                "op_kind": op.op_kind,
+                "blast_radius_cap": effective_cap,
+                "invocation_index": cap_ledger.count(key),  # 1-based (post-record)
+                "recorded_at": _iso_z(clock()),
+            }
+        }
+
+    return GateDecision(permitted=True, audit=audit)
+
+
 def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
                         descriptor_set: Optional[Sequence[Dict[str, Any]]] = None,
                         cap_ledger: Optional[InvocationLedger] = None,
@@ -278,11 +392,20 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
       1. Resolve the contract + effective risk class (F-28 fail-safe classification).
       2. read_only_local => never trips (design §4.5): permit untouched.
       3. Not gated (reversible_external, ungated) => permit untouched (byte-identical to pre-B1-4).
-      4. Gated => resolve target: absent => refuse; a recognized test target ON a recognized
-         test/copy surface => permit (bounded test, no acceptance/cap needed — no live blast
-         radius); a test target on a live surface => refuse (I1 — the target claim must bind to
-         the write surface); live => require a covering accepted entry, then the recovery floor
-         (F-29) and the blast-radius cap.
+      4. Gated => resolve target: absent => refuse. Otherwise the resolved target falls into
+         exactly one of three classes (T1):
+           - ISOLATED_TEST_TARGETS ('copy', 'dry_run') — no live blast radius. 'copy' permits
+             only on a recognized test/copy surface (I1), else refuses; 'dry_run' permits
+             unconditionally (no surface/cap/ledger/acceptance requirement — safe only because
+             the adapter guarantees no client.write under dry_run).
+           - LIVE_BOUNDED_TEST_TARGETS ('bounded_sample', 'native_undo') — a real live write to
+             a bounded subset of the live resource. Requires a DECLARED (not necessarily
+             accepted) descriptor entry whose declared_test_target exactly matches, then runs
+             the SAME live-enforcement funnel as an accepted live write (recovery floor +
+             mandatory blast-radius cap + ledger).
+           - LIVE_TARGET ('live') — requires a covering ACCEPTED descriptor entry, then the
+             same live-enforcement funnel.
+         Any other resolved value => refuse (unrecognized target).
     """
     if clock is None:
         clock = system_clock
@@ -314,22 +437,48 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
             "defaults to live",
             op_kind=op.op_kind, risk_class=risk_class)
 
-    if resolved in TEST_TARGETS:
-        # I1: a declared test target is a caller ASSERTION; it is honored ONLY when the op's
-        # surface is a recognized test/copy surface. A test target claimed on a live (non-test)
-        # surface must NOT permit — client.write would otherwise hit the live record. Fail-safe:
-        # bind the target claim to where the write physically lands.
-        if not is_test_surface(op.surface):
-            return _refuse(
-                f"gated operation refused: target {resolved!r} is a declared test target but "
-                f"the surface {op.surface!r} is not a recognized test/copy surface — a "
-                "test-target claim on a live surface is never honored (the write would hit the "
-                "live record). Route the operation to a copy/bounded test surface, or declare "
-                f"the affirmative live target and satisfy the accepted-phase gate.",
-                op_kind=op.op_kind, risk_class=risk_class, surface=op.surface)
-        # Bounded test against a recognized test/copy surface — always allowed, acceptance-
-        # independent, no live blast radius, so no cap and no ledger required.
+    if resolved in ISOLATED_TEST_TARGETS:
+        if resolved == "copy":
+            # I1 (unchanged/byte-identical): a declared 'copy' target is a caller ASSERTION;
+            # it is honored ONLY when the op's surface is a recognized test/copy surface. A
+            # copy claimed on a live (non-test) surface must NOT permit — client.write would
+            # otherwise hit the live record. Fail-safe: bind the target claim to where the
+            # write physically lands.
+            if not is_test_surface(op.surface):
+                return _refuse(
+                    f"gated operation refused: target {resolved!r} is a declared test target "
+                    f"but the surface {op.surface!r} is not a recognized test/copy surface — a "
+                    "test-target claim on a live surface is never honored (the write would hit "
+                    "the live record). Route the operation to a copy/bounded test surface, or "
+                    "declare the affirmative live target and satisfy the accepted-phase gate.",
+                    op_kind=op.op_kind, risk_class=risk_class, surface=op.surface)
+            # Copy against a recognized test/copy surface — always allowed, acceptance-
+            # independent, no live blast radius, so no cap and no ledger required.
+            return _PERMIT
+
+        # resolved == "dry_run": permit UNCONDITIONALLY — no surface, cap, ledger, or
+        # acceptance requirement. This permit is SAFE ONLY because a separate task's adapter
+        # (run_operation) guarantees a dry_run op never reaches client.write: THIS gate
+        # authorizes the intent, the ADAPTER enforces no-mutation. If that adapter guarantee
+        # were ever removed, this unconditional permit would become a live-write hole.
         return _PERMIT
+
+    if resolved in LIVE_BOUNDED_TEST_TARGETS:
+        # A REAL live write to a bounded subset of the live resource (perform-then-revert for
+        # native_undo; a bounded live sample for bounded_sample) — NOT surface-isolated, so it
+        # runs the SAME live-enforcement funnel as an accepted live write. The only relaxation
+        # vs. the accepted live path is dropping `accepted: true`: a DECLARED capability whose
+        # declared_test_target exactly matches `resolved` suffices (accepted not required).
+        ds = load_descriptor_set() if descriptor_set is None else descriptor_set
+        declared = _declared_entry(ds, op, risk_class, resolved)
+        if declared is None:
+            return _refuse(
+                f"gated operation refused: capability not DECLARED for test target {resolved!r} "
+                "— a LIVE_BOUNDED write requires a descriptor entry whose declared_test_target "
+                f"exactly matches {resolved!r} at risk_class {risk_class!r} (acceptance is NOT "
+                "required pre-acceptance, but a DECLARATION is).",
+                op_kind=op.op_kind, risk_class=risk_class)
+        return _enforce_live_funnel(op, risk_class, contract, declared, cap_ledger, clock)
 
     if resolved != LIVE_TARGET:
         return _refuse(
@@ -348,57 +497,4 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
             "actions, never blanket live mutation",
             op_kind=op.op_kind, risk_class=risk_class)
 
-    # F-29 recovery floor — NON-GRADUATING for standing_automation: a live standing_automation
-    # op requires a recovery profile on its covering entry, and NO autonomy/maturity signal can
-    # waive it (there is no such parameter on this gate — the floor is structural, not narrated).
-    if risk_class == "standing_automation":
-        ref = covering.get("recovery_profile_ref")
-        if not (isinstance(ref, str) and ref.strip()):
-            return _refuse(
-                "live standing_automation refused: the non-graduating recovery floor is not "
-                "satisfied — the covering accepted entry declares no recovery_profile_ref (a "
-                "backup/recover path). Maturity graduates supervision, never this safety net.",
-                op_kind=op.op_kind, risk_class=risk_class)
-
-    # Blast-radius cap — deterministic, outside the LLM. Mandatory for irreversible ops; also
-    # enforced for any gated class that carries an effective cap.
-    effective_cap = _effective_cap(contract, covering)
-    cap_required = (risk_class == FAIL_SAFE_RISK_CLASS) or (effective_cap is not None)
-    audit: Optional[Dict[str, Any]] = None
-    if cap_required:
-        if effective_cap is None:
-            return _refuse(
-                "live irreversible op refused: no blast-radius cap could be determined (neither "
-                "a contract default nor a per-capability descriptor cap). An unbounded "
-                "irreversible action is never permitted.",
-                op_kind=op.op_kind, risk_class=risk_class)
-        if cap_ledger is None:
-            return _refuse(
-                "live irreversible op refused: no invocation ledger supplied, so the "
-                f"blast-radius cap ({effective_cap}) cannot be enforced. Refusing rather than "
-                "running an untracked irreversible action.",
-                op_kind=op.op_kind, risk_class=risk_class, blast_radius_cap=effective_cap)
-        key = _ledger_key(op)
-        if cap_ledger.count(key) >= effective_cap:
-            return _refuse(
-                f"live irreversible op refused: blast-radius cap of {effective_cap} reached for "
-                f"this capability in the current window (irreversible actions never batch).",
-                op_kind=op.op_kind, risk_class=risk_class, blast_radius_cap=effective_cap)
-        cap_ledger.record(key)
-
-        # F-22 + design §4.7: a live irreversible action writes an explicit, clock-stamped
-        # "this cannot be reversed" acknowledgement. The timestamp comes from the clock, NEVER
-        # a passed-in string.
-        if risk_class == FAIL_SAFE_RISK_CLASS:
-            audit = {
-                "irreversibility_acknowledgement": {
-                    "reversible": False,
-                    "note": "This action cannot be reversed.",
-                    "op_kind": op.op_kind,
-                    "blast_radius_cap": effective_cap,
-                    "invocation_index": cap_ledger.count(key),  # 1-based (post-record)
-                    "recorded_at": _iso_z(clock()),
-                }
-            }
-
-    return GateDecision(permitted=True, audit=audit)
+    return _enforce_live_funnel(op, risk_class, contract, covering, cap_ledger, clock)

@@ -34,6 +34,8 @@ from external_write.write_gate import (  # noqa: E402
     is_test_surface,
     LIVE_TARGET,
     TEST_TARGETS,
+    ISOLATED_TEST_TARGETS,
+    LIVE_BOUNDED_TEST_TARGETS,
     GATED_RISK_CLASSES,
     FAIL_SAFE_RISK_CLASS,
     READ_ONLY_LOCAL,
@@ -70,12 +72,14 @@ def _op(op_kind, *, surface="google_sheets", object_id="obj:1", field="__record_
 
 def _accepted_entry(*, id="google_sheets", risk_class="irreversible_external",
                     blast_radius_cap=None, declared_test_target="copy",
-                    recovery_profile_ref=None):
+                    recovery_profile_ref=None, accepted=True):
+    # `accepted` defaults True (the historical name/shape); pass accepted=False to build a
+    # DECLARED-only entry for the T1 LIVE_BOUNDED path (_declared_entry does not require it).
     return {
         "id": id, "name": id, "action_class": "delete",
         "risk_class": risk_class, "recovery_profile_ref": recovery_profile_ref,
         "declared_test_target": declared_test_target,
-        "blast_radius_cap": blast_radius_cap, "accepted": True,
+        "blast_radius_cap": blast_radius_cap, "accepted": accepted,
     }
 
 
@@ -255,8 +259,11 @@ class TestDeleteRecordGating(unittest.TestCase):
         self.assertIn("surface", result.detail["reason"].lower())
 
     def test_every_test_target_on_live_surface_refused(self):
-        # Not just 'copy' — EVERY declared test target claimed on a live surface is refused.
-        for tt in sorted(TEST_TARGETS):
+        # Every declared test target claimed on a live surface with NOTHING declared/accepted
+        # is refused — EXCEPT dry_run (T1): dry_run is ISOLATED and permits unconditionally
+        # regardless of surface (no live blast radius; T2's adapter guarantees no client.write).
+        # dry_run's unconditional-permit is pinned separately in TestDryRunPermitsUnconditionally.
+        for tt in sorted(TEST_TARGETS - {"dry_run"}):
             op = _op("delete_record", surface="google_sheets", object_id=f"obj:{tt}")
             result = run_operation(op, _receipt(op), _AcceptingClient(),
                                    target=tt, descriptor_set=[])
@@ -435,8 +442,12 @@ class TestF29StandingAutomation(unittest.TestCase):
         self.assertIn("recover", r.detail["reason"].lower())
 
     def test_standing_automation_accepted_with_recovery_ref_allowed(self):
+        # R5 (T1): a blast-radius cap is now MANDATORY for every gated live risk class, not
+        # just irreversible_external — so this entry must carry a cap for the write to permit.
+        # (Pre-T1 this passed with no cap at all; that is the exact S-1 gap T1 closes.)
         op = _op("_standing_probe", field="Field")
         ds = [_accepted_entry(id="google_sheets", risk_class="standing_automation",
+                              blast_radius_cap=3,
                               recovery_profile_ref="recovery_profiles/backup_v1")]
         r = run_operation(op, _receipt(op), _AcceptingClient(),
                           target=LIVE_TARGET, descriptor_set=ds,
@@ -474,6 +485,240 @@ class TestF22SystemClock(unittest.TestCase):
         val = system_clock()
         after = datetime.now(timezone.utc)
         self.assertTrue(before <= val <= after)
+
+
+# ---------------------------------------------------------------------------
+# T1 (bounded_sample / dry_run / native_undo test surfaces) — vocabulary partition
+# ---------------------------------------------------------------------------
+
+class TestR1TestTargetPartition(unittest.TestCase):
+    def test_isolated_and_live_bounded_partition_test_targets_exactly(self):
+        # The two classes must cover TEST_TARGETS exactly and be disjoint, so a future target
+        # string can never silently default into the wrong safety class.
+        self.assertEqual(ISOLATED_TEST_TARGETS | LIVE_BOUNDED_TEST_TARGETS, TEST_TARGETS)
+        self.assertEqual(ISOLATED_TEST_TARGETS & LIVE_BOUNDED_TEST_TARGETS, frozenset())
+
+    def test_partition_values(self):
+        self.assertEqual(ISOLATED_TEST_TARGETS, frozenset({"copy", "dry_run"}))
+        self.assertEqual(LIVE_BOUNDED_TEST_TARGETS, frozenset({"bounded_sample", "native_undo"}))
+
+
+# ---------------------------------------------------------------------------
+# T1 — dry_run: ISOLATED, permits unconditionally at the gate
+# ---------------------------------------------------------------------------
+
+class TestDryRunPermitsUnconditionally(unittest.TestCase):
+    def test_dry_run_permits_with_no_descriptor_cap_or_ledger(self):
+        op = _op("delete_record", surface="google_sheets", object_id="obj:dry")
+        result = run_operation(op, _receipt(op), _AcceptingClient(), target="dry_run")
+        self.assertEqual(result.status, "written")
+
+    def test_dry_run_permits_regardless_of_surface(self):
+        # Unlike copy, dry_run carries no surface requirement — it is SAFE only because T2's
+        # adapter guarantees dry_run never reaches client.write; the gate authorizes the
+        # intent, the adapter enforces no-mutation. This op still targets a "live" surface
+        # here (no adapter no-write path exists yet in this task), so the AcceptingClient
+        # stub's write is harmless in this test.
+        for surface in ("google_sheets", COPY_SURFACE, "asana"):
+            op = _op("delete_record", surface=surface, object_id=f"obj:{surface}")
+            result = run_operation(op, _receipt(op), _AcceptingClient(), target="dry_run")
+            self.assertEqual(result.status, "written", surface)
+
+    def test_dry_run_permits_even_with_empty_descriptor_set_and_no_ledger(self):
+        op = _op("delete_record", surface="google_sheets", object_id="obj:dry2")
+        result = run_operation(op, _receipt(op), _AcceptingClient(),
+                               target="dry_run", descriptor_set=[], cap_ledger=None)
+        self.assertEqual(result.status, "written")
+
+
+# ---------------------------------------------------------------------------
+# T1 — bounded_sample: LIVE_BOUNDED, declared (not accepted) + shared funnel
+# ---------------------------------------------------------------------------
+
+class TestLiveBoundedSampleGating(unittest.TestCase):
+    def test_declared_entry_with_cap_and_ledger_permits(self):
+        ds = [_accepted_entry(accepted=False, declared_test_target="bounded_sample",
+                              risk_class="irreversible_external", blast_radius_cap=2)]
+        led = InvocationLedger()
+        op = _op("delete_record", object_id="obj:0")
+        r = run_operation(op, _receipt(op), _AcceptingClient(),
+                          target="bounded_sample", descriptor_set=ds, cap_ledger=led)
+        self.assertEqual(r.status, "written")
+        self.assertEqual(led.count("google_sheets::delete_record"), 1)
+
+    def test_cap_boundary_nth_allowed_n_plus_1_refused(self):
+        ds = [_accepted_entry(accepted=False, declared_test_target="bounded_sample",
+                              risk_class="irreversible_external", blast_radius_cap=2)]
+        led = InvocationLedger()
+        for i in range(2):
+            op = _op("delete_record", object_id=f"obj:{i}", batch_id=f"b{i}")
+            r = run_operation(op, _receipt(op), _AcceptingClient(),
+                              target="bounded_sample", descriptor_set=ds, cap_ledger=led)
+            self.assertEqual(r.status, "written", f"invocation {i+1} of 2 must pass")
+        op = _op("delete_record", object_id="obj:overflow", batch_id="bX")
+        r = run_operation(op, _receipt(op), _AcceptingClient(),
+                          target="bounded_sample", descriptor_set=ds, cap_ledger=led)
+        self.assertEqual(r.status, "refused")
+        self.assertIn("cap", r.detail["reason"].lower())
+
+    def test_permits_even_when_entry_is_not_accepted(self):
+        # The whole point of LIVE_BOUNDED: it needs a DECLARATION, not acceptance.
+        ds = [_accepted_entry(accepted=False, declared_test_target="bounded_sample",
+                              risk_class="irreversible_external", blast_radius_cap=2)]
+        op = _op("delete_record")
+        r = run_operation(op, _receipt(op), _AcceptingClient(),
+                          target="bounded_sample", descriptor_set=ds,
+                          cap_ledger=InvocationLedger())
+        self.assertEqual(r.status, "written")
+
+    def test_undeclared_capability_refused(self):
+        op = _op("delete_record")
+        r = run_operation(op, _receipt(op), _AcceptingClient(),
+                          target="bounded_sample", descriptor_set=[],
+                          cap_ledger=InvocationLedger())
+        self.assertEqual(r.status, "refused")
+        self.assertIn("declared", r.detail["reason"].lower())
+
+    def test_declared_test_target_mismatch_refused(self):
+        # The entry declares 'copy'; the op requests 'bounded_sample' — exact-match anchor,
+        # not membership, so a copy declaration never covers a bounded_sample request.
+        ds = [_accepted_entry(accepted=False, declared_test_target="copy",
+                              risk_class="irreversible_external", blast_radius_cap=2)]
+        op = _op("delete_record")
+        r = run_operation(op, _receipt(op), _AcceptingClient(),
+                          target="bounded_sample", descriptor_set=ds,
+                          cap_ledger=InvocationLedger())
+        self.assertEqual(r.status, "refused")
+
+    def test_no_cap_anywhere_refused(self):
+        # Neither the contract nor the descriptor entry carries a cap -> mandatory-cap refuse.
+        contracts_mod.OPERATION_CONTRACTS["_bounded_probe"] = OperationContract(
+            op_kind="_bounded_probe", writes=("Field",), produces=(),
+            dependency_set=("adapters.py",), verifier_set=("prestate_snapshot_diff_v1",),
+            introduces_persistent_binding=False, risk_class="irreversible_external",
+            requires_accepted_phase=True, blast_radius_cap=None)
+        try:
+            ds = [_accepted_entry(accepted=False, declared_test_target="bounded_sample",
+                                  risk_class="irreversible_external", blast_radius_cap=None)]
+            op = _op("_bounded_probe", field="Field")
+            r = run_operation(op, _receipt(op), _AcceptingClient(),
+                              target="bounded_sample", descriptor_set=ds,
+                              cap_ledger=InvocationLedger())
+            self.assertEqual(r.status, "refused")
+            self.assertIn("cap", r.detail["reason"].lower())
+        finally:
+            contracts_mod.OPERATION_CONTRACTS.pop("_bounded_probe", None)
+
+    def test_no_ledger_refused(self):
+        ds = [_accepted_entry(accepted=False, declared_test_target="bounded_sample",
+                              risk_class="irreversible_external", blast_radius_cap=2)]
+        op = _op("delete_record")
+        r = run_operation(op, _receipt(op), _AcceptingClient(),
+                          target="bounded_sample", descriptor_set=ds, cap_ledger=None)
+        self.assertEqual(r.status, "refused")
+        self.assertIn("ledger", r.detail["reason"].lower())
+
+
+# ---------------------------------------------------------------------------
+# T1 — native_undo mirrors bounded_sample (same LIVE_BOUNDED class)
+# ---------------------------------------------------------------------------
+
+class TestLiveNativeUndoGating(unittest.TestCase):
+    def test_declared_entry_permits(self):
+        ds = [_accepted_entry(accepted=False, declared_test_target="native_undo",
+                              risk_class="irreversible_external", blast_radius_cap=2)]
+        op = _op("delete_record")
+        r = run_operation(op, _receipt(op), _AcceptingClient(),
+                          target="native_undo", descriptor_set=ds,
+                          cap_ledger=InvocationLedger())
+        self.assertEqual(r.status, "written")
+
+    def test_undeclared_capability_refused(self):
+        op = _op("delete_record")
+        r = run_operation(op, _receipt(op), _AcceptingClient(),
+                          target="native_undo", descriptor_set=[],
+                          cap_ledger=InvocationLedger())
+        self.assertEqual(r.status, "refused")
+        self.assertIn("declared", r.detail["reason"].lower())
+
+
+# ---------------------------------------------------------------------------
+# T1 — R5: mandatory blast-radius cap for EVERY gated risk class on live/live-bounded
+# ---------------------------------------------------------------------------
+
+class TestR5MandatoryCapAllGatedClasses(unittest.TestCase):
+    def setUp(self):
+        contracts_mod.OPERATION_CONTRACTS["_sensitive_probe"] = OperationContract(
+            op_kind="_sensitive_probe", writes=("Field",), produces=(),
+            dependency_set=("adapters.py",), verifier_set=("prestate_snapshot_diff_v1",),
+            introduces_persistent_binding=False, risk_class="sensitive_data")
+        contracts_mod.OPERATION_CONTRACTS["_standing_cap_probe"] = OperationContract(
+            op_kind="_standing_cap_probe", writes=("Field",), produces=(),
+            dependency_set=("adapters.py",), verifier_set=("prestate_snapshot_diff_v1",),
+            introduces_persistent_binding=False, risk_class="standing_automation")
+
+    def tearDown(self):
+        contracts_mod.OPERATION_CONTRACTS.pop("_sensitive_probe", None)
+        contracts_mod.OPERATION_CONTRACTS.pop("_standing_cap_probe", None)
+
+    def test_sensitive_data_live_no_cap_refused(self):
+        op = _op("_sensitive_probe", field="Field")
+        ds = [_accepted_entry(risk_class="sensitive_data")]  # accepted, no cap anywhere
+        r = run_operation(op, _receipt(op), _AcceptingClient(),
+                          target=LIVE_TARGET, descriptor_set=ds,
+                          cap_ledger=InvocationLedger())
+        self.assertEqual(r.status, "refused")
+        self.assertIn("cap", r.detail["reason"].lower())
+
+    def test_sensitive_data_live_with_cap_permits(self):
+        op = _op("_sensitive_probe", field="Field")
+        ds = [_accepted_entry(risk_class="sensitive_data", blast_radius_cap=3)]
+        r = run_operation(op, _receipt(op), _AcceptingClient(),
+                          target=LIVE_TARGET, descriptor_set=ds,
+                          cap_ledger=InvocationLedger())
+        self.assertEqual(r.status, "written")
+
+    def test_standing_automation_live_no_cap_refused(self):
+        # Recovery floor satisfied, cap absent -> mandatory-cap refuse (S-1).
+        op = _op("_standing_cap_probe", field="Field")
+        ds = [_accepted_entry(risk_class="standing_automation",
+                              recovery_profile_ref="recovery_profiles/backup_v1")]
+        r = run_operation(op, _receipt(op), _AcceptingClient(),
+                          target=LIVE_TARGET, descriptor_set=ds,
+                          cap_ledger=InvocationLedger())
+        self.assertEqual(r.status, "refused")
+        self.assertIn("cap", r.detail["reason"].lower())
+
+    def test_standing_automation_live_with_cap_permits(self):
+        op = _op("_standing_cap_probe", field="Field")
+        ds = [_accepted_entry(risk_class="standing_automation", blast_radius_cap=3,
+                              recovery_profile_ref="recovery_profiles/backup_v1")]
+        r = run_operation(op, _receipt(op), _AcceptingClient(),
+                          target=LIVE_TARGET, descriptor_set=ds,
+                          cap_ledger=InvocationLedger())
+        self.assertEqual(r.status, "written")
+
+
+# ---------------------------------------------------------------------------
+# T1 — single-object cap-slot invariant: one Operation = one write = one cap slot
+# ---------------------------------------------------------------------------
+
+class TestSingleObjectCapSlotInvariant(unittest.TestCase):
+    def test_one_operation_consumes_exactly_one_slot(self):
+        ds = [_accepted_entry(risk_class="irreversible_external", blast_radius_cap=5)]
+        led = InvocationLedger()
+        op = _op("delete_record", object_id="obj:solo")
+        r = run_operation(op, _receipt(op), _AcceptingClient(),
+                          target=LIVE_TARGET, descriptor_set=ds, cap_ledger=led)
+        self.assertEqual(r.status, "written")
+        self.assertEqual(led.count("google_sheets::delete_record"), 1)
+        # A second run of the SAME Operation object is a second, independent invocation and
+        # consumes a second slot — a single Operation never covers a batch (one object_id =
+        # one write = one cap slot; Operation carries no query/bulk shape to mutate more).
+        r2 = run_operation(op, _receipt(op), _AcceptingClient(),
+                           target=LIVE_TARGET, descriptor_set=ds, cap_ledger=led)
+        self.assertEqual(r2.status, "written")
+        self.assertEqual(led.count("google_sheets::delete_record"), 2)
 
 
 if __name__ == "__main__":
