@@ -24,6 +24,31 @@
 
 set -euo pipefail
 
+# ── Status-line convention (F-36 fix) ───────────────────────────────────────
+# Every operator-runnable emitted script carries this SAME block (kept
+# byte-identical on purpose -- see test_status_line_convention.py). It
+# guarantees ONE unambiguous terminal line plus a real exit code no matter
+# where or why the script exits: an explicit `exit N` below, or an exit
+# `set -e` forces on a line this script's own logic never anticipated. A
+# `!`-run command must never finish silently (empty output, exit 0) and be
+# mistaken for having done nothing (dogfood finding F-36).
+_STATUS_LINE_REPORTED=false
+_report_status_line() {
+  local _exit_code=$?
+  trap - EXIT
+  if [ "$_STATUS_LINE_REPORTED" != true ]; then
+    _STATUS_LINE_REPORTED=true
+    if [ "$_exit_code" -eq 0 ]; then
+      echo "RESULT: done"
+    else
+      echo "RESULT: failed (exit ${_exit_code})" >&2
+    fi
+  fi
+  exit "$_exit_code"
+}
+trap _report_status_line EXIT
+# ── end status-line convention ──────────────────────────────────────────────
+
 # --- Configuration ---
 AGENT_NAME="{{AGENT_NAME}}"
 AGENT_MODEL="{{AGENT_MODEL}}"
