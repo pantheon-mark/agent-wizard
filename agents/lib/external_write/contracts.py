@@ -136,6 +136,14 @@ _WRITE_AFFECTING_MODULES = (
     "verifiers.py",
 )
 
+# Public alias (Task 10 — external-write-gate-generalization): a capability's own
+# generated adapter module (wizard/scripts/lib/capability_code_scaffold.py) declares its
+# OperationContract with this SAME shared dependency_set, exactly like the seeded status
+# ops and the Gmail reference adapter (_gmail_message_contract) both already do — this
+# name is the stable, public spelling other modules should import rather than reaching
+# for the underscore-prefixed one above.
+WRITE_AFFECTING_MODULES = _WRITE_AFFECTING_MODULES
+
 
 VERIFIER_REGISTRY: dict = {
     "prestate_snapshot_diff_v1": VerifierDef(
@@ -316,6 +324,26 @@ OPERATION_CONTRACTS: dict = {
         requires_accepted_phase=True, blast_radius_cap=25),
     "gmail.filter.create": _gmail_filter_create_contract(),
 }
+
+
+def register_contract(contract: OperationContract) -> None:
+    """Register `contract` under its own `op_kind` (Task 10 —
+    external-write-gate-generalization; lets a capability added post-build
+    declare its op_kind's contract without hand-editing this module's
+    literal ``OPERATION_CONTRACTS`` dict).
+
+    Mirrors ``adapter_registry.register_adapter``'s convention exactly: a
+    plain, unvalidated registration a real adapter module calls at import
+    time (module scope), alongside its own ``register_adapter(op_kind, ...)``
+    call — see e.g. ``adapters_gmail.py``'s registration block for the
+    established pattern this generalizes. Re-registering the same op_kind
+    overwrites the prior entry (last-registered wins); callers own ordering,
+    this function does not raise on a duplicate op_kind. No validation of
+    `contract` beyond it being an ``OperationContract`` instance is performed
+    here — the same "no validation, that's a different layer's job" division
+    ``adapter_registry.register_adapter`` already documents.
+    """
+    OPERATION_CONTRACTS[contract.op_kind] = contract
 
 
 def get_contract(op_kind: str) -> Optional[OperationContract]:

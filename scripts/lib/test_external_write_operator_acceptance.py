@@ -22,6 +22,8 @@ from external_write.operator_acceptance import (  # noqa: E402
     record_operator_acceptance,
     OperatorAcceptanceResult,
     DEFAULT_RECEIPT_DIR,
+    PENDING_MIGRATIONS_REL,
+    close_pending_migration_if_matched,
 )
 from external_write.acceptance_ceremony import OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA  # noqa: E402
 from external_write.copy_run_proof import COPY_RUN_PROOF_SCHEMA  # noqa: E402
@@ -206,6 +208,171 @@ class OperatorAcceptanceE2ETest(unittest.TestCase):
 
     def test_default_receipt_dir_constant(self):
         self.assertEqual(DEFAULT_RECEIPT_DIR, "security/acceptance_receipts")
+
+
+class PendingMigrationAutoCloseTest(unittest.TestCase):
+    """Task 10 carry-forward from Task 9: a capability that migrates a mechanism
+    upgrade-reconcile (Task 9) safe-paused closes that mechanism's
+    pending_migrations.json entry the moment IT is actually accepted through this
+    flow — by the documented id-matching convention (capability_id ==
+    mechanism_id), never by a schema change to the pinned descriptor shape.
+
+    Reuses the SAME fixture shapes as OperatorAcceptanceE2ETest (real proof,
+    real descriptor set) rather than a separate ad hoc setUp — this is still a
+    real end-to-end run through the ceremony, not a mock of it."""
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+        self.security = self.tmp / "security"
+        self.security.mkdir(parents=True, exist_ok=True)
+        self.set_path = self.security / "capability_descriptors.json"
+        self.proof_path = self.tmp / "proof.json"
+        self.receipt_path = self.security / "acceptance_receipts" / "google_sheets.receipt.json"
+        self.audit_path = self.security / "capability_acceptance_log.jsonl"
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _write_set(self, descriptors):
+        self.set_path.write_text(json.dumps(descriptors, indent=2, ensure_ascii=False) + "\n",
+                                 encoding="utf-8")
+
+    def _write_proof(self, proof=None):
+        self.proof_path.write_text(json.dumps(proof if proof is not None else _proof()),
+                                   encoding="utf-8")
+
+    def _write_pending_migrations(self, entries):
+        path = self.tmp / "pending_migrations.json"
+        path.write_text(json.dumps(entries, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8")
+        return path
+
+    def test_matching_entry_is_closed_on_real_acceptance(self):
+        pm_path = self._write_pending_migrations([
+            {"mechanism_id": "google_sheets", "writer_relpath": "agents/cron/x.py",
+            "entrypoint_relpath": "agents/cron/run_x.sh", "violations": [],
+            "suggested_next_step": "migrate via add-capability", "status": "pending"},
+        ])
+        self._write_set([_descriptor(id="google_sheets")])
+        self._write_proof()
+
+        res = record_operator_acceptance(
+            "google_sheets", PHASE, str(self.proof_path),
+            "Yes — I accept this capability for live use.",
+            receipt_path=str(self.receipt_path), descriptor_set_path=str(self.set_path),
+            audit_log_path=str(self.audit_path), pending_migrations_path=str(pm_path))
+        self.assertTrue(res.accepted, res.reason)
+
+        remaining = json.loads(pm_path.read_text(encoding="utf-8"))
+        self.assertEqual(remaining, [])
+
+    def test_non_matching_entries_are_left_untouched(self):
+        pm_path = self._write_pending_migrations([
+            {"mechanism_id": "some_other_mechanism", "writer_relpath": "agents/cron/y.py",
+            "entrypoint_relpath": "agents/cron/run_y.sh", "violations": [],
+            "suggested_next_step": "migrate via add-capability", "status": "pending"},
+        ])
+        self._write_set([_descriptor(id="google_sheets")])
+        self._write_proof()
+
+        res = record_operator_acceptance(
+            "google_sheets", PHASE, str(self.proof_path),
+            "Yes — I accept this capability for live use.",
+            receipt_path=str(self.receipt_path), descriptor_set_path=str(self.set_path),
+            audit_log_path=str(self.audit_path), pending_migrations_path=str(pm_path))
+        self.assertTrue(res.accepted, res.reason)
+
+        remaining = json.loads(pm_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0]["mechanism_id"], "some_other_mechanism")
+
+    def test_missing_queue_file_does_not_block_or_fail_acceptance(self):
+        self._write_set([_descriptor(id="google_sheets")])
+        self._write_proof()
+        missing_path = str(self.tmp / "does_not_exist" / "pending_migrations.json")
+
+        res = record_operator_acceptance(
+            "google_sheets", PHASE, str(self.proof_path),
+            "Yes — I accept this capability for live use.",
+            receipt_path=str(self.receipt_path), descriptor_set_path=str(self.set_path),
+            audit_log_path=str(self.audit_path), pending_migrations_path=missing_path)
+        self.assertTrue(res.accepted, res.reason)
+        # Bookkeeping-only: no queue file materialized just because acceptance ran.
+        self.assertFalse(Path(missing_path).exists())
+
+    def test_helper_is_a_noop_on_refused_acceptance(self):
+        # Refused (unconfirmed) acceptance must never touch the queue at all.
+        pm_path = self._write_pending_migrations([
+            {"mechanism_id": "google_sheets", "writer_relpath": "agents/cron/x.py",
+            "entrypoint_relpath": "agents/cron/run_x.sh", "violations": [],
+            "suggested_next_step": "migrate via add-capability", "status": "pending"},
+        ])
+        self._write_set([_descriptor(id="google_sheets")])
+        self._write_proof()
+
+        res = record_operator_acceptance(
+            "google_sheets", PHASE, str(self.proof_path), "   ",
+            receipt_path=str(self.receipt_path), descriptor_set_path=str(self.set_path),
+            audit_log_path=str(self.audit_path), pending_migrations_path=str(pm_path))
+        self.assertFalse(res.accepted)
+
+        remaining = json.loads(pm_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(remaining), 1)
+
+
+class ClosePendingMigrationHelperUnitTest(unittest.TestCase):
+    """Direct unit coverage of close_pending_migration_if_matched's fail-soft
+    behavior, independent of the full acceptance ceremony."""
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _path(self):
+        return str(self.tmp / "pending_migrations.json")
+
+    def test_matched_entry_removed_returns_true(self):
+        p = self._path()
+        Path(p).write_text(json.dumps([{"mechanism_id": "cap1"}]), encoding="utf-8")
+        self.assertTrue(close_pending_migration_if_matched("cap1", p))
+        self.assertEqual(json.loads(Path(p).read_text(encoding="utf-8")), [])
+
+    def test_no_match_returns_false_and_leaves_file_untouched(self):
+        p = self._path()
+        original = json.dumps([{"mechanism_id": "cap1"}])
+        Path(p).write_text(original, encoding="utf-8")
+        self.assertFalse(close_pending_migration_if_matched("cap2", p))
+        self.assertEqual(Path(p).read_text(encoding="utf-8"), original)
+
+    def test_missing_file_returns_false(self):
+        self.assertFalse(close_pending_migration_if_matched(
+            "cap1", str(self.tmp / "nope.json")))
+
+    def test_malformed_json_returns_false(self):
+        p = self._path()
+        Path(p).write_text("{not json", encoding="utf-8")
+        self.assertFalse(close_pending_migration_if_matched("cap1", p))
+
+    def test_non_list_body_returns_false(self):
+        p = self._path()
+        Path(p).write_text(json.dumps({"mechanism_id": "cap1"}), encoding="utf-8")
+        self.assertFalse(close_pending_migration_if_matched("cap1", p))
+
+    def test_only_matching_entry_removed_among_several(self):
+        p = self._path()
+        Path(p).write_text(json.dumps([
+            {"mechanism_id": "cap1"}, {"mechanism_id": "cap2"}, {"mechanism_id": "cap3"},
+        ]), encoding="utf-8")
+        self.assertTrue(close_pending_migration_if_matched("cap2", p))
+        remaining = json.loads(Path(p).read_text(encoding="utf-8"))
+        self.assertEqual([e["mechanism_id"] for e in remaining], ["cap1", "cap3"])
+
+    def test_default_path_constant(self):
+        self.assertEqual(PENDING_MIGRATIONS_REL, "agents/handoffs/pending_migrations.json")
 
 
 if __name__ == "__main__":

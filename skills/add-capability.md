@@ -43,7 +43,9 @@ Before asking anything, read these documents from the project directory, fresh, 
 
 Reading these is what lets the proposal in Step C fit the operator's real situation rather than being generic. What "help me manage this" means depends entirely on what the system is for, and that lives in these documents.
 
-**Also check for a pending migration.** If `agents/handoffs/pending_migrations.json` exists and is non-empty, an upgrade previously found an existing mechanism that no longer follows a safety rule (see `operating_discipline.md`) and safe-paused it rather than leaving it running unsafely or breaking it outright — each entry names the paused mechanism, why, and what changed. Treat any entry there as a live candidate for "what should this help with?" and mention it plainly if the operator hasn't already brought it up: something they already had is paused and waiting on this same careful process to bring it back safely. Once that entry's capability is designed, checked, built, and accepted through this flow, remove it from the file — the migration is done, not still pending.
+**Also check for a pending migration.** If `agents/handoffs/pending_migrations.json` exists and is non-empty, an upgrade previously found an existing mechanism that no longer follows a safety rule (see `operating_discipline.md`) and safe-paused it rather than leaving it running unsafely or breaking it outright — each entry names the paused mechanism (its `mechanism_id`), why, and what changed. Treat any entry there as a live candidate for "what should this help with?" and mention it plainly if the operator hasn't already brought it up: something they already had is paused and waiting on this same careful process to bring it back safely.
+
+**When you design a capability that migrates one of these entries, give the new capability the exact same id as the entry's `mechanism_id`.** That is what lets the entry close itself automatically the moment this capability is actually accepted for live use later (through next-phase's business-acceptance step) — you never edit `pending_migrations.json` by hand, and you never need to remember to come back and remove the entry yourself. If you give the migrated capability a different id than the paused mechanism's `mechanism_id`, the entry will not close automatically and will keep being surfaced as still pending — so match the id deliberately, not incidentally.
 
 ## Step B — A short, plain-language interview
 
@@ -56,6 +58,8 @@ Ask one question at a time and wait for the answer before the next. Ground each 
 - **What must it never do?** Capture the hard limits in the operator's own words.
 
 Record only what the operator actually says, confirms, or adopts. A possibility you offered is not their intent until they take it up.
+
+**Phrase any option in the operator's own voice, never in the assistant's first person (F-33).** Whenever you offer the operator a choice — through a question with a couple of concrete possibilities, a menu of options, or any other selectable choice — word each option as something the operator is choosing to have the assistant do, not as the assistant speaking in the first person. Write "Have the assistant find and label them" or "Let the assistant sort these automatically," never "I find and label them" or "I'll sort these automatically." This is not a style preference: a downstream safety classifier that watches for the operator volunteering to do something themselves reads a first-person "I ..." option as exactly that, and can wave through an action it should have stopped. Apply this to every option you offer anywhere in this skill — Step B's possibilities, any choice presented while refining the Step C proposal, and any other selectable option this skill surfaces — not only the literal interview questions above.
 
 **Non-technical does not mean risk-blind.** If setting this up will need the operator to do one irreducible thing — most often granting the system access to something outside the project — do not hand them the technical version. Translate it into plain business terms of what that access lets the system do and, just as important, what it does not: for example, "this would let it read and sort your messages and move them to the trash; it would not be able to send anything as you." When you get to that step, be honest about the effort: name that it is a one-time approval you will walk them through click by click, and give a plain, honest estimate rather than pretending it is instant. For example:
 
@@ -149,6 +153,32 @@ Two parts of this cascade are load-bearing and must not be skipped:
 **The typed capability descriptor.** The output of defining a capability includes a small typed record of what it is authorized to be — its resources, its action class, its risk class, a reference to its Recovery Profile, the specific safe target its trial run is allowed to touch, and, for anything irreversible, the hard cap on how many such actions can happen in a window. This descriptor is written marked not-yet-accepted. It is the typed authorization the system's deterministic safety gates actually read — the plan text is a plain-language projection of it, not the thing the gates trust. Crucially, defining the descriptor authorizes nothing live: live use is unlocked only later, after the build proves the recovery path on a copy and the operator formally accepts the capability. Until then, the descriptor stands as "declared, not accepted," and the safety gates hold the capability to its safe trial target only.
 
 ## Step F — Land the trust records, then hand off to build it
+
+### For a capability that touches anything outside the project: emit its code gate-wired, by construction (silent)
+
+If any allowed action you settled in Step C is tagged with an action class that touches something outside the project (`mutate`, `delete`, `send-execute`, `synchronize`, or `retain-archive`), do not let the build write this capability's code freehand — not here, and not later in the hand-off to next-phase. A freely-authored capability can drift outside the system's safety gate one file at a time, and the only thing that ever caught that in practice was a downstream classifier that was never meant to be the real safeguard. Instead, run the system's own deterministic generator now, before the hand-off, so the capability's code is wired onto the gate from the moment it exists — never a capability whose gate wiring depends on an agent (or you) remembering to do it correctly.
+
+Gather a small working spec file from what you already settled in Steps C/D — the capability's id (the SAME id you used for the typed descriptor below; if this capability migrates a paused mechanism from Step A, this is also the id that must match that entry's `mechanism_id`), a plain display name, the one named operation it performs, which external system it touches, the read-only access scope that lets it look without being able to change anything, the hard cap on how many such actions can happen in a window, and the plain names of what it is allowed to read — for example:
+
+```json
+{
+  "capability_id": "acme_crm_sync",
+  "display_name": "Sync new signups into the CRM",
+  "op_kind": "acme_crm.record.sync",
+  "surface": "acme_crm",
+  "read_only_scope": "acme_crm.readonly",
+  "blast_radius_cap": 10,
+  "read_methods": ["list_records", "get_record"]
+}
+```
+
+Save that to a working JSON file (for example under `agents/handoffs/`), then run, silently, from the project root:
+
+```
+python3 "${WIZARD_HOME:-$HOME/agent-wizard}/scripts/lib/capability_code_scaffold.py" --spec "<path to that working JSON file>" --project-root .
+```
+
+This writes two files — the part of the capability that is allowed to touch `acme_crm` (registered with the system's gate machinery, holding no ambient access to anything) and the part that proposes what to do (which can only read, never write, and never holds or sees any access credential) — and registers the first of those as a recognized, gate-covered module with zero further wiring from you or the operator. Next-phase fills in the one remaining per-vendor decision inside the files this generates; it never starts a writes-back capability from a blank file. If a capability's allowed actions are all read-only, notification-only, or otherwise never leave the project, skip this step — there is nothing external to gate-wire.
 
 ### Land the typed record and teach the guard (silent)
 

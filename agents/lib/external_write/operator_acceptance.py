@@ -66,6 +66,12 @@ from external_write.acceptance_ceremony import (
 # Default on-disk home for the minted receipt (project-root-relative; disk-first + audit).
 DEFAULT_RECEIPT_DIR = "security/acceptance_receipts"
 
+# Duplicated from wizard/scripts/lib/upgrade_reconcile.MIGRATION_QUEUE_REL (D-B1-a boundary:
+# this module lives in the operator-emitted external_write package and must not import the
+# build-side tree -- same duplication discipline as capability_registration.REGISTERED_ENTRY_KEYS
+# / BASE_DESCRIPTOR_ID_PREFIX, pinned equal to their build-side originals by a cross-tree test).
+PENDING_MIGRATIONS_REL = "agents/handoffs/pending_migrations.json"
+
 
 @dataclass(frozen=True)
 class OperatorAcceptanceResult:
@@ -113,6 +119,47 @@ def _atomic_write_text(path: str, text: str) -> None:
         raise
 
 
+def close_pending_migration_if_matched(
+    capability_id: str,
+    pending_migrations_path: Optional[str] = None,
+) -> bool:
+    """Best-effort cleanup (Task 10 — external-write-gate-generalization; carries the T9
+    CARRY item forward): if `capability_id` matches a pending migration's `mechanism_id`,
+    remove that entry from the queue so it stops being surfaced as still-pending.
+
+    The matching convention (documented to the operator via add-capability.md Step A/E): when
+    a capability is designed to migrate a mechanism that upgrade-reconcile (Task 9) safe-paused,
+    it is given the SAME id as the paused mechanism's `mechanism_id`. That is what lets this
+    closure match automatically — no new field, no schema change to the pinned descriptor-entry
+    shape (`capability_registration.REGISTERED_ENTRY_KEYS`).
+
+    Deliberately fail-soft: this runs AFTER the ceremony has already flipped the descriptor (the
+    trust-critical write is already done by the time this is called) — it is bookkeeping
+    tidy-up on a best-effort queue file, never a second authority. A missing file, malformed
+    JSON, a non-list body, or simply no matching entry are all silent no-ops (return False);
+    nothing here ever raises or blocks the caller's already-completed acceptance.
+    """
+    path = pending_migrations_path or PENDING_MIGRATIONS_REL
+    try:
+        with open(path, encoding="utf-8") as f:
+            entries = json.load(f)
+    except Exception:
+        return False
+    if not isinstance(entries, list):
+        return False
+    remaining = [
+        e for e in entries
+        if not (isinstance(e, dict) and e.get("mechanism_id") == capability_id)
+    ]
+    if len(remaining) == len(entries):
+        return False  # nothing matched -- not a migrated mechanism, or already closed.
+    try:
+        _atomic_write_text(path, json.dumps(remaining, indent=2, ensure_ascii=False) + "\n")
+    except Exception:
+        return False
+    return True
+
+
 def record_operator_acceptance(
     capability_id: str,
     phase_id: str,
@@ -124,6 +171,7 @@ def record_operator_acceptance(
     lib_dir: Optional[Path] = None,
     audit_log_path: Optional[str] = None,
     accepted_at: Optional[str] = None,
+    pending_migrations_path: Optional[str] = None,
 ) -> OperatorAcceptanceResult:
     """Mint the operator-acceptance receipt from the operator's VERBATIM confirmation and drive
     the acceptance ceremony. Fail-safe: on any missing / empty / ambiguous input, refuse and
@@ -143,6 +191,9 @@ def record_operator_acceptance(
     lib_dir:               Forwarded to the ceremony (hash recomputation dir).
     audit_log_path:        Forwarded to the ceremony (acceptance-record log).
     accepted_at:           ISO-8601 UTC timestamp for the receipt (default: now).
+    pending_migrations_path: Forwarded to close_pending_migration_if_matched on success
+                           (default: PENDING_MIGRATIONS_REL). Best-effort only — see that
+                           function's docstring.
     """
     if not (isinstance(capability_id, str) and capability_id.strip()):
         return _refuse("no target capability_id supplied")
@@ -191,6 +242,12 @@ def record_operator_acceptance(
         return OperatorAcceptanceResult(
             accepted=False, reason=acceptance.reason, receipt_ref=receipt_path,
             acceptance=acceptance)
+
+    # Task 10 carry-forward from Task 9: a capability that migrates a paused mechanism
+    # closes that mechanism's pending-migration entry the moment it is actually accepted —
+    # best-effort, never blocks the acceptance that already happened above.
+    close_pending_migration_if_matched(capability_id, pending_migrations_path)
+
     return OperatorAcceptanceResult(
         accepted=True, reason=None, receipt_ref=receipt_path, acceptance=acceptance)
 

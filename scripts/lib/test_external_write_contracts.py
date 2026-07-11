@@ -13,9 +13,11 @@ from external_write.contracts import (  # noqa: E402
     VERIFIER_REGISTRY,
     OPERATION_CONTRACTS,
     RISK_CLASSES as EXTERNAL_WRITE_RISK_CLASSES,
+    WRITE_AFFECTING_MODULES,
     get_contract,
     get_verifier,
     accepted_verifier_ids,
+    register_contract,
 )
 import dependency_projection as dp  # type: ignore  # noqa: E402
 
@@ -112,6 +114,52 @@ class TestContracts(unittest.TestCase):
         c = get_contract("delete_record")
         for vid in c.verifier_set:
             self.assertIn(vid, VERIFIER_REGISTRY)
+
+    def test_write_affecting_modules_public_alias_matches_private(self):
+        # capability_code_scaffold.py (Task 10) imports the PUBLIC name; it must stay
+        # equal to the private tuple every seeded/reference contract already uses.
+        self.assertEqual(WRITE_AFFECTING_MODULES, get_contract("set_status").dependency_set)
+
+
+class TestRegisterContract(unittest.TestCase):
+    """Task 10 (external-write-gate-generalization) -- register_contract is the
+    generalization that lets a capability added AFTER the initial build declare
+    its own op_kind's contract without hand-editing this module's literal
+    OPERATION_CONTRACTS dict. Mirrors adapter_registry.register_adapter's own
+    tested convention (last-registered wins, no validation performed here)."""
+
+    def tearDown(self):
+        OPERATION_CONTRACTS.pop("t10_test_op_kind", None)
+        OPERATION_CONTRACTS.pop("t10_test_op_kind_2", None)
+
+    def test_register_contract_lands_a_new_op_kind(self):
+        self.assertIsNone(get_contract("t10_test_op_kind"))
+        c = OperationContract(
+            op_kind="t10_test_op_kind",
+            writes=("labels",),
+            produces=(),
+            dependency_set=WRITE_AFFECTING_MODULES,
+            verifier_set=("operator_attested_v1",),
+            introduces_persistent_binding=False,
+            risk_class="sensitive_data",
+            requires_accepted_phase=True,
+            blast_radius_cap=10,
+            read_only_scope="acme.readonly",
+        )
+        register_contract(c)
+        self.assertIs(get_contract("t10_test_op_kind"), c)
+
+    def test_register_contract_overwrites_prior_registration(self):
+        first = OperationContract(op_kind="t10_test_op_kind_2", writes=("a",), produces=(),
+                                  dependency_set=WRITE_AFFECTING_MODULES, verifier_set=(),
+                                  introduces_persistent_binding=False, blast_radius_cap=1)
+        second = OperationContract(op_kind="t10_test_op_kind_2", writes=("b",), produces=(),
+                                   dependency_set=WRITE_AFFECTING_MODULES, verifier_set=(),
+                                   introduces_persistent_binding=False, blast_radius_cap=2)
+        register_contract(first)
+        register_contract(second)
+        self.assertIs(get_contract("t10_test_op_kind_2"), second)
+        self.assertEqual(get_contract("t10_test_op_kind_2").blast_radius_cap, 2)
 
 
 if __name__ == "__main__":
