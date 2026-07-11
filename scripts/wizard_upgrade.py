@@ -389,7 +389,8 @@ def _run_upgrade_plan(args: argparse.Namespace, plan_only_invoked_via_synonym: b
 
 
 def _run_reconcile_best_effort(operator_dir: Path, build_repo_root: Path, result) -> None:
-    """ADR-0042 — after a successful apply, reconcile operator-authored functionality
+    """The upgrade impact-review + reconcile step — after a successful apply,
+    reconcile operator-authored functionality
     against the changed contract (detect a now-non-conformant writer, safe-pause its
     entrypoint, guide migration through add-capability) BEFORE control returns to the
     operator. Never lets a reconcile-side error undo or hide a completed apply — a

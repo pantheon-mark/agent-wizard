@@ -54,8 +54,9 @@ Bypass classes CAUGHT at v0
                          anywhere outside the ADAPTER_PROFILE zone, regardless
                          of whether the vendor SDK was itself imported in this
                          file (Task 5 -- see "Trust zones" below). The symbol
-                         set is CURATED, not exhaustive (IDQ-074) -- the same
-                         disclosed-bound spirit as ``_FORBIDDEN_IMPORT_ROOTS``.
+                         set is CURATED, not exhaustive (a known, tracked
+                         limitation) -- the same disclosed-bound spirit as
+                         ``_FORBIDDEN_IMPORT_ROOTS``.
 
 ------------------------------------------------------------------------------
 Bounds NOT covered at v0 (disclosed — no silent caps)
@@ -255,10 +256,10 @@ _NETWORK_CLI_TOOLS = frozenset(
 )
 
 # Credential-access surface (Task 5 — credential-isolation build-time half).
-# Curated, NOT exhaustive (IDQ-074) — same disclosed-bound spirit as
-# _FORBIDDEN_IMPORT_ROOTS. Matched structurally (attribute name / call target)
-# so detection does not depend on how — or whether — the vendor SDK was
-# imported in THIS file (an aliased import, an object handed in as a
+# Curated, NOT exhaustive (a known, tracked limitation) — same disclosed-bound
+# spirit as _FORBIDDEN_IMPORT_ROOTS. Matched structurally (attribute name /
+# call target) so detection does not depend on how — or whether — the vendor
+# SDK was imported in THIS file (an aliased import, an object handed in as a
 # parameter, or a name never statically resolvable at all still trips this).
 #
 #   _CREDENTIAL_FACTORY_METHODS -- attribute names that construct or widen a

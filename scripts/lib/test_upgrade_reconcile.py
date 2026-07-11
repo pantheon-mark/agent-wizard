@@ -1,4 +1,4 @@
-"""Tests for the upgrade impact-review + reconcile engine (ADR-0042, Task 9).
+"""Tests for the upgrade impact-review + reconcile engine (Task 9).
 
 Anti-overfit posture: the module-level unit tests build a small synthetic
 operator-project tree (no real bundle/registry machinery needed — reconcile only

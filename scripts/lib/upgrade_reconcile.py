@@ -1,10 +1,11 @@
-"""Upgrade impact-review + reconcile engine (ADR-0042; task 9 of the
+"""Upgrade impact-review + reconcile engine (task 9 of the
 external-write-gate-generalization slice).
 
 Why this exists
 ----------------
-The ADR-0039 amendment ships a fail-closed external-write gate: any script that
-mutates an external surface OUTSIDE the emitted named-operation adapters fails the
+The external-write build-time enforcement mechanism ships a fail-closed
+external-write gate: any script that mutates an external surface OUTSIDE the
+emitted named-operation adapters fails the
 build (Task 5's ``external_write.scan``). That gate is correct going FORWARD, but a
 system built before the gate existed can carry operator-authored capability code
 that already does this — confirmed live in the estate dogfood:
@@ -31,8 +32,8 @@ run by the emitted upgrade-apply flow (``wizard_upgrade.py``'s ``cmd_apply`` /
                flagged operator Python file itself (no surgical AST rewrite) — it
                only gates the wrapper script that schedules/invokes it.
   4. GUIDE MIGRATION — hand the fix to the existing operator-originated-
-               enhancement flow (``add-capability`` / ``next-phase``, ADR-0041):
-               an approval-gated migration, never an automatic silent rewrite.
+               enhancement flow (``add-capability`` / ``next-phase``): an
+               approval-gated migration, never an automatic silent rewrite.
                This module records a durable, disk-first migration request
                (``agents/handoffs/pending_migrations.json``) that
                ``wizard/skills/add-capability.md`` checks at its Step A.
@@ -56,9 +57,9 @@ Where a mechanism entangles read and write behavior in the SAME file/entrypoint
 (the real ``estate_upkeep.py`` does this — a single script that both writes a
 Status-tidy fix and produces the read-only digest), a clean read/write split is
 not available and pausing the one shared entrypoint necessarily pauses the whole
-mechanism. This is a disclosed limit (ADR-0042 consequences): "capabilities that
-entangle [read and write] require operator-approved refactor before pause is
-clean." Paused-and-safe beats running-ungated, so this module still pauses in
+mechanism. This is a disclosed limit: "capabilities that entangle [read and
+write] require operator-approved refactor before pause is clean." Paused-and-
+safe beats running-ungated, so this module still pauses in
 that case rather than leaving the write path live.
 
 Un-pausing is a side effect of migration, not of this module: deleting the marker
@@ -367,8 +368,8 @@ def _append_migration_request(
 ) -> Path:
     """Land (or refresh) a durable, disk-first migration request in the pending-
     migrations queue that ``wizard/skills/add-capability.md`` checks at its
-    Step A — this is the hand-off to the operator-originated-enhancement flow
-    (ADR-0041): approval-gated migration, never an automatic silent rewrite.
+    Step A — this is the hand-off to the operator-originated-enhancement flow:
+    approval-gated migration, never an automatic silent rewrite.
 
     Idempotent: re-running an upgrade (or a later reconcile pass) for the same
     mechanism_id REPLACES its existing entry rather than duplicating it."""
@@ -481,7 +482,7 @@ def reconcile_upgrade(
     upgrade_id: str = "",
     operator_code_dirs: Sequence[str] = OPERATOR_CODE_DIRS,
 ) -> ReconcileResult:
-    """The ADR-0042 upgrade impact-review + reconcile step.
+    """The upgrade impact-review + reconcile step.
 
     Run by the emitted upgrade-apply flow AFTER ``upgrade_apply.apply_upgrade`` has
     delivered the new layer, and BEFORE control returns to the operator. See the
