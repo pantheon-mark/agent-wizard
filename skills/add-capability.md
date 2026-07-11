@@ -43,6 +43,8 @@ Before asking anything, read these documents from the project directory, fresh, 
 
 Reading these is what lets the proposal in Step C fit the operator's real situation rather than being generic. What "help me manage this" means depends entirely on what the system is for, and that lives in these documents.
 
+**Also check for a pending migration.** If `agents/handoffs/pending_migrations.json` exists and is non-empty, an upgrade previously found an existing mechanism that no longer follows a safety rule (see `operating_discipline.md`) and safe-paused it rather than leaving it running unsafely or breaking it outright — each entry names the paused mechanism, why, and what changed. Treat any entry there as a live candidate for "what should this help with?" and mention it plainly if the operator hasn't already brought it up: something they already had is paused and waiting on this same careful process to bring it back safely. Once that entry's capability is designed, checked, built, and accepted through this flow, remove it from the file — the migration is done, not still pending.
+
 ## Step B — A short, plain-language interview
 
 Ask about the capability at the level of what it should do and why — never at the level of how it is wired. All technical translation (which agents, what access, which credentials, and — most important — which high-risk kinds of action this introduces) happens silently inside this skill. The operator is never shown access scopes, client IDs, or a setup checklist. That handoff is exactly what causes trouble; keep it internal.

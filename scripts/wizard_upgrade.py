@@ -78,6 +78,10 @@ from lib.upgrade_apply import (  # noqa: E402
     render_apply_result,
     UpgradeApplyError,
 )
+from lib.upgrade_reconcile import (  # noqa: E402
+    reconcile_upgrade,
+    render_reconcile_result,
+)
 from lib.self_update import (  # noqa: E402
     apply_self_update,
     render_self_update_result,
@@ -384,6 +388,32 @@ def _run_upgrade_plan(args: argparse.Namespace, plan_only_invoked_via_synonym: b
     return 0
 
 
+def _run_reconcile_best_effort(operator_dir: Path, build_repo_root: Path, result) -> None:
+    """ADR-0042 — after a successful apply, reconcile operator-authored functionality
+    against the changed contract (detect a now-non-conformant writer, safe-pause its
+    entrypoint, guide migration through add-capability) BEFORE control returns to the
+    operator. Never lets a reconcile-side error undo or hide a completed apply — a
+    failure here is surfaced honestly, not swallowed and not fatal to the exit code
+    (the foundation-doc upgrade itself already succeeded)."""
+    try:
+        reconcile_result = reconcile_upgrade(
+            operator_dir, build_repo_root,
+            from_version=result.from_version, to_version=result.to_version,
+            upgrade_id=result.upgrade_id,
+        )
+    except Exception as e:  # noqa: BLE001 - see docstring: never fatal to a completed apply
+        print(
+            f"note: the upgrade safety check could not complete ({e}). Run a manual review "
+            "of agents/cron and agents/scripts against agents/lib/external_write/scan.py "
+            "before relying on any scheduled write.",
+            file=sys.stderr,
+        )
+        return
+    out = render_reconcile_result(reconcile_result)
+    if out:
+        print(out, end="")
+
+
 def cmd_apply(args: argparse.Namespace) -> int:
     """`wizard upgrade --to VERSION --apply [--ack]` — the merge-apply path.
 
@@ -419,6 +449,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     print(render_apply_result(result), end="")
+    _run_reconcile_best_effort(operator_dir, build_repo_root, result)
     return 0
 
 
@@ -627,6 +658,7 @@ def run_self_upgrade(
                 print(f"error: {e}", file=sys.stderr)
                 return ("apply_complete", 1)
             print(render_apply_result(result), end="")
+            _run_reconcile_best_effort(operator_dir, build_repo_root, result)
             return ("apply_complete", 0)
 
     run_kwargs: dict = {"argv": list(reexec_argv) if reexec_argv is not None else [],
