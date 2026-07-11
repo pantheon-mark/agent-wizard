@@ -120,15 +120,20 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
 )
 
 # ---------------------------------------------------------------------------
-# ADAPTER_PROFILE -- registered per-vendor adapter modules. Empty until a
-# real adapter lands (Task 7+ adds its module's relative path here, e.g.
-# "adapters/gmail_adapter.py"). Deliberately NOT a directory rule: a build
-# or test wiring that needs a DIFFERENT set (e.g. an isolated test fixture
-# tree) passes its own frozenset explicitly via the `adapter_profile_paths`
-# parameter of `classify_zone` / `scan_paths` / `run_coverage_gate` rather
-# than mutating this module-level default.
+# ADAPTER_PROFILE -- registered per-vendor adapter modules. Deliberately NOT
+# a directory rule: a build or test wiring that needs a DIFFERENT set (e.g.
+# an isolated test fixture tree) passes its own frozenset explicitly via the
+# `adapter_profile_paths` parameter of `classify_zone` / `scan_paths` /
+# `run_coverage_gate` rather than mutating this module-level default.
+#
+# "adapters_gmail.py" (Task 7 — external-write-gate-generalization slice) is
+# the first real entry: the reference Gmail verb-shaped adapter, proving the
+# generalized gate against a real vendor API shape. This is the ONE-LINE,
+# reviewable diff the module docstring above describes -- the file is exempt
+# from every check scan.py enforces ONLY because its relative path is
+# deliberately listed here, never merely because of where it lives on disk.
 # ---------------------------------------------------------------------------
-ADAPTER_PROFILE_MODULE_PATHS: FrozenSet[str] = frozenset()
+ADAPTER_PROFILE_MODULE_PATHS: FrozenSet[str] = frozenset({"adapters_gmail.py"})
 
 
 def _resolve_relative(file_path: Path, anchor: Path) -> Union[str, None]:

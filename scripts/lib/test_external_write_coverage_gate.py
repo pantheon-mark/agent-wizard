@@ -316,8 +316,15 @@ class TestRunCoverageGate(unittest.TestCase):
 
     def test_clean_scan_and_covering_set_passes(self):
         with tempfile.TemporaryDirectory() as tmp:
+            # Covers every guarded risk class in the REAL default OPERATION_CONTRACTS: delete_record
+            # (irreversible_external) plus the Task 7 Gmail op_kinds added since (sensitive_data for
+            # the message ops, standing_automation for gmail.filter.create).
             set_path = self._write_set(
-                tmp, [_desc(risk_class="irreversible_external", accepted=True)])
+                tmp, [
+                    _desc(risk_class="irreversible_external", accepted=True),
+                    _desc(id="gmail", risk_class="sensitive_data", accepted=True),
+                    _desc(id="gmail_filters", risk_class="standing_automation", accepted=True),
+                ])
             d = run_coverage_gate([_FIXTURES / "benign_local.py"],
                                   descriptor_set_path=set_path)
             self.assertTrue(d.passed, d.failures)

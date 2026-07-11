@@ -239,6 +239,64 @@ def _delete_record_contract() -> OperationContract:
     )
 
 
+def _gmail_message_contract(op_kind: str, *, risk_class: str,
+                            requires_accepted_phase: bool,
+                            blast_radius_cap: Optional[int]) -> OperationContract:
+    """Build a contract for a Gmail per-message label mutation (Task 7 —
+    external-write-gate-generalization slice; the reference VERB-shaped
+    adapter proving the generalized gate against a real vendor API).
+
+    trash / untrash / modify_labels all mutate the SAME thing structurally —
+    a message's label set — so writes=("labels",) is shared across all three;
+    produces=() because none of them create a new artifact. dependency_set is
+    the same shared write-affecting module tuple every op_kind declares;
+    effects_manifest.resolve_dependency_files (Task 3 / F-34) unions in
+    adapters_gmail.py — this op_kind's registered adapter module — on top of
+    it, exactly like every other adapter-backed op_kind. risk_class is
+    "sensitive_data" for all three: Gmail message content is sensitive
+    personal data, even though the label mutation itself is recoverable
+    (trash/relabel are reversible; the DATA they touch is what earns the
+    gated classification, not the recoverability of the edit).
+
+    read_only_scope="gmail.readonly" makes these op_kinds eligible for the
+    ReadFacade credential-isolation safety model (Task 4) — the concrete
+    GmailReadFacade is registered in adapters_gmail.py.
+    """
+    return OperationContract(
+        op_kind=op_kind,
+        writes=("labels",),
+        produces=(),
+        dependency_set=_WRITE_AFFECTING_MODULES,
+        verifier_set=("prestate_snapshot_diff_v1",),
+        introduces_persistent_binding=False,
+        risk_class=risk_class,
+        requires_accepted_phase=requires_accepted_phase,
+        blast_radius_cap=blast_radius_cap,
+        read_only_scope="gmail.readonly",
+    )
+
+
+def _gmail_filter_create_contract() -> OperationContract:
+    """gmail.filter.create is the one op_kind in this reference set that
+    introduces a PERSISTENT BINDING (copy_run_proof's durability_checks
+    gating): a created filter is a standing rule that keeps acting on every
+    future matching message, not a one-shot edit on existing data — hence
+    risk_class="standing_automation" (F-29's non-graduating-recovery-floor
+    class), distinct from the per-message ops above."""
+    return OperationContract(
+        op_kind="gmail.filter.create",
+        writes=("filters",),
+        produces=("gmail_filter",),
+        dependency_set=_WRITE_AFFECTING_MODULES,
+        verifier_set=("prestate_snapshot_diff_v1",),
+        introduces_persistent_binding=True,
+        risk_class="standing_automation",
+        requires_accepted_phase=True,
+        blast_radius_cap=5,
+        read_only_scope="gmail.readonly",
+    )
+
+
 OPERATION_CONTRACTS: dict = {
     "set_status": _status_contract("set_status", "Status"),
     "complete_tasks": _status_contract("complete_tasks", "Status"),
@@ -246,6 +304,17 @@ OPERATION_CONTRACTS: dict = {
     "add_note": _status_contract("add_note", "Note"),
     "set_priority": _status_contract("set_priority", "Priority"),
     "delete_record": _delete_record_contract(),
+    # Task 7 — reference verb-shaped adapter (external-write-gate-generalization).
+    "gmail.message.trash": _gmail_message_contract(
+        "gmail.message.trash", risk_class="sensitive_data",
+        requires_accepted_phase=True, blast_radius_cap=25),
+    "gmail.message.untrash": _gmail_message_contract(
+        "gmail.message.untrash", risk_class="sensitive_data",
+        requires_accepted_phase=True, blast_radius_cap=25),
+    "gmail.message.modify_labels": _gmail_message_contract(
+        "gmail.message.modify_labels", risk_class="sensitive_data",
+        requires_accepted_phase=True, blast_radius_cap=25),
+    "gmail.filter.create": _gmail_filter_create_contract(),
 }
 
 
