@@ -338,6 +338,28 @@ class TestRunCoverageGate(unittest.TestCase):
         self.assertFalse(d.passed)
         self.assertIn("uncovered_mutator", _kinds(d))
 
+    def test_adapter_profile_paths_passthrough_reaches_scan_paths(self):
+        # Task 5: this gate does not re-implement the zone taxonomy -- it
+        # consumes it exclusively via scan_paths. Proves adapter_profile_paths
+        # / allowed_root passed to run_coverage_gate actually reach scan_paths:
+        # an unregistered "vendor_adapter.py" trips bypass_scan_violation;
+        # registering it as adapter-profile removes that failure kind.
+        kernel_root = _FIXTURES / "zones" / "kernel_root"
+        unregistered = run_coverage_gate(
+            [kernel_root / "vendor_adapter.py"],
+            descriptor_set_path="/no/such/descriptor/set.json",
+            allowed_root=kernel_root,
+        )
+        self.assertIn("bypass_scan_violation", _kinds(unregistered))
+
+        registered = run_coverage_gate(
+            [kernel_root / "vendor_adapter.py"],
+            descriptor_set_path="/no/such/descriptor/set.json",
+            allowed_root=kernel_root,
+            adapter_profile_paths=frozenset({"vendor_adapter.py"}),
+        )
+        self.assertNotIn("bypass_scan_violation", _kinds(registered))
+
 
 if __name__ == "__main__":
     unittest.main()

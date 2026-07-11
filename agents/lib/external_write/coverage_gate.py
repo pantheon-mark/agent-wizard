@@ -94,7 +94,7 @@ imported from ``write_gate`` — a single source, already duplicated from the bu
 Stdlib only — no third-party dependencies.
 """
 
-from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Sequence, Union
+from typing import Any, Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Sequence, Union
 from pathlib import Path
 
 # sys.path bootstrap: unlike scan.py (pure stdlib, no sibling imports), this module imports
@@ -265,13 +265,26 @@ def run_coverage_gate(
     paths: Sequence[Union[str, Path]],
     descriptor_set_path: Optional[str] = None,
     allowed_root: Optional[Union[str, Path]] = None,
+    adapter_profile_paths: Optional[FrozenSet[str]] = None,
+    sealed_kernel_paths: Optional[FrozenSet[str]] = None,
 ) -> CoverageDecision:
     """CLI-shaped helper: scan ``paths`` for bypasses (via the PURE ``scan_paths``), load the
     descriptor set fail-closed (via B1-4's loader — ``[]`` when absent/unreadable; defaults to
     ``security/capability_descriptors.json``, project-root-relative — B2-T2), read the real
     operation contracts, and evaluate the gate. This gate does not use the ``accepted`` field of
-    any entry it loads. Mirrors scan.py's invocation shape."""
-    violations = scan_paths(paths, allowed_root=allowed_root)
+    any entry it loads. Mirrors scan.py's invocation shape.
+
+    ``adapter_profile_paths`` / ``sealed_kernel_paths`` (Task 5) pass straight through to
+    ``scan_paths`` — this gate does not re-implement the trust-zone taxonomy (SEALED_KERNEL /
+    ADAPTER_PROFILE / CAPABILITY) at all; it consumes it exclusively via ``scan_paths``'s
+    violations, so ``zones.py`` (imported by ``scan.py``) remains the ONE canonical place that
+    taxonomy is defined. Defaulting both to ``None`` preserves ``scan_paths``'s own defaults
+    (``zones.SEALED_KERNEL_MODULE_PATHS`` / ``zones.ADAPTER_PROFILE_MODULE_PATHS``)."""
+    violations = scan_paths(
+        paths, allowed_root=allowed_root,
+        adapter_profile_paths=adapter_profile_paths,
+        sealed_kernel_paths=sealed_kernel_paths,
+    )
     descriptor_set = load_descriptor_set(descriptor_set_path)
     return evaluate_coverage_gate(
         scan_violations=violations, descriptor_set=descriptor_set)
