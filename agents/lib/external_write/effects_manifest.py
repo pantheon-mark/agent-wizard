@@ -97,6 +97,47 @@ def resolve_dependency_files(op_kind: str) -> Tuple[str, ...]:
     return tuple(sorted(files))
 
 
+def unresolvable_adapter_seal_gap(op_kind: str) -> Optional[str]:
+    """Fail-closed guard for a caller (the acceptance ceremony -- Task 6) that
+    must REFUSE rather than mint a trust seal it knows does not cover the
+    real writer.
+
+    `_adapter_module_file` can fail to resolve a registered adapter's
+    defining module (e.g. a dynamically-loaded or hand-stubbed adapter whose
+    `__module__` names nothing in `sys.modules`, or a module with no
+    `__file__`) -- in that case `resolve_dependency_files` /
+    `proof_hash.compute_implementation_hash` silently EXCLUDE the adapter
+    from the hashed dependency set (see `_adapter_module_file`'s own
+    docstring: "treated as this adapter contributes no additional
+    dependency file, not a build failure"). That is the correct call for a
+    structural Protocol stub used in a unit test, but it is exactly the F-34
+    hole at the TRUST surface: a proof's stored `implementation_hash` and the
+    ceremony's own freshly recomputed one would AGREE with each other while
+    both are blind to the adapter's bytes, so hash-equality checking alone
+    can never detect this -- the two hashes were never covering the real
+    writer in the first place.
+
+    Returns a human-readable reason string IFF op_kind has a registered
+    adapter whose module file cannot be resolved. Returns None when there is
+    no registered adapter at all (nothing to seal -- the legacy field-write
+    path is unaffected) or when the registered adapter's module resolves
+    normally (the seal is complete).
+    """
+    adapter = get_adapter(op_kind)
+    if adapter is None:
+        return None
+    if _adapter_module_file(adapter) is not None:
+        return None
+    return (
+        f"operation kind {op_kind!r} has a registered adapter "
+        f"({type(adapter).__module__}.{type(adapter).__qualname__}) whose "
+        "defining module's source file could not be resolved -- "
+        "implementation_hash would silently EXCLUDE this adapter from the "
+        "tamper-seal (F-34); refusing rather than accepting a seal that "
+        "does not cover the real writer"
+    )
+
+
 @dataclass(frozen=True)
 class EffectsManifest:
     """The per-op_kind hash-bound authority record.

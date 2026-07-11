@@ -82,6 +82,12 @@ def _proof(capability_id="google_sheets", op_kind=OP_KIND):
         "accepted_for_live_use": True,
         "implementation_hash": compute_implementation_hash(op_kind),
         "contract_hash": compute_contract_hash(op_kind),
+        # Task 6 (F-34 wire-verification): a real, clean, on-disk capability module — the SAME
+        # fixture the Task-5 scanner test suite proves scans to zero violations.
+        "capability_module_paths": [str(
+            Path(__file__).resolve().parents[2] / "test_fixtures" / "external_write_scan"
+            / "legal_through_adapter.py"
+        )],
     }
 
 

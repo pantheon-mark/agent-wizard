@@ -14,6 +14,15 @@ It is optional to this structural validator (older copy-run flows that never rea
 do not need it) but MANDATORY at the trust surface: the ceremony refuses a proof that is absent
 or mismatched. When present it must be a non-empty string.
 
+capability_module_paths (Task 6 -- F-34 wire-verification) names the capability's OWN
+write-affecting module files (its capability/proposal/read code -- never the trusted adapter
+module itself). Like capability_id, it is optional to this structural validator (no filesystem
+I/O happens here) but MANDATORY at the trust surface: the acceptance ceremony refuses a proof
+that omits it, or whose declared files do not scan clean under the build-time AST bypass
+scanner (scan.py) -- the structural proof that this capability's own code can neither reach an
+external surface directly nor construct/obtain a write-capable credential, i.e. that its write
+path is actually gated. When present here it must be a non-empty list of non-empty path strings.
+
 durability_checks[] is folded in: for operations that introduce or
 rely on persistent binding across operator-visible data, ordinary operator actions
 (sort/filter/insert/delete/move) are performed against the new structure on the copy
@@ -90,6 +99,18 @@ def validate_copy_run_proof(proof: Any) -> ProofResult:
         cid = proof["capability_id"]
         if not (isinstance(cid, str) and cid.strip()):
             return _fail("capability_id, when present, must be a non-empty string")
+
+    # capability_module_paths is optional to this structural validator but MANDATORY at the
+    # trust surface (see module docstring) -- the acceptance ceremony enforces presence + a
+    # clean bypass scan; this validator only checks the shape (no filesystem I/O here).
+    if "capability_module_paths" in proof:
+        module_paths = proof["capability_module_paths"]
+        if not (isinstance(module_paths, list) and module_paths
+                and all(isinstance(p, str) and p.strip() for p in module_paths)):
+            return _fail(
+                "capability_module_paths, when present, must be a non-empty list of "
+                "non-empty path strings"
+            )
 
     op_kind = proof["op_kind"]
     contract = get_contract(op_kind)

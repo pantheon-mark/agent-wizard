@@ -51,6 +51,30 @@ ceremony flips exactly that descriptor's ``accepted`` to ``true`` IFF every inva
      refuse.
   6. PHASE MATCH — the descriptor's owning ``phase_id`` equals the accepted ``phase_id``. Else
      refuse.
+  7. WRITE PATH IS GATED (Task 6 — F-34 wire-verification) — the ``copy_run_proof`` must declare
+     ``capability_module_paths``: the capability's OWN write-affecting module files (its
+     capability/proposal/read code — never the trusted adapter module itself). Each named path
+     must exist as a real file, and the FULL set must scan CLEAN under the SAME deterministic
+     AST bypass scanner the build-time gate uses (``scan.scan_paths`` — Task 5's zone-aware
+     scanner), reused verbatim, not reimplemented (DRY; no parallel call-graph check). A clean
+     scan is the structural proof that this capability's own code can neither reach an external
+     surface directly (bypassing ``run_operation``) nor construct/obtain a write-capable
+     credential — i.e., that its write path is actually gated, not merely asserted to be.
+     Absent, empty, non-existent-file, or non-clean (any violation kind at all) → refuse.
+  8. NO SEAL GAP (Task 6 — F-34 CARRY fix) — ``effects_manifest._adapter_module_file`` can fail
+     to resolve a registered adapter's defining module, in which case
+     ``resolve_dependency_files`` / ``compute_implementation_hash`` silently EXCLUDE that
+     adapter from the hashed dependency set. Because the ceremony's own Invariant-2
+     recomputation would then AGREE with an equally-blind proof hash, hash equality ALONE
+     cannot detect this — both hashes were never covering the real writer. This invariant asks
+     ``effects_manifest.unresolvable_adapter_seal_gap(op_kind)`` explicitly and refuses if it
+     reports a gap, so the ceremony never mints a seal it already knows is incomplete.
+  9. DECLARED_TEST_TARGET IS THE VOCAB TOKEN, not prose (Task 6 — the D-i fix) — the target
+     descriptor's ``declared_test_target`` must be exactly one of ``write_gate.TEST_TARGETS``
+     (copy / bounded_sample / dry_run / native_undo). A prose description (e.g. "sample of 5
+     real emails, manually reviewed") can never be programmatically matched by the write gate's
+     LIVE_BOUNDED lookup (``write_gate._declared_entry`` does an exact string match), silently
+     stranding the capability off the declarative test-target path forever. Else refuse.
 
 Only a gated capability (an effective risk class in ``write_gate.GATED_RISK_CLASSES``) is in
 scope — acceptance is meaningless for read-only / plain-reversible descriptors, so the ceremony
@@ -69,7 +93,13 @@ these inputs):
                           artifact (``copy_run_proof.COPY_RUN_PROOF_SCHEMA``); carries the
                           ``op_kind`` + ``implementation_hash`` + ``contract_hash`` this ceremony
                           re-verifies against the canon. B2-T4 (approved-design artifact) /
-                          B2-T6 (Step-6 acceptance) produce it.
+                          B2-T6 (Step-6 acceptance) produce it. Since Task 6 it MUST also carry
+                          ``capability_module_paths`` — the real, on-disk paths of the
+                          capability's own write-affecting modules (never the trusted adapter
+                          module) — which this ceremony scans clean before minting acceptance
+                          (Invariant 7). The producer of the copy-run proof (the supervised
+                          copy-run flow) is responsible for enumerating the COMPLETE set for
+                          this capability; the ceremony scans exactly what it is given.
   * operator receipt    — a filesystem path to a JSON file matching
                           ``OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA`` (see ``_REQUIRED_RECEIPT_FIELDS``):
                           {schema, capability_id, phase_id, copy_run_proof_ref,
@@ -111,12 +141,14 @@ if __package__ in (None, ""):  # pragma: no cover - only true when run as a scri
 
 from external_write.contracts import RISK_CLASSES, get_contract
 from external_write.copy_run_proof import validate_copy_run_proof
+from external_write.effects_manifest import unresolvable_adapter_seal_gap
 from external_write.proof_hash import (
     compute_contract_hash,
     compute_implementation_hash,
     ProofHashError,
 )
-from external_write.write_gate import GATED_RISK_CLASSES
+from external_write.scan import scan_paths
+from external_write.write_gate import GATED_RISK_CLASSES, TEST_TARGETS
 
 
 # The operator-acceptance receipt schema (produced by B2-T6's next-phase Step-6).
@@ -325,6 +357,19 @@ def accept_capability_for_live_use(
             f"(got {cap!r}); an unbounded gated capability is never accepted",
             capability_id, phase_id)
 
+    # --- Invariant 9: declared_test_target is the vocab token, not prose (D-i fix) --------
+    # A prose description can never be programmatically matched by the write gate's
+    # LIVE_BOUNDED lookup (write_gate._declared_entry does an EXACT string match against
+    # TEST_TARGETS), so a mis-emitted prose value would silently strand the capability off the
+    # declarative test-target path forever. Refuse rather than accept a capability like that.
+    declared_target = target.get("declared_test_target")
+    if not (isinstance(declared_target, str) and declared_target in TEST_TARGETS):
+        return _refuse(
+            f"gated descriptor {capability_id!r} has a declared_test_target that is not the "
+            f"vocab token (got {declared_target!r}; must be one of {sorted(TEST_TARGETS)}) — "
+            "a prose description is never programmatically matchable by the write gate",
+            capability_id, phase_id)
+
     # --- Invariant 6: phase binding -------------------------------------------------------
     descriptor_phase = target.get(PHASE_ID_KEY)
     if not (isinstance(descriptor_phase, str) and descriptor_phase):
@@ -402,6 +447,36 @@ def accept_capability_for_live_use(
             "refusing (a same-risk proof must not cross-authorize)",
             capability_id, phase_id)
 
+    # --- Invariant 7: WRITE PATH IS GATED (F-34 wire-verification) ------------------------
+    # The proof must declare the capability's OWN write-affecting module files, and the FULL
+    # set must scan clean under the SAME deterministic AST bypass scanner the build-time gate
+    # runs (scan.scan_paths — Task 5's zone-aware scanner). Reused verbatim, not reimplemented
+    # (DRY; this is deliberately not a parallel call-graph check). Fail-safe on every branch:
+    # a missing/malformed declaration, a named file that does not exist, or ANY reported
+    # violation (a vendor SDK import, a direct surface-mutation call, a dynamic import, a
+    # network shell-out, or a write-capable credential construction/widening) all refuse.
+    module_paths = proof.get("capability_module_paths")
+    if not (isinstance(module_paths, list) and module_paths
+            and all(isinstance(p, str) and p.strip() for p in module_paths)):
+        return _refuse(
+            "copy_run_proof carries no non-empty capability_module_paths — the ceremony "
+            "cannot verify the capability's write path is gated without the files to scan",
+            capability_id, phase_id)
+    for _p in module_paths:
+        if not Path(_p).is_file():
+            return _refuse(
+                f"capability_module_paths entry {_p!r} does not exist as a file — a write "
+                "path cannot be verified clean against a file that is not there",
+                capability_id, phase_id)
+    bypass_violations = scan_paths(module_paths)
+    if bypass_violations:
+        offenders = "; ".join(
+            f"{v.path}:{v.lineno}:{v.kind}" for v in bypass_violations)
+        return _refuse(
+            "the capability's own modules did not pass the write-path bypass scan clean — "
+            f"its write path is not gated: {offenders}",
+            capability_id, phase_id)
+
     # --- Invariant 2: no risk downgrade, verified against the hash-bound canon -------------
     op_kind = proof.get("op_kind")
     contract = get_contract(op_kind) if isinstance(op_kind, str) else None
@@ -410,6 +485,17 @@ def accept_capability_for_live_use(
             f"copy_run_proof op_kind {op_kind!r} has no registered contract — cannot verify risk "
             "against the canon",
             capability_id, phase_id)
+
+    # --- Invariant 8: NO SEAL GAP (F-34 CARRY fix) -----------------------------------------
+    # A registered adapter whose defining module cannot be resolved would be silently EXCLUDED
+    # from the implementation_hash (effects_manifest.resolve_dependency_files) — and because
+    # the ceremony's own recomputation below would be equally blind to it, the hash-equality
+    # check just below can never detect this on its own (both hashes agree; neither covers the
+    # adapter). Ask explicitly and refuse rather than mint a seal known to be incomplete.
+    seal_gap = unresolvable_adapter_seal_gap(op_kind)
+    if seal_gap is not None:
+        return _refuse(seal_gap, capability_id, phase_id)
+
     # The descriptor's declared risk must equal the operation's contract risk (do not trust the
     # descriptor field in isolation — bind it to the contract).
     if descriptor_risk != contract.risk_class:

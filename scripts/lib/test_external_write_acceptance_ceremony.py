@@ -30,6 +30,14 @@ from external_write.acceptance_ceremony import (  # noqa: E402
     AcceptanceResult,
     OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA,
 )
+from external_write.adapter_registry import (  # noqa: E402
+    get_adapter,
+    register_adapter,
+    unregister_adapter,
+)
+import external_write.contracts as _contracts  # noqa: E402
+from external_write.contracts import OperationContract  # noqa: E402
+from external_write.effects_manifest import resolve_dependency_files  # noqa: E402
 from external_write.proof_hash import (  # noqa: E402
     compute_contract_hash,
     compute_implementation_hash,
@@ -44,11 +52,19 @@ from external_write.write_gate import (  # noqa: E402
     load_descriptor_set,
     evaluate_write_gate,
     LIVE_TARGET,
+    TEST_TARGETS,
 )
 
 
 PHASE = "phase_02"
 PROOF_OP_KIND = "delete_record"  # irreversible_external; non-binding; no recovery floor
+
+# Task 6 (F-34 wire-verification) fixtures — real scan.py fixture files, reused verbatim from
+# the Task-5 scanner test suite (DRY: not a parallel set of bypass shapes).
+_SCAN_FIXTURES = (
+    Path(__file__).resolve().parents[2] / "test_fixtures" / "external_write_scan"
+)
+_CLEAN_MODULE_PATH = str(_SCAN_FIXTURES / "legal_through_adapter.py")
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +93,7 @@ def _verification():
 
 def _proof(op_kind=PROOF_OP_KIND, *, contract_hash=None, implementation_hash=None,
            durability=None, accepted_for_live_use=True, capability_id="google_sheets",
-           include_capability_id=True):
+           include_capability_id=True, module_paths=None, include_module_paths=True):
     p = {
         "schema": COPY_RUN_PROOF_SCHEMA,
         "operation_id": "op-001",
@@ -103,6 +119,10 @@ def _proof(op_kind=PROOF_OP_KIND, *, contract_hash=None, implementation_hash=Non
     }
     if include_capability_id:
         p["capability_id"] = capability_id
+    if include_module_paths:
+        p["capability_module_paths"] = (
+            list(module_paths) if module_paths is not None else [_CLEAN_MODULE_PATH]
+        )
     return p
 
 
@@ -443,6 +463,105 @@ class AcceptanceCeremonyTest(unittest.TestCase):
         self.assertFalse(res.accepted)
         self.assertEqual(c.original_bytes(), orig)
 
+    # -- Invariant 7: WRITE PATH IS GATED (Task 6 — F-34 wire-verification) ----------------
+    # Closes the dogfood finding directly: the ceremony must REFUSE a capability whose own
+    # code holds/constructs a write credential, or whose write path bypasses run_operation
+    # (a direct surface-mutation call, or a forbidden vendor-SDK import) — reusing the SAME
+    # Task-5 zone-aware scanner the build-time gate runs, not a reimplemented check.
+
+    def test_missing_capability_module_paths_refuses(self):
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets")],
+                  proof=_proof(include_module_paths=False))
+        orig = c.original_bytes()
+        res = c.call()
+        self.assertFalse(res.accepted)
+        self.assertEqual(c.original_bytes(), orig)
+
+    def test_empty_capability_module_paths_refuses(self):
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets")],
+                  proof=_proof(module_paths=[]))
+        orig = c.original_bytes()
+        res = c.call()
+        self.assertFalse(res.accepted)
+        self.assertEqual(c.original_bytes(), orig)
+
+    def test_capability_module_path_pointing_at_missing_file_refuses(self):
+        # Fail-safe: a scanner over a nonexistent file silently reports zero violations (it
+        # never got to read the file) — the ceremony must not treat that as "clean".
+        missing = str(_SCAN_FIXTURES / "_does_not_exist_anywhere.py")
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets")],
+                  proof=_proof(module_paths=[missing]))
+        orig = c.original_bytes()
+        res = c.call()
+        self.assertFalse(res.accepted)
+        self.assertEqual(c.original_bytes(), orig)
+
+    def test_capability_module_holding_write_credential_refuses(self):
+        # (a) fixture capability that holds/constructs a write credential.
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets")],
+                  proof=_proof(module_paths=[
+                      str(_SCAN_FIXTURES / "credential_construction.py")]))
+        orig = c.original_bytes()
+        res = c.call()
+        self.assertFalse(res.accepted)
+        self.assertIn("write-path bypass scan", res.reason)
+        self.assertEqual(c.original_bytes(), orig)
+
+    def test_capability_module_direct_api_call_refuses(self):
+        # (b) fixture with a write path outside run_operation — a direct surface mutation.
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets")],
+                  proof=_proof(module_paths=[str(_SCAN_FIXTURES / "direct_api_call.py")]))
+        orig = c.original_bytes()
+        res = c.call()
+        self.assertFalse(res.accepted)
+        self.assertEqual(c.original_bytes(), orig)
+
+    def test_capability_module_forbidden_import_refuses(self):
+        # (b) alternate shape — a forbidden vendor/network import outside run_operation.
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets")],
+                  proof=_proof(module_paths=[str(_SCAN_FIXTURES / "forbidden_import.py")]))
+        orig = c.original_bytes()
+        res = c.call()
+        self.assertFalse(res.accepted)
+        self.assertEqual(c.original_bytes(), orig)
+
+    def test_conformant_capability_module_accepts(self):
+        # ACCEPTS a fully-conformant fixture: a capability module that routes every mutation
+        # through the emitted adapter scans clean, and does not by itself block acceptance.
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets")],
+                  proof=_proof(module_paths=[
+                      str(_SCAN_FIXTURES / "legal_through_adapter.py")]))
+        res = c.call()
+        self.assertTrue(res.accepted, res.reason)
+
+    # -- Invariant 9: declared_test_target is the vocab token, not prose (Task 6 D-i fix) ---
+
+    def test_prose_declared_test_target_refuses(self):
+        c = _Case(self.tmp, descriptors=[_descriptor(
+            id="google_sheets",
+            declared_test_target="Sample of 5 real emails, manually reviewed")])
+        orig = c.original_bytes()
+        res = c.call()
+        self.assertFalse(res.accepted)
+        self.assertEqual(c.original_bytes(), orig)
+
+    def test_missing_declared_test_target_refuses(self):
+        d = _descriptor(id="google_sheets")
+        d["declared_test_target"] = None
+        c = _Case(self.tmp, descriptors=[d])
+        orig = c.original_bytes()
+        res = c.call()
+        self.assertFalse(res.accepted)
+        self.assertEqual(c.original_bytes(), orig)
+
+    def test_each_vocab_test_target_accepts(self):
+        for tok in sorted(TEST_TARGETS):
+            with self.subTest(tok=tok):
+                c = _Case(self.tmp, descriptors=[
+                    _descriptor(id="google_sheets", declared_test_target=tok)])
+                res = c.call()
+                self.assertTrue(res.accepted, res.reason)
+
     # -- Atomicity --------------------------------------------------------
 
     def test_write_failure_leaves_original_intact(self):
@@ -502,6 +621,94 @@ class AcceptanceCeremonyTest(unittest.TestCase):
         from capability_descriptor_registry import base_declared_descriptors  # type: ignore
         for e in base_declared_descriptors():
             self.assertIs(e["accepted"], False)
+
+
+# ---------------------------------------------------------------------------
+# Invariant 8: NO SEAL GAP (Task 6 — F-34 CARRY fix)
+# ---------------------------------------------------------------------------
+# The central regression this task closes: a registered adapter whose defining module cannot be
+# resolved is silently EXCLUDED from the hashed dependency set (effects_manifest._adapter_module_
+# file returns None -> resolve_dependency_files skips it). Both the proof's stored hash and the
+# ceremony's own freshly-recomputed hash are computed the SAME (blind) way, so they AGREE with
+# each other while neither covers the adapter's bytes — Invariant 2's hash-equality check alone
+# can never catch this. This must refuse via the new explicit unresolvable_adapter_seal_gap check
+# (Invariant 8), not via a hash mismatch.
+
+_SEAL_GAP_OP_KIND = "_t6_seal_gap_fixture_op"
+
+
+class _UnresolvableSealGapAdapter:
+    """Adapter-protocol-conforming stub whose __module__ is deliberately pointed at a name that
+    is NOT in sys.modules, so effects_manifest._adapter_module_file cannot resolve it — the
+    exact silent-exclusion shape the CARRY note (T3->T6) flags."""
+
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, raw_client, unit):
+        return True
+
+
+_UnresolvableSealGapAdapter.__module__ = "_no_such_module_ever_t6_seal_gap"
+
+
+class SealGapAcceptanceTest(unittest.TestCase):
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.tmp = self._td.name
+        self._prior_contract = _contracts.OPERATION_CONTRACTS.get(_SEAL_GAP_OP_KIND)
+        _contracts.OPERATION_CONTRACTS[_SEAL_GAP_OP_KIND] = OperationContract(
+            op_kind=_SEAL_GAP_OP_KIND,
+            writes=("__fixture__",),
+            produces=(),
+            dependency_set=(),  # deliberately empty — see _FixtureContractMixin in
+                                # test_external_write_effects_manifest.py; isolates the adapter
+                                # binding from the static declared dependency_set path.
+            verifier_set=("prestate_snapshot_diff_v1",),
+            introduces_persistent_binding=False,
+            risk_class="irreversible_external",
+            requires_accepted_phase=True,
+            blast_radius_cap=5,
+        )
+        register_adapter(_SEAL_GAP_OP_KIND, _UnresolvableSealGapAdapter())
+
+    def tearDown(self):
+        unregister_adapter(_SEAL_GAP_OP_KIND)
+        if self._prior_contract is None:
+            _contracts.OPERATION_CONTRACTS.pop(_SEAL_GAP_OP_KIND, None)
+        else:
+            _contracts.OPERATION_CONTRACTS[_SEAL_GAP_OP_KIND] = self._prior_contract
+        self._td.cleanup()
+
+    def test_adapter_module_is_actually_unresolvable(self):
+        # Sanity on the vulnerability itself (documents the premise, does not exercise the
+        # ceremony): the registered adapter contributes NOTHING to the hashed dependency set,
+        # so proof_hash is blind to its bytes.
+        self.assertEqual(resolve_dependency_files(_SEAL_GAP_OP_KIND), ())
+        self.assertIsNotNone(get_adapter(_SEAL_GAP_OP_KIND))
+
+    def test_unresolvable_adapter_module_refuses_despite_matching_hashes(self):
+        c = _Case(self.tmp, descriptors=[
+            _descriptor(id="google_sheets", risk_class="irreversible_external")],
+            proof=_proof(op_kind=_SEAL_GAP_OP_KIND, capability_id="google_sheets"))
+        orig = c.original_bytes()
+        # The stored hashes and the ceremony's freshly recomputed ones agree (both blind to the
+        # adapter) — proving Invariant 2 alone would have accepted this.
+        proof_on_disk = json.loads(c.proof_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            proof_on_disk["implementation_hash"],
+            compute_implementation_hash(_SEAL_GAP_OP_KIND))
+        res = c.call(capability_id="google_sheets")
+        self.assertFalse(res.accepted)
+        self.assertIn("seal", (res.reason or "").lower())
+        self.assertEqual(c.original_bytes(), orig)
 
 
 if __name__ == "__main__":
