@@ -19,8 +19,14 @@ from pathlib import Path
 _AGENTS_LIB = Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib"
 sys.path.insert(0, str(_AGENTS_LIB))
 
-from external_write.operations import Operation, Result  # noqa: E402
+from external_write.operations import Operation, Result, EffectUnit  # noqa: E402
 from external_write.adapters import run_operation          # noqa: E402
+from external_write import contracts as contracts_mod       # noqa: E402
+from external_write.contracts import OperationContract       # noqa: E402
+from external_write.adapter_registry import (                # noqa: E402
+    register_adapter,
+    unregister_adapter,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -531,6 +537,109 @@ class TestDryRunNoMutation(unittest.TestCase):
         result = run_operation(op, receipt, client, target="copy")
         self.assertEqual(result.status, "written")
         self.assertEqual(client.read("obj:copy-1", "__record__"), "<x>")
+
+
+class _BulkPlanAdapter:
+    """Test adapter whose plan() fans out to `n` EffectUnits. Records every
+    apply_one call so a test can assert it was NEVER invoked (the F-31
+    regression proof: a many-target Operation must be refused on cardinality
+    BEFORE any unit is applied)."""
+
+    def __init__(self, n):
+        self._n = n
+        self.applied = []
+
+    def plan(self, params):
+        return [EffectUnit(unit_id=f"u{i}", target_ref=params) for i in range(self._n)]
+
+    def apply_one(self, raw_client, unit):
+        self.applied.append(unit)
+        raw_client.write(unit.unit_id, "Status", "Complete")
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, raw_client, unit):
+        return True
+
+
+class TestAdapterDispatchCardinalityCap(unittest.TestCase):
+    """T2 — run_operation dispatches to a registered adapter and enforces the
+    blast-radius cap on len(effect_units) BEFORE any write (the F-31 regression:
+    a single Operation carrying many targets must not slip past the cap)."""
+
+    OP_KIND = "_bulk_probe_op"
+
+    def setUp(self):
+        contracts_mod.OPERATION_CONTRACTS[self.OP_KIND] = OperationContract(
+            op_kind=self.OP_KIND,
+            writes=("Status",),
+            produces=(),
+            dependency_set=(),
+            verifier_set=(),
+            introduces_persistent_binding=False,
+            risk_class="reversible_external",  # ungated -- isolates the cardinality
+            blast_radius_cap=25,               # cap under test, independent of the gate
+        )
+
+    def tearDown(self):
+        contracts_mod.OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+        unregister_adapter(self.OP_KIND)
+
+    def _op(self, batch_id="bulk-1"):
+        return Operation(
+            surface="google_sheets",
+            op_kind=self.OP_KIND,
+            batch_id=batch_id,
+            params={"rows": list(range(55))},
+        )
+
+    def test_55_unit_plan_over_cap_25_refuses_with_zero_writes(self):
+        adapter = _BulkPlanAdapter(55)
+        register_adapter(self.OP_KIND, adapter)
+        op = self._op()
+        client = _RaisingClient()  # raises AssertionError if .write/.read ever called
+        receipt = _receipt(op)
+
+        result = run_operation(op, receipt, client)
+
+        self.assertEqual(result.status, "refused")
+        self.assertEqual(len(adapter.applied), 0,
+                          "apply_one must NEVER be called once the planned unit count "
+                          "exceeds the blast-radius cap")
+        self.assertIn("55", result.detail.get("reason", ""))
+        self.assertIn("25", result.detail.get("reason", ""))
+
+    def test_under_cap_plan_applies_every_unit(self):
+        adapter = _BulkPlanAdapter(10)
+        register_adapter(self.OP_KIND, adapter)
+        op = self._op(batch_id="bulk-2")
+        client = _AcceptingClient()
+        receipt = _receipt(op)
+
+        result = run_operation(op, receipt, client)
+
+        self.assertEqual(result.status, "written")
+        self.assertEqual(len(adapter.applied), 10)
+
+    def test_op_with_no_registered_adapter_still_writes_via_field_path(self):
+        """Parity: an op_kind with NO registered adapter must fall through to the
+        existing field-write path, byte-identical to pre-T2 behavior."""
+        op = Operation(
+            surface="google_sheets",
+            object_id="sheet:parity-1",
+            field="Status",
+            new_value="Complete",
+            op_kind="set_status",  # a seeded op_kind -- deliberately unregistered
+            batch_id="parity-1",
+        )
+        client = _AcceptingClient()
+        receipt = _receipt(op)
+
+        result = run_operation(op, receipt, client)
+
+        self.assertEqual(result.status, "written")
+        self.assertEqual(client.read("sheet:parity-1", "Status"), "Complete")
 
 
 if __name__ == "__main__":

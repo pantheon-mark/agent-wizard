@@ -37,7 +37,8 @@ from typing import Any, Optional, Sequence
 
 from external_write.operations import Operation, Result
 from external_write.verifiers import validate_postwrite_verification
-from external_write.write_gate import evaluate_write_gate, InvocationLedger
+from external_write.write_gate import evaluate_write_gate, InvocationLedger, resolve_effective_cap
+from external_write.adapter_registry import get_adapter
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +119,45 @@ def _parse_allowed_from_error(message: str) -> Optional[list]:
 
 
 # ---------------------------------------------------------------------------
+# T2: registered-adapter action path
+# ---------------------------------------------------------------------------
+
+def _run_adapter_operation(op: Operation, raw_client: Any, adapter: Any,
+                           descriptor_set: Any, gate_audit: Optional[dict]) -> Result:
+    """Plan, cap-check, then apply — the registered-adapter counterpart to the
+    field-write Steps 2-4 in run_operation.
+
+    THE ORDERING GUARANTEE (F-31): `adapter.plan(...)` is called first and must be
+    pure (no writes, no reads — see the Adapter protocol docstring). Its result is
+    counted and compared against the blast-radius cap BEFORE `adapter.apply_one` is
+    called even once. A plan whose unit count exceeds the cap is refused in full —
+    zero units are applied, not "cap-many, then stop."
+    """
+    units = adapter.plan(op.params)
+    cap = resolve_effective_cap(op, descriptor_set)
+    if cap is not None and len(units) > cap:
+        return Result(
+            status="refused",
+            detail={
+                "reason": (
+                    f"operation refused: planned {len(units)} effect unit(s) exceeds "
+                    f"the blast-radius cap of {cap} for op_kind {op.op_kind!r} — "
+                    "refused before any write was attempted."
+                ),
+                "planned_units": len(units),
+                "blast_radius_cap": cap,
+            },
+        )
+
+    for unit in units:
+        adapter.apply_one(raw_client, unit)
+
+    detail: dict = dict(gate_audit) if gate_audit else {}
+    detail["units_applied"] = len(units)
+    return Result(status="written", detail=detail)
+
+
+# ---------------------------------------------------------------------------
 # Core dispatch
 # ---------------------------------------------------------------------------
 
@@ -186,6 +226,18 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     if target == "dry_run":
         detail: dict = {"dry_run": True, "simulated_value": op.new_value}
         return Result(status="written", detail=detail)
+
+    # Step 1.75 (T2): registered-adapter action path. When op.op_kind has a
+    # registered Adapter (adapter_registry.py), dispatch to it INSTEAD of the
+    # field-write path below: plan the effect units, refuse before any write if the
+    # planned count exceeds the blast-radius cap (the F-31 fix — a single Operation
+    # carrying many targets can no longer slip past the cap by counting as one
+    # invocation), then apply each unit in turn. An op_kind with NO registered
+    # adapter falls straight through to the unchanged field-write path (T2/T8
+    # boundary: migrating the seeded field ops onto this registry is Task 8).
+    adapter = get_adapter(op.op_kind)
+    if adapter is not None:
+        return _run_adapter_operation(op, client, adapter, descriptor_set, _gate_audit)
 
     # Step 2: attempt write via the surface's validating path.
     try:
