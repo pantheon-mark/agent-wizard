@@ -28,6 +28,7 @@ from external_write.write_gate import (  # noqa: E402
     InvocationLedger,
     load_descriptor_set,
     evaluate_write_gate,
+    resolve_effective_cap,
     system_clock,
     COPY_SURFACE,
     TEST_SURFACES,
@@ -364,6 +365,62 @@ class TestBlastRadiusCap(unittest.TestCase):
             r = run_operation(op, _receipt(op), _AcceptingClient(), descriptor_set=[])
             self.assertEqual(r.status, "written")
         self.assertEqual(led.count("google_sheets::delete_record"), 0)
+
+
+class TestResolveEffectiveCapMultipleMatchingEntries(unittest.TestCase):
+    """Review fix: resolve_effective_cap must be fail-safe when MULTIPLE descriptor
+    entries match the same surface + risk_class — it must take the SMALLEST cap
+    across every matching entry (never the first match), matching the same
+    "smallest cap wins" convention `_effective_cap` already establishes. A
+    too-permissive blast-radius cap picked by first-match order is a security-
+    relevant correctness bug."""
+
+    OP_KIND = "_multi_descriptor_cap_probe"
+
+    def setUp(self):
+        contracts_mod.OPERATION_CONTRACTS[self.OP_KIND] = OperationContract(
+            op_kind=self.OP_KIND,
+            writes=("Status",),
+            produces=(),
+            dependency_set=(),
+            verifier_set=(),
+            introduces_persistent_binding=False,
+            risk_class="irreversible_external",
+            blast_radius_cap=20,  # deliberately larger than every descriptor cap below
+        )
+
+    def tearDown(self):
+        contracts_mod.OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+
+    def _op(self):
+        return Operation(surface="google_sheets", op_kind=self.OP_KIND,
+                          object_id="obj:1", field="__record__", new_value="<x>",
+                          batch_id="b1")
+
+    def test_multiple_matching_entries_resolve_to_the_smallest_cap(self):
+        # Two entries match the SAME surface + risk_class, in an order where the
+        # FIRST entry has the LARGER cap. First-match behavior would wrongly
+        # return 15 (min(contract=20, first=15)); the fail-safe fix must return 7
+        # -- the smallest cap across ALL matching entries (contract=20, 15, 7).
+        ds = [
+            _accepted_entry(risk_class="irreversible_external", blast_radius_cap=15),
+            _accepted_entry(risk_class="irreversible_external", blast_radius_cap=7),
+        ]
+        cap = resolve_effective_cap(self._op(), ds)
+        self.assertEqual(cap, 7)
+
+    def test_descriptor_override_is_sourced_from_the_descriptor_set_not_the_contract(self):
+        # Both matching entries' caps are well below the contract's default (20),
+        # so a resolved value of 4 can only have come from actually reading and
+        # combining the descriptor entries -- not from falling back to the
+        # contract cap (which alone would resolve to 20).
+        ds = [
+            _accepted_entry(risk_class="irreversible_external", blast_radius_cap=12),
+            _accepted_entry(risk_class="irreversible_external", blast_radius_cap=4),
+        ]
+        cap = resolve_effective_cap(self._op(), ds)
+        self.assertEqual(cap, 4)
+        self.assertLess(cap, 20)
 
 
 # ---------------------------------------------------------------------------

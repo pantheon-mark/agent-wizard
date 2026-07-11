@@ -318,8 +318,8 @@ def _ledger_key(op: Operation) -> str:
 def resolve_effective_cap(op: Operation,
                           descriptor_set: Optional[Sequence[Dict[str, Any]]] = None) -> Optional[int]:
     """Public accessor: the effective blast-radius cap for `op` — the contract's
-    default `blast_radius_cap`, overridden DOWNWARD by a matching descriptor entry's
-    cap if one is present (same "smallest of the caps present" rule as
+    default `blast_radius_cap`, overridden DOWNWARD by matching descriptor entries'
+    caps if any are present (same "smallest of the caps present" rule as
     `_effective_cap`, used internally by the live-enforcement funnel below).
 
     T2 (adapter dispatch, adapters.py) reuses this to count a registered adapter's
@@ -328,16 +328,20 @@ def resolve_effective_cap(op: Operation,
     which counts one Operation as one slot regardless of how many effect units it
     fans out to (the F-31 gap this exists to close).
 
-    Matching is lenient on purpose: it looks for the first descriptor entry whose
+    Matching is lenient on purpose: it considers EVERY descriptor entry whose
     id/name matches op.surface and whose risk_class matches op's effective risk
     class, WITHOUT requiring `accepted` or a declared_test_target match — a cap
     value is not an authorization decision, so it is not gated the way
-    `_covering_entry`/`_declared_entry` are. Returns None only when neither a
-    contract cap nor a matching descriptor cap is configured."""
+    `_covering_entry`/`_declared_entry` are. Fail-safe: if more than one entry
+    matches, the SMALLEST cap across ALL of them wins (never the first match) —
+    the same "smallest cap wins" convention `_effective_cap` establishes for the
+    contract-vs-single-entry case, applied here across every matching entry so a
+    too-permissive cap can never be silently selected. Returns None only when
+    neither a contract cap nor any matching descriptor cap is configured."""
     contract = get_contract(op.op_kind)
     risk_class = _effective_risk_class(contract)
     ds = load_descriptor_set() if descriptor_set is None else descriptor_set
-    entry: Optional[Dict[str, Any]] = None
+    matches: List[Dict[str, Any]] = []
     for e in ds:
         if not isinstance(e, dict):
             continue
@@ -345,9 +349,11 @@ def resolve_effective_cap(op: Operation,
             continue
         if e.get("risk_class") != risk_class:
             continue
-        entry = e
-        break
-    return _effective_cap(contract, entry)
+        matches.append(e)
+    if not matches:
+        return _effective_cap(contract, None)
+    caps = [c for c in (_effective_cap(contract, e) for e in matches) if c is not None]
+    return min(caps) if caps else None
 
 
 def _enforce_live_funnel(op: Operation, risk_class: str, contract: Optional[OperationContract],
