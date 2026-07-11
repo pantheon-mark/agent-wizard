@@ -281,6 +281,78 @@ class TestReadFacadeAdversarialBypasses(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Group 1c: bypass 4 (live-reproduced, re-review) -- the wrapped client is
+# unreachable via ANY attribute access on the facade, not just the ones
+# refused at class-definition time above. Before this fix, the client was
+# stored as a plain instance attribute (`self._read_only_client`), and
+# `ReadFacade.__getattribute__` unconditionally passed through every
+# underscore-prefixed name -- so ANY code holding a facade could do
+# `facade._read_only_client` and get the live wrapped client back, no
+# subclassing or trickery required. This pins that it no longer works, for
+# `_read_only_client` and for a spread of other plausible guesses.
+# ---------------------------------------------------------------------------
+
+class _SecretSentinelClient:
+    """A fixture read-only client whose declared method returns a sentinel
+    value, so a test can prove the sentinel is reachable ONLY through the
+    declared read method -- never through any attribute on the facade."""
+
+    def get_secret(self):
+        return "SECRET-SENTINEL-VALUE"
+
+
+class _SentinelFacade(ReadFacade):
+    read_methods = ("get_secret",)
+
+    def get_secret(self):
+        return self._read("get_secret")
+
+
+class TestReadFacadeClientUnreachableViaAnyAttribute(unittest.TestCase):
+
+    CANDIDATE_LEAK_NAMES = (
+        "_read_only_client",  # the actual pre-fix attribute name
+        "_client",
+        "_raw",
+        "_raw_client",
+        "client",
+        "_wrapped",
+        "_wrapped_client",
+        "_inner",
+        "_inner_client",
+        "_c",
+    )
+
+    def test_no_attribute_access_returns_the_wrapped_client(self):
+        client = _SecretSentinelClient()
+        facade = _SentinelFacade(client)
+
+        for name in self.CANDIDATE_LEAK_NAMES:
+            with self.subTest(name=name):
+                value = getattr(facade, name, "__ATTRIBUTE_ABSENT__")
+                self.assertIsNot(
+                    value, client,
+                    f"facade.{name} returned the wrapped client -- the "
+                    "client must be unreachable via every attribute name, "
+                    "not just the ones a reviewer happened to guess"
+                )
+
+    def test_instance_dict_never_contains_the_wrapped_client(self):
+        """Defense in depth: the client must never have been assigned to
+        ANY instance attribute in the first place -- not merely blocked
+        from being read back out afterward."""
+        client = _SecretSentinelClient()
+        facade = _SentinelFacade(client)
+        self.assertNotIn(client, vars(facade).values())
+
+    def test_declared_read_method_still_returns_the_correct_value(self):
+        """The lockdown must not break legitimate declared read methods."""
+        client = _SecretSentinelClient()
+        facade = _SentinelFacade(client)
+        self.assertEqual(facade.get_secret(), "SECRET-SENTINEL-VALUE")
+
+
+# ---------------------------------------------------------------------------
 # Fixtures shared by the credential-injection-seam tests
 # ---------------------------------------------------------------------------
 
@@ -490,8 +562,19 @@ class TestCapabilityContextNeverCarriesWriteCredential(unittest.TestCase):
         read_only = _FixtureReadOnlyClient()
         facade = _FixtureReadFacade(read_only)
 
-        self.assertIs(facade._read_only_client, read_only)
-        self.assertIsNot(facade._read_only_client, write_capable)
+        # Behavioral proof of wiring: the declared read method dispatches to
+        # the read-only client. (Identity can no longer be asserted via a
+        # `facade._read_only_client`-style attribute -- see
+        # TestReadFacadeClientUnreachableViaAnyAttribute; the client is not
+        # stored as an instance attribute at all.)
+        self.assertEqual(facade.get_status("obj-1"), "Open")
+        reachable = _reachable_values(facade)
+        self.assertTrue(all(obj is not write_capable for obj in reachable))
+        self.assertTrue(all(obj is not read_only for obj in reachable),
+                        "the wrapped read-only client must not be reachable "
+                        "via the facade's instance-attribute graph either -- "
+                        "it is held in module-private state, not on the "
+                        "instance")
 
 
 # ---------------------------------------------------------------------------
@@ -535,7 +618,10 @@ class TestVendorEligibility(unittest.TestCase):
         read_only_client = _FixtureReadOnlyClient()
         facade = build_read_facade(self.OP_KIND, read_only_client, _FixtureReadFacade)
         self.assertIsInstance(facade, _FixtureReadFacade)
-        self.assertIs(facade._read_only_client, read_only_client)
+        reachable = _reachable_values(facade)
+        self.assertTrue(all(obj is not read_only_client for obj in reachable),
+                        "the wrapped client must not be reachable via the "
+                        "facade's instance-attribute graph")
         self.assertEqual(facade.get_status("obj-1"), "Open")
 
     def test_build_read_facade_defaults_to_bare_read_facade_class(self):

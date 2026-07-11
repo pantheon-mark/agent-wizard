@@ -2,7 +2,9 @@
 credential-isolation property (Task 4 — external-write-gate-generalization
 slice; cross-vendor round-2 finding; hardened per a code-review finding that
 live-reproduced three working bypasses of the class-definition-time-only
-guard — see "Runtime enforcement" below).
+guard — see "Runtime enforcement" below; hardened AGAIN per a re-review that
+live-reproduced a fourth bypass, requiring no subclassing at all — see
+"Client storage" below).
 
 The property this module exists to guarantee:
 
@@ -44,6 +46,19 @@ complementary mechanism — Task 5's job):
      override any of these three hooks (forbidden above), this enforcement
      cannot be re-opened by a subclass.
 
+     Client storage: the runtime allowlist above is necessary but was not
+     sufficient — the base class itself used to store the wrapped client as
+     a plain instance attribute (`self._read_only_client`), and
+     `__getattribute__`'s underscore passthrough (needed for legitimate
+     internal/dunder access) returned it to ANY caller who accessed
+     `facade._read_only_client` — no subclassing or trickery required. The
+     wrapped client is therefore never assigned to an instance attribute at
+     all: `__init__` stores it in `_WRAPPED_CLIENTS`, a module-private
+     `weakref.WeakKeyDictionary` keyed by the facade instance, and `_read`
+     looks it up there instead. There is consequently no attribute name —
+     guessed, underscore-prefixed, or otherwise — that any attribute access
+     on a ReadFacade instance can resolve to the wrapped client.
+
   2. The credential-provider seam — `run_operation` (adapters.py) accepts an
      optional `write_credential_provider` and calls it itself, INSIDE the
      adapter-dispatch execution path, to obtain the write-capable raw client
@@ -69,6 +84,7 @@ Stdlib only — no third-party dependencies.
 """
 
 import inspect
+import weakref
 from typing import Any, Optional, Tuple
 
 from external_write.contracts import get_contract
@@ -78,6 +94,12 @@ from external_write.contracts import get_contract
 # below. Forbidding subclasses from defining any of these is what makes the
 # runtime enforcement un-defeatable from a subclass.
 _FORBIDDEN_ACCESS_HOOKS = ("__getattr__", "__getattribute__", "__setattr__")
+
+# The wrapped read-only client, keyed by facade instance. This is
+# deliberately NOT an instance attribute — it is module-private state that
+# no attribute access on a ReadFacade instance can name or resolve to. See
+# "Client storage" in the module docstring.
+_WRAPPED_CLIENTS: "weakref.WeakKeyDictionary[ReadFacade, Any]" = weakref.WeakKeyDictionary()
 
 
 class ReadFacadeEligibilityError(Exception):
@@ -106,6 +128,12 @@ class ReadFacade:
     underscore-prefixed/dunder internal, is reachable from outside) and
     `__setattr__` (no non-underscore-prefixed instance attribute can be set
     at all). Subclasses cannot override either hook to re-open this.
+
+    The wrapped client itself is never stored as an instance attribute at
+    all — not even an underscore-prefixed one. `__init__` keeps it in a
+    module-private `weakref.WeakKeyDictionary` keyed by instance, so there
+    is no attribute name whatsoever (guessed or otherwise) that resolves to
+    it from outside.
 
     A conforming subclass implements its declared read methods via `_read`,
     which dispatches to the wrapped read-only client:
@@ -171,13 +199,19 @@ class ReadFacade:
                 )
 
     def __init__(self, read_only_client: Any):
-        self._read_only_client = read_only_client
+        # Deliberately NOT `self._read_only_client = read_only_client` — see
+        # "Client storage" in the module docstring. The client is held in
+        # module-private closure/weak-reference state, never as an instance
+        # attribute, so no attribute access (of any name) can return it.
+        _WRAPPED_CLIENTS[self] = read_only_client
 
     def __getattribute__(self, name: str) -> Any:
         # Underscore-prefixed/dunder names are internal machinery (this
-        # base class's own `_read_only_client`/`_read`, plus whatever
-        # `object` itself needs) and are never part of the externally
-        # reachable public surface being policed here.
+        # base class's own `_read`, plus whatever `object` itself needs)
+        # and are never part of the externally reachable public surface
+        # being policed here. Note the wrapped client is never reachable
+        # through this passthrough regardless of name, because it is never
+        # stored as an instance attribute in the first place (see __init__).
         if name.startswith("_") or name == "read_methods":
             return object.__getattribute__(self, name)
         read_methods = object.__getattribute__(self, "read_methods")
@@ -206,8 +240,11 @@ class ReadFacade:
     def _read(self, method_name: str, *args, **kwargs) -> Any:
         """Dispatch a declared read method's implementation to the wrapped
         read-only client. Subclasses use this so they never need to store or
-        re-expose the raw client themselves."""
-        method = getattr(self._read_only_client, method_name)
+        re-expose the raw client themselves. Looks the client up in the
+        module-private `_WRAPPED_CLIENTS` store — see __init__ — never via a
+        `self.<something>` instance attribute."""
+        client = _WRAPPED_CLIENTS[self]
+        method = getattr(client, method_name)
         return method(*args, **kwargs)
 
 
