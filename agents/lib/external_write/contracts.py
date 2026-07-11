@@ -4,9 +4,19 @@ Authority clause's accepted-verifier surface.
 Each named operation declares, up front and machine-readably:
   * writes            — the field(s)/range(s) it is allowed to change.
   * produces          — any new artifacts it creates (empty for in-place edits).
-  * dependency_set    — the lib modules whose code determines its write behavior;
-                        used by the proof-hash computation so any change to write
-                        logic changes the operation's identity.
+  * dependency_set    — the STATIC lib modules whose code determines every op's
+                        shared write behavior (the field-write funnel). Used by the
+                        proof-hash computation so any change to that shared write
+                        logic changes every op's identity. This is NOT the complete
+                        write-affecting file list for an op_kind that has its own
+                        registered adapter (adapter_registry.get_adapter) — the
+                        proof-hash computation actually consults
+                        effects_manifest.resolve_dependency_files(op_kind), which is
+                        this dependency_set UNION the op_kind's registered adapter
+                        module, if any (Task 3 — external-write-gate-generalization;
+                        closes F-34, where the hash previously covered only the fixed
+                        _WRITE_AFFECTING_MODULES tuple below and structurally excluded
+                        a capability's own adapter code).
   * verifier_set      — the verifier_ids whose post-write verification this op accepts.
   * introduces_persistent_binding — True iff the op introduces or relies on persistent
                         binding across operator-visible data (stable IDs, anchors,
@@ -98,9 +108,13 @@ RISK_CLASSES = frozenset({
 })
 
 
-# The lib modules whose source determines write behavior for the seeded in-place
-# operations. Listed by canonical filename; the proof-hash computation resolves
-# these against the installed adapter directory.
+# The lib modules whose source determines the SHARED write behavior for every
+# seeded in-place operation. Listed by canonical filename; the proof-hash
+# computation resolves these against the installed adapter directory. This is
+# every existing op_kind's dependency_set today, but it is not the full
+# per-op_kind picture once an op_kind has its own registered adapter — see
+# effects_manifest.resolve_dependency_files (Task 3) and the dependency_set
+# docstring above.
 _WRITE_AFFECTING_MODULES = (
     "adapters.py",
     "broker.py",

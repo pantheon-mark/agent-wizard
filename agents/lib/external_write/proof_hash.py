@@ -10,6 +10,13 @@ by the model:
     semantics. Any change to any of these changes the hash, dropping the op off the
     accepted list and forcing a fresh copy-run. A missing dependency file is fail-closed
     (a coverage-incomplete hash would reopen the in-place-edit hole).
+
+    The dependency-file list is resolved per op_kind by
+    `effects_manifest.resolve_dependency_files` — the contract's declared
+    `dependency_set` UNION the op_kind's registered adapter module, if any
+    (Task 3 — external-write-gate-generalization; closes F-34, where this hash
+    used to cover only a fixed shared-module tuple and structurally excluded a
+    capability's own adapter code).
   * contract_hash — sha256 over the declared surface (writes/produces/dependency_set/
     verifier_set/binding flag) + resolved verifier defs. Schema/contract identity,
     independent of code bytes.
@@ -26,6 +33,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from external_write.contracts import get_contract, get_verifier
+from external_write.effects_manifest import resolve_dependency_files
 
 # SHA-256 produces a 64-character lowercase hex digest.
 SHA256_HEX_LEN = 64
@@ -86,8 +94,13 @@ def compute_implementation_hash(op_kind: str, *, lib_dir: Optional[Path] = None,
     root = Path(lib_dir) if lib_dir is not None else _default_lib_dir()
 
     h = hashlib.sha256()
-    for fname in sorted(c.dependency_set):
-        fpath = root / fname
+    for fname in sorted(resolve_dependency_files(op_kind)):
+        candidate = Path(fname)
+        # A bare filename (the static declared dependency_set) resolves
+        # against `root` as before; an adapter module's path is already
+        # absolute (resolved via its loaded module's __file__ in
+        # effects_manifest) and hashes correctly regardless of `root`.
+        fpath = candidate if candidate.is_absolute() else root / fname
         if not fpath.is_file():
             raise ProofHashError(
                 f"write-affecting dependency {fname!r} not found under {root} "
