@@ -137,6 +137,150 @@ class TestReadFacadeDenyByDefaultAllowlist(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Group 1b: adversarial bypasses (live-reproduced by a code reviewer) --
+# each must be refused, either at class-definition time or by the client
+# being unreachable at runtime. These pin the RUNTIME enforcement added on
+# top of the class-definition-time allowlist above.
+# ---------------------------------------------------------------------------
+
+class TestReadFacadeAdversarialBypasses(unittest.TestCase):
+
+    def test_property_returning_the_client_is_refused(self):
+        """Bypass 1: a `property` is not `callable()`, so the old
+        callable-only check never flagged it -- and `getattr` on a property
+        returns its VALUE (the wrapped client), not the property object.
+        Must be refused regardless of callability."""
+
+        def _define_bad_subclass():
+            class _PropertyLeakFacade(ReadFacade):
+                read_methods = ("get_item",)
+
+                def get_item(self, item_id):
+                    return self._read("get_item", item_id)
+
+                raw_client = property(lambda self: self._read_only_client)
+
+            return _PropertyLeakFacade
+
+        with self.assertRaises(TypeError):
+            _define_bad_subclass()
+
+    def test_instance_attribute_leak_in_overridden_init_cannot_reach_the_client(self):
+        """Bypass 2: `__init_subclass__` only inspects `vars(cls)` at class-
+        definition time -- instance state set in an overridden `__init__` is
+        invisible to it. The runtime `__setattr__` guard refuses the smuggled
+        public instance attribute at set-time (inside __init__ itself),
+        which is even stronger than merely making it unreachable afterward:
+        the client is never wired onto reachable state at all."""
+
+        class _InstanceLeakFacade(ReadFacade):
+            read_methods = ("get_item",)
+
+            def __init__(self, read_only_client):
+                super().__init__(read_only_client)
+                self.client = read_only_client  # smuggled public instance attr
+
+            def get_item(self, item_id):
+                return self._read("get_item", item_id)
+
+        read_only = object()
+        with self.assertRaises(AttributeError):
+            _InstanceLeakFacade(read_only)
+
+    def test_getattr_override_forwarding_to_client_is_refused(self):
+        """Bypass 3: a `__getattr__` override forwarding unknown names to the
+        wrapped client defeats the allowlist for ANY attribute name, and the
+        override itself (a dunder) was invisible to the old check. Must be
+        refused at class-definition time."""
+
+        def _define_bad_subclass():
+            class _GetattrLeakFacade(ReadFacade):
+                read_methods = ("get_item",)
+
+                def get_item(self, item_id):
+                    return self._read("get_item", item_id)
+
+                def __getattr__(self, name):
+                    return getattr(self._read_only_client, name)
+
+            return _GetattrLeakFacade
+
+        with self.assertRaises(TypeError):
+            _define_bad_subclass()
+
+    def test_getattribute_override_is_refused(self):
+        """A subclass overriding `__getattribute__` directly (the most
+        direct way to defeat the runtime allowlist) must also be refused at
+        class-definition time."""
+
+        def _define_bad_subclass():
+            class _GetattributeLeakFacade(ReadFacade):
+                read_methods = ("get_item",)
+
+                def get_item(self, item_id):
+                    return self._read("get_item", item_id)
+
+                def __getattribute__(self, name):
+                    return object.__getattribute__(self, name)
+
+            return _GetattributeLeakFacade
+
+        with self.assertRaises(TypeError):
+            _define_bad_subclass()
+
+    def test_setattr_override_is_refused(self):
+        """A subclass overriding `__setattr__` could re-permit smuggling a
+        public instance attribute past the base class's runtime guard --
+        must be refused at class-definition time."""
+
+        def _define_bad_subclass():
+            class _SetattrLeakFacade(ReadFacade):
+                read_methods = ("get_item",)
+
+                def get_item(self, item_id):
+                    return self._read("get_item", item_id)
+
+                def __setattr__(self, name, value):
+                    object.__setattr__(self, name, value)
+
+            return _SetattrLeakFacade
+
+        with self.assertRaises(TypeError):
+            _define_bad_subclass()
+
+    def test_conforming_subclass_instance_still_rejects_arbitrary_public_attribute_sets(self):
+        """Defense in depth: even without an overridden __init__, attempting
+        to smuggle a public attribute onto a conforming facade instance from
+        outside is refused at set-time."""
+
+        class _FixtureFacade(ReadFacade):
+            read_methods = ("get_item",)
+
+            def get_item(self, item_id):
+                return self._read("get_item", item_id)
+
+        facade = _FixtureFacade(read_only_client=object())
+        with self.assertRaises(AttributeError):
+            facade.client = object()
+
+    def test_declared_read_method_name_backed_by_a_property_is_refused(self):
+        """Even if the leaking attribute's name IS listed in read_methods,
+        it must actually be a plain method -- not a property standing in for
+        one -- or the runtime allowlist would let it through untouched."""
+
+        def _define_bad_subclass():
+            class _DeclaredPropertyFacade(ReadFacade):
+                read_methods = ("raw_client",)
+
+                raw_client = property(lambda self: self._read_only_client)
+
+            return _DeclaredPropertyFacade
+
+        with self.assertRaises(TypeError):
+            _define_bad_subclass()
+
+
+# ---------------------------------------------------------------------------
 # Fixtures shared by the credential-injection-seam tests
 # ---------------------------------------------------------------------------
 

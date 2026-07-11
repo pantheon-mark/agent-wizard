@@ -1,6 +1,8 @@
 """Read-only facade + write-credential injection seam — the KEYSTONE
 credential-isolation property (Task 4 — external-write-gate-generalization
-slice; cross-vendor round-2 finding).
+slice; cross-vendor round-2 finding; hardened per a code-review finding that
+live-reproduced three working bypasses of the class-definition-time-only
+guard — see "Runtime enforcement" below).
 
 The property this module exists to guarantee:
 
@@ -13,14 +15,34 @@ Two independent mechanisms implement that, and neither relies on scanning
 source text for suspicious names (that heuristic is a DIFFERENT,
 complementary mechanism — Task 5's job):
 
-  1. ReadFacade — a deny-by-default method allowlist. A ReadFacade subclass
-     declares its read methods in the `read_methods` class tuple;
-     `__init_subclass__` refuses (raises TypeError) at class-DEFINITION time
-     — i.e. at import, before a single instance exists — if the subclass
-     defines any other public callable. There is no way to add a mutating
-     method to a ReadFacade subclass without it being refused; the guarantee
-     is structural (every method must be deliberately declared), not a
-     pattern match against verbs like "write"/"delete".
+  1. ReadFacade — a deny-by-default method allowlist, enforced BOTH at
+     class-definition time and at runtime (see "Runtime enforcement"
+     below). A ReadFacade subclass declares its read methods in the
+     `read_methods` class tuple; `__init_subclass__` refuses (raises
+     TypeError) at class-DEFINITION time — i.e. at import, before a single
+     instance exists — if the subclass defines any other public class
+     attribute (callable or not — this also catches `property` objects,
+     which are not `callable()`), or if the subclass overrides
+     `__getattr__`/`__getattribute__`/`__setattr__` (which would otherwise
+     let it re-open the attribute surface the runtime guard closes). There
+     is no way to add a mutating method — or any other reachable attribute
+     — to a ReadFacade subclass without it being refused; the guarantee is
+     structural (every method must be deliberately declared), not a pattern
+     match against verbs like "write"/"delete".
+
+     Runtime enforcement: a class-definition-time-only check is not enough
+     — instance state set in an overridden `__init__` (e.g.
+     `self.client = read_only_client`) is invisible to `__init_subclass__`,
+     which only inspects `vars(cls)` at class-definition time. So
+     `ReadFacade.__getattribute__` ALSO enforces, on every attribute access
+     against every instance, that only a declared `read_methods` name (or
+     an underscore-prefixed/dunder internal) is reachable — any other name,
+     however it was set, raises AttributeError. `ReadFacade.__setattr__`
+     additionally refuses, at set-time, any attempt to set a non-
+     underscore-prefixed instance attribute, so a smuggled public attribute
+     never even makes it into instance state. Because subclasses cannot
+     override any of these three hooks (forbidden above), this enforcement
+     cannot be re-opened by a subclass.
 
   2. The credential-provider seam — `run_operation` (adapters.py) accepts an
      optional `write_credential_provider` and calls it itself, INSIDE the
@@ -46,9 +68,16 @@ guarantee (same ceiling as proof_hash.py / contracts.py / effects_manifest.py).
 Stdlib only — no third-party dependencies.
 """
 
+import inspect
 from typing import Any, Optional, Tuple
 
 from external_write.contracts import get_contract
+
+# The three attribute-access hooks a subclass could use to re-open the
+# runtime allowlist enforced by ReadFacade.__getattribute__ / __setattr__
+# below. Forbidding subclasses from defining any of these is what makes the
+# runtime enforcement un-defeatable from a subclass.
+_FORBIDDEN_ACCESS_HOOKS = ("__getattr__", "__getattribute__", "__setattr__")
 
 
 class ReadFacadeEligibilityError(Exception):
@@ -60,12 +89,23 @@ class ReadFacadeEligibilityError(Exception):
 class ReadFacade:
     """Base class for a read-only facade wrapping a read-only-scoped client.
 
-    Subclasses declare EVERY public method they expose in the class-level
+    Subclasses declare EVERY public attribute they expose in the class-level
     `read_methods` tuple. `__init_subclass__` enforces — at class-definition
     time, so a bad subclass fails to even import — that no OTHER public
-    callable is defined on the subclass. This is a deny-by-default allowlist:
-    nothing reaches a ReadFacade's public surface without being deliberately
-    declared safe. It is not a name-pattern scan for mutating verbs.
+    class attribute is defined on the subclass (callable or not — this also
+    catches non-callable objects like `property`), and that the subclass
+    does not override `__getattr__`/`__getattribute__`/`__setattr__`. This
+    is a deny-by-default allowlist: nothing reaches a ReadFacade's public
+    surface without being deliberately declared safe. It is not a
+    name-pattern scan for mutating verbs.
+
+    That class-definition-time check alone is not sufficient — instance
+    state set in an overridden `__init__` is invisible to it. So this class
+    ALSO enforces the allowlist at runtime, on every instance, via
+    `__getattribute__` (only a declared `read_methods` name, or an
+    underscore-prefixed/dunder internal, is reachable from outside) and
+    `__setattr__` (no non-underscore-prefixed instance attribute can be set
+    at all). Subclasses cannot override either hook to re-open this.
 
     A conforming subclass implements its declared read methods via `_read`,
     which dispatches to the wrapped read-only client:
@@ -85,26 +125,83 @@ class ReadFacade:
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
         declared = set(cls.read_methods)
-        for name, value in vars(cls).items():
+        class_vars = vars(cls)
+
+        for hook_name in _FORBIDDEN_ACCESS_HOOKS:
+            if hook_name in class_vars:
+                raise TypeError(
+                    f"{cls.__name__} may not define {hook_name} — overriding "
+                    "one of ReadFacade's attribute-access hooks "
+                    f"{_FORBIDDEN_ACCESS_HOOKS!r} would let a subclass "
+                    "re-open attribute access that ReadFacade's runtime "
+                    "allowlist deliberately closes, defeating the "
+                    "credential-isolation guarantee this class exists to "
+                    "provide."
+                )
+
+        for name, value in class_vars.items():
             if name == "read_methods":
                 continue
             if name.startswith("_"):
-                # Private/dunder/protected names are never part of the
-                # public read-method surface being policed here.
+                # Private/dunder/protected names (other than the forbidden
+                # access hooks checked above) are never part of the public
+                # read-method surface being policed here.
                 continue
-            if callable(value) and name not in declared:
+            if name not in declared:
                 raise TypeError(
-                    f"{cls.__name__}.{name} is a public method that is not "
+                    f"{cls.__name__}.{name} is a public attribute that is not "
                     f"listed in {cls.__name__}.read_methods {tuple(sorted(declared))!r}. "
-                    "A ReadFacade subclass may not define ANY public method "
-                    "that is not explicitly declared as a read method — this "
-                    "is a deny-by-default allowlist, refused at class-"
-                    "definition time (build-time refusal), not a runtime "
-                    "name-pattern scan."
+                    "A ReadFacade subclass may not define ANY public "
+                    "attribute — callable or not, which also catches "
+                    "property objects standing in for a method — that is "
+                    "not explicitly declared as a read method. This is a "
+                    "deny-by-default allowlist, refused at class-definition "
+                    "time (build-time refusal), not a runtime name-pattern "
+                    "scan."
+                )
+            if not inspect.isfunction(value):
+                raise TypeError(
+                    f"{cls.__name__}.{name} is declared in read_methods but "
+                    "is not a plain method — it is "
+                    f"{type(value).__name__!r}. A declared read method must "
+                    "be implemented as a plain method (e.g. via `def`), not "
+                    "a property or other descriptor that could return "
+                    "something other than the result of a genuine method "
+                    "call (such as the wrapped client itself)."
                 )
 
     def __init__(self, read_only_client: Any):
         self._read_only_client = read_only_client
+
+    def __getattribute__(self, name: str) -> Any:
+        # Underscore-prefixed/dunder names are internal machinery (this
+        # base class's own `_read_only_client`/`_read`, plus whatever
+        # `object` itself needs) and are never part of the externally
+        # reachable public surface being policed here.
+        if name.startswith("_") or name == "read_methods":
+            return object.__getattribute__(self, name)
+        read_methods = object.__getattribute__(self, "read_methods")
+        if name in read_methods:
+            return object.__getattribute__(self, name)
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no externally reachable "
+            f"attribute {name!r} — only its declared read_methods "
+            f"{tuple(read_methods)!r} (plus internal/private state) are "
+            "reachable from outside a ReadFacade instance. This is enforced "
+            "at runtime, not just at class-definition time."
+        )
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if not name.startswith("_"):
+            raise AttributeError(
+                f"{type(self).__name__} may not set the public instance "
+                f"attribute {name!r} — a ReadFacade instance's only "
+                "externally reachable state is its declared read methods; "
+                "smuggling a client (or anything else) onto a public "
+                "instance attribute is refused at set-time, not just "
+                "detected afterward."
+            )
+        object.__setattr__(self, name, value)
 
     def _read(self, method_name: str, *args, **kwargs) -> Any:
         """Dispatch a declared read method's implementation to the wrapped
