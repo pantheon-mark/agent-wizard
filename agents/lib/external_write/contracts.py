@@ -93,6 +93,20 @@ class OperationContract:
     risk_class: str = "reversible_external"
     requires_accepted_phase: bool = False
     blast_radius_cap: Optional[int] = None
+    # Task 4 (external-write-gate-generalization — credential isolation): the
+    # vendor-scoped, READ-ONLY OAuth/API scope (or equivalent credential-scope
+    # identifier) that a ReadFacade for this op_kind is built against, e.g.
+    # "gmail.readonly". None (the default, preserving every contract built
+    # before this field existed) means this op_kind has NOT declared a
+    # read-only scope and is therefore INELIGIBLE for the ReadFacade
+    # credential-isolation safety model — external_write.read_facade.
+    # require_read_only_scope/build_read_facade refuse fail-closed on None.
+    # This is a vendor-ELIGIBILITY declaration, not a hash-bound identity
+    # field (contrast risk_class/requires_accepted_phase/blast_radius_cap
+    # above, D-B1-b): it gates whether a ReadFacade can be built at all, it
+    # does not itself change write behavior, so it is deliberately left out
+    # of proof_hash._contract_canon.
+    read_only_scope: Optional[str] = None
 
 
 # The risk-class vocabulary, mirrored VERBATIM from wizard/scripts/lib/

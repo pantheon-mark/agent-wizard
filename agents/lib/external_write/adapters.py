@@ -123,7 +123,8 @@ def _parse_allowed_from_error(message: str) -> Optional[list]:
 # ---------------------------------------------------------------------------
 
 def _run_adapter_operation(op: Operation, raw_client: Any, adapter: Any,
-                           descriptor_set: Any, gate_audit: Optional[dict]) -> Result:
+                           descriptor_set: Any, gate_audit: Optional[dict],
+                           write_credential_provider: Optional[Any] = None) -> Result:
     """Plan, cap-check, then apply — the registered-adapter counterpart to the
     field-write Steps 2-4 in run_operation.
 
@@ -132,6 +133,17 @@ def _run_adapter_operation(op: Operation, raw_client: Any, adapter: Any,
     counted and compared against the blast-radius cap BEFORE `adapter.apply_one` is
     called even once. A plan whose unit count exceeds the cap is refused in full —
     zero units are applied, not "cap-many, then stop."
+
+    Credential isolation (Task 4 — external-write-gate-generalization): when a
+    `write_credential_provider` is supplied, THIS function — the adapter
+    EXECUTION path, called only once dispatch is already committed — is where
+    the write-capable raw client is obtained, by calling
+    `write_credential_provider(op)`. It is resolved here, not by the caller of
+    run_operation and not by any capability/proposal-side code, and it is used
+    immediately for `adapter.apply_one`, never stored or handed back out. When
+    no provider is supplied, `raw_client` (the pre-Task-4 `client` argument)
+    is used as-is — unchanged, backward-compatible behavior for every existing
+    caller (see adapter_registry.py Task 2 scope note).
     """
     units = adapter.plan(op.params)
     cap = resolve_effective_cap(op, descriptor_set)
@@ -149,8 +161,13 @@ def _run_adapter_operation(op: Operation, raw_client: Any, adapter: Any,
             },
         )
 
+    effective_raw_client = (
+        write_credential_provider(op) if write_credential_provider is not None
+        else raw_client
+    )
+
     for unit in units:
-        adapter.apply_one(raw_client, unit)
+        adapter.apply_one(effective_raw_client, unit)
 
     detail: dict = dict(gate_audit) if gate_audit else {}
     detail["units_applied"] = len(units)
@@ -166,7 +183,8 @@ def run_operation(op: Operation, receipt: Any, client: Any,
                   target: Optional[str] = None,
                   descriptor_set: Any = None,
                   cap_ledger: Optional[InvocationLedger] = None,
-                  clock: Any = None) -> Result:
+                  clock: Any = None,
+                  write_credential_provider: Optional[Any] = None) -> Result:
     """Run a named external-write operation with receipt validation and fail-fast
     value-validity enforcement.
 
@@ -192,6 +210,14 @@ def run_operation(op: Operation, receipt: Any, client: Any,
              live irreversible ops. Absent on a live irreversible op => fail-safe refuse.
     clock:   (B1-4/F-22) a no-arg callable returning a UTC datetime; every date this code writes
              comes from it. Defaults to the system clock; injected only for deterministic tests.
+    write_credential_provider: (T4 — credential isolation, keyword-only) an optional callable
+             taking the Operation and returning a write-capable raw client/credential. When
+             supplied, it is invoked ONLY inside the registered-adapter execution path (see
+             _run_adapter_operation), immediately before `adapter.apply_one` — never by a
+             caller of run_operation, and never exposed to capability/proposal-side code. When
+             absent (the default), `client` is used as the write-capable raw client for the
+             adapter path, unchanged from Task 2's behavior. Ignored entirely by the legacy
+             field-write path (Task 8 migrates that path onto this seam).
 
     Returns
     -------
@@ -237,7 +263,8 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     # boundary: migrating the seeded field ops onto this registry is Task 8).
     adapter = get_adapter(op.op_kind)
     if adapter is not None:
-        return _run_adapter_operation(op, client, adapter, descriptor_set, _gate_audit)
+        return _run_adapter_operation(op, client, adapter, descriptor_set, _gate_audit,
+                                      write_credential_provider)
 
     # Step 2: attempt write via the surface's validating path.
     try:
