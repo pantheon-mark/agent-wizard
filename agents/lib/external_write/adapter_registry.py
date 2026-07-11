@@ -12,11 +12,32 @@ scope). It performs NO validation of op_kind against contracts.py — that join
 happens in adapters.py, which resolves the op's contract/risk-class/cap independently
 of whether an adapter is registered.
 
-Scope note (T2/T8 boundary): this task does NOT migrate the six seeded field
-op_kinds (set_status, complete_tasks, update_due_date, add_note, set_priority,
-delete_record) onto this registry — that migration, plus replay-conformance, is
-Task 8. Until then the registry stays empty for every existing op_kind, and
-run_operation's field-write path (unchanged) handles them exactly as before.
+Scope note (T2/T8 boundary, resolved): Task 2 deliberately did NOT migrate the
+six seeded field op_kinds (set_status, complete_tasks, update_due_date,
+add_note, set_priority, delete_record) onto this registry, leaving that
+decision plus replay-conformance to Task 8.
+
+Task 8 evaluated registering those six op_kinds as a single "field adapter"
+and DECIDED AGAINST IT: `_run_adapter_operation` (adapters.py) — the
+registered-adapter execution path — does not perform the field-write path's
+Steps 2-4 (native-API fail-fast ValueError -> needs_operator_choice,
+read-back verification, postwrite_verification/Clause A handling). Those are
+cross-cutting over the whole Operation, not per-EffectUnit, so folding the six
+field op_kinds into this registry would require either duplicating that logic
+inside apply_one (violating the "apply_one performs exactly one mutation"
+protocol above) or generalizing run_operation's adapter-dispatch path itself —
+a change touching every registered adapter, including the Gmail reference
+adapter (Task 7), for zero behavioral benefit given the existing fallback
+already passes every field-op test. See
+test_external_write_replay_conformance.py for the resulting backward-
+compatibility guarantee (golden v1-field digests + full-pipeline replay for
+all six op_kinds) and its
+TestFieldOpKindsUseUnregisteredFallbackPath, which fails loudly if a future
+change registers one of these op_kinds without redoing this analysis.
+
+The registry therefore stays empty for every seeded field op_kind
+indefinitely (not just "until Task 8"), and run_operation's field-write path
+(unchanged) continues to handle them exactly as before.
 
 Stdlib only — no third-party dependencies.
 """

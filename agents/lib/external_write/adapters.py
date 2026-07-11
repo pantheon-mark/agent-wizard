@@ -217,7 +217,11 @@ def run_operation(op: Operation, receipt: Any, client: Any,
              caller of run_operation, and never exposed to capability/proposal-side code. When
              absent (the default), `client` is used as the write-capable raw client for the
              adapter path, unchanged from Task 2's behavior. Ignored entirely by the legacy
-             field-write path (Task 8 migrates that path onto this seam).
+             field-write path — Task 8 evaluated migrating that path onto this seam (by
+             registering the seeded field op_kinds as an adapter) and decided against it;
+             see adapter_registry.py's module docstring for the reasoning. The field-write
+             path keeps using `client` directly and does not accept a
+             write_credential_provider.
 
     Returns
     -------
@@ -259,8 +263,12 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     # planned count exceeds the blast-radius cap (the F-31 fix — a single Operation
     # carrying many targets can no longer slip past the cap by counting as one
     # invocation), then apply each unit in turn. An op_kind with NO registered
-    # adapter falls straight through to the unchanged field-write path (T2/T8
-    # boundary: migrating the seeded field ops onto this registry is Task 8).
+    # adapter falls straight through to the unchanged field-write path. Task 8
+    # evaluated migrating the six seeded field op_kinds onto this registry and
+    # decided against it (see adapter_registry.py's module docstring for the
+    # full reasoning) — they stay on this fallback path indefinitely; the
+    # backward-compatibility guarantee is proven by
+    # test_external_write_replay_conformance.py instead.
     adapter = get_adapter(op.op_kind)
     if adapter is not None:
         return _run_adapter_operation(op, client, adapter, descriptor_set, _gate_audit,
