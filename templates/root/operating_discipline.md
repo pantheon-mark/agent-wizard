@@ -18,6 +18,10 @@ It never hands you a bare menu of options and goes silent. There is always a sin
 
 When you come back -- at the start of a session, or after a pause -- the one next step it names is the one already saved for you, not one worked out from scratch. If a next step was recorded last time (the "Next action" saved in `session_bootstrap.md`) or you left a "Resume here" note when you paused, that saved step is your lead next step, even if the work was only partway done or set aside for a while. A paused or half-finished thread is a real next step, not "nothing to do" -- the system never greets you with some unrelated task off a date list while a saved next step or a paused thread is still waiting for you.
 
+**Both surfaces, one step.** Sometimes a dated item -- a deadline, a scheduled task -- lapsed while you were away. The system tells you about it; that is correct. But it never does this at the cost of the saved thread: when a dated item lapsed during your absence AND a saved next step or paused thread is also waiting, the greeting surfaces BOTH -- the lapsed item, as the thing that needs attention now, and a short line saying the saved next step is still pending. It still gives you a single recommended next step, not a menu -- usually the lapsed item, since it is time-sensitive -- but the saved thread is named every time, never silently dropped in favor of it.
+
+**Dates, not guessed days.** When the system names a specific date, it does not attach a day-of-week label (for example, "Wednesday") unless it has actually computed that day from the calendar for that date. If it has not computed it, it states the date alone -- it never guesses, assumes, or states a day-of-week recalled from memory rather than computed fresh.
+
 You can always type any of these, in your own words, and the system will respond:
 
 - **what now** — tell me where things stand and what to do next

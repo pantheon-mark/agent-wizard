@@ -808,6 +808,46 @@ class ControlledVocabularyRuleWiringTests(unittest.TestCase):
             "operating_discipline.md must state version currency is re-checked fresh each session",
         )
 
+    def test_operating_discipline_states_both_surface_rule(self):
+        """F-23/F-25 ext (Task 13): operating_discipline.md states that when a dated item
+        lapsed during the operator's absence AND a saved/paused next step also exists, the
+        greeting surfaces BOTH — the lapsed item and the still-pending saved next step —
+        rather than silently dropping the saved thread in favor of the lapsed item. A single
+        recommended next step is still preserved (no menu)."""
+        lower = self.od_text.lower()
+        self.assertIn("lapsed", lower,
+                      "operating_discipline.md must name the 'lapsed while away' scenario")
+        self.assertIn("surfaces both", lower,
+                      "operating_discipline.md must state the greeting surfaces BOTH items")
+        self.assertIn("still pending", lower,
+                      "operating_discipline.md must state the saved next step is still pending, "
+                      "not silently dropped")
+        self.assertIn("never silently drop", lower,
+                      "operating_discipline.md must state the saved thread is never silently "
+                      "dropped in favor of the lapsed item")
+        self.assertTrue(
+            ("single recommended next step" in lower) or ("one recommended next step" in lower),
+            "operating_discipline.md must state a single recommended next step is still given, "
+            "even when both items are surfaced (no-menu convention preserved)",
+        )
+
+    def test_operating_discipline_forbids_guessed_day_of_week(self):
+        """F-23/F-25 ext (Task 13) sub-guard: operating_discipline.md forbids stating a
+        day-of-week label unless it has actually been computed from the calendar (the dogfood
+        greeting mislabeled 'Wednesday 7/9' when 7/9 was in fact a Thursday)."""
+        lower = self.od_text.lower()
+        self.assertIn("day-of-week", lower,
+                      "operating_discipline.md must name the day-of-week guard")
+        self.assertTrue(
+            ("computed" in lower),
+            "operating_discipline.md must require the day-of-week to be COMPUTED, not guessed",
+        )
+        self.assertTrue(
+            ("guess" in lower) or ("assume" in lower) or ("recalled" in lower) or ("memory" in lower),
+            "operating_discipline.md must forbid guessing/assuming/recalling a day-of-week from "
+            "memory rather than computing it",
+        )
+
     def test_r005_deliverable_folders_not_contradicted(self):
         """R-005 reconciliation: the controlled-vocab rule and the deliverable-folders rule
         coexist without contradiction at the CANONICAL TEMPLATE level.
