@@ -22,8 +22,9 @@ Bypass classes CAUGHT at v0
   forbidden_import    -- importing a network / external-write client
                          (requests, urllib, http.client, googleapiclient,
                          gspread, httpx, aiohttp, boto3, psycopg2, pycurl, ...)
-                         anywhere outside the allowed module. Both ``import x``
-                         and ``from x import y`` forms; submodules
+                         anywhere outside the ADAPTER_PROFILE zone (see
+                         "Trust zones" below). Both ``import x`` and
+                         ``from x import y`` forms; submodules
                          (urllib.request) match the banned top-level package.
   direct_api_call     -- referencing a known external-surface mutation method
                          by name (values().update, batchUpdate, append,
@@ -41,6 +42,20 @@ Bypass classes CAUGHT at v0
                          whose command invokes a network tool (curl, wget,
                          http, httpie, ...). Detected from list/str literal
                          arguments.
+  credential_construction -- obtaining or widening a write-capable credential:
+                         constructing/loading one via a curated set of factory
+                         names (``Credentials``/``ServiceAccountCredentials``
+                         construction, ``from_service_account_file``,
+                         ``from_service_account_info``,
+                         ``from_authorized_user_file``,
+                         ``from_authorized_user_info``) or widening an
+                         existing credential's authority (``.with_subject(...)``
+                         domain-wide-delegation impersonation). Flagged
+                         anywhere outside the ADAPTER_PROFILE zone, regardless
+                         of whether the vendor SDK was itself imported in this
+                         file (Task 5 -- see "Trust zones" below). The symbol
+                         set is CURATED, not exhaustive (IDQ-074) -- the same
+                         disclosed-bound spirit as ``_FORBIDDEN_IMPORT_ROOTS``.
 
 ------------------------------------------------------------------------------
 Bounds NOT covered at v0 (disclosed — no silent caps)
@@ -69,28 +84,91 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
     not silently grant a clean bypass for the common mutation/shell-out shapes —
     but the import-name denylist itself must be kept current as new clients
     appear. This bound is disclosed; it is not a silent cap.
+  * Static re-stashing of a wrapped client onto a new attribute (e.g. a
+    ReadFacade subclass's ``__init__`` doing ``self._x = read_only_client``
+    under a different name than the base class expects). This is NOT
+    detected here: distinguishing "a benign attribute assignment" from "a
+    client being re-stashed to dodge the runtime allowlist" from AST shape
+    alone is not reliably decidable without false-positive-prone heuristics
+    (any ``self.<name> = <param>`` assignment would have to be flagged,
+    which fires on ordinary, legitimate constructors constantly). This class
+    of bypass is instead closed at RUNTIME, in depth, by
+    ``read_facade.ReadFacade`` itself: its ``__setattr__`` refuses to set any
+    non-underscore-prefixed instance attribute at all, and its
+    ``__getattribute__`` allowlist means even a successfully-smuggled
+    underscore-prefixed attribute is unreachable from outside the instance.
+    Disclosed here as a documented limitation of the static gate, not
+    silently assumed covered.
 
 ------------------------------------------------------------------------------
-Allowed-module identity (anchored, NOT a floating directory name)
+Trust zones (replaces the old blanket "whole external_write/ tree is exempt"
+rule — see ``zones.py`` for the full rationale and the canonical taxonomy)
 ------------------------------------------------------------------------------
-  Exemption is anchored to a single canonical absolute location: the real,
-  installed adapter directory. By default that is ``scan.py``'s own directory
-  (``Path(__file__).resolve().parent``) — scan.py lives INSIDE the allowed
-  module, so its location IS the adapter directory and cannot be spoofed by a
-  look-alike directory an author recreates elsewhere. A scanned file is exempt
-  IFF its resolved path is that anchor directory or a descendant of it. The
-  caller may override the anchor explicitly (``scan_paths(..., allowed_root=)``)
-  so build wiring can pass the canonical adapter dir. The dotted
-  ``allowed_module`` string is used for messaging only — it is NOT the exemption
-  credential. (Earlier versions keyed exemption on the directory NAME appearing
-  anywhere in the path; that was spoofable — a file under an attacker-created
-  ``.../agents/lib/external_write/`` anywhere on disk was silently exempted.
-  Fixed: identity is the absolute anchor, not a floating name.)
+  Every scanned file is classified into exactly one of three zones
+  (``zones.classify_zone``):
+
+    SEALED_KERNEL    -- the gate machinery (run_operation, write_gate,
+                        broker, receipt validation, the invocation ledger,
+                        operations/contracts/proof_hash/effects_manifest,
+                        the adapter registry, the read facade, this scanner
+                        and the coverage gate). Held to the SAME checks as
+                        capability code below — it simply never trips them,
+                        because none of this code needs a vendor SDK import
+                        or a write-capable credential.
+    ADAPTER_PROFILE  -- registered per-vendor adapter modules. The ONLY zone
+                        exempt from every check this module enforces —
+                        importing a vendor SDK, calling a mutation verb, and
+                        constructing/obtaining a write-capable credential are
+                        all legitimate here.
+    CAPABILITY       -- everything else, including any module that is not
+                        EXPLICITLY enumerated as SEALED_KERNEL or
+                        ADAPTER_PROFILE — even one that physically lives
+                        inside the installed package directory. This is the
+                        fail-closed default zone: an unclassifiable module is
+                        always the most restrictive zone, never a silent
+                        pass.
+
+  Zone membership is anchored to a single canonical absolute location — by
+  default ``scan.py``'s own directory (``Path(__file__).resolve().parent``),
+  which cannot be spoofed by a look-alike directory an author recreates
+  elsewhere — but, critically, being located under that anchor is NECESSARY,
+  not SUFFICIENT, for SEALED_KERNEL or ADAPTER_PROFILE membership: the file's
+  path relative to the anchor must ALSO be explicitly listed in
+  ``zones.SEALED_KERNEL_MODULE_PATHS`` / ``zones.ADAPTER_PROFILE_MODULE_PATHS``
+  (or an equivalent explicit set passed by the caller). A new file dropped
+  under the package directory — including a whole new adapter directory — is
+  therefore NOT automatically exempted from anything; exemption requires a
+  deliberate, reviewable addition to one of those two allowlists. (Earlier
+  versions keyed exemption on the directory NAME appearing anywhere in the
+  path, which was spoofable — fixed by anchoring to the absolute location.
+  This task closes a second, more subtle version of the same failure mode:
+  even WITHIN the anchor, a directory alone was never meant to be sufficient
+  for exemption.)
 """
 
 import ast
 from pathlib import Path
-from typing import List, NamedTuple, Optional, Sequence, Union
+from typing import FrozenSet, List, NamedTuple, Optional, Sequence, Union
+
+# sys.path bootstrap: scan.py is designed to also be run directly as a script
+# (see the CLI entrypoint at the bottom of this file), in which case Python
+# puts THIS file's own directory on sys.path, not its parent — so
+# ``import external_write.zones`` would fail unresolved. Make the package
+# parent (``agents/lib``) importable if it is not already (a no-op under the
+# test harness / normal package import, which puts it on the path itself).
+# Anchored to __file__, not cwd. Mirrors coverage_gate.py's identical need.
+if __package__ in (None, ""):  # pragma: no cover - only true when run as a script
+    import sys as _bootstrap_sys
+    _pkg_parent = str(Path(__file__).resolve().parent.parent)
+    if _pkg_parent not in _bootstrap_sys.path:
+        _bootstrap_sys.path.insert(0, _pkg_parent)
+
+from external_write.zones import (  # noqa: E402
+    ADAPTER_PROFILE_MODULE_PATHS,
+    SEALED_KERNEL_MODULE_PATHS,
+    Zone,
+    classify_zone,
+)
 
 
 class Violation(NamedTuple):
@@ -100,7 +178,8 @@ class Violation(NamedTuple):
     lineno: the line of the offending AST node.
     kind:   what was caught — one of:
               'direct_api_call', 'forbidden_import',
-              'dynamic_import', 'subprocess_network'.
+              'dynamic_import', 'subprocess_network',
+              'credential_construction', 'unparseable'.
             Specific enough that a build-failure message tells the operator or
             agent WHAT to fix.
     """
@@ -175,43 +254,55 @@ _NETWORK_CLI_TOOLS = frozenset(
     {"curl", "wget", "http", "https", "httpie", "scp", "sftp", "rsync"}
 )
 
+# Credential-access surface (Task 5 — credential-isolation build-time half).
+# Curated, NOT exhaustive (IDQ-074) — same disclosed-bound spirit as
+# _FORBIDDEN_IMPORT_ROOTS. Matched structurally (attribute name / call target)
+# so detection does not depend on how — or whether — the vendor SDK was
+# imported in THIS file (an aliased import, an object handed in as a
+# parameter, or a name never statically resolvable at all still trips this).
+#
+#   _CREDENTIAL_FACTORY_METHODS -- attribute names that construct or widen a
+#     write-capable credential when called: the Google service-account /
+#     authorized-user factory constructors, and ``with_subject`` (domain-wide
+#     delegation impersonation — turns a service-account credential into one
+#     that can act as an arbitrary user). Flagged on the attribute REFERENCE,
+#     the same structural approach _check_surface_mutation already uses for
+#     unambiguous mutation verbs, so a bound-and-called-later reference
+#     (``fn = creds.with_subject; fn(user)``) is caught too.
+#   _CREDENTIAL_CLASS_NAMES -- class names that, when CALLED (constructed),
+#     produce a credential object. Checked only at the Call site (not every
+#     attribute reference) because these names are common enough as bare
+#     identifiers that flagging every reference would be noisy; constructing
+#     one is the operative act.
+_CREDENTIAL_FACTORY_METHODS = frozenset(
+    {
+        "from_service_account_file",
+        "from_service_account_info",
+        "from_authorized_user_file",
+        "from_authorized_user_info",
+        "with_subject",
+    }
+)
+_CREDENTIAL_CLASS_NAMES = frozenset({"Credentials", "ServiceAccountCredentials"})
+
 
 # ---------------------------------------------------------------------------
-# Allowed-module identity (anchored to ONE absolute location — NOT a name the
-# script controls and NOT a directory name that can be recreated elsewhere)
+# Trust-zone anchor (see zones.py for the full taxonomy). Anchored to ONE
+# absolute location — NOT a name the script controls and NOT a directory name
+# that can be recreated elsewhere.
 # ---------------------------------------------------------------------------
 
-def _default_allowed_root() -> Path:
-    """The canonical allowed-module directory: scan.py's OWN installed location.
+def _default_kernel_anchor() -> Path:
+    """The canonical package anchor: scan.py's OWN installed location.
 
-    scan.py lives INSIDE the allowed module (``agents/lib/external_write/``), so
-    its parent directory IS the real adapter directory. This anchor cannot be
+    scan.py lives INSIDE the package (``agents/lib/external_write/``), so its
+    parent directory IS the real package directory. This anchor cannot be
     spoofed by a look-alike directory an author recreates somewhere else —
-    identity is the absolute installed path, not a floating name.
+    identity is the absolute installed path, not a floating name. Zone
+    membership itself is decided by ``zones.classify_zone`` (location under
+    this anchor is necessary but not sufficient — see zones.py).
     """
     return Path(__file__).resolve().parent
-
-
-def _is_inside_allowed_module(file_path: Path, allowed_root: Path) -> bool:
-    """A file is INSIDE the allowed module iff its resolved path is the anchor
-    directory or a descendant of it.
-
-    Identity is decided by absolute location, not by any name a script could
-    spoof: a file under an attacker-recreated ``.../agents/lib/external_write/``
-    directory ELSEWHERE on disk is NOT exempt, and a malicious
-    ``# agents.lib.external_write`` comment or import string is irrelevant.
-    """
-    resolved = file_path.resolve()
-    try:
-        # Path.is_relative_to is available in Python 3.9+. is_relative_to(self)
-        # is True, so the anchor directory itself is also exempt.
-        return resolved.is_relative_to(allowed_root)
-    except AttributeError:  # pragma: no cover - py<3.9 fallback
-        try:
-            resolved.relative_to(allowed_root)
-            return True
-        except ValueError:
-            return False
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +408,7 @@ class _Scanner(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         self._check_dynamic_import(node)
         self._check_subprocess_network(node)
+        self._check_credential_construction_call(node)
         # NOTE: surface-mutation detection is done in visit_Attribute, NOT here.
         # That way a mutation verb is caught whether it is the immediate func of
         # a Call (svc...update(...)) OR merely loaded and called indirectly
@@ -327,6 +419,7 @@ class _Scanner(ast.NodeVisitor):
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         self._check_surface_mutation(node)
+        self._check_credential_attribute(node)
         self.generic_visit(node)
 
     def _check_dynamic_import(self, node: ast.Call) -> None:
@@ -414,15 +507,69 @@ class _Scanner(ast.NodeVisitor):
             if "values" in chain or "spreadsheets" in chain or "sheet" in chain:
                 self._add(node.lineno, "direct_api_call")
 
+    def _check_credential_attribute(self, node: ast.Attribute) -> None:
+        """Flag a credential-construction/widening attribute REFERENCE (Task 5
+        — the build-time half of credential isolation).
+
+        Fires for an ``ast.Attribute`` whose ``.attr`` is a curated
+        credential-factory/widening name (``from_service_account_file``,
+        ``with_subject``, ...) — same structural approach as
+        ``_check_surface_mutation``: caught whether the attribute is the
+        immediate func of a Call or merely loaded and invoked indirectly
+        (``fn = creds.with_subject; fn(user)``), and regardless of whether
+        the vendor SDK that defines it was imported in THIS file (capability
+        code can obtain a credential-shaped object via an argument, a helper
+        import, or any other indirection — the credential-isolation property
+        this closes is that capability code must never be able to CALL one of
+        these, not merely that it must not import a specific package).
+        """
+        if node.attr in _CREDENTIAL_FACTORY_METHODS:
+            self._add(node.lineno, "credential_construction")
+
+    def _check_credential_construction_call(self, node: ast.Call) -> None:
+        """Flag construction of a curated credential CLASS
+        (``Credentials(...)``, ``ServiceAccountCredentials(...)``), whether
+        called as a bare name (``Credentials(...)``) or via an attribute
+        chain (``service_account.Credentials(...)``). Checked only at the
+        Call site (constructing one is the operative act) — unlike the
+        factory-method attributes above, these class names are common enough
+        as bare identifiers that flagging every reference (not just
+        construction) would be noisy.
+        """
+        func = node.func
+        name = None
+        if isinstance(func, ast.Name):
+            name = func.id
+        elif isinstance(func, ast.Attribute):
+            name = func.attr
+        if name in _CREDENTIAL_CLASS_NAMES:
+            self._add(node.lineno, "credential_construction")
+
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def _scan_file(file_path: Path, allowed_root: Path) -> List[Violation]:
+def _scan_file(
+    file_path: Path,
+    kernel_anchor: Path,
+    sealed_kernel_paths: FrozenSet[str],
+    adapter_profile_paths: FrozenSet[str],
+) -> List[Violation]:
     if file_path.suffix != ".py":
         return []
-    if _is_inside_allowed_module(file_path, allowed_root):
+    zone = classify_zone(
+        file_path,
+        kernel_anchor,
+        sealed_kernel_paths=sealed_kernel_paths,
+        adapter_profile_paths=adapter_profile_paths,
+    )
+    if zone is Zone.ADAPTER_PROFILE:
+        # The ONLY zone exempt from every check below — see "Trust zones" in
+        # the module docstring and zones.py for the full rationale. Zone
+        # membership itself is never "anything under this path" (classify_zone
+        # requires an explicit relative-path listing), so this exemption
+        # cannot be obtained merely by location.
         return []
     try:
         source = file_path.read_text(encoding="utf-8")
@@ -450,20 +597,36 @@ def scan_paths(
     paths: Sequence[Union[str, Path]],
     allowed_module: str = "agents.lib.external_write",
     allowed_root: Optional[Union[str, Path]] = None,
+    adapter_profile_paths: Optional[FrozenSet[str]] = None,
+    sealed_kernel_paths: Optional[FrozenSet[str]] = None,
 ) -> List[Violation]:
     """Scan ``paths`` (files and/or directories) for external-write bypasses.
 
-    Code WITHIN the allowed module (the external_write package) is exempt — that
-    is where the real network calls legitimately live. Exemption is anchored to
-    a single absolute location, NOT to a directory name that can be recreated
-    elsewhere:
+    Every scanned file is classified into one of three trust zones
+    (``zones.classify_zone`` — see zones.py and this module's "Trust zones"
+    docstring section for the full taxonomy and rationale). Only the
+    ADAPTER_PROFILE zone is exempt from the checks below; SEALED_KERNEL and
+    CAPABILITY code are both scanned in full.
 
-      * ``allowed_root`` (when given) is the canonical adapter directory. A
-        scanned file is exempt iff its resolved path is that directory or a
-        descendant of it. Build wiring should pass the real adapter dir here.
+      * ``allowed_root`` (when given) is the canonical package anchor — the
+        real, installed ``external_write`` directory. Location under this
+        anchor is NECESSARY but not SUFFICIENT for SEALED_KERNEL or
+        ADAPTER_PROFILE membership; see below.
       * When ``allowed_root`` is None, the anchor defaults to scan.py's OWN
         installed directory (``Path(__file__).resolve().parent``), which IS the
-        real adapter directory and cannot be spoofed by a look-alike directory.
+        real package directory and cannot be spoofed by a look-alike directory.
+      * ``sealed_kernel_paths`` / ``adapter_profile_paths`` (when given)
+        override ``zones.SEALED_KERNEL_MODULE_PATHS`` /
+        ``zones.ADAPTER_PROFILE_MODULE_PATHS`` — the explicit, relative-path
+        allowlists a scanned file's path (relative to ``allowed_root``) must
+        appear in to be classified SEALED_KERNEL / ADAPTER_PROFILE. A file
+        that is neither listed is CAPABILITY — the most restrictive zone —
+        even if it is physically located under ``allowed_root``. This is
+        deliberate: a new file (or a whole new adapter directory) dropped
+        under the package is NOT automatically exempted from anything merely
+        by its location; build wiring / tests that need a different explicit
+        set pass it here rather than the caller relying on directory
+        placement alone.
 
     ``allowed_module`` is the dotted name used for human-facing messaging only;
     it is deliberately NOT the exemption credential (keying on the name was
@@ -476,13 +639,27 @@ def scan_paths(
     anchor = (
         Path(allowed_root).resolve()
         if allowed_root is not None
-        else _default_allowed_root()
+        else _default_kernel_anchor()
+    )
+    resolved_sealed_kernel_paths = (
+        sealed_kernel_paths if sealed_kernel_paths is not None
+        else SEALED_KERNEL_MODULE_PATHS
+    )
+    resolved_adapter_profile_paths = (
+        adapter_profile_paths if adapter_profile_paths is not None
+        else ADAPTER_PROFILE_MODULE_PATHS
     )
     violations: List[Violation] = []
     for raw in paths:
         p = Path(raw)
         for f in _iter_py_files(p):
-            violations.extend(_scan_file(f, anchor))
+            violations.extend(
+                _scan_file(
+                    f, anchor,
+                    resolved_sealed_kernel_paths,
+                    resolved_adapter_profile_paths,
+                )
+            )
     violations.sort(key=lambda v: (v.path, v.lineno, v.kind))
     return violations
 

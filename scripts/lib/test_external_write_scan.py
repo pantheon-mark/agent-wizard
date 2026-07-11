@@ -18,6 +18,9 @@ Test intents:
   7. subprocess_curl.py              -> subprocess_network violation(s)
   8. scanning a directory aggregates violations across files
   9. code INSIDE the allowed module (adapters.py) is exempt
+  10. Task 5 — credential-access is flagged independent of forbidden_import
+  11. Task 5 — trust-zone split: sealed-kernel is not blanket-exempt,
+      adapter-profile requires EXPLICIT registration (not directory location)
 """
 
 import sys
@@ -123,17 +126,44 @@ class TestSpoofedAnchor(unittest.TestCase):
         )
         self.assertIn("forbidden_import", _kinds(v))
 
-    def test_explicit_allowed_root_override_exempts_only_that_tree(self):
-        # Caller can override the anchor. Passing the spoof tree's adapter dir as
-        # the explicit allowed_root exempts it; the real adapter dir is then NOT
-        # the anchor, but a file under the override IS exempt.
+    def test_root_override_alone_does_not_exempt_an_unregistered_module(self):
+        # Task 5: zone membership is EXPLICIT, never "anything under this
+        # path". Overriding the anchor to the spoof tree's directory is NOT,
+        # by itself, enough to exempt a file inside it — sneaky.py's relative
+        # path is not listed in either the sealed-kernel or adapter-profile
+        # allowlist, so it is classified CAPABILITY (fail-closed default) and
+        # still flagged, even though it is now "inside" the overridden root.
         spoof_root = (
             _FIXTURES / "fake_anchor" / "agents" / "lib" / "external_write"
         )
         spoof_file = spoof_root / "sneaky.py"
         v = scan_paths([spoof_file], allowed_root=spoof_root)
+        self.assertTrue(
+            v,
+            "a bare root override must NOT exempt a module that is not "
+            "explicitly registered in a zone allowlist",
+        )
+        self.assertIn("forbidden_import", _kinds(v))
+
+    def test_root_override_plus_explicit_adapter_profile_registration_exempts_it(self):
+        # The explicit registration this task requires: overriding the anchor
+        # AND naming the module's relative path in adapter_profile_paths is
+        # what exempts it — never the directory override alone (see test
+        # above). This is the reviewable, one-line-diff mechanism zones.py
+        # documents in place of the old blanket exemption.
+        spoof_root = (
+            _FIXTURES / "fake_anchor" / "agents" / "lib" / "external_write"
+        )
+        spoof_file = spoof_root / "sneaky.py"
+        v = scan_paths(
+            [spoof_file],
+            allowed_root=spoof_root,
+            adapter_profile_paths=frozenset({"sneaky.py"}),
+        )
         self.assertEqual(
-            v, [], "file under the explicit allowed_root must be exempt"
+            v, [],
+            "a module explicitly registered as adapter-profile under the "
+            "overridden anchor must be exempt",
         )
 
     def test_real_adapter_dir_is_default_anchor(self):
@@ -185,6 +215,83 @@ class TestDirectoryAggregation(unittest.TestCase):
         self.assertTrue(str(first.path).endswith("direct_api_call.py"))
         self.assertIsInstance(first.lineno, int)
         self.assertIsInstance(first.kind, str)
+
+
+class TestCredentialAccess(unittest.TestCase):
+    """Task 5 — capability code obtaining/widening a write-capable credential
+    is a violation, independent of the forbidden_import check."""
+
+    def test_with_subject_scope_widening_flagged_with_no_forbidden_import(self):
+        v = scan_paths([_FIXTURES / "credential_construction.py"])
+        self.assertIn("credential_construction", _kinds(v))
+        # No vendor SDK is imported in this fixture at all.
+        self.assertNotIn("forbidden_import", _kinds(v))
+        cred = [x for x in v if x.kind == "credential_construction"]
+        # Direct call + bound-and-called-later reference -> two sites.
+        self.assertGreaterEqual(len(cred), 2)
+
+    def test_factory_and_direct_construction_flagged(self):
+        v = scan_paths([_FIXTURES / "credential_construction_factory.py"])
+        kinds = _kinds(v)
+        self.assertIn("credential_construction", kinds)
+        cred = [x for x in v if x.kind == "credential_construction"]
+        # from_service_account_file, from_service_account_info,
+        # bare Credentials(...), bare ServiceAccountCredentials(...).
+        self.assertGreaterEqual(len(cred), 4)
+        # The fixture's import is deliberately not a denylisted root, so the
+        # credential check is proven independent of the import check here too.
+        self.assertNotIn("forbidden_import", kinds)
+
+
+class TestTrustZoneSplit(unittest.TestCase):
+    """Task 5 — the trust boundary is split into SEALED_KERNEL /
+    ADAPTER_PROFILE / CAPABILITY zones; the old "whole external_write/ tree is
+    exempt" rule is replaced by explicit, relative-path zone membership."""
+
+    _KERNEL_ROOT = _FIXTURES / "zones" / "kernel_root"
+
+    def test_sealed_kernel_zone_is_not_a_blanket_exemption(self):
+        # "adapters.py" is a real SEALED_KERNEL_MODULE_PATHS entry, but that
+        # zone is held to the same checks as capability code -- it must not
+        # get a free pass merely by matching the kernel's module name.
+        v = scan_paths(
+            [self._KERNEL_ROOT / "adapters.py"], allowed_root=self._KERNEL_ROOT
+        )
+        self.assertTrue(v, "sealed-kernel zone must not be blanket-exempt")
+        self.assertIn("forbidden_import", _kinds(v))
+
+    def test_unregistered_module_under_kernel_root_is_capability_fail_closed(self):
+        # vendor_adapter.py physically lives under the (overridden) kernel
+        # anchor but is not listed in either zone allowlist -- classified
+        # CAPABILITY, the fail-closed default, and fully flagged.
+        v = scan_paths(
+            [self._KERNEL_ROOT / "vendor_adapter.py"],
+            allowed_root=self._KERNEL_ROOT,
+        )
+        self.assertTrue(
+            v, "an unregistered module under the anchor must fail closed as "
+            "CAPABILITY, not be silently exempted by location"
+        )
+        kinds = _kinds(v)
+        self.assertIn("forbidden_import", kinds)
+        self.assertIn("credential_construction", kinds)
+        self.assertIn("direct_api_call", kinds)
+
+    def test_explicit_adapter_profile_registration_exempts_conformant_module(self):
+        # The SAME file, now explicitly registered as ADAPTER_PROFILE by its
+        # relative path -- the reviewable, one-line mechanism this task
+        # requires in place of a directory rule. A conformant adapter-profile
+        # module doing legitimate vendor import + credential construction +
+        # raw mutation passes cleanly.
+        v = scan_paths(
+            [self._KERNEL_ROOT / "vendor_adapter.py"],
+            allowed_root=self._KERNEL_ROOT,
+            adapter_profile_paths=frozenset({"vendor_adapter.py"}),
+        )
+        self.assertEqual(
+            v, [],
+            "an explicitly-registered adapter-profile module must be exempt",
+        )
 
 
 if __name__ == "__main__":
