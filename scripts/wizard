@@ -32,5 +32,25 @@ if [ ! -f "$ENGINE" ]; then
   exit 2
 fi
 
-PYTHON="${PYTHON:-python3}"
+# Resolve a Python interpreter meeting the wizard's own floor (>=3.11) rather than
+# blindly trusting a bare `python3` (F-35 fix: a stale python3 -- e.g. macOS's own EOL
+# system copy -- must not be trusted silently). PYTHON, if set, is an explicit override
+# (advanced/test use) and is trusted as-is, unvalidated -- same escape hatch as before.
+if [ -z "${PYTHON:-}" ]; then
+  PYTHON=""
+  for _candidate in python3.13 python3.12 python3.11; do
+    if command -v "$_candidate" &>/dev/null; then
+      PYTHON="$_candidate"
+      break
+    fi
+  done
+  if [ -z "$PYTHON" ] && command -v python3 &>/dev/null \
+     && python3 -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 11) else 1)' 2>/dev/null; then
+    PYTHON="python3"
+  fi
+  if [ -z "$PYTHON" ]; then
+    echo "wizard: no Python 3.11+ interpreter found. Install one with: brew install python@3.12" >&2
+    exit 2
+  fi
+fi
 exec "$PYTHON" "$ENGINE" "$@"

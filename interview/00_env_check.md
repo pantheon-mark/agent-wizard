@@ -1,7 +1,7 @@
 # 00: Environment Check
 
 ## What this file does
-Silently verify that all four prerequisites are installed and at acceptable versions before the wizard interview begins. This step is invisible to the user unless a check fails. If all four checks pass, proceed immediately to `01_phase1_capture.md` without any user-facing message.
+Silently verify that all five prerequisites are installed and at acceptable versions before the wizard interview begins. This step is invisible to the user unless a check fails. If all five checks pass, proceed immediately to `01_phase1_capture.md` without any user-facing message.
 
 ## When this file runs
 At the very start of a wizard session, before any questions are asked and before any files are created. No project directory exists. No staging file exists. This is the zero-state starting point.
@@ -64,7 +64,7 @@ Write sub-step marker: Append `step_00_PERM: complete | <timestamp>` to `~/claud
 
 ## Check sequence
 
-Run all four checks in order. For each check: if it passes, move silently to the next. If it fails, show the failure message and fix command to the user, wait for confirmation that the fix was applied, re-run that specific check, and do not advance to the next check until the current one passes. The loop for a failing check is: show message → show fix command → wait for confirmation → re-run → if still failing, repeat.
+Run all five checks in order. For each check: if it passes, move silently to the next. If it fails, show the failure message and fix command to the user, wait for confirmation that the fix was applied, re-run that specific check, and do not advance to the next check until the current one passes. The loop for a failing check is: show message → show fix command → wait for confirmation → re-run → if still failing, repeat.
 
 ---
 
@@ -170,9 +170,37 @@ Write sub-step marker: Append `step_00_CHECK-3: complete | <timestamp>` to `~/cl
 >
 > Open a Terminal window, paste the command, and press Enter. When it finishes, come back and tell me.
 
-Wait for confirmation. Re-run `claude --version`. Do not proceed to `01_phase1_capture.md` until this check passes.
+Wait for confirmation. Re-run `claude --version`. Do not proceed to Check 5 until this check passes.
 
 Write sub-step marker: Append `step_00_CHECK-4: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
+
+---
+
+### Check 5: Python
+
+**Why this check exists:** Some systems the wizard can build include parts that run Python code (for example, a part that writes information back into another service). Your Mac already has a `python3` command, but on many Macs it is an old copy Apple ships for its own use — too old to run these parts safely, and never intended to be relied on directly. This check makes sure a current, dedicated Python is available before it's ever needed, so you never have to diagnose a Python problem yourself later. Your finished system never depends on whatever `python3` happens to mean on your Mac — the wizard always points it at the exact copy installed here.
+
+**Run:** Try each of the following, in order, and use the first one that succeeds:
+1. `python3.12 --version`
+2. `python3.11 --version`
+3. `"$(brew --prefix python@3.12)/bin/python3.12" --version`
+4. `python3 --version`
+
+**Passes if:** Any of the above returns a version of **3.11.0 or higher**. (3.12 is recommended and is what step 1 or 3 finds if it's installed.)
+
+**If none of the above finds a version 3.11.0 or higher, say this to the user:**
+
+> Your Mac needs a current copy of Python for parts of your system that may need it later. Here's the command to install it:
+>
+> ```
+> brew install python@3.12
+> ```
+>
+> Open a Terminal window, paste the command, and press Enter. It takes a few minutes. When it's done, come back here and tell me.
+
+Wait for the user to confirm the fix is done. Re-run the four-step check above. If it still fails, show the same message again. Do not proceed to `01_phase1_capture.md` until this check passes.
+
+Write sub-step marker: Append `step_00_CHECK-5: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 
 ---
 
@@ -198,7 +226,7 @@ Write the response (or "skipped") to `wizard_test_notes.md` in the project direc
 
 ## Success condition
 
-All four checks have passed. Do not show any message to the user.
+All five checks have passed. Do not show any message to the user.
 
 **Write completion marker:** Append `step_00: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md` (create the file if it does not exist). This marker is written only on successful completion. If the session crashes mid-step, no marker exists and cold resume knows to restart this step.
 
@@ -206,4 +234,4 @@ Proceed immediately to `01_phase1_capture.md`.
 
 ## Log note
 
-There is no file to log to at this stage. The project directory and staging file do not exist yet. The result of this environment check (all four checks passed, versions found) is recorded as the first entry in `wizard_session_draft.md` when it is created in `01_phase1_capture.md` (step P1-3).
+There is no file to log to at this stage. The project directory and staging file do not exist yet. The result of this environment check (all five checks passed, versions found) is recorded as the first entry in `wizard_session_draft.md` when it is created in `01_phase1_capture.md` (step P1-3).

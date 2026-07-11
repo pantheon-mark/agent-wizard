@@ -28,7 +28,7 @@ A word on time, so it is not a surprise. Installing the tools takes about an hou
 
 ## Installing the tools
 
-You install four programs, then download the wizard. Each step is one command you copy and paste into Terminal, followed by a quick check.
+You install five programs, then download the wizard. Each step is one command you copy and paste into Terminal, followed by a quick check.
 
 Open Terminal first: press Command and Space together, type "Terminal", and press Enter. You will see a window with a blinking cursor. That is where every command below goes.
 
@@ -86,7 +86,23 @@ node --version
 
 You should see a version number starting with `v18` or higher.
 
-### Step 4: Install Claude Code
+### Step 4: Install Python
+
+Some systems the wizard can build include parts that run Python code — for example, a part that writes information back into another service. Your Mac already has a `python3` command, but it's often an old copy Apple ships for its own use, not one meant to be relied on for this. Installing a current copy now means you never have to think about this again; the wizard always points at this exact copy, never at whatever `python3` happens to mean on your Mac. Paste this and press Enter:
+
+```
+brew install python@3.12
+```
+
+Check it:
+
+```
+$(brew --prefix python@3.12)/bin/python3.12 --version
+```
+
+You should see `Python 3.12.x`.
+
+### Step 5: Install Claude Code
 
 Claude Code is the tool the wizard runs inside. Paste this and press Enter:
 
@@ -102,7 +118,7 @@ claude --version
 
 You should see a version number.
 
-### Step 5: Log in to Claude Code
+### Step 6: Log in to Claude Code
 
 Paste this and press Enter:
 
@@ -112,7 +128,7 @@ claude
 
 The first time, Claude Code opens a browser window to log in to your Claude account. Follow the prompts, then you are returned to Terminal. Type `/exit` and press Enter to close it for now.
 
-### Step 6: Download the wizard
+### Step 7: Download the wizard
 
 Paste this and press Enter:
 
@@ -122,7 +138,7 @@ git clone https://github.com/pantheon-mark/agent-wizard.git ~/agent-wizard
 
 This downloads the wizard into a folder called `agent-wizard` in your home folder. It only runs once.
 
-### Step 7: Launch the wizard
+### Step 8: Launch the wizard
 
 Paste these two commands, pressing Enter after each:
 

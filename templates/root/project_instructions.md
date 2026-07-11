@@ -234,6 +234,8 @@ This system's autonomous (unattended/scheduled) work draws on the separate month
 |---------|------------------|---------------|
 {{VERSION_PIN_ROWS}}
 
+*Python end-of-life watch: if this system has a Python component (a `requirements.txt` file in the project root — no file means no Python component and this does not apply), `./start-session.sh` keeps its interpreter at Python {{PYTHON_FLOOR_VERSION}} or newer automatically and checks it against Python's own public end-of-life schedule {{PYTHON_EOL_CHECK_CADENCE}}. If the pinned version is nearing or past end-of-life, you'll see a plain-language heads-up with the exact command to move to a current one — you don't need to track Python versions yourself.*
+
 ---
 
 ## GitHub Remote

@@ -38,7 +38,7 @@ The wizard runs as a state machine through 16 numbered files. Each file specifie
 
 | File | Topic |
 |------|-------|
-| `wizard/interview/00_env_check.md` | Environment prerequisite checks — Homebrew, Git, Node.js, Claude Code |
+| `wizard/interview/00_env_check.md` | Environment prerequisite checks — Homebrew, Git, Node.js, Claude Code, Python |
 | `wizard/interview/01_phase1_capture.md` | Project name and core purpose — creates staging file |
 | `wizard/interview/02_financial.md` | Spend ceiling and overage plan |
 | `wizard/interview/03_user_profile.md` | User role, availability, domain, autonomy level authorization |

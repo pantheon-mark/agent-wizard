@@ -106,6 +106,115 @@ if [ ! -f "CLAUDE.md" ]; then
     exit 1
 fi
 
+# ── Python venv bootstrap (F-35 fix) ─────────────────────────────────────────
+# Dogfood finding F-35: an emitted Python-shape system ran on whatever ancient
+# `python3` macOS happened to have (never checked, never installed, no venv, no
+# declared deps) -- the operator had to fix this by hand. The fix: this project's
+# requirements.txt is emitted ONLY for a writes-back/Python-dependent system (see
+# agent_emitter._emit_requirements_txt) -- its presence is the single signal this whole
+# block keys off. A system with no Python component has no requirements.txt, and this
+# entire block is a silent no-op: no venv, no interpreter check, no dead scaffolding.
+PYTHON_FLOOR_MAJOR=3
+PYTHON_FLOOR_MINOR=11
+
+_python_meets_floor() {
+  # $1: path to a python interpreter. 0 (true) iff its version >= the floor above.
+  "$1" -c "import sys; sys.exit(0 if sys.version_info[:2] >= (${PYTHON_FLOOR_MAJOR}, ${PYTHON_FLOOR_MINOR}) else 1)" 2>/dev/null
+}
+
+_resolve_modern_python() {
+  # Never assumes the operator's PATH resolves a current `python3` (same discipline as
+  # programmatic --model selection): tries dedicated version binaries first, then a
+  # Homebrew prefix lookup (works even when Homebrew's own bin dir isn't linked onto
+  # PATH), and only falls back to bare `python3` after actually verifying its version.
+  local candidate
+  for candidate in python3.13 python3.12 python3.11; do
+    if command -v "$candidate" &>/dev/null && _python_meets_floor "$(command -v "$candidate")"; then
+      command -v "$candidate"
+      return 0
+    fi
+  done
+  if command -v brew &>/dev/null; then
+    local brew_prefix
+    brew_prefix="$(brew --prefix python@3.12 2>/dev/null || true)"
+    if [ -n "$brew_prefix" ] && [ -x "$brew_prefix/bin/python3.12" ] \
+       && _python_meets_floor "$brew_prefix/bin/python3.12"; then
+      echo "$brew_prefix/bin/python3.12"
+      return 0
+    fi
+  fi
+  if command -v python3 &>/dev/null && _python_meets_floor "$(command -v python3)"; then
+    command -v python3
+    return 0
+  fi
+  return 1
+}
+
+if [ -f "requirements.txt" ]; then
+    MODERN_PYTHON="$(_resolve_modern_python || true)"
+    if [ -z "$MODERN_PYTHON" ]; then
+        echo ""
+        echo "This system needs Python ${PYTHON_FLOOR_MAJOR}.${PYTHON_FLOOR_MINOR} or newer to run its Python components, and none was found."
+        echo "Run this to install it: brew install python@3.12"
+        echo "Then run ./start-session.sh again."
+        echo ""
+        exit 1
+    fi
+
+    # Create (or recreate, if a stale sub-floor .venv exists from before this fix) the
+    # project-local venv on the resolved modern interpreter. Never the operator's bare
+    # python3 -- always this exact, verified copy.
+    if [ ! -x ".venv/bin/python" ] || ! _python_meets_floor ".venv/bin/python"; then
+        rm -rf .venv
+        "$MODERN_PYTHON" -m venv .venv
+    fi
+
+    # Idempotent: pip is a fast no-op when requirements are already satisfied.
+    .venv/bin/python -m pip install --quiet --disable-pip-version-check -r requirements.txt
+
+    # Pin the interpreter for the REST of this session: prepend the venv's bin/ (which
+    # contains its own `python`/`python3`/`python3.x`) to PATH so any python command run
+    # in this session -- by you, or by an agent's own bash tool call -- resolves to this
+    # pinned interpreter, never a stray system python3.
+    export PATH="$PROJECT_DIR/.venv/bin:$PATH"
+
+    # ── Python end-of-life upkeep reminder ──────────────────────────────────
+    # Plain-language heads-up if the pinned interpreter is nearing or past its public
+    # end-of-life, in the same "tell the operator, give the exact fix command" voice as
+    # the rest of this script and the CLAUDE.md upgrade-notice mechanism. Dates are
+    # CPython's own published end-of-life schedule (PEP 602 cadence).
+    _VENV_PY_VERSION="$(.venv/bin/python -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
+    _PY_EOL_DATE=""
+    case "$_VENV_PY_VERSION" in
+        3.9)  _PY_EOL_DATE="2025-10-05" ;;
+        3.10) _PY_EOL_DATE="2026-10-04" ;;
+        3.11) _PY_EOL_DATE="2027-10-24" ;;
+        3.12) _PY_EOL_DATE="2028-10-02" ;;
+        3.13) _PY_EOL_DATE="2029-10-01" ;;
+        3.14) _PY_EOL_DATE="2030-10-01" ;;
+        *)    _PY_EOL_DATE="" ;;
+    esac
+    if [ -n "$_PY_EOL_DATE" ]; then
+        _TODAY_EPOCH=$(date -u +%s)
+        _EOL_EPOCH=$(date -u -j -f "%Y-%m-%d" "$_PY_EOL_DATE" +%s 2>/dev/null || date -u -d "$_PY_EOL_DATE" +%s 2>/dev/null || echo "")
+        if [ -n "$_EOL_EPOCH" ]; then
+            _DAYS_LEFT=$(( (_EOL_EPOCH - _TODAY_EPOCH) / 86400 ))
+            if [ "$_DAYS_LEFT" -lt 0 ]; then
+                echo ""
+                echo "Heads up: this project's Python (${_VENV_PY_VERSION}) reached end-of-life on ${_PY_EOL_DATE} and no longer receives security fixes."
+                echo "Run this when you have a moment: brew install python@3.12"
+                echo ""
+            elif [ "$_DAYS_LEFT" -lt 180 ]; then
+                echo ""
+                echo "Heads up: this project's Python (${_VENV_PY_VERSION}) reaches end-of-life on ${_PY_EOL_DATE}."
+                echo "No action needed yet -- when you have a moment: brew install python@3.12"
+                echo ""
+            fi
+        fi
+    fi
+fi
+# ── end Python venv bootstrap ─────────────────────────────────────────────────
+
 # ── Banner ────────────────────────────────────────────────────────────────────
 
 # Kickoff prompt — the FIRST message handed to the session so it orients itself and

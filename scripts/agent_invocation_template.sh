@@ -57,6 +57,15 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TASK_ID="${1:-$(date +%Y%m%d_%H%M%S)}"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+# Python interpreter pin (F-35 fix). If this project has a Python component, its pinned
+# project-local venv already exists (created by start-session.sh's venv-bootstrap on
+# first boot). Prefer it over a bare `python3` here too -- this matters specifically for
+# a cron-triggered run, which invokes THIS script directly and bypasses start-session.sh
+# entirely. A system with no Python component has no .venv/ and this is a silent no-op.
+if [[ -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
+  export PATH="$PROJECT_ROOT/.venv/bin:$PATH"
+fi
+
 # --- Required file paths ---
 PROMPT_FILE="$PROJECT_ROOT/agents/prompts/${AGENT_NAME}_prompt.md"
 SESSION_BOOTSTRAP="$PROJECT_ROOT/session_bootstrap.md"

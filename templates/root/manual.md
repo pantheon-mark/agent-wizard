@@ -107,7 +107,8 @@ Your agent team runs through a tool called Claude Code. To use it, your Mac need
 1. **Homebrew** — a tool that installs other tools. Think of it as an app store for developer tools. You use it once to install the other items on this list.
 2. **Git** — version control. Every change your agents make is tracked and reversible.
 3. **Node.js** — a runtime that Claude Code depends on to operate.
-4. **Claude Code** — the tool your agents run through.
+4. **Python** — a current copy, used by the parts of your system (if any) that write information back into another service. Your Mac already has an old copy of Python built in for its own use; this installs a current one that your system points to directly, so it never depends on whatever `python3` happens to mean on your Mac.
+5. **Claude Code** — the tool your agents run through.
 
 **Time required:** About 20-30 minutes, most of which is waiting for downloads.
 
@@ -208,7 +209,25 @@ You should see a version number starting with `v18` or higher.
 
 ---
 
-### Step 4 — Install Claude Code
+### Step 4 — Install Python
+
+Install a current Python with Homebrew:
+
+```
+brew install python@3.12
+```
+
+This takes a few minutes. When it finishes, verify:
+
+```
+$(brew --prefix python@3.12)/bin/python3.12 --version
+```
+
+You should see `Python 3.12.x`. If your system has a part that runs Python code (see `requirements.txt` in this project folder — if it's not there, this system has none), your session startup script (`start-session.sh`) uses this copy automatically the first time you run it, setting up a project-local copy your system always points to. You never need to run a Python command yourself.
+
+---
+
+### Step 5 — Install Claude Code
 
 Install Claude Code with this command:
 
@@ -231,7 +250,7 @@ You should see a version number. Claude Code is now installed.
 Your agent team checks for updates automatically and will tell you if anything needs attention. If you ever need to update manually:
 
 ```
-brew upgrade git node
+brew upgrade git node python@3.12
 npm install -g @anthropic-ai/claude-code
 ```
 

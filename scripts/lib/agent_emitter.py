@@ -80,6 +80,18 @@ _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _CAPABILITY_DESCRIPTOR_SET_REL = "security/capability_descriptors.json"
 _BUNDLE_CAPABILITY_DESCRIPTOR_TEMPLATE_REL = "security/capability_descriptors.json"
 
+# F-35 fix (dogfood finding) — requirements.txt at the operator-project ROOT, emitted ONLY for a
+# writes-back plan, gated + source-gated IDENTICALLY to the external_write lib and the capability
+# descriptor set above: a read-only system carries no Python dependency and gets no requirements.txt
+# (no dead file — start-session.sh's venv-bootstrap block keys off this file's presence). The
+# canonical template lives under the scaffold's "root" tree (wizard/templates/root/
+# requirements_template) rather than "agents/lib/external_write" because the emitted file itself
+# belongs at the project root (pip convention), not inside the lib package; scaffold_emitter
+# excludes its basename from the unconditional root/ walk (EXCLUDE_BASENAMES) so only this
+# conditional emitter ever produces it.
+_REQUIREMENTS_TXT_REL = "requirements.txt"
+_BUNDLE_REQUIREMENTS_TEMPLATE_REL = "root/requirements_template"
+
 
 def _plan_has_writes_back(plan: "EmissionPlan") -> bool:
     """True iff the plan's external-dependency identity record contains at least one
@@ -212,6 +224,33 @@ def _emit_capability_descriptor_set(plan: "EmissionPlan", staging_dir: Path,
     out_path.parent.mkdir(parents=True, exist_ok=True)
     return [_emit_from_template(template_path, out_path, {cdr.EMIT_FIELD: str(value)},
                                 "capability_descriptors.json")]
+
+
+def _emit_requirements_txt(plan: "EmissionPlan", staging_dir: Path,
+                           build_repo_root: Path) -> List[Path]:
+    """Emit requirements.txt at the operator-project root for a writes-back plan ONLY (F-35 fix,
+    dogfood finding: an emitted Python-shape system had no pinned interpreter, no venv, and no
+    declared dependencies — the operator had to fix this by hand).
+
+    Gated IDENTICALLY to the external_write lib and the capability descriptor set
+    (_plan_has_writes_back): a read-only or foundation-only system has no Python component and
+    gets no requirements.txt — no dead file, and start-session.sh's venv-bootstrap block (which
+    keys off this file's presence) is a silent no-op for it. Source-gated on the bundle carrying
+    the template — inert until a bundle cut copies wizard/templates/root/requirements_template
+    into <bundle>/templates/root/, mirroring the same source-gating as the lib and descriptor set.
+
+    The template carries no {{KEY}} placeholders (its content is static — see
+    wizard/templates/root/requirements_template), so no inputs need to be supplied here."""
+    if not _plan_has_writes_back(plan):
+        return []
+    bt = _bundle_agent_templates_root(build_repo_root, plan.bundle_version)
+    template_path = bt / _BUNDLE_REQUIREMENTS_TEMPLATE_REL
+    if not template_path.is_file():
+        # Source-gated: the bundle does not carry the template yet (pending a bundle cut).
+        return []
+    out_path = staging_dir / _REQUIREMENTS_TXT_REL
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    return [_emit_from_template(template_path, out_path, {}, "requirements.txt")]
 
 
 def _bundle_agent_templates_root(build_repo_root: Path, version: Optional[str] = None) -> Path:
@@ -473,6 +512,10 @@ def emit_agent_layer(plan: EmissionPlan, staging_dir: Path, build_repo_root: Pat
     # reads security/capability_descriptors.json; without it a fresh writes-back build fails
     # closed (dead on arrival). Same writes-back + source gating as the lib emit above. ---
     written += _emit_capability_descriptor_set(plan, staging_dir, build_repo_root)
+
+    # --- requirements.txt (writes-back only, F-35 fix) — pairs with start-session.sh's venv
+    # bootstrap, which keys off this file's presence. Same writes-back + source gating. ---
+    written += _emit_requirements_txt(plan, staging_dir, build_repo_root)
 
     # --- Roster (generated; the Orchestrator health check reads this) ---
     roster_out = agents_dir / "roster.md"

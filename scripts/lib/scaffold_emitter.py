@@ -75,7 +75,10 @@ _BUNDLE_CLAUDE_CONFIG_REL = "claude_config"
 # env_template lives in the bundle (so the contract's .env template_path resolves)
 # but .env is emitted EMPTY by operator_fill_emitter, not from this template — the
 # scaffold walk must skip it.
-EXCLUDE_BASENAMES = {"_index.md", "env_template"}
+# requirements_template is gated EXACTLY like the external_write lib (writes-back only,
+# via agent_emitter._emit_requirements_txt, F-35 fix) — the unconditional root/ walk here
+# must not emit it unconditionally, or a read-only system would get a dead requirements.txt.
+EXCLUDE_BASENAMES = {"_index.md", "env_template", "requirements_template"}
 EXCLUDE_RELPATHS = {
     "quality/rules_library.md",  # corpus single-home (corpus_emitter)
     # security/capability_descriptors.json is emitted ONLY for a writes-back plan, by the
@@ -128,6 +131,10 @@ def _default_scaffold_inputs() -> Dict[str, str]:
         "BASH_AUTHORIZATION": "ask-first",
         "CREDENTIAL_CHECK_CADENCE": "quarterly",
         "ROTATION_LEAD_TIME_DAYS": "14",
+        # --- Python interpreter floor + EOL-watch cadence (F-35 fix). Only meaningful for a
+        # writes-back system (one with a requirements.txt); inert prose otherwise. ---
+        "PYTHON_FLOOR_VERSION": "3.11",
+        "PYTHON_EOL_CHECK_CADENCE": "every session start",
         # --- scale tier ---
         "SCALE_TIER": "small",
         "SCALE_TIER_RATIONALE": CONFIGURE,
