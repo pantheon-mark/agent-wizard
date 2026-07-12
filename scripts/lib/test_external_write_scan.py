@@ -576,5 +576,117 @@ class TestAdapterRegistryKernelStaysClean(unittest.TestCase):
                                 f"clean under the new capability-only rules; got {v}")
 
 
+class TestFunctionIntrospectionCapabilityBan(unittest.TestCase):
+    """Task R8-T1 — cross-vendor re-ratification found a reflection reach
+    the R7-T4 bans missed: because `run_operation` is the real function
+    object from adapters.py, its `__globals__` bridges into the sealed
+    kernel namespace, and a string-keyed lookup through it is invisible to
+    every symbol check in this module. Closing it means banning the
+    function/method-object internals themselves (`__globals__`/`__code__`/
+    `__func__`/`__self__`/`__closure__`) as CAPABILITY-zone attribute
+    references, the same discipline `__subclasses__` already uses."""
+
+    def test_globals_reach_is_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_run_operation_globals_reach.py"]
+        )
+        self.assertIn("introspection_escape_hatch", _kinds(v))
+
+    def test_code_and_closure_and_bound_method_internals_are_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_function_object_internals.py"]
+        )
+        kinds = _kinds(v)
+        self.assertIn("introspection_escape_hatch", kinds)
+        hatches = [x for x in v if x.kind == "introspection_escape_hatch"]
+        # __code__, __closure__, __func__, __self__ -- four sites total.
+        self.assertGreaterEqual(len(hatches), 4)
+
+    def test_full_globals_to_provision_write_client_exploit_chain_is_flagged(self):
+        # The exact chain a cross-vendor re-ratification verified scan_paths
+        # previously returned [] for.
+        v = scan_paths(
+            [_FIXTURES / "capability_run_operation_globals_dispatch_exploit.py"]
+        )
+        kinds = _kinds(v)
+        self.assertIn("introspection_escape_hatch", kinds)
+        self.assertIn("adapter_registry_reference", kinds)
+
+
+class TestDispatchRegistryAndProvisionerCapabilityBan(unittest.TestCase):
+    """Task R8-T1 — the two adapter-registry symbols the re-ratification
+    found missing from the curated ban set: `_DISPATCH_REGISTRY` (the dict
+    `get_dispatch` reads from, parallel to the already-banned `_REGISTRY`)
+    and `provision_write_client` (the dispatch-level write-client
+    provisioner, parallel to the already-banned `build_write_client`)."""
+
+    def test_dispatch_registry_attribute_is_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_dispatch_registry_reference.py"]
+        )
+        self.assertIn("adapter_registry_reference", _kinds(v))
+
+    def test_provision_write_client_reference_is_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_provision_write_client_reference.py"]
+        )
+        self.assertIn("adapter_registry_reference", _kinds(v))
+
+
+class TestFunctionIntrospectionNegativeGuards(unittest.TestCase):
+    """False-positive discipline (Task R8-T1): the new dunder ban must not
+    over-fire on ordinary capability idioms -- type(x), x.__class__,
+    dataclasses, and the curated capability_api surface all stay clean."""
+
+    def test_ordinary_introspection_still_not_flagged(self):
+        # Regression guard: the R7-T4 negative fixture (type(x), .__class__,
+        # .__dict__, .__mro__, .__module__) must still be clean after the
+        # new dunder ban.
+        v = scan_paths(
+            [_FIXTURES / "capability_ordinary_introspection_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_capability_shaped_dataclass_and_type_usage_not_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_shaped_dataclass_and_type_usage_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+
+class TestFunctionIntrospectionKernelStaysClean(unittest.TestCase):
+    """Zone-scoping regression guard (Task R8-T1): the new bans are
+    CAPABILITY-zone-ONLY, so SEALED_KERNEL, ADAPTER_PROFILE, and every real
+    module in the package must still scan clean."""
+
+    def test_adapters_module_scans_clean(self):
+        v = scan_paths([_ADAPTER_DIR / "adapters.py"])
+        self.assertEqual(v, [])
+
+    def test_read_facade_module_scans_clean(self):
+        v = scan_paths([_ADAPTER_DIR / "read_facade.py"])
+        self.assertEqual(v, [])
+
+    def test_capability_api_module_scans_clean(self):
+        v = scan_paths([_ADAPTER_DIR / "capability_api.py"])
+        self.assertEqual(v, [])
+
+    def test_read_facades_gmail_module_scans_clean(self):
+        v = scan_paths([_ADAPTER_DIR / "read_facades_gmail.py"])
+        self.assertEqual(v, [])
+
+    def test_adapters_gmail_module_still_scans_clean(self):
+        v = scan_paths([_ADAPTER_DIR / "adapters_gmail.py"])
+        self.assertEqual(v, [])
+
+    def test_whole_adapter_dir_still_scans_clean(self):
+        v = scan_paths([_ADAPTER_DIR])
+        self.assertEqual(
+            v, [],
+            f"real kernel/adapter-profile code must stay clean under the "
+            f"new function-introspection bans; got {v}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
