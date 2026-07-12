@@ -13,8 +13,8 @@ Each named operation declares, up front and machine-readably:
                         proof-hash computation actually consults
                         effects_manifest.resolve_dependency_files(op_kind), which is
                         this dependency_set UNION the op_kind's registered adapter
-                        module, if any (Task 3 — external-write-gate-generalization;
-                        closes F-34, where the hash previously covered only the fixed
+                        module, if any (closing a gap where the hash previously
+                        covered only the fixed
                         _WRITE_AFFECTING_MODULES tuple below and structurally excluded
                         a capability's own adapter code).
   * verifier_set      — the verifier_ids whose post-write verification this op accepts.
@@ -26,20 +26,20 @@ Each named operation declares, up front and machine-readably:
                         in-place status edits / one-shot / append-only surfaces.
   * risk_class        — the op_kind's risk class, drawn from RISK_CLASSES below (mirrors
                         the authoritative vocabulary in wizard/scripts/lib/
-                        dependency_projection.py RISK_CLASSES — B1-1; kept equal by a
+                        dependency_projection.py RISK_CLASSES; kept equal by a
                         cross-tree consistency test since external_write cannot import
                         the build-side module). Defaults to "reversible_external" so
                         every contract predating this field keeps its prior behavior.
   * requires_accepted_phase — True iff running this op requires a covering ACCEPTED
-                        descriptor phase (enforced by B1-4's adapter, not here).
+                        descriptor phase (enforced by the write gate's adapter, not here).
                         Defaults to False (existing status ops stay ungated by this
                         flag; they are already gated by the broker + copy_run_proof).
   * blast_radius_cap  — the op_kind's default cap on invocations per window, or None
-                        for no inherent cap (enforced by B1-4; the per-capability
-                        descriptor cap from B1-2 overrides this at enforcement time).
+                        for no inherent cap (enforced by the write gate; the per-capability
+                        descriptor cap overrides this at enforcement time).
                         Defaults to None.
 
-  D-B1-b (LOCKED): risk_class / requires_accepted_phase / blast_radius_cap are
+  LOCKED: risk_class / requires_accepted_phase / blast_radius_cap are
   hash-bound — they enter proof_hash._contract_canon so a post-hoc risk-class
   downgrade (or any change to these fields) changes the contract hash and
   invalidates a previously-accepted proof. Fail-safe by construction.
@@ -88,12 +88,12 @@ class OperationContract:
     dependency_set: Tuple[str, ...]
     verifier_set: Tuple[str, ...]
     introduces_persistent_binding: bool
-    # B1-3 risk fields (each default preserves pre-B1-3 behavior for every contract
-    # built before this change; see the module docstring and D-B1-b above).
+    # Risk fields (each default preserves the prior behavior for every contract
+    # built before this change; see the module docstring and the LOCKED note above).
     risk_class: str = "reversible_external"
     requires_accepted_phase: bool = False
     blast_radius_cap: Optional[int] = None
-    # Task 4 (external-write-gate-generalization — credential isolation): the
+    # Credential isolation: the
     # vendor-scoped, READ-ONLY OAuth/API scope (or equivalent credential-scope
     # identifier) that a ReadFacade for this op_kind is built against, e.g.
     # "gmail.readonly". None (the default, preserving every contract built
@@ -103,15 +103,15 @@ class OperationContract:
     # require_read_only_scope/build_read_facade refuse fail-closed on None.
     # This is a vendor-ELIGIBILITY declaration, not a hash-bound identity
     # field (contrast risk_class/requires_accepted_phase/blast_radius_cap
-    # above, D-B1-b): it gates whether a ReadFacade can be built at all, it
+    # above): it gates whether a ReadFacade can be built at all, it
     # does not itself change write behavior, so it is deliberately left out
     # of proof_hash._contract_canon.
     read_only_scope: Optional[str] = None
 
 
 # The risk-class vocabulary, mirrored VERBATIM from wizard/scripts/lib/
-# dependency_projection.RISK_CLASSES (B1-1). external_write cannot import the
-# build-side module (separate root-of-trust tree — D-B1-a), so this is a deliberate
+# dependency_projection.RISK_CLASSES. external_write cannot import the
+# build-side module (a separate root-of-trust tree), so this is a deliberate
 # duplication guarded by a cross-tree equality test
 # (test_external_write_contracts.test_risk_classes_constant_matches_build_side_vocabulary,
 # which runs from wizard/scripts and can import both trees). If you change the values
@@ -127,7 +127,7 @@ RISK_CLASSES = frozenset({
 # computation resolves these against the installed adapter directory. This is
 # every existing op_kind's dependency_set today, but it is not the full
 # per-op_kind picture once an op_kind has its own registered adapter — see
-# effects_manifest.resolve_dependency_files (Task 3) and the dependency_set
+# effects_manifest.resolve_dependency_files and the dependency_set
 # docstring above.
 _WRITE_AFFECTING_MODULES = (
     "adapters.py",
@@ -136,7 +136,7 @@ _WRITE_AFFECTING_MODULES = (
     "verifiers.py",
 )
 
-# Public alias (Task 10 — external-write-gate-generalization): a capability's own
+# Public alias: a capability's own
 # generated adapter module (wizard/scripts/lib/capability_code_scaffold.py) declares its
 # OperationContract with this SAME shared dependency_set, exactly like the seeded status
 # ops and the Gmail reference adapter (_gmail_message_contract) both already do — this
@@ -180,7 +180,7 @@ def _status_contract(op_kind: str, field: str) -> OperationContract:
     intent is a deliberate classification, not an unset field that happens to
     match the default. requires_accepted_phase / blast_radius_cap are left at
     their defaults (False / None): these ops are already gated by the broker +
-    copy_run_proof and must not be newly restricted by B1-3.
+    copy_run_proof and must not be newly restricted by these fields.
     """
     return OperationContract(
         op_kind=op_kind,
@@ -194,7 +194,7 @@ def _status_contract(op_kind: str, field: str) -> OperationContract:
 
 
 def _delete_record_contract() -> OperationContract:
-    """The first NON-status, irreversible op_kind (B1-3 requirement 3).
+    """The first NON-status, irreversible op_kind.
 
     delete_record is the generic, domain-neutral shape every irreversible external
     delete follows (no email/Gmail-specific naming — this is the template other
@@ -218,7 +218,7 @@ def _delete_record_contract() -> OperationContract:
         live_surface_read, forbidden=writer_generated_id_map/live_id_column_as_
         truth/apply_report) rather than inventing a new platform_audit_log
         VerifierDef whose forbidden-input lineage this task was not asked to
-        design. (See the B1-3 report for the full justification.)
+        design.
       introduces_persistent_binding=False — a delete does not introduce or rely on
         any persistent binding future operations depend on; it removes a record,
         it does not create stable IDs/anchors/cross-refs for later writes to key
@@ -228,11 +228,11 @@ def _delete_record_contract() -> OperationContract:
         it is the FAIL_SAFE_RISK_CLASS in dependency_projection.py, the
         most-protected member of RISK_CLASSES.
       requires_accepted_phase=True — an irreversible delete may only run under a
-        covering ACCEPTED descriptor phase (enforced by B1-4).
+        covering ACCEPTED descriptor phase (enforced by the write gate).
       blast_radius_cap=5 — irreversible ops never batch, and the slice policy
         ceiling is ~10/session; 5 is a conservative interim per-op_kind default,
-        comfortably under that ceiling, that B1-2's per-capability descriptor cap
-        can override downward (never upward past this) at B1-4 enforcement time.
+        comfortably under that ceiling, that a per-capability descriptor cap
+        can override downward (never upward past this) at write-gate enforcement time.
     """
     return OperationContract(
         op_kind="delete_record",
@@ -250,15 +250,14 @@ def _delete_record_contract() -> OperationContract:
 def _gmail_message_contract(op_kind: str, *, risk_class: str,
                             requires_accepted_phase: bool,
                             blast_radius_cap: Optional[int]) -> OperationContract:
-    """Build a contract for a Gmail per-message label mutation (Task 7 —
-    external-write-gate-generalization slice; the reference VERB-shaped
-    adapter proving the generalized gate against a real vendor API).
+    """Build a contract for a Gmail per-message label mutation (the reference
+    VERB-shaped adapter proving the generalized gate against a real vendor API).
 
     trash / untrash / modify_labels all mutate the SAME thing structurally —
     a message's label set — so writes=("labels",) is shared across all three;
     produces=() because none of them create a new artifact. dependency_set is
     the same shared write-affecting module tuple every op_kind declares;
-    effects_manifest.resolve_dependency_files (Task 3 / F-34) unions in
+    effects_manifest.resolve_dependency_files unions in
     adapters_gmail.py — this op_kind's registered adapter module — on top of
     it, exactly like every other adapter-backed op_kind. risk_class is
     "sensitive_data" for all three: Gmail message content is sensitive
@@ -267,10 +266,10 @@ def _gmail_message_contract(op_kind: str, *, risk_class: str,
     gated classification, not the recoverability of the edit).
 
     read_only_scope="gmail.readonly" makes these op_kinds eligible for the
-    ReadFacade credential-isolation safety model (Task 4) — the concrete
+    ReadFacade credential-isolation safety model — the concrete
     GmailReadFacade is registered (via register_read_facade, against the
     kernel registry in read_facade.py) in read_facades_gmail.py, split out
-    of adapters_gmail.py per Task R7-T1 so the facade lives in its own
+    of adapters_gmail.py so the facade lives in its own
     scanned module, with no adapter and no credential in it.
     """
     return OperationContract(
@@ -292,7 +291,7 @@ def _gmail_filter_create_contract() -> OperationContract:
     introduces a PERSISTENT BINDING (copy_run_proof's durability_checks
     gating): a created filter is a standing rule that keeps acting on every
     future matching message, not a one-shot edit on existing data — hence
-    risk_class="standing_automation" (F-29's non-graduating-recovery-floor
+    risk_class="standing_automation" (the non-graduating-recovery-floor
     class), distinct from the per-message ops above."""
     return OperationContract(
         op_kind="gmail.filter.create",
@@ -315,7 +314,7 @@ OPERATION_CONTRACTS: dict = {
     "add_note": _status_contract("add_note", "Note"),
     "set_priority": _status_contract("set_priority", "Priority"),
     "delete_record": _delete_record_contract(),
-    # Task 7 — reference verb-shaped adapter (external-write-gate-generalization).
+    # Reference verb-shaped adapter.
     "gmail.message.trash": _gmail_message_contract(
         "gmail.message.trash", risk_class="sensitive_data",
         requires_accepted_phase=True, blast_radius_cap=25),
@@ -330,8 +329,7 @@ OPERATION_CONTRACTS: dict = {
 
 
 def register_contract(contract: OperationContract) -> None:
-    """Register `contract` under its own `op_kind` (Task 10 —
-    external-write-gate-generalization; lets a capability added post-build
+    """Register `contract` under its own `op_kind` (lets a capability added post-build
     declare its op_kind's contract without hand-editing this module's
     literal ``OPERATION_CONTRACTS`` dict).
 

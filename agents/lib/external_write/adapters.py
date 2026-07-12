@@ -48,7 +48,7 @@ from external_write.adapter_registry import get_dispatch
 def _validate_receipt(op: Operation, receipt: Any) -> Optional[str]:
     """Return None if the receipt is valid for this op; return a reason string if not.
 
-    Receipt contract (minimal — Task 2 must produce conforming receipts):
+    Receipt contract (minimal — the receipt-issuing side must produce conforming receipts):
       {
         "approved_operation_digest": "<sha256-hex>",
         "expires_at": "<ISO-8601 UTC, Z suffix>"
@@ -119,7 +119,7 @@ def _parse_allowed_from_error(message: str) -> Optional[list]:
 
 
 # ---------------------------------------------------------------------------
-# T2: registered-adapter action path
+# Registered-adapter action path
 # ---------------------------------------------------------------------------
 
 def _run_adapter_operation(op: Operation, raw_client: Any, dispatch: Any,
@@ -128,8 +128,8 @@ def _run_adapter_operation(op: Operation, raw_client: Any, dispatch: Any,
     """Cap-check, then apply — the registered-adapter counterpart to the
     field-write Steps 2-4 in run_operation.
 
-    THE ORDERING GUARANTEE (F-31): `units` is `dispatch.plan(dispatch.instance,
-    op.params)`'s result, already computed ONCE by run_operation (NF3 — Step 0
+    THE ORDERING GUARANTEE: `units` is `dispatch.plan(dispatch.instance,
+    op.params)`'s result, already computed ONCE by run_operation (Step 0
     hoists that pure planning call above the gate to compute the window's
     `n_units`; see run_operation's docstring). It is counted and compared
     against the blast-radius cap BEFORE `dispatch.apply_one` is called even
@@ -140,8 +140,8 @@ def _run_adapter_operation(op: Operation, raw_client: Any, dispatch: Any,
     the caller already has the one true planned list and passes it straight
     through.
 
-    Captured dispatch, not the mutable instance (Task R7-T2 — cross-vendor-
-    ratified defense-in-depth fix): `dispatch` is an `adapter_registry.
+    Captured dispatch, not the mutable instance (a defense-in-depth
+    fix): `dispatch` is an `adapter_registry.
     AdapterDispatch` — `plan`/`apply_one`/`undo_one`/`verify_one` (and
     `provision_write_client`, if the class defines `build_write_client`) were
     captured OFF `type(adapter)` at `register_adapter` time, not read off the
@@ -155,7 +155,7 @@ def _run_adapter_operation(op: Operation, raw_client: Any, dispatch: Any,
     `adapter_registry.AdapterDispatch`'s docstring for the full threat model
     this closes.
 
-    Credential isolation (BL-1 / F-33 — the keystone): the write-capable raw
+    Credential isolation (the keystone): the write-capable raw
     client is resolved INTERNALLY, here, keyed by the registered adapter's
     CAPTURED provisioner — NOT from any caller-supplied argument and NOT by
     re-reading `instance.build_write_client` (which a capability could have
@@ -175,7 +175,7 @@ def _run_adapter_operation(op: Operation, raw_client: Any, dispatch: Any,
     adapter whose write client is handed in by its trusted caller) has
     `dispatch.provision_write_client is None`, so this falls back to
     `raw_client` (run_operation's `client` argument) used as-is — the
-    unchanged, pre-BL-1 behavior. The six seeded field op_kinds have no
+    unchanged, original behavior. The six seeded field op_kinds have no
     registered adapter at all and never reach this path (see
     adapter_registry.py's scope note; test_external_write_replay_conformance.py
     carries their byte-identical guarantee).
@@ -232,39 +232,39 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     client:  A surface client stub or real client.  Must implement:
                client.write(object_id, field, value) -> None  (raises ValueError on bad value)
                client.read(object_id, field) -> Any
-    target:  (B1-4, keyword-only) the machine-readable target signal for a gated (high-risk)
+    target:  (keyword-only) the machine-readable target signal for a gated (high-risk)
              op: LIVE_TARGET ('live') or a declared test target ('copy'/'bounded_sample'/
              'dry_run'/'native_undo'). An op on the copy-surface convention is an implicit copy
              target. A declared test target is honored ONLY when the op targets a recognized
              test/copy surface (is_test_surface); a test-target claim on a live surface is
              refused (I1). For a gated op an ABSENT target fails safe to refuse. Ignored for the
              ungated seeded status ops (read_only_local / reversible_external): the gate is a
-             no-op for them and their behavior is byte-identical to pre-B1-4.
-    descriptor_set: (B1-4) the accepted-descriptor set (B1-2 shape). None => loaded fail-safe
-             from disk (absent until B2 => nothing accepted => live refused).
-    cap_ledger: (B1-4) the InvocationLedger enforcing the deterministic blast-radius cap on
-             live irreversible ops. Absent on a live irreversible op => fail-safe refuse. NF3:
-             the SAME ledger's window is now bounded in UNITS across its lifetime (not
+             no-op for them and their behavior is byte-identical to the ungated path.
+    descriptor_set: the accepted-descriptor set (contracts.py's descriptor-registry shape). None => loaded fail-safe
+             from disk (absent => nothing accepted => live refused).
+    cap_ledger: the InvocationLedger enforcing the deterministic blast-radius cap on
+             live irreversible ops. Absent on a live irreversible op => fail-safe refuse.
+             The SAME ledger's window is bounded in UNITS across its lifetime (not
              invocation count) — see n_units below.
-    clock:   (B1-4/F-22) a no-arg callable returning a UTC datetime; every date this code writes
+    clock:   a no-arg callable returning a UTC datetime; every date this code writes
              comes from it. Defaults to the system clock; injected only for deterministic tests.
 
-    n_units / plan-once (NF3 — external-write-gate-generalization): when op.op_kind has a
+    n_units / plan-once: when op.op_kind has a
              registered adapter AND target is not 'dry_run', this function resolves its CAPTURED
              dispatch (adapter_registry.get_dispatch — see AdapterDispatch's docstring for why
-             this is captured off the class rather than the mutable instance, Task R7-T2) and
+             this is captured off the class rather than the mutable instance) and
              calls `dispatch.plan(dispatch.instance, op.params)` ONCE, before Step 0's gate —
              plan() is contractually PURE
              (no reads/writes; see the Adapter protocol docstring), so hoisting it above the gate
              does not touch the surface and does not weaken "the gate refuses before any write."
              The resulting `len(units)` is passed into evaluate_write_gate as n_units, so the
              shared InvocationLedger's aggregate window is consumed in UNITS, not in one slot per
-             invocation regardless of fan-out (the F-31 gap this closes — see write_gate.py's
+             invocation regardless of fan-out (the fan-out gap this closes — see write_gate.py's
              _enforce_live_funnel). The SAME already-planned `units` list is then passed
              straight into _run_adapter_operation, which does NOT call plan() again (avoiding a
              redundant, if harmless, second pure call). An op_kind with no registered adapter
              plans nothing and uses n_units=1, exactly like the legacy field-write path.
-             `dry_run` is exempted from the hoist entirely (R3 fix — plan-hoist totality):
+             `dry_run` is exempted from the hoist entirely (plan-hoist totality):
              dry_run never consumes the aggregate window (it short-circuits at Step 1.5, before
              Step 1.75's adapter dispatch, and never applies a unit), so it needs no `n_units`
              and no planned `units` — n_units stays at the default of 1 (unused for this path)
@@ -278,7 +278,7 @@ def run_operation(op: Operation, receipt: Any, client: Any,
              never an uncaught exception breaking run_operation's "always returns a Result"
              contract.
 
-    Credential isolation (BL-1 / F-33): run_operation takes NO caller-supplied
+    Credential isolation: run_operation takes NO caller-supplied
              write-credential provider. When op.op_kind has a registered adapter whose CLASS
              self-provisions its own write client, the write-capable raw client is resolved
              INTERNALLY inside the adapter execution path (see _run_adapter_operation:
@@ -294,21 +294,21 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     Result with status in {'written', 'needs_operator_choice', 'refused'}.
     """
 
-    # Step -1 (NF3, R3 fix): resolve the adapter and plan ONCE, before the gate. plan() is
+    # Step -1: resolve the adapter and plan ONCE, before the gate. plan() is
     # contractually PURE (no reads/writes), so calling it here — ahead of Step 0 — does not
     # touch the surface; it exists solely to compute n_units for the gate's unit-aware window
     # (write_gate._enforce_live_funnel). None planned (no registered adapter) => n_units=1,
     # matching the legacy field-write path exactly.
     #
-    # Disclosed (Task R11-T1, F3): this hoist runs plan() BEFORE the write gate, so plan()'s
+    # Disclosed: this hoist runs plan() BEFORE the write gate, so plan()'s
     # purity is load-bearing — a plan() that performed a write would execute it before the
     # gate ever ran. That purity is an adapter-author invariant verified by operator review
     # of the trusted adapter module, NOT machine-enforced by scan.py (ADAPTER_PROFILE modules,
     # where every plan() implementation lives, are exempt from every scanner check — see
     # scan.py's "Bounds NOT covered" docstring section for the full disclosure).
     #
-    # Two fail-safe exemptions/guards added by the R3 fix (regression found in review of the
-    # NF3 change, commit 9e69837 — plan() is PURE but NOT TOTAL: seeded adapters index directly
+    # Two fail-safe exemptions/guards address a regression found in review of the
+    # plan-hoist change — plan() is PURE but NOT TOTAL: seeded adapters index directly
     # into params, e.g. `m["message_id"]`, and raise on malformed input):
     #   1. `dry_run` never plans at all. dry_run consumes no window (it short-circuits at Step
     #      1.5, below, before Step 1.75's adapter dispatch even runs) and needs no `units`, so
@@ -316,7 +316,7 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     #      even for malformed params. n_units stays at the unused default of 1 for this path.
     #   2. For every other path, a plan() failure is caught and converted into a clean refused
     #      Result rather than propagated — so a malformed-params op is a fail-safe refusal
-    #      everywhere (an improvement over pre-NF3, where such an op crashed later, inside
+    #      everywhere (an improvement over the earlier behavior, where such an op crashed later, inside
     #      _run_adapter_operation's now-removed second plan() call), never an uncaught exception
     #      breaking run_operation's "always returns a Result" contract.
     dispatch = get_dispatch(op.op_kind)
@@ -325,7 +325,7 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     if dispatch is not None and target != "dry_run":
         try:
             _planned_units = dispatch.plan(dispatch.instance, op.params)
-            # F4 (gpt ratification): plan() is contractually a List[EffectUnit],
+            # plan() is contractually a List[EffectUnit],
             # but nothing upstream enforces that at the type level. Validate the
             # shape INSIDE this guard — a plan() returning None (or any other
             # non-list, e.g. a string, which is itself len()-able and iterable
@@ -350,7 +350,7 @@ def run_operation(op: Operation, receipt: Any, client: Any,
             )
         n_units = len(_planned_units)
 
-    # Step 0 (B1-4): the deterministic pre-write gate — the single chokepoint's fail-safe heart.
+    # Step 0: the deterministic pre-write gate — the single chokepoint's fail-safe heart.
     # Runs BEFORE receipt validation and before anything touches the surface. A no-op for the
     # ungated seeded status ops; refuses fail-safe for every missing input on a gated op.
     decision = evaluate_write_gate(
@@ -365,34 +365,34 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     if reason:
         return Result(status="refused", detail={"reason": reason})
 
-    # Step 1.5 (T2): dry_run no-mutation guarantee. The gate (Step 0) permits `dry_run`
-    # UNCONDITIONALLY (T1) precisely because THIS adapter guarantees it never reaches
+    # Step 1.5: dry_run no-mutation guarantee. The gate (Step 0) permits `dry_run`
+    # UNCONDITIONALLY precisely because THIS adapter guarantees it never reaches
     # client.write (the sole external-write site, below) — nor the client.read read-back,
     # nor post-write verification. A dry_run is a preview of whether the REAL write would
     # be permitted: the gate and receipt validation above still run in full, in order, so
     # a dry_run of a would-be-refused op still reports refused (fail-safe overriding).
     # Once both pass, report the write that WOULD happen without ever performing it.
-    # Reuses status="written" (see adapters test module / write_gate T1 tests, which
+    # Reuses status="written" (see the adapters and write_gate test modules, which
     # already assert status=="written" for dry_run) with an unambiguous dry_run=True
     # detail marker — no consumer of Result.status distinguishes a real write from this.
     if target == "dry_run":
         detail: dict = {"dry_run": True, "simulated_value": op.new_value}
         return Result(status="written", detail=detail)
 
-    # Step 1.75 (T2): registered-adapter action path. When op.op_kind has a
+    # Step 1.75: registered-adapter action path. When op.op_kind has a
     # registered Adapter (adapter_registry.py), dispatch to it INSTEAD of the
     # field-write path below: plan the effect units, refuse before any write if the
-    # planned count exceeds the blast-radius cap (the F-31 fix — a single Operation
+    # planned count exceeds the blast-radius cap (a single Operation
     # carrying many targets can no longer slip past the cap by counting as one
     # invocation), then apply each unit in turn. An op_kind with NO registered
-    # adapter falls straight through to the unchanged field-write path. Task 8
-    # evaluated migrating the six seeded field op_kinds onto this registry and
+    # adapter falls straight through to the unchanged field-write path. A prior
+    # evaluation considered migrating the six seeded field op_kinds onto this registry and
     # decided against it (see adapter_registry.py's module docstring for the
     # full reasoning) — they stay on this fallback path indefinitely; the
     # backward-compatibility guarantee is proven by
     # test_external_write_replay_conformance.py instead.
     #
-    # NF3: `dispatch` and `_planned_units` were already resolved/planned once above (Step -1),
+    # `dispatch` and `_planned_units` were already resolved/planned once above (Step -1),
     # ahead of the gate, so the cap-check + apply step here reuses that SAME planned list
     # rather than calling plan() a second time.
     if dispatch is not None:
@@ -430,9 +430,9 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     # When a caller supplies a postwrite-verification-v1 record, the success claim
     # is bounded by the record's mode and rejected on declared-dependency overlap.
     # Back-compat: no record -> the read-back-confirmed write is reported as before.
-    # The gate's audit record (e.g. the F-22 clock-stamped irreversibility acknowledgement) is
+    # The gate's audit record (e.g. the clock-stamped irreversibility acknowledgement) is
     # merged into the success detail; it is None for the ungated status ops, so their written
-    # Result stays byte-identical (detail=None) to pre-B1-4.
+    # Result stays byte-identical (detail=None) to the ungated path.
     if postwrite_verification is None:
         return Result(status="written",
                       detail=dict(_gate_audit) if _gate_audit else None)

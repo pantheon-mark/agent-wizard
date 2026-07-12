@@ -1,4 +1,4 @@
-"""B2-T3 — the acceptance ceremony: the SOLE deterministic writer of ``accepted: true`` in
+"""The acceptance ceremony: the SOLE deterministic writer of ``accepted: true`` in
 ``security/capability_descriptors.json``.
 
 The runtime ``write_gate`` authorizes a LIVE external write only for a descriptor whose
@@ -45,23 +45,23 @@ ceremony flips exactly that descriptor's ``accepted`` to ``true`` IFF every inva
      the target descriptor's id (== ``capability_id``). Without this the proof↔capability join
      sits at RISK-CLASS altitude: a valid proof for a DIFFERENT same-op-kind / same-risk
      capability would cross-authorize. Absent / non-string / mismatched → refuse.
-  5. OPERATOR-ACCEPTANCE RECEIPT PRESENT + BOUND — the receipt B2-T6's next-phase Step-6 produces,
+  5. OPERATOR-ACCEPTANCE RECEIPT PRESENT + BOUND — the receipt the next-phase acceptance step produces,
      bound to this exact acceptance (its ``capability_id`` / ``phase_id`` / ``copy_run_proof_ref``
      match the ceremony inputs and it carries a non-empty verbatim operator confirmation). Else
      refuse.
   6. PHASE MATCH — the descriptor's owning ``phase_id`` equals the accepted ``phase_id``. Else
      refuse.
-  7. WRITE PATH IS GATED (Task 6 — F-34 wire-verification) — the ``copy_run_proof`` must declare
+  7. WRITE PATH IS GATED (wire-verification) — the ``copy_run_proof`` must declare
      ``capability_module_paths``: the capability's OWN write-affecting module files (its
      capability/proposal/read code — never the trusted adapter module itself). Each named path
      must exist as a real file, and the FULL set must scan CLEAN under the SAME deterministic
-     AST bypass scanner the build-time gate uses (``scan.scan_paths`` — Task 5's zone-aware
+     AST bypass scanner the build-time gate uses (``scan.scan_paths``'s zone-aware
      scanner), reused verbatim, not reimplemented (DRY; no parallel call-graph check). A clean
      scan is the structural proof that this capability's own code can neither reach an external
      surface directly (bypassing ``run_operation``) nor construct/obtain a write-capable
      credential — i.e., that its write path is actually gated, not merely asserted to be.
      Absent, empty, non-existent-file, or non-clean (any violation kind at all) → refuse.
-  8. NO SEAL GAP (Task 6 — F-34 CARRY fix) — ``effects_manifest._adapter_module_file`` can fail
+  8. NO SEAL GAP — ``effects_manifest._adapter_module_file`` can fail
      to resolve a registered adapter's defining module, in which case
      ``resolve_dependency_files`` / ``compute_implementation_hash`` silently EXCLUDE that
      adapter from the hashed dependency set. Because the ceremony's own Invariant-2
@@ -69,7 +69,7 @@ ceremony flips exactly that descriptor's ``accepted`` to ``true`` IFF every inva
      cannot detect this — both hashes were never covering the real writer. This invariant asks
      ``effects_manifest.unresolvable_adapter_seal_gap(op_kind)`` explicitly and refuses if it
      reports a gap, so the ceremony never mints a seal it already knows is incomplete.
-  9. DECLARED_TEST_TARGET IS THE VOCAB TOKEN, not prose (Task 6 — the D-i fix) — the target
+  9. DECLARED_TEST_TARGET IS THE VOCAB TOKEN, not prose — the target
      descriptor's ``declared_test_target`` must be exactly one of ``write_gate.TEST_TARGETS``
      (copy / bounded_sample / dry_run / native_undo). A prose description (e.g. "sample of 5
      real emails, manually reviewed") can never be programmatically matched by the write gate's
@@ -86,14 +86,14 @@ trailing newline — the SAME formatting ``render_descriptor_registry_json`` emi
 parity stays reproducible). Exactly the target entry's ``accepted`` is set; every other entry and
 every other key is left byte-identical.
 
-Forward input contract (T4/T5/T6 MUST conform — documented here because downstream tasks produce
-these inputs):
+Forward input contract (the producers below MUST conform — documented here because downstream
+steps produce these inputs):
 
   * copy_run_proof ref  — a filesystem path to a JSON file holding one ``copy_run_proof-v1``
                           artifact (``copy_run_proof.COPY_RUN_PROOF_SCHEMA``); carries the
                           ``op_kind`` + ``implementation_hash`` + ``contract_hash`` this ceremony
-                          re-verifies against the canon. B2-T4 (approved-design artifact) /
-                          B2-T6 (Step-6 acceptance) produce it. Since Task 6 it MUST also carry
+                          re-verifies against the canon. The approved-design-artifact step /
+                          the Step-6 acceptance step produce it. It MUST also carry
                           ``capability_module_paths`` — the real, on-disk paths of the
                           capability's own write-affecting modules (never the trusted adapter
                           module) — which this ceremony scans clean before minting acceptance
@@ -103,18 +103,18 @@ these inputs):
   * operator receipt    — a filesystem path to a JSON file matching
                           ``OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA`` (see ``_REQUIRED_RECEIPT_FIELDS``):
                           {schema, capability_id, phase_id, copy_run_proof_ref,
-                          operator_confirmation, accepted_at}. B2-T6's Step-6 mints it from the
+                          operator_confirmation, accepted_at}. The next-phase Step-6 mints it from the
                           real operator confirmation and passes its path here.
   * phase binding       — the descriptor set today carries no phase field
                           (``capability_descriptor_registry.ENTRY_KEYS`` has none). This ceremony
                           defines a minimal additive ``phase_id`` string key on each descriptor
                           entry (ignored by write_gate / coverage_gate, which read only their own
-                          keys). B2-T4 declares the owning phase; B2-T5's emit / add-capability
-                          cascade MUST populate ``phase_id`` on each emitted descriptor entry, or
+                          keys). The approved-design step declares the owning phase; the emit /
+                          add-capability cascade MUST populate ``phase_id`` on each emitted descriptor entry, or
                           no capability can ever be accepted (fail-safe).
 
 Emission: this module runs at OPERATOR-SIDE acceptance time (next-phase Step-6, in the operator's
-project), so it must be emitted into operator systems. B2-T9 must add it to
+project), so it must be emitted into operator systems. A later step must add it to
 ``_EXTERNAL_WRITE_LIB_FILES`` + the foundation bundle (NOT wired here — CANONICAL-ONLY).
 
 Stdlib only — no third-party dependencies.
@@ -151,7 +151,7 @@ from external_write.scan import scan_paths
 from external_write.write_gate import GATED_RISK_CLASSES, TEST_TARGETS
 
 
-# The operator-acceptance receipt schema (produced by B2-T6's next-phase Step-6).
+# The operator-acceptance receipt schema (produced by the next-phase Step-6).
 OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA = "operator_acceptance_receipt-v1"
 
 # The durable acceptance-record schema written to the audit log on a successful flip.
@@ -165,7 +165,7 @@ PHASE_ID_KEY = "phase_id"
 
 # Reserved base-descriptor id/name prefix — DUPLICATED from
 # capability_descriptor_registry.BASE_DESCRIPTOR_ID_PREFIX (external_write cannot import the
-# build-side tree — D-B1-a) and pinned equal by
+# build-side tree) and pinned equal by
 # test_external_write_acceptance_ceremony.test_base_prefix_matches_build_side, exactly as the
 # write_gate vocabulary constants are pinned. A base entry is a placeholder describing that a
 # built-in op EXISTS and is unaccepted; it is never a real acceptable capability, so the ceremony
@@ -447,10 +447,10 @@ def accept_capability_for_live_use(
             "refusing (a same-risk proof must not cross-authorize)",
             capability_id, phase_id)
 
-    # --- Invariant 7: WRITE PATH IS GATED (F-34 wire-verification) ------------------------
+    # --- Invariant 7: WRITE PATH IS GATED (wire-verification) ------------------------
     # The proof must declare the capability's OWN write-affecting module files, and the FULL
     # set must scan clean under the SAME deterministic AST bypass scanner the build-time gate
-    # runs (scan.scan_paths — Task 5's zone-aware scanner). Reused verbatim, not reimplemented
+    # runs (scan.scan_paths's zone-aware scanner). Reused verbatim, not reimplemented
     # (DRY; this is deliberately not a parallel call-graph check). Fail-safe on every branch:
     # a missing/malformed declaration, a named file that does not exist, or ANY reported
     # violation (a vendor SDK import, a direct surface-mutation call, a dynamic import, a
@@ -486,7 +486,7 @@ def accept_capability_for_live_use(
             "against the canon",
             capability_id, phase_id)
 
-    # --- Invariant 8: NO SEAL GAP (F-34 CARRY fix) -----------------------------------------
+    # --- Invariant 8: NO SEAL GAP -----------------------------------------------------------
     # A registered adapter whose defining module cannot be resolved would be silently EXCLUDED
     # from the implementation_hash (effects_manifest.resolve_dependency_files) — and because
     # the ceremony's own recomputation below would be equally blind to it, the hash-equality

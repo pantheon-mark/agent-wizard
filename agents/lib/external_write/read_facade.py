@@ -1,13 +1,12 @@
 """Read-only facade + write-credential injection seam — the KEYSTONE
-credential-isolation property (Task 4 — external-write-gate-generalization
-slice; cross-vendor round-2 finding; hardened per a code-review finding that
-live-reproduced three working bypasses of the class-definition-time-only
-guard — see "Runtime enforcement" below; hardened AGAIN per a re-review that
+credential-isolation property (hardened across several rounds of review: an
+early review live-reproduced three working bypasses of the class-definition-
+time-only guard — see "Runtime enforcement" below; a later re-review
 live-reproduced a fourth bypass, requiring no subclassing at all — see
-"Client storage" below; hardened AGAIN (R4, carried defense-in-depth finding)
-per a novel single-underscore re-stash residual and to make the docstrings
-here stop overclaiming — see "Runtime enforcement" and "Disclosed residual
-bypasses" below).
+"Client storage" below; a further hardening pass, carrying forward a
+defense-in-depth finding, closed a novel single-underscore re-stash residual
+and stopped the docstrings here from overclaiming — see "Runtime
+enforcement" and "Disclosed residual bypasses" below).
 
 The property this module exists to guarantee:
 
@@ -18,7 +17,7 @@ The property this module exists to guarantee:
 
 Two independent mechanisms implement that, and neither relies on scanning
 source text for suspicious names (that heuristic is a DIFFERENT,
-complementary mechanism — Task 5's job):
+complementary mechanism — that is scan.py's job):
 
   1. ReadFacade — a deny-by-default method allowlist, enforced BOTH at
      class-definition time and at runtime (see "Runtime enforcement"
@@ -40,7 +39,7 @@ complementary mechanism — Task 5's job):
      `self.client = read_only_client`) is invisible to `__init_subclass__`,
      which only inspects `vars(cls)` at class-definition time. So
      `ReadFacade.__getattribute__` ALSO enforces, on every attribute access
-     against every instance, a FIXED allowlist (R4 — not a blanket
+     against every instance, a FIXED allowlist (not a blanket
      underscore passthrough): dunders (`__class__`, `__weakref__`,
      `__hash__`, `__eq__`, and the rest of Python/object machinery), a
      fixed internal set (`read_methods`, `_read`), and declared
@@ -71,14 +70,14 @@ complementary mechanism — Task 5's job):
      this module's actual enforcement ceiling — build-time + operator-as-
      approver, not runtime/OS (see "Enforcement ceiling" below). Ordinary
      capability/proposal code has no reason to do either, and scan.py's
-     static rules (Task 5) are the complementary mechanism that polices
+     static rules are the complementary mechanism that polices
      source text for that kind of reach-in; this class's guarantee is that
      NORMAL attribute access — `facade.<name>` / `getattr(facade, name)` —
      cannot reach the wrapped client, not that no Python code anywhere ever
      could by deliberately reaching beneath the language's own attribute
      protocol.
 
-     (c) (R7-T1 — honesty over overclaim, corrected finding) `_read` ITSELF
+     (c) (honesty over overclaim, corrected here) `_read` ITSELF
      is reachable by ANY holder of a facade instance, not merely from inside
      a subclass's own methods: `_read` is a member of the FIXED internal
      allowlist `__getattribute__` grants (`_INTERNAL_ALLOWLIST` above), and
@@ -123,7 +122,7 @@ complementary mechanism — Task 5's job):
      an adapter self-provisions (defines `build_write_client(op)`), the adapter
      execution path calls it itself, INSIDE that path, to obtain the raw client
      passed to `adapter.apply_one(raw_client, unit)`. `run_operation` takes NO
-     caller-supplied provider (BL-1 / F-33): capability/proposal code that
+     caller-supplied provider: capability/proposal code that
      builds an Operation and holds a ReadFacade cannot even NAME a credential
      provider (enforced deterministically by scan.py's
      credential_provider_reference rule), let alone pass one in or see the
@@ -135,10 +134,10 @@ op_kind with no declared read-only scope is refused fail-closed
 (ReadFacadeEligibilityError) — build-time refusal, never a silent
 downgrade to "read facade not required here".
 
-T4/T7 boundary: the concrete Gmail read facade + real OAuth scopes
-(gmail.readonly vs gmail.modify) are Task 7. This module is generic and is
-proven against a fixture read-only client + a fixture write-credential
-provider — never against Gmail specifics.
+Scope boundary: the concrete Gmail read facade + real OAuth scopes
+(gmail.readonly vs gmail.modify) live in the Gmail adapter module. This
+module is generic and is proven against a fixture read-only client + a
+fixture write-credential provider — never against Gmail specifics.
 
 Enforcement ceiling: build-time + operator-as-approver, NOT a runtime/OS
 guarantee (same ceiling as proof_hash.py / contracts.py / effects_manifest.py).
@@ -164,7 +163,7 @@ _FORBIDDEN_ACCESS_HOOKS = ("__getattr__", "__getattribute__", "__setattr__")
 # "Client storage" in the module docstring.
 _WRAPPED_CLIENTS: "weakref.WeakKeyDictionary[ReadFacade, Any]" = weakref.WeakKeyDictionary()
 
-# The FIXED internal allowlist for ReadFacade.__getattribute__ (R4): names
+# The FIXED internal allowlist for ReadFacade.__getattribute__: names
 # other than dunders and declared read_methods entries that legitimately
 # need to be reachable via `self.<name>` from inside a ReadFacade subclass's
 # own methods. `read_methods` is the class-level declaration tuple itself;
@@ -207,7 +206,7 @@ class ReadFacade:
     That class-definition-time check alone is not sufficient — instance
     state set in an overridden `__init__` is invisible to it. So this class
     ALSO enforces a FIXED allowlist at runtime, on every instance, via
-    `__getattribute__` (R4: not a blanket underscore passthrough — only
+    `__getattribute__` (not a blanket underscore passthrough — only
     dunders, a fixed internal set {`read_methods`, `_read`}, and a declared
     `read_methods` name are reachable from outside; a NOVEL
     single-underscore instance attribute, however it got set, is denied)
@@ -238,7 +237,7 @@ class ReadFacade:
     seam (mechanism 2 in the module docstring), not by anything in this
     class.
 
-    Disclosed (R7-T1, honesty over overclaim): `_read` is reachable by ANY
+    Disclosed (honesty over overclaim): `_read` is reachable by ANY
     holder of a facade instance, not only from a subclass's own methods —
     see the module docstring's "Disclosed residual bypasses" item (c) and
     `_read`'s own docstring below. A holder can call `facade._read(name,
@@ -319,7 +318,7 @@ class ReadFacade:
         _WRAPPED_CLIENTS[self] = read_only_client
 
     def __getattribute__(self, name: str) -> Any:
-        # R4: a FIXED allowlist, not a blanket underscore passthrough —
+        # A FIXED allowlist, not a blanket underscore passthrough —
         # dunders (object/Python machinery: __class__, __weakref__,
         # __hash__, __eq__, ...), the fixed internal set {read_methods,
         # _read}, and declared read_methods names. Any OTHER name —
@@ -345,7 +344,7 @@ class ReadFacade:
         )
 
     def __setattr__(self, name: str, value: Any) -> None:
-        # R4: symmetric tightening — dunder slot machinery aside, nothing
+        # Symmetric tightening — dunder slot machinery aside, nothing
         # in ReadFacade legitimately sets an instance attribute at all
         # (__init__ stores the wrapped client in the module-private
         # _WRAPPED_CLIENTS, never as `self.<anything>`). So every non-dunder
@@ -372,7 +371,7 @@ class ReadFacade:
         module-private `_WRAPPED_CLIENTS` store — see __init__ — never via a
         `self.<something>` instance attribute.
 
-        Disclosed (R7-T1, honesty over overclaim — do not remove this
+        Disclosed (honesty over overclaim — do not remove this
         paragraph without re-reading the module docstring's "Disclosed
         residual bypasses" item (c)): `_read` is reachable by ANY holder of
         this facade instance, not only from within a subclass's own
@@ -399,8 +398,7 @@ class ReadFacade:
 
 
 # ---------------------------------------------------------------------------
-# Kernel ReadFacade registry (Task R7-T1 — external-write-gate-generalization
-# slice; the cross-vendor-ratified fix for the architectural hole where
+# Kernel ReadFacade registry — the fix for the architectural hole where
 # capability-zone code had to import its ReadFacade subclass from the same
 # adapter module that holds `build_write_client`, and could reach/monkey-
 # patch the mutable adapter obtained via `get_adapter`). Removing capability's
@@ -497,7 +495,7 @@ def build_read_facade(op_kind: str, read_only_client: Any,
     declared read_only_scope is refused (ReadFacadeEligibilityError) before
     any registry resolution is even attempted.
 
-    CAPABILITY-facing call shape (Task R7-T1): `build_read_facade(op_kind,
+    CAPABILITY-facing call shape: `build_read_facade(op_kind,
     read_only_client)` — the subclass is resolved FROM THE KERNEL REGISTRY
     (`_READ_FACADE_REGISTRY`, populated by `register_read_facade` at import
     time — see the registry section above) keyed by `op_kind`. If no facade
@@ -518,7 +516,7 @@ def build_read_facade(op_kind: str, read_only_client: Any,
 
     `read_only_client` must already be scoped read-only by its caller (the
     real vendor-specific scoping — e.g. requesting gmail.readonly rather
-    than gmail.modify — is Task 7's concern; this function only enforces
+    than gmail.modify — is the concrete adapter's concern; this function only enforces
     that a scope was DECLARED, it cannot verify the client object it is
     handed actually holds a read-only-scoped credential).
     """

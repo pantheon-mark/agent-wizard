@@ -1,11 +1,10 @@
-"""Per-`op_kind` effects manifest — the hash-bound authority (Task 3 —
-external-write-gate-generalization slice; closes dogfood finding F-34).
+"""Per-`op_kind` effects manifest — the hash-bound authority.
 
-F-34: `proof_hash.compute_implementation_hash` used to hash a FIXED module
+Previously, `proof_hash.compute_implementation_hash` hashed only a FIXED module
 tuple (`contracts._WRITE_AFFECTING_MODULES` — `adapters.py`, `broker.py`,
 `operations.py`, `verifiers.py`). That tuple is the shared plumbing every
 op_kind runs through, but it structurally EXCLUDES a capability's own
-registered adapter module (`adapter_registry.get_adapter(op_kind)` — Task 2).
+registered adapter module (`adapter_registry.get_adapter(op_kind)`).
 An adapter could be edited in place and the accepted-write identity would not
 change: exactly the in-place-edit hole the whole proof-hash mechanism exists to
 close.
@@ -19,10 +18,10 @@ contract-declared set, so a byte changed in a capability's own adapter module
 changes that capability's `implementation_hash` and drops it off the accepted
 list.
 
-Ambiguity note (T3/T7 boundary): the real Gmail verb adapter is Task 7 and
-does not exist yet. This module and its tests are generic — proven against a
+Scope note: this module and its tests are generic — proven against a
 throwaway fixture adapter (`wizard/test_fixtures/effects_manifest/
-fixture_adapter.py`), never against Gmail specifics.
+fixture_adapter.py`), never against Gmail specifics; the real Gmail verb
+adapter lives elsewhere.
 
 Enforcement ceiling: build-time + operator-as-approver, NOT a runtime/OS
 guarantee (same ceiling as proof_hash.py and contracts.py).
@@ -81,7 +80,7 @@ def resolve_dependency_files(op_kind: str) -> Tuple[str, ...]:
     contract's declared `dependency_set` (bare filenames, resolved against a
     `lib_dir` root at hash time — unchanged, backward-compatible behavior)
     UNION the absolute path of `op_kind`'s registered adapter module, if any
-    (the F-34 fix). Fail-closed on an unregistered op_kind.
+    (closing the in-place-edit hole above). Fail-closed on an unregistered op_kind.
     """
     c = get_contract(op_kind)
     if c is None:
@@ -98,7 +97,7 @@ def resolve_dependency_files(op_kind: str) -> Tuple[str, ...]:
 
 
 def unresolvable_adapter_seal_gap(op_kind: str) -> Optional[str]:
-    """Fail-closed guard for a caller (the acceptance ceremony -- Task 6) that
+    """Fail-closed guard for a caller (the acceptance ceremony) that
     must REFUSE rather than mint a trust seal it knows does not cover the
     real writer.
 
@@ -110,7 +109,7 @@ def unresolvable_adapter_seal_gap(op_kind: str) -> Optional[str]:
     from the hashed dependency set (see `_adapter_module_file`'s own
     docstring: "treated as this adapter contributes no additional
     dependency file, not a build failure"). That is the correct call for a
-    structural Protocol stub used in a unit test, but it is exactly the F-34
+    structural Protocol stub used in a unit test, but it is exactly the
     hole at the TRUST surface: a proof's stored `implementation_hash` and the
     ceremony's own freshly recomputed one would AGREE with each other while
     both are blind to the adapter's bytes, so hash-equality checking alone
@@ -133,7 +132,7 @@ def unresolvable_adapter_seal_gap(op_kind: str) -> Optional[str]:
         f"({type(adapter).__module__}.{type(adapter).__qualname__}) whose "
         "defining module's source file could not be resolved -- "
         "implementation_hash would silently EXCLUDE this adapter from the "
-        "tamper-seal (F-34); refusing rather than accepting a seal that "
+        "tamper-seal; refusing rather than accepting a seal that "
         "does not cover the real writer"
     )
 

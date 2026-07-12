@@ -1,4 +1,4 @@
-"""B2-T5 — the operate-time capability-REGISTRATION helper: the deterministic writer the
+"""The operate-time capability-REGISTRATION helper: the deterministic writer the
 add-capability cascade invokes to land a newly-DECLARED (never accepted) capability descriptor in
 ``security/capability_descriptors.json`` AND, in the SAME fail-safe operation, regenerate the
 QA-visible ``quality/co-protected-workflows.md`` table.
@@ -21,7 +21,7 @@ Fail-safe / fail-closed properties (every branch defaults to refuse + write noth
     ceremony is the SOLE writer of that field); an accepted:true input is refused;
   * the id must be free-form and unique, never the reserved ``__builtin__:`` base sentinel;
   * an absent / out-of-vocabulary ``risk_class`` is resolved FAIL-SAFE to the most-protected class
-    (never silently treated as safe — F-28), so an unclassified writer lands GATED and
+    (never silently treated as safe), so an unclassified writer lands GATED and
     co-protected-registered, not invisible;
   * for a GATED capability the co-protected table MUST be present and locatable; if it is not, the
     descriptor is not landed;
@@ -37,7 +37,7 @@ Fail-safe / fail-closed properties (every branch defaults to refuse + write noth
   * if the descriptor-set write fails AFTER the co-protected write, the co-protected table is
     rolled back to its exact prior text — the pair is all-or-nothing.
 
-Boundary discipline (D-B1-a): this module lives in the external_write package (emitted into the
+Boundary discipline: this module lives in the external_write package (emitted into the
 operator system) and MUST NOT import the build-side tree. The few build-side constants it needs
 (the descriptor-entry key order, the reserved base prefix, the protection-note prose, the
 protection-requiring risk-class set) are DUPLICATED here and pinned equal to their build-side
@@ -76,7 +76,7 @@ from external_write.write_gate import (
 DEFAULT_CO_PROTECTED_PATH = "quality/co-protected-workflows.md"
 
 # The descriptor-entry key order — DUPLICATED from capability_descriptor_registry.ENTRY_KEYS
-# (build-side; not importable here — D-B1-a) and pinned equal by
+# (build-side; not importable here) and pinned equal by
 # test_external_write_capability_registration.DriftPinTest. A landed entry carries EXACTLY these
 # keys, in this order, so the on-disk descriptor set stays a single uniform shape whether an entry
 # came from the build-time producer or from this operate-time helper.
@@ -86,7 +86,7 @@ REGISTERED_ENTRY_KEYS = (
 )
 
 # Reserved base-descriptor id/name prefix — DUPLICATED from
-# capability_descriptor_registry.BASE_DESCRIPTOR_ID_PREFIX (D-B1-a) and pinned equal by test. A
+# capability_descriptor_registry.BASE_DESCRIPTOR_ID_PREFIX (not importable here) and pinned equal by test. A
 # base entry is a placeholder describing that a built-in op EXISTS and is unaccepted; it is never a
 # real declarable capability, and it never appears as a QA-matchable co-protected row.
 BASE_DESCRIPTOR_ID_PREFIX = "__builtin__:"
@@ -103,7 +103,7 @@ CO_PROTECTED_RISK_CLASSES = GATED_RISK_CLASSES
 CO_PROTECTED_TABLE_HEADER = "| Capability | Action class | Risk class | What's protected |"
 
 # The per-risk-class "What's protected" prose — DUPLICATED verbatim from
-# co_protected_workflows._PROTECTION_NOTE / STANDING_AUTOMATION_FLOOR_NOTE (D-B1-a) and pinned
+# co_protected_workflows._PROTECTION_NOTE / STANDING_AUTOMATION_FLOOR_NOTE (not importable here) and pinned
 # equal by test, so an operate-time-registered row reads identically to a build-time-projected one.
 STANDING_AUTOMATION_FLOOR_NOTE = (
     "Runs on a recurring or unattended basis (a server-side filter, rule, or scheduled job), not "
@@ -157,7 +157,7 @@ def _resolve_risk_class(value: Any) -> str:
     """Fail-safe risk-class resolution (mirrors dependency_projection.resolve_risk_class /
     write_gate._effective_risk_class): a present, in-vocabulary value is honored (including
     read_only_local); anything absent/None/out-of-vocabulary resolves to the MOST-protected class
-    (never silently to read_only_local — F-28)."""
+    (never silently to read_only_local)."""
     if isinstance(value, str) and value in RISK_CLASSES:
         return value
     return FAIL_SAFE_RISK_CLASS

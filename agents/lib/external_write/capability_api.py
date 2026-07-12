@@ -1,6 +1,5 @@
-"""Curated capability-facing import surface for `external_write` (Task
-R7-T1 — external-write-gate-generalization slice; kernel ReadFacade registry
-generalization).
+"""Curated capability-facing import surface for `external_write` (part of
+the kernel ReadFacade registry generalization).
 
 This is the ONLY `external_write` module (besides `operations`, which is
 pure data — Operation/EffectUnit — and carries nothing credential-reachable
@@ -17,9 +16,12 @@ EXACTLY the two capability-facing entrypoints and NOTHING else:
                         subclass from its own registry; see read_facade.py).
 
 It deliberately does NOT re-export:
-  * `get_adapter` / the adapter registry (`adapter_registry.py`) — the
-    mutable Adapter instance a capability could otherwise reach and
-    monkey-patch.
+  * `get_adapter` / `get_dispatch` / `AdapterDispatch` / the adapter registry
+    (`adapter_registry.py`) — the mutable Adapter instance (or its captured
+    dispatch record) a capability could otherwise reach and monkey-patch.
+    These names are already banned in the CAPABILITY zone by scan.py's
+    `adapter_registry_reference` rule; listed here too so this module's own
+    non-reachability surface is self-documenting.
   * Any Adapter class or ADAPTER_PROFILE module (e.g. `adapters_gmail.py`).
   * `register_read_facade` / `_READ_FACADE_REGISTRY` — registration is a
     module-import-time, kernel/facade-module concern, not something
@@ -29,11 +31,11 @@ It deliberately does NOT re-export:
     capability importing ONLY from here has no path to a write credential,
     by construction of what this file contains, not by convention.
 
-Why this module exists (the hole it closes): prior to Task R7, capability
+Why this module exists (the hole it closes): previously, capability
 code reached its `ReadFacade` subclass by importing it directly from the
 same ADAPTER_PROFILE module that defined `build_write_client` (e.g.
-`from external_write.adapters_gmail import GmailReadFacade`) — a
-cross-vendor-ratified architectural hole, because that import gave
+`from external_write.adapters_gmail import GmailReadFacade`) — an
+architectural hole, because that import gave
 capability code a reason to be in the SAME module namespace as write-capable
 adapter code, and nothing stopped it from also importing (or reaching, via
 `get_adapter`) the mutable adapter object itself. This module removes that

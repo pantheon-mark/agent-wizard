@@ -1,7 +1,7 @@
-"""Static per-op_kind adapter registry (Task 2 — external-write-gate-generalization).
+"""Static per-op_kind adapter registry.
 
-`run_operation` (adapters.py) is the single external-write chokepoint. Prior to this
-task it knew exactly one write shape: a spreadsheet-style field write
+`run_operation` (adapters.py) is the single external-write chokepoint. Originally
+it knew exactly one write shape: a spreadsheet-style field write
 (client.write(object_id, field, value)). This module lets a named op_kind declare a
 richer, verb-shaped write instead — a registered Adapter that plans a list of
 discrete EffectUnits (operations.py) and applies them one at a time.
@@ -12,22 +12,21 @@ scope). It performs NO validation of op_kind against contracts.py — that join
 happens in adapters.py, which resolves the op's contract/risk-class/cap independently
 of whether an adapter is registered.
 
-Scope note (T2/T8 boundary, resolved): Task 2 deliberately did NOT migrate the
+Scope note (resolved): this registry deliberately does NOT include the
 six seeded field op_kinds (set_status, complete_tasks, update_due_date,
-add_note, set_priority, delete_record) onto this registry, leaving that
-decision plus replay-conformance to Task 8.
+add_note, set_priority, delete_record).
 
-Task 8 evaluated registering those six op_kinds as a single "field adapter"
-and DECIDED AGAINST IT: `_run_adapter_operation` (adapters.py) — the
-registered-adapter execution path — does not perform the field-write path's
-Steps 2-4 (native-API fail-fast ValueError -> needs_operator_choice,
+A later evaluation considered registering those six op_kinds as a single
+"field adapter" and DECIDED AGAINST IT: `_run_adapter_operation` (adapters.py)
+— the registered-adapter execution path — does not perform the field-write
+path's Steps 2-4 (native-API fail-fast ValueError -> needs_operator_choice,
 read-back verification, postwrite_verification/Clause A handling). Those are
 cross-cutting over the whole Operation, not per-EffectUnit, so folding the six
 field op_kinds into this registry would require either duplicating that logic
 inside apply_one (violating the "apply_one performs exactly one mutation"
 protocol above) or generalizing run_operation's adapter-dispatch path itself —
 a change touching every registered adapter, including the Gmail reference
-adapter (Task 7), for zero behavioral benefit given the existing fallback
+adapter, for zero behavioral benefit given the existing fallback
 already passes every field-op test. See
 test_external_write_replay_conformance.py for the resulting backward-
 compatibility guarantee (golden v1-field digests + full-pipeline replay for
@@ -36,7 +35,7 @@ TestFieldOpKindsUseUnregisteredFallbackPath, which fails loudly if a future
 change registers one of these op_kinds without redoing this analysis.
 
 The registry therefore stays empty for every seeded field op_kind
-indefinitely (not just "until Task 8"), and run_operation's field-write path
+indefinitely, and run_operation's field-write path
 (unchanged) continues to handle them exactly as before.
 
 Stdlib only — no third-party dependencies.
@@ -60,16 +59,16 @@ class Adapter(Protocol):
                  ordering guarantee.
     apply_one  — perform exactly ONE EffectUnit's mutation against raw_client.
                  Adapters must not fan out inside apply_one (one call = one
-                 mutation) — enforcing that per-adapter is a later task; T2 only
-                 counts units from plan().
+                 mutation) — enforcing that per-adapter is a later concern; this
+                 registry only counts units from plan().
     undo_one   — reverse exactly one previously-applied EffectUnit, if the unit is
-                 reversible (undo_ref is not None). Not invoked by T2's dispatch
-                 path; reserved for a later rollback/undo task.
+                 reversible (undo_ref is not None). Not invoked by this
+                 module's dispatch path; reserved for a later rollback/undo task.
     verify_one — verify exactly one applied EffectUnit landed as intended. Not
-                 invoked by T2's dispatch path; reserved for a later verification
-                 task.
+                 invoked by this module's dispatch path; reserved for a later
+                 verification task.
 
-    build_write_client (OPTIONAL — BL-1 / F-33 credential-isolation keystone) —
+    build_write_client (OPTIONAL — the credential-isolation keystone) —
                  an adapter MAY additionally define
                  ``build_write_client(self, op) -> raw_write_client``: the ONE
                  place this op_kind's write-capable credential/client is
@@ -122,7 +121,7 @@ _REGISTRY: Dict[str, Adapter] = {}
 @dataclass(frozen=True)
 class AdapterDispatch:
     """A frozen, CLASS-BOUND dispatch record captured once, at registration
-    time (Task R7-T2 — cross-vendor-ratified defense-in-depth fix).
+    time (a defense-in-depth fix).
 
     Why this exists: `run_operation` (adapters.py) used to call the
     registered adapter's INSTANCE methods directly (`adapter.plan(...)`,
@@ -159,7 +158,7 @@ class AdapterDispatch:
     provision_write_client:
                `getattr(type(adapter), "build_write_client", None)` —
                auto-captured so an adapter that self-provisions its own
-               write client (BL-1 / F-33) keeps working with NO emitter
+               write client keeps working with NO emitter
                change; None if the class does not define the method (the
                back-compat fallback path in adapters.py then uses
                run_operation's own `client` argument, unchanged). Deliberately
@@ -195,7 +194,7 @@ def register_adapter(op_kind: str, adapter: Adapter) -> None:
     op_kind overwrites the prior entry (last-registered wins) — callers own
     ordering; this function does not raise on a duplicate op_kind.
 
-    Call signature is UNCHANGED from before Task R7-T2 — callers (e.g.
+    Call signature is UNCHANGED from before this hardening — callers (e.g.
     adapters_gmail.py's module-scope `register_adapter(OP_KIND, Adapter())`
     calls) need no update. In addition to the existing instance registration,
     this now also captures an AdapterDispatch record OFF `type(adapter)` (see
@@ -221,7 +220,7 @@ def get_adapter(op_kind: str) -> Optional[Adapter]:
     the registry itself makes no claim about whether an unregistered op_kind is
     valid; that is contracts.py's concern.
 
-    Unchanged by Task R7-T2 (kept for back-compat with callers that only need
+    Unchanged by this hardening (kept for back-compat with callers that only need
     the instance for module-resolution purposes, e.g. effects_manifest.py's
     `_adapter_module_file`/`_adapter_effect_unit_path`, which read
     `type(adapter).__module__` — those never invoke a method on the instance
