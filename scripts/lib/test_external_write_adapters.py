@@ -918,5 +918,299 @@ class TestPlanHoistTotality(unittest.TestCase):
                          "to the aggregate window")
 
 
+# ---------------------------------------------------------------------------
+# R7-T2 — captured dispatch is monkey-patch-inert (cross-vendor-ratified
+# defense-in-depth fix). Cross-vendor ratification found: capability code
+# could do `a = get_adapter(op.op_kind); a.apply_one = thief;
+# run_operation(op, forged_receipt, None, target="copy")` and the kernel
+# would provision the REAL write client and hand it to the hijacked
+# `apply_one`, because run_operation used to call the adapter's MUTABLE
+# INSTANCE method. These tests prove that is no longer possible: the thief
+# is never invoked, and the write-capable client is never leaked to it.
+# ---------------------------------------------------------------------------
+
+class _WriteCapableRecorder:
+    """The real write-capable object -- only ever reachable via the
+    registered adapter's OWN (captured, class-bound) apply_one/
+    build_write_client. If a thief ever got hold of this, that would BE the
+    security failure these tests exist to rule out."""
+
+    def __init__(self):
+        self.recorded = []
+
+    def record(self, unit):
+        self.recorded.append(unit)
+
+
+class _RaisingCapabilitySideClient2:
+    """Stands in for whatever object capability/proposal-side code passes as
+    run_operation's `client` argument. Raises if ever used -- proves the
+    self-provisioning adapter path never falls back to it."""
+
+    def record(self, unit):
+        raise AssertionError(
+            "the capability-side client argument must never be used when "
+            "the adapter's CLASS self-provisions its own write client")
+
+
+class _MonkeyPatchableAdapter:
+    """A self-provisioning adapter (defines build_write_client on its CLASS)
+    used to prove that reassigning apply_one / build_write_client as an
+    INSTANCE attribute AFTER registration is inert against run_operation --
+    the captured class-bound dispatch runs instead, every time."""
+
+    def __init__(self, write_capable):
+        self._write_capable = write_capable
+        self.real_apply_calls = []
+        self.real_build_calls = []
+
+    def plan(self, params):
+        return [EffectUnit(unit_id="u1", target_ref=params)]
+
+    def apply_one(self, raw_client, unit):
+        self.real_apply_calls.append(raw_client)
+        raw_client.record(unit)
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, raw_client, unit):
+        return True
+
+    def build_write_client(self, op):
+        self.real_build_calls.append(op)
+        return self._write_capable
+
+
+class TestCapturedDispatchMonkeyPatchIsInert(unittest.TestCase):
+
+    OP_KIND = "_monkey_patch_dispatch_probe"
+
+    def setUp(self):
+        contracts_mod.OPERATION_CONTRACTS[self.OP_KIND] = OperationContract(
+            op_kind=self.OP_KIND,
+            writes=("Status",),
+            produces=(),
+            dependency_set=(),
+            verifier_set=(),
+            introduces_persistent_binding=False,
+            risk_class="reversible_external",  # ungated -- isolates the dispatch mechanism
+        )
+
+    def tearDown(self):
+        contracts_mod.OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+        unregister_adapter(self.OP_KIND)
+
+    def _op(self, batch_id):
+        return Operation(
+            surface="fixture_surface",
+            op_kind=self.OP_KIND,
+            batch_id=batch_id,
+            params={"target": "x"},
+        )
+
+    def test_instance_apply_one_reassignment_does_not_hijack_run_operation(self):
+        write_capable = _WriteCapableRecorder()
+        adapter = _MonkeyPatchableAdapter(write_capable)
+        register_adapter(self.OP_KIND, adapter)
+
+        stolen = {"called": False, "client": None}
+
+        def _thief_apply_one(raw_client, unit):
+            stolen["called"] = True
+            stolen["client"] = raw_client
+            raise AssertionError("the hijacked apply_one must never be invoked")
+
+        # This is exactly the exploit shape the cross-vendor ratification found:
+        # obtain a reference to the registered adapter instance, then reassign
+        # one of its methods, THEN drive run_operation.
+        adapter.apply_one = _thief_apply_one
+
+        op = self._op("mp-apply-1")
+        result = run_operation(op, _receipt(op), _RaisingCapabilitySideClient2())
+
+        self.assertEqual(result.status, "written")
+        self.assertFalse(stolen["called"],
+                         "the reassigned instance apply_one (thief) must NEVER be called")
+        self.assertIsNone(stolen["client"],
+                          "the write-capable client must never reach the thief")
+        # The REAL (captured, class-bound) apply_one ran instead, against the
+        # REAL write-capable client -- not the capability-side client, and not
+        # anything the thief ever saw.
+        self.assertEqual(len(adapter.real_apply_calls), 1)
+        self.assertIs(adapter.real_apply_calls[0], write_capable)
+        self.assertEqual(len(write_capable.recorded), 1)
+
+    def test_instance_build_write_client_reassignment_does_not_hijack_run_operation(self):
+        real_write_capable = _WriteCapableRecorder()
+        thief_write_capable = _WriteCapableRecorder()
+        adapter = _MonkeyPatchableAdapter(real_write_capable)
+        register_adapter(self.OP_KIND, adapter)
+
+        thief_calls = []
+
+        def _thief_build_write_client(op):
+            thief_calls.append(op)
+            return thief_write_capable
+
+        adapter.build_write_client = _thief_build_write_client
+
+        op = self._op("mp-build-1")
+        result = run_operation(op, _receipt(op), _RaisingCapabilitySideClient2())
+
+        self.assertEqual(result.status, "written")
+        self.assertEqual(len(thief_calls), 0,
+                         "the reassigned instance build_write_client (thief) must NEVER be called")
+        # The REAL (captured, class-bound) build_write_client ran instead, and
+        # its result -- not the thief's -- is what apply_one actually received.
+        self.assertEqual(len(adapter.real_build_calls), 1)
+        self.assertIs(adapter.real_apply_calls[0], real_write_capable)
+        self.assertEqual(len(real_write_capable.recorded), 1)
+        self.assertEqual(len(thief_write_capable.recorded), 0,
+                         "the thief's write-capable client must never be used for a real mutation")
+
+    def test_both_methods_reassigned_together_still_fully_inert(self):
+        # Belt-and-braces: both apply_one AND build_write_client hijacked at
+        # once must still be fully inert against run_operation.
+        real_write_capable = _WriteCapableRecorder()
+        adapter = _MonkeyPatchableAdapter(real_write_capable)
+        register_adapter(self.OP_KIND, adapter)
+
+        calls = {"apply": 0, "build": 0}
+
+        def _thief_apply_one(raw_client, unit):
+            calls["apply"] += 1
+            raise AssertionError("hijacked apply_one must never run")
+
+        def _thief_build_write_client(op):
+            calls["build"] += 1
+            return _WriteCapableRecorder()
+
+        adapter.apply_one = _thief_apply_one
+        adapter.build_write_client = _thief_build_write_client
+
+        op = self._op("mp-both-1")
+        result = run_operation(op, _receipt(op), _RaisingCapabilitySideClient2())
+
+        self.assertEqual(result.status, "written")
+        self.assertEqual(calls, {"apply": 0, "build": 0})
+        self.assertEqual(len(real_write_capable.recorded), 1)
+
+
+# ---------------------------------------------------------------------------
+# R7-T2 — plan() return-type guard (gpt ratification finding F4). The
+# hoisted plan() call in run_operation's Step -1 was wrapped in a try/except,
+# but the `len(_planned_units)` use sat OUTSIDE that guard -- so a plan()
+# that returned None (or any other non-list) raised instead of producing a
+# clean refusal. Fixed by validating isinstance(_planned_units, list) INSIDE
+# the same guard: any failure (exception OR wrong type) is now a clean
+# refused Result, never a crash.
+# ---------------------------------------------------------------------------
+
+class _NonListPlanAdapter:
+    """Adapter whose plan() returns whatever fixed (non-list) value it was
+    constructed with, regardless of params. apply_one/undo_one/verify_one
+    raise if ever called -- a plan() returning the wrong type must be refused
+    before any unit is ever applied."""
+
+    def __init__(self, planned_value):
+        self._planned_value = planned_value
+
+    def plan(self, params):
+        return self._planned_value
+
+    def apply_one(self, raw_client, unit):
+        raise AssertionError("apply_one must never be called when plan() returns a non-list")
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, raw_client, unit):
+        return True
+
+
+class _ListPlanControlAdapter(_NonListPlanAdapter):
+    """Control fixture for the guard's non-triggering path: a REAL, working
+    apply_one defined on the CLASS (dispatch is captured off the class, so an
+    instance-level override would not do -- see AdapterDispatch's docstring)."""
+
+    def apply_one(self, raw_client, unit):
+        raw_client.write(unit.unit_id, "Status", "Complete")
+
+
+class TestPlanReturnTypeGuard(unittest.TestCase):
+
+    OP_KIND = "_plan_return_type_probe"
+
+    def setUp(self):
+        contracts_mod.OPERATION_CONTRACTS[self.OP_KIND] = OperationContract(
+            op_kind=self.OP_KIND,
+            writes=("Status",),
+            produces=(),
+            dependency_set=(),
+            verifier_set=(),
+            introduces_persistent_binding=False,
+            risk_class="reversible_external",
+        )
+
+    def tearDown(self):
+        contracts_mod.OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+        unregister_adapter(self.OP_KIND)
+
+    def _op(self, batch_id):
+        return Operation(
+            surface="fixture_surface",
+            op_kind=self.OP_KIND,
+            batch_id=batch_id,
+            params={},
+        )
+
+    def test_plan_returning_none_is_refused_not_a_crash(self):
+        adapter = _NonListPlanAdapter(None)
+        register_adapter(self.OP_KIND, adapter)
+        op = self._op("ptg-none")
+
+        result = run_operation(op, _receipt(op), _AcceptingClient())
+
+        self.assertIsInstance(result, Result)
+        self.assertEqual(result.status, "refused")
+
+    def test_plan_returning_a_dict_is_refused_not_a_crash(self):
+        adapter = _NonListPlanAdapter({"not": "a list"})
+        register_adapter(self.OP_KIND, adapter)
+        op = self._op("ptg-dict")
+
+        result = run_operation(op, _receipt(op), _AcceptingClient())
+
+        self.assertIsInstance(result, Result)
+        self.assertEqual(result.status, "refused")
+
+    def test_plan_returning_a_string_is_refused_not_silently_miscounted(self):
+        # A string is len()-able AND iterable, so a naive len()-only guard (or
+        # no guard at all) would not crash on this input -- it would silently
+        # treat each CHARACTER as a planned "unit" and iterate straight into
+        # apply_one, which is exactly the silent-corruption failure mode the
+        # isinstance(list) check exists to catch, not merely the None-crash case.
+        adapter = _NonListPlanAdapter("not-a-list-of-effect-units")
+        register_adapter(self.OP_KIND, adapter)
+        op = self._op("ptg-str")
+
+        result = run_operation(op, _receipt(op), _AcceptingClient())
+
+        self.assertIsInstance(result, Result)
+        self.assertEqual(result.status, "refused")
+
+    def test_plan_returning_a_list_still_works_unaffected(self):
+        # Control: a well-behaved plan() returning an actual list is unaffected
+        # by the guard.
+        adapter = _ListPlanControlAdapter([EffectUnit(unit_id="u1", target_ref={})])
+        register_adapter(self.OP_KIND, adapter)
+        op = self._op("ptg-list-ok")
+
+        result = run_operation(op, _receipt(op), _AcceptingClient())
+
+        self.assertEqual(result.status, "written")
+
+
 if __name__ == "__main__":
     unittest.main()
