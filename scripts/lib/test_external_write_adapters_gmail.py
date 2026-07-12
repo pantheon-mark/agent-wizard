@@ -40,17 +40,18 @@ _AGENTS_LIB = Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib"
 sys.path.insert(0, str(_AGENTS_LIB))
 
 import external_write.adapters_gmail as adapters_gmail  # noqa: E402
+import external_write.read_facades_gmail as read_facades_gmail  # noqa: E402
 from external_write.adapters_gmail import (  # noqa: E402
     OP_TRASH, OP_UNTRASH, OP_MODIFY_LABELS, OP_FILTER_CREATE,
     GmailMessageTrashAdapter, GmailMessageUntrashAdapter,
     GmailMessageModifyLabelsAdapter, GmailFilterCreateAdapter,
-    GmailReadFacade,
 )
+from external_write.read_facades_gmail import GmailReadFacade  # noqa: E402
 from external_write.adapter_registry import get_adapter  # noqa: E402
 from external_write.contracts import get_contract  # noqa: E402
 from external_write.read_facade import build_read_facade  # noqa: E402
 from external_write.zones import (  # noqa: E402
-    ADAPTER_PROFILE_MODULE_PATHS, Zone, classify_zone,
+    ADAPTER_PROFILE_MODULE_PATHS, SEALED_KERNEL_MODULE_PATHS, Zone, classify_zone,
 )
 from external_write.scan import scan_paths, _attr_chain_names  # noqa: E402
 from external_write.effects_manifest import (  # noqa: E402
@@ -69,6 +70,8 @@ from external_write.acceptance_ceremony import (  # noqa: E402
 
 _ADAPTER_MODULE_PATH = Path(adapters_gmail.__file__).resolve()
 _ADAPTER_ANCHOR = _ADAPTER_MODULE_PATH.parent  # agents/lib/external_write
+
+_READ_FACADES_GMAIL_MODULE_PATH = Path(read_facades_gmail.__file__).resolve()
 
 _FIXTURES = (
     Path(__file__).resolve().parents[2] / "test_fixtures" / "external_write_scan"
@@ -521,6 +524,24 @@ class TestZoneScanClassification(unittest.TestCase):
         self.assertIn("forbidden_import", kinds)
         self.assertIn("credential_construction", kinds)
 
+    def test_read_facades_gmail_is_not_listed_in_any_zone_allowlist(self):
+        """Task R7-T1: the split-out facade module is deliberately left OUT
+        of both ADAPTER_PROFILE_MODULE_PATHS and SEALED_KERNEL_MODULE_PATHS
+        -- an unlisted module defaults to the fail-closed CAPABILITY
+        classification (zones.py's module docstring), which is fine here
+        because the module contains nothing that trips the scanner."""
+        rel = _READ_FACADES_GMAIL_MODULE_PATH.name
+        self.assertNotIn(rel, ADAPTER_PROFILE_MODULE_PATHS)
+        self.assertNotIn(rel, SEALED_KERNEL_MODULE_PATHS)
+
+    def test_read_facades_gmail_classifies_as_capability(self):
+        zone = classify_zone(_READ_FACADES_GMAIL_MODULE_PATH, _ADAPTER_ANCHOR)
+        self.assertEqual(zone, Zone.CAPABILITY)
+
+    def test_read_facades_gmail_scans_clean(self):
+        violations = scan_paths([_READ_FACADES_GMAIL_MODULE_PATH])
+        self.assertEqual(violations, [], violations)
+
 
 # ---------------------------------------------------------------------------
 # 6. GmailReadFacade
@@ -576,6 +597,28 @@ class TestGmailReadFacade(unittest.TestCase):
             value = getattr(facade, name, "__ABSENT__")
             self.assertIsNot(value, read_only)
             self.assertIsNot(value, service)
+
+    def test_two_arg_build_read_facade_resolves_gmail_read_facade_from_the_kernel_registry(self):
+        """R7-T1: capability-facing call shape -- no facade_cls supplied, no
+        import of GmailReadFacade needed by the caller at all; the kernel
+        resolves it from the registry read_facades_gmail.py populated at
+        import time."""
+        service = MockGmailService(messages={"m1": {"INBOX"}})
+        read_only = _FixtureGmailReadOnlyClient(service)
+        for op_kind in (OP_TRASH, OP_UNTRASH, OP_MODIFY_LABELS, OP_FILTER_CREATE):
+            with self.subTest(op_kind=op_kind):
+                facade = build_read_facade(op_kind, read_only)
+                self.assertIsInstance(facade, GmailReadFacade)
+
+    def test_gmail_read_facade_recovers_the_read_facades_module_not_the_adapter_module(self):
+        """The whole point of the split (Task R7-T1): a capability that
+        recovers `facade.__class__.__module__` for a Gmail read facade lands
+        on read_facades_gmail -- a module with no adapter and no credential
+        in it -- never on adapters_gmail, which defines write-capable
+        Adapters."""
+        facade = GmailReadFacade(_FixtureGmailReadOnlyClient(MockGmailService()))
+        self.assertEqual(facade.__class__.__module__, "external_write.read_facades_gmail")
+        self.assertNotEqual(facade.__class__.__module__, adapters_gmail.__name__)
 
 
 # ---------------------------------------------------------------------------

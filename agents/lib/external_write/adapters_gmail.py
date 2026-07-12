@@ -76,7 +76,6 @@ if TYPE_CHECKING:  # pragma: no cover - type-only; never executes at runtime.
 
 from external_write.adapter_registry import register_adapter
 from external_write.operations import EffectUnit
-from external_write.read_facade import ReadFacade
 
 
 # ---------------------------------------------------------------------------
@@ -395,44 +394,18 @@ register_adapter(OP_UNTRASH, GmailMessageUntrashAdapter())
 register_adapter(OP_MODIFY_LABELS, GmailMessageModifyLabelsAdapter())
 register_adapter(OP_FILTER_CREATE, GmailFilterCreateAdapter())
 
-
-# ---------------------------------------------------------------------------
-# Gmail read-only facade (Task 4/T7 boundary closed): declares ONLY
-# read/list/search methods, backed by a gmail.readonly-scoped client.
-# Capability/proposal-side code reads through this, never the write-capable
-# client -- see read_facade.py's module docstring for the credential-
-# isolation guarantee this relies on. Like every ReadFacade subclass, it MUST
-# NOT re-stash the wrapped client as an attribute of its own: this subclass
-# declares read_methods only and every method dispatches via `self._read`,
-# so there is no additional attribute for the base class's runtime allowlist
-# to police -- a subclass that stored the client under its own attribute
-# would be refused at class-definition time (ReadFacade.__init_subclass__)
-# before this module could even import.
-# ---------------------------------------------------------------------------
-
-class GmailReadFacade(ReadFacade):
-    """Read-only Gmail facade -- built via
-    ``read_facade.build_read_facade(op_kind, read_only_client, GmailReadFacade)``
-    against a client scoped to gmail.readonly (see contracts.py's gmail
-    op_kinds' declared ``read_only_scope``)."""
-
-    read_methods = (
-        "list_messages", "get_message", "list_labels", "list_filters",
-        "get_filter",
-    )
-
-    def list_messages(self, query: Optional[str] = None,
-                      max_results: Optional[int] = None) -> Any:
-        return self._read("list_messages", query=query, max_results=max_results)
-
-    def get_message(self, message_id: str) -> Any:
-        return self._read("get_message", message_id)
-
-    def list_labels(self) -> Any:
-        return self._read("list_labels")
-
-    def list_filters(self) -> Any:
-        return self._read("list_filters")
-
-    def get_filter(self, filter_id: str) -> Any:
-        return self._read("get_filter", filter_id)
+# NOTE (Task R7-T1 -- external-write-gate-generalization slice, kernel-
+# registry generalization): the Gmail read-only facade used to be defined
+# HERE, in this ADAPTER_PROFILE module -- which meant a capability that
+# recovered `facade.__class__.__module__` landed on the SAME module that
+# defines `build_write_client`-bearing adapters, an unnecessary (and, per a
+# cross-vendor-ratified finding, exploitable) proximity between a read-only
+# facade and write-capable adapter code. `GmailReadFacade` now lives in its
+# own scanned module, `read_facades_gmail.py`, which imports only
+# `ReadFacade` + `register_read_facade` from the kernel `read_facade` module
+# -- no vendor SDK import, no adapter class, no credential/provisioner. See
+# that module for the facade itself; it registers against the kernel
+# `_READ_FACADE_REGISTRY` (read_facade.py) for this module's four op_kinds,
+# and `read_facade.build_read_facade(op_kind, read_only_client)` resolves it
+# from there -- this module no longer needs to be imported (or even exist,
+# from the facade's point of view) for that resolution to work.
