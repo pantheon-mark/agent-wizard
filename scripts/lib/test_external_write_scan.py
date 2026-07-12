@@ -563,6 +563,82 @@ class TestAdapterRegistryCapabilityBan(unittest.TestCase):
         )
 
 
+class TestBareAdapterImportCapabilityBan(unittest.TestCase):
+    """Task R11-T1, F1 (cross-vendor review finding) — a BARE, non-relative
+    import of an adapter-profile or adapter-registry module (no
+    `external_write.` prefix, no relative dot) is invisible to both the
+    dotted-module match (requires an explicit `external_write` component)
+    and the R10-T1 relative-import checks (require `node.level > 0`). Must
+    be flagged the same as the absolute/package-level/relative forms."""
+
+    def test_bare_import_adapters_gmail_is_flagged(self):
+        v = scan_paths([_FIXTURES / "capability_bare_import_adapters_gmail.py"])
+        self.assertIn(
+            "adapter_module_import", _kinds(v),
+            "import adapters_gmail (bare, non-relative) must be flagged",
+        )
+
+    def test_bare_import_adapters_gmail_aliased_is_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_bare_import_adapters_gmail_aliased.py"]
+        )
+        self.assertIn(
+            "adapter_module_import", _kinds(v),
+            "import adapters_gmail as ag must be flagged on the real module "
+            "name, not evaded by the alias",
+        )
+
+    def test_bare_import_adapter_registry_is_flagged(self):
+        v = scan_paths([_FIXTURES / "capability_bare_import_adapter_registry.py"])
+        kinds = _kinds(v)
+        self.assertIn("adapter_module_import", kinds)
+        self.assertIn("adapter_registry_reference", kinds)
+
+    def test_bare_from_import_adapters_gmail_is_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_bare_from_import_adapters_gmail.py"]
+        )
+        self.assertIn(
+            "adapter_module_import", _kinds(v),
+            "from adapters_gmail import X (bare, non-relative) must be flagged",
+        )
+
+    def test_bare_from_import_adapter_registry_is_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_bare_from_import_adapter_registry.py"]
+        )
+        kinds = _kinds(v)
+        self.assertIn("adapter_module_import", kinds)
+        self.assertIn("adapter_registry_reference", kinds)
+
+
+class TestNestedAdapterPackageCapabilityBan(unittest.TestCase):
+    """Task R11-T1, F2 (cross-vendor review finding) — the dotted-module
+    matchers previously anchored on the TRAILING two components, so a
+    nested adapter-profile/registry package one level deeper than that
+    (``external_write.adapters_acme.client`` / ``external_write.
+    adapter_registry.sub``) was invisible. Generalized to match ANY
+    component immediately following ``external_write``."""
+
+    def test_nested_adapter_profile_package_import_is_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_nested_adapters_profile_package_import.py"]
+        )
+        self.assertIn(
+            "adapter_module_import", _kinds(v),
+            "import external_write.adapters_acme.client (nested profile "
+            "package) must be flagged",
+        )
+
+    def test_nested_adapter_registry_package_import_is_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_nested_adapter_registry_package_import.py"]
+        )
+        kinds = _kinds(v)
+        self.assertIn("adapter_module_import", kinds)
+        self.assertIn("adapter_registry_reference", kinds)
+
+
 class TestAdapterRegistryNegativeGuards(unittest.TestCase):
     """False-positive discipline (Task R7-T4): the curated capability-facing
     surfaces and ordinary introspection idioms must stay clean."""
@@ -673,6 +749,44 @@ class TestAdapterRegistryNegativeGuards(unittest.TestCase):
         # rule.
         v = scan_paths(
             [_FIXTURES / "capability_relative_up_package_unrelated_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_bare_import_adapters_kernel_not_flagged(self):
+        # Task R11-T1, F1 negative guard: `import adapters` (bare, no
+        # external_write. prefix, no relative dot) -- "adapters" is not
+        # "adapter_registry" and does not start with "adapters_".
+        v = scan_paths(
+            [_FIXTURES / "capability_bare_import_adapters_kernel_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_bare_from_import_adapters_kernel_not_flagged(self):
+        # Task R11-T1, F1 negative guard: `from adapters import
+        # run_operation` (bare, non-relative).
+        v = scan_paths(
+            [_FIXTURES / "capability_bare_from_import_adapters_kernel_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_bare_import_operations_and_capability_api_not_flagged(self):
+        # Task R11-T1, F1 negative guard: `import operations` / `import
+        # capability_api`, bare, no external_write. prefix -- neither name
+        # is "adapter_registry" nor starts with "adapters_".
+        v = scan_paths(
+            [
+                _FIXTURES
+                / "capability_bare_import_operations_and_capability_api_allowed.py"
+            ]
+        )
+        self.assertEqual(v, [])
+
+    def test_nested_bare_adapters_kernel_submodule_not_flagged(self):
+        # Task R11-T1, F2 negative guard: `from external_write.adapters.utils
+        # import helper` -- "adapters" (not "adapters_...") immediately
+        # follows external_write, regardless of the further nesting after it.
+        v = scan_paths(
+            [_FIXTURES / "capability_nested_bare_adapters_kernel_allowed.py"]
         )
         self.assertEqual(v, [])
 
