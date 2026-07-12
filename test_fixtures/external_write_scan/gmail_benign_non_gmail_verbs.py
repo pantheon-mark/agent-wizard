@@ -32,3 +32,15 @@ def send_local_notification(bus, payload):
 def modify_local_record(store, record_id, patch):
     # "modify" on a local record store -- not Gmail's messages().
     store.modify(record_id, patch)
+
+
+def create_task_in_store(task_store, task):
+    # "create" on a plain local store -- not Gmail's drafts()/filters().
+    # This is a real call site (attribute access), not just a method definition.
+    task_store.create(task)
+
+
+def delete_task_from_store(task_store, task_id):
+    # "delete" on a plain local store -- not Gmail's filters().
+    # This is a real call site (attribute access), not just a method definition.
+    task_store.delete(task_id)
