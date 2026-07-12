@@ -62,7 +62,24 @@ Bypass classes CAUGHT at v0
                          file (Task 5 -- see "Trust zones" below). The symbol
                          set is CURATED, not exhaustive (a known, tracked
                          limitation) -- the same disclosed-bound spirit as
-                         ``_FORBIDDEN_IMPORT_ROOTS``.
+                         ``_FORBIDDEN_IMPORT_ROOTS``. Two further evasions of
+                         this curated symbol check are disclosed, not closed
+                         (T5 -- Task R2, same "no silent caps" spirit as the
+                         ``build_write_client`` getattr bound documented under
+                         ``credential_provider_reference`` below): (i) a
+                         string-literal ``getattr(creds, "with_subject")(user)``
+                         resolves a curated factory/authority method via a
+                         Constant node, invisible to this attribute-NAME check
+                         -- the identical shape already disclosed for
+                         ``build_write_client``; (ii) an aliased import
+                         (``from google.oauth2.credentials import Credentials
+                         as X``) evades the bare-name construction check, since
+                         ``_CREDENTIAL_CLASS_NAMES`` matches the LOCAL bound
+                         name (``X``), not the original symbol -- though the
+                         import statement itself usually still trips
+                         ``forbidden_import`` (the ``google`` root is banned
+                         regardless of the ``as`` alias), so this residual is
+                         Low severity, not a silent full bypass.
   credential_provider_reference -- naming an ADAPTER_PROFILE write-credential
                          PROVIDER symbol anywhere outside the ADAPTER_PROFILE
                          zone: importing it (``from external_write.adapters_x
@@ -118,18 +135,44 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
   * Static re-stashing of a wrapped client onto a new attribute (e.g. a
     ReadFacade subclass's ``__init__`` doing ``self._x = read_only_client``
     under a different name than the base class expects). This is NOT
-    detected here: distinguishing "a benign attribute assignment" from "a
+    detected HERE: distinguishing "a benign attribute assignment" from "a
     client being re-stashed to dodge the runtime allowlist" from AST shape
     alone is not reliably decidable without false-positive-prone heuristics
     (any ``self.<name> = <param>`` assignment would have to be flagged,
     which fires on ordinary, legitimate constructors constantly). This class
     of bypass is instead closed at RUNTIME, in depth, by
-    ``read_facade.ReadFacade`` itself: its ``__setattr__`` refuses to set any
-    non-underscore-prefixed instance attribute at all, and its
-    ``__getattribute__`` allowlist means even a successfully-smuggled
-    underscore-prefixed attribute is unreachable from outside the instance.
-    Disclosed here as a documented limitation of the static gate, not
-    silently assumed covered.
+    ``read_facade.ReadFacade`` itself (NF2 — external-write-gate-
+    generalization fix-wave, Task R2: reconciled with R4's read_facade
+    hardening below, which this bullet previously undersold):
+
+      (a) CLOSED for normal attribute access, as of R4. ``__setattr__``
+          refuses to set ANY instance attribute other than a dunder — public
+          or underscore-prefixed alike — so a re-stash never even lands in
+          instance state. And even a value that somehow got in would be moot:
+          ``__getattribute__`` enforces a FIXED allowlist (dunders, the
+          internal ``read_methods``/``_read`` names, and declared
+          ``read_methods``) on every instance access, so a novel
+          underscore-prefixed attribute — successfully smuggled or not — is
+          unreachable via ``facade.<name>`` / ``getattr(facade, name)``.
+
+      (b) NOT closed — disclosed reach-beneath residuals, honesty over
+          overclaim, matching read_facade.py's own "Disclosed residual
+          bypasses" section: code that imports the module-private
+          ``_WRAPPED_CLIENTS`` weak-key dict directly can still read the
+          wrapped client out of it (the runtime allowlist governs attribute
+          access on a ReadFacade INSTANCE, not access to the module's own
+          private state); and code that calls
+          ``object.__getattribute__(self, name)`` (or otherwise reaches
+          beneath the class's own hook — e.g. ``inspect``/``ctypes``-level
+          introspection) bypasses ``ReadFacade.__getattribute__`` entirely,
+          since it never goes through the instance's own attribute protocol.
+          Neither residual is caught by scan.py itself — this module does
+          not attempt to flag either shape — and neither is closed by
+          read_facade.py either; both sit OUTSIDE the deterministic
+          guarantee and INSIDE this project's actual enforcement ceiling:
+          build-time + operator-as-approver, not runtime/OS. Disclosed here
+          as a documented limitation of the static gate, not silently
+          assumed covered.
 
 ------------------------------------------------------------------------------
 Trust zones (replaces the old blanket "whole external_write/ tree is exempt"
@@ -338,6 +381,15 @@ _NETWORK_CLI_TOOLS = frozenset(
 #     attribute reference) because these names are common enough as bare
 #     identifiers that flagging every reference would be noisy; constructing
 #     one is the operative act.
+#
+# T5 (Task R2) disclosed bounds, not closed here -- see the module docstring's
+# ``credential_construction`` section for the full disclosure: (i) a
+# string-literal ``getattr(creds, "with_subject")(user)`` resolves a curated
+# name via a Constant node, invisible to both frozensets above; (ii) an
+# aliased ``from google... import Credentials as X`` evades
+# _CREDENTIAL_CLASS_NAMES (which matches the local bound name, not the
+# original symbol) -- though ``forbidden_import`` usually still fires on the
+# banned ``google`` root regardless of the alias, so this is Low severity.
 _CREDENTIAL_FACTORY_METHODS = frozenset(
     {
         "from_service_account_file",
