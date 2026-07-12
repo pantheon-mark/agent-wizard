@@ -511,6 +511,57 @@ class TestAdapterRegistryCapabilityBan(unittest.TestCase):
             "form, no symbol use) must be flagged",
         )
 
+    def test_relative_dotted_adapters_gmail_import_is_flagged(self):
+        # Task R10-T1 (cross-vendor-verified gap): `from .adapters_gmail
+        # import GmailMessageTrashAdapter` -- node.level > 0, node.module ==
+        # "adapters_gmail" (no "external_write." prefix at all, since a
+        # relative import never spells the package name). Must be flagged
+        # the same as the absolute/package-level forms.
+        v = scan_paths(
+            [_FIXTURES / "capability_relative_from_adapters_gmail_import.py"]
+        )
+        self.assertIn(
+            "adapter_module_import", _kinds(v),
+            "from .adapters_gmail import X (relative dotted form) must be "
+            "flagged the same as the absolute external_write.adapters_gmail form",
+        )
+
+    def test_relative_bare_adapters_gmail_import_is_flagged(self):
+        # Same gap, bare relative form: `from . import adapters_gmail` --
+        # node.level > 0, node.module is None, submodule name in alias.name.
+        v = scan_paths(
+            [_FIXTURES / "capability_relative_import_adapters_gmail_bare.py"]
+        )
+        self.assertIn(
+            "adapter_module_import", _kinds(v),
+            "from . import adapters_gmail (relative bare form) must be "
+            "flagged the same as the package-level form",
+        )
+
+    def test_relative_dotted_adapter_registry_import_is_flagged(self):
+        # Registry form of the relative-dotted gap: `from .adapter_registry
+        # import get_adapter`. Must be flagged BOTH adapter_module_import
+        # (the relative import of the registry module) AND
+        # adapter_registry_reference (the get_adapter symbol named).
+        v = scan_paths(
+            [_FIXTURES / "capability_relative_from_adapter_registry_import.py"]
+        )
+        kinds = _kinds(v)
+        self.assertIn("adapter_module_import", kinds)
+        self.assertIn("adapter_registry_reference", kinds)
+
+    def test_relative_bare_adapter_registry_import_is_flagged(self):
+        # Registry form of the relative-bare gap: `from . import
+        # adapter_registry`, no symbol subsequently used off it.
+        v = scan_paths(
+            [_FIXTURES / "capability_relative_import_adapter_registry_bare.py"]
+        )
+        self.assertIn(
+            "adapter_module_import", _kinds(v),
+            "from . import adapter_registry (relative bare form, no symbol "
+            "use) must be flagged",
+        )
+
 
 class TestAdapterRegistryNegativeGuards(unittest.TestCase):
     """False-positive discipline (Task R7-T4): the curated capability-facing
@@ -569,6 +620,59 @@ class TestAdapterRegistryNegativeGuards(unittest.TestCase):
         # clean -- "adapters".startswith("adapters_") is False.
         v = scan_paths(
             [_FIXTURES / "capability_package_level_bare_adapters_import_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_relative_import_operations_not_flagged(self):
+        # Task R10-T1 negative guard: `from . import operations` -- neither
+        # the registry nor an adapter-profile module.
+        v = scan_paths(
+            [_FIXTURES / "capability_relative_import_operations_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_relative_bare_adapters_import_not_flagged(self):
+        # Task R10-T1 negative guard: `from . import adapters` (bare kernel
+        # dispatch module) + using run_operation must stay clean --
+        # "adapters".startswith("adapters_") is False.
+        v = scan_paths(
+            [_FIXTURES / "capability_relative_import_bare_adapters_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_relative_import_capability_api_not_flagged(self):
+        # Task R10-T1 negative guard: `from . import capability_api` -- the
+        # curated capability-facing surface.
+        v = scan_paths(
+            [_FIXTURES / "capability_relative_import_capability_api_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_relative_import_read_facades_gmail_not_flagged(self):
+        # Task R10-T1 negative guard: `from . import read_facades_gmail` --
+        # "read_facades_gmail" does not start with "adapters_", so it must
+        # not collide with the new prefix check.
+        v = scan_paths(
+            [_FIXTURES / "capability_relative_import_read_facades_gmail_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_relative_dotted_bare_adapters_not_flagged(self):
+        # Task R10-T1 negative guard: `from .adapters import run_operation`
+        # (relative dotted form of the bare kernel dispatch module) --
+        # "adapters".startswith("adapters_") is False.
+        v = scan_paths(
+            [_FIXTURES / "capability_relative_from_adapters_bare_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_relative_up_package_unrelated_module_not_flagged(self):
+        # Task R10-T1 negative guard: `from ..something import x` (level 2,
+        # up-package) names an unrelated module -- must not be flagged
+        # regardless of the import's level; only the module NAME gates the
+        # rule.
+        v = scan_paths(
+            [_FIXTURES / "capability_relative_up_package_unrelated_allowed.py"]
         )
         self.assertEqual(v, [])
 
