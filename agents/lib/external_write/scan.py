@@ -137,6 +137,23 @@ Bypass classes CAUGHT at v0
                              ``adapters_`` prefix requires a trailing
                              underscore + a non-empty suffix, so "adapters"
                              alone never collides with "adapters_gmail" etc.
+                             Task R9-T1 (cross-vendor-verified gap) additionally
+                             matches the PACKAGE-LEVEL import shape — ``from
+                             external_write import adapters_<vendor>`` / ``from
+                             external_write import adapter_registry`` — where
+                             the profile/registry name sits in the import's
+                             alias rather than in a dotted module path
+                             (``node.module`` there is just the bare
+                             ``external_write`` package, which the
+                             trailing-two-components match above does not by
+                             itself reach). Matched by the SAME name rule
+                             (registry exact-name OR ``adapters_`` prefix),
+                             applied per-alias when the import's module is the
+                             ``external_write`` package itself (see
+                             ``_module_is_external_write_package``); the bare
+                             ``adapters`` alias is excluded on identical
+                             grounds — ``"adapters".startswith("adapters_")``
+                             is False.
                            * ``adapter_registry_reference`` — naming a
                              registry symbol (``get_adapter``, ``get_dispatch``,
                              ``register_adapter``, ``unregister_adapter``,
@@ -347,18 +364,6 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
     scanner bound, not a silent gap. Consistent with the credential-isolation
     keystone (BL-1 / F-33) being the real guarantee; this module discloses
     what it does not deterministically catch.
-  * ``external_write.adapter_registry`` reached via ``from external_write
-    import adapter_registry`` (importing the SUBMODULE NAME off the
-    package, rather than a dotted ``external_write.adapter_registry``
-    path) is NOT matched by ``adapter_module_import``'s module-string
-    check, and ``adapter_registry`` is not itself in the
-    ``adapter_registry_reference`` symbol set (only names reachable
-    THROUGH the module — ``get_adapter``, ``get_dispatch``, etc. — are).
-    A curated, disclosed gap (same spirit as every other curated symbol
-    surface in this module) rather than a silently assumed closure; every
-    real caller in this codebase (kernel, adapter-profile, and every
-    fixture in this task) uses the dotted ``external_write.X`` form this
-    check does match.
   * A read facade's own internal read-dispatch method is reachable by any
     code holding a reference to the facade object, with an arbitrary
     method-name argument — not limited to whatever the facade's own
@@ -783,6 +788,29 @@ def _module_matches_adapter_profile(dotted: str) -> bool:
     )
 
 
+def _module_is_external_write_package(dotted: str) -> bool:
+    """True iff ``dotted`` names the ``external_write`` package itself (not a
+    submodule) — the shape a ``from external_write import X`` import produces
+    (``node.module == "external_write"``). Matched by the trailing
+    component, so a package-path prefix in front (e.g. a hypothetical
+    ``pkg.external_write``) does not evade the match — same convention as
+    ``_module_matches_adapter_registry`` / ``_module_matches_adapter_profile``
+    above, one component shorter because there is no submodule component
+    here at all.
+
+    Used to catch the package-level import gap (Task R9-T1, cross-vendor-
+    verified): ``from external_write import adapters_gmail`` puts the
+    profile submodule name in ``alias.name`` ("adapters_gmail") rather than
+    in ``node.module`` (which is just ``"external_write"``, a bare kernel
+    package name never matched by the two dotted-module checks above). The
+    caller pairs this predicate with a per-alias name check against
+    ``_ADAPTER_REGISTRY_MODULE_NAME`` / ``_ADAPTER_PROFILE_MODULE_PREFIX`` —
+    see ``visit_ImportFrom``.
+    """
+    parts = dotted.split(".")
+    return parts[-1] == "external_write"
+
+
 # ---------------------------------------------------------------------------
 # Trust-zone anchor (see zones.py for the full taxonomy). Anchored to ONE
 # absolute location — NOT a name the script controls and NOT a directory name
@@ -928,6 +956,7 @@ class _Scanner(ast.NodeVisitor):
         # Importing an adapter-profile credential-provider symbol into a
         # non-adapter zone is itself the bypass (BL-1): the emitted capability
         # must be UNABLE to name the provider.
+        is_package_level = bool(node.module) and _module_is_external_write_package(node.module)
         for alias in node.names:
             if alias.name in _CREDENTIAL_PROVIDER_SYMBOLS:
                 self._add(node.lineno, "credential_provider_reference")
@@ -938,6 +967,25 @@ class _Scanner(ast.NodeVisitor):
             # (CAPABILITY-only — see class docstring / module docstring).
             if self._capability_zone and alias.name in _ADAPTER_REGISTRY_SYMBOLS:
                 self._add(node.lineno, "adapter_registry_reference")
+            # Task R9-T1 (cross-vendor-verified gap): the PACKAGE-LEVEL import
+            # form -- ``from external_write import adapters_gmail`` /
+            # ``from external_write import adapter_registry`` -- puts the
+            # profile/registry submodule name in `alias.name`, not in
+            # `node.module` (which is just "external_write" here), so it is
+            # invisible to the two dotted-module checks above. Same name
+            # rule as those checks (registry exact-name OR profile prefix),
+            # applied to the alias instead of the module string. Bare
+            # "adapters" is naturally excluded: it is neither
+            # "adapter_registry" nor does it start with "adapters_".
+            if (
+                self._capability_zone
+                and is_package_level
+                and (
+                    alias.name == _ADAPTER_REGISTRY_MODULE_NAME
+                    or alias.name.startswith(_ADAPTER_PROFILE_MODULE_PREFIX)
+                )
+            ):
+                self._add(node.lineno, "adapter_module_import")
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
