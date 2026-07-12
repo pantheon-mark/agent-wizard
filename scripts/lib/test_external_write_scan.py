@@ -484,6 +484,33 @@ class TestAdapterRegistryCapabilityBan(unittest.TestCase):
         # import importlib, sys.modules[...], importlib.import_module(...).
         self.assertGreaterEqual(len(hatches), 3)
 
+    def test_package_level_adapter_profile_import_is_flagged(self):
+        # Task R9-T1 (cross-vendor-verified gap): `from external_write import
+        # adapters_gmail` puts the profile submodule name in `alias.name`
+        # ("adapters_gmail") with `node.module == "external_write"` (a bare
+        # parent package) -- invisible to the dotted-module check alone.
+        # Must be flagged `adapter_module_import` the same as the dotted form.
+        v = scan_paths(
+            [_FIXTURES / "capability_package_level_adapters_gmail_import.py"]
+        )
+        self.assertIn(
+            "adapter_module_import", _kinds(v),
+            "from external_write import adapters_gmail (package-level form) "
+            "must be flagged the same as the dotted external_write.adapters_gmail form",
+        )
+
+    def test_package_level_adapter_registry_import_is_flagged(self):
+        # Same gap, registry form: `from external_write import
+        # adapter_registry` with no symbol subsequently used off it.
+        v = scan_paths(
+            [_FIXTURES / "capability_package_level_adapter_registry_import.py"]
+        )
+        self.assertIn(
+            "adapter_module_import", _kinds(v),
+            "from external_write import adapter_registry (package-level "
+            "form, no symbol use) must be flagged",
+        )
+
 
 class TestAdapterRegistryNegativeGuards(unittest.TestCase):
     """False-positive discipline (Task R7-T4): the curated capability-facing
@@ -508,6 +535,40 @@ class TestAdapterRegistryNegativeGuards(unittest.TestCase):
     def test_ordinary_class_introspection_not_flagged(self):
         v = scan_paths(
             [_FIXTURES / "capability_ordinary_introspection_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_package_level_operations_import_not_flagged(self):
+        # Task R9-T1 negative guard: `from external_write import operations`
+        # is neither the registry nor an adapter-profile module.
+        v = scan_paths(
+            [_FIXTURES / "capability_package_level_operations_import_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_package_level_capability_api_import_not_flagged(self):
+        # Task R9-T1 negative guard: `from external_write import
+        # capability_api` is the curated capability-facing surface.
+        v = scan_paths(
+            [_FIXTURES / "capability_package_level_capability_api_import_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_package_level_read_facades_gmail_import_not_flagged(self):
+        # Task R9-T1 negative guard: `from external_write import
+        # read_facades_gmail` -- "read_facades_gmail" does not start with
+        # "adapters_", so it must not collide with the new prefix check.
+        v = scan_paths(
+            [_FIXTURES / "capability_package_level_read_facades_gmail_import_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_package_level_bare_adapters_import_not_flagged(self):
+        # Task R9-T1 negative guard: `from external_write import adapters`
+        # (bare kernel dispatch module) + using run_operation must stay
+        # clean -- "adapters".startswith("adapters_") is False.
+        v = scan_paths(
+            [_FIXTURES / "capability_package_level_bare_adapters_import_allowed.py"]
         )
         self.assertEqual(v, [])
 
