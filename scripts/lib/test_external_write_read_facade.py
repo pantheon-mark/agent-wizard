@@ -44,8 +44,11 @@ from external_write.read_facade import (  # noqa: E402
     ReadFacade,
     ReadFacadeEligibilityError,
     build_read_facade,
+    get_read_facade_class,
     get_read_only_scope,
+    register_read_facade,
     require_read_only_scope,
+    unregister_read_facade,
 )
 
 
@@ -699,7 +702,12 @@ class TestVendorEligibility(unittest.TestCase):
                         "facade's instance-attribute graph")
         self.assertEqual(facade.get_status("obj-1"), "Open")
 
-    def test_build_read_facade_defaults_to_bare_read_facade_class(self):
+    def test_build_read_facade_two_arg_form_fails_closed_when_nothing_registered(self):
+        """R7-T1: an eligible op_kind (declared read_only_scope) with NO
+        registered ReadFacade subclass must still refuse fail-closed -- never
+        silently fall back to a bare ReadFacade (which would expose zero read
+        methods and fail confusingly at first real call instead of at build
+        time)."""
         contracts_mod.OPERATION_CONTRACTS[self.OP_KIND] = OperationContract(
             op_kind=self.OP_KIND,
             writes=("__fixture__",),
@@ -709,8 +717,102 @@ class TestVendorEligibility(unittest.TestCase):
             introduces_persistent_binding=False,
             read_only_scope="fixture.readonly",
         )
-        facade = build_read_facade(self.OP_KIND, read_only_client=object())
-        self.assertIsInstance(facade, ReadFacade)
+        with self.assertRaises(ReadFacadeEligibilityError):
+            build_read_facade(self.OP_KIND, read_only_client=object())
+
+
+# ---------------------------------------------------------------------------
+# Group 5 (R7-T1): the kernel ReadFacade registry -- capability-facing
+# build_read_facade(op_kind, client) resolves the subclass FROM the registry,
+# mirroring adapter_registry.register_adapter/get_adapter/_REGISTRY exactly
+# (module-level dict, last-registered wins, no op_kind validation here).
+# ---------------------------------------------------------------------------
+
+class TestReadFacadeRegistry(unittest.TestCase):
+
+    OP_KIND = "_registry_probe_op"
+
+    def setUp(self):
+        contracts_mod.OPERATION_CONTRACTS[self.OP_KIND] = OperationContract(
+            op_kind=self.OP_KIND,
+            writes=("__fixture__",),
+            produces=(),
+            dependency_set=(),
+            verifier_set=(),
+            introduces_persistent_binding=False,
+            read_only_scope="fixture.readonly",
+        )
+
+    def tearDown(self):
+        contracts_mod.OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+        unregister_read_facade(self.OP_KIND)
+
+    def test_register_read_facade_rejects_a_non_read_facade_class(self):
+        class _NotAReadFacade:
+            pass
+
+        with self.assertRaises(TypeError):
+            register_read_facade(self.OP_KIND, _NotAReadFacade)
+        self.assertIsNone(get_read_facade_class(self.OP_KIND))
+
+    def test_register_read_facade_rejects_a_non_class_value(self):
+        with self.assertRaises(TypeError):
+            register_read_facade(self.OP_KIND, object())
+
+    def test_registered_subclass_is_retrievable_by_op_kind(self):
+        register_read_facade(self.OP_KIND, _FixtureReadFacade)
+        self.assertIs(get_read_facade_class(self.OP_KIND), _FixtureReadFacade)
+
+    def test_last_registered_wins(self):
+        class _FirstFacade(ReadFacade):
+            read_methods = ("get_status",)
+
+            def get_status(self, object_id):
+                return self._read("get_status", object_id)
+
+        register_read_facade(self.OP_KIND, _FirstFacade)
+        register_read_facade(self.OP_KIND, _FixtureReadFacade)
+        self.assertIs(get_read_facade_class(self.OP_KIND), _FixtureReadFacade)
+
+    def test_unregistered_op_kind_returns_none(self):
+        self.assertIsNone(get_read_facade_class("_no_such_op_kind_registered"))
+
+    def test_build_read_facade_two_arg_form_resolves_the_registered_subclass(self):
+        register_read_facade(self.OP_KIND, _FixtureReadFacade)
+        read_only_client = _FixtureReadOnlyClient()
+
+        facade = build_read_facade(self.OP_KIND, read_only_client)
+
+        self.assertIsInstance(facade, _FixtureReadFacade)
+        self.assertEqual(facade.get_status("obj-1"), "Open")
+
+    def test_explicit_facade_cls_kwarg_bypasses_the_registry_backward_compat(self):
+        """The `facade_cls` kwarg is a kernel/test affordance, not part of
+        the capability surface: when a caller explicitly supplies it, it is
+        used AS GIVEN even if something else (or nothing) is registered for
+        the op_kind."""
+        class _OtherFacade(ReadFacade):
+            read_methods = ("get_status",)
+
+            def get_status(self, object_id):
+                return self._read("get_status", object_id)
+
+        register_read_facade(self.OP_KIND, _FixtureReadFacade)
+        read_only_client = _FixtureReadOnlyClient()
+
+        facade = build_read_facade(self.OP_KIND, read_only_client, _OtherFacade)
+
+        self.assertIsInstance(facade, _OtherFacade)
+        self.assertNotIsInstance(facade, _FixtureReadFacade)
+
+    def test_require_read_only_scope_is_checked_before_registry_resolution(self):
+        """An ineligible op_kind (no declared read_only_scope) refuses
+        fail-closed even if a facade happens to be registered for it --
+        require_read_only_scope runs FIRST."""
+        contracts_mod.OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+        register_read_facade(self.OP_KIND, _FixtureReadFacade)
+        with self.assertRaises(ReadFacadeEligibilityError):
+            build_read_facade(self.OP_KIND, read_only_client=object())
 
 
 if __name__ == "__main__":

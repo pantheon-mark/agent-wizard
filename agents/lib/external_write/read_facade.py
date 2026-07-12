@@ -78,6 +78,33 @@ complementary mechanism — Task 5's job):
      could by deliberately reaching beneath the language's own attribute
      protocol.
 
+     (c) (R7-T1 — honesty over overclaim, corrected finding) `_read` ITSELF
+     is reachable by ANY holder of a facade instance, not merely from inside
+     a subclass's own methods: `_read` is a member of the FIXED internal
+     allowlist `__getattribute__` grants (`_INTERNAL_ALLOWLIST` above), and
+     that allowlist cannot distinguish "a subclass method calling
+     `self._read`" from "external code calling `facade._read` directly" —
+     both are ordinary attribute access on the same instance, from outside
+     `ReadFacade.__getattribute__`'s own frame. Concretely: any holder of a
+     facade can call `facade._read(method_name, *args, **kwargs)` with an
+     ARBITRARY `method_name` — not only the names the subclass declared in
+     `read_methods` — and reach whatever attribute the wrapped read-only
+     client exposes (e.g. `facade._read("some_undeclared_method")`, or a
+     generic introspection shape like `facade._read("__getattribute__",
+     "some_attr")`). `read_methods` is therefore a curated, convenient
+     surface for the subclass's OWN callers, not an enforced ceiling on what
+     `_read` itself can reach. This is disclosed, not closed, and is NOT
+     something this module attempts to scanner-ban: a conforming subclass's
+     declared read methods legitimately call `self._read`, so there is no
+     textual or structural pattern that distinguishes that legitimate call
+     from an external one — an attempted ban would either break every
+     conforming subclass or be trivially unenforceable. What remains true
+     regardless: this leaks only the READ-ONLY client's surface, never the
+     write-capable credential (a wholly separate object this class never
+     sees — mechanism 2 below), and it sits inside this module's build-time
+     + operator-as-approver enforcement ceiling, not a runtime/OS guarantee
+     (see "Enforcement ceiling" below).
+
      Client storage: the runtime allowlist above is necessary but was not
      sufficient — the base class itself used to store the wrapped client as
      a plain instance attribute (`self._read_only_client`), and
@@ -121,7 +148,7 @@ Stdlib only — no third-party dependencies.
 
 import inspect
 import weakref
-from typing import Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from external_write.contracts import get_contract
 
@@ -210,6 +237,16 @@ class ReadFacade:
     object this class never even sees, isolated by the credential-provider
     seam (mechanism 2 in the module docstring), not by anything in this
     class.
+
+    Disclosed (R7-T1, honesty over overclaim): `_read` is reachable by ANY
+    holder of a facade instance, not only from a subclass's own methods —
+    see the module docstring's "Disclosed residual bypasses" item (c) and
+    `_read`'s own docstring below. A holder can call `facade._read(name,
+    ...)` with a `name` the subclass never declared in `read_methods`,
+    reaching the wrapped read-only client's surface beyond what the
+    subclass exposes. This still leaks only the read-only client, never a
+    write credential, and is not scanner-banned (legitimate subclass
+    methods must call `self._read`).
 
     A conforming subclass implements its declared read methods via `_read`,
     which dispatches to the wrapped read-only client:
@@ -333,10 +370,91 @@ class ReadFacade:
         read-only client. Subclasses use this so they never need to store or
         re-expose the raw client themselves. Looks the client up in the
         module-private `_WRAPPED_CLIENTS` store — see __init__ — never via a
-        `self.<something>` instance attribute."""
+        `self.<something>` instance attribute.
+
+        Disclosed (R7-T1, honesty over overclaim — do not remove this
+        paragraph without re-reading the module docstring's "Disclosed
+        residual bypasses" item (c)): `_read` is reachable by ANY holder of
+        this facade instance, not only from within a subclass's own
+        methods — it must be in `__getattribute__`'s fixed internal
+        allowlist so that a declared read method's `self._read(...)` call
+        works at all, and that allowlist cannot tell a subclass's own call
+        apart from an external caller's. Concretely, a holder can call
+        `facade._read(method_name, *args, **kwargs)` with an ARBITRARY
+        `method_name` — not only the names declared in `read_methods` —
+        reaching whatever attribute the wrapped read-only client itself
+        exposes. `read_methods` is a curated surface for the subclass's OWN
+        callers; it is not an enforced ceiling on what `_read` can reach.
+        This leaks only the READ-ONLY client (never the write-capable
+        credential, a separate object this class never sees) and sits
+        inside the build-time + operator-as-approver enforcement ceiling,
+        not a runtime/OS guarantee. It is deliberately NOT scanner-banned:
+        legitimate subclass methods must call `self._read`, so there is no
+        way to structurally distinguish that from an external caller doing
+        the same — disclosure, not an unenforceable ban, is the correct
+        treatment."""
         client = _WRAPPED_CLIENTS[self]
         method = getattr(client, method_name)
         return method(*args, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Kernel ReadFacade registry (Task R7-T1 — external-write-gate-generalization
+# slice; the cross-vendor-ratified fix for the architectural hole where
+# capability-zone code had to import its ReadFacade subclass from the same
+# adapter module that holds `build_write_client`, and could reach/monkey-
+# patch the mutable adapter obtained via `get_adapter`). Removing capability's
+# *reason* to import the adapter module is the point: `build_read_facade`
+# resolves the subclass FROM this registry, keyed by op_kind, so a facade
+# subclass can live in its own scanned module (see read_facades_gmail.py)
+# with no adapter and no credential anywhere in it.
+#
+# Mirrors adapter_registry.py's register_adapter/get_adapter/_REGISTRY
+# exactly: a plain module-level dict, populated by `register_read_facade` at
+# import time (a facade module calls `register_read_facade(op_kind,
+# MyReadFacadeSubclass)` at module scope, mirroring how an adapter module
+# calls `register_adapter`), last-registered wins, no validation of op_kind
+# against contracts.py (that join happens in `build_read_facade` below via
+# `require_read_only_scope`).
+# ---------------------------------------------------------------------------
+
+_READ_FACADE_REGISTRY: Dict[str, type] = {}
+
+
+def register_read_facade(op_kind: str, facade_cls: type) -> None:
+    """Register `facade_cls` as the ReadFacade subclass `build_read_facade`
+    resolves for `op_kind`.
+
+    Validates `issubclass(facade_cls, ReadFacade)` — raises TypeError
+    otherwise, so a non-ReadFacade class can never enter the registry (the
+    credential-isolation guarantee this module exists to provide depends on
+    every resolved facade actually being a ReadFacade, subject to its
+    deny-by-default allowlist).
+
+    Re-registering the same op_kind overwrites the prior entry (last-
+    registered wins) — callers own ordering; this function does not raise on
+    a duplicate op_kind, mirroring `adapter_registry.register_adapter`.
+    """
+    if not (isinstance(facade_cls, type) and issubclass(facade_cls, ReadFacade)):
+        raise TypeError(
+            f"register_read_facade({op_kind!r}, ...): facade_cls must be a "
+            f"ReadFacade subclass, got {facade_cls!r}"
+        )
+    _READ_FACADE_REGISTRY[op_kind] = facade_cls
+
+
+def get_read_facade_class(op_kind: str) -> Optional[type]:
+    """Return the registered ReadFacade subclass for op_kind, or None if
+    nothing is registered. Mirrors `adapter_registry.get_adapter`."""
+    return _READ_FACADE_REGISTRY.get(op_kind)
+
+
+def unregister_read_facade(op_kind: str) -> None:
+    """Remove a registration, if present. Test-only convenience for
+    isolating read-facade-registry test cases from one another; production
+    facade modules register once at import time and never unregister.
+    Mirrors `adapter_registry.unregister_adapter`."""
+    _READ_FACADE_REGISTRY.pop(op_kind, None)
 
 
 def get_read_only_scope(op_kind: str) -> Optional[str]:
@@ -372,17 +490,49 @@ def require_read_only_scope(op_kind: str) -> str:
 
 def build_read_facade(op_kind: str, read_only_client: Any,
                        facade_cls: Optional[type] = None) -> ReadFacade:
-    """Build a ReadFacade for op_kind, refusing fail-closed if op_kind has no
-    declared read_only_scope (require_read_only_scope). `read_only_client`
-    must already be scoped read-only by its caller (the real vendor-specific
-    scoping — e.g. requesting gmail.readonly rather than gmail.modify — is
-    Task 7's concern; this function only enforces that a scope was
-    DECLARED, it cannot verify the client object it is handed actually holds
-    a read-only-scoped credential).
+    """Build a ReadFacade for op_kind.
 
-    facade_cls defaults to the bare ReadFacade base class (read_methods=());
-    callers building a real facade pass their own ReadFacade subclass.
+    `require_read_only_scope(op_kind)` is checked FIRST, fail-closed,
+    regardless of whether `facade_cls` is supplied — an op_kind with no
+    declared read_only_scope is refused (ReadFacadeEligibilityError) before
+    any registry resolution is even attempted.
+
+    CAPABILITY-facing call shape (Task R7-T1): `build_read_facade(op_kind,
+    read_only_client)` — the subclass is resolved FROM THE KERNEL REGISTRY
+    (`_READ_FACADE_REGISTRY`, populated by `register_read_facade` at import
+    time — see the registry section above) keyed by `op_kind`. If no facade
+    is registered for `op_kind`, this raises ReadFacadeEligibilityError: a
+    fail-closed, build-time-style refusal. There is deliberately no silent
+    fallback to a bare `ReadFacade` — a bare `ReadFacade` declares zero read
+    methods, so a silent fallback would only defer the failure to the first
+    real call instead of surfacing it at build time, which is a worse
+    failure mode.
+
+    `facade_cls` (OPTIONAL) is a KERNEL/TEST AFFORDANCE ONLY — it is NOT
+    part of the capability surface (`capability_api.py`'s `build_read_facade`
+    re-export is always invoked two-arg by emitted capability code). If a
+    caller explicitly supplies `facade_cls`, it is used AS GIVEN, bypassing
+    registry resolution entirely — this keeps existing kernel/test callers
+    that construct a facade directly working unchanged. If omitted (the
+    capability-facing shape), the class is resolved from the registry.
+
+    `read_only_client` must already be scoped read-only by its caller (the
+    real vendor-specific scoping — e.g. requesting gmail.readonly rather
+    than gmail.modify — is Task 7's concern; this function only enforces
+    that a scope was DECLARED, it cannot verify the client object it is
+    handed actually holds a read-only-scoped credential).
     """
     require_read_only_scope(op_kind)
-    cls = facade_cls if facade_cls is not None else ReadFacade
+    if facade_cls is not None:
+        cls = facade_cls
+    else:
+        cls = _READ_FACADE_REGISTRY.get(op_kind)
+        if cls is None:
+            raise ReadFacadeEligibilityError(
+                f"operation kind {op_kind!r} has a declared read_only_scope "
+                "but no ReadFacade subclass is registered for it via "
+                "register_read_facade — refusing fail-closed rather than "
+                "silently falling back to a bare ReadFacade (which would "
+                "expose zero read methods)."
+            )
     return cls(read_only_client)
