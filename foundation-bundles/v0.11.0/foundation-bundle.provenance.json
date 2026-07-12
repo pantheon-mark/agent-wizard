@@ -137,7 +137,7 @@
       "path": "templates/agents/lib/external_write/read_facades_gmail.py"
     },
     {
-      "hash": "sha256:bd6c7be74e3b526beb46023a0dbe2879eecd67bf1ab6708abeff79f638ae9a7e",
+      "hash": "sha256:b02e6815881faf968a441ce763179fd4058036b4bdc1a8c087ec1fb7780ab67a",
       "path": "templates/agents/lib/external_write/scan.py"
     },
     {
@@ -478,12 +478,12 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-07-12T10:26:00Z",
-  "generator_version": "5bacde5f5104ae3bf78aa1b90d33a4a1d630828b",
+  "generated_at": "2026-07-12T11:29:06Z",
+  "generator_version": "279844ccf12a0b34e6fd0bab48d2e79cbe9ddbab",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.11.0",
-  "source_registry_entry_hash": "sha256:7db0104a61ebedc29b455322f113aed53cccbcb9e5a5658b4408a3dbce738829",
+  "source_registry_entry_hash": "sha256:abb9cbce4d047172156f07ed982db579cdb6fd68ea76c421bdb2a3923cf1cdf3",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
   "template_tree_hash": "sha256:2bb200832538ef783e35624cb22bff7c1c1f64538821fee80e008a8f6e794857",

@@ -140,16 +140,27 @@ Bypass classes CAUGHT at v0
                            * ``adapter_registry_reference`` — naming a
                              registry symbol (``get_adapter``, ``get_dispatch``,
                              ``register_adapter``, ``unregister_adapter``,
-                             ``_REGISTRY``, ``AdapterDispatch``) as an import
-                             alias, a bare name, or an attribute — regardless
-                             of which module the capability claims to import
-                             it from (so a re-export shape, e.g. ``from
-                             external_write.adapters import get_adapter``,
-                             is caught on the NAME even though the bare
-                             ``adapters`` module import itself is legal).
-                             Modeled directly on ``credential_provider_reference``
-                             above (visit_ImportFrom / visit_Name /
-                             visit_Attribute against a curated symbol set).
+                             ``_REGISTRY``, ``AdapterDispatch``,
+                             ``_DISPATCH_REGISTRY``, ``provision_write_client``)
+                             as an import alias, a bare name, or an attribute
+                             — regardless of which module the capability
+                             claims to import it from (so a re-export shape,
+                             e.g. ``from external_write.adapters import
+                             get_adapter``, is caught on the NAME even though
+                             the bare ``adapters`` module import itself is
+                             legal). ``_DISPATCH_REGISTRY`` and
+                             ``provision_write_client`` were added alongside
+                             the function-object-internals ban above:
+                             ``_DISPATCH_REGISTRY`` is the dispatch-keyed
+                             dict backing ``get_dispatch``, the same role
+                             ``_REGISTRY`` plays for ``get_adapter``; and
+                             ``provision_write_client`` is the write-client
+                             provisioner reachable off a dispatch object, the
+                             same role ``build_write_client`` plays off an
+                             adapter object. Modeled directly on
+                             ``credential_provider_reference`` above
+                             (visit_ImportFrom / visit_Name / visit_Attribute
+                             against a curated symbol set).
                          Together these make the mutable Adapter instance and
                          the adapter-profile modules that define
                          ``build_write_client`` STATICALLY unreachable from
@@ -191,7 +202,24 @@ Bypass classes CAUGHT at v0
                          ``__mro__``, ``__module__`` — these appear in
                          ordinary code (``type(x)``, isinstance idioms,
                          dataclasses) constantly, and banning them would
-                         over-fire on unremarkable Python.
+                         over-fire on unremarkable Python. Also flagged, any
+                         base, name alone: the function/method-object
+                         internals ``__globals__``, ``__code__``,
+                         ``__closure__``, ``__func__``, and ``__self__``. A
+                         real function object (such as the one legitimate
+                         capability-facing entrypoint into this gate) carries
+                         its own defining module's global namespace on
+                         ``__globals__`` — naming that attribute is a way to
+                         reach outside the function entirely, into whatever
+                         module defined it, without a static ``import``
+                         statement this scanner's other checks would see.
+                         ``__code__``/``__closure__``/``__func__``/``__self__``
+                         are the same class of reach: internals of a function
+                         or bound-method object that let code walk sideways
+                         into state it was never handed directly. Like
+                         ``__subclasses__``, none of these five appear in
+                         ordinary capability code, so banning them carries the
+                         same no-over-fire guarantee.
 
 ------------------------------------------------------------------------------
 Bounds NOT covered at v0 (disclosed — no silent caps)
@@ -331,6 +359,56 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
     real caller in this codebase (kernel, adapter-profile, and every
     fixture in this task) uses the dotted ``external_write.X`` form this
     check does match.
+  * A read facade's own internal read-dispatch method is reachable by any
+    code holding a reference to the facade object, with an arbitrary
+    method-name argument — not limited to whatever the facade's own
+    declared read methods actually call. This is a property of the read
+    facade's own runtime design (documented in full in that module), not
+    something this static scanner additionally restricts; noted here only
+    so this module's list of disclosed bounds is complete.
+
+------------------------------------------------------------------------------
+Enforcement ceiling — what this scanner guarantees, and what it does not
+------------------------------------------------------------------------------
+  This scanner is a build-time guard against capability code drifting into
+  an ungated external-write path, or reaching one through an obvious,
+  nameable bypass. It runs once, before a build is accepted, over the
+  generated source files in a project, and it fails that build if anything
+  it checks for is present.
+
+  It is NOT a runtime sandbox, and it is not designed to defend against a
+  determined, adversarial use of Python's own reflection machinery from
+  inside a capability module. Concretely, this scanner does not attempt to
+  catch every way a piece of code could reach into another object's internal
+  state at runtime: walking through a function or method object's own
+  internals to reach the module that defines it, reassigning an attribute on
+  an object by calling the built-in attribute-setting machinery directly
+  instead of using ordinary attribute-assignment syntax, or resolving a name
+  through a string value computed at runtime instead of writing that name
+  literally in the source. Some of the clearest, most obvious instances of
+  that kind of reach are closed directly by the checks above (see the
+  function-object-internals additions to the introspection-escape-hatch
+  check, and the adapter-registry symbol list). Reflection paths beyond
+  those remain possible in principle. That is a disclosed limit of this
+  check, stated here plainly rather than left as a silent gap.
+
+  This limit is acceptable given what this scanner is actually built to
+  protect against. The capability code it scans is written by an AI
+  assistant working for the operator, inside the operator's own project,
+  against the operator's own credentials — it is not code written by an
+  outside party trying to defeat this check on purpose. The realistic
+  failure this scanner guards against is an assistant accidentally
+  producing a capability that reaches an external surface it should not:
+  an ordinary import of a network client, an ordinary call to a mutating
+  method, an ordinary reference to a credential or registry symbol it
+  should never have been able to name — not a hostile author deliberately
+  hand-crafting a reflection-based bypass to get past this specific check.
+  Within that scope, this scanner together with the operator reviewing what
+  gets built is the intended safeguard: a deterministic check at build time,
+  backed by a person approving the result, rather than a runtime or
+  operating-system-level sandbox. Every reflection path this scanner does
+  not close is disclosed above, in "Bounds NOT covered", and in this
+  section — never silently assumed covered.
 
 ------------------------------------------------------------------------------
 Trust zones (replaces the old blanket "whole external_write/ tree is exempt"
@@ -630,6 +708,15 @@ _ADAPTER_PROFILE_MODULE_PREFIX = "adapters_"
 # _CREDENTIAL_PROVIDER_SYMBOLS's visit_ImportFrom / visit_Name /
 # visit_Attribute pattern. Curated, NOT exhaustive — same disclosed-bound
 # spirit as every other curated symbol surface in this module.
+#
+# Task R8-T1 (cross-vendor re-ratification) adds the two symbols the review
+# found unguarded: ``_DISPATCH_REGISTRY`` (the dispatch-keyed dict
+# ``get_dispatch`` reads from — parallel to the already-banned ``_REGISTRY``,
+# the adapter-keyed dict ``get_adapter`` reads from) and
+# ``provision_write_client`` (the write-client provisioner on an
+# ``AdapterDispatch``/dispatch object — parallel to the already-banned
+# ``build_write_client``, the provisioner on an ``Adapter``). Same curated,
+# disclosed-bound discipline as every other symbol set in this module.
 _ADAPTER_REGISTRY_SYMBOLS = frozenset(
     {
         "get_adapter",
@@ -638,6 +725,8 @@ _ADAPTER_REGISTRY_SYMBOLS = frozenset(
         "unregister_adapter",
         "_REGISTRY",
         "AdapterDispatch",
+        "_DISPATCH_REGISTRY",
+        "provision_write_client",
     }
 )
 
@@ -646,6 +735,29 @@ _ADAPTER_REGISTRY_SYMBOLS = frozenset(
 # that flagging every bare reference does not risk the noisy false-positive
 # collision _CREDENTIAL_CLASS_NAMES's design note warns about.
 _INTROSPECTION_BARE_NAMES = frozenset({"__import__", "globals", "vars"})
+
+# Function/method-object internals — attribute names banned by NAME alone,
+# any base (Task R8-T1, cross-vendor re-ratification). ``run_operation`` is
+# the real function object defined in the sealed kernel module, so its
+# ``__globals__`` bridges directly into that module's namespace; a string-
+# keyed lookup through it (``run_operation.__globals__["get_dispatch"]``) is
+# invisible to every symbol check in this module, because the lookup key is
+# an ``ast.Constant``, not a Name/Attribute. Banning the attribute reference
+# itself closes the bridge deterministically: capability code can no longer
+# NAME ``.__globals__`` (or the sibling internals below) at all, regardless
+# of what it would do with the result. Unlike ``__class__``/``__dict__``/
+# ``__mro__``/``__module__`` (deliberately NOT banned — see the module
+# docstring), ordinary capability code has no legitimate reason to ever
+# touch a function/method object's own internals, so this set does not
+# over-fire on ``type(x)``, isinstance idioms, or dataclasses:
+#   * ``__globals__``  -- the function's global-namespace dict.
+#   * ``__code__``     -- the function's code object.
+#   * ``__closure__``  -- captured free-variable cells.
+#   * ``__func__``     -- the underlying function behind a bound method.
+#   * ``__self__``     -- the bound instance behind a bound method.
+_FUNCTION_INTROSPECTION_ATTRS = frozenset(
+    {"__globals__", "__code__", "__closure__", "__func__", "__self__"}
+)
 
 
 def _module_matches_adapter_registry(dotted: str) -> bool:
@@ -882,8 +994,12 @@ class _Scanner(ast.NodeVisitor):
         ``importlib`` Name). ``__subclasses__`` is flagged on the attribute
         name alone, any base — unlike ``__class__``/``__dict__``/``__mro__``/
         ``__module__`` (deliberately NOT banned; see module docstring),
-        ``__subclasses__`` has no ordinary-code collision risk."""
-        if node.attr == "__subclasses__":
+        ``__subclasses__`` has no ordinary-code collision risk. Task R8-T1
+        adds the same any-base, name-alone treatment for the function/method-
+        object internals in ``_FUNCTION_INTROSPECTION_ATTRS`` (``__globals__``/
+        ``__code__``/``__closure__``/``__func__``/``__self__``) — see that
+        set's docstring for why these do not over-fire either."""
+        if node.attr == "__subclasses__" or node.attr in _FUNCTION_INTROSPECTION_ATTRS:
             self._add(node.lineno, "introspection_escape_hatch")
             return
         base = node.value

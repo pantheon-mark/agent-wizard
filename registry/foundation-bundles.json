@@ -253,7 +253,7 @@
       "manifest": "foundation-bundles/v0.11.0/manifest.yaml",
       "status": "prerelease",
       "changelog": "Two additions under the hood. An adapter registry enforces a cap on how many things a single write action can touch; a read-only view lets a capability be built and tested without the code that builds it ever being able to touch the credential that can write; and a clearer three-way split between the code your system trusts by default, the code a connected service's adapter runs, and the code a specific capability runs makes it easier to see what any given piece of code is and is not allowed to do. A Gmail adapter (label and filter actions only — never sending, never permanently deleting) proves these building blocks out as a second real capability. And when your system checks for and applies an update, it now also checks whether anything you already had running still follows the current safety rules — if something no longer does, that one thing is safely paused, reversibly, and handed to the same define → build → accept process you already use to add a new capability, rather than left running unprotected or broken outright. No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.",
-      "bundle_tree_sha256": "sha256:ba20df5da592e679bab50a7924c545457e340a9d68d02c8ea77a7bf64157112b",
+      "bundle_tree_sha256": "sha256:cce8683fd18e793a151945cc0b624339ffb122bcad36889af50ce3d4facae88f",
       "bundle_manifest_sha256": "sha256:27bddb24d325170eb5947050abd2a36bf6902fc477cab481d124addb64e5a1bf"
     }
   ]
