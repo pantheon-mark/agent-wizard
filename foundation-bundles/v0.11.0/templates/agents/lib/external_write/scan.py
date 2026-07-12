@@ -104,6 +104,94 @@ Bypass classes CAUGHT at v0
                          the method via a Constant node invisible to the symbol
                          check — an aliased/dynamic reach that stays a disclosed
                          deterministic-scanner limitation, not closed here.
+  adapter_module_import,
+  adapter_registry_reference -- (Task R7-T4 — cross-vendor-ratified defense-in-
+                         depth, sealing the architecture Tasks R7-T1..T3 built)
+                         CAPABILITY-zone-ONLY bans (see "Trust zones" below —
+                         unlike every rule above, these two do NOT apply to
+                         SEALED_KERNEL: ``adapters.py`` and
+                         ``effects_manifest.py`` legitimately import and call
+                         ``get_dispatch``/``get_adapter`` — that is the
+                         registry's own intended kernel-side consumer. Nor do
+                         they apply to ADAPTER_PROFILE, already exempt from
+                         every check before the scanner runs — see
+                         ``_scan_file``'s early return):
+                           * ``adapter_module_import`` — importing the adapter
+                             registry module itself (``import
+                             external_write.adapter_registry`` / ``from
+                             external_write.adapter_registry import ...``) or
+                             an adapter-PROFILE module (``import
+                             external_write.adapters_<vendor>`` / ``from
+                             external_write.adapters_<vendor> import ...``).
+                             Matched by the module's trailing two dotted
+                             components (``external_write.adapter_registry`` /
+                             ``external_write.adapters_`` + a non-empty
+                             suffix) so a package-path prefix in front (e.g. a
+                             hypothetical ``pkg.external_write.adapters_x``)
+                             does not evade the match. CRITICAL distinction:
+                             the bare kernel dispatch module
+                             ``external_write.adapters`` (where
+                             ``run_operation`` lives — the one legitimate
+                             CAPABILITY-facing entrypoint, re-exported again by
+                             ``capability_api.py``) is NEVER matched — the
+                             ``adapters_`` prefix requires a trailing
+                             underscore + a non-empty suffix, so "adapters"
+                             alone never collides with "adapters_gmail" etc.
+                           * ``adapter_registry_reference`` — naming a
+                             registry symbol (``get_adapter``, ``get_dispatch``,
+                             ``register_adapter``, ``unregister_adapter``,
+                             ``_REGISTRY``, ``AdapterDispatch``) as an import
+                             alias, a bare name, or an attribute — regardless
+                             of which module the capability claims to import
+                             it from (so a re-export shape, e.g. ``from
+                             external_write.adapters import get_adapter``,
+                             is caught on the NAME even though the bare
+                             ``adapters`` module import itself is legal).
+                             Modeled directly on ``credential_provider_reference``
+                             above (visit_ImportFrom / visit_Name /
+                             visit_Attribute against a curated symbol set).
+                         Together these make the mutable Adapter instance and
+                         the adapter-profile modules that define
+                         ``build_write_client`` STATICALLY unreachable from
+                         capability code — closing the reach path Task R7-T2's
+                         ``AdapterDispatch`` capture defends at runtime
+                         (reassigning an instance attribute after obtaining it
+                         via ``get_adapter`` no longer hijacks dispatch — see
+                         ``adapter_registry.AdapterDispatch``) by removing the
+                         capability's ability to even NAME ``get_adapter`` in
+                         the first place.
+  introspection_escape_hatch -- (Task R7-T4, CAPABILITY-zone-ONLY, same
+                         zone-scoping rationale as the two rules above —
+                         ``read_facade.py``'s own ``__init_subclass__``
+                         legitimately calls ``vars(cls)`` in SEALED_KERNEL)
+                         a clear dynamic-reach escape hatch that could
+                         otherwise reach a banned module or object WITHOUT a
+                         static ``import`` the checks above would see:
+                         ``sys.modules`` (attribute access gated on a ``sys``
+                         base), ``X.__subclasses__`` (attribute, any base —
+                         unambiguous, no benign-collision risk, unlike
+                         ``__class__``/``__dict__``/``__mro__``/``__module__``
+                         below), ``importlib.import_module`` (attribute gated
+                         on an ``importlib`` base) and the bare ``import
+                         importlib`` / ``from importlib import ...`` statement
+                         itself (root-matched, mirroring
+                         ``_FORBIDDEN_IMPORT_ROOTS``'s convention), and the
+                         bare builtins ``__import__`` / ``globals`` / ``vars``
+                         referenced by name. Deliberately BROADER than
+                         ``dynamic_import`` above: ``dynamic_import`` only
+                         fires when a literal argument names a KNOWN-forbidden
+                         import root; ``importlib.import_module("external_write.
+                         adapter_registry")`` — an internal module name, not a
+                         network/vendor client — would evade that check
+                         entirely, which is exactly why this rule fires on the
+                         attribute/name reference itself, regardless of any
+                         argument. Deliberately NOT banned (disclosed instead,
+                         not silently assumed covered — see "Bounds NOT
+                         covered" below): ``__class__``, ``__dict__``,
+                         ``__mro__``, ``__module__`` — these appear in
+                         ordinary code (``type(x)``, isinstance idioms,
+                         dataclasses) constantly, and banning them would
+                         over-fire on unremarkable Python.
 
 ------------------------------------------------------------------------------
 Bounds NOT covered at v0 (disclosed — no silent caps)
@@ -173,6 +261,76 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
           build-time + operator-as-approver, not runtime/OS. Disclosed here
           as a documented limitation of the static gate, not silently
           assumed covered.
+  * ``direct_api_call`` is NOT a claim of method-reference completeness
+    (Task R7-T4 — correcting an overclaim (NF1) a cross-vendor review
+    flagged in this section's prior wording). Two known false negatives,
+    disclosed rather than chased, because closing either would require
+    undecidable data-flow analysis, not a deterministic AST shape check:
+      (a) a BROKEN variable chain — ``u = client.users(); m =
+          u.messages(); m.send(...)`` — splits the attribute chain across
+          several assignments. ``_attr_chain_names`` walks a single
+          Call/Attribute expression and stops at the first ``ast.Name`` it
+          hits (here, the local variable ``m``), so it never sees the
+          ``users``/``messages`` surface handles that would have gated the
+          ambiguous verb — the chain-gating this module relies on
+          (``_check_surface_mutation``) is a SINGLE-EXPRESSION analysis, not
+          a local data-flow/alias tracker.
+      (b) a LITERAL ``getattr(x, "send")(...)`` — the mutation verb is a
+          ``ast.Constant`` string, not an ``ast.Attribute`` node with
+          ``.attr == "send"``; it is invisible to the same attribute-name
+          check, the identical Constant-node blind spot already disclosed
+          above for ``build_write_client`` / the credential-factory
+          surfaces.
+    Both are disclosed deterministic-scanner bounds, not silently assumed
+    covered. ``direct_api_call`` is defense-in-depth here, not the primary
+    guarantee: CAPABILITY-zone code has no write-capable client to call a
+    verb ON in the first place unless the credential-isolation keystone
+    (BL-1 / F-33) is itself breached — and Task R7-T4's
+    ``adapter_registry_reference`` / ``adapter_module_import`` /
+    ``introspection_escape_hatch`` rules are precisely what closes the
+    static reach paths to that keystone. This module does not attempt to
+    chase every conceivable indirection into value-flow analysis; it
+    catches the common, single-expression shapes and discloses the rest.
+  * Introspection beneath ``get_adapter``/``build_write_client`` via
+    ``__class__``/``__dict__``/``__mro__``/``__module__`` (Task R7-T4).
+    These four dunders are deliberately NOT banned — see
+    ``introspection_escape_hatch`` above — because they appear in ordinary
+    code (``type(x)``, isinstance idioms, dataclasses) constantly; banning
+    them would over-fire on unremarkable Python. A determined capability
+    could still chain ``obj.__class__.__mro__[...]`` or
+    ``type(x).__dict__["build_write_client"]`` to resolve a class-level
+    method by a STRING key — a ``ast.Constant`` node, invisible to every
+    symbol check in this module, the same Constant-node blind spot
+    disclosed throughout this section. This residual is OUTSIDE the
+    deterministic guarantee and INSIDE this project's actual enforcement
+    ceiling (build-time + operator-as-approver, not runtime/OS) — disclosed
+    here, not silently assumed covered. In practice this residual is
+    defanged by the rules above: the entry point into it (``get_adapter``,
+    to obtain an adapter instance to introspect at all) is itself a banned
+    ``adapter_registry_reference`` in the CAPABILITY zone, so a capability
+    module that never names ``get_adapter`` has no adapter instance to
+    reach beneath in the first place.
+  * Aliased ``sys`` / ``importlib`` names in introspection-escape-hatch
+    checks (Task R7-T4). The ``sys.modules`` and ``importlib.import_module``
+    checks in ``_check_introspection_attribute`` anchor on a bare Name node
+    (``base.id == "sys"`` / ``"importlib"``). An aliased import
+    (``import sys as s``) reference to ``s.modules[...]`` evades the check
+    because the base name is "s", not "sys" — a disclosed deterministic-
+    scanner bound, not a silent gap. Consistent with the credential-isolation
+    keystone (BL-1 / F-33) being the real guarantee; this module discloses
+    what it does not deterministically catch.
+  * ``external_write.adapter_registry`` reached via ``from external_write
+    import adapter_registry`` (importing the SUBMODULE NAME off the
+    package, rather than a dotted ``external_write.adapter_registry``
+    path) is NOT matched by ``adapter_module_import``'s module-string
+    check, and ``adapter_registry`` is not itself in the
+    ``adapter_registry_reference`` symbol set (only names reachable
+    THROUGH the module — ``get_adapter``, ``get_dispatch``, etc. — are).
+    A curated, disclosed gap (same spirit as every other curated symbol
+    surface in this module) rather than a silently assumed closure; every
+    real caller in this codebase (kernel, adapter-profile, and every
+    fixture in this task) uses the dotted ``external_write.X`` form this
+    check does match.
 
 ------------------------------------------------------------------------------
 Trust zones (replaces the old blanket "whole external_write/ tree is exempt"
@@ -188,7 +346,14 @@ rule — see ``zones.py`` for the full rationale and the canonical taxonomy)
                         and the coverage gate). Held to the SAME checks as
                         capability code below — it simply never trips them,
                         because none of this code needs a vendor SDK import
-                        or a write-capable credential.
+                        or a write-capable credential. ONE deliberate
+                        exception (Task R7-T4): the adapter_module_import /
+                        adapter_registry_reference / introspection_escape_hatch
+                        rules are CAPABILITY-zone-ONLY and do NOT apply here —
+                        adapters.py and effects_manifest.py are the registry's
+                        own intended kernel-side consumers (get_dispatch /
+                        get_adapter), and read_facade.py legitimately calls
+                        vars(cls) — see those rules' docstring sections.
     ADAPTER_PROFILE  -- registered per-vendor adapter modules. The ONLY zone
                         exempt from every check this module enforces —
                         importing a vendor SDK, calling a mutation verb, and
@@ -254,6 +419,8 @@ class Violation(NamedTuple):
               'direct_api_call', 'forbidden_import',
               'dynamic_import', 'subprocess_network',
               'credential_construction', 'credential_provider_reference',
+              'adapter_module_import', 'adapter_registry_reference',
+              'introspection_escape_hatch',
               'unparseable'.
             Specific enough that a build-failure message tells the operator or
             agent WHAT to fix.
@@ -432,6 +599,77 @@ _CREDENTIAL_PROVIDER_SYMBOLS = frozenset(
     }
 )
 
+# ---------------------------------------------------------------------------
+# CAPABILITY-zone-ONLY bans (Task R7-T4 — cross-vendor-ratified defense-in-
+# depth, sealing the architecture Tasks R7-T1..T3 built). Unlike every rule
+# above, these three checks are gated on zone == Zone.CAPABILITY and do NOT
+# fire in SEALED_KERNEL: ``adapters.py`` legitimately imports/calls
+# ``get_dispatch``, ``effects_manifest.py`` legitimately imports/calls
+# ``get_adapter``, and ``read_facade.py`` legitimately calls ``vars(cls)`` in
+# ``__init_subclass__`` — see the module docstring's
+# ``adapter_registry_reference`` / ``introspection_escape_hatch`` sections for
+# the full rationale and zone-scoping discipline.
+# ---------------------------------------------------------------------------
+
+# The adapter registry module itself — banned by module identity, matched by
+# its trailing two dotted components (see _module_matches_adapter_registry)
+# so a package-path prefix in front does not evade the match.
+_ADAPTER_REGISTRY_MODULE_NAME = "adapter_registry"
+
+# Adapter-PROFILE modules (``adapters_<vendor>.py``) — banned by module
+# identity. CRITICAL: the prefix below REQUIRES the trailing underscore, so
+# the bare kernel dispatch module ``external_write.adapters`` (where
+# ``run_operation`` lives) never matches — see _module_matches_adapter_profile.
+_ADAPTER_PROFILE_MODULE_PREFIX = "adapters_"
+
+# Adapter-registry symbols — banned by NAME (import alias, bare Name, or
+# Attribute), regardless of which module a capability claims to import them
+# from (so a re-export shape, e.g. ``from external_write.adapters import
+# get_adapter``, is caught on the name even though the bare ``adapters``
+# module import itself is legal). Modeled directly on
+# _CREDENTIAL_PROVIDER_SYMBOLS's visit_ImportFrom / visit_Name /
+# visit_Attribute pattern. Curated, NOT exhaustive — same disclosed-bound
+# spirit as every other curated symbol surface in this module.
+_ADAPTER_REGISTRY_SYMBOLS = frozenset(
+    {
+        "get_adapter",
+        "get_dispatch",
+        "register_adapter",
+        "unregister_adapter",
+        "_REGISTRY",
+        "AdapterDispatch",
+    }
+)
+
+# Dynamic-reach escape hatches — bare builtin names banned by NAME (Name
+# node). Unambiguous enough (unlike, say, a hypothetical "update"/"delete")
+# that flagging every bare reference does not risk the noisy false-positive
+# collision _CREDENTIAL_CLASS_NAMES's design note warns about.
+_INTROSPECTION_BARE_NAMES = frozenset({"__import__", "globals", "vars"})
+
+
+def _module_matches_adapter_registry(dotted: str) -> bool:
+    """True iff ``dotted`` (an import's module path) names the adapter
+    registry module — matched by its trailing two dotted components, so a
+    package-path prefix in front (e.g. a hypothetical
+    ``pkg.external_write.adapter_registry``) does not evade the match."""
+    parts = dotted.split(".")
+    return len(parts) >= 2 and parts[-2] == "external_write" and parts[-1] == _ADAPTER_REGISTRY_MODULE_NAME
+
+
+def _module_matches_adapter_profile(dotted: str) -> bool:
+    """True iff ``dotted`` names an adapter-PROFILE module
+    (``external_write.adapters_<vendor>``) — same trailing-two-components
+    match as above. The bare kernel dispatch module
+    ``external_write.adapters`` never matches: ``"adapters".startswith(
+    "adapters_")`` is False (the prefix requires the trailing underscore)."""
+    parts = dotted.split(".")
+    return (
+        len(parts) >= 2
+        and parts[-2] == "external_write"
+        and parts[-1].startswith(_ADAPTER_PROFILE_MODULE_PREFIX)
+    )
+
 
 # ---------------------------------------------------------------------------
 # Trust-zone anchor (see zones.py for the full taxonomy). Anchored to ONE
@@ -526,9 +764,18 @@ class _Scanner(ast.NodeVisitor):
     is bounded; see module docstring.)
     """
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, zone: Zone = Zone.CAPABILITY):
         self.path = path
         self.violations: List[Violation] = []
+        # Task R7-T4: three rules (adapter_module_import,
+        # adapter_registry_reference, introspection_escape_hatch) are
+        # CAPABILITY-zone-ONLY — see the module docstring's zone-scoping
+        # rationale (SEALED_KERNEL legitimately imports/calls
+        # get_dispatch/get_adapter/vars(cls)). Every other rule in this class
+        # is unconditional (SEALED_KERNEL + CAPABILITY both scanned in full;
+        # ADAPTER_PROFILE never reaches this class at all — see _scan_file's
+        # early return).
+        self._capability_zone = zone is Zone.CAPABILITY
 
     def _add(self, lineno: int, kind: str) -> None:
         self.violations.append(Violation(path=self.path, lineno=lineno, kind=kind))
@@ -540,6 +787,16 @@ class _Scanner(ast.NodeVisitor):
             root = alias.name.split(".")[0]
             if root in _FORBIDDEN_IMPORT_ROOTS:
                 self._add(node.lineno, "forbidden_import")
+            if self._capability_zone:
+                if (
+                    _module_matches_adapter_registry(alias.name)
+                    or _module_matches_adapter_profile(alias.name)
+                ):
+                    self._add(node.lineno, "adapter_module_import")
+                # ``import importlib`` (or any importlib submodule) itself —
+                # root-matched, mirroring _FORBIDDEN_IMPORT_ROOTS's convention.
+                if root == "importlib":
+                    self._add(node.lineno, "introspection_escape_hatch")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
@@ -548,12 +805,27 @@ class _Scanner(ast.NodeVisitor):
             root = node.module.split(".")[0]
             if root in _FORBIDDEN_IMPORT_ROOTS:
                 self._add(node.lineno, "forbidden_import")
+            if self._capability_zone:
+                if (
+                    _module_matches_adapter_registry(node.module)
+                    or _module_matches_adapter_profile(node.module)
+                ):
+                    self._add(node.lineno, "adapter_module_import")
+                if root == "importlib":
+                    self._add(node.lineno, "introspection_escape_hatch")
         # Importing an adapter-profile credential-provider symbol into a
         # non-adapter zone is itself the bypass (BL-1): the emitted capability
         # must be UNABLE to name the provider.
         for alias in node.names:
             if alias.name in _CREDENTIAL_PROVIDER_SYMBOLS:
                 self._add(node.lineno, "credential_provider_reference")
+            # Adapter-registry symbols are banned by NAME regardless of which
+            # module the import claims to come from — e.g. a re-export shape
+            # (``from external_write.adapters import get_adapter``) is caught
+            # here even though the ``adapters`` module import itself is legal
+            # (CAPABILITY-only — see class docstring / module docstring).
+            if self._capability_zone and alias.name in _ADAPTER_REGISTRY_SYMBOLS:
+                self._add(node.lineno, "adapter_registry_reference")
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
@@ -562,6 +834,11 @@ class _Scanner(ast.NodeVisitor):
         # reference itself, so "holds it by reference only" is no defense.
         if node.id in _CREDENTIAL_PROVIDER_SYMBOLS:
             self._add(node.lineno, "credential_provider_reference")
+        if self._capability_zone:
+            if node.id in _ADAPTER_REGISTRY_SYMBOLS:
+                self._add(node.lineno, "adapter_registry_reference")
+            if node.id in _INTROSPECTION_BARE_NAMES:
+                self._add(node.lineno, "introspection_escape_hatch")
         self.generic_visit(node)
 
     # --- calls -------------------------------------------------------------
@@ -585,7 +862,36 @@ class _Scanner(ast.NodeVisitor):
         # an attribute access on the imported adapter module.
         if node.attr in _CREDENTIAL_PROVIDER_SYMBOLS:
             self._add(node.lineno, "credential_provider_reference")
+        if self._capability_zone:
+            self._check_adapter_registry_attribute(node)
+            self._check_introspection_attribute(node)
         self.generic_visit(node)
+
+    def _check_adapter_registry_attribute(self, node: ast.Attribute) -> None:
+        """CAPABILITY-only: an attribute reference naming an adapter-registry
+        symbol (e.g. ``adapter_registry.get_adapter``, or
+        ``mod.AdapterDispatch``), regardless of the base expression."""
+        if node.attr in _ADAPTER_REGISTRY_SYMBOLS:
+            self._add(node.lineno, "adapter_registry_reference")
+
+    def _check_introspection_attribute(self, node: ast.Attribute) -> None:
+        """CAPABILITY-only: clear dynamic-reach escape hatches reached via
+        attribute access — ``sys.modules`` (base-gated on a ``sys`` Name, so
+        an unrelated ``.modules`` attribute on some other object is not
+        flagged) and ``importlib.import_module`` (base-gated on an
+        ``importlib`` Name). ``__subclasses__`` is flagged on the attribute
+        name alone, any base — unlike ``__class__``/``__dict__``/``__mro__``/
+        ``__module__`` (deliberately NOT banned; see module docstring),
+        ``__subclasses__`` has no ordinary-code collision risk."""
+        if node.attr == "__subclasses__":
+            self._add(node.lineno, "introspection_escape_hatch")
+            return
+        base = node.value
+        if isinstance(base, ast.Name):
+            if base.id == "sys" and node.attr == "modules":
+                self._add(node.lineno, "introspection_escape_hatch")
+            elif base.id == "importlib" and node.attr == "import_module":
+                self._add(node.lineno, "introspection_escape_hatch")
 
     def _check_dynamic_import(self, node: ast.Call) -> None:
         func = node.func
@@ -762,7 +1068,7 @@ def _scan_file(
         # An unparseable file cannot be statically verified safe. For a trust
         # gate, treat that as a violation so the build does not pass blind.
         return [Violation(path=str(file_path), lineno=1, kind="unparseable")]
-    scanner = _Scanner(str(file_path))
+    scanner = _Scanner(str(file_path), zone)
     scanner.visit(tree)
     return scanner.violations
 

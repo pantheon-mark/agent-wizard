@@ -1398,12 +1398,20 @@ class TestS253ContractDelta(unittest.TestCase):
         # T14 (external-write-gate-generalization bundle cut): the five new modules this slice
         # added under agents/lib/external_write/ must be enrolled, or an emitted writes-back
         # system's package breaks at import time (adapters_gmail/operations/scan/etc. import
-        # these at module load, not just when called) — twenty lib files total.
+        # these at module load, not just when called) — twenty lib files total at T14.
         import agent_emitter
         for name in ("adapter_registry.py", "adapters_gmail.py", "effects_manifest.py",
                      "read_facade.py", "zones.py"):
             self.assertIn(name, agent_emitter._EXTERNAL_WRITE_LIB_FILES)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 20)
+
+    def test_emit_set_lists_the_two_r7_capability_zone_files(self):
+        # R7 (external-write-gate-generalization, CAPABILITY-zone hardening): capability_api.py
+        # and read_facades_gmail.py must be enrolled, or an emitted writes-back system's package
+        # breaks at import time — twenty-two lib files total.
+        import agent_emitter
+        for name in ("capability_api.py", "read_facades_gmail.py"):
+            self.assertIn(name, agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 22)
 
     def _writes_back_plan(self):
         import copy, json

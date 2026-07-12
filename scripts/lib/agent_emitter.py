@@ -79,6 +79,14 @@ _EXTERNAL_WRITE_LIB_FILES = (
     "effects_manifest.py",
     "read_facade.py",
     "zones.py",
+    # R7 (external-write-gate-generalization, CAPABILITY-zone hardening): the CAPABILITY-zone
+    # surface split out of the runtime substrate above. capability_api.py is the sanctioned
+    # entry point CAPABILITY-zone code must call instead of touching adapter_registry/adapters
+    # directly; read_facades_gmail.py is the Gmail read-facade counterpart the scaffold-generated
+    # per-capability read facade imports. Omitting either breaks an emitted writes-back system at
+    # import time the same way the T14 five above would.
+    "capability_api.py",
+    "read_facades_gmail.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

@@ -1429,6 +1429,22 @@
     },
     {
       "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "agents/lib/external_write/capability_api.py",
+      "render_kind": "copy",
+      "template_path": "templates/agents/lib/external_write/capability_api.py"
+    },
+    {
+      "delivery": "wizard",
+      "merge_strategy": "warn_on_drift",
+      "mode": "0644",
+      "relpath": "agents/lib/external_write/read_facades_gmail.py",
+      "render_kind": "copy",
+      "template_path": "templates/agents/lib/external_write/read_facades_gmail.py"
+    },
+    {
+      "delivery": "wizard",
       "merge_strategy": "operator_review",
       "mode": "0644",
       "relpath": "requirements.txt",

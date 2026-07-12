@@ -38,7 +38,7 @@ from typing import Any, Optional, Sequence
 from external_write.operations import Operation, Result
 from external_write.verifiers import validate_postwrite_verification
 from external_write.write_gate import evaluate_write_gate, InvocationLedger, resolve_effective_cap
-from external_write.adapter_registry import get_adapter
+from external_write.adapter_registry import get_dispatch
 
 
 # ---------------------------------------------------------------------------
@@ -122,39 +122,59 @@ def _parse_allowed_from_error(message: str) -> Optional[list]:
 # T2: registered-adapter action path
 # ---------------------------------------------------------------------------
 
-def _run_adapter_operation(op: Operation, raw_client: Any, adapter: Any,
+def _run_adapter_operation(op: Operation, raw_client: Any, dispatch: Any,
                            descriptor_set: Any, gate_audit: Optional[dict],
                            units: list) -> Result:
     """Cap-check, then apply — the registered-adapter counterpart to the
     field-write Steps 2-4 in run_operation.
 
-    THE ORDERING GUARANTEE (F-31): `units` is `adapter.plan(op.params)`'s result,
-    already computed ONCE by run_operation (NF3 — Step 0 hoists that pure planning
-    call above the gate to compute the window's `n_units`; see run_operation's
-    docstring). It is counted and compared against the blast-radius cap BEFORE
-    `adapter.apply_one` is called even once. A plan whose unit count exceeds the cap
-    is refused in full — zero units are applied, not "cap-many, then stop." This
-    function does NOT call `adapter.plan(...)` again — `plan()` is contractually
-    pure (no writes, no reads — see the Adapter protocol docstring), so a second
-    call would be safe but wasteful; the caller already has the one true planned
-    list and passes it straight through.
+    THE ORDERING GUARANTEE (F-31): `units` is `dispatch.plan(dispatch.instance,
+    op.params)`'s result, already computed ONCE by run_operation (NF3 — Step 0
+    hoists that pure planning call above the gate to compute the window's
+    `n_units`; see run_operation's docstring). It is counted and compared
+    against the blast-radius cap BEFORE `dispatch.apply_one` is called even
+    once. A plan whose unit count exceeds the cap is refused in full — zero
+    units are applied, not "cap-many, then stop." This function does NOT call
+    plan() again — it is contractually pure (no writes, no reads — see the
+    Adapter protocol docstring), so a second call would be safe but wasteful;
+    the caller already has the one true planned list and passes it straight
+    through.
+
+    Captured dispatch, not the mutable instance (Task R7-T2 — cross-vendor-
+    ratified defense-in-depth fix): `dispatch` is an `adapter_registry.
+    AdapterDispatch` — `plan`/`apply_one`/`undo_one`/`verify_one` (and
+    `provision_write_client`, if the class defines `build_write_client`) were
+    captured OFF `type(adapter)` at `register_adapter` time, not read off the
+    instance here. Every call below therefore goes through the CLASS's
+    function object, with `dispatch.instance` passed explicitly as `self` —
+    reassigning `dispatch.instance.apply_one` (or `.build_write_client`) as an
+    ordinary instance attribute, however a capability obtained a reference to
+    that instance, cannot change what this function calls: `dispatch.apply_one`
+    is a plain reference to the function that lived on the class at
+    registration time, immune to any later instance-level shadowing. See
+    `adapter_registry.AdapterDispatch`'s docstring for the full threat model
+    this closes.
 
     Credential isolation (BL-1 / F-33 — the keystone): the write-capable raw
-    client is resolved INTERNALLY, here, keyed by the registered adapter — NOT
-    from any caller-supplied argument. If the adapter self-provisions its own
-    write client (it defines `build_write_client(op) -> raw_write_client`, as
-    the emitted ADAPTER_PROFILE-zone adapters do), THIS function — the adapter
+    client is resolved INTERNALLY, here, keyed by the registered adapter's
+    CAPTURED provisioner — NOT from any caller-supplied argument and NOT by
+    re-reading `instance.build_write_client` (which a capability could have
+    reassigned). If the adapter self-provisions its own write client (its
+    class defines `build_write_client(self, op) -> raw_write_client`, as the
+    emitted ADAPTER_PROFILE-zone adapters do), THIS function — the adapter
     EXECUTION path, reached only once dispatch is already committed — calls
-    `adapter.build_write_client(op)` to obtain it, and uses it immediately for
-    `adapter.apply_one`, never storing it or handing it back out. Capability/
-    proposal-side code can no longer even NAME a credential provider, let alone
-    pass one in (enforced deterministically by scan.py's
-    credential_provider_reference rule, not by a comment convention).
+    the captured `dispatch.provision_write_client(dispatch.instance, op)` to
+    obtain it, and uses it immediately for `dispatch.apply_one`, never storing
+    it or handing it back out. Capability/proposal-side code can no longer
+    even NAME a credential provider, let alone pass one in (enforced
+    deterministically by scan.py's credential_provider_reference rule, not by
+    a comment convention).
 
-    Backward compatibility: an adapter that does NOT self-provision (no
+    Backward compatibility: an adapter whose class does NOT self-provision (no
     `build_write_client` method — e.g. the Gmail reference adapter, or any
-    adapter whose write client is handed in by its trusted caller) falls back
-    to `raw_client` (run_operation's `client` argument) used as-is — the
+    adapter whose write client is handed in by its trusted caller) has
+    `dispatch.provision_write_client is None`, so this falls back to
+    `raw_client` (run_operation's `client` argument) used as-is — the
     unchanged, pre-BL-1 behavior. The six seeded field op_kinds have no
     registered adapter at all and never reach this path (see
     adapter_registry.py's scope note; test_external_write_replay_conformance.py
@@ -175,20 +195,16 @@ def _run_adapter_operation(op: Operation, raw_client: Any, adapter: Any,
             },
         )
 
-    # Resolve the adapter's write-client provisioner by its STRING name (a
-    # Constant node, invisible to scan.py's credential_provider_reference symbol
-    # check). The local is named `_provision`, NOT `build_write_client`: this
-    # module is SEALED_KERNEL (not exempt from that rule), so a local literally
-    # named `build_write_client` would self-trip the scanner as a bare-name
-    # reference to the guarded provider symbol.
-    _provision = getattr(adapter, "build_write_client", None)
+    # Already captured off the class at registration time (adapter_registry.
+    # AdapterDispatch) — never re-read from the (possibly reassigned) instance.
+    _provision = dispatch.provision_write_client
     effective_raw_client = (
-        _provision(op) if callable(_provision)
+        _provision(dispatch.instance, op) if _provision is not None
         else raw_client
     )
 
     for unit in units:
-        adapter.apply_one(effective_raw_client, unit)
+        dispatch.apply_one(dispatch.instance, effective_raw_client, unit)
 
     detail: dict = dict(gate_audit) if gate_audit else {}
     detail["units_applied"] = len(units)
@@ -234,8 +250,11 @@ def run_operation(op: Operation, receipt: Any, client: Any,
              comes from it. Defaults to the system clock; injected only for deterministic tests.
 
     n_units / plan-once (NF3 — external-write-gate-generalization): when op.op_kind has a
-             registered adapter AND target is not 'dry_run', this function resolves it and calls
-             `adapter.plan(op.params)` ONCE, before Step 0's gate — plan() is contractually PURE
+             registered adapter AND target is not 'dry_run', this function resolves its CAPTURED
+             dispatch (adapter_registry.get_dispatch — see AdapterDispatch's docstring for why
+             this is captured off the class rather than the mutable instance, Task R7-T2) and
+             calls `dispatch.plan(dispatch.instance, op.params)` ONCE, before Step 0's gate —
+             plan() is contractually PURE
              (no reads/writes; see the Adapter protocol docstring), so hoisting it above the gate
              does not touch the surface and does not weaken "the gate refuses before any write."
              The resulting `len(units)` is passed into evaluate_write_gate as n_units, so the
@@ -260,14 +279,15 @@ def run_operation(op: Operation, receipt: Any, client: Any,
              contract.
 
     Credential isolation (BL-1 / F-33): run_operation takes NO caller-supplied
-             write-credential provider. When op.op_kind has a registered adapter that
+             write-credential provider. When op.op_kind has a registered adapter whose CLASS
              self-provisions its own write client, the write-capable raw client is resolved
              INTERNALLY inside the adapter execution path (see _run_adapter_operation:
-             `adapter.build_write_client(op)`), keyed by the registered adapter — never by a
-             caller of run_operation and never exposed to capability/proposal-side code. An
-             adapter that does not self-provision falls back to `client` as the raw write
-             client (unchanged, backward-compatible). The legacy field-write path uses
-             `client` directly.
+             `dispatch.provision_write_client(dispatch.instance, op)` — the CAPTURED class
+             method, immune to an instance-level `build_write_client` reassignment), keyed by
+             the registered adapter — never by a caller of run_operation and never exposed to
+             capability/proposal-side code. An adapter whose class does not self-provision falls
+             back to `client` as the raw write client (unchanged, backward-compatible). The
+             legacy field-write path uses `client` directly.
 
     Returns
     -------
@@ -292,12 +312,25 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     #      everywhere (an improvement over pre-NF3, where such an op crashed later, inside
     #      _run_adapter_operation's now-removed second plan() call), never an uncaught exception
     #      breaking run_operation's "always returns a Result" contract.
-    adapter = get_adapter(op.op_kind)
+    dispatch = get_dispatch(op.op_kind)
     _planned_units: Optional[list] = None
     n_units = 1
-    if adapter is not None and target != "dry_run":
+    if dispatch is not None and target != "dry_run":
         try:
-            _planned_units = adapter.plan(op.params)
+            _planned_units = dispatch.plan(dispatch.instance, op.params)
+            # F4 (gpt ratification): plan() is contractually a List[EffectUnit],
+            # but nothing upstream enforces that at the type level. Validate the
+            # shape INSIDE this guard — a plan() returning None (or any other
+            # non-list, e.g. a string, which is itself len()-able and iterable
+            # and would otherwise be silently misread as a sequence of
+            # one-character "units") must become a clean refusal here, not a
+            # TypeError/AttributeError raised later at `len(_planned_units)` or
+            # a silent-corruption bug from iterating the wrong thing.
+            if not isinstance(_planned_units, list):
+                raise TypeError(
+                    "plan() must return a list of EffectUnit; got "
+                    f"{type(_planned_units).__name__!r}"
+                )
         except Exception as exc:
             return Result(
                 status="refused",
@@ -352,11 +385,11 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     # backward-compatibility guarantee is proven by
     # test_external_write_replay_conformance.py instead.
     #
-    # NF3: `adapter` and `_planned_units` were already resolved/planned once above (Step -1),
+    # NF3: `dispatch` and `_planned_units` were already resolved/planned once above (Step -1),
     # ahead of the gate, so the cap-check + apply step here reuses that SAME planned list
-    # rather than calling adapter.plan(op.params) a second time.
-    if adapter is not None:
-        return _run_adapter_operation(op, client, adapter, descriptor_set, _gate_audit,
+    # rather than calling plan() a second time.
+    if dispatch is not None:
+        return _run_adapter_operation(op, client, dispatch, descriptor_set, _gate_audit,
                                       _planned_units)
 
     # Step 2: attempt write via the surface's validating path.

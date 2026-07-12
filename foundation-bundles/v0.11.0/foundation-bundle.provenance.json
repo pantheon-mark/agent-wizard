@@ -33,11 +33,11 @@
       "path": "manifest.yaml"
     },
     {
-      "hash": "sha256:fc3af2e7faa5e45c46f18192b5bedde9a092efdd2ba0412cbd0fb2c064d8cc80",
+      "hash": "sha256:27bddb24d325170eb5947050abd2a36bf6902fc477cab481d124addb64e5a1bf",
       "path": "migration-manifest.json"
     },
     {
-      "hash": "sha256:ec7984c282eddf0036fb2863c16df6eab3d4a07b6a44d8bab15d6e444fff7655",
+      "hash": "sha256:e8801fa44734faee5d820ed1af1df54a622416dba1d647f2b2dcc849df9ccf1e",
       "path": "migration-manifest.yaml"
     },
     {
@@ -45,7 +45,7 @@
       "path": "schemas/section-schema.yaml"
     },
     {
-      "hash": "sha256:eb733c594e0b246bd99eb5f0f97c4c857855fb86e29d286e0326510e9b1eb3a8",
+      "hash": "sha256:33ce1293e5e1b9e7d5828d0f0e942495dd782c0a94f2b136f28af9e546e10c47",
       "path": "system-artifacts.json"
     },
     {
@@ -73,15 +73,15 @@
       "path": "templates/agents/lib/external_write/acceptance_ceremony.py"
     },
     {
-      "hash": "sha256:04bc01b2c8ecf8a0867a78988642eb94da97f671f6a2561e181e96312b50592a",
+      "hash": "sha256:f4075367078321c7bc508a5a0718e8f387e4ac2cf84815194452bc2e182f8c52",
       "path": "templates/agents/lib/external_write/adapter_registry.py"
     },
     {
-      "hash": "sha256:cae33dc6baaece97883ec33fa231cfa17167d0f437d80791e5998102ff9320c5",
+      "hash": "sha256:cfa2c5313f0df8d5aae00def0ba2ce389c80438442cab840a4dfd422e695a040",
       "path": "templates/agents/lib/external_write/adapters.py"
     },
     {
-      "hash": "sha256:2c28b13f7305348d398b105c7e58ea6eb9120f4976320c46c20853e23979ac62",
+      "hash": "sha256:10314761695fbff6c5d14ea9c457adaec924a229f1be52aa89b9a90948301496",
       "path": "templates/agents/lib/external_write/adapters_gmail.py"
     },
     {
@@ -93,11 +93,15 @@
       "path": "templates/agents/lib/external_write/broker.py"
     },
     {
+      "hash": "sha256:f1e0a9656907f9d7b671a2e3273562a46d47048b307c8fecf61afc030d761c02",
+      "path": "templates/agents/lib/external_write/capability_api.py"
+    },
+    {
       "hash": "sha256:b51528cc299d4a1f93767acc255152409a5c9e3e8f1d93e114f04dd1b2a53172",
       "path": "templates/agents/lib/external_write/capability_registration.py"
     },
     {
-      "hash": "sha256:6eb363fbb06cfcd2a0e64dcf89f22dffc448dafd3bd90403ff0aa17cb2c73fa6",
+      "hash": "sha256:50da23e51d73d06766b26736c510d124b799fb8e32fb7618163c6df9c5a71481",
       "path": "templates/agents/lib/external_write/contracts.py"
     },
     {
@@ -125,11 +129,15 @@
       "path": "templates/agents/lib/external_write/proof_hash.py"
     },
     {
-      "hash": "sha256:93d2e5eb270b82f33cff77c04c21539242900f438969a2518d000d1fc9cde434",
+      "hash": "sha256:8bfda3a059bcf5b50090229dc2e5899f34803be0ca163b7834a2dc1384c57311",
       "path": "templates/agents/lib/external_write/read_facade.py"
     },
     {
-      "hash": "sha256:063f187af935b8d57cd35e37c2ce9a629fb8b4ad0aafd51cb781e0fcb60e5e40",
+      "hash": "sha256:ab1e036aa73642b2a23e4152eee1614e5948e1299e755cbadce6f54383cdd571",
+      "path": "templates/agents/lib/external_write/read_facades_gmail.py"
+    },
+    {
+      "hash": "sha256:bd6c7be74e3b526beb46023a0dbe2879eecd67bf1ab6708abeff79f638ae9a7e",
       "path": "templates/agents/lib/external_write/scan.py"
     },
     {
@@ -470,12 +478,12 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-07-12T03:29:07Z",
-  "generator_version": "51c5e583341dfa79e1cfc6566e0884a8796a8bbf",
+  "generated_at": "2026-07-12T10:26:00Z",
+  "generator_version": "5bacde5f5104ae3bf78aa1b90d33a4a1d630828b",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.11.0",
-  "source_registry_entry_hash": "sha256:d3d180cf72a1989040f5e4c3cdcec4e1967206924e8b1ee08a754f2f72577757",
+  "source_registry_entry_hash": "sha256:7db0104a61ebedc29b455322f113aed53cccbcb9e5a5658b4408a3dbce738829",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
   "template_tree_hash": "sha256:2bb200832538ef783e35624cb22bff7c1c1f64538821fee80e008a8f6e794857",

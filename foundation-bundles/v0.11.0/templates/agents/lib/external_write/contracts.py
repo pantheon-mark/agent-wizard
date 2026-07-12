@@ -268,7 +268,10 @@ def _gmail_message_contract(op_kind: str, *, risk_class: str,
 
     read_only_scope="gmail.readonly" makes these op_kinds eligible for the
     ReadFacade credential-isolation safety model (Task 4) — the concrete
-    GmailReadFacade is registered in adapters_gmail.py.
+    GmailReadFacade is registered (via register_read_facade, against the
+    kernel registry in read_facade.py) in read_facades_gmail.py, split out
+    of adapters_gmail.py per Task R7-T1 so the facade lives in its own
+    scanned module, with no adapter and no credential in it.
     """
     return OperationContract(
         op_kind=op_kind,

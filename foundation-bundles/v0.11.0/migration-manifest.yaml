@@ -21,6 +21,9 @@ artifact_notes:
   agents/lib/external_write/adapters_gmail.py: New Gmail adapter — label and filter actions only, never
     sending or permanently deleting anything — plugging into the same gated write path as every other
     capability.
+  agents/lib/external_write/capability_api.py: New — the only import surface your capability code should
+    use to write back or read from a connected account, so capability code never has a path to the credential-holding
+    adapter itself.
   agents/lib/external_write/capability_registration.py: Registers an operator-originated capability (one
     the operator asks for mid-run) into the descriptor set with its risk class and protections.
   agents/lib/external_write/contracts.py: Extended with the Gmail operation kinds and their risk classes.
@@ -35,6 +38,9 @@ artifact_notes:
     — recording their decision so the acceptance ceremony can proceed.
   agents/lib/external_write/read_facade.py: Gives a capability a read-only view of a connected account,
     so the code that builds and tests a capability can never reach the credential that can write.
+  agents/lib/external_write/read_facades_gmail.py: New — the read-only Gmail view your capability code
+    sees, kept in its own file with no adapter or credential in it, so nothing in it can ever be repurposed
+    to write.
   agents/lib/external_write/scan.py: Extended to check credential handling as well as write-path bypasses,
     and to apply the new trust-zone split so only adapter code (never capability code) is allowed to construct
     a write credential.
