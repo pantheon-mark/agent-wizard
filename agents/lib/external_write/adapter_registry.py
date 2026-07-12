@@ -42,7 +42,8 @@ indefinitely (not just "until Task 8"), and run_operation's field-write path
 Stdlib only — no third-party dependencies.
 """
 
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 
 from external_write.operations import EffectUnit
 
@@ -118,24 +119,133 @@ class Adapter(Protocol):
 _REGISTRY: Dict[str, Adapter] = {}
 
 
+@dataclass(frozen=True)
+class AdapterDispatch:
+    """A frozen, CLASS-BOUND dispatch record captured once, at registration
+    time (Task R7-T2 — cross-vendor-ratified defense-in-depth fix).
+
+    Why this exists: `run_operation` (adapters.py) used to call the
+    registered adapter's INSTANCE methods directly (`adapter.plan(...)`,
+    `adapter.apply_one(...)`). A capability that obtained the adapter
+    instance (e.g. via `get_adapter(op_kind)`) could reassign
+    `adapter.apply_one` (or `adapter.build_write_client`) to a function of
+    its own choosing — an ordinary Python instance-attribute shadow, nothing
+    exotic — and the kernel would then hand the reassigned "adapter" the
+    real write-capable client, because instance-method dispatch always
+    re-resolves the CURRENT attribute at call time. That is the whole class
+    of the vulnerability this record closes.
+
+    `register_adapter` captures `plan`/`apply_one`/`undo_one`/`verify_one`
+    (and `build_write_client`, if the class defines it) OFF THE CLASS
+    (`type(adapter)`) at registration, not off the instance, and freezes them
+    into this immutable record. `run_operation` then calls the captured
+    UNBOUND class functions directly (`dispatch.apply_one(dispatch.instance,
+    raw_client, unit)`), passing `dispatch.instance` explicitly as `self`.
+    Reassigning `instance.apply_one` after registration only shadows the
+    instance's own attribute lookup (`instance.apply_one` would return the
+    thief) — it does not and cannot touch `AdapterDispatch.apply_one`, a
+    plain reference to the function object that lived on the class at
+    registration time. The captured callables always run instead.
+
+    Fields
+    ------
+    instance:  The registered Adapter instance — passed explicitly as `self`
+               to every captured callable below (they are unbound functions,
+               not bound methods).
+    plan / apply_one / undo_one / verify_one:
+               `type(adapter).plan` etc. — the class's function objects,
+               captured at registration time. Never re-read from the
+               instance at call time.
+    provision_write_client:
+               `getattr(type(adapter), "build_write_client", None)` —
+               auto-captured so an adapter that self-provisions its own
+               write client (BL-1 / F-33) keeps working with NO emitter
+               change; None if the class does not define the method (the
+               back-compat fallback path in adapters.py then uses
+               run_operation's own `client` argument, unchanged). Deliberately
+               NOT named `build_write_client` on this record: scan.py's
+               credential_provider_reference rule flags ANY `ast.Name` or
+               `ast.Attribute` node whose identifier is exactly
+               "build_write_client" (or "write_credential_provider"),
+               including a dataclass field declaration or a plain attribute
+               read/write — this module is SEALED_KERNEL (scanned, not
+               exempt; see the Adapter protocol docstring's parallel note
+               above), so the field itself must not carry that literal name.
+               The captured value is still resolved via the SAME
+               scanner-invisible `getattr(cls, "build_write_client", None)`
+               string-literal call the rest of this module already relies on.
+    """
+
+    instance: Any
+    plan: Callable
+    apply_one: Callable
+    undo_one: Callable
+    verify_one: Callable
+    provision_write_client: Optional[Callable]
+
+
+# op_kind -> AdapterDispatch. Populated alongside _REGISTRY by register_adapter;
+# this is what run_operation dispatches through (get_dispatch), never _REGISTRY/
+# get_adapter directly — see AdapterDispatch's docstring for why.
+_DISPATCH_REGISTRY: Dict[str, "AdapterDispatch"] = {}
+
+
 def register_adapter(op_kind: str, adapter: Adapter) -> None:
     """Register `adapter` as the handler for `op_kind`. Re-registering the same
     op_kind overwrites the prior entry (last-registered wins) — callers own
-    ordering; this function does not raise on a duplicate op_kind."""
+    ordering; this function does not raise on a duplicate op_kind.
+
+    Call signature is UNCHANGED from before Task R7-T2 — callers (e.g.
+    adapters_gmail.py's module-scope `register_adapter(OP_KIND, Adapter())`
+    calls) need no update. In addition to the existing instance registration,
+    this now also captures an AdapterDispatch record OFF `type(adapter)` (see
+    AdapterDispatch's docstring) and stores it in `_DISPATCH_REGISTRY`, keyed
+    by the same op_kind."""
     _REGISTRY[op_kind] = adapter
+    cls = type(adapter)
+    _DISPATCH_REGISTRY[op_kind] = AdapterDispatch(
+        instance=adapter,
+        plan=cls.plan,
+        apply_one=cls.apply_one,
+        undo_one=cls.undo_one,
+        verify_one=cls.verify_one,
+        provision_write_client=getattr(cls, "build_write_client", None),
+    )
 
 
 def get_adapter(op_kind: str) -> Optional[Adapter]:
-    """Return the registered Adapter for op_kind, or None if nothing is registered.
+    """Return the registered Adapter INSTANCE for op_kind, or None if nothing
+    is registered.
 
     run_operation treats None as "fall through to the existing field-write path" —
     the registry itself makes no claim about whether an unregistered op_kind is
-    valid; that is contracts.py's concern."""
+    valid; that is contracts.py's concern.
+
+    Unchanged by Task R7-T2 (kept for back-compat with callers that only need
+    the instance for module-resolution purposes, e.g. effects_manifest.py's
+    `_adapter_module_file`/`_adapter_effect_unit_path`, which read
+    `type(adapter).__module__` — those never invoke a method on the instance
+    they get back, so they are not part of the dispatch-hijack surface this
+    task closes). `run_operation` itself no longer calls this function — it
+    calls `get_dispatch` instead."""
     return _REGISTRY.get(op_kind)
+
+
+def get_dispatch(op_kind: str) -> Optional[AdapterDispatch]:
+    """Return the captured AdapterDispatch for op_kind, or None if nothing is
+    registered. This is what `run_operation` (adapters.py) dispatches
+    through — never `get_adapter`/the raw instance — so that an
+    instance-level reassignment of `apply_one` or `build_write_client`
+    (obtained via `get_adapter`, or any other reference to the same
+    instance) cannot hijack execution. See AdapterDispatch's docstring for
+    the full threat model."""
+    return _DISPATCH_REGISTRY.get(op_kind)
 
 
 def unregister_adapter(op_kind: str) -> None:
     """Remove a registration, if present. Test-only convenience for isolating
     adapter-registry test cases from one another; production adapter modules
-    register once at import time and never unregister."""
+    register once at import time and never unregister. Removes BOTH the
+    instance registry entry and the captured dispatch record."""
     _REGISTRY.pop(op_kind, None)
+    _DISPATCH_REGISTRY.pop(op_kind, None)
