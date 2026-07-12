@@ -58,20 +58,29 @@ Bypass classes CAUGHT at v0
                          limitation) -- the same disclosed-bound spirit as
                          ``_FORBIDDEN_IMPORT_ROOTS``.
   credential_provider_reference -- naming an ADAPTER_PROFILE write-credential
-                         PROVIDER symbol (``write_credential_provider``)
-                         anywhere outside the ADAPTER_PROFILE zone: importing it
-                         (``from external_write.adapters_x import
-                         write_credential_provider``), referencing it as a bare
-                         name, or accessing it as an attribute. The BL-1 / F-33
-                         credential-isolation keystone: capability/proposal-zone
-                         code must be UNABLE TO OBTAIN the write-credential
-                         provider (the callable that returns the write client),
-                         not merely "does not call it" by convention. The
-                         provider legitimately lives ONLY in the ADAPTER_PROFILE
-                         zone (exempt from every check), where a concrete
-                         adapter provisions its own write client. Curated set,
-                         same disclosed-bound spirit as the credential-
-                         construction surface.
+                         PROVIDER symbol anywhere outside the ADAPTER_PROFILE
+                         zone: importing it (``from external_write.adapters_x
+                         import write_credential_provider``), referencing it as a
+                         bare name, or accessing it as an attribute. TWO reach
+                         paths are guarded: the retired module-level provider
+                         name (``write_credential_provider``) AND the Adapter
+                         method that provisions the write client
+                         (``build_write_client`` — so a capability-zone
+                         ``get_adapter(op_kind).build_write_client(op)`` attribute
+                         reference is flagged too). The BL-1 / F-33 credential-
+                         isolation keystone: capability/proposal-zone code must be
+                         UNABLE TO OBTAIN the write-credential provider (the
+                         callable that returns the write client), not merely
+                         "does not call it" by convention. The provider
+                         legitimately lives ONLY in the ADAPTER_PROFILE zone
+                         (exempt from every check), where a concrete adapter
+                         DEFINES ``build_write_client`` and provisions its own
+                         write client. Curated set, same disclosed-bound spirit
+                         as the credential-construction surface: a string-literal
+                         ``getattr(adapter, "build_write_client", None)`` resolves
+                         the method via a Constant node invisible to the symbol
+                         check — an aliased/dynamic reach that stays a disclosed
+                         deterministic-scanner limitation, not closed here.
 
 ------------------------------------------------------------------------------
 Bounds NOT covered at v0 (disclosed — no silent caps)
@@ -312,7 +321,26 @@ _CREDENTIAL_CLASS_NAMES = frozenset({"Credentials", "ServiceAccountCredentials"}
 # the ADAPTER_PROFILE zone, which is exempt from every check before this fires
 # (see _scan_file's early return). Curated, NOT exhaustive — same disclosed-
 # bound spirit as _FORBIDDEN_IMPORT_ROOTS / the credential-construction surface.
-_CREDENTIAL_PROVIDER_SYMBOLS = frozenset({"write_credential_provider"})
+_CREDENTIAL_PROVIDER_SYMBOLS = frozenset(
+    {
+        # The retired module-level provider name (pre-BL-1 emitted shape).
+        "write_credential_provider",
+        # The Adapter method that provisions the write-capable client
+        # (``build_write_client(op)``). BL-1 residual: after the provider was
+        # moved onto the adapter, capability-zone code could still reach the
+        # write client via ``get_adapter(op_kind).build_write_client(op)`` — an
+        # attribute reference the symbol check now flags. The concrete adapter
+        # legitimately DEFINES ``def build_write_client`` in the ADAPTER_PROFILE
+        # zone, which is exempt before this rule fires (see _scan_file's early
+        # return), so the definition is not self-tripped; only a reference from
+        # a non-adapter zone is. NOTE: a string-literal ``getattr(adapter,
+        # "build_write_client", None)`` resolves the method by a Constant node
+        # invisible to this symbol check — that aliased/dynamic reach is the
+        # same disclosed deterministic-scanner bound documented above, not
+        # closed here.
+        "build_write_client",
+    }
+)
 
 
 # ---------------------------------------------------------------------------

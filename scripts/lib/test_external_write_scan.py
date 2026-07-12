@@ -279,6 +279,66 @@ class TestCredentialProviderReference(unittest.TestCase):
         )
 
 
+class TestBuildWriteClientReachPath(unittest.TestCase):
+    """Task R1 / BL-1 residual — after the keystone fix moved credential
+    provisioning onto an Adapter method, the write-capable client was STILL
+    reachable from CAPABILITY-zone code via
+    ``get_adapter(op_kind).build_write_client(op)``. The scanner must flag that
+    ``build_write_client`` reach path as ``credential_provider_reference``, just
+    as it flags the retired ``write_credential_provider`` name. The concrete
+    adapter's own ``def build_write_client`` (ADAPTER_PROFILE zone) and the
+    sealed-kernel execution path (which resolves the method by a STRING literal)
+    must both still scan clean."""
+
+    _CAP_FIX = _FIXTURES / "capability_reaches_build_write_client.py"
+    _ADAPTER_FIX = _FIXTURES / "adapter_defines_build_write_client.py"
+    _KERNEL_ADAPTERS = _ADAPTER_DIR / "adapters.py"
+
+    def test_capability_build_write_client_reach_is_flagged(self):
+        # A CAPABILITY-zone module doing get_adapter(OP_KIND).build_write_client(op)
+        # must be flagged -- the attribute reference to the provisioner is the
+        # bypass the residual left open.
+        v = scan_paths([self._CAP_FIX])
+        self.assertIn(
+            "credential_provider_reference", _kinds(v),
+            "a CAPABILITY-zone module that reaches the write client via "
+            ".build_write_client must be flagged credential_provider_reference",
+        )
+        refs = [x for x in v if x.kind == "credential_provider_reference"]
+        self.assertGreaterEqual(
+            len(refs), 1,
+            f"the .build_write_client attribute reference must be caught; got {v}",
+        )
+
+    def test_adapter_defining_build_write_client_scans_clean(self):
+        # The concrete adapter's OWN method definition, in the ADAPTER_PROFILE
+        # zone, must NOT be flagged -- defining the provisioner is legal exactly
+        # where it should live.
+        v = scan_paths(
+            [self._ADAPTER_FIX],
+            allowed_root=self._ADAPTER_FIX.parent,
+            adapter_profile_paths=frozenset({self._ADAPTER_FIX.name}),
+        )
+        self.assertEqual(
+            v, [],
+            "an ADAPTER_PROFILE adapter that DEFINES build_write_client must "
+            f"scan clean; got {v}",
+        )
+
+    def test_sealed_kernel_adapters_module_scans_clean(self):
+        # The real SEALED_KERNEL adapters.py resolves the adapter method by a
+        # STRING literal (getattr(adapter, "build_write_client", None)) and names
+        # its local `_provision`, NOT `build_write_client` -- so the sealed
+        # kernel (which is NOT exempt from the provider-reference rule) does not
+        # self-trip. Regression guard for the rename.
+        v = scan_paths([self._KERNEL_ADAPTERS], allowed_root=_ADAPTER_DIR)
+        self.assertNotIn(
+            "credential_provider_reference", _kinds(v),
+            "the sealed-kernel adapters.py must not self-trip the "
+            f"credential_provider_reference rule; got {v}",
+        )
+
+
 class TestTrustZoneSplit(unittest.TestCase):
     """Task 5 — the trust boundary is split into SEALED_KERNEL /
     ADAPTER_PROFILE / CAPABILITY zones; the old "whole external_write/ tree is
