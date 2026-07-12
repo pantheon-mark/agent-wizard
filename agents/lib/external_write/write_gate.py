@@ -195,8 +195,11 @@ class InvocationLedger:
     def count(self, key: str) -> int:
         return self._counts.get(key, 0)
 
-    def record(self, key: str) -> None:
-        self._counts[key] = self.count(key) + 1
+    def record(self, key: str, n: int = 1) -> None:
+        """Consume `n` slots for `key` (NF3: the window is bounded in UNITS, not
+        invocations). Defaults to 1 so every pre-NF3 call site — one invocation, one
+        slot — is unaffected."""
+        self._counts[key] = self.count(key) + n
 
 
 # ---------------------------------------------------------------------------
@@ -358,14 +361,23 @@ def resolve_effective_cap(op: Operation,
 
 def _enforce_live_funnel(op: Operation, risk_class: str, contract: Optional[OperationContract],
                          entry: Dict[str, Any], cap_ledger: Optional[InvocationLedger],
-                         clock: Any) -> GateDecision:
+                         clock: Any, n_units: int = 1) -> GateDecision:
     """The SHARED live-enforcement funnel (R4/T1): the recovery floor (F-29), the mandatory
     blast-radius cap + ledger, and the irreversibility audit. Called by BOTH the LIVE path
     (`entry` from `_covering_entry`, accepted required) and the LIVE_BOUNDED path (`entry` from
     `_declared_entry`, accepted NOT required) — the only difference between the two callers is
     which lookup produced `entry`; every live bound past that point is identical (constraint:
     the LIVE_BOUNDED relaxation vs. LIVE drops ONLY `accepted:true`). Duplicating this logic
-    across two branches was rejected as a drift risk (gemini regret-mode finding)."""
+    across two branches was rejected as a drift risk (gemini regret-mode finding).
+
+    n_units (NF3): the number of discrete effect units THIS operation plans to apply — 1 for
+    the legacy field-write path and every pre-NF3 caller (default, backward-compatible), or
+    `len(adapter.plan(op.params))` for a registered adapter (adapters.py hoists that pure
+    plan() call above the gate to compute it). The window this function enforces is bounded in
+    UNITS across the ledger's lifetime, not in invocation count: a single multi-unit operation
+    consumes `n_units` slots, so a session of many multi-unit invocations cannot slip past the
+    cap by counting each invocation as one slot regardless of its fan-out (the F-31 per-op cap
+    stays independent and unchanged — this is the separate AGGREGATE bound)."""
     # F-29 recovery floor — NON-GRADUATING for standing_automation: a live standing_automation
     # op requires a recovery profile on its entry, and NO autonomy/maturity signal can waive it
     # (there is no such parameter on this gate — the floor is structural, not narrated).
@@ -395,13 +407,17 @@ def _enforce_live_funnel(op: Operation, risk_class: str, contract: Optional[Oper
             "gated action.",
             op_kind=op.op_kind, risk_class=risk_class, blast_radius_cap=effective_cap)
     key = _ledger_key(op)
-    if cap_ledger.count(key) >= effective_cap:
+    consumed = cap_ledger.count(key)
+    if consumed + n_units > effective_cap:
         return _refuse(
             f"live gated op refused: blast-radius cap of {effective_cap} reached for this "
-            "capability in the current window (single-object Operation: one object_id = one "
-            "write = one cap slot; gated actions never batch).",
-            op_kind=op.op_kind, risk_class=risk_class, blast_radius_cap=effective_cap)
-    cap_ledger.record(key)
+            "capability in the current window — the window is bounded in UNITS, not "
+            f"invocations: {consumed} unit(s) already consumed in this window, this operation "
+            f"plans {n_units} more, which would bring the total to {consumed + n_units}, "
+            f"exceeding the cap of {effective_cap}.",
+            op_kind=op.op_kind, risk_class=risk_class, blast_radius_cap=effective_cap,
+            n_units=n_units, units_consumed_before=consumed)
+    cap_ledger.record(key, n_units)
 
     # F-22 + design §4.7: a live irreversible action writes an explicit, clock-stamped
     # "this cannot be reversed" acknowledgement. The timestamp comes from the clock, NEVER
@@ -414,7 +430,10 @@ def _enforce_live_funnel(op: Operation, risk_class: str, contract: Optional[Oper
                 "note": "This action cannot be reversed.",
                 "op_kind": op.op_kind,
                 "blast_radius_cap": effective_cap,
-                "invocation_index": cap_ledger.count(key),  # 1-based (post-record)
+                # units_consumed_in_window (NF3, renamed from invocation_index): the
+                # CUMULATIVE unit count consumed in this window so far, post-record — no
+                # longer an invocation index, since one operation can consume many units.
+                "units_consumed_in_window": cap_ledger.count(key),
                 "recorded_at": _iso_z(clock()),
             }
         }
@@ -425,9 +444,15 @@ def _enforce_live_funnel(op: Operation, risk_class: str, contract: Optional[Oper
 def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
                         descriptor_set: Optional[Sequence[Dict[str, Any]]] = None,
                         cap_ledger: Optional[InvocationLedger] = None,
-                        clock: Optional[Any] = None) -> GateDecision:
+                        clock: Optional[Any] = None,
+                        n_units: int = 1) -> GateDecision:
     """The deterministic pre-write gate. Returns a GateDecision; the caller returns the refusal
     immediately when not permitted, and merges `audit` into the success Result otherwise.
+
+    n_units (NF3, default 1): the number of discrete effect units the calling operation plans
+    to apply — threaded straight into `_enforce_live_funnel`'s unit-aware window. Defaults to 1
+    so every existing direct caller (field-write ops, and every test/caller that predates NF3)
+    is unaffected: 1 unit consumes exactly 1 window slot, byte-identical to pre-NF3 behavior.
 
     Order (each step fails safe):
       1. Resolve the contract + effective risk class (F-28 fail-safe classification).
@@ -519,7 +544,8 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
                 f"exactly matches {resolved!r} at risk_class {risk_class!r} (acceptance is NOT "
                 "required pre-acceptance, but a DECLARATION is).",
                 op_kind=op.op_kind, risk_class=risk_class)
-        return _enforce_live_funnel(op, risk_class, contract, declared, cap_ledger, clock)
+        return _enforce_live_funnel(op, risk_class, contract, declared, cap_ledger, clock,
+                                    n_units=n_units)
 
     if resolved != LIVE_TARGET:
         return _refuse(
@@ -538,4 +564,5 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
             "actions, never blanket live mutation",
             op_kind=op.op_kind, risk_class=risk_class)
 
-    return _enforce_live_funnel(op, risk_class, contract, covering, cap_ledger, clock)
+    return _enforce_live_funnel(op, risk_class, contract, covering, cap_ledger, clock,
+                                n_units=n_units)
