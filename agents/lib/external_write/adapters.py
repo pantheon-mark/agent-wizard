@@ -234,17 +234,30 @@ def run_operation(op: Operation, receipt: Any, client: Any,
              comes from it. Defaults to the system clock; injected only for deterministic tests.
 
     n_units / plan-once (NF3 — external-write-gate-generalization): when op.op_kind has a
-             registered adapter, this function resolves it and calls `adapter.plan(op.params)`
-             ONCE, before Step 0's gate — plan() is contractually PURE (no reads/writes; see the
-             Adapter protocol docstring), so hoisting it above the gate does not touch the
-             surface and does not weaken "the gate refuses before any write." The resulting
-             `len(units)` is passed into evaluate_write_gate as n_units, so the shared
-             InvocationLedger's aggregate window is consumed in UNITS, not in one slot per
+             registered adapter AND target is not 'dry_run', this function resolves it and calls
+             `adapter.plan(op.params)` ONCE, before Step 0's gate — plan() is contractually PURE
+             (no reads/writes; see the Adapter protocol docstring), so hoisting it above the gate
+             does not touch the surface and does not weaken "the gate refuses before any write."
+             The resulting `len(units)` is passed into evaluate_write_gate as n_units, so the
+             shared InvocationLedger's aggregate window is consumed in UNITS, not in one slot per
              invocation regardless of fan-out (the F-31 gap this closes — see write_gate.py's
              _enforce_live_funnel). The SAME already-planned `units` list is then passed
              straight into _run_adapter_operation, which does NOT call plan() again (avoiding a
              redundant, if harmless, second pure call). An op_kind with no registered adapter
              plans nothing and uses n_units=1, exactly like the legacy field-write path.
+             `dry_run` is exempted from the hoist entirely (R3 fix — plan-hoist totality):
+             dry_run never consumes the aggregate window (it short-circuits at Step 1.5, before
+             Step 1.75's adapter dispatch, and never applies a unit), so it needs no `n_units`
+             and no planned `units` — n_units stays at the default of 1 (unused for this path)
+             and _planned_units stays None. Planning for dry_run would be wasted work and, worse,
+             a crash risk: plan() is pure but NOT total — the seeded Gmail adapters index
+             directly into params (e.g. `m["message_id"]`) and raise KeyError on malformed
+             input, which is exactly the shape a dry_run preview of a would-be-refused op can
+             have. For the non-dry_run registered-adapter path, the hoisted plan() call is also
+             guarded: any exception it raises is caught and turned into a clean refused Result
+             (never propagated), so a malformed-params op is a fail-safe refusal everywhere,
+             never an uncaught exception breaking run_operation's "always returns a Result"
+             contract.
 
     Credential isolation (BL-1 / F-33): run_operation takes NO caller-supplied
              write-credential provider. When op.op_kind has a registered adapter that
@@ -261,16 +274,40 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     Result with status in {'written', 'needs_operator_choice', 'refused'}.
     """
 
-    # Step -1 (NF3): resolve the adapter and plan ONCE, before the gate. plan() is
+    # Step -1 (NF3, R3 fix): resolve the adapter and plan ONCE, before the gate. plan() is
     # contractually PURE (no reads/writes), so calling it here — ahead of Step 0 — does not
     # touch the surface; it exists solely to compute n_units for the gate's unit-aware window
     # (write_gate._enforce_live_funnel). None planned (no registered adapter) => n_units=1,
     # matching the legacy field-write path exactly.
+    #
+    # Two fail-safe exemptions/guards added by the R3 fix (regression found in review of the
+    # NF3 change, commit 9e69837 — plan() is PURE but NOT TOTAL: seeded adapters index directly
+    # into params, e.g. `m["message_id"]`, and raise on malformed input):
+    #   1. `dry_run` never plans at all. dry_run consumes no window (it short-circuits at Step
+    #      1.5, below, before Step 1.75's adapter dispatch even runs) and needs no `units`, so
+    #      skipping the hoisted plan() here preserves dry_run's no-crash, no-op preview guarantee
+    #      even for malformed params. n_units stays at the unused default of 1 for this path.
+    #   2. For every other path, a plan() failure is caught and converted into a clean refused
+    #      Result rather than propagated — so a malformed-params op is a fail-safe refusal
+    #      everywhere (an improvement over pre-NF3, where such an op crashed later, inside
+    #      _run_adapter_operation's now-removed second plan() call), never an uncaught exception
+    #      breaking run_operation's "always returns a Result" contract.
     adapter = get_adapter(op.op_kind)
     _planned_units: Optional[list] = None
     n_units = 1
-    if adapter is not None:
-        _planned_units = adapter.plan(op.params)
+    if adapter is not None and target != "dry_run":
+        try:
+            _planned_units = adapter.plan(op.params)
+        except Exception as exc:
+            return Result(
+                status="refused",
+                detail={
+                    "reason": (
+                        "operation refused: could not plan effect units from the "
+                        f"operation params for op_kind {op.op_kind!r} — {exc!r}"
+                    ),
+                },
+            )
         n_units = len(_planned_units)
 
     # Step 0 (B1-4): the deterministic pre-write gate — the single chokepoint's fail-safe heart.

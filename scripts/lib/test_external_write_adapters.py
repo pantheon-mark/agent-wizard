@@ -780,5 +780,143 @@ class TestUnitAwareBlastRadiusWindow(unittest.TestCase):
             "count units, not invocations")
 
 
+class _MalformedParamsAdapter:
+    """Test adapter whose plan() is PURE but NOT TOTAL — like the seeded Gmail
+    adapters (adapters_gmail.py), it indexes directly into params (e.g.
+    `m["message_id"]`) and raises on malformed input rather than validating.
+    Used to reproduce the R3 regression: run_operation's Step -1 hoists
+    plan() above the gate to compute n_units, so a plan() failure on
+    malformed params must become a clean refused Result, not an uncaught
+    exception. Records every plan()/apply_one() call so a test can confirm
+    dry_run never even attempts to plan."""
+
+    def __init__(self):
+        self.plan_calls = 0
+        self.applied = []
+
+    def plan(self, params):
+        self.plan_calls += 1
+        params = params or {}
+        units = []
+        for m in params["messages"]:  # KeyError if "messages" is absent/malformed
+            units.append(EffectUnit(unit_id=m["message_id"], target_ref=m))
+        return units
+
+    def apply_one(self, raw_client, unit):
+        self.applied.append(unit)
+        raw_client.write(unit.unit_id, "Status", "Complete")
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, raw_client, unit):
+        return True
+
+
+class TestPlanHoistTotality(unittest.TestCase):
+    """R3 fix — regression found in review of the NF3 change (commit 9e69837):
+    run_operation's Step -1 called adapter.plan(op.params) UNCONDITIONALLY,
+    before the gate/receipt/dry_run short-circuit, to compute n_units. plan()
+    is side-effect-free but NOT total (the seeded Gmail adapters raise KeyError
+    on malformed params) — so an op the gate would have cleanly refused, or a
+    dry_run preview, raised instead of returning a Result, breaking
+    run_operation's "always returns a Result" contract and dry_run's no-op
+    guarantee. Fixed by: (1) never planning for dry_run, and (2) guarding the
+    hoisted plan() call so any exception becomes a clean refused Result."""
+
+    OP_KIND = "_malformed_params_probe"
+    SURFACE = "gmail"
+    CAP = 25
+
+    def setUp(self):
+        contracts_mod.OPERATION_CONTRACTS[self.OP_KIND] = OperationContract(
+            op_kind=self.OP_KIND,
+            writes=("labels",),
+            produces=(),
+            dependency_set=(),
+            verifier_set=(),
+            introduces_persistent_binding=False,
+            risk_class="irreversible_external",
+            requires_accepted_phase=True,
+            blast_radius_cap=self.CAP,
+        )
+
+    def tearDown(self):
+        contracts_mod.OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+        unregister_adapter(self.OP_KIND)
+
+    def _op(self, batch_id, params=None):
+        return Operation(
+            surface=self.SURFACE,
+            op_kind=self.OP_KIND,
+            batch_id=batch_id,
+            params=params if params is not None else {},  # missing "messages" -- malformed
+        )
+
+    def _accepted_entry(self):
+        return {
+            "id": self.SURFACE, "name": self.SURFACE, "action_class": "delete",
+            "risk_class": "irreversible_external", "recovery_profile_ref": None,
+            "declared_test_target": "copy", "blast_radius_cap": None,
+            "accepted": True,
+        }
+
+    def test_gate_refusal_target_none_with_malformed_params_is_refused_not_exception(self):
+        # A gated op with target=None is a clean gate refusal (missing target fails
+        # safe). Malformed params (no "messages" key) would make the adapter's
+        # plan() raise KeyError. Before the R3 fix, Step -1's unconditional plan()
+        # call raised BEFORE the gate ever ran. The fix must still return a
+        # REFUSED Result -- never let the exception propagate.
+        adapter = _MalformedParamsAdapter()
+        register_adapter(self.OP_KIND, adapter)
+        op = self._op("mp-1")  # target defaults to None
+        client = _RaisingClient()  # would raise AssertionError if ever touched
+
+        result = run_operation(op, _receipt(op), client)
+
+        self.assertIsInstance(result, Result)
+        self.assertEqual(result.status, "refused")
+        self.assertEqual(len(adapter.applied), 0)
+
+    def test_dry_run_of_malformed_params_is_noop_preview_and_never_plans(self):
+        # dry_run must return its no-op preview even when the op's params are
+        # malformed -- it must not plan at all (planning is unnecessary for
+        # dry_run, and would crash on this adapter's malformed-input params).
+        adapter = _MalformedParamsAdapter()
+        register_adapter(self.OP_KIND, adapter)
+        op = self._op("mp-2")
+        client = _RaisingClient()  # would raise AssertionError if ever touched
+
+        result = run_operation(op, _receipt(op), client, target="dry_run")
+
+        self.assertEqual(result.status, "written")
+        self.assertTrue(result.detail.get("dry_run") is True)
+        self.assertEqual(adapter.plan_calls, 0,
+                         "dry_run must never call adapter.plan() -- it consumes no "
+                         "window and needs no units")
+        self.assertEqual(len(adapter.applied), 0)
+
+    def test_live_op_with_malformed_params_is_refused_not_exception(self):
+        # A live (or live-bounded/accepted-descriptor) op whose params are
+        # malformed must still come back as a clean refused Result, never an
+        # uncaught exception -- this is the fail-safe direction the fix requires.
+        adapter = _MalformedParamsAdapter()
+        register_adapter(self.OP_KIND, adapter)
+        ds = [self._accepted_entry()]
+        led = InvocationLedger()
+        op = self._op("mp-3")
+        client = _RaisingClient()  # would raise AssertionError if ever touched
+
+        result = run_operation(op, _receipt(op), client,
+                               target=LIVE_TARGET, descriptor_set=ds, cap_ledger=led)
+
+        self.assertIsInstance(result, Result)
+        self.assertEqual(result.status, "refused")
+        self.assertEqual(len(adapter.applied), 0)
+        self.assertEqual(led.count(f"{self.SURFACE}::{self.OP_KIND}"), 0,
+                         "a plan-failure refusal must not have recorded anything "
+                         "to the aggregate window")
+
+
 if __name__ == "__main__":
     unittest.main()
