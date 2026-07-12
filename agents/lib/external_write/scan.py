@@ -153,7 +153,34 @@ Bypass classes CAUGHT at v0
                              ``_module_is_external_write_package``); the bare
                              ``adapters`` alias is excluded on identical
                              grounds — ``"adapters".startswith("adapters_")``
-                             is False.
+                             is False. Task R10-T1 (cross-vendor-verified gap)
+                             additionally matches the RELATIVE import forms —
+                             ``from .adapters_<vendor> import X`` / ``from
+                             .adapter_registry import Y`` (dotted-relative,
+                             ``node.level > 0`` with ``node.module`` set to
+                             the bare submodule name and no
+                             ``external_write.`` prefix at all, since a
+                             relative import never spells the package it is
+                             relative to) and ``from . import adapters_
+                             <vendor>`` / ``from . import adapter_registry``
+                             (bare-relative, ``node.level > 0`` with
+                             ``node.module is None`` and the submodule name in
+                             the import's alias instead). Neither shape is
+                             reached by the absolute dotted-module match above
+                             (which requires an ``external_write.`` prefix)
+                             or the package-level match (which requires
+                             ``node.module == "external_write"`` exactly).
+                             Matched by the SAME name rule as the other two
+                             forms (registry exact-name OR ``adapters_``
+                             prefix), gated on the module/alias name alone —
+                             not on the relative level — so an up-package
+                             relative import of an unrelated module (``from
+                             ..something import x``) is not incidentally
+                             flagged, and the bare kernel dispatch module is
+                             excluded via both relative spellings (``from
+                             .adapters import run_operation`` / ``from .
+                             import adapters``) on the identical
+                             trailing-underscore ground as the other forms.
                            * ``adapter_registry_reference`` — naming a
                              registry symbol (``get_adapter``, ``get_dispatch``,
                              ``register_adapter``, ``unregister_adapter``,
@@ -940,7 +967,9 @@ class _Scanner(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        # node.module is None for "from . import x" (relative) — never forbidden.
+        # node.module is None for "from . import x" (relative) — never forbidden
+        # (forbidden_import only bans absolute known-vendor package roots, and a
+        # relative import can never spell one of those roots).
         if node.module:
             root = node.module.split(".")[0]
             if root in _FORBIDDEN_IMPORT_ROOTS:
@@ -953,10 +982,47 @@ class _Scanner(ast.NodeVisitor):
                     self._add(node.lineno, "adapter_module_import")
                 if root == "importlib":
                     self._add(node.lineno, "introspection_escape_hatch")
+        # Task R10-T1 (cross-vendor-verified gap): a RELATIVE import of an
+        # adapter/registry submodule -- ``from .adapters_gmail import X`` /
+        # ``from .adapter_registry import Y`` -- has ``node.level > 0`` and
+        # ``node.module`` set to the bare submodule name, with NO
+        # "external_write." prefix at all (a relative import never spells the
+        # package name it is relative to). This is invisible to both the
+        # absolute dotted-module check above (which requires an
+        # "external_write." prefix on ``node.module``) and the package-level
+        # check below (which requires ``node.module == "external_write"``
+        # exactly). A file physically inside external_write/ is
+        # CAPABILITY-classified by fail-closed zoning unless explicitly
+        # listed as SEALED_KERNEL/ADAPTER_PROFILE, so a sibling relative
+        # import is a plausible drift shape reaching adapter-profile code.
+        # Gated on the module NAME alone (registry exact-name OR profile
+        # prefix), not on the relative level, so an up-package relative
+        # import of an unrelated module (``from ..something import x``,
+        # level 2) is not incidentally flagged -- and the bare kernel
+        # dispatch module (``from .adapters import run_operation``) is
+        # excluded on the same grounds as the absolute/package-level checks:
+        # "adapters".startswith("adapters_") is False.
+        if (
+            self._capability_zone
+            and node.level > 0
+            and node.module
+            and (
+                node.module == _ADAPTER_REGISTRY_MODULE_NAME
+                or node.module.startswith(_ADAPTER_PROFILE_MODULE_PREFIX)
+            )
+        ):
+            self._add(node.lineno, "adapter_module_import")
         # Importing an adapter-profile credential-provider symbol into a
         # non-adapter zone is itself the bypass (BL-1): the emitted capability
         # must be UNABLE to name the provider.
         is_package_level = bool(node.module) and _module_is_external_write_package(node.module)
+        # Task R10-T1 (cross-vendor-verified gap): the RELATIVE bare-import
+        # form -- ``from . import adapters_gmail`` / ``from . import
+        # adapter_registry`` -- has ``node.level > 0`` AND ``node.module is
+        # None`` (a bare "from . import" carries no module string at all),
+        # with the profile/registry submodule name sitting in `alias.name`
+        # instead -- the relative sibling of the package-level gap above.
+        is_relative_bare = node.level > 0 and node.module is None
         for alias in node.names:
             if alias.name in _CREDENTIAL_PROVIDER_SYMBOLS:
                 self._add(node.lineno, "credential_provider_reference")
@@ -980,6 +1046,20 @@ class _Scanner(ast.NodeVisitor):
             if (
                 self._capability_zone
                 and is_package_level
+                and (
+                    alias.name == _ADAPTER_REGISTRY_MODULE_NAME
+                    or alias.name.startswith(_ADAPTER_PROFILE_MODULE_PREFIX)
+                )
+            ):
+                self._add(node.lineno, "adapter_module_import")
+            # Task R10-T1: same name rule applied to the RELATIVE bare-import
+            # form (``from . import adapters_gmail`` / ``from . import
+            # adapter_registry``). Bare "adapters" / "operations" /
+            # "capability_api" / "read_facades_<cap>" are naturally excluded:
+            # none is "adapter_registry" nor starts with "adapters_".
+            if (
+                self._capability_zone
+                and is_relative_bare
                 and (
                     alias.name == _ADAPTER_REGISTRY_MODULE_NAME
                     or alias.name.startswith(_ADAPTER_PROFILE_MODULE_PREFIX)
