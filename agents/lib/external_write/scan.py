@@ -310,6 +310,15 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
     ``adapter_registry_reference`` in the CAPABILITY zone, so a capability
     module that never names ``get_adapter`` has no adapter instance to
     reach beneath in the first place.
+  * Aliased ``sys`` / ``importlib`` names in introspection-escape-hatch
+    checks (Task R7-T4). The ``sys.modules`` and ``importlib.import_module``
+    checks in ``_check_introspection_attribute`` anchor on a bare Name node
+    (``base.id == "sys"`` / ``"importlib"``). An aliased import
+    (``import sys as s``) reference to ``s.modules[...]`` evades the check
+    because the base name is "s", not "sys" — a disclosed deterministic-
+    scanner bound, not a silent gap. Consistent with the credential-isolation
+    keystone (BL-1 / F-33) being the real guarantee; this module discloses
+    what it does not deterministically catch.
   * ``external_write.adapter_registry`` reached via ``from external_write
     import adapter_registry`` (importing the SUBMODULE NAME off the
     package, rather than a dotted ``external_write.adapter_registry``
