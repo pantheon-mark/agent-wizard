@@ -18,8 +18,11 @@ that capability).
 This module is the fix for the BUILD side of that gap: a deterministic,
 template-driven emitter that turns a small, typed `CapabilityCodeSpec` (the
 op_kind + vendor read-only scope + blast-radius cap the design phase already
-settled — see add-capability.md Steps C/D) into two files that are ALREADY
-gate-wired, by construction, before a single line is hand-authored:
+settled — see add-capability.md Steps C/D) into THREE files that are ALREADY
+gate-wired, by construction, before a single line is hand-authored (Task
+R7-T3 — external-write-gate-generalization slice — rewired this from two
+files to three, mirroring the reference split proven by Task R7-T1's
+`read_facades_gmail.py`):
 
   1. An **adapter module** (Task 5's ADAPTER_PROFILE trust zone) —
      `agents/lib/external_write/adapters_<capability_id>.py`. Registers a
@@ -32,17 +35,45 @@ gate-wired, by construction, before a single line is hand-authored:
      `zones.effective_adapter_profile_paths` / `_load_extra_adapter_profile_paths`
      — Task 10's zones.py change), so the module is a recognized
      ADAPTER_PROFILE member the moment it is written, with NO hand-edit of
-     `zones.py`'s source required.
-  2. A **capability module** (Task 5's CAPABILITY trust zone) —
-     `agents/capabilities/<capability_id>_capability.py`. Holds only a
-     `read_facade.ReadFacade` built against the declared read-only scope;
-     never imports a vendor SDK; never constructs or references a write
-     credential; and cannot even NAME a write-credential provider. It routes
-     any actual write through `adapters.run_operation`, which resolves the
-     write-capable client INTERNALLY from the registered adapter's
-     `build_write_client` method (BL-1 / F-33 credential-isolation keystone —
-     enforced deterministically by scan.py's credential_provider_reference
-     rule, not by a comment convention).
+     `zones.py`'s source required. It no longer defines a ReadFacade
+     subclass at all (see item 2) — the ONLY thing this module's write
+     credential is reachable from.
+  2. A **read-facade module** (SCANNED, NOT ADAPTER_PROFILE) —
+     `agents/lib/external_write/read_facades_<capability_id>.py`. Defines
+     ONLY the `<Prefix>ReadFacade` subclass and registers it against the
+     kernel registry (`read_facade.register_read_facade`) at module scope.
+     Imports ONLY `ReadFacade` + `register_read_facade` from
+     `external_write.read_facade` — no vendor SDK, no Adapter class, no
+     `build_write_client`, no credential of any kind. Deliberately left OUT
+     of both zone allowlists (fail-closed default: CAPABILITY), which is
+     fine because it scans clean on its own merits — the same shape
+     `read_facades_gmail.py` (Task R7-T1) already proved.
+  3. A **capability module** (Task 5's CAPABILITY trust zone) —
+     `agents/capabilities/<capability_id>_capability.py`. Imports ONLY the
+     curated kernel surface — `external_write.capability_api`
+     (`run_operation` + `build_read_facade`) and `external_write.operations`
+     (pure data) — never a vendor SDK, never the adapter module, never the
+     adapter registry, never the concrete `<Prefix>ReadFacade` class. It
+     resolves its read facade via `build_read_facade(op_kind,
+     read_only_client)` (the two-arg, kernel-registry-resolved form — the
+     concrete subclass is found via the read-facade module's registration,
+     not by import), and cannot even NAME a write-credential provider. It
+     routes any actual write through `capability_api.run_operation`, which
+     resolves the write-capable client INTERNALLY from the registered
+     adapter's `build_write_client` method (BL-1 / F-33 credential-isolation
+     keystone — enforced deterministically by scan.py's
+     credential_provider_reference rule, not by a comment convention).
+
+The structural point of the three-way split: before Task R7-T3, the
+capability module imported its `<Prefix>ReadFacade` class from the SAME
+adapter module that defines `build_write_client` — giving capability code a
+legitimate-looking reason to be in that module's import graph, and a
+capability that recovered `facade.__class__.__module__` landed on a module
+that ALSO holds write-capable adapter code. Now the capability module's
+entire `external_write` import surface is the curated
+`capability_api`/`operations` pair, and a facade recovered via
+`__class__.__module__` lands on the credential-free read-facade module
+instead.
 
 Both emitted files are runnable/importable stubs — `plan`/`apply_one`/
 `undo_one`/`verify_one` and the adapter's `build_write_client` raise
@@ -176,6 +207,12 @@ class CapabilityCodeSpec:
         return f"adapters_{self.capability_id}"
 
     @property
+    def read_facade_module_stem(self) -> str:
+        """Task R7-T3: the split-out read-facade module's filename stem,
+        mirroring the reference `read_facades_gmail.py` naming (Task R7-T1)."""
+        return f"read_facades_{self.capability_id}"
+
+    @property
     def capability_module_stem(self) -> str:
         return f"{self.capability_id}_capability"
 
@@ -186,14 +223,22 @@ class CapabilityCodeSpec:
 
 _ADAPTER_MODULE_TEMPLATE = Template('''"""${display_name} — adapter module (ADAPTER_PROFILE trust zone).
 
-GENERATED by wizard/scripts/lib/capability_code_scaffold.py (Task 10 —
-external-write-gate-generalization slice) for the "${capability_id}" capability,
-via add-capability's build cascade. This is the ONLY module for this capability
-allowed to import a vendor SDK, construct or obtain a write-capable credential,
-and perform a raw vendor mutation -- see zones.py for the full trust-zone
-rationale. Its relative filename is registered in the sibling
-adapter_profile_registry.json (never hand-edited into zones.py's source) so it
-is recognized as ADAPTER_PROFILE the moment this file is written.
+GENERATED by wizard/scripts/lib/capability_code_scaffold.py (Task 10, split
+per Task R7-T3 — external-write-gate-generalization slice) for the
+"${capability_id}" capability, via add-capability's build cascade. This is the
+ONLY module for this capability allowed to import a vendor SDK, construct or
+obtain a write-capable credential, and perform a raw vendor mutation -- see
+zones.py for the full trust-zone rationale. Its relative filename is
+registered in the sibling adapter_profile_registry.json (never hand-edited
+into zones.py's source) so it is recognized as ADAPTER_PROFILE the moment
+this file is written.
+
+This module deliberately does NOT define this capability's ReadFacade
+subclass (Task R7-T3 -- mirrors the reference split in read_facades_gmail.py,
+Task R7-T1): that class lives in the sibling
+${read_facade_module_stem}.py, a SCANNED module with no adapter and no
+credential in it, so a capability that recovers
+`facade.__class__.__module__` never lands here.
 
 TODO (next-phase / a human decision, not this emitter's job): the plan /
 apply_one / undo_one / verify_one bodies below are structural stubs -- they
@@ -212,7 +257,6 @@ from external_write.contracts import (
     OperationContract, WRITE_AFFECTING_MODULES, register_contract,
 )
 from external_write.operations import EffectUnit
-from external_write.read_facade import ReadFacade
 
 
 OP_KIND = "${op_kind}"
@@ -305,19 +349,6 @@ def build_read_only_client() -> Any:
     raise NotImplementedError(
         "TODO: construct/obtain a client scoped to the read-only scope "
         "${read_only_scope} here and return it.")
-
-
-# ---------------------------------------------------------------------------
-# Read-only facade (declares ONLY the read methods named below; see
-# read_facade.py -- a subclass may not define any other public attribute).
-# ---------------------------------------------------------------------------
-
-class ${class_prefix}ReadFacade(ReadFacade):
-    """Read-only facade for '${op_kind}', built against ${read_only_scope}."""
-
-    read_methods = ${read_methods}
-
-${read_method_bodies}
 ''')
 
 _READ_METHOD_BODY_TEMPLATE = Template('''    def ${method_name}(self, *args: Any, **kwargs: Any) -> Any:
@@ -328,9 +359,6 @@ _READ_METHOD_BODY_TEMPLATE = Template('''    def ${method_name}(self, *args: Any
 def render_adapter_module(spec: CapabilityCodeSpec) -> str:
     """Render the ADAPTER_PROFILE-zone module source for `spec`. Pure string
     rendering -- no filesystem I/O, no import of the rendered code."""
-    read_method_bodies = "\n".join(
-        _READ_METHOD_BODY_TEMPLATE.substitute(method_name=m) for m in spec.read_methods
-    )
     return _ADAPTER_MODULE_TEMPLATE.substitute(
         display_name=spec.display_name,
         capability_id=spec.capability_id,
@@ -344,35 +372,130 @@ def render_adapter_module(spec: CapabilityCodeSpec) -> str:
         requires_accepted_phase=repr(bool(spec.requires_accepted_phase)),
         blast_radius_cap=repr(int(spec.blast_radius_cap)),
         read_only_scope=repr(spec.read_only_scope),
+        read_facade_module_stem=spec.read_facade_module_stem,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Read-facade module (Task R7-T3 — SCANNED zone, NOT ADAPTER_PROFILE) template
+# — mirrors the reference split in read_facades_gmail.py (Task R7-T1). Holds
+# ONLY the ReadFacade subclass; imports ONLY ReadFacade + register_read_facade
+# from the kernel read_facade module; no vendor SDK, no Adapter class, no
+# build_write_client, no credential of any kind. Registers itself against the
+# kernel registry at module scope, so build_read_facade(op_kind, client) (the
+# two-arg, capability-facing form) resolves it once this module has been
+# imported at least once in the running process.
+# ---------------------------------------------------------------------------
+
+_READ_FACADE_MODULE_TEMPLATE = Template('''"""${display_name} — read-only facade module (SCANNED zone, NOT
+ADAPTER_PROFILE).
+
+GENERATED by wizard/scripts/lib/capability_code_scaffold.py (Task R7-T3 —
+external-write-gate-generalization slice) for the "${capability_id}"
+capability, mirroring the reference split in read_facades_gmail.py (Task
+R7-T1). This module imports ONLY ``ReadFacade`` + ``register_read_facade``
+from ``external_write.read_facade`` (the kernel) -- no vendor SDK import, no
+Adapter class, no ``build_write_client``, no credential/provisioner of any
+kind.
+
+It is NOT listed in either of zones.py's allowlists (SEALED_KERNEL /
+ADAPTER_PROFILE), so it defaults to the fail-closed CAPABILITY
+classification -- which is fine here, because it contains nothing that trips
+scan.py's checks (see test_capability_code_scaffold.py's zone-clean golden
+emit tests). A capability that recovers `facade.__class__.__module__` for
+'${op_kind}' lands HERE -- a module with no adapter and no credential
+anywhere in it -- never on ${adapter_module_stem}.py, which defines this
+capability's write-capable Adapter.
+
+The op_kind string below is deliberately DUPLICATED from the adapter module's
+own OP_KIND constant, not imported from it -- importing anything from the
+adapter module, even a harmless string literal, would re-create exactly the
+coupling this split exists to remove.
+"""
+
+from typing import Any
+
+from external_write.read_facade import ReadFacade, register_read_facade
+
+
+OP_KIND = "${op_kind}"
+
+
+class ${class_prefix}ReadFacade(ReadFacade):
+    """Read-only facade for '${op_kind}', built against ${read_only_scope}."""
+
+    read_methods = ${read_methods}
+
+${read_method_bodies}
+
+register_read_facade(OP_KIND, ${class_prefix}ReadFacade)
+''')
+
+
+def render_read_facade_module(spec: CapabilityCodeSpec) -> str:
+    """Render the SCANNED (non-ADAPTER_PROFILE) read-facade module source for
+    `spec`. Pure string rendering -- no filesystem I/O, no import of the
+    rendered code."""
+    read_method_bodies = "\n".join(
+        _READ_METHOD_BODY_TEMPLATE.substitute(method_name=m) for m in spec.read_methods
+    )
+    return _READ_FACADE_MODULE_TEMPLATE.substitute(
+        display_name=spec.display_name,
+        capability_id=spec.capability_id,
+        adapter_module_stem=spec.adapter_module_stem,
+        op_kind=spec.op_kind,
+        class_prefix=spec.class_prefix,
+        read_only_scope=repr(spec.read_only_scope),
         read_methods=repr(tuple(spec.read_methods)),
         read_method_bodies=read_method_bodies,
     )
 
 
 # ---------------------------------------------------------------------------
-# Capability module (CAPABILITY zone) template — no vendor import, no write
-# credential, no client re-stash, and no importable credential-provider symbol
-# to reach; reads only via the ReadFacade above; routes any write through
-# adapters.run_operation, which resolves the write client internally from the
-# registered adapter's build_write_client method.
+# Capability module (CAPABILITY zone) template — Task R7-T3: imports ONLY the
+# curated kernel surface (external_write.capability_api's run_operation +
+# build_read_facade, and external_write.operations' pure data types) — never
+# the adapter module, never the adapter registry, never the concrete
+# ReadFacade subclass. No vendor import, no write credential, no client
+# re-stash, and no importable credential-provider symbol to reach; reads only
+# via the facade capability_api.build_read_facade resolves from the kernel
+# registry (populated by the sibling read_facades_<capability_id>.py module at
+# import time); routes any write through capability_api.run_operation, which
+# resolves the write client internally from the registered adapter's
+# build_write_client method.
 # ---------------------------------------------------------------------------
 
 _CAPABILITY_MODULE_TEMPLATE = Template('''"""${display_name} — capability module (CAPABILITY trust zone).
 
-GENERATED by wizard/scripts/lib/capability_code_scaffold.py (Task 10 —
-external-write-gate-generalization slice) for the "${capability_id}" capability.
+GENERATED by wizard/scripts/lib/capability_code_scaffold.py (Task 10, split
+per Task R7-T3 — external-write-gate-generalization slice) for the
+"${capability_id}" capability.
 
 Structural safety -- held by ABSENCE of code, not a runtime check (mirrors
 adapters_gmail.py's own "Structural safety" section): this module never
 imports a vendor SDK, never constructs or references a write-capable
-credential, and never calls anything shaped like a raw vendor mutation. It
-reads ONLY through ${class_prefix}ReadFacade (declared read methods only) and
-proposes/executes writes ONLY through adapters.run_operation. It cannot even
-NAME a write-credential provider: the write-capable credential is built solely
-by the adapter module's ${class_prefix}Adapter.build_write_client, resolved
-INTERNALLY by run_operation inside the adapter execution path (BL-1 / F-33 --
-enforced deterministically by scan.py's credential_provider_reference rule, not
-by a comment convention).
+credential, and never calls anything shaped like a raw vendor mutation. Its
+ENTIRE external_write import surface is the curated kernel surface --
+``external_write.capability_api`` (``run_operation`` + ``build_read_facade``)
+and ``external_write.operations`` (pure data) -- it never imports
+${adapter_module_stem}.py, the adapter registry, ``get_adapter``, or the
+concrete ${class_prefix}ReadFacade class (Task R7-T3 -- see
+${read_facade_module_stem}.py, which registers that class against the kernel
+read-facade registry at import time; ``build_read_facade`` resolves it from
+there, keyed by op_kind, so this module never needs to name it at all).
+
+It cannot even NAME a write-credential provider: the write-capable credential
+is built solely by the adapter module's ${class_prefix}Adapter.build_write_client,
+resolved INTERNALLY by run_operation inside the adapter execution path (BL-1 /
+F-33 -- enforced deterministically by scan.py's credential_provider_reference
+rule, not by a comment convention).
+
+NOTE for whoever wires this capability's entrypoint together: `build_facade`
+below requires ${read_facade_module_stem}.py to have been imported at least
+once in the running process (its module-scope `register_read_facade` call is
+what populates the kernel registry `build_read_facade` resolves from) --
+`build_read_facade` fails closed (raises ReadFacadeEligibilityError) if it
+has not been.
 
 TODO (a human/next-phase decision, not this emitter's job): propose_operations
 below is a structural stub -- it shows the SHAPE (read via the facade, build
@@ -383,24 +506,25 @@ the real design in vision.md / execution_plan.md.
 
 from typing import Any, List, Optional
 
-from external_write.adapters import run_operation
-from external_write.adapters_${capability_id} import ${class_prefix}ReadFacade
+from external_write.capability_api import build_read_facade, run_operation
 from external_write.operations import Operation, SCHEMA_V2_ACTION
-from external_write.read_facade import build_read_facade
 
 
 OP_KIND = "${op_kind}"
 SURFACE = "${surface}"
 
 
-def build_facade(read_only_client: Any) -> ${class_prefix}ReadFacade:
-    """Build this capability's read-only facade. `read_only_client` must
-    already be scoped to ${read_only_scope} by its caller (see the adapter
-    module's build_read_only_client)."""
-    return build_read_facade(OP_KIND, read_only_client, ${class_prefix}ReadFacade)
+def build_facade(read_only_client: Any) -> Any:
+    """Build this capability's read-only facade via the kernel registry (the
+    two-arg, capability-facing form -- the concrete subclass is resolved by
+    ``build_read_facade`` from the registry ${read_facade_module_stem}.py
+    populates at import time, never imported here by name). `read_only_client`
+    must already be scoped to ${read_only_scope} by its caller (see the
+    adapter module's build_read_only_client)."""
+    return build_read_facade(OP_KIND, read_only_client)
 
 
-def propose_operations(facade: ${class_prefix}ReadFacade, batch_id: str) -> List[Operation]:
+def propose_operations(facade: Any, batch_id: str) -> List[Operation]:
     """TODO: read via `facade` (its declared read methods only) and return the
     Operation(s) this capability proposes. Structural stub -- returns no
     operations until the real per-capability logic is filled in."""
@@ -432,6 +556,8 @@ def render_capability_module(spec: CapabilityCodeSpec) -> str:
         surface=spec.surface,
         op_kind=spec.op_kind,
         class_prefix=spec.class_prefix,
+        adapter_module_stem=spec.adapter_module_stem,
+        read_facade_module_stem=spec.read_facade_module_stem,
         read_only_scope=repr(spec.read_only_scope),
     )
 
@@ -475,10 +601,18 @@ def emit_capability_code_scaffold(
     external_write_rel: Path = DEFAULT_EXTERNAL_WRITE_REL,
     capabilities_rel: Path = DEFAULT_CAPABILITIES_REL,
 ) -> List[Path]:
-    """Emit the gate-wired-by-construction adapter + capability module pair for
-    `spec` into `project_root`, and register the adapter module in the
-    ADAPTER_PROFILE registry. Returns the list of paths written (adapter
-    module, capability module, registry file — in that order).
+    """Emit the gate-wired-by-construction adapter + read-facade + capability
+    module TRIO for `spec` into `project_root` (Task R7-T3 — three files, not
+    two; see this module's docstring for the full rationale), and register
+    ONLY the adapter module in the ADAPTER_PROFILE registry. Returns the list
+    of paths written, in this order: adapter module, read-facade module,
+    capability module, registry file.
+
+    The read-facade module (`read_facades_<capability_id>.py`) is written
+    alongside the adapter module in `external_write_dir` — same directory as
+    the reference `read_facades_gmail.py` — but is deliberately NEVER added
+    to the ADAPTER_PROFILE registry: it is a SCANNED module (fail-closed
+    default CAPABILITY classification), not an ADAPTER_PROFILE one.
 
     Idempotent for the code files (a re-run overwrites its own prior emit, not
     duplicates it); the registry update is idempotent by construction (see
@@ -492,15 +626,17 @@ def emit_capability_code_scaffold(
     capabilities_dir.mkdir(parents=True, exist_ok=True)
 
     adapter_path = external_write_dir / f"{spec.adapter_module_stem}.py"
+    read_facade_path = external_write_dir / f"{spec.read_facade_module_stem}.py"
     capability_path = capabilities_dir / f"{spec.capability_module_stem}.py"
 
     adapter_path.write_text(render_adapter_module(spec), encoding="utf-8")
+    read_facade_path.write_text(render_read_facade_module(spec), encoding="utf-8")
     capability_path.write_text(render_capability_module(spec), encoding="utf-8")
 
     registry_path = _update_adapter_profile_registry(
         external_write_dir, f"{spec.adapter_module_stem}.py")
 
-    return [adapter_path, capability_path, registry_path]
+    return [adapter_path, read_facade_path, capability_path, registry_path]
 
 
 # ---------------------------------------------------------------------------
