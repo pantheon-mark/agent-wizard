@@ -622,6 +622,14 @@ class AcceptanceCeremonyTest(unittest.TestCase):
         for e in base_declared_descriptors():
             self.assertIs(e["accepted"], False)
 
+    def test_pending_migrations_path_matches_build_side(self):
+        # The duplicated pending-migrations path must equal the build-side canonical constant
+        # (the operator-emitted operator_acceptance module cannot import the build-side tree —
+        # D-B1-a — so it is pinned equal to the build-side original by a cross-tree test).
+        from external_write import operator_acceptance  # type: ignore
+        from upgrade_reconcile import MIGRATION_QUEUE_REL  # type: ignore
+        self.assertEqual(operator_acceptance.PENDING_MIGRATIONS_REL, MIGRATION_QUEUE_REL)
+
 
 # ---------------------------------------------------------------------------
 # Invariant 8: NO SEAL GAP (Task 6 — F-34 CARRY fix)
