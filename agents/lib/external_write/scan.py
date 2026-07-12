@@ -181,6 +181,41 @@ Bypass classes CAUGHT at v0
                              .adapters import run_operation`` / ``from .
                              import adapters``) on the identical
                              trailing-underscore ground as the other forms.
+                             Task R11-T1 (cross-vendor-ratified gap, F1)
+                             additionally matches the BARE, NON-RELATIVE
+                             import forms — ``import adapters_<vendor>`` /
+                             ``import adapter_registry`` (via
+                             ``visit_Import``, which has no ``level`` concept
+                             at all — a plain ``import`` statement is always
+                             absolute) and ``from adapters_<vendor> import
+                             X`` / ``from adapter_registry import Y`` at
+                             ``node.level == 0`` — where the module name has
+                             NO ``external_write.`` prefix and no relative
+                             dot either, the one combination none of the
+                             absolute/package-level/relative checks above
+                             reach (see ``_bare_first_component_matches_adapter``).
+                             Gated on ``node.level == 0`` in the ``from``
+                             form specifically so it does not double-fire
+                             alongside the R10-T1 relative-bare check, which
+                             independently matches the identical bare module
+                             name at ``node.level > 0``. Task R11-T1 (F2)
+                             also generalizes the absolute dotted-module
+                             match itself (``_module_matches_adapter_registry``
+                             / ``_module_matches_adapter_profile``) from
+                             "the registry/profile name is the LAST
+                             component" to "the registry/profile name is ANY
+                             component immediately following an
+                             ``external_write`` component" — closing a
+                             nested-package gap: ``external_write.
+                             adapters_acme.client`` or ``external_write.
+                             adapter_registry.sub`` (a profile/registry
+                             package one level deeper than the previously-
+                             caught two-component form) is now matched too
+                             (see ``_has_adapter_component_after_external_write``).
+                             Both R11-T1 additions preserve the bare kernel
+                             dispatch module's exclusion on the same
+                             trailing-underscore / exact-name grounds as
+                             every prior form.
                            * ``adapter_registry_reference`` — naming a
                              registry symbol (``get_adapter``, ``get_dispatch``,
                              ``register_adapter``, ``unregister_adapter``,
@@ -398,6 +433,26 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
     facade's own runtime design (documented in full in that module), not
     something this static scanner additionally restricts; noted here only
     so this module's list of disclosed bounds is complete.
+  * A registered adapter's ``plan()`` purity is an ADAPTER-AUTHOR invariant,
+    not something this scanner machine-verifies (Task R11-T1, F3 —
+    cross-vendor review finding). ``adapters.py``'s ``run_operation`` calls
+    a registered adapter's ``dispatch.plan(dispatch.instance, op.params)``
+    ONCE, BEFORE the write gate runs, purely to count effect units for the
+    blast-radius cap (see that function's "n_units / plan-once" docstring
+    section). That ordering means ``plan()`` MUST be pure — no external
+    write, no other I/O, no credential use — for the gate's "refuses before
+    any write is attempted" guarantee to hold: an adapter whose ``plan()``
+    performed a write would execute that write BEFORE the gate ever ran,
+    regardless of what the gate later decides. This scanner does not, and
+    structurally cannot, verify that purity: every concrete adapter's
+    ``plan()`` implementation lives in an ADAPTER_PROFILE module, and
+    ADAPTER_PROFILE is the ONE zone exempt from every check in this file —
+    see "Trust zones" below and ``_scan_file``'s early return. So the
+    guarantee behind ``plan()`` purity is the same as everywhere else this
+    project relies on the ADAPTER_PROFILE zone: a human operator reviewing
+    the trusted adapter module before it is registered, not a deterministic
+    proof that the function body has no side effects. Disclosed here
+    plainly, not silently assumed covered.
 
 ------------------------------------------------------------------------------
 Enforcement ceiling — what this scanner guarantees, and what it does not
@@ -792,26 +847,87 @@ _FUNCTION_INTROSPECTION_ATTRS = frozenset(
 )
 
 
+def _has_adapter_component_after_external_write(dotted: str, predicate) -> bool:
+    """Task R11-T1 (F2 — cross-vendor-ratified gap): True iff some component
+    of ``dotted`` equals ``"external_write"`` and the component IMMEDIATELY
+    FOLLOWING it satisfies ``predicate``.
+
+    Generalizes the prior trailing-two-components match (which only checked
+    ``parts[-2] == "external_write"`` — i.e. the adapter/registry name had to
+    be the very LAST component) to ANY position in the dotted path. That
+    closes the nested-package gap a cross-vendor review found: a package one
+    level deeper than the previously-caught two-component absolute form —
+    ``external_write.adapters_acme.client`` or ``external_write.
+    adapter_registry.sub`` — has the profile/registry name sandwiched
+    between ``external_write`` and a further submodule, not trailing, so the
+    old ``parts[-2]``-only check missed it. The trailing case is still
+    covered here as the special case where the matching index is
+    ``len(parts) - 2``, so nothing that matched before stops matching now —
+    this is a strict superset, not a behavior change for the old shapes. A
+    package-path prefix in front (e.g. ``pkg.external_write.adapter_registry``)
+    still does not evade the match, since the scan is for the LITERAL
+    ``"external_write"`` component wherever it occurs, not just at index 0.
+    """
+    parts = dotted.split(".")
+    for i in range(len(parts) - 1):
+        if parts[i] == "external_write" and predicate(parts[i + 1]):
+            return True
+    return False
+
+
 def _module_matches_adapter_registry(dotted: str) -> bool:
     """True iff ``dotted`` (an import's module path) names the adapter
-    registry module — matched by its trailing two dotted components, so a
-    package-path prefix in front (e.g. a hypothetical
-    ``pkg.external_write.adapter_registry``) does not evade the match."""
-    parts = dotted.split(".")
-    return len(parts) >= 2 and parts[-2] == "external_write" and parts[-1] == _ADAPTER_REGISTRY_MODULE_NAME
+    registry module, anchored on an ``external_write`` component anywhere in
+    the path (see ``_has_adapter_component_after_external_write`` — Task
+    R11-T1/F2 generalized this from a trailing-two-components-only match to
+    ANY nesting depth). Does NOT match a BARE ``adapter_registry`` module
+    with no ``external_write`` component at all — see
+    ``_bare_first_component_matches_adapter`` (Task R11-T1/F1) for that
+    shape, kept as a separate, narrowly-scoped check so the two do not
+    double-fire on the same import (see callers)."""
+    return _has_adapter_component_after_external_write(
+        dotted, lambda name: name == _ADAPTER_REGISTRY_MODULE_NAME
+    )
 
 
 def _module_matches_adapter_profile(dotted: str) -> bool:
     """True iff ``dotted`` names an adapter-PROFILE module
-    (``external_write.adapters_<vendor>``) — same trailing-two-components
-    match as above. The bare kernel dispatch module
-    ``external_write.adapters`` never matches: ``"adapters".startswith(
-    "adapters_")`` is False (the prefix requires the trailing underscore)."""
-    parts = dotted.split(".")
+    (``external_write.adapters_<vendor>``, at ANY nesting depth following the
+    ``external_write`` component — Task R11-T1/F2). The bare kernel dispatch
+    module ``external_write.adapters`` never matches: ``"adapters".
+    startswith("adapters_")`` is False (the prefix requires the trailing
+    underscore). Does NOT match a BARE ``adapters_<vendor>`` module with no
+    ``external_write`` component — see ``_bare_first_component_matches_adapter``
+    (Task R11-T1/F1)."""
+    return _has_adapter_component_after_external_write(
+        dotted, lambda name: name.startswith(_ADAPTER_PROFILE_MODULE_PREFIX)
+    )
+
+
+def _bare_first_component_matches_adapter(dotted: str) -> bool:
+    """Task R11-T1 (F1 — cross-vendor-ratified gap): True iff ``dotted``'s
+    FIRST component alone — with NO ``external_write.`` prefix anywhere in
+    the path — is the registry module name or an adapter-profile module name.
+
+    Catches the bare, non-relative import shapes invisible to every existing
+    check: ``import adapters_gmail`` / ``import adapter_registry`` (visited
+    via ``visit_Import``, which has no ``level`` concept at all — a plain
+    ``import`` statement can never be relative) and ``from adapters_gmail
+    import X`` / ``from adapter_registry import Y`` at ``node.level == 0``
+    (the absolute ``from`` form; the RELATIVE bare/dotted forms at
+    ``node.level > 0`` are already caught by the R10-T1 checks, which this
+    function's callers gate around to avoid a double-count — see
+    ``visit_ImportFrom``).
+
+    The bare kernel dispatch module (``adapters``) and other legitimate bare
+    capability-facing names (``operations``, ``capability_api``,
+    ``read_facades_<cap>``) never match, on the identical trailing-underscore
+    / exact-name grounds every other check in this module uses.
+    """
+    first = dotted.split(".")[0]
     return (
-        len(parts) >= 2
-        and parts[-2] == "external_write"
-        and parts[-1].startswith(_ADAPTER_PROFILE_MODULE_PREFIX)
+        first == _ADAPTER_REGISTRY_MODULE_NAME
+        or first.startswith(_ADAPTER_PROFILE_MODULE_PREFIX)
     )
 
 
@@ -958,6 +1074,12 @@ class _Scanner(ast.NodeVisitor):
                 if (
                     _module_matches_adapter_registry(alias.name)
                     or _module_matches_adapter_profile(alias.name)
+                    # Task R11-T1 (F1): a plain ``import`` statement is
+                    # always absolute (no relative ``import`` syntax exists
+                    # in Python), so this bare check is safe unconditionally
+                    # here — no relative-import special case to avoid
+                    # double-counting against.
+                    or _bare_first_component_matches_adapter(alias.name)
                 ):
                     self._add(node.lineno, "adapter_module_import")
                 # ``import importlib`` (or any importlib submodule) itself —
@@ -978,6 +1100,19 @@ class _Scanner(ast.NodeVisitor):
                 if (
                     _module_matches_adapter_registry(node.module)
                     or _module_matches_adapter_profile(node.module)
+                    # Task R11-T1 (F1): the bare, ABSOLUTE form -- ``from
+                    # adapters_gmail import X`` / ``from adapter_registry
+                    # import Y`` -- has node.level == 0 and node.module set
+                    # to the bare name with no "external_write." prefix at
+                    # all. Gated on node.level == 0 so this does not
+                    # double-fire alongside the R10-T1 relative-specific
+                    # block below (gated on node.level > 0), which already
+                    # catches the identical bare-name shape for a RELATIVE
+                    # import (``from .adapters_gmail import X``).
+                    or (
+                        node.level == 0
+                        and _bare_first_component_matches_adapter(node.module)
+                    )
                 ):
                     self._add(node.lineno, "adapter_module_import")
                 if root == "importlib":
