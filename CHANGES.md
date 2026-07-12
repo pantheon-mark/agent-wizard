@@ -12,6 +12,21 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-11 — more building blocks for writes-back capabilities, and a paused capability is protected during an update (v0.11.0)
+
+**Public-facing change:** Two additions under the hood. Future write-back capabilities have more proven building blocks to draw on, and if something you already had running no longer follows your system's current safety rules, an update now catches it and pauses it safely instead of breaking it or leaving it running unprotected.
+
+- **New building blocks for writes-back capabilities.** An adapter registry enforces a cap on how many things a single write action can touch. A read-only view lets a capability be built and tested without the code that builds it ever being able to touch the credential that can write. And a clearer three-way split — the code your system trusts by default, the code a connected service's adapter runs, and the code a specific capability runs — makes it easier to see what any given piece of code is and is not allowed to do.
+- **A Gmail adapter proves it out.** Label and filter actions only — never sending anything, never permanently deleting anything — added as a second real capability built on these same building blocks, alongside the original one.
+- **An update now protects what you already have running.** When your system checks for and applies an update, it now also checks whether anything you already had running still follows the current safety rules. If something no longer does, that one thing is safely paused — reversibly, without changing or breaking its code — and handed to the same define → build → accept process you already use to add a new capability, rather than left running unprotected or broken outright.
+- No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
+
+This is a feature addition (`v0.11.0`, operator-explicit as always). Foundation documents are byte-identical to `v0.10.2`.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-07-05 — your system now picks up right where you left off (v0.10.2)
 
 **Public-facing change:** When you come back to your system — at the start of a session or after a pause — it now leads with the step you actually left off on (including a paused or half-finished task), instead of picking an unrelated item off a date list. And when it saves where things stand, it records only the version you are on right now, never a guess like "no update expected next time" that a later check could prove wrong.

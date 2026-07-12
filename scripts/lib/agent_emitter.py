@@ -68,6 +68,17 @@ _EXTERNAL_WRITE_LIB_FILES = (
     "acceptance_ceremony.py",
     "capability_registration.py",
     "operator_acceptance.py",
+    # T14 (external-write-gate-generalization bundle cut): the five modules added by this
+    # slice's generalized Operation/adapter/credential-isolation/zone work. Without these an
+    # emitted writes-back system imports operations.py/scan.py/etc. successfully but those
+    # modules themselves import adapter_registry/effects_manifest/read_facade/zones (and the
+    # Gmail adapter registers itself against adapter_registry+contracts+zones at import time) —
+    # omitting them breaks the emitted package at import time, not just at some later call.
+    "adapter_registry.py",
+    "adapters_gmail.py",
+    "effects_manifest.py",
+    "read_facade.py",
+    "zones.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
@@ -122,16 +133,18 @@ def _plan_has_writes_back(plan: "EmissionPlan") -> bool:
 def external_write_lib_emit_set(plan: "EmissionPlan") -> List[str]:
     """The emitted-tree relpaths of the external_write lib files this plan should emit.
 
-    Returns all fifteen lib files under agents/lib/external_write/ when the plan has a
+    Returns all twenty lib files under agents/lib/external_write/ when the plan has a
     writes-back dependency: the original four substrate files (operations, adapters,
     broker, scan), the six contract-and-verification modules (verification_modes,
     contracts, verifiers, boundary, proof_hash, copy_run_proof), the two B1-4/B1-5
     safety-gate modules (coverage_gate — build-time descriptor-coverage gate; write_gate —
-    runtime pre-write gate) enrolled at B2-T2, and the three B2 operator-originated-enhancement
+    runtime pre-write gate) enrolled at B2-T2, the three B2 operator-originated-enhancement
     flow modules (acceptance_ceremony, capability_registration, operator_acceptance) enrolled at
-    B2-T9a (canonical enrollment only; the physical bundle copy + system-artifacts.json + parity
-    entries land at B2-T9b — the copy below is already source-gated on the bundle carrying the
-    file, so this enrollment is a no-op until then).
+    B2-T9a, and the five external-write-gate-generalization modules (adapter_registry,
+    adapters_gmail, effects_manifest, read_facade, zones) enrolled at T14 (canonical
+    enrollment; the physical bundle copy + system-artifacts.json + parity entries land at the
+    T14 bundle cut — the copy below is already source-gated on the bundle carrying the file,
+    so this enrollment is a no-op until then).
 
     Returns [] when the plan has no writes-back (boundary_output) dependency — no dead
     code for read-only systems, and none for foundation-only plans (which have no agent

@@ -242,6 +242,19 @@
       "changelog": "When you come back to your system — at the start of a session or after a pause — it now leads with the step you actually left off on (including a paused or half-finished task), instead of picking an unrelated item off a date list. And when it saves where things stand, it records only the version you are on right now, never a guess like \"no update expected next time\" that a later check could prove wrong.",
       "bundle_tree_sha256": "sha256:f4492cf8f9f2cdcfa040e85c4dddedf6bb8379925114b2d048a0d8c7ae9b048a",
       "bundle_manifest_sha256": "sha256:f59f9d85bc32da5e61a360eea895397339a6fdb419bfcb156209de5f58da10e9"
+    },
+    {
+      "foundation_bundle_version": "v0.11.0",
+      "safety_class": "routine_improvement",
+      "recommendation_reason": "Future writes-back capabilities get more proven building blocks, and if something you already had running no longer follows your system's current safety rules, an update now catches it and pauses it safely instead of breaking it.",
+      "path": "foundation-bundles/v0.11.0/",
+      "release_date": "2026-07-11",
+      "source_commit": "PENDING",
+      "manifest": "foundation-bundles/v0.11.0/manifest.yaml",
+      "status": "prerelease",
+      "changelog": "Two additions under the hood. An adapter registry enforces a cap on how many things a single write action can touch; a read-only view lets a capability be built and tested without the code that builds it ever being able to touch the credential that can write; and a clearer three-way split between the code your system trusts by default, the code a connected service's adapter runs, and the code a specific capability runs makes it easier to see what any given piece of code is and is not allowed to do. A Gmail adapter (label and filter actions only — never sending, never permanently deleting) proves these building blocks out as a second real capability. And when your system checks for and applies an update, it now also checks whether anything you already had running still follows the current safety rules — if something no longer does, that one thing is safely paused, reversibly, and handed to the same define → build → accept process you already use to add a new capability, rather than left running unprotected or broken outright. No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.",
+      "bundle_tree_sha256": "sha256:56f91e6427755f1becc880266f4b063ed61a4aab32352219a998989c11b07218",
+      "bundle_manifest_sha256": "sha256:fc3af2e7faa5e45c46f18192b5bedde9a092efdd2ba0412cbd0fb2c064d8cc80"
     }
   ]
 }
