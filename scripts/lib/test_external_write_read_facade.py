@@ -353,6 +353,69 @@ class TestReadFacadeClientUnreachableViaAnyAttribute(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Group 1d (carried T4, R4): the runtime allowlist used to pass through
+# EVERY underscore-prefixed name unconditionally -- permissive enough that a
+# NOVEL single-underscore instance attribute (e.g. a subclass method doing
+# `self._stash = X`) was readable back via normal attribute access, and
+# __setattr__ would let it be set in the first place. R4 tightens both hooks
+# to a fixed allowlist: dunders, the fixed internal set {read_methods,
+# _read}, and declared read_methods names -- nothing else, however it got
+# onto the instance.
+# ---------------------------------------------------------------------------
+
+class TestReadFacadeInternalAllowlistTightening(unittest.TestCase):
+
+    def test_novel_single_underscore_attribute_is_not_readable(self):
+        """Even if a novel single-underscore name ends up in instance state
+        by some OTHER means (bypassing ReadFacade's own __setattr__ hook, to
+        isolate this from the __setattr__ guarantee tested separately
+        below), normal attribute access must still refuse it."""
+        facade = _SentinelFacade(_SecretSentinelClient())
+        object.__setattr__(facade, "_stash", "SECRET-STASH-VALUE")
+        with self.assertRaises(AttributeError):
+            facade._stash
+
+    def test_novel_single_underscore_attribute_cannot_even_be_set(self):
+        """Symmetric __setattr__ tightening: normal attribute-set syntax for
+        a novel single-underscore name is refused at set-time, not merely
+        unreadable afterward -- nothing in ReadFacade legitimately sets an
+        instance attribute at all (see __init__: the client goes into
+        _WRAPPED_CLIENTS, never `self.<anything>`)."""
+        facade = _SentinelFacade(_SecretSentinelClient())
+        with self.assertRaises(AttributeError):
+            facade._stash = "SECRET-STASH-VALUE"
+
+    def test_declared_read_method_still_works_end_to_end_via_read(self):
+        facade = _SentinelFacade(_SecretSentinelClient())
+        self.assertEqual(facade.get_secret(), "SECRET-SENTINEL-VALUE")
+
+    def test_repr_type_name_and_weakref_keying_still_work(self):
+        import external_write.read_facade as read_facade_mod
+
+        client = _SecretSentinelClient()
+        facade = _SentinelFacade(client)
+
+        # repr() must not raise -- the default object.__repr__ path.
+        self.assertIn("_SentinelFacade", repr(facade))
+
+        # type(...).__name__, as used in this module's own error messages.
+        self.assertEqual(type(facade).__name__, "_SentinelFacade")
+
+        # Hashing (needed to key a WeakKeyDictionary) must still work.
+        self.assertIsInstance(hash(facade), int)
+
+        # Weakref-keying into _WRAPPED_CLIENTS must still resolve to the
+        # wrapped client.
+        self.assertIn(facade, read_facade_mod._WRAPPED_CLIENTS)
+        self.assertIs(read_facade_mod._WRAPPED_CLIENTS[facade], client)
+
+    def test_dunder_access_still_works(self):
+        facade = _SentinelFacade(_SecretSentinelClient())
+        self.assertIs(facade.__class__, _SentinelFacade)
+        self.assertIsInstance(facade.__weakref__, object)
+
+
+# ---------------------------------------------------------------------------
 # Fixtures shared by the credential-injection-seam tests
 # ---------------------------------------------------------------------------
 
