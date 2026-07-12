@@ -27,6 +27,7 @@ from external_write.adapter_registry import (                # noqa: E402
     register_adapter,
     unregister_adapter,
 )
+from external_write.write_gate import InvocationLedger, LIVE_TARGET  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -640,6 +641,143 @@ class TestAdapterDispatchCardinalityCap(unittest.TestCase):
 
         self.assertEqual(result.status, "written")
         self.assertEqual(client.read("sheet:parity-1", "Status"), "Complete")
+
+
+class _UnitPlanAdapter:
+    """Test adapter whose plan() fans out to a FIXED number of EffectUnits,
+    for exercising the aggregate blast-radius WINDOW's per-operation unit
+    count (NF3) -- distinct from _BulkPlanAdapter above, which exists to
+    prove the single-op F-31 cardinality cap. Records every apply_one call so
+    a test can confirm exactly how many units actually got applied."""
+
+    def __init__(self, n):
+        self._n = n
+        self.applied = []
+
+    def plan(self, params):
+        return [EffectUnit(unit_id=f"u{i}", target_ref=params) for i in range(self._n)]
+
+    def apply_one(self, raw_client, unit):
+        self.applied.append(unit)
+        raw_client.write(unit.unit_id, "Status", "Complete")
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, raw_client, unit):
+        return True
+
+
+class TestUnitAwareBlastRadiusWindow(unittest.TestCase):
+    """NF3 -- the aggregate blast-radius WINDOW (the shared InvocationLedger's
+    lifetime) must be bounded in UNITS, not in invocation count. The per-op
+    cap (F-31, TestAdapterDispatchCardinalityCap above) is an independent,
+    single-op bound and stays intact; this class is about the SEPARATE
+    aggregate window a cap_ledger enforces across MULTIPLE invocations of the
+    SAME capability. Uses a GATED (irreversible_external, requires_accepted_
+    phase=True) op_kind with an ACCEPTED covering descriptor entry so the op
+    actually runs the live-enforcement funnel (_enforce_live_funnel) where the
+    window lives."""
+
+    OP_KIND = "_unit_window_probe"
+    SURFACE = "google_sheets"
+    CAP = 25
+
+    def setUp(self):
+        contracts_mod.OPERATION_CONTRACTS[self.OP_KIND] = OperationContract(
+            op_kind=self.OP_KIND,
+            writes=("Status",),
+            produces=(),
+            dependency_set=(),
+            verifier_set=(),
+            introduces_persistent_binding=False,
+            risk_class="irreversible_external",
+            requires_accepted_phase=True,
+            blast_radius_cap=self.CAP,
+        )
+
+    def tearDown(self):
+        contracts_mod.OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+        unregister_adapter(self.OP_KIND)
+
+    def _op(self, batch_id):
+        return Operation(
+            surface=self.SURFACE,
+            op_kind=self.OP_KIND,
+            batch_id=batch_id,
+            params={"batch": batch_id},
+        )
+
+    def _accepted_entry(self):
+        return {
+            "id": self.SURFACE, "name": self.SURFACE, "action_class": "delete",
+            "risk_class": "irreversible_external", "recovery_profile_ref": None,
+            "declared_test_target": "copy", "blast_radius_cap": None,
+            "accepted": True,
+        }
+
+    def _ledger_key(self):
+        return f"{self.SURFACE}::{self.OP_KIND}"
+
+    def test_aggregate_window_bounded_by_units_not_invocations(self):
+        # cap=25; three ops of 10 units each. Bounded by UNITS: the first two
+        # (10, then 20 units consumed) are permitted; the third would reach
+        # 30 units and is refused. Under the OLD one-slot-per-invocation
+        # window this sequence is only invocation 3 of 25 -- nowhere near the
+        # cap -- so a pass here on the new code but the assertions below on
+        # led.count() failing would expose a regression to invocation-only
+        # counting.
+        adapter = _UnitPlanAdapter(10)
+        register_adapter(self.OP_KIND, adapter)
+        ds = [self._accepted_entry()]
+        led = InvocationLedger()
+        key = self._ledger_key()
+
+        op1 = self._op("b1")
+        r1 = run_operation(op1, _receipt(op1), _AcceptingClient(),
+                           target=LIVE_TARGET, descriptor_set=ds, cap_ledger=led)
+        self.assertEqual(r1.status, "written")
+        self.assertEqual(led.count(key), 10,
+                         "the window must consume len(effect_units) per op, not 1 slot")
+
+        op2 = self._op("b2")
+        r2 = run_operation(op2, _receipt(op2), _AcceptingClient(),
+                           target=LIVE_TARGET, descriptor_set=ds, cap_ledger=led)
+        self.assertEqual(r2.status, "written")
+        self.assertEqual(led.count(key), 20)
+
+        op3 = self._op("b3")
+        r3 = run_operation(op3, _receipt(op3), _AcceptingClient(),
+                           target=LIVE_TARGET, descriptor_set=ds, cap_ledger=led)
+        self.assertEqual(
+            r3.status, "refused",
+            "third 10-unit op must be refused: 20 units already consumed + "
+            "10 more = 30 > cap of 25 -- a session of 25-unit invocations "
+            "must be bounded by TOTAL UNITS, not invocation count")
+        self.assertIn("cap", r3.detail["reason"].lower())
+        # The refused op recorded NOTHING to the ledger and applied nothing.
+        self.assertEqual(led.count(key), 20)
+        self.assertEqual(len(adapter.applied), 20,
+                         "the refused third op must not have applied any unit")
+
+    def test_contrast_one_slot_per_invocation_window_would_have_passed_all_three(self):
+        # Direct contrast proof (per the task brief): replay the exact same
+        # 3-invocation sequence against the LEGACY one-slot-per-invocation
+        # counting convention (InvocationLedger.record(key) with no explicit
+        # n -- the pre-NF3 default) and show it would sit at 3/25, nowhere
+        # near refusal -- i.e. the bound genuinely is unit-based now, not
+        # merely coincidentally stricter.
+        legacy_ledger = InvocationLedger()
+        key = self._ledger_key()
+        for _ in range(3):
+            legacy_ledger.record(key)  # legacy call site: n defaults to 1
+        self.assertEqual(legacy_ledger.count(key), 3)
+        self.assertLess(
+            legacy_ledger.count(key), self.CAP,
+            "under a 1-slot-per-invocation window, 3 invocations of a 10-unit "
+            "op would never approach a cap of 25, even though 30 units were "
+            "actually consumed -- contrast proof that the real fix must "
+            "count units, not invocations")
 
 
 if __name__ == "__main__":
