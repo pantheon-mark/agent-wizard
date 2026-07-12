@@ -3,7 +3,7 @@ external-write-gate-generalization slice).
 
 Tasks 1-6 built a generalized external-write gate (verb-shaped Operations, a
 per-op_kind Adapter registry, credential isolation via ReadFacade +
-write_credential_provider, the zone-aware AST bypass scanner, the per-op_kind
+adapter-owned write-client provisioning, the zone-aware AST bypass scanner, the per-op_kind
 effects manifest that binds a registered adapter's own bytes into the accepted-
 write identity, and the acceptance ceremony). None of that had yet been proven
 against a REAL vendor API shape — a verb-shaped surface (labels/filters), not

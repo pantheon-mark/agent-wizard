@@ -4,7 +4,10 @@ slice; cross-vendor round-2 finding; hardened per a code-review finding that
 live-reproduced three working bypasses of the class-definition-time-only
 guard — see "Runtime enforcement" below; hardened AGAIN per a re-review that
 live-reproduced a fourth bypass, requiring no subclassing at all — see
-"Client storage" below).
+"Client storage" below; hardened AGAIN (R4, carried defense-in-depth finding)
+per a novel single-underscore re-stash residual and to make the docstrings
+here stop overclaiming — see "Runtime enforcement" and "Disclosed residual
+bypasses" below).
 
 The property this module exists to guarantee:
 
@@ -37,14 +40,43 @@ complementary mechanism — Task 5's job):
      `self.client = read_only_client`) is invisible to `__init_subclass__`,
      which only inspects `vars(cls)` at class-definition time. So
      `ReadFacade.__getattribute__` ALSO enforces, on every attribute access
-     against every instance, that only a declared `read_methods` name (or
-     an underscore-prefixed/dunder internal) is reachable — any other name,
-     however it was set, raises AttributeError. `ReadFacade.__setattr__`
-     additionally refuses, at set-time, any attempt to set a non-
-     underscore-prefixed instance attribute, so a smuggled public attribute
-     never even makes it into instance state. Because subclasses cannot
-     override any of these three hooks (forbidden above), this enforcement
-     cannot be re-opened by a subclass.
+     against every instance, a FIXED allowlist (R4 — not a blanket
+     underscore passthrough): dunders (`__class__`, `__weakref__`,
+     `__hash__`, `__eq__`, and the rest of Python/object machinery), a
+     fixed internal set (`read_methods`, `_read`), and declared
+     `read_methods` names. Any other name — including a NOVEL
+     single-underscore instance attribute a subclass method might stash
+     (e.g. `self._stash = X`), however it was set — raises AttributeError.
+     `ReadFacade.__setattr__` is symmetrically tightened: it refuses, at
+     set-time, any attempt to set an instance attribute other than a
+     dunder (public OR a novel single-underscore name alike), so a smuggled
+     value never even makes it into instance state in the first place —
+     nothing in ReadFacade legitimately sets an instance attribute at all.
+     Because subclasses cannot override any of these three hooks (forbidden
+     above), a subclass cannot re-open this runtime allowlist through
+     normal attribute access.
+
+     Disclosed residual bypasses (honesty over overclaim — these are NOT
+     closed by the above, and this module does not claim they are): (a)
+     code that imports the module-private `_WRAPPED_CLIENTS` directly can
+     still read the wrapped read-only client out of it — the runtime
+     allowlist governs attribute access on a ReadFacade INSTANCE, not
+     access to this module's own private state; (b) code that calls
+     `object.__getattribute__(self, name)` (or otherwise reaches into
+     object machinery beneath the class hook, e.g. via `self.__dict__` —
+     empty though it always is — or `inspect`/`ctypes`-level introspection)
+     bypasses `ReadFacade.__getattribute__` entirely, because it never goes
+     through the instance's own `__getattribute__` call. Both of these are
+     OUTSIDE the deterministic guarantee this class provides and INSIDE
+     this module's actual enforcement ceiling — build-time + operator-as-
+     approver, not runtime/OS (see "Enforcement ceiling" below). Ordinary
+     capability/proposal code has no reason to do either, and scan.py's
+     static rules (Task 5) are the complementary mechanism that polices
+     source text for that kind of reach-in; this class's guarantee is that
+     NORMAL attribute access — `facade.<name>` / `getattr(facade, name)` —
+     cannot reach the wrapped client, not that no Python code anywhere ever
+     could by deliberately reaching beneath the language's own attribute
+     protocol.
 
      Client storage: the runtime allowlist above is necessary but was not
      sufficient — the base class itself used to store the wrapped client as
@@ -59,12 +91,16 @@ complementary mechanism — Task 5's job):
      guessed, underscore-prefixed, or otherwise — that any attribute access
      on a ReadFacade instance can resolve to the wrapped client.
 
-  2. The credential-provider seam — `run_operation` (adapters.py) accepts an
-     optional `write_credential_provider` and calls it itself, INSIDE the
-     adapter-dispatch execution path, to obtain the write-capable raw client
-     passed to `adapter.apply_one(raw_client, unit)`. Capability/proposal
-     code that builds an Operation and holds a ReadFacade never receives
-     that provider and never sees the credential it returns.
+  2. The credential-provider seam — `run_operation` (adapters.py) resolves the
+     write-capable raw client INTERNALLY, keyed by the registered adapter: when
+     an adapter self-provisions (defines `build_write_client(op)`), the adapter
+     execution path calls it itself, INSIDE that path, to obtain the raw client
+     passed to `adapter.apply_one(raw_client, unit)`. `run_operation` takes NO
+     caller-supplied provider (BL-1 / F-33): capability/proposal code that
+     builds an Operation and holds a ReadFacade cannot even NAME a credential
+     provider (enforced deterministically by scan.py's
+     credential_provider_reference rule), let alone pass one in or see the
+     credential it returns.
 
 Vendor eligibility: an op_kind may only use this safety model if its
 contract declares a `read_only_scope` (contracts.OperationContract). An
@@ -101,6 +137,26 @@ _FORBIDDEN_ACCESS_HOOKS = ("__getattr__", "__getattribute__", "__setattr__")
 # "Client storage" in the module docstring.
 _WRAPPED_CLIENTS: "weakref.WeakKeyDictionary[ReadFacade, Any]" = weakref.WeakKeyDictionary()
 
+# The FIXED internal allowlist for ReadFacade.__getattribute__ (R4): names
+# other than dunders and declared read_methods entries that legitimately
+# need to be reachable via `self.<name>` from inside a ReadFacade subclass's
+# own methods. `read_methods` is the class-level declaration tuple itself;
+# `_read` is the dispatch method every declared read method calls. Nothing
+# else — including any NOVEL single-underscore name a subclass might stash
+# on an instance — is reachable through this hook. See the module/class
+# docstrings' "Runtime enforcement" sections for what this closes and what
+# it deliberately does not (residual bypasses are disclosed there, not
+# hidden).
+_INTERNAL_ALLOWLIST = frozenset({"read_methods", "_read"})
+
+
+def _is_dunder(name: str) -> bool:
+    """True for names of the form `__x__` — Python/object machinery
+    (`__class__`, `__weakref__`, `__hash__`, `__eq__`, `__repr__`, etc.)
+    that ReadFacade's runtime allowlist must never deny, or ordinary object
+    behavior (hashing, weakref-keying, repr, equality) would break."""
+    return name.startswith("__") and name.endswith("__")
+
 
 class ReadFacadeEligibilityError(Exception):
     """Raised when an op_kind has no declared read_only_scope — ineligible
@@ -123,17 +179,37 @@ class ReadFacade:
 
     That class-definition-time check alone is not sufficient — instance
     state set in an overridden `__init__` is invisible to it. So this class
-    ALSO enforces the allowlist at runtime, on every instance, via
-    `__getattribute__` (only a declared `read_methods` name, or an
-    underscore-prefixed/dunder internal, is reachable from outside) and
-    `__setattr__` (no non-underscore-prefixed instance attribute can be set
-    at all). Subclasses cannot override either hook to re-open this.
+    ALSO enforces a FIXED allowlist at runtime, on every instance, via
+    `__getattribute__` (R4: not a blanket underscore passthrough — only
+    dunders, a fixed internal set {`read_methods`, `_read`}, and a declared
+    `read_methods` name are reachable from outside; a NOVEL
+    single-underscore instance attribute, however it got set, is denied)
+    and `__setattr__` (no instance attribute other than a dunder can be set
+    at all — public or single-underscore alike). Subclasses cannot override
+    either hook to re-open this through normal attribute access.
 
     The wrapped client itself is never stored as an instance attribute at
     all — not even an underscore-prefixed one. `__init__` keeps it in a
     module-private `weakref.WeakKeyDictionary` keyed by instance, so there
     is no attribute name whatsoever (guessed or otherwise) that resolves to
-    it from outside.
+    it from outside via normal attribute access.
+
+    Disclosed residual (honesty over overclaim — NOT closed here, and not
+    claimed to be): code that imports this module's private
+    `_WRAPPED_CLIENTS` directly, or that calls
+    `object.__getattribute__(self, name)` / otherwise reaches beneath the
+    class's own `__getattribute__`, bypasses the runtime allowlist above —
+    those are not `facade.<name>` / `getattr(facade, name)` attribute
+    access, so this class's hook never runs. That residual sits outside
+    this class's deterministic guarantee, inside this module's actual
+    enforcement ceiling (build-time + operator-as-approver, not runtime/OS
+    — see the module docstring's "Enforcement ceiling"). What IS guaranteed
+    here: ordinary attribute access on a ReadFacade instance cannot reach
+    the wrapped client. The value protected by this class is the READ-ONLY
+    client specifically — the write-capable credential is a separate
+    object this class never even sees, isolated by the credential-provider
+    seam (mechanism 2 in the module docstring), not by anything in this
+    class.
 
     A conforming subclass implements its declared read methods via `_read`,
     which dispatches to the wrapped read-only client:
@@ -206,13 +282,16 @@ class ReadFacade:
         _WRAPPED_CLIENTS[self] = read_only_client
 
     def __getattribute__(self, name: str) -> Any:
-        # Underscore-prefixed/dunder names are internal machinery (this
-        # base class's own `_read`, plus whatever `object` itself needs)
-        # and are never part of the externally reachable public surface
-        # being policed here. Note the wrapped client is never reachable
-        # through this passthrough regardless of name, because it is never
-        # stored as an instance attribute in the first place (see __init__).
-        if name.startswith("_") or name == "read_methods":
+        # R4: a FIXED allowlist, not a blanket underscore passthrough —
+        # dunders (object/Python machinery: __class__, __weakref__,
+        # __hash__, __eq__, ...), the fixed internal set {read_methods,
+        # _read}, and declared read_methods names. Any OTHER name —
+        # including a NOVEL single-underscore instance attribute a subclass
+        # might stash (e.g. `self._stash = X` in an overridden method) — is
+        # denied. Note the wrapped client is never reachable through any of
+        # this regardless of name, because it is never stored as an
+        # instance attribute in the first place (see __init__).
+        if _is_dunder(name) or name in _INTERNAL_ALLOWLIST:
             return object.__getattribute__(self, name)
         read_methods = object.__getattribute__(self, "read_methods")
         if name in read_methods:
@@ -220,22 +299,34 @@ class ReadFacade:
         raise AttributeError(
             f"{type(self).__name__!r} object has no externally reachable "
             f"attribute {name!r} — only its declared read_methods "
-            f"{tuple(read_methods)!r} (plus internal/private state) are "
-            "reachable from outside a ReadFacade instance. This is enforced "
-            "at runtime, not just at class-definition time."
+            f"{tuple(read_methods)!r} (plus a fixed internal allowlist of "
+            f"{tuple(sorted(_INTERNAL_ALLOWLIST))!r} and dunders) are "
+            "reachable on a ReadFacade instance. This is enforced at "
+            "runtime, not just at class-definition time, and denies any "
+            "novel single-underscore name — not only undeclared public "
+            "names."
         )
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if not name.startswith("_"):
-            raise AttributeError(
-                f"{type(self).__name__} may not set the public instance "
-                f"attribute {name!r} — a ReadFacade instance's only "
-                "externally reachable state is its declared read methods; "
-                "smuggling a client (or anything else) onto a public "
-                "instance attribute is refused at set-time, not just "
-                "detected afterward."
-            )
-        object.__setattr__(self, name, value)
+        # R4: symmetric tightening — dunder slot machinery aside, nothing
+        # in ReadFacade legitimately sets an instance attribute at all
+        # (__init__ stores the wrapped client in the module-private
+        # _WRAPPED_CLIENTS, never as `self.<anything>`). So every non-dunder
+        # set is refused at set-time, public OR a novel single-underscore
+        # name alike — there is no attribute name a smuggled value could be
+        # stashed under in the first place.
+        if _is_dunder(name):
+            object.__setattr__(self, name, value)
+            return
+        raise AttributeError(
+            f"{type(self).__name__} may not set the instance attribute "
+            f"{name!r} — a ReadFacade instance sets no instance attribute "
+            "of any name (public or underscore-prefixed); its only "
+            "externally reachable state is its declared read methods, and "
+            "the wrapped client lives in module-private state, never on "
+            "the instance. Smuggling anything onto instance state is "
+            "refused at set-time, not just detected afterward."
+        )
 
     def _read(self, method_name: str, *args, **kwargs) -> Any:
         """Dispatch a declared read method's implementation to the wrapped

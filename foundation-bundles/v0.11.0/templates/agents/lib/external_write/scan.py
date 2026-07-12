@@ -28,13 +28,19 @@ Bypass classes CAUGHT at v0
                          (urllib.request) match the banned top-level package.
   direct_api_call     -- referencing a known external-surface mutation method
                          by name (values().update, batchUpdate, append,
-                         update_cells, ...). Caught whether the mutation verb is
-                         the immediate func of a Call OR merely loaded as an
-                         attribute and called indirectly (``fn = svc...update;
-                         fn(...)``). Caught wherever it appears, including inside
-                         a local helper function (so helper indirection is
-                         covered: the forbidden reference inside the helper is
-                         itself reported).
+                         update_cells, ...; and, as of Task R2/NF1, Gmail's
+                         trash/untrash on name alone, and modify/send/create/
+                         delete gated on a Gmail surface handle -- messages/
+                         drafts/threads/labels/filters/settings/users -- in the
+                         attribute chain, mirroring the Sheets ambiguous-verb
+                         design; see ``_check_surface_mutation``). Caught
+                         whether the mutation verb is the immediate func of a
+                         Call OR merely loaded as an attribute and called
+                         indirectly (``fn = svc...update; fn(...)``). Caught
+                         wherever it appears, including inside a local helper
+                         function (so helper indirection is covered: the
+                         forbidden reference inside the helper is itself
+                         reported).
   dynamic_import      -- importlib.import_module('requests') / __import__(...)
                          with a banned literal module name (defeats static
                          ``import`` detection).
@@ -56,7 +62,48 @@ Bypass classes CAUGHT at v0
                          file (Task 5 -- see "Trust zones" below). The symbol
                          set is CURATED, not exhaustive (a known, tracked
                          limitation) -- the same disclosed-bound spirit as
-                         ``_FORBIDDEN_IMPORT_ROOTS``.
+                         ``_FORBIDDEN_IMPORT_ROOTS``. Two further evasions of
+                         this curated symbol check are disclosed, not closed
+                         (T5 -- Task R2, same "no silent caps" spirit as the
+                         ``build_write_client`` getattr bound documented under
+                         ``credential_provider_reference`` below): (i) a
+                         string-literal ``getattr(creds, "with_subject")(user)``
+                         resolves a curated factory/authority method via a
+                         Constant node, invisible to this attribute-NAME check
+                         -- the identical shape already disclosed for
+                         ``build_write_client``; (ii) an aliased import
+                         (``from google.oauth2.credentials import Credentials
+                         as X``) evades the bare-name construction check, since
+                         ``_CREDENTIAL_CLASS_NAMES`` matches the LOCAL bound
+                         name (``X``), not the original symbol -- though the
+                         import statement itself usually still trips
+                         ``forbidden_import`` (the ``google`` root is banned
+                         regardless of the ``as`` alias), so this residual is
+                         Low severity, not a silent full bypass.
+  credential_provider_reference -- naming an ADAPTER_PROFILE write-credential
+                         PROVIDER symbol anywhere outside the ADAPTER_PROFILE
+                         zone: importing it (``from external_write.adapters_x
+                         import write_credential_provider``), referencing it as a
+                         bare name, or accessing it as an attribute. TWO reach
+                         paths are guarded: the retired module-level provider
+                         name (``write_credential_provider``) AND the Adapter
+                         method that provisions the write client
+                         (``build_write_client`` — so a capability-zone
+                         ``get_adapter(op_kind).build_write_client(op)`` attribute
+                         reference is flagged too). The BL-1 / F-33 credential-
+                         isolation keystone: capability/proposal-zone code must be
+                         UNABLE TO OBTAIN the write-credential provider (the
+                         callable that returns the write client), not merely
+                         "does not call it" by convention. The provider
+                         legitimately lives ONLY in the ADAPTER_PROFILE zone
+                         (exempt from every check), where a concrete adapter
+                         DEFINES ``build_write_client`` and provisions its own
+                         write client. Curated set, same disclosed-bound spirit
+                         as the credential-construction surface: a string-literal
+                         ``getattr(adapter, "build_write_client", None)`` resolves
+                         the method via a Constant node invisible to the symbol
+                         check — an aliased/dynamic reach that stays a disclosed
+                         deterministic-scanner limitation, not closed here.
 
 ------------------------------------------------------------------------------
 Bounds NOT covered at v0 (disclosed — no silent caps)
@@ -88,18 +135,44 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
   * Static re-stashing of a wrapped client onto a new attribute (e.g. a
     ReadFacade subclass's ``__init__`` doing ``self._x = read_only_client``
     under a different name than the base class expects). This is NOT
-    detected here: distinguishing "a benign attribute assignment" from "a
+    detected HERE: distinguishing "a benign attribute assignment" from "a
     client being re-stashed to dodge the runtime allowlist" from AST shape
     alone is not reliably decidable without false-positive-prone heuristics
     (any ``self.<name> = <param>`` assignment would have to be flagged,
     which fires on ordinary, legitimate constructors constantly). This class
     of bypass is instead closed at RUNTIME, in depth, by
-    ``read_facade.ReadFacade`` itself: its ``__setattr__`` refuses to set any
-    non-underscore-prefixed instance attribute at all, and its
-    ``__getattribute__`` allowlist means even a successfully-smuggled
-    underscore-prefixed attribute is unreachable from outside the instance.
-    Disclosed here as a documented limitation of the static gate, not
-    silently assumed covered.
+    ``read_facade.ReadFacade`` itself (NF2 — external-write-gate-
+    generalization fix-wave, Task R2: reconciled with R4's read_facade
+    hardening below, which this bullet previously undersold):
+
+      (a) CLOSED for normal attribute access, as of R4. ``__setattr__``
+          refuses to set ANY instance attribute other than a dunder — public
+          or underscore-prefixed alike — so a re-stash never even lands in
+          instance state. And even a value that somehow got in would be moot:
+          ``__getattribute__`` enforces a FIXED allowlist (dunders, the
+          internal ``read_methods``/``_read`` names, and declared
+          ``read_methods``) on every instance access, so a novel
+          underscore-prefixed attribute — successfully smuggled or not — is
+          unreachable via ``facade.<name>`` / ``getattr(facade, name)``.
+
+      (b) NOT closed — disclosed reach-beneath residuals, honesty over
+          overclaim, matching read_facade.py's own "Disclosed residual
+          bypasses" section: code that imports the module-private
+          ``_WRAPPED_CLIENTS`` weak-key dict directly can still read the
+          wrapped client out of it (the runtime allowlist governs attribute
+          access on a ReadFacade INSTANCE, not access to the module's own
+          private state); and code that calls
+          ``object.__getattribute__(self, name)`` (or otherwise reaches
+          beneath the class's own hook — e.g. ``inspect``/``ctypes``-level
+          introspection) bypasses ``ReadFacade.__getattribute__`` entirely,
+          since it never goes through the instance's own attribute protocol.
+          Neither residual is caught by scan.py itself — this module does
+          not attempt to flag either shape — and neither is closed by
+          read_facade.py either; both sit OUTSIDE the deterministic
+          guarantee and INSIDE this project's actual enforcement ceiling:
+          build-time + operator-as-approver, not runtime/OS. Disclosed here
+          as a documented limitation of the static gate, not silently
+          assumed covered.
 
 ------------------------------------------------------------------------------
 Trust zones (replaces the old blanket "whole external_write/ tree is exempt"
@@ -180,7 +253,8 @@ class Violation(NamedTuple):
     kind:   what was caught — one of:
               'direct_api_call', 'forbidden_import',
               'dynamic_import', 'subprocess_network',
-              'credential_construction', 'unparseable'.
+              'credential_construction', 'credential_provider_reference',
+              'unparseable'.
             Specific enough that a build-failure message tells the operator or
             agent WHAT to fix.
     """
@@ -241,6 +315,38 @@ _FORBIDDEN_SHEETS_VERBS = frozenset({"update", "append", "clear"})
 # trailing special case).
 _UNAMBIGUOUS_SURFACE_VERBS = frozenset({"batchUpdate", "update_cells"})
 
+# NF1 (external-write-gate-generalization fix-wave, Task R2) — Gmail mutation
+# verbs, added as a first-class defense-in-depth detection layer following the
+# SAME ambiguous-vs-unambiguous discipline as the Sheets verbs above. A direct
+# Gmail mutation was already indirectly caught via forbidden_import (the
+# googleapiclient/google import) + credential_construction (obtaining the
+# write-capable credential); this closes the surface-mutation gap directly,
+# the same way _FORBIDDEN_SHEETS_VERBS / _UNAMBIGUOUS_SURFACE_VERBS close it
+# for Sheets. Kept as a PARALLEL set (not merged into the Sheets sets) so each
+# vendor's verb list stays independently readable and the Sheets set is left
+# untouched.
+#
+#   _UNAMBIGUOUS_GMAIL_VERBS -- Gmail-specific verbs that rarely collide with
+#     ordinary method names on an arbitrary object -- flagged on name alone,
+#     exactly like _UNAMBIGUOUS_SURFACE_VERBS.
+#   _FORBIDDEN_GMAIL_VERBS -- verbs that collide with common English method
+#     names (a dict/service/store can easily have its own .create()/
+#     .delete()/.send()/.modify()) -- flagged ONLY when the attribute chain
+#     shows a Gmail surface handle (_GMAIL_SURFACE_HANDLES below), the same
+#     chain-gating _FORBIDDEN_SHEETS_VERBS uses for update/append/clear.
+_UNAMBIGUOUS_GMAIL_VERBS = frozenset({"trash", "untrash"})
+_FORBIDDEN_GMAIL_VERBS = frozenset({"modify", "send", "create", "delete"})
+
+# Gmail resource/surface handles: the resource-collection names that appear in
+# the attribute chain of a real Gmail API call shape (``service.users()
+# .messages().trash(...)``, ``...drafts().create(...)``,
+# ``...settings().filters().create(...)``). These are RESOURCE handles, not
+# verbs themselves — mirrors how "values"/"spreadsheets"/"sheet" gate the
+# Sheets ambiguous verbs in _check_surface_mutation.
+_GMAIL_SURFACE_HANDLES = frozenset(
+    {"messages", "drafts", "threads", "labels", "filters", "settings", "users"}
+)
+
 # Functions that perform a dynamic import.
 _DYNAMIC_IMPORT_FUNCS = frozenset({"__import__"})
 # importlib.import_module is matched as a (module='importlib', attr) pair below.
@@ -275,6 +381,15 @@ _NETWORK_CLI_TOOLS = frozenset(
 #     attribute reference) because these names are common enough as bare
 #     identifiers that flagging every reference would be noisy; constructing
 #     one is the operative act.
+#
+# T5 (Task R2) disclosed bounds, not closed here -- see the module docstring's
+# ``credential_construction`` section for the full disclosure: (i) a
+# string-literal ``getattr(creds, "with_subject")(user)`` resolves a curated
+# name via a Constant node, invisible to both frozensets above; (ii) an
+# aliased ``from google... import Credentials as X`` evades
+# _CREDENTIAL_CLASS_NAMES (which matches the local bound name, not the
+# original symbol) -- though ``forbidden_import`` usually still fires on the
+# banned ``google`` root regardless of the alias, so this is Low severity.
 _CREDENTIAL_FACTORY_METHODS = frozenset(
     {
         "from_service_account_file",
@@ -285,6 +400,37 @@ _CREDENTIAL_FACTORY_METHODS = frozenset(
     }
 )
 _CREDENTIAL_CLASS_NAMES = frozenset({"Credentials", "ServiceAccountCredentials"})
+
+# Adapter-profile credential-PROVIDER symbols (Task R1 / BL-1 — the
+# credential-isolation keystone, finding F-33). A write-capable credential is
+# provisioned ONLY inside the trusted ADAPTER_PROFILE zone. The emitted
+# CAPABILITY zone must be UNABLE TO OBTAIN that provider — not merely "declines
+# to call it". So naming an adapter-profile credential-provider symbol at all
+# (importing it, referencing it as a bare name, or accessing it as an
+# attribute) is a violation everywhere the scanner runs; it is legal ONLY in
+# the ADAPTER_PROFILE zone, which is exempt from every check before this fires
+# (see _scan_file's early return). Curated, NOT exhaustive — same disclosed-
+# bound spirit as _FORBIDDEN_IMPORT_ROOTS / the credential-construction surface.
+_CREDENTIAL_PROVIDER_SYMBOLS = frozenset(
+    {
+        # The retired module-level provider name (pre-BL-1 emitted shape).
+        "write_credential_provider",
+        # The Adapter method that provisions the write-capable client
+        # (``build_write_client(op)``). BL-1 residual: after the provider was
+        # moved onto the adapter, capability-zone code could still reach the
+        # write client via ``get_adapter(op_kind).build_write_client(op)`` — an
+        # attribute reference the symbol check now flags. The concrete adapter
+        # legitimately DEFINES ``def build_write_client`` in the ADAPTER_PROFILE
+        # zone, which is exempt before this rule fires (see _scan_file's early
+        # return), so the definition is not self-tripped; only a reference from
+        # a non-adapter zone is. NOTE: a string-literal ``getattr(adapter,
+        # "build_write_client", None)`` resolves the method by a Constant node
+        # invisible to this symbol check — that aliased/dynamic reach is the
+        # same disclosed deterministic-scanner bound documented above, not
+        # closed here.
+        "build_write_client",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +548,20 @@ class _Scanner(ast.NodeVisitor):
             root = node.module.split(".")[0]
             if root in _FORBIDDEN_IMPORT_ROOTS:
                 self._add(node.lineno, "forbidden_import")
+        # Importing an adapter-profile credential-provider symbol into a
+        # non-adapter zone is itself the bypass (BL-1): the emitted capability
+        # must be UNABLE to name the provider.
+        for alias in node.names:
+            if alias.name in _CREDENTIAL_PROVIDER_SYMBOLS:
+                self._add(node.lineno, "credential_provider_reference")
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        # A bare-name reference to the write-credential provider (e.g. passing
+        # it through to run_operation, or calling it directly). Caught on the
+        # reference itself, so "holds it by reference only" is no defense.
+        if node.id in _CREDENTIAL_PROVIDER_SYMBOLS:
+            self._add(node.lineno, "credential_provider_reference")
         self.generic_visit(node)
 
     # --- calls -------------------------------------------------------------
@@ -421,6 +581,10 @@ class _Scanner(ast.NodeVisitor):
     def visit_Attribute(self, node: ast.Attribute) -> None:
         self._check_surface_mutation(node)
         self._check_credential_attribute(node)
+        # ``adapters_x.write_credential_provider`` — reaching the provider via
+        # an attribute access on the imported adapter module.
+        if node.attr in _CREDENTIAL_PROVIDER_SYMBOLS:
+            self._add(node.lineno, "credential_provider_reference")
         self.generic_visit(node)
 
     def _check_dynamic_import(self, node: ast.Call) -> None:
@@ -491,13 +655,20 @@ class _Scanner(ast.NodeVisitor):
         (update/append/clear) are flagged only when the attribute chain shows a
         sheets-style surface handle. The unambiguous verbs (batchUpdate,
         update_cells) are flagged on name alone.
+
+        NF1 (Task R2) adds the same discipline for Gmail: ``trash``/
+        ``untrash`` are flagged on name alone (unambiguous); ``modify``/
+        ``send``/``create``/``delete`` collide with common method names, so
+        they are flagged only when the attribute chain shows a Gmail surface
+        handle (``messages``/``drafts``/``threads``/``labels``/``filters``/
+        ``settings``/``users`` — see ``_GMAIL_SURFACE_HANDLES``).
         """
         method = node.attr
 
         # Unambiguous external-surface verbs: flagged on name alone (single
         # path — no separate later branch). These are not English collection
         # methods, so there is no benign-collision risk.
-        if method in _UNAMBIGUOUS_SURFACE_VERBS:
+        if method in _UNAMBIGUOUS_SURFACE_VERBS or method in _UNAMBIGUOUS_GMAIL_VERBS:
             self._add(node.lineno, "direct_api_call")
             return
 
@@ -506,6 +677,15 @@ class _Scanner(ast.NodeVisitor):
         if method in _FORBIDDEN_SHEETS_VERBS:
             chain = _attr_chain_names(node)
             if "values" in chain or "spreadsheets" in chain or "sheet" in chain:
+                self._add(node.lineno, "direct_api_call")
+            return
+
+        # Ambiguous Gmail verbs (modify/send/create/delete) collide with
+        # common method names on an arbitrary object; flag only when the
+        # attribute chain shows a Gmail resource/surface handle.
+        if method in _FORBIDDEN_GMAIL_VERBS:
+            chain = _attr_chain_names(node)
+            if any(handle in chain for handle in _GMAIL_SURFACE_HANDLES):
                 self._add(node.lineno, "direct_api_call")
 
     def _check_credential_attribute(self, node: ast.Attribute) -> None:

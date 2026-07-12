@@ -68,8 +68,8 @@ DEFAULT_RECEIPT_DIR = "security/acceptance_receipts"
 
 # Duplicated from wizard/scripts/lib/upgrade_reconcile.MIGRATION_QUEUE_REL (D-B1-a boundary:
 # this module lives in the operator-emitted external_write package and must not import the
-# build-side tree -- same duplication discipline as capability_registration.REGISTERED_ENTRY_KEYS
-# / BASE_DESCRIPTOR_ID_PREFIX, pinned equal to their build-side originals by a cross-tree test).
+# build-side tree -- same duplication discipline as BASE_DESCRIPTOR_ID_PREFIX and
+# REGISTERED_ENTRY_KEYS, pinned equal to their build-side originals by cross-tree tests).
 PENDING_MIGRATIONS_REL = "agents/handoffs/pending_migrations.json"
 
 

@@ -67,6 +67,36 @@ class Adapter(Protocol):
     verify_one — verify exactly one applied EffectUnit landed as intended. Not
                  invoked by T2's dispatch path; reserved for a later verification
                  task.
+
+    build_write_client (OPTIONAL — BL-1 / F-33 credential-isolation keystone) —
+                 an adapter MAY additionally define
+                 ``build_write_client(self, op) -> raw_write_client``: the ONE
+                 place this op_kind's write-capable credential/client is
+                 constructed or obtained. When present, ``run_operation``'s
+                 adapter execution path (``adapters._run_adapter_operation``)
+                 calls it INTERNALLY — keyed by the registered adapter, never
+                 by any caller of run_operation and never by capability/
+                 proposal-side code — to obtain the raw client handed to
+                 ``apply_one``. This is why capability-zone code no longer holds
+                 a credential provider: the provider lives on the adapter,
+                 inside the trusted ADAPTER_PROFILE zone. scan.py's
+                 credential_provider_reference rule guards BOTH reach paths in
+                 the capability zone — the retired ``write_credential_provider``
+                 name AND a ``build_write_client`` reference (e.g.
+                 ``get_adapter(op_kind).build_write_client(op)``) — so a
+                 capability-zone hand-edit that names either is flagged by the
+                 deterministic scanner. Disclosed bound (unchanged): resolving
+                 the method by a string literal —
+                 ``getattr(adapter, "build_write_client", None)``, as this
+                 module's own kernel execution path does — hides the name in a
+                 Constant node the symbol check cannot see; that aliased/dynamic
+                 reach is the same known deterministic-scanner limitation as the
+                 module's other curated-symbol surfaces, NOT closed here. It is
+                 deliberately NOT a required Protocol member: an adapter whose
+                 write client is supplied by its trusted caller (e.g. the Gmail
+                 reference adapter, exercised with a hand-provided
+                 ``raw_client``) simply omits it and falls back to
+                 run_operation's ``client`` argument, unchanged.
     """
 
     def plan(self, params: Optional[dict]) -> List[EffectUnit]:

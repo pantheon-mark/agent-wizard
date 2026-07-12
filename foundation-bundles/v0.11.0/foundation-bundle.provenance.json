@@ -73,15 +73,15 @@
       "path": "templates/agents/lib/external_write/acceptance_ceremony.py"
     },
     {
-      "hash": "sha256:3e3eb96a23f66a147e58644451c8f8a060b69fbfcbd97eed8ac30cd28dc18b13",
+      "hash": "sha256:04bc01b2c8ecf8a0867a78988642eb94da97f671f6a2561e181e96312b50592a",
       "path": "templates/agents/lib/external_write/adapter_registry.py"
     },
     {
-      "hash": "sha256:4880f9ff8356cc680aeee514a75094f77299673231db74efa781cde36aae33f7",
+      "hash": "sha256:cae33dc6baaece97883ec33fa231cfa17167d0f437d80791e5998102ff9320c5",
       "path": "templates/agents/lib/external_write/adapters.py"
     },
     {
-      "hash": "sha256:3c8db4b47e31750d3ecdad0d82171e1be5cd1826a98156f3821a1b2bc5353a46",
+      "hash": "sha256:2c28b13f7305348d398b105c7e58ea6eb9120f4976320c46c20853e23979ac62",
       "path": "templates/agents/lib/external_write/adapters_gmail.py"
     },
     {
@@ -117,7 +117,7 @@
       "path": "templates/agents/lib/external_write/operations.py"
     },
     {
-      "hash": "sha256:e7c3ae7aa670d3cce8936ccc8cd6629155fed36ecb122a33e16610c1f6c965a0",
+      "hash": "sha256:27e0132927244e6c07213bea063ea495cd077644ca06250c2817fab1a4b610a1",
       "path": "templates/agents/lib/external_write/operator_acceptance.py"
     },
     {
@@ -125,11 +125,11 @@
       "path": "templates/agents/lib/external_write/proof_hash.py"
     },
     {
-      "hash": "sha256:b23ac951f6fb6ab4e4bb5823f8435cc9742d3e350863346a437e5e0ad8fef901",
+      "hash": "sha256:93d2e5eb270b82f33cff77c04c21539242900f438969a2518d000d1fc9cde434",
       "path": "templates/agents/lib/external_write/read_facade.py"
     },
     {
-      "hash": "sha256:966cee932188a8b304405946d1ded3d02682cbec4cf26ce26a16f29910637261",
+      "hash": "sha256:063f187af935b8d57cd35e37c2ce9a629fb8b4ad0aafd51cb781e0fcb60e5e40",
       "path": "templates/agents/lib/external_write/scan.py"
     },
     {
@@ -141,7 +141,7 @@
       "path": "templates/agents/lib/external_write/verifiers.py"
     },
     {
-      "hash": "sha256:0bea4434d1a1ca2d112089a1960097e9e1d0bcbea0da16355a2ece449d32f1d4",
+      "hash": "sha256:6ca42da5e11e2e629124f3aaddbac1eb1b53f7e216d2e2debff880228c1d9c0d",
       "path": "templates/agents/lib/external_write/write_gate.py"
     },
     {
@@ -470,12 +470,12 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-07-11T23:50:27Z",
-  "generator_version": "55ff6b4759a76825a11ef5689750df0565120ab2",
+  "generated_at": "2026-07-12T03:29:07Z",
+  "generator_version": "51c5e583341dfa79e1cfc6566e0884a8796a8bbf",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.11.0",
-  "source_registry_entry_hash": "sha256:47133e9a82db5a7fe712c7dd7ebe027078d23b2b291f1e123209b9b93b33122a",
+  "source_registry_entry_hash": "sha256:d3d180cf72a1989040f5e4c3cdcec4e1967206924e8b1ee08a754f2f72577757",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
   "template_tree_hash": "sha256:2bb200832538ef783e35624cb22bff7c1c1f64538821fee80e008a8f6e794857",
