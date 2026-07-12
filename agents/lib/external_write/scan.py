@@ -57,6 +57,21 @@ Bypass classes CAUGHT at v0
                          set is CURATED, not exhaustive (a known, tracked
                          limitation) -- the same disclosed-bound spirit as
                          ``_FORBIDDEN_IMPORT_ROOTS``.
+  credential_provider_reference -- naming an ADAPTER_PROFILE write-credential
+                         PROVIDER symbol (``write_credential_provider``)
+                         anywhere outside the ADAPTER_PROFILE zone: importing it
+                         (``from external_write.adapters_x import
+                         write_credential_provider``), referencing it as a bare
+                         name, or accessing it as an attribute. The BL-1 / F-33
+                         credential-isolation keystone: capability/proposal-zone
+                         code must be UNABLE TO OBTAIN the write-credential
+                         provider (the callable that returns the write client),
+                         not merely "does not call it" by convention. The
+                         provider legitimately lives ONLY in the ADAPTER_PROFILE
+                         zone (exempt from every check), where a concrete
+                         adapter provisions its own write client. Curated set,
+                         same disclosed-bound spirit as the credential-
+                         construction surface.
 
 ------------------------------------------------------------------------------
 Bounds NOT covered at v0 (disclosed — no silent caps)
@@ -180,7 +195,8 @@ class Violation(NamedTuple):
     kind:   what was caught — one of:
               'direct_api_call', 'forbidden_import',
               'dynamic_import', 'subprocess_network',
-              'credential_construction', 'unparseable'.
+              'credential_construction', 'credential_provider_reference',
+              'unparseable'.
             Specific enough that a build-failure message tells the operator or
             agent WHAT to fix.
     """
@@ -285,6 +301,18 @@ _CREDENTIAL_FACTORY_METHODS = frozenset(
     }
 )
 _CREDENTIAL_CLASS_NAMES = frozenset({"Credentials", "ServiceAccountCredentials"})
+
+# Adapter-profile credential-PROVIDER symbols (Task R1 / BL-1 — the
+# credential-isolation keystone, finding F-33). A write-capable credential is
+# provisioned ONLY inside the trusted ADAPTER_PROFILE zone. The emitted
+# CAPABILITY zone must be UNABLE TO OBTAIN that provider — not merely "declines
+# to call it". So naming an adapter-profile credential-provider symbol at all
+# (importing it, referencing it as a bare name, or accessing it as an
+# attribute) is a violation everywhere the scanner runs; it is legal ONLY in
+# the ADAPTER_PROFILE zone, which is exempt from every check before this fires
+# (see _scan_file's early return). Curated, NOT exhaustive — same disclosed-
+# bound spirit as _FORBIDDEN_IMPORT_ROOTS / the credential-construction surface.
+_CREDENTIAL_PROVIDER_SYMBOLS = frozenset({"write_credential_provider"})
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +430,20 @@ class _Scanner(ast.NodeVisitor):
             root = node.module.split(".")[0]
             if root in _FORBIDDEN_IMPORT_ROOTS:
                 self._add(node.lineno, "forbidden_import")
+        # Importing an adapter-profile credential-provider symbol into a
+        # non-adapter zone is itself the bypass (BL-1): the emitted capability
+        # must be UNABLE to name the provider.
+        for alias in node.names:
+            if alias.name in _CREDENTIAL_PROVIDER_SYMBOLS:
+                self._add(node.lineno, "credential_provider_reference")
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        # A bare-name reference to the write-credential provider (e.g. passing
+        # it through to run_operation, or calling it directly). Caught on the
+        # reference itself, so "holds it by reference only" is no defense.
+        if node.id in _CREDENTIAL_PROVIDER_SYMBOLS:
+            self._add(node.lineno, "credential_provider_reference")
         self.generic_visit(node)
 
     # --- calls -------------------------------------------------------------
@@ -421,6 +463,10 @@ class _Scanner(ast.NodeVisitor):
     def visit_Attribute(self, node: ast.Attribute) -> None:
         self._check_surface_mutation(node)
         self._check_credential_attribute(node)
+        # ``adapters_x.write_credential_provider`` — reaching the provider via
+        # an attribute access on the imported adapter module.
+        if node.attr in _CREDENTIAL_PROVIDER_SYMBOLS:
+            self._add(node.lineno, "credential_provider_reference")
         self.generic_visit(node)
 
     def _check_dynamic_import(self, node: ast.Call) -> None:

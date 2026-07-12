@@ -59,12 +59,16 @@ complementary mechanism — Task 5's job):
      guessed, underscore-prefixed, or otherwise — that any attribute access
      on a ReadFacade instance can resolve to the wrapped client.
 
-  2. The credential-provider seam — `run_operation` (adapters.py) accepts an
-     optional `write_credential_provider` and calls it itself, INSIDE the
-     adapter-dispatch execution path, to obtain the write-capable raw client
-     passed to `adapter.apply_one(raw_client, unit)`. Capability/proposal
-     code that builds an Operation and holds a ReadFacade never receives
-     that provider and never sees the credential it returns.
+  2. The credential-provider seam — `run_operation` (adapters.py) resolves the
+     write-capable raw client INTERNALLY, keyed by the registered adapter: when
+     an adapter self-provisions (defines `build_write_client(op)`), the adapter
+     execution path calls it itself, INSIDE that path, to obtain the raw client
+     passed to `adapter.apply_one(raw_client, unit)`. `run_operation` takes NO
+     caller-supplied provider (BL-1 / F-33): capability/proposal code that
+     builds an Operation and holds a ReadFacade cannot even NAME a credential
+     provider (enforced deterministically by scan.py's
+     credential_provider_reference rule), let alone pass one in or see the
+     credential it returns.
 
 Vendor eligibility: an op_kind may only use this safety model if its
 contract declares a `read_only_scope` (contracts.OperationContract). An

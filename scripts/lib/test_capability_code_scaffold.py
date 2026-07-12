@@ -158,15 +158,53 @@ class TestGoldenEmitZoneClean(unittest.TestCase):
                 roots.add(node.module.split(".")[0])
         self.assertEqual(roots, {"typing", "external_write"})
 
-    def test_capability_module_never_calls_write_credential_provider(self):
-        # It may hold a REFERENCE to write_credential_provider (imported, passed through
-        # to run_operation) but must never CALL it directly.
+    def test_capability_module_cannot_obtain_write_credential_provider(self):
+        # BL-1 / F-33: the required property is now UNABLE TO OBTAIN, not merely
+        # "does not call". The emitted CAPABILITY module must neither import nor
+        # reference `write_credential_provider` ANYWHERE (no import alias, no
+        # bare-name reference, no attribute access) -- so there is no provider
+        # symbol for capability code to reach at all.
         tree = ast.parse(self.capability_path.read_text(encoding="utf-8"))
+        offenders = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                self.assertNotEqual(node.func.id, "write_credential_provider",
-                                   "capability module must never CALL the write "
-                                   "credential provider directly")
+            if isinstance(node, ast.ImportFrom):
+                offenders += [a.name for a in node.names
+                              if a.name == "write_credential_provider"]
+            elif isinstance(node, ast.Name) and node.id == "write_credential_provider":
+                offenders.append(node.id)
+            elif isinstance(node, ast.Attribute) and node.attr == "write_credential_provider":
+                offenders.append(node.attr)
+        self.assertEqual(
+            offenders, [],
+            "emitted CAPABILITY module must be UNABLE TO OBTAIN the write "
+            "credential provider -- it must not import or reference "
+            f"write_credential_provider at all (found: {offenders})")
+
+    def test_scanner_flags_a_capability_that_DOES_reference_the_provider(self):
+        # The regression guard the emitter change protects: a capability module
+        # that (like the PRE-FIX shape) imports/holds write_credential_provider
+        # is flagged by scan.scan_paths with credential_provider_reference. This
+        # proves the "cannot obtain" property is enforced deterministically by
+        # the scanner, not merely by how the current template happens to render.
+        offending = self.cap_dir / "offending_capability.py"
+        offending.write_text(
+            "from external_write.adapters_acme_crm_sync import (\n"
+            "    AcmeCrmSyncReadFacade,\n"
+            "    write_credential_provider,\n"
+            ")\n\n\n"
+            "def run_approved(op, receipt):\n"
+            "    return write_credential_provider\n",
+            encoding="utf-8",
+        )
+        effective = zones.effective_adapter_profile_paths(self.lib_dir)
+        violations = scan.scan_paths(
+            [offending],
+            allowed_root=self.lib_dir,
+            adapter_profile_paths=effective,
+        )
+        kinds = {v.kind for v in violations}
+        self.assertIn("credential_provider_reference", kinds,
+                      f"scanner must flag a capability referencing the provider; got {violations}")
 
     def test_capability_module_has_no_credential_factory_reference(self):
         tree = ast.parse(self.capability_path.read_text(encoding="utf-8"))

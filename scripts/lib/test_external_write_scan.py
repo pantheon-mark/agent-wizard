@@ -243,6 +243,42 @@ class TestCredentialAccess(unittest.TestCase):
         self.assertNotIn("forbidden_import", kinds)
 
 
+class TestCredentialProviderReference(unittest.TestCase):
+    """Task R1 / BL-1 — a CAPABILITY-zone import or reference of an
+    adapter-profile write-credential provider symbol
+    (``write_credential_provider``) is a VIOLATION. The emitted capability
+    module must be UNABLE TO OBTAIN the provider, not merely "does not call
+    it". The provider legitimately lives only in the ADAPTER_PROFILE zone."""
+
+    _FIX = _FIXTURES / "capability_holds_write_credential_provider.py"
+
+    def test_capability_holding_provider_is_flagged(self):
+        v = scan_paths([self._FIX])
+        self.assertIn(
+            "credential_provider_reference", _kinds(v),
+            "a CAPABILITY-zone module that imports/references "
+            "write_credential_provider must be flagged",
+        )
+        refs = [x for x in v if x.kind == "credential_provider_reference"]
+        # The import alias AND the by-reference pass-through are both caught.
+        self.assertGreaterEqual(len(refs), 2)
+
+    def test_provider_reference_is_exempt_in_adapter_profile_zone(self):
+        # The SAME file, explicitly registered as ADAPTER_PROFILE by its
+        # relative path, is exempt from every check -- the provider legitimately
+        # lives in this zone.
+        v = scan_paths(
+            [self._FIX],
+            allowed_root=self._FIX.parent,
+            adapter_profile_paths=frozenset({self._FIX.name}),
+        )
+        self.assertEqual(
+            v, [],
+            "an adapter-profile module may legitimately hold the credential "
+            "provider symbol",
+        )
+
+
 class TestTrustZoneSplit(unittest.TestCase):
     """Task 5 — the trust boundary is split into SEALED_KERNEL /
     ADAPTER_PROFILE / CAPABILITY zones; the old "whole external_write/ tree is

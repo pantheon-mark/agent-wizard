@@ -37,13 +37,15 @@ gate-wired, by construction, before a single line is hand-authored:
      `agents/capabilities/<capability_id>_capability.py`. Holds only a
      `read_facade.ReadFacade` built against the declared read-only scope;
      never imports a vendor SDK; never constructs or references a write
-     credential; routes any actual write through `adapters.run_operation`,
-     passing the adapter module's `write_credential_provider` through BY
-     REFERENCE (never calling it, never seeing what it returns — the same
-     credential-isolation property `read_facade.py` documents).
+     credential; and cannot even NAME a write-credential provider. It routes
+     any actual write through `adapters.run_operation`, which resolves the
+     write-capable client INTERNALLY from the registered adapter's
+     `build_write_client` method (BL-1 / F-33 credential-isolation keystone —
+     enforced deterministically by scan.py's credential_provider_reference
+     rule, not by a comment convention).
 
 Both emitted files are runnable/importable stubs — `plan`/`apply_one`/
-`undo_one`/`verify_one` and `write_credential_provider` raise
+`undo_one`/`verify_one` and the adapter's `build_write_client` raise
 `NotImplementedError` with a plain TODO pointing at the one thing that still
 needs a human decision (the actual per-vendor call shape) — but the GATE
 WIRING itself (contract declaration, adapter registration, zone membership,
@@ -243,7 +245,23 @@ register_contract(OperationContract(
 class ${class_prefix}Adapter:
     """Adapter for '${op_kind}'. See the module TODO -- apply_one/undo_one/
     verify_one are structural stubs; plan() is pure (no read, no write) per
-    the Adapter protocol's ordering guarantee (adapter_registry.py)."""
+    the Adapter protocol's ordering guarantee (adapter_registry.py).
+
+    build_write_client (BL-1 / F-33 credential-isolation keystone) is the ONLY
+    place this capability's write-capable credential may be constructed.
+    run_operation (adapters.py) calls it ITSELF, INSIDE the adapter execution
+    path, keyed by this registered adapter -- never by capability-zone code,
+    which cannot even NAME it (enforced by scan.py's
+    credential_provider_reference rule). Because it is a METHOD on this
+    ADAPTER_PROFILE-zone adapter (not an importable module-level symbol), there
+    is no provider name for the CAPABILITY zone to reach."""
+
+    def build_write_client(self, op: Any) -> Any:
+        raise NotImplementedError(
+            "TODO: construct/obtain the write-capable ${surface} credential/client here "
+            "(this method is the ONLY legal place to do so for this capability) "
+            "and return it. Called by run_operation inside the adapter execution "
+            "path, never by capability code.")
 
     def plan(self, params: Optional[dict]) -> List[EffectUnit]:
         params = params or {}
@@ -277,20 +295,11 @@ register_adapter(OP_KIND, ${class_prefix}Adapter())
 
 
 # ---------------------------------------------------------------------------
-# Write-credential provider -- the ONLY place this capability's write-capable
-# credential may be constructed. run_operation (adapters.py) calls this itself,
-# INSIDE the adapter execution path, and only there -- see read_facade.py's
-# module docstring for the credential-isolation guarantee this depends on.
-# Capability-zone code below only ever holds a REFERENCE to this function; it
-# never calls it and never sees what it returns.
+# Read-only client -- scoped to the declared read-only scope; NOT write-capable.
+# The write-capable credential is built only by ${class_prefix}Adapter.
+# build_write_client above (the ONE legal place), reached only by run_operation
+# inside the adapter execution path.
 # ---------------------------------------------------------------------------
-
-def write_credential_provider(op: Any) -> Any:
-    raise NotImplementedError(
-        "TODO: construct/obtain the write-capable ${surface} credential/client here "
-        "(this function body is the ONLY legal place to do so for this capability) "
-        "and return it. Called by run_operation, never by capability code.")
-
 
 def build_read_only_client() -> Any:
     raise NotImplementedError(
@@ -342,9 +351,10 @@ def render_adapter_module(spec: CapabilityCodeSpec) -> str:
 
 # ---------------------------------------------------------------------------
 # Capability module (CAPABILITY zone) template — no vendor import, no write
-# credential, no client re-stash; reads only via the ReadFacade above; routes
-# any write through adapters.run_operation, passing the adapter module's
-# write_credential_provider through BY REFERENCE.
+# credential, no client re-stash, and no importable credential-provider symbol
+# to reach; reads only via the ReadFacade above; routes any write through
+# adapters.run_operation, which resolves the write client internally from the
+# registered adapter's build_write_client method.
 # ---------------------------------------------------------------------------
 
 _CAPABILITY_MODULE_TEMPLATE = Template('''"""${display_name} — capability module (CAPABILITY trust zone).
@@ -357,10 +367,12 @@ adapters_gmail.py's own "Structural safety" section): this module never
 imports a vendor SDK, never constructs or references a write-capable
 credential, and never calls anything shaped like a raw vendor mutation. It
 reads ONLY through ${class_prefix}ReadFacade (declared read methods only) and
-proposes/executes writes ONLY through adapters.run_operation, passing this
-capability's adapter module's write_credential_provider through BY REFERENCE
--- this module never calls it and never sees what it returns (see
-read_facade.py's module docstring for the property this holds).
+proposes/executes writes ONLY through adapters.run_operation. It cannot even
+NAME a write-credential provider: the write-capable credential is built solely
+by the adapter module's ${class_prefix}Adapter.build_write_client, resolved
+INTERNALLY by run_operation inside the adapter execution path (BL-1 / F-33 --
+enforced deterministically by scan.py's credential_provider_reference rule, not
+by a comment convention).
 
 TODO (a human/next-phase decision, not this emitter's job): propose_operations
 below is a structural stub -- it shows the SHAPE (read via the facade, build
@@ -372,10 +384,7 @@ the real design in vision.md / execution_plan.md.
 from typing import Any, List, Optional
 
 from external_write.adapters import run_operation
-from external_write.adapters_${capability_id} import (
-    ${class_prefix}ReadFacade,
-    write_credential_provider,
-)
+from external_write.adapters_${capability_id} import ${class_prefix}ReadFacade
 from external_write.operations import Operation, SCHEMA_V2_ACTION
 from external_write.read_facade import build_read_facade
 
@@ -402,14 +411,14 @@ def propose_operations(facade: ${class_prefix}ReadFacade, batch_id: str) -> List
 
 def run_approved(op: Operation, receipt: Any, *, target: Optional[str] = None,
                  descriptor_set: Any = None, cap_ledger: Any = None) -> Any:
-    """Execute an already-approved Operation. Passes write_credential_provider
-    through by reference only -- this function never calls it and never
-    receives the credential it returns; run_operation invokes it internally,
-    inside the adapter execution path, only once dispatch is committed."""
+    """Execute an already-approved Operation. Passes NO write-credential
+    provider -- this capability zone cannot obtain one. run_operation resolves
+    the write-capable client internally, keyed by the registered adapter
+    (${class_prefix}Adapter.build_write_client), inside the adapter execution
+    path, only once dispatch is committed (BL-1 / F-33)."""
     return run_operation(
         op, receipt, None,
         target=target, descriptor_set=descriptor_set, cap_ledger=cap_ledger,
-        write_credential_provider=write_credential_provider,
     )
 ''')
 

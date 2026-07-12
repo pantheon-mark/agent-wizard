@@ -8,11 +8,11 @@ Four groups:
      methods; a subclass that defines an undeclared public method is refused
      at class-definition time (build-time refusal), not by a name-pattern
      scan (that is Task 5's job, exercised elsewhere).
-  2. TestCredentialInjectionSeam — run_operation obtains the write-capable
-     raw client from `write_credential_provider`, INSIDE the adapter
-     execution path, and passes it to `adapter.apply_one`; the `client`
-     argument (the pre-Task-4 stand-in) is never touched when a provider is
-     supplied.
+  2. TestCredentialInjectionSeam — run_operation resolves the write-capable
+     raw client INTERNALLY from the registered adapter's `build_write_client`,
+     INSIDE the adapter execution path, and passes it to `adapter.apply_one`;
+     the `client` argument (the pre-BL-1 stand-in) is never touched when the
+     adapter self-provisions. run_operation takes no caller-supplied provider.
   3. TestCapabilityContextNeverCarriesWriteCredential — a capability-context
      object graph (holding only a ReadFacade + an Operation-building method)
      has no reachable attribute that is the write-capable credential.
@@ -380,25 +380,41 @@ class _RecordingAdapter:
 class _RaisingCapabilitySideClient:
     """Stands in for whatever object capability/proposal-side code passes as
     the `client` argument. Its .record RAISES if ever invoked -- proving the
-    adapter path never falls back to it when a write_credential_provider is
-    supplied."""
+    adapter path never falls back to it when the adapter self-provisions its
+    own write client via build_write_client."""
 
     def record(self, unit):
         raise AssertionError(
             "the capability-side client must NEVER be used for apply_one "
-            "when a write_credential_provider is supplied"
+            "when the adapter self-provisions via build_write_client"
         )
 
 
 class _WriteCapableFake:
-    """The real write-capable object -- only ever handed out by the
-    write_credential_provider, INSIDE the adapter execution path."""
+    """The real write-capable object -- only ever produced by the adapter's
+    own build_write_client, INSIDE the adapter execution path."""
 
     def __init__(self):
         self.recorded = []
 
     def record(self, unit):
         self.recorded.append(unit)
+
+
+class _SelfProvisioningAdapter(_RecordingAdapter):
+    """An adapter that self-provisions its write client (BL-1 / F-33): it owns
+    build_write_client, so run_operation resolves the write-capable client
+    INTERNALLY, keyed by the registered adapter -- no caller-supplied provider
+    exists any more."""
+
+    def __init__(self, write_capable):
+        super().__init__()
+        self._write_capable = write_capable
+        self.build_calls = []
+
+    def build_write_client(self, op):
+        self.build_calls.append(op)
+        return self._write_capable
 
 
 class TestCredentialInjectionSeam(unittest.TestCase):
@@ -428,44 +444,39 @@ class TestCredentialInjectionSeam(unittest.TestCase):
             params={"target": "x"},
         )
 
-    def test_provider_supplied_raw_client_is_the_one_passed_to_apply_one(self):
-        adapter = _RecordingAdapter()
+    def test_self_provisioned_client_is_the_one_passed_to_apply_one(self):
+        write_capable = _WriteCapableFake()
+        adapter = _SelfProvisioningAdapter(write_capable)
         register_adapter(self.OP_KIND, adapter)
         op = self._op()
-        write_capable = _WriteCapableFake()
         capability_side_client = _RaisingCapabilitySideClient()
 
-        result = run_operation(
-            op, _receipt(op), capability_side_client,
-            write_credential_provider=lambda o: write_capable,
-        )
+        # run_operation takes NO write-credential provider argument; the write
+        # client is resolved internally from the adapter itself.
+        result = run_operation(op, _receipt(op), capability_side_client)
 
         self.assertEqual(result.status, "written")
         self.assertEqual(len(adapter.apply_calls), 1)
         self.assertIs(adapter.apply_calls[0], write_capable)
         self.assertEqual(len(write_capable.recorded), 1)
 
-    def test_provider_is_called_with_the_operation_being_run(self):
-        adapter = _RecordingAdapter()
+    def test_build_write_client_is_called_with_the_operation_being_run(self):
+        adapter = _SelfProvisioningAdapter(_WriteCapableFake())
         register_adapter(self.OP_KIND, adapter)
         op = self._op(batch_id="seam-2")
-        received = []
 
-        def provider(passed_op):
-            received.append(passed_op)
-            return _WriteCapableFake()
+        run_operation(op, _receipt(op), _RaisingCapabilitySideClient())
 
-        run_operation(op, _receipt(op), _RaisingCapabilitySideClient(),
-                      write_credential_provider=provider)
+        self.assertEqual(len(adapter.build_calls), 1)
+        self.assertIs(adapter.build_calls[0], op)
 
-        self.assertEqual(len(received), 1)
-        self.assertIs(received[0], op)
-
-    def test_no_provider_falls_back_to_client_argument_unchanged(self):
-        """Backward-compatible with Task 2: when no write_credential_provider
-        is supplied, the `client` argument is used as the raw client for
-        apply_one -- unchanged from before this task."""
-        adapter = _RecordingAdapter()
+    def test_no_self_provisioning_falls_back_to_client_argument_unchanged(self):
+        """Backward-compatible: an adapter that does NOT define
+        build_write_client falls back to run_operation's `client` argument as
+        the raw client for apply_one -- unchanged, pre-BL-1 behavior (e.g. the
+        Gmail reference adapter, whose write client is handed in by its trusted
+        caller)."""
+        adapter = _RecordingAdapter()  # no build_write_client
         register_adapter(self.OP_KIND, adapter)
         op = self._op(batch_id="seam-3")
         client = _WriteCapableFake()
@@ -522,9 +533,10 @@ class _FixtureReadFacade(ReadFacade):
 class CapabilityContext:
     """Stands in for the object capability/proposal-side code actually
     holds: a ReadFacade to look things up, plus a method to PROPOSE an
-    Operation. It is never given the write-capable credential or the
-    write_credential_provider -- those live only in the adapter execution
-    path (run_operation), a completely separate call."""
+    Operation. It is never given the write-capable credential and cannot name
+    a credential provider -- the write client is built only by the registered
+    adapter's build_write_client, inside the adapter execution path
+    (run_operation), a completely separate call."""
 
     def __init__(self, read_facade):
         self.read_facade = read_facade

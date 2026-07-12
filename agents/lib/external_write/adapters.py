@@ -123,8 +123,7 @@ def _parse_allowed_from_error(message: str) -> Optional[list]:
 # ---------------------------------------------------------------------------
 
 def _run_adapter_operation(op: Operation, raw_client: Any, adapter: Any,
-                           descriptor_set: Any, gate_audit: Optional[dict],
-                           write_credential_provider: Optional[Any] = None) -> Result:
+                           descriptor_set: Any, gate_audit: Optional[dict]) -> Result:
     """Plan, cap-check, then apply — the registered-adapter counterpart to the
     field-write Steps 2-4 in run_operation.
 
@@ -134,16 +133,26 @@ def _run_adapter_operation(op: Operation, raw_client: Any, adapter: Any,
     called even once. A plan whose unit count exceeds the cap is refused in full —
     zero units are applied, not "cap-many, then stop."
 
-    Credential isolation (Task 4 — external-write-gate-generalization): when a
-    `write_credential_provider` is supplied, THIS function — the adapter
-    EXECUTION path, called only once dispatch is already committed — is where
-    the write-capable raw client is obtained, by calling
-    `write_credential_provider(op)`. It is resolved here, not by the caller of
-    run_operation and not by any capability/proposal-side code, and it is used
-    immediately for `adapter.apply_one`, never stored or handed back out. When
-    no provider is supplied, `raw_client` (the pre-Task-4 `client` argument)
-    is used as-is — unchanged, backward-compatible behavior for every existing
-    caller (see adapter_registry.py Task 2 scope note).
+    Credential isolation (BL-1 / F-33 — the keystone): the write-capable raw
+    client is resolved INTERNALLY, here, keyed by the registered adapter — NOT
+    from any caller-supplied argument. If the adapter self-provisions its own
+    write client (it defines `build_write_client(op) -> raw_write_client`, as
+    the emitted ADAPTER_PROFILE-zone adapters do), THIS function — the adapter
+    EXECUTION path, reached only once dispatch is already committed — calls
+    `adapter.build_write_client(op)` to obtain it, and uses it immediately for
+    `adapter.apply_one`, never storing it or handing it back out. Capability/
+    proposal-side code can no longer even NAME a credential provider, let alone
+    pass one in (enforced deterministically by scan.py's
+    credential_provider_reference rule, not by a comment convention).
+
+    Backward compatibility: an adapter that does NOT self-provision (no
+    `build_write_client` method — e.g. the Gmail reference adapter, or any
+    adapter whose write client is handed in by its trusted caller) falls back
+    to `raw_client` (run_operation's `client` argument) used as-is — the
+    unchanged, pre-BL-1 behavior. The six seeded field op_kinds have no
+    registered adapter at all and never reach this path (see
+    adapter_registry.py's scope note; test_external_write_replay_conformance.py
+    carries their byte-identical guarantee).
     """
     units = adapter.plan(op.params)
     cap = resolve_effective_cap(op, descriptor_set)
@@ -161,8 +170,9 @@ def _run_adapter_operation(op: Operation, raw_client: Any, adapter: Any,
             },
         )
 
+    build_write_client = getattr(adapter, "build_write_client", None)
     effective_raw_client = (
-        write_credential_provider(op) if write_credential_provider is not None
+        build_write_client(op) if callable(build_write_client)
         else raw_client
     )
 
@@ -183,8 +193,7 @@ def run_operation(op: Operation, receipt: Any, client: Any,
                   target: Optional[str] = None,
                   descriptor_set: Any = None,
                   cap_ledger: Optional[InvocationLedger] = None,
-                  clock: Any = None,
-                  write_credential_provider: Optional[Any] = None) -> Result:
+                  clock: Any = None) -> Result:
     """Run a named external-write operation with receipt validation and fail-fast
     value-validity enforcement.
 
@@ -210,18 +219,16 @@ def run_operation(op: Operation, receipt: Any, client: Any,
              live irreversible ops. Absent on a live irreversible op => fail-safe refuse.
     clock:   (B1-4/F-22) a no-arg callable returning a UTC datetime; every date this code writes
              comes from it. Defaults to the system clock; injected only for deterministic tests.
-    write_credential_provider: (T4 — credential isolation, keyword-only) an optional callable
-             taking the Operation and returning a write-capable raw client/credential. When
-             supplied, it is invoked ONLY inside the registered-adapter execution path (see
-             _run_adapter_operation), immediately before `adapter.apply_one` — never by a
-             caller of run_operation, and never exposed to capability/proposal-side code. When
-             absent (the default), `client` is used as the write-capable raw client for the
-             adapter path, unchanged from Task 2's behavior. Ignored entirely by the legacy
-             field-write path — Task 8 evaluated migrating that path onto this seam (by
-             registering the seeded field op_kinds as an adapter) and decided against it;
-             see adapter_registry.py's module docstring for the reasoning. The field-write
-             path keeps using `client` directly and does not accept a
-             write_credential_provider.
+
+    Credential isolation (BL-1 / F-33): run_operation takes NO caller-supplied
+             write-credential provider. When op.op_kind has a registered adapter that
+             self-provisions its own write client, the write-capable raw client is resolved
+             INTERNALLY inside the adapter execution path (see _run_adapter_operation:
+             `adapter.build_write_client(op)`), keyed by the registered adapter — never by a
+             caller of run_operation and never exposed to capability/proposal-side code. An
+             adapter that does not self-provision falls back to `client` as the raw write
+             client (unchanged, backward-compatible). The legacy field-write path uses
+             `client` directly.
 
     Returns
     -------
@@ -271,8 +278,7 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     # test_external_write_replay_conformance.py instead.
     adapter = get_adapter(op.op_kind)
     if adapter is not None:
-        return _run_adapter_operation(op, client, adapter, descriptor_set, _gate_audit,
-                                      write_credential_provider)
+        return _run_adapter_operation(op, client, adapter, descriptor_set, _gate_audit)
 
     # Step 2: attempt write via the surface's validating path.
     try:

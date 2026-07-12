@@ -1,7 +1,7 @@
 """Bypass fixture (Task 7 — external-write-gate-generalization slice): what it
 would look like if CAPABILITY-side code tried to obtain a write-capable Gmail
-client directly, instead of going through the credential-isolation seam
-(`write_credential_provider`, resolved only inside `adapters.py`'s adapter-
+client directly, instead of the write client being provisioned inside the
+trusted ADAPTER_PROFILE zone (resolved only inside `adapters.py`'s adapter-
 execution path and handed to `adapters_gmail.py`'s own `apply_one`).
 
 Must be flagged on BOTH counts: the vendor SDK import, and the credential
