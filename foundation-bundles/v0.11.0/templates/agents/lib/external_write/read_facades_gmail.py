@@ -1,17 +1,17 @@
-"""Reference Gmail ReadFacade — split OUT of adapters_gmail.py (Task R7-T1 —
-external-write-gate-generalization slice; kernel ReadFacade registry
-generalization) so the reference facade lives in its OWN scanned module,
-with no adapter class and no credential anywhere in it.
+"""Reference Gmail ReadFacade — split OUT of adapters_gmail.py (part of the
+kernel ReadFacade registry generalization) so the reference facade lives in
+its OWN scanned module, with no adapter class and no credential anywhere in
+it.
 
 ------------------------------------------------------------------------------
 Why this module exists (the hole it closes)
 ------------------------------------------------------------------------------
-Before this task, `GmailReadFacade` was defined inside `adapters_gmail.py` —
+Previously, `GmailReadFacade` was defined inside `adapters_gmail.py` —
 the ADAPTER_PROFILE module that ALSO defines every Gmail Adapter and would,
-for a future self-provisioning adapter, define `build_write_client`. A
-cross-vendor design consult ratified this as an architectural hole:
+for a future self-provisioning adapter, define `build_write_client`. Design
+review identified this as an architectural hole:
 capability-zone code that recovered `facade.__class__.__module__` (or
-imported the facade class directly, as the pre-R7-T1 emitted shape did)
+imported the facade class directly, as the earlier emitted shape did)
 landed on a module that ALSO holds write-capable adapter code — an
 unnecessary, and exploitable, proximity between "read-only facade" and
 "write-capable adapter" in the SAME file. A capability importing
@@ -47,7 +47,7 @@ exemption). That is deliberately fine here: this module contains nothing
 that trips `scan.py`'s CAPABILITY-zone checks (no forbidden import, no
 direct vendor mutation call, no credential construction, no
 credential-provider symbol reference) — see
-test_external_write_read_facades_gmail.py's
+test_external_write_adapters_gmail.py's
 `test_read_facades_gmail_scans_clean`.
 
 The whole point, restated: a capability that recovers

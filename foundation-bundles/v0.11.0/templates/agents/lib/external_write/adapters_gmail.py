@@ -1,7 +1,6 @@
-"""Gmail verb-shaped adapter — the REFERENCE ADAPTER_PROFILE module (Task 7 —
-external-write-gate-generalization slice).
+"""Gmail verb-shaped adapter — the REFERENCE ADAPTER_PROFILE module.
 
-Tasks 1-6 built a generalized external-write gate (verb-shaped Operations, a
+The rest of this package builds a generalized external-write gate (verb-shaped Operations, a
 per-op_kind Adapter registry, credential isolation via ReadFacade +
 adapter-owned write-client provisioning, the zone-aware AST bypass scanner, the per-op_kind
 effects manifest that binds a registered adapter's own bytes into the accepted-
@@ -102,7 +101,7 @@ def _current_label_ids(raw_client: Any, message_id: str) -> List[str]:
     here (unlike in a Adapter.plan(), which must be pure — see
     adapter_registry.Adapter's protocol docstring): this runs inside
     apply_one/undo_one/verify_one, against the write-capable raw_client the
-    credential-isolation seam (Task 4) hands this adapter, never against
+    credential-isolation seam hands this adapter, never against
     capability-side code's ReadFacade."""
     msg = raw_client.users().messages().get(
         userId="me", id=message_id, format="metadata").execute()
@@ -394,13 +393,12 @@ register_adapter(OP_UNTRASH, GmailMessageUntrashAdapter())
 register_adapter(OP_MODIFY_LABELS, GmailMessageModifyLabelsAdapter())
 register_adapter(OP_FILTER_CREATE, GmailFilterCreateAdapter())
 
-# NOTE (Task R7-T1 -- external-write-gate-generalization slice, kernel-
-# registry generalization): the Gmail read-only facade used to be defined
-# HERE, in this ADAPTER_PROFILE module -- which meant a capability that
-# recovered `facade.__class__.__module__` landed on the SAME module that
-# defines `build_write_client`-bearing adapters, an unnecessary (and, per a
-# cross-vendor-ratified finding, exploitable) proximity between a read-only
-# facade and write-capable adapter code. `GmailReadFacade` now lives in its
+# NOTE (kernel-registry generalization): the Gmail read-only facade used to
+# be defined HERE, in this ADAPTER_PROFILE module -- which meant a
+# capability that recovered `facade.__class__.__module__` landed on the SAME
+# module that defines `build_write_client`-bearing adapters, an unnecessary
+# (and exploitable) proximity between a read-only facade and write-capable
+# adapter code. `GmailReadFacade` now lives in its
 # own scanned module, `read_facades_gmail.py`, which imports only
 # `ReadFacade` + `register_read_facade` from the kernel `read_facade` module
 # -- no vendor SDK import, no adapter class, no credential/provisioner. See

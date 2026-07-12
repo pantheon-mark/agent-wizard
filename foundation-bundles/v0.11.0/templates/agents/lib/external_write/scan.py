@@ -8,9 +8,9 @@ mutates an external surface OUTSIDE those adapters.
 It is the real enforcement. The runtime PreToolUse hook is a disclosed backstop
 only: it classifies by command shape and is structurally blind to per-project
 interpreter-script writes. A grep is trivially defeated (helper indirection,
-dynamic import, subprocess curl). Therefore the cross-vendor design consult was
-explicit that this gate MUST be deterministic AST + call-graph analysis, NOT
-grep and NOT LLM judgment. Treat every bypass below as adversarial: assume a
+dynamic import, subprocess curl). This gate is therefore deliberately
+deterministic AST + call-graph analysis, NOT grep and NOT LLM judgment.
+Treat every bypass below as adversarial: assume a
 script author (or a confused agent) is trying to reach an external surface
 without going through the adapter, and catch it.
 
@@ -28,7 +28,7 @@ Bypass classes CAUGHT at v0
                          (urllib.request) match the banned top-level package.
   direct_api_call     -- referencing a known external-surface mutation method
                          by name (values().update, batchUpdate, append,
-                         update_cells, ...; and, as of Task R2/NF1, Gmail's
+                         update_cells, ...; and Gmail's
                          trash/untrash on name alone, and modify/send/create/
                          delete gated on a Gmail surface handle -- messages/
                          drafts/threads/labels/filters/settings/users -- in the
@@ -59,12 +59,12 @@ Bypass classes CAUGHT at v0
                          domain-wide-delegation impersonation). Flagged
                          anywhere outside the ADAPTER_PROFILE zone, regardless
                          of whether the vendor SDK was itself imported in this
-                         file (Task 5 -- see "Trust zones" below). The symbol
+                         file (see "Trust zones" below). The symbol
                          set is CURATED, not exhaustive (a known, tracked
                          limitation) -- the same disclosed-bound spirit as
                          ``_FORBIDDEN_IMPORT_ROOTS``. Two further evasions of
                          this curated symbol check are disclosed, not closed
-                         (T5 -- Task R2, same "no silent caps" spirit as the
+                         (same "no silent caps" spirit as the
                          ``build_write_client`` getattr bound documented under
                          ``credential_provider_reference`` below): (i) a
                          string-literal ``getattr(creds, "with_subject")(user)``
@@ -90,7 +90,7 @@ Bypass classes CAUGHT at v0
                          method that provisions the write client
                          (``build_write_client`` — so a capability-zone
                          ``get_adapter(op_kind).build_write_client(op)`` attribute
-                         reference is flagged too). The BL-1 / F-33 credential-
+                         reference is flagged too). The credential-
                          isolation keystone: capability/proposal-zone code must be
                          UNABLE TO OBTAIN the write-credential provider (the
                          callable that returns the write client), not merely
@@ -105,8 +105,8 @@ Bypass classes CAUGHT at v0
                          check — an aliased/dynamic reach that stays a disclosed
                          deterministic-scanner limitation, not closed here.
   adapter_module_import,
-  adapter_registry_reference -- (Task R7-T4 — cross-vendor-ratified defense-in-
-                         depth, sealing the architecture Tasks R7-T1..T3 built)
+  adapter_registry_reference -- (defense-in-
+                         depth, sealing the architecture built above)
                          CAPABILITY-zone-ONLY bans (see "Trust zones" below —
                          unlike every rule above, these two do NOT apply to
                          SEALED_KERNEL: ``adapters.py`` and
@@ -137,7 +137,7 @@ Bypass classes CAUGHT at v0
                              ``adapters_`` prefix requires a trailing
                              underscore + a non-empty suffix, so "adapters"
                              alone never collides with "adapters_gmail" etc.
-                             Task R9-T1 (cross-vendor-verified gap) additionally
+                             This additionally
                              matches the PACKAGE-LEVEL import shape — ``from
                              external_write import adapters_<vendor>`` / ``from
                              external_write import adapter_registry`` — where
@@ -153,7 +153,7 @@ Bypass classes CAUGHT at v0
                              ``_module_is_external_write_package``); the bare
                              ``adapters`` alias is excluded on identical
                              grounds — ``"adapters".startswith("adapters_")``
-                             is False. Task R10-T1 (cross-vendor-verified gap)
+                             is False. A further check
                              additionally matches the RELATIVE import forms —
                              ``from .adapters_<vendor> import X`` / ``from
                              .adapter_registry import Y`` (dotted-relative,
@@ -181,7 +181,7 @@ Bypass classes CAUGHT at v0
                              .adapters import run_operation`` / ``from .
                              import adapters``) on the identical
                              trailing-underscore ground as the other forms.
-                             Task R11-T1 (cross-vendor-ratified gap, F1)
+                             A further check
                              additionally matches the BARE, NON-RELATIVE
                              import forms — ``import adapters_<vendor>`` /
                              ``import adapter_registry`` (via
@@ -196,9 +196,9 @@ Bypass classes CAUGHT at v0
                              reach (see ``_bare_first_component_matches_adapter``).
                              Gated on ``node.level == 0`` in the ``from``
                              form specifically so it does not double-fire
-                             alongside the R10-T1 relative-bare check, which
+                             alongside the relative-bare check above, which
                              independently matches the identical bare module
-                             name at ``node.level > 0``. Task R11-T1 (F2)
+                             name at ``node.level > 0``. This
                              also generalizes the absolute dotted-module
                              match itself (``_module_matches_adapter_registry``
                              / ``_module_matches_adapter_profile``) from
@@ -212,7 +212,7 @@ Bypass classes CAUGHT at v0
                              package one level deeper than the previously-
                              caught two-component form) is now matched too
                              (see ``_has_adapter_component_after_external_write``).
-                             Both R11-T1 additions preserve the bare kernel
+                             Both additions above preserve the bare kernel
                              dispatch module's exclusion on the same
                              trailing-underscore / exact-name grounds as
                              every prior form.
@@ -243,14 +243,14 @@ Bypass classes CAUGHT at v0
                          Together these make the mutable Adapter instance and
                          the adapter-profile modules that define
                          ``build_write_client`` STATICALLY unreachable from
-                         capability code — closing the reach path Task R7-T2's
+                         capability code — closing the reach path the
                          ``AdapterDispatch`` capture defends at runtime
                          (reassigning an instance attribute after obtaining it
                          via ``get_adapter`` no longer hijacks dispatch — see
                          ``adapter_registry.AdapterDispatch``) by removing the
                          capability's ability to even NAME ``get_adapter`` in
                          the first place.
-  introspection_escape_hatch -- (Task R7-T4, CAPABILITY-zone-ONLY, same
+  introspection_escape_hatch -- (CAPABILITY-zone-ONLY, same
                          zone-scoping rationale as the two rules above —
                          ``read_facade.py``'s own ``__init_subclass__``
                          legitimately calls ``vars(cls)`` in SEALED_KERNEL)
@@ -336,11 +336,10 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
     (any ``self.<name> = <param>`` assignment would have to be flagged,
     which fires on ordinary, legitimate constructors constantly). This class
     of bypass is instead closed at RUNTIME, in depth, by
-    ``read_facade.ReadFacade`` itself (NF2 — external-write-gate-
-    generalization fix-wave, Task R2: reconciled with R4's read_facade
+    ``read_facade.ReadFacade`` itself (reconciled with the read_facade
     hardening below, which this bullet previously undersold):
 
-      (a) CLOSED for normal attribute access, as of R4. ``__setattr__``
+      (a) CLOSED for normal attribute access. ``__setattr__``
           refuses to set ANY instance attribute other than a dunder — public
           or underscore-prefixed alike — so a re-stash never even lands in
           instance state. And even a value that somehow got in would be moot:
@@ -369,8 +368,8 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
           as a documented limitation of the static gate, not silently
           assumed covered.
   * ``direct_api_call`` is NOT a claim of method-reference completeness
-    (Task R7-T4 — correcting an overclaim (NF1) a cross-vendor review
-    flagged in this section's prior wording). Two known false negatives,
+    (an earlier version of this section overclaimed otherwise; corrected
+    here). Two known false negatives,
     disclosed rather than chased, because closing either would require
     undecidable data-flow analysis, not a deterministic AST shape check:
       (a) a BROKEN variable chain — ``u = client.users(); m =
@@ -392,14 +391,14 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
     covered. ``direct_api_call`` is defense-in-depth here, not the primary
     guarantee: CAPABILITY-zone code has no write-capable client to call a
     verb ON in the first place unless the credential-isolation keystone
-    (BL-1 / F-33) is itself breached — and Task R7-T4's
+    is itself breached — and the
     ``adapter_registry_reference`` / ``adapter_module_import`` /
     ``introspection_escape_hatch`` rules are precisely what closes the
     static reach paths to that keystone. This module does not attempt to
     chase every conceivable indirection into value-flow analysis; it
     catches the common, single-expression shapes and discloses the rest.
   * Introspection beneath ``get_adapter``/``build_write_client`` via
-    ``__class__``/``__dict__``/``__mro__``/``__module__`` (Task R7-T4).
+    ``__class__``/``__dict__``/``__mro__``/``__module__``.
     These four dunders are deliberately NOT banned — see
     ``introspection_escape_hatch`` above — because they appear in ordinary
     code (``type(x)``, isinstance idioms, dataclasses) constantly; banning
@@ -418,13 +417,13 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
     module that never names ``get_adapter`` has no adapter instance to
     reach beneath in the first place.
   * Aliased ``sys`` / ``importlib`` names in introspection-escape-hatch
-    checks (Task R7-T4). The ``sys.modules`` and ``importlib.import_module``
+    checks. The ``sys.modules`` and ``importlib.import_module``
     checks in ``_check_introspection_attribute`` anchor on a bare Name node
     (``base.id == "sys"`` / ``"importlib"``). An aliased import
     (``import sys as s``) reference to ``s.modules[...]`` evades the check
     because the base name is "s", not "sys" — a disclosed deterministic-
     scanner bound, not a silent gap. Consistent with the credential-isolation
-    keystone (BL-1 / F-33) being the real guarantee; this module discloses
+    keystone being the real guarantee; this module discloses
     what it does not deterministically catch.
   * A read facade's own internal read-dispatch method is reachable by any
     code holding a reference to the facade object, with an arbitrary
@@ -434,8 +433,7 @@ Bounds NOT covered at v0 (disclosed — no silent caps)
     something this static scanner additionally restricts; noted here only
     so this module's list of disclosed bounds is complete.
   * A registered adapter's ``plan()`` purity is an ADAPTER-AUTHOR invariant,
-    not something this scanner machine-verifies (Task R11-T1, F3 —
-    cross-vendor review finding). ``adapters.py``'s ``run_operation`` calls
+    not something this scanner machine-verifies. ``adapters.py``'s ``run_operation`` calls
     a registered adapter's ``dispatch.plan(dispatch.instance, op.params)``
     ONCE, BEFORE the write gate runs, purely to count effect units for the
     blast-radius cap (see that function's "n_units / plan-once" docstring
@@ -512,7 +510,7 @@ rule — see ``zones.py`` for the full rationale and the canonical taxonomy)
                         capability code below — it simply never trips them,
                         because none of this code needs a vendor SDK import
                         or a write-capable credential. ONE deliberate
-                        exception (Task R7-T4): the adapter_module_import /
+                        exception: the adapter_module_import /
                         adapter_registry_reference / introspection_escape_hatch
                         rules are CAPABILITY-zone-ONLY and do NOT apply here —
                         adapters.py and effects_manifest.py are the registry's
@@ -647,7 +645,7 @@ _FORBIDDEN_SHEETS_VERBS = frozenset({"update", "append", "clear"})
 # trailing special case).
 _UNAMBIGUOUS_SURFACE_VERBS = frozenset({"batchUpdate", "update_cells"})
 
-# NF1 (external-write-gate-generalization fix-wave, Task R2) — Gmail mutation
+# Gmail mutation
 # verbs, added as a first-class defense-in-depth detection layer following the
 # SAME ambiguous-vs-unambiguous discipline as the Sheets verbs above. A direct
 # Gmail mutation was already indirectly caught via forbidden_import (the
@@ -693,7 +691,7 @@ _NETWORK_CLI_TOOLS = frozenset(
     {"curl", "wget", "http", "https", "httpie", "scp", "sftp", "rsync"}
 )
 
-# Credential-access surface (Task 5 — credential-isolation build-time half).
+# Credential-access surface (the credential-isolation build-time half).
 # Curated, NOT exhaustive (a known, tracked limitation) — same disclosed-bound
 # spirit as _FORBIDDEN_IMPORT_ROOTS. Matched structurally (attribute name /
 # call target) so detection does not depend on how — or whether — the vendor
@@ -714,7 +712,7 @@ _NETWORK_CLI_TOOLS = frozenset(
 #     identifiers that flagging every reference would be noisy; constructing
 #     one is the operative act.
 #
-# T5 (Task R2) disclosed bounds, not closed here -- see the module docstring's
+# Disclosed bounds, not closed here -- see the module docstring's
 # ``credential_construction`` section for the full disclosure: (i) a
 # string-literal ``getattr(creds, "with_subject")(user)`` resolves a curated
 # name via a Constant node, invisible to both frozensets above; (ii) an
@@ -733,8 +731,8 @@ _CREDENTIAL_FACTORY_METHODS = frozenset(
 )
 _CREDENTIAL_CLASS_NAMES = frozenset({"Credentials", "ServiceAccountCredentials"})
 
-# Adapter-profile credential-PROVIDER symbols (Task R1 / BL-1 — the
-# credential-isolation keystone, finding F-33). A write-capable credential is
+# Adapter-profile credential-PROVIDER symbols — the
+# credential-isolation keystone. A write-capable credential is
 # provisioned ONLY inside the trusted ADAPTER_PROFILE zone. The emitted
 # CAPABILITY zone must be UNABLE TO OBTAIN that provider — not merely "declines
 # to call it". So naming an adapter-profile credential-provider symbol at all
@@ -745,10 +743,10 @@ _CREDENTIAL_CLASS_NAMES = frozenset({"Credentials", "ServiceAccountCredentials"}
 # bound spirit as _FORBIDDEN_IMPORT_ROOTS / the credential-construction surface.
 _CREDENTIAL_PROVIDER_SYMBOLS = frozenset(
     {
-        # The retired module-level provider name (pre-BL-1 emitted shape).
+        # The retired module-level provider name (an earlier emitted shape).
         "write_credential_provider",
         # The Adapter method that provisions the write-capable client
-        # (``build_write_client(op)``). BL-1 residual: after the provider was
+        # (``build_write_client(op)``). Residual: after the provider was
         # moved onto the adapter, capability-zone code could still reach the
         # write client via ``get_adapter(op_kind).build_write_client(op)`` — an
         # attribute reference the symbol check now flags. The concrete adapter
@@ -765,8 +763,8 @@ _CREDENTIAL_PROVIDER_SYMBOLS = frozenset(
 )
 
 # ---------------------------------------------------------------------------
-# CAPABILITY-zone-ONLY bans (Task R7-T4 — cross-vendor-ratified defense-in-
-# depth, sealing the architecture Tasks R7-T1..T3 built). Unlike every rule
+# CAPABILITY-zone-ONLY bans (defense-in-
+# depth, sealing the architecture built above). Unlike every rule
 # above, these three checks are gated on zone == Zone.CAPABILITY and do NOT
 # fire in SEALED_KERNEL: ``adapters.py`` legitimately imports/calls
 # ``get_dispatch``, ``effects_manifest.py`` legitimately imports/calls
@@ -796,7 +794,7 @@ _ADAPTER_PROFILE_MODULE_PREFIX = "adapters_"
 # visit_Attribute pattern. Curated, NOT exhaustive — same disclosed-bound
 # spirit as every other curated symbol surface in this module.
 #
-# Task R8-T1 (cross-vendor re-ratification) adds the two symbols the review
+# This adds the two symbols a review
 # found unguarded: ``_DISPATCH_REGISTRY`` (the dispatch-keyed dict
 # ``get_dispatch`` reads from — parallel to the already-banned ``_REGISTRY``,
 # the adapter-keyed dict ``get_adapter`` reads from) and
@@ -824,7 +822,7 @@ _ADAPTER_REGISTRY_SYMBOLS = frozenset(
 _INTROSPECTION_BARE_NAMES = frozenset({"__import__", "globals", "vars"})
 
 # Function/method-object internals — attribute names banned by NAME alone,
-# any base (Task R8-T1, cross-vendor re-ratification). ``run_operation`` is
+# any base. ``run_operation`` is
 # the real function object defined in the sealed kernel module, so its
 # ``__globals__`` bridges directly into that module's namespace; a string-
 # keyed lookup through it (``run_operation.__globals__["get_dispatch"]``) is
@@ -848,14 +846,14 @@ _FUNCTION_INTROSPECTION_ATTRS = frozenset(
 
 
 def _has_adapter_component_after_external_write(dotted: str, predicate) -> bool:
-    """Task R11-T1 (F2 — cross-vendor-ratified gap): True iff some component
+    """True iff some component
     of ``dotted`` equals ``"external_write"`` and the component IMMEDIATELY
     FOLLOWING it satisfies ``predicate``.
 
     Generalizes the prior trailing-two-components match (which only checked
     ``parts[-2] == "external_write"`` — i.e. the adapter/registry name had to
     be the very LAST component) to ANY position in the dotted path. That
-    closes the nested-package gap a cross-vendor review found: a package one
+    closes a nested-package gap: a package one
     level deeper than the previously-caught two-component absolute form —
     ``external_write.adapters_acme.client`` or ``external_write.
     adapter_registry.sub`` — has the profile/registry name sandwiched
@@ -878,11 +876,11 @@ def _has_adapter_component_after_external_write(dotted: str, predicate) -> bool:
 def _module_matches_adapter_registry(dotted: str) -> bool:
     """True iff ``dotted`` (an import's module path) names the adapter
     registry module, anchored on an ``external_write`` component anywhere in
-    the path (see ``_has_adapter_component_after_external_write`` — Task
-    R11-T1/F2 generalized this from a trailing-two-components-only match to
+    the path (see ``_has_adapter_component_after_external_write``, which
+    generalized this from a trailing-two-components-only match to
     ANY nesting depth). Does NOT match a BARE ``adapter_registry`` module
     with no ``external_write`` component at all — see
-    ``_bare_first_component_matches_adapter`` (Task R11-T1/F1) for that
+    ``_bare_first_component_matches_adapter`` for that
     shape, kept as a separate, narrowly-scoped check so the two do not
     double-fire on the same import (see callers)."""
     return _has_adapter_component_after_external_write(
@@ -893,19 +891,19 @@ def _module_matches_adapter_registry(dotted: str) -> bool:
 def _module_matches_adapter_profile(dotted: str) -> bool:
     """True iff ``dotted`` names an adapter-PROFILE module
     (``external_write.adapters_<vendor>``, at ANY nesting depth following the
-    ``external_write`` component — Task R11-T1/F2). The bare kernel dispatch
+    ``external_write`` component). The bare kernel dispatch
     module ``external_write.adapters`` never matches: ``"adapters".
     startswith("adapters_")`` is False (the prefix requires the trailing
     underscore). Does NOT match a BARE ``adapters_<vendor>`` module with no
     ``external_write`` component — see ``_bare_first_component_matches_adapter``
-    (Task R11-T1/F1)."""
+    for that shape."""
     return _has_adapter_component_after_external_write(
         dotted, lambda name: name.startswith(_ADAPTER_PROFILE_MODULE_PREFIX)
     )
 
 
 def _bare_first_component_matches_adapter(dotted: str) -> bool:
-    """Task R11-T1 (F1 — cross-vendor-ratified gap): True iff ``dotted``'s
+    """True iff ``dotted``'s
     FIRST component alone — with NO ``external_write.`` prefix anywhere in
     the path — is the registry module name or an adapter-profile module name.
 
@@ -915,7 +913,7 @@ def _bare_first_component_matches_adapter(dotted: str) -> bool:
     ``import`` statement can never be relative) and ``from adapters_gmail
     import X`` / ``from adapter_registry import Y`` at ``node.level == 0``
     (the absolute ``from`` form; the RELATIVE bare/dotted forms at
-    ``node.level > 0`` are already caught by the R10-T1 checks, which this
+    ``node.level > 0`` are already caught by the checks above, which this
     function's callers gate around to avoid a double-count — see
     ``visit_ImportFrom``).
 
@@ -941,8 +939,7 @@ def _module_is_external_write_package(dotted: str) -> bool:
     above, one component shorter because there is no submodule component
     here at all.
 
-    Used to catch the package-level import gap (Task R9-T1, cross-vendor-
-    verified): ``from external_write import adapters_gmail`` puts the
+    Used to catch the package-level import gap: ``from external_write import adapters_gmail`` puts the
     profile submodule name in ``alias.name`` ("adapters_gmail") rather than
     in ``node.module`` (which is just ``"external_write"``, a bare kernel
     package name never matched by the two dotted-module checks above). The
@@ -1050,7 +1047,7 @@ class _Scanner(ast.NodeVisitor):
     def __init__(self, path: str, zone: Zone = Zone.CAPABILITY):
         self.path = path
         self.violations: List[Violation] = []
-        # Task R7-T4: three rules (adapter_module_import,
+        # Three rules (adapter_module_import,
         # adapter_registry_reference, introspection_escape_hatch) are
         # CAPABILITY-zone-ONLY — see the module docstring's zone-scoping
         # rationale (SEALED_KERNEL legitimately imports/calls
@@ -1074,7 +1071,7 @@ class _Scanner(ast.NodeVisitor):
                 if (
                     _module_matches_adapter_registry(alias.name)
                     or _module_matches_adapter_profile(alias.name)
-                    # Task R11-T1 (F1): a plain ``import`` statement is
+                    # A plain ``import`` statement is
                     # always absolute (no relative ``import`` syntax exists
                     # in Python), so this bare check is safe unconditionally
                     # here — no relative-import special case to avoid
@@ -1100,12 +1097,12 @@ class _Scanner(ast.NodeVisitor):
                 if (
                     _module_matches_adapter_registry(node.module)
                     or _module_matches_adapter_profile(node.module)
-                    # Task R11-T1 (F1): the bare, ABSOLUTE form -- ``from
+                    # The bare, ABSOLUTE form -- ``from
                     # adapters_gmail import X`` / ``from adapter_registry
                     # import Y`` -- has node.level == 0 and node.module set
                     # to the bare name with no "external_write." prefix at
                     # all. Gated on node.level == 0 so this does not
-                    # double-fire alongside the R10-T1 relative-specific
+                    # double-fire alongside the relative-specific
                     # block below (gated on node.level > 0), which already
                     # catches the identical bare-name shape for a RELATIVE
                     # import (``from .adapters_gmail import X``).
@@ -1117,7 +1114,7 @@ class _Scanner(ast.NodeVisitor):
                     self._add(node.lineno, "adapter_module_import")
                 if root == "importlib":
                     self._add(node.lineno, "introspection_escape_hatch")
-        # Task R10-T1 (cross-vendor-verified gap): a RELATIVE import of an
+        # A RELATIVE import of an
         # adapter/registry submodule -- ``from .adapters_gmail import X`` /
         # ``from .adapter_registry import Y`` -- has ``node.level > 0`` and
         # ``node.module`` set to the bare submodule name, with NO
@@ -1148,10 +1145,10 @@ class _Scanner(ast.NodeVisitor):
         ):
             self._add(node.lineno, "adapter_module_import")
         # Importing an adapter-profile credential-provider symbol into a
-        # non-adapter zone is itself the bypass (BL-1): the emitted capability
+        # non-adapter zone is itself the bypass: the emitted capability
         # must be UNABLE to name the provider.
         is_package_level = bool(node.module) and _module_is_external_write_package(node.module)
-        # Task R10-T1 (cross-vendor-verified gap): the RELATIVE bare-import
+        # The RELATIVE bare-import
         # form -- ``from . import adapters_gmail`` / ``from . import
         # adapter_registry`` -- has ``node.level > 0`` AND ``node.module is
         # None`` (a bare "from . import" carries no module string at all),
@@ -1168,7 +1165,7 @@ class _Scanner(ast.NodeVisitor):
             # (CAPABILITY-only — see class docstring / module docstring).
             if self._capability_zone and alias.name in _ADAPTER_REGISTRY_SYMBOLS:
                 self._add(node.lineno, "adapter_registry_reference")
-            # Task R9-T1 (cross-vendor-verified gap): the PACKAGE-LEVEL import
+            # The PACKAGE-LEVEL import
             # form -- ``from external_write import adapters_gmail`` /
             # ``from external_write import adapter_registry`` -- puts the
             # profile/registry submodule name in `alias.name`, not in
@@ -1187,7 +1184,7 @@ class _Scanner(ast.NodeVisitor):
                 )
             ):
                 self._add(node.lineno, "adapter_module_import")
-            # Task R10-T1: same name rule applied to the RELATIVE bare-import
+            # Same name rule applied to the RELATIVE bare-import
             # form (``from . import adapters_gmail`` / ``from . import
             # adapter_registry``). Bare "adapters" / "operations" /
             # "capability_api" / "read_facades_<cap>" are naturally excluded:
@@ -1257,7 +1254,7 @@ class _Scanner(ast.NodeVisitor):
         ``importlib`` Name). ``__subclasses__`` is flagged on the attribute
         name alone, any base — unlike ``__class__``/``__dict__``/``__mro__``/
         ``__module__`` (deliberately NOT banned; see module docstring),
-        ``__subclasses__`` has no ordinary-code collision risk. Task R8-T1
+        ``__subclasses__`` has no ordinary-code collision risk. This
         adds the same any-base, name-alone treatment for the function/method-
         object internals in ``_FUNCTION_INTROSPECTION_ATTRS`` (``__globals__``/
         ``__code__``/``__closure__``/``__func__``/``__self__``) — see that
@@ -1341,7 +1338,7 @@ class _Scanner(ast.NodeVisitor):
         sheets-style surface handle. The unambiguous verbs (batchUpdate,
         update_cells) are flagged on name alone.
 
-        NF1 (Task R2) adds the same discipline for Gmail: ``trash``/
+        The same discipline applies for Gmail: ``trash``/
         ``untrash`` are flagged on name alone (unambiguous); ``modify``/
         ``send``/``create``/``delete`` collide with common method names, so
         they are flagged only when the attribute chain shows a Gmail surface
@@ -1374,8 +1371,8 @@ class _Scanner(ast.NodeVisitor):
                 self._add(node.lineno, "direct_api_call")
 
     def _check_credential_attribute(self, node: ast.Attribute) -> None:
-        """Flag a credential-construction/widening attribute REFERENCE (Task 5
-        — the build-time half of credential isolation).
+        """Flag a credential-construction/widening attribute REFERENCE (the
+        build-time half of credential isolation).
 
         Fires for an ``ast.Attribute`` whose ``.attr`` is a curated
         credential-factory/widening name (``from_service_account_file``,

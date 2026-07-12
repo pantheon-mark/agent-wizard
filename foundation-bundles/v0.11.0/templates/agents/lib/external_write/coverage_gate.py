@@ -1,4 +1,4 @@
-"""B1-5 / B2-T1 — the deterministic descriptor-COVERAGE gate: the second build-time safety gate.
+"""The deterministic descriptor-COVERAGE gate: the second build-time safety gate.
 
 Run in MA-REV ALONGSIDE the AST bypass scanner (``scan.py``) but SEPARATE from it. The two
 gates answer complementary questions and together make the design invariant enforceable at
@@ -8,9 +8,9 @@ build time:
     package?" — a deterministic AST/call-graph check over the operator's scripts.
   * THIS gate: "is every GUARDED mutator covered by a DECLARED, structurally-valid descriptor of
     the right risk class?" — a deterministic projection over the in-code operation contracts
-    (``contracts.py``) joined against the machine-readable declared-descriptor set (B1-2).
+    (``contracts.py``) joined against the machine-readable declared-descriptor set.
 
-As of B2-T1, this gate does NOT check ``accepted``. ACCEPTANCE for live writes is enforced at
+This gate does NOT check ``accepted``. ACCEPTANCE for live writes is enforced at
 RUNTIME by the sibling ``write_gate`` (a capability runs against its declared test target until a
 covering phase is accepted). The split exists because a descriptor is ALWAYS emitted with
 ``accepted: false`` and only becomes accepted after an operator accepts the BUILT capability —
@@ -30,11 +30,11 @@ The deterministic algorithm
 ------------------------------------------------------------------------------
 Inputs (all deterministic; no clock, no randomness, no LLM):
   1. ``scan_violations`` — the output of ``scan.scan_paths()`` over the phase's code.
-  2. ``descriptor_set``  — the machine-readable descriptor set (B1-2
+  2. ``descriptor_set``  — the machine-readable descriptor set (the
      ``render_descriptor_registry_json`` shape; entries may be accepted or unaccepted — this gate
-     does not care), loaded fail-closed (``[]`` when absent) via the SAME loader B1-4 uses
+     does not care), loaded fail-closed (``[]`` when absent) via the SAME loader the write gate uses
      (``write_gate.load_descriptor_set``), pointed at the ONE descriptor-set file every emitted
-     writes-back system carries (``security/capability_descriptors.json`` — B2-T2).
+     writes-back system carries (``security/capability_descriptors.json``).
   3. ``contracts_map``   — op_kind -> ``OperationContract`` (defaults to the real
      ``contracts.OPERATION_CONTRACTS``): the authoritative, in-code enumeration of the named
      external-write operations. This is the "guarded mutator" demand side.
@@ -89,7 +89,7 @@ surface is known.
 
 Vocabulary constants (``GATED_RISK_CLASSES``, ``READ_ONLY_LOCAL``, ``FAIL_SAFE_RISK_CLASS``) are
 imported from ``write_gate`` — a single source, already duplicated from the build-side tree
-(D-B1-a) and pinned equal by cross-tree tests. This gate adds no new duplication.
+and pinned equal by cross-tree tests. This gate adds no new duplication.
 
 Stdlib only — no third-party dependencies.
 """
@@ -150,7 +150,7 @@ class CoverageDecision(NamedTuple):
 
 def _effective_contract_risk_class(contract: OperationContract) -> str:
     """The mutator's effective risk class: the contract's declared class if it is in the known
-    vocabulary, else the MOST-protected class (never read_only_local by omission — F-28)."""
+    vocabulary, else the MOST-protected class (never read_only_local by omission)."""
     rc = getattr(contract, "risk_class", None)
     if isinstance(rc, str) and rc in _KNOWN_RISK_CLASSES:
         return rc
@@ -243,7 +243,7 @@ def evaluate_coverage_gate(
     failures.extend(_validate_entries(descriptor_set))
 
     # (b)/(d) Demand side: every guarded mutator must have a DECLARED covering descriptor. This
-    # gate does NOT check acceptance (B2-T1) — acceptance for live writes is runtime's job
+    # gate does NOT check acceptance — acceptance for live writes is runtime's job
     # (write_gate); a descriptor with accepted:false covers a mutator here just as well as one
     # with accepted:true.
     for op_kind in sorted(contracts_map):
@@ -269,12 +269,12 @@ def run_coverage_gate(
     sealed_kernel_paths: Optional[FrozenSet[str]] = None,
 ) -> CoverageDecision:
     """CLI-shaped helper: scan ``paths`` for bypasses (via the PURE ``scan_paths``), load the
-    descriptor set fail-closed (via B1-4's loader — ``[]`` when absent/unreadable; defaults to
-    ``security/capability_descriptors.json``, project-root-relative — B2-T2), read the real
+    descriptor set fail-closed (via the write gate's loader — ``[]`` when absent/unreadable;
+    defaults to ``security/capability_descriptors.json``, project-root-relative), read the real
     operation contracts, and evaluate the gate. This gate does not use the ``accepted`` field of
     any entry it loads. Mirrors scan.py's invocation shape.
 
-    ``adapter_profile_paths`` / ``sealed_kernel_paths`` (Task 5) pass straight through to
+    ``adapter_profile_paths`` / ``sealed_kernel_paths`` pass straight through to
     ``scan_paths`` — this gate does not re-implement the trust-zone taxonomy (SEALED_KERNEL /
     ADAPTER_PROFILE / CAPABILITY) at all; it consumes it exclusively via ``scan_paths``'s
     violations, so ``zones.py`` (imported by ``scan.py``) remains the ONE canonical place that

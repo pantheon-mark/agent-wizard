@@ -14,7 +14,7 @@ It is optional to this structural validator (older copy-run flows that never rea
 do not need it) but MANDATORY at the trust surface: the ceremony refuses a proof that is absent
 or mismatched. When present it must be a non-empty string.
 
-capability_module_paths (Task 6 -- F-34 wire-verification) names the capability's OWN
+capability_module_paths (wire-verification) names the capability's OWN
 write-affecting module files (its capability/proposal/read code -- never the trusted adapter
 module itself). Like capability_id, it is optional to this structural validator (no filesystem
 I/O happens here) but MANDATORY at the trust surface: the acceptance ceremony refuses a proof

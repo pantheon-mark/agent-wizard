@@ -1,4 +1,4 @@
-"""B1-4 — the deterministic pre-write gate: the runtime-enforcement heart of the safety
+"""The deterministic pre-write gate: the runtime-enforcement heart of the safety
 substrate.
 
 `run_operation` (adapters.py) is the single chokepoint every external write passes through.
@@ -15,7 +15,7 @@ THE OVERRIDING PROPERTY is fail-safe everywhere: a missing input (absent target 
 absent/unreadable/malformed descriptor set, unknown/unclassified risk) must NEVER open the
 gate. Every branch below defaults to refuse.
 
-Design points settled from the code (see the B1-4 report):
+Design points settled from the code:
 
   * Target signal — an explicit, machine-readable `target` argument threaded through
     run_operation, whose test-target vocabulary REUSES dependency_projection.TEST_TARGETS and
@@ -36,7 +36,7 @@ Design points settled from the code (see the B1-4 report):
     time; over-counting on a later refusal is the SAFE direction for a blast-radius cap.
 
 Vocabulary constants below are duplicated from wizard/scripts/lib/dependency_projection.py
-(external_write cannot import the build-side tree — D-B1-a) and pinned equal by cross-tree
+(external_write cannot import the build-side tree, a deliberate boundary) and pinned equal by cross-tree
 tests in test_external_write_write_gate.py, exactly as contracts.RISK_CLASSES is.
 
 Stdlib only — no third-party dependencies.
@@ -59,13 +59,13 @@ from external_write.contracts import OperationContract, get_contract
 # read_only_local classification skips the gate; an ABSENT/unknown one never resolves here.
 READ_ONLY_LOCAL = "read_only_local"
 
-# F-28: an absent/unrecognized risk_class resolves to the MOST-protected class, never the safe
+# An absent/unrecognized risk_class resolves to the MOST-protected class, never the safe
 # one. Mirrors dependency_projection.FAIL_SAFE_RISK_CLASS / resolve_risk_class().
 FAIL_SAFE_RISK_CLASS = "irreversible_external"
 
 # The classes the gate treats as high-risk: acceptance + test-target required. Everything in the
 # risk vocabulary except read_only_local (never gated) and reversible_external (already gated by
-# the broker + copy_run_proof; the seeded status ops live here and stay ungated by B1-4).
+# the broker + copy_run_proof; the seeded status ops live here and stay ungated by this module).
 GATED_RISK_CLASSES = frozenset({
     "irreversible_external", "standing_automation", "sensitive_data",
 })
@@ -74,7 +74,7 @@ GATED_RISK_CLASSES = frozenset({
 # dependency_projection.TEST_TARGETS. A gated op may run against any of these before acceptance.
 TEST_TARGETS = frozenset({"copy", "bounded_sample", "dry_run", "native_undo"})
 
-# T1 (bounded_sample/dry_run/native_undo test surfaces, 2026-07-05): TEST_TARGETS splits into
+# TEST_TARGETS splits into
 # two safety classes by LIVE BLAST RADIUS, not by the word "test" — a bounded live sample is a
 # subset of the LIVE resource and cannot be made safe by surface separation the way copy is.
 # The two classes below partition TEST_TARGETS EXACTLY (pinned by a test in
@@ -83,7 +83,7 @@ TEST_TARGETS = frozenset({"copy", "bounded_sample", "dry_run", "native_undo"})
 #
 #   ISOLATED_TEST_TARGETS   — no live blast radius at all. `copy` is surface-based
 #     (COPY_SURFACE, descriptor-independent) — unchanged/byte-identical. `dry_run` permits
-#     unconditionally at THIS gate; that permit is SAFE only because a separate task's adapter
+#     unconditionally at THIS gate; that permit is SAFE only because a separate adapter
 #     guarantees dry_run never reaches client.write (the gate authorizes the intent, the
 #     adapter enforces no-mutation) — see evaluate_write_gate below.
 #   LIVE_BOUNDED_TEST_TARGETS — a REAL live write to a bounded subset of the live resource
@@ -100,7 +100,7 @@ LIVE_BOUNDED_TEST_TARGETS = frozenset({"bounded_sample", "native_undo"})
 LIVE_TARGET = "live"
 
 # copy_run_proof's copy-surface convention (copy_run_proof._synthetic_op). An Operation on this
-# surface is inherently a copy target. Reusing it is why B1-4 introduces no parallel mechanism.
+# surface is inherently a copy target. Reusing it is why this module introduces no parallel mechanism.
 COPY_SURFACE = "copy_surface"
 
 # The recognized bounded/copy/test surfaces (I1): physical surfaces a write can land on WITHOUT
@@ -108,7 +108,7 @@ COPY_SURFACE = "copy_surface"
 # native_undo) is a caller ASSERTION about intent; it is honored only when the op physically
 # targets one of these surfaces — otherwise a caller could pass target="copy" on a live surface
 # and the write would still hit the live record. The sole convention today is copy_run_proof's
-# COPY_SURFACE; a real bounded_sample / dry_run surface is a B2 concern and must be added here
+# COPY_SURFACE; a real bounded_sample / dry_run surface is a future concern and must be added here
 # EXPLICITLY (never inferred), exactly like the vocabulary constants above.
 TEST_SURFACES = frozenset({COPY_SURFACE})
 
@@ -121,14 +121,14 @@ def is_test_surface(surface: Any) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# F-22: system clock — the single source of any date this module writes
+# System clock — the single source of any date this module writes
 # ---------------------------------------------------------------------------
 
 def system_clock() -> datetime:
     """Return the current UTC time from the system clock. The gate NEVER accepts a
-    model-authored / passed-in 'today' string; every timestamp it writes originates here (F-22).
-    Injectable in run_operation via `clock=` for deterministic tests. Reusable by B1-7's
-    date-site fold-in."""
+    model-authored / passed-in 'today' string; every timestamp it writes originates here.
+    Injectable in run_operation via `clock=` for deterministic tests. Reusable by any future
+    module that needs the same clock discipline."""
     return datetime.now(timezone.utc)
 
 
@@ -141,7 +141,7 @@ def _iso_z(dt: datetime) -> str:
 # Fail-safe descriptor-set loader
 # ---------------------------------------------------------------------------
 
-# B2-T2: the project-root-relative path to the ONE descriptor-set file every emitted
+# The project-root-relative path to the ONE descriptor-set file every emitted
 # writes-back system carries (security/capability_descriptors.json). It holds the FULL
 # descriptor set — every declared descriptor, `accepted` flags varying — not only the accepted
 # ones; the prior name (ACCEPTED_DESCRIPTOR_SET_PATH) misled at a trust surface. BOTH gates read
@@ -155,7 +155,7 @@ DESCRIPTOR_SET_PATH: Optional[str] = "security/capability_descriptors.json"
 
 
 def load_descriptor_set(path: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Load the machine-readable descriptor set (B1-2 render_descriptor_registry_json shape: a
+    """Load the machine-readable descriptor set (the render_descriptor_registry_json shape: a
     JSON array of entries with id/name/action_class/risk_class/recovery_profile_ref/
     declared_test_target/blast_radius_cap/accepted). Holds the FULL set — every declared
     descriptor, `accepted` flags varying; write_gate filters on `accepted: true` (+ surface
@@ -196,9 +196,9 @@ class InvocationLedger:
         return self._counts.get(key, 0)
 
     def record(self, key: str, n: int = 1) -> None:
-        """Consume `n` slots for `key` (NF3: the window is bounded in UNITS, not
-        invocations). Defaults to 1 so every pre-NF3 call site — one invocation, one
-        slot — is unaffected."""
+        """Consume `n` slots for `key` (the window is bounded in UNITS, not
+        invocations). Defaults to 1 so every call site that predates unit-aware
+        counting — one invocation, one slot — is unaffected."""
         self._counts[key] = self.count(key) + n
 
 
@@ -230,7 +230,7 @@ def _refuse(reason: str, **extra: Any) -> GateDecision:
 
 
 def _effective_risk_class(contract: Optional[OperationContract]) -> str:
-    """F-28: an op with no contract, or a contract whose risk_class is not in the known
+    """An op with no contract, or a contract whose risk_class is not in the known
     vocabulary, resolves to the MOST-protected class — never read_only_local by omission."""
     if contract is None:
         return FAIL_SAFE_RISK_CLASS
@@ -276,7 +276,7 @@ def _declared_entry(descriptor_set: Sequence[Dict[str, Any]], op: Operation, ris
     """Return the first DECLARED descriptor entry that covers this op for a LIVE_BOUNDED test
     `target`, or None. Distinct from `_covering_entry` (that function is left byte-unchanged;
     this is a separate lookup, not a conditional weakening of it — leaking the accepted-live
-    path would be a T1 regret-mode risk).
+    path would be a drift risk).
 
     Same surface/risk-class join as `_covering_entry` (op's capability id/name match; declared
     risk_class equals the op's effective risk_class), but:
@@ -301,7 +301,7 @@ def _declared_entry(descriptor_set: Sequence[Dict[str, Any]], op: Operation, ris
 def _effective_cap(contract: Optional[OperationContract],
                    covering: Optional[Dict[str, Any]]) -> Optional[int]:
     """Effective blast-radius cap = the SMALLEST of the caps present (the per-capability
-    descriptor cap may override the contract default DOWNWARD, never upward — B1-3). Returns
+    descriptor cap may override the contract default DOWNWARD, never upward). Returns
     None only when neither a contract cap nor a descriptor cap is set."""
     caps: List[int] = []
     if contract is not None and isinstance(contract.blast_radius_cap, int) \
@@ -325,11 +325,11 @@ def resolve_effective_cap(op: Operation,
     caps if any are present (same "smallest of the caps present" rule as
     `_effective_cap`, used internally by the live-enforcement funnel below).
 
-    T2 (adapter dispatch, adapters.py) reuses this to count a registered adapter's
+    Adapter dispatch (adapters.py) reuses this to count a registered adapter's
     planned `len(effect_units)` against the SAME cap value the invocation-level gate
     would use — independently of, and BEFORE, that per-invocation ledger enforcement,
     which counts one Operation as one slot regardless of how many effect units it
-    fans out to (the F-31 gap this exists to close).
+    fans out to (the fan-out gap this exists to close).
 
     Matching is lenient on purpose: it considers EVERY descriptor entry whose
     id/name matches op.surface and whose risk_class matches op's effective risk
@@ -362,23 +362,23 @@ def resolve_effective_cap(op: Operation,
 def _enforce_live_funnel(op: Operation, risk_class: str, contract: Optional[OperationContract],
                          entry: Dict[str, Any], cap_ledger: Optional[InvocationLedger],
                          clock: Any, n_units: int = 1) -> GateDecision:
-    """The SHARED live-enforcement funnel (R4/T1): the recovery floor (F-29), the mandatory
+    """The SHARED live-enforcement funnel: the recovery floor, the mandatory
     blast-radius cap + ledger, and the irreversibility audit. Called by BOTH the LIVE path
     (`entry` from `_covering_entry`, accepted required) and the LIVE_BOUNDED path (`entry` from
     `_declared_entry`, accepted NOT required) — the only difference between the two callers is
     which lookup produced `entry`; every live bound past that point is identical (constraint:
     the LIVE_BOUNDED relaxation vs. LIVE drops ONLY `accepted:true`). Duplicating this logic
-    across two branches was rejected as a drift risk (gemini regret-mode finding).
+    across two branches was rejected as a drift risk.
 
-    n_units (NF3): the number of discrete effect units THIS operation plans to apply — 1 for
-    the legacy field-write path and every pre-NF3 caller (default, backward-compatible), or
+    n_units: the number of discrete effect units THIS operation plans to apply — 1 for
+    the legacy field-write path and every existing caller (default, backward-compatible), or
     `len(adapter.plan(op.params))` for a registered adapter (adapters.py hoists that pure
     plan() call above the gate to compute it). The window this function enforces is bounded in
     UNITS across the ledger's lifetime, not in invocation count: a single multi-unit operation
     consumes `n_units` slots, so a session of many multi-unit invocations cannot slip past the
-    cap by counting each invocation as one slot regardless of its fan-out (the F-31 per-op cap
+    cap by counting each invocation as one slot regardless of its fan-out (the per-op cap
     stays independent and unchanged — this is the separate AGGREGATE bound)."""
-    # F-29 recovery floor — NON-GRADUATING for standing_automation: a live standing_automation
+    # Recovery floor — NON-GRADUATING for standing_automation: a live standing_automation
     # op requires a recovery profile on its entry, and NO autonomy/maturity signal can waive it
     # (there is no such parameter on this gate — the floor is structural, not narrated).
     if risk_class == "standing_automation":
@@ -390,7 +390,7 @@ def _enforce_live_funnel(op: Operation, risk_class: str, contract: Optional[Oper
                 "path). Maturity graduates supervision, never this safety net.",
                 op_kind=op.op_kind, risk_class=risk_class)
 
-    # Blast-radius cap — deterministic, outside the LLM. R5/S-1 (T1): MANDATORY for every
+    # Blast-radius cap — deterministic, outside the LLM. MANDATORY for every
     # gated risk class on a live OR live-bounded write, not only irreversible_external — an
     # unbounded gated live write (live or live-bounded) is never permitted.
     effective_cap = _effective_cap(contract, entry)
@@ -419,7 +419,7 @@ def _enforce_live_funnel(op: Operation, risk_class: str, contract: Optional[Oper
             n_units=n_units, units_consumed_before=consumed)
     cap_ledger.record(key, n_units)
 
-    # F-22 + design §4.7: a live irreversible action writes an explicit, clock-stamped
+    # Per design §4.7: a live irreversible action writes an explicit, clock-stamped
     # "this cannot be reversed" acknowledgement. The timestamp comes from the clock, NEVER
     # a passed-in string.
     audit: Optional[Dict[str, Any]] = None
@@ -430,7 +430,7 @@ def _enforce_live_funnel(op: Operation, risk_class: str, contract: Optional[Oper
                 "note": "This action cannot be reversed.",
                 "op_kind": op.op_kind,
                 "blast_radius_cap": effective_cap,
-                # units_consumed_in_window (NF3, renamed from invocation_index): the
+                # units_consumed_in_window (renamed from invocation_index): the
                 # CUMULATIVE unit count consumed in this window so far, post-record — no
                 # longer an invocation index, since one operation can consume many units.
                 "units_consumed_in_window": cap_ledger.count(key),
@@ -449,17 +449,18 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
     """The deterministic pre-write gate. Returns a GateDecision; the caller returns the refusal
     immediately when not permitted, and merges `audit` into the success Result otherwise.
 
-    n_units (NF3, default 1): the number of discrete effect units the calling operation plans
+    n_units (default 1): the number of discrete effect units the calling operation plans
     to apply — threaded straight into `_enforce_live_funnel`'s unit-aware window. Defaults to 1
-    so every existing direct caller (field-write ops, and every test/caller that predates NF3)
-    is unaffected: 1 unit consumes exactly 1 window slot, byte-identical to pre-NF3 behavior.
+    so every existing direct caller (field-write ops, and every test/caller that predates this
+    unit-aware window) is unaffected: 1 unit consumes exactly 1 window slot, byte-identical to
+    the prior per-invocation behavior.
 
     Order (each step fails safe):
-      1. Resolve the contract + effective risk class (F-28 fail-safe classification).
+      1. Resolve the contract + effective risk class (fail-safe classification).
       2. read_only_local => never trips (design §4.5): permit untouched.
-      3. Not gated (reversible_external, ungated) => permit untouched (byte-identical to pre-B1-4).
+      3. Not gated (reversible_external, ungated) => permit untouched (byte-identical to the ungated path).
       4. Gated => resolve target: absent => refuse. Otherwise the resolved target falls into
-         exactly one of three classes (T1):
+         exactly one of three classes:
            - ISOLATED_TEST_TARGETS ('copy', 'dry_run') — no live blast radius. 'copy' permits
              only on a recognized test/copy surface (I1), else refuses; 'dry_run' permits
              unconditionally (no surface/cap/ledger/acceptance requirement — safe only because
@@ -479,12 +480,12 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
     contract = get_contract(op.op_kind)
     risk_class = _effective_risk_class(contract)
 
-    # (2) read_only_local NEVER trips — but ONLY when explicitly classified so (F-28: an absent
+    # (2) read_only_local NEVER trips — but ONLY when explicitly classified so (an absent
     # risk_class resolved to FAIL_SAFE_RISK_CLASS above, so it can never reach this branch).
     if risk_class == READ_ONLY_LOCAL:
         return _PERMIT
 
-    # (3) Is this op gated at all?  Unknown/uncovered writer (no contract) is gated (F-28);
+    # (3) Is this op gated at all?  Unknown/uncovered writer (no contract) is gated;
     # any GATED_RISK_CLASSES member is gated; an explicit requires_accepted_phase is gated.
     gated = (
         contract is None

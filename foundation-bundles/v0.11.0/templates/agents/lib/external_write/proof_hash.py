@@ -14,9 +14,8 @@ by the model:
     The dependency-file list is resolved per op_kind by
     `effects_manifest.resolve_dependency_files` — the contract's declared
     `dependency_set` UNION the op_kind's registered adapter module, if any
-    (Task 3 — external-write-gate-generalization; closes F-34, where this hash
-    used to cover only a fixed shared-module tuple and structurally excluded a
-    capability's own adapter code).
+    (closing a gap where this hash used to cover only a fixed shared-module
+    tuple and structurally excluded a capability's own adapter code).
   * contract_hash — sha256 over the declared surface (writes/produces/dependency_set/
     verifier_set/binding flag) + resolved verifier defs. Schema/contract identity,
     independent of code bytes.
@@ -73,7 +72,7 @@ def _contract_canon(op_kind: str) -> dict:
         "dependency_set": list(c.dependency_set),
         "verifier_set": list(c.verifier_set),
         "introduces_persistent_binding": c.introduces_persistent_binding,
-        # B1-3 / D-B1-b (LOCKED): these three risk fields are deliberately hash-bound
+        # LOCKED: these three risk fields are deliberately hash-bound
         # so a post-hoc change to any of them — most importantly a risk_class
         # downgrade — changes both compute_contract_hash and compute_implementation_hash
         # (the latter includes this canon via compute_implementation_hash's own
