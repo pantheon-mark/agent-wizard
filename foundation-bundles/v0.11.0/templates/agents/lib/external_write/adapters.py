@@ -300,6 +300,13 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     # (write_gate._enforce_live_funnel). None planned (no registered adapter) => n_units=1,
     # matching the legacy field-write path exactly.
     #
+    # Disclosed (Task R11-T1, F3): this hoist runs plan() BEFORE the write gate, so plan()'s
+    # purity is load-bearing — a plan() that performed a write would execute it before the
+    # gate ever ran. That purity is an adapter-author invariant verified by operator review
+    # of the trusted adapter module, NOT machine-enforced by scan.py (ADAPTER_PROFILE modules,
+    # where every plan() implementation lives, are exempt from every scanner check — see
+    # scan.py's "Bounds NOT covered" docstring section for the full disclosure).
+    #
     # Two fail-safe exemptions/guards added by the R3 fix (regression found in review of the
     # NF3 change, commit 9e69837 — plan() is PURE but NOT TOTAL: seeded adapters index directly
     # into params, e.g. `m["message_id"]`, and raise on malformed input):

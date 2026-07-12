@@ -77,7 +77,7 @@
       "path": "templates/agents/lib/external_write/adapter_registry.py"
     },
     {
-      "hash": "sha256:cfa2c5313f0df8d5aae00def0ba2ce389c80438442cab840a4dfd422e695a040",
+      "hash": "sha256:be11e99ec5c3f3b2fc91ca101ee5d715315689975d2594bba705bb1d6f0eb42a",
       "path": "templates/agents/lib/external_write/adapters.py"
     },
     {
@@ -137,7 +137,7 @@
       "path": "templates/agents/lib/external_write/read_facades_gmail.py"
     },
     {
-      "hash": "sha256:bf1638c320664d180b745d523cd6565be7227829685989d46e23650a2f6c6be7",
+      "hash": "sha256:26fa50edf16cfe572232e3a8842ea1f1b7c728f44730b3a520fd62c7e511a141",
       "path": "templates/agents/lib/external_write/scan.py"
     },
     {
@@ -478,12 +478,12 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-07-12T12:14:15Z",
-  "generator_version": "3d0f8e42a9d37d9d33bdc36263375bfdecc75859",
+  "generated_at": "2026-07-12T12:57:26Z",
+  "generator_version": "c2f744d058078f02008f383b9703cc06d1aec768",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.11.0",
-  "source_registry_entry_hash": "sha256:e1f66dd3fbc230e752d181eea3e73f6e4d67ac4479fe28933a9d79c1e8162c43",
+  "source_registry_entry_hash": "sha256:568c9011dd552bb02b8ff676d4e59269afe7b7bda6fb0e0aeb78e9fed34208b6",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
   "template_tree_hash": "sha256:2bb200832538ef783e35624cb22bff7c1c1f64538821fee80e008a8f6e794857",
