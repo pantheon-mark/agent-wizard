@@ -431,5 +431,150 @@ class TestTrustZoneSplit(unittest.TestCase):
         )
 
 
+class TestAdapterRegistryCapabilityBan(unittest.TestCase):
+    """Task R7-T4 — CAPABILITY-zone code must be STATICALLY unable to reach
+    the adapter registry or an adapter-PROFILE module (sealing the
+    architecture Tasks R7-T1..T3 built: it can neither monkey-patch the
+    registered adapter nor string-reach build_write_client, because it
+    cannot even NAME get_adapter/the profile modules). These two new rules
+    are CAPABILITY-zone-ONLY — see TestAdapterRegistryKernelStaysClean below
+    for the SEALED_KERNEL/ADAPTER_PROFILE exemption."""
+
+    def test_capability_importing_adapter_registry_module_is_flagged(self):
+        v = scan_paths([_FIXTURES / "capability_adapter_registry_import.py"])
+        kinds = _kinds(v)
+        self.assertIn("adapter_module_import", kinds)
+        self.assertIn("adapter_registry_reference", kinds)
+
+    def test_capability_reexported_get_adapter_name_is_flagged(self):
+        # from external_write.adapters import get_adapter -- the MODULE is
+        # the allowed bare kernel dispatch module, but naming get_adapter at
+        # all is itself the bypass.
+        v = scan_paths(
+            [_FIXTURES / "capability_adapters_reexport_get_adapter.py"]
+        )
+        kinds = _kinds(v)
+        self.assertIn("adapter_registry_reference", kinds)
+        self.assertNotIn(
+            "adapter_module_import", kinds,
+            "the bare external_write.adapters module import itself is legal",
+        )
+
+    def test_capability_importing_adapter_profile_module_is_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_adapters_profile_module_import.py"]
+        )
+        self.assertIn("adapter_module_import", _kinds(v))
+
+    def test_monkeypatch_class_dict_exploit_shape_is_flagged(self):
+        # The get_adapter reference is what closes this fixture -- the
+        # __class__.__dict__["build_write_client"] chain is a disclosed,
+        # not-closed residual (a Constant-node string key), but there is no
+        # adapter instance to reach into without get_adapter first.
+        v = scan_paths(
+            [_FIXTURES / "capability_monkeypatch_class_dict_exploit.py"]
+        )
+        self.assertIn("adapter_registry_reference", _kinds(v))
+
+    def test_introspection_dynamic_reach_is_flagged(self):
+        v = scan_paths([_FIXTURES / "capability_introspection_dynamic_reach.py"])
+        kinds = _kinds(v)
+        self.assertIn("introspection_escape_hatch", kinds)
+        hatches = [x for x in v if x.kind == "introspection_escape_hatch"]
+        # import importlib, sys.modules[...], importlib.import_module(...).
+        self.assertGreaterEqual(len(hatches), 3)
+
+
+class TestAdapterRegistryNegativeGuards(unittest.TestCase):
+    """False-positive discipline (Task R7-T4): the curated capability-facing
+    surfaces and ordinary introspection idioms must stay clean."""
+
+    def test_bare_kernel_adapters_module_run_operation_not_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_bare_adapters_run_operation_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_capability_api_reexport_not_flagged(self):
+        v = scan_paths([_FIXTURES / "capability_api_reexport_allowed.py"])
+        self.assertEqual(v, [])
+
+    def test_emitted_read_facades_shape_not_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_read_facade_emitted_shape_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+    def test_ordinary_class_introspection_not_flagged(self):
+        v = scan_paths(
+            [_FIXTURES / "capability_ordinary_introspection_allowed.py"]
+        )
+        self.assertEqual(v, [])
+
+
+class TestAdapterRegistryKernelStaysClean(unittest.TestCase):
+    """The zone-scoping requirement (Task R7-T4): adapter_module_import /
+    adapter_registry_reference / introspection_escape_hatch must NOT fire in
+    SEALED_KERNEL (adapters.py / effects_manifest.py legitimately import and
+    call get_dispatch / get_adapter; read_facade.py legitimately calls
+    vars(cls)) or ADAPTER_PROFILE (adapters_gmail.py legitimately calls
+    register_adapter; already exempt before the scanner runs at all)."""
+
+    def test_adapters_module_scans_clean(self):
+        v = scan_paths([_ADAPTER_DIR / "adapters.py"])
+        self.assertEqual(
+            v, [],
+            "SEALED_KERNEL adapters.py legitimately imports/calls "
+            f"get_dispatch; must not self-trip the new CAPABILITY-only "
+            f"rules; got {v}",
+        )
+
+    def test_effects_manifest_module_scans_clean(self):
+        v = scan_paths([_ADAPTER_DIR / "effects_manifest.py"])
+        self.assertEqual(
+            v, [],
+            "SEALED_KERNEL effects_manifest.py legitimately imports/calls "
+            f"get_adapter; must not self-trip the new CAPABILITY-only "
+            f"rules; got {v}",
+        )
+
+    def test_read_facade_module_scans_clean(self):
+        # read_facade.py's __init_subclass__ legitimately calls vars(cls) --
+        # must not self-trip the new introspection_escape_hatch rule.
+        v = scan_paths([_ADAPTER_DIR / "read_facade.py"])
+        self.assertEqual(v, [])
+
+    def test_write_gate_module_scans_clean(self):
+        v = scan_paths([_ADAPTER_DIR / "write_gate.py"])
+        self.assertEqual(v, [])
+
+    def test_adapters_gmail_module_still_scans_clean(self):
+        # ADAPTER_PROFILE zone's own register_adapter call — exempt before
+        # the scanner runs at all (unaffected by this task, regression guard).
+        v = scan_paths([_ADAPTER_DIR / "adapters_gmail.py"])
+        self.assertEqual(v, [])
+
+    def test_capability_api_module_scans_clean(self):
+        # capability_api.py is UNLISTED in either zone allowlist (fail-closed
+        # CAPABILITY default), yet imports nothing but run_operation (from the
+        # bare adapters module) and build_read_facade (from read_facade) --
+        # neither a banned module nor a banned symbol.
+        v = scan_paths([_ADAPTER_DIR / "capability_api.py"])
+        self.assertEqual(v, [])
+
+    def test_read_facades_gmail_module_scans_clean(self):
+        # Also fail-closed CAPABILITY (unlisted), and also clean on its own
+        # merits: imports only ReadFacade + register_read_facade.
+        v = scan_paths([_ADAPTER_DIR / "read_facades_gmail.py"])
+        self.assertEqual(v, [])
+
+    def test_whole_adapter_dir_still_scans_clean(self):
+        # Full-directory regression guard: every file in the real package,
+        # scanned together under the default zone allowlists, stays clean.
+        v = scan_paths([_ADAPTER_DIR])
+        self.assertEqual(v, [], f"real kernel/adapter-profile code must stay "
+                                f"clean under the new capability-only rules; got {v}")
+
+
 if __name__ == "__main__":
     unittest.main()
