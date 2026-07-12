@@ -28,13 +28,19 @@ Bypass classes CAUGHT at v0
                          (urllib.request) match the banned top-level package.
   direct_api_call     -- referencing a known external-surface mutation method
                          by name (values().update, batchUpdate, append,
-                         update_cells, ...). Caught whether the mutation verb is
-                         the immediate func of a Call OR merely loaded as an
-                         attribute and called indirectly (``fn = svc...update;
-                         fn(...)``). Caught wherever it appears, including inside
-                         a local helper function (so helper indirection is
-                         covered: the forbidden reference inside the helper is
-                         itself reported).
+                         update_cells, ...; and, as of Task R2/NF1, Gmail's
+                         trash/untrash on name alone, and modify/send/create/
+                         delete gated on a Gmail surface handle -- messages/
+                         drafts/threads/labels/filters/settings/users -- in the
+                         attribute chain, mirroring the Sheets ambiguous-verb
+                         design; see ``_check_surface_mutation``). Caught
+                         whether the mutation verb is the immediate func of a
+                         Call OR merely loaded as an attribute and called
+                         indirectly (``fn = svc...update; fn(...)``). Caught
+                         wherever it appears, including inside a local helper
+                         function (so helper indirection is covered: the
+                         forbidden reference inside the helper is itself
+                         reported).
   dynamic_import      -- importlib.import_module('requests') / __import__(...)
                          with a banned literal module name (defeats static
                          ``import`` detection).
@@ -265,6 +271,38 @@ _FORBIDDEN_SHEETS_VERBS = frozenset({"update", "append", "clear"})
 # the prior double-handling where batchUpdate was both a "sheets verb" and a
 # trailing special case).
 _UNAMBIGUOUS_SURFACE_VERBS = frozenset({"batchUpdate", "update_cells"})
+
+# NF1 (external-write-gate-generalization fix-wave, Task R2) — Gmail mutation
+# verbs, added as a first-class defense-in-depth detection layer following the
+# SAME ambiguous-vs-unambiguous discipline as the Sheets verbs above. A direct
+# Gmail mutation was already indirectly caught via forbidden_import (the
+# googleapiclient/google import) + credential_construction (obtaining the
+# write-capable credential); this closes the surface-mutation gap directly,
+# the same way _FORBIDDEN_SHEETS_VERBS / _UNAMBIGUOUS_SURFACE_VERBS close it
+# for Sheets. Kept as a PARALLEL set (not merged into the Sheets sets) so each
+# vendor's verb list stays independently readable and the Sheets set is left
+# untouched.
+#
+#   _UNAMBIGUOUS_GMAIL_VERBS -- Gmail-specific verbs that rarely collide with
+#     ordinary method names on an arbitrary object -- flagged on name alone,
+#     exactly like _UNAMBIGUOUS_SURFACE_VERBS.
+#   _FORBIDDEN_GMAIL_VERBS -- verbs that collide with common English method
+#     names (a dict/service/store can easily have its own .create()/
+#     .delete()/.send()/.modify()) -- flagged ONLY when the attribute chain
+#     shows a Gmail surface handle (_GMAIL_SURFACE_HANDLES below), the same
+#     chain-gating _FORBIDDEN_SHEETS_VERBS uses for update/append/clear.
+_UNAMBIGUOUS_GMAIL_VERBS = frozenset({"trash", "untrash"})
+_FORBIDDEN_GMAIL_VERBS = frozenset({"modify", "send", "create", "delete"})
+
+# Gmail resource/surface handles: the resource-collection names that appear in
+# the attribute chain of a real Gmail API call shape (``service.users()
+# .messages().trash(...)``, ``...drafts().create(...)``,
+# ``...settings().filters().create(...)``). These are RESOURCE handles, not
+# verbs themselves — mirrors how "values"/"spreadsheets"/"sheet" gate the
+# Sheets ambiguous verbs in _check_surface_mutation.
+_GMAIL_SURFACE_HANDLES = frozenset(
+    {"messages", "drafts", "threads", "labels", "filters", "settings", "users"}
+)
 
 # Functions that perform a dynamic import.
 _DYNAMIC_IMPORT_FUNCS = frozenset({"__import__"})
@@ -565,13 +603,20 @@ class _Scanner(ast.NodeVisitor):
         (update/append/clear) are flagged only when the attribute chain shows a
         sheets-style surface handle. The unambiguous verbs (batchUpdate,
         update_cells) are flagged on name alone.
+
+        NF1 (Task R2) adds the same discipline for Gmail: ``trash``/
+        ``untrash`` are flagged on name alone (unambiguous); ``modify``/
+        ``send``/``create``/``delete`` collide with common method names, so
+        they are flagged only when the attribute chain shows a Gmail surface
+        handle (``messages``/``drafts``/``threads``/``labels``/``filters``/
+        ``settings``/``users`` — see ``_GMAIL_SURFACE_HANDLES``).
         """
         method = node.attr
 
         # Unambiguous external-surface verbs: flagged on name alone (single
         # path — no separate later branch). These are not English collection
         # methods, so there is no benign-collision risk.
-        if method in _UNAMBIGUOUS_SURFACE_VERBS:
+        if method in _UNAMBIGUOUS_SURFACE_VERBS or method in _UNAMBIGUOUS_GMAIL_VERBS:
             self._add(node.lineno, "direct_api_call")
             return
 
@@ -580,6 +625,15 @@ class _Scanner(ast.NodeVisitor):
         if method in _FORBIDDEN_SHEETS_VERBS:
             chain = _attr_chain_names(node)
             if "values" in chain or "spreadsheets" in chain or "sheet" in chain:
+                self._add(node.lineno, "direct_api_call")
+            return
+
+        # Ambiguous Gmail verbs (modify/send/create/delete) collide with
+        # common method names on an arbitrary object; flag only when the
+        # attribute chain shows a Gmail resource/surface handle.
+        if method in _FORBIDDEN_GMAIL_VERBS:
+            chain = _attr_chain_names(node)
+            if any(handle in chain for handle in _GMAIL_SURFACE_HANDLES):
                 self._add(node.lineno, "direct_api_call")
 
     def _check_credential_attribute(self, node: ast.Attribute) -> None:

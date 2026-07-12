@@ -71,6 +71,47 @@ class TestDirectApiCall(unittest.TestCase):
             self.assertGreater(viol.lineno, 0)
 
 
+class TestGmailDirectApiCall(unittest.TestCase):
+    """NF1 (external-write-gate-generalization fix-wave, Task R2) — Gmail
+    mutation verbs added to ``direct_api_call`` as a defense-in-depth layer
+    (a direct Gmail mutation is already indirectly caught via
+    forbidden_import + credential_construction; this adds a first-class
+    surface-mutation detection mirroring the Sheets design)."""
+
+    def test_gmail_mutation_verbs_flagged_in_capability_zone(self):
+        v = scan_paths([_FIXTURES / "gmail_direct_api_call.py"])
+        self.assertTrue(v, "direct Gmail mutation calls must be flagged")
+        kinds = _kinds(v)
+        self.assertIn("direct_api_call", kinds)
+        direct = [x for x in v if x.kind == "direct_api_call"]
+        # trash, untrash, create(drafts), modify, send, create(filters),
+        # delete(filters), trash (bound-and-called-later) -> 8 sites.
+        self.assertGreaterEqual(len(direct), 8)
+        for viol in direct:
+            self.assertIsInstance(viol.lineno, int)
+            self.assertGreater(viol.lineno, 0)
+
+    def test_benign_non_gmail_verbs_not_flagged(self):
+        # False-positive guard: create/delete/send/modify are common method
+        # names. With no Gmail surface handle in the attribute chain, a
+        # benign non-Gmail call must NOT be flagged.
+        v = scan_paths([_FIXTURES / "gmail_benign_non_gmail_verbs.py"])
+        self.assertEqual(
+            v, [], "non-Gmail create/delete/send/modify must not be flagged"
+        )
+
+    def test_gmail_adapter_module_is_exempt(self):
+        # The real Gmail adapter (ADAPTER_PROFILE zone, registered in
+        # zones.ADAPTER_PROFILE_MODULE_PATHS) legitimately calls these same
+        # verbs (messages().modify, settings().filters().create/delete) --
+        # it must not be flagged. Uses the default anchor/adapter-profile
+        # allowlist, exactly as a real build would.
+        v = scan_paths([_ADAPTER_DIR / "adapters_gmail.py"])
+        self.assertEqual(
+            v, [], "the ADAPTER_PROFILE Gmail adapter must scan clean"
+        )
+
+
 class TestForbiddenImport(unittest.TestCase):
     def test_network_client_imports_flagged(self):
         v = scan_paths([_FIXTURES / "forbidden_import.py"])
