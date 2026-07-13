@@ -101,12 +101,29 @@ def _current_label_ids(raw_client: Any, message_id: str) -> List[str]:
     """A live read of message `message_id`'s CURRENT label set. Legitimate
     here (unlike in a Adapter.plan(), which must be pure — see
     adapter_registry.Adapter's protocol docstring): this runs inside
-    apply_one/undo_one/verify_one, against the write-capable raw_client the
-    credential-isolation seam hands this adapter, never against
-    capability-side code's ReadFacade."""
+    apply_one/undo_one, against the WRITE-CAPABLE raw_client the
+    credential-isolation seam hands this adapter, to compute the exact
+    label delta a mutation needs. Never used by verify_one — see
+    `_observed_label_ids` below, which reads through a READ-ONLY facade
+    instead."""
     msg = raw_client.users().messages().get(
         userId="me", id=message_id, format="metadata").execute()
     return list(msg.get("labelIds", []))
+
+
+def _observed_label_ids(observer: Any, message_id: str) -> List[str]:
+    """verify_one's READ-ONLY observation of message `message_id`'s current
+    label set (Task 3, A2 run-time — v0.12.0 Slice 1). `observer` is a
+    `read_facades_gmail.GmailReadFacade` (or, in a unit test, a fixture
+    exposing the same declared `read_methods`) — NEVER the write-capable
+    raw_client `apply_one`/`undo_one` use above; the kernel
+    (`adapters._run_adapter_operation`) builds it from a read-only-scoped
+    client and hands it to verify_one, never the write client. `get_message`
+    returns the SAME shape `_current_label_ids` reads off the write-capable
+    client (`{"id": ..., "labelIds": [...]}`), so the rest of this module's
+    label-diff logic is unchanged regardless of which client observed it."""
+    msg = observer.get_message(message_id)
+    return list((msg or {}).get("labelIds", []))
 
 
 def _apply_label_delta(raw_client: Any, message_id: str,
@@ -143,13 +160,15 @@ def _trash_labels(raw_client: Any, message_id: str) -> None:
     _apply_label_delta(raw_client, message_id, [TRASH_LABEL], [INBOX_LABEL])
 
 
-def _label_diff(raw_client: Any, message_id: str,
+def _label_diff(observer: Any, message_id: str,
                 prior_label_ids: Sequence[str]) -> Dict[str, Any]:
     """verify_one's prestate/label diff: the message's CURRENT live label
-    set, plus whether it matches the trashed shape (TRASH present, INBOX
-    absent) and/or the given prestate exactly. Generic enough to answer
-    both "did apply land" and "did undo restore prestate" from one call."""
-    current = _current_label_ids(raw_client, message_id)
+    set — read via the READ-ONLY `observer` (see `_observed_label_ids`
+    above), never the write-capable client — plus whether it matches the
+    trashed shape (TRASH present, INBOX absent) and/or the given prestate
+    exactly. Generic enough to answer both "did apply land" and "did undo
+    restore prestate" from one call."""
+    current = _observed_label_ids(observer, message_id)
     current_set = set(current)
     prior_set = set(prior_label_ids)
     return {
@@ -203,9 +222,9 @@ class GmailMessageTrashAdapter:
         _set_exact_labels(raw_client, unit.undo_ref["message_id"],
                           unit.undo_ref["prior_label_ids"])
 
-    def verify_one(self, raw_client: Any, unit: EffectUnit) -> Any:
+    def verify_one(self, observer: Any, unit: EffectUnit) -> Any:
         prior = unit.undo_ref["prior_label_ids"] if unit.undo_ref else ()
-        return _label_diff(raw_client, unit.target_ref["message_id"], prior)
+        return _label_diff(observer, unit.target_ref["message_id"], prior)
 
     # -----------------------------------------------------------------
     # Evidence predicates (Task 1, B4/T1 -- v0.12.0 Slice 1). Reads LABEL
@@ -274,9 +293,9 @@ class GmailMessageUntrashAdapter:
             raise ValueError(f"{OP_UNTRASH}: unit {unit.unit_id!r} has no undo_ref")
         _trash_labels(raw_client, unit.undo_ref["message_id"])
 
-    def verify_one(self, raw_client: Any, unit: EffectUnit) -> Any:
+    def verify_one(self, observer: Any, unit: EffectUnit) -> Any:
         prior = unit.target_ref.get("prior_label_ids", ())
-        return _label_diff(raw_client, unit.target_ref["message_id"], prior)
+        return _label_diff(observer, unit.target_ref["message_id"], prior)
 
 
 # ---------------------------------------------------------------------------
@@ -326,9 +345,9 @@ class GmailMessageModifyLabelsAdapter:
         _set_exact_labels(raw_client, unit.undo_ref["message_id"],
                           unit.undo_ref["prior_label_ids"])
 
-    def verify_one(self, raw_client: Any, unit: EffectUnit) -> Any:
+    def verify_one(self, observer: Any, unit: EffectUnit) -> Any:
         prior = unit.undo_ref["prior_label_ids"] if unit.undo_ref else ()
-        return _label_diff(raw_client, unit.target_ref["message_id"], prior)
+        return _label_diff(observer, unit.target_ref["message_id"], prior)
 
 
 # ---------------------------------------------------------------------------
@@ -390,13 +409,16 @@ class GmailFilterCreateAdapter:
             userId="me", id=filter_id).execute()
         del self._created_filter_ids[unit.unit_id]
 
-    def verify_one(self, raw_client: Any, unit: EffectUnit) -> Any:
+    def verify_one(self, observer: Any, unit: EffectUnit) -> Any:
+        """READ-ONLY observation via `observer` (a GmailReadFacade, or a
+        fixture exposing the same read_methods) -- never the write-capable
+        raw_client `apply_one`/`undo_one` use. `get_filter` is the facade's
+        declared read method for this shape (see read_facades_gmail.py)."""
         filter_id = self._created_filter_ids.get(unit.unit_id)
         if filter_id is None:
             return {"unit_id": unit.unit_id, "exists": False, "filter_id": None}
         try:
-            existing = raw_client.users().settings().filters().get(
-                userId="me", id=filter_id).execute()
+            existing = observer.get_filter(filter_id)
         except Exception:
             return {"unit_id": unit.unit_id, "exists": False, "filter_id": filter_id}
         return {

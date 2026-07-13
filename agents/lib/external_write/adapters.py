@@ -33,12 +33,15 @@ Stdlib only — no third-party dependencies.
 
 import re
 from datetime import datetime, timezone
-from typing import Any, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 from external_write.operations import Operation, Result
 from external_write.verifiers import validate_postwrite_verification
 from external_write.write_gate import evaluate_write_gate, InvocationLedger, resolve_effective_cap
 from external_write.adapter_registry import get_dispatch
+from external_write.evidence import AdapterEvidence
+from external_write.contracts import SourceLineage
+from external_write.read_facade import build_read_facade, ReadFacadeEligibilityError
 
 
 # ---------------------------------------------------------------------------
@@ -122,9 +125,173 @@ def _parse_allowed_from_error(message: str) -> Optional[list]:
 # Registered-adapter action path
 # ---------------------------------------------------------------------------
 
+def _verify_applied_units(op: Operation, dispatch: Any, units: list,
+                          read_only_client: Any) -> dict:
+    """Post-apply, run-time verification (Task 3, A2 run-time — v0.12.0
+    Slice 1; closes F-41: `_run_adapter_operation` used to return
+    status="written" unconditionally, without ever calling `verify_one` —
+    the estate dogfood's "verified" claim came from the substrate's own
+    manifest, never a real-surface check, and 118-vs-120 surfaced only
+    because the operator counted by hand).
+
+    For EACH applied unit, this OBSERVES the real external surface through a
+    READ-ONLY FACADE (`read_facade.build_read_facade`) built from a
+    read-only-scoped client — NEVER the write-capable client `apply_one`
+    just used (credential isolation: see `adapter_registry.AdapterDispatch`'s
+    `provision_read_only_client` docstring and `read_facade.py`'s module
+    docstring) — and evaluates the adapter's OWN captured
+    `verify_apply_landed` predicate over what was actually observed. A
+    `verified` status is EARNED from that observation; anything the kernel
+    could not itself confirm reports the HONEST `applied_not_verified`,
+    NEVER `verified`:
+
+      * the op_kind's registered adapter declares no `verify_apply_landed`
+        predicate;
+      * no read-only client is available (neither self-provisioned via
+        `build_read_only_client` nor supplied by the caller via
+        `run_operation`'s `read_only_client` argument);
+      * the op_kind is ineligible for the read-only-facade model (no
+        declared `read_only_scope` / no registered `ReadFacade` subclass);
+      * `verify_one` (the adapter's read-only OBSERVER) raises, or does not
+        return an observable poststate mapping; or
+      * the predicate itself evaluates the observed evidence as NOT landed.
+
+    Returns a dict — recorded into `Result.detail["verification"]` by the
+    caller, never consumed here (the RunEnvelope tranche wiring that
+    CONSUMES this is Task 4, out of this task's scope):
+    {"per_unit": {unit_id: {"status": "verified"|"applied_not_verified",
+    "reason": <str, present only when not verified>}}, "verified_count": N,
+    "applied_not_verified_count": M} — a legible, reconciled aggregate count
+    per EffectUnit (the apply/verify granularity the adapter itself chose in
+    `plan()`; a surface quirk like Gmail thread-vs-message grouping is the
+    adapter's own poststate shape to reconcile before returning it from
+    `verify_one`, not something this generic kernel function assumes).
+    """
+    per_unit: Dict[str, dict] = {}
+
+    if dispatch.verify_apply_landed is None:
+        reason = (
+            f"operation kind {op.op_kind!r} has a registered adapter but "
+            "declares no verify_apply_landed evidence predicate -- a "
+            "'verified' claim cannot be earned without one"
+        )
+        for unit in units:
+            per_unit[unit.unit_id] = {"status": "applied_not_verified", "reason": reason}
+        return {"per_unit": per_unit, "verified_count": 0,
+                "applied_not_verified_count": len(units)}
+
+    facade = None
+    facade_error: Optional[str] = None
+    # Resolve the read-only client — self-provisioned by the adapter if it
+    # defines build_read_only_client, else the caller-supplied fallback.
+    # Fail-SAFE: the apply loop already ran; a provisioning failure here must
+    # NEVER propagate (it would turn a successful write into an uncaught
+    # exception), so any exception degrades to applied_not_verified, honest.
+    _provision_ro = dispatch.provision_read_only_client
+    effective_read_only_client = None
+    try:
+        effective_read_only_client = (
+            _provision_ro(dispatch.instance, op) if _provision_ro is not None
+            else read_only_client
+        )
+    except Exception as exc:
+        facade_error = (
+            f"could not obtain a read-only client for {op.op_kind!r} "
+            f"(build_read_only_client raised): {exc!r}"
+        )
+
+    if facade_error is not None:
+        pass
+    elif effective_read_only_client is None:
+        facade_error = (
+            f"no read-only client is available for {op.op_kind!r} -- the "
+            "adapter did not self-provision one (build_read_only_client) and "
+            "the caller did not supply run_operation's read_only_client "
+            "argument -- the real surface cannot be queried"
+        )
+    else:
+        try:
+            facade = build_read_facade(op.op_kind, effective_read_only_client)
+        except ReadFacadeEligibilityError as exc:
+            facade_error = (
+                f"operation kind {op.op_kind!r} is not eligible for the "
+                f"read-only-facade credential-isolation model: {exc}"
+            )
+        except Exception as exc:
+            facade_error = (
+                f"could not build a read-only facade for {op.op_kind!r}: {exc!r}"
+            )
+
+    verified_count = 0
+    unverified_count = 0
+    for unit in units:
+        if facade is None:
+            per_unit[unit.unit_id] = {"status": "applied_not_verified", "reason": facade_error}
+            unverified_count += 1
+            continue
+
+        try:
+            poststate = dispatch.verify_one(dispatch.instance, facade, unit)
+        except Exception as exc:
+            per_unit[unit.unit_id] = {
+                "status": "applied_not_verified",
+                "reason": f"verify_one raised while observing the real surface: {exc!r}",
+            }
+            unverified_count += 1
+            continue
+
+        if not isinstance(poststate, dict):
+            per_unit[unit.unit_id] = {
+                "status": "applied_not_verified",
+                "reason": "verify_one did not return an observable poststate mapping",
+            }
+            unverified_count += 1
+            continue
+
+        evidence = AdapterEvidence(
+            op_kind=op.op_kind,
+            unit_id=unit.unit_id,
+            poststate=poststate,
+            prestate=None,
+            source_lineage=SourceLineage(
+                pre_write_sources=(),
+                post_write_sources=("live_read_only_facade_observation",),
+                forbidden_verification_inputs=(),
+            ),
+        )
+        try:
+            landed = bool(dispatch.verify_apply_landed(dispatch.instance, evidence))
+        except Exception as exc:
+            per_unit[unit.unit_id] = {
+                "status": "applied_not_verified",
+                "reason": f"verify_apply_landed raised evaluating observed evidence: {exc!r}",
+            }
+            unverified_count += 1
+            continue
+
+        if landed:
+            per_unit[unit.unit_id] = {"status": "verified"}
+            verified_count += 1
+        else:
+            per_unit[unit.unit_id] = {
+                "status": "applied_not_verified",
+                "reason": (
+                    "observed evidence from the read-only facade does not "
+                    "confirm the apply landed"
+                ),
+            }
+            unverified_count += 1
+
+    return {
+        "per_unit": per_unit,
+        "verified_count": verified_count,
+        "applied_not_verified_count": unverified_count,
+    }
+
+
 def _run_adapter_operation(op: Operation, raw_client: Any, dispatch: Any,
                            descriptor_set: Any, gate_audit: Optional[dict],
-                           units: list) -> Result:
+                           units: list, read_only_client: Any = None) -> Result:
     """Cap-check, then apply — the registered-adapter counterpart to the
     field-write Steps 2-4 in run_operation.
 
@@ -179,6 +346,19 @@ def _run_adapter_operation(op: Operation, raw_client: Any, dispatch: Any,
     registered adapter at all and never reach this path (see
     adapter_registry.py's scope note; test_external_write_replay_conformance.py
     carries their byte-identical guarantee).
+
+    Run-time verification (Task 3, A2 run-time — v0.12.0 Slice 1; closes
+    F-41): AFTER the apply loop below, `_verify_applied_units` observes the
+    REAL surface for every applied unit through a READ-ONLY facade — built
+    from the adapter's self-provisioned read-only client
+    (`dispatch.provision_read_only_client`) if present, else from
+    `read_only_client` (this function's own new parameter, mirroring
+    `raw_client`'s write-side caller-supplied fallback) — and records an
+    honest per-unit `verified`/`applied_not_verified` status into
+    `Result.detail["verification"]`. This NEVER uses `effective_raw_client`
+    (the write-capable client resolved above) for the read: the two
+    resolutions are entirely independent, exactly like write-side credential
+    isolation is independent of any caller-supplied argument.
     """
     cap = resolve_effective_cap(op, descriptor_set)
     if cap is not None and len(units) > cap:
@@ -206,8 +386,15 @@ def _run_adapter_operation(op: Operation, raw_client: Any, dispatch: Any,
     for unit in units:
         dispatch.apply_one(dispatch.instance, effective_raw_client, unit)
 
+    # Run-time verification (Task 3, A2 run-time — v0.12.0 Slice 1; closes
+    # F-41): NEVER uses `effective_raw_client` above — see this function's
+    # docstring and `_verify_applied_units`'s own docstring for the
+    # credential-isolation rationale.
+    verification = _verify_applied_units(op, dispatch, units, read_only_client)
+
     detail: dict = dict(gate_audit) if gate_audit else {}
     detail["units_applied"] = len(units)
+    detail["verification"] = verification
     return Result(status="written", detail=detail)
 
 
@@ -220,7 +407,8 @@ def run_operation(op: Operation, receipt: Any, client: Any,
                   target: Optional[str] = None,
                   descriptor_set: Any = None,
                   cap_ledger: Optional[InvocationLedger] = None,
-                  clock: Any = None) -> Result:
+                  clock: Any = None,
+                  read_only_client: Any = None) -> Result:
     """Run a named external-write operation with receipt validation and fail-fast
     value-validity enforcement.
 
@@ -232,6 +420,20 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     client:  A surface client stub or real client.  Must implement:
                client.write(object_id, field, value) -> None  (raises ValueError on bad value)
                client.read(object_id, field) -> Any
+    read_only_client: (keyword-only, Task 3 — A2 run-time, v0.12.0 Slice 1) a
+             READ-ONLY-scoped client for the registered-adapter path's
+             post-apply run-time verification (`_verify_applied_units`) —
+             the read-side mirror of `client`: used ONLY as a fallback when
+             the op_kind's registered adapter does NOT self-provision one
+             (no `build_read_only_client` on its class); ignored entirely by
+             the legacy field-write path and by any op_kind with no
+             registered adapter. Absent/None (the default) means run-time
+             verification cannot query the real surface: every applied unit
+             is reported `applied_not_verified` (honest fail-safe), never
+             `verified` — this is NEVER the same object as `client`/the
+             resolved write-capable client (credential isolation; see
+             `adapter_registry.AdapterDispatch.provision_read_only_client`
+             and `read_facade.py`).
     target:  (keyword-only) the machine-readable target signal for a gated (high-risk)
              op: LIVE_TARGET ('live') or a declared test target ('copy'/'bounded_sample'/
              'dry_run'/'native_undo'). An op on the copy-surface convention is an implicit copy
@@ -397,7 +599,7 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     # rather than calling plan() a second time.
     if dispatch is not None:
         return _run_adapter_operation(op, client, dispatch, descriptor_set, _gate_audit,
-                                      _planned_units)
+                                      _planned_units, read_only_client)
 
     # Step 2: attempt write via the surface's validating path.
     try:

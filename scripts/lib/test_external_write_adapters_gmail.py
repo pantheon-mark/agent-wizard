@@ -311,6 +311,7 @@ class TestApplyUndoVerifyRoundTrip(unittest.TestCase):
 
     def test_trash_apply_undo_verify_restores_prestate(self):
         service = MockGmailService(messages={"m1": {"INBOX", "IMPORTANT"}})
+        observer = _FixtureGmailReadOnlyClient(service)
         adapter = GmailMessageTrashAdapter()
         units = adapter.plan({"messages": [
             {"message_id": "m1", "prior_label_ids": ["INBOX", "IMPORTANT"]},
@@ -319,18 +320,23 @@ class TestApplyUndoVerifyRoundTrip(unittest.TestCase):
         unit = units[0]
 
         adapter.apply_one(service, unit)
-        applied = adapter.verify_one(service, unit)
+        # verify_one is the READ-ONLY OBSERVER (Task 3, A2 run-time -- v0.12.0
+        # Slice 1): it takes an observer exposing GmailReadFacade's declared
+        # read_methods (get_message/...), never the write-capable `service`
+        # apply_one/undo_one use above -- see adapters_gmail._observed_label_ids.
+        applied = adapter.verify_one(observer, unit)
         self.assertTrue(applied["is_trashed"])
         self.assertFalse(applied["matches_prestate"])
         self.assertEqual(set(service.messages["m1"]), {"TRASH", "IMPORTANT"})
 
         adapter.undo_one(service, unit)
-        restored = adapter.verify_one(service, unit)
+        restored = adapter.verify_one(observer, unit)
         self.assertTrue(restored["matches_prestate"])
         self.assertEqual(set(service.messages["m1"]), {"INBOX", "IMPORTANT"})
 
     def test_untrash_apply_undo_verify_round_trip(self):
         service = MockGmailService(messages={"m1": {"TRASH", "IMPORTANT"}})
+        observer = _FixtureGmailReadOnlyClient(service)
         adapter = GmailMessageUntrashAdapter()
         units = adapter.plan({"messages": [
             {"message_id": "m1", "prior_label_ids": ["INBOX", "IMPORTANT"]},
@@ -339,7 +345,7 @@ class TestApplyUndoVerifyRoundTrip(unittest.TestCase):
 
         adapter.apply_one(service, unit)
         self.assertEqual(set(service.messages["m1"]), {"INBOX", "IMPORTANT"})
-        applied = adapter.verify_one(service, unit)
+        applied = adapter.verify_one(observer, unit)
         self.assertTrue(applied["matches_prestate"])
 
         # undo = re-trash
@@ -348,6 +354,7 @@ class TestApplyUndoVerifyRoundTrip(unittest.TestCase):
 
     def test_modify_labels_apply_undo_verify_restores_prestate(self):
         service = MockGmailService(messages={"m1": {"INBOX"}})
+        observer = _FixtureGmailReadOnlyClient(service)
         adapter = GmailMessageModifyLabelsAdapter()
         units = adapter.plan({"messages": [
             {"message_id": "m1", "add_label_ids": ["Label_custom"],
@@ -359,12 +366,13 @@ class TestApplyUndoVerifyRoundTrip(unittest.TestCase):
         self.assertEqual(set(service.messages["m1"]), {"Label_custom"})
 
         adapter.undo_one(service, unit)
-        restored = adapter.verify_one(service, unit)
+        restored = adapter.verify_one(observer, unit)
         self.assertTrue(restored["matches_prestate"])
         self.assertEqual(set(service.messages["m1"]), {"INBOX"})
 
     def test_filter_create_apply_undo_verify_round_trip(self):
         service = MockGmailService()
+        observer = _FixtureGmailReadOnlyClient(service)
         adapter = GmailFilterCreateAdapter()
         units = adapter.plan({"filters": [
             {"criteria": {"from": "newsletter@example.com"},
@@ -374,13 +382,13 @@ class TestApplyUndoVerifyRoundTrip(unittest.TestCase):
 
         adapter.apply_one(service, unit)
         self.assertEqual(len(service.filters), 1)
-        applied = adapter.verify_one(service, unit)
+        applied = adapter.verify_one(observer, unit)
         self.assertTrue(applied["exists"])
         self.assertEqual(applied["criteria"], {"from": "newsletter@example.com"})
 
         adapter.undo_one(service, unit)
         self.assertEqual(service.filters, {})
-        after_undo = adapter.verify_one(service, unit)
+        after_undo = adapter.verify_one(observer, unit)
         self.assertFalse(after_undo["exists"])
 
     def test_filter_create_undo_without_prior_apply_raises(self):
@@ -479,9 +487,17 @@ class TestStructuralSafetyByAbsence(unittest.TestCase):
         source = _ADAPTER_MODULE_PATH.read_text(encoding="utf-8")
         chains = _call_attr_chains(source)
         self.assertIn("users.messages.modify", chains)
+        self.assertIn("users.messages.get", chains)
         self.assertIn("users.settings.filters.create", chains)
         self.assertIn("users.settings.filters.delete", chains)
-        self.assertIn("users.settings.filters.get", chains)
+        # `users.settings.filters.get` is NO LONGER a call site in this module
+        # (Task 3, A2 run-time — v0.12.0 Slice 1): verify_one's filter-exists
+        # read moved to `observer.get_filter(filter_id)` — a READ-ONLY facade
+        # method, never the write-capable raw_client's `.users().settings().
+        # filters().get(...)` chain. See TestGmailReadFacade /
+        # GmailReadFacade.get_filter (read_facades_gmail.py) for that read
+        # path instead.
+        self.assertNotIn("users.settings.filters.get", chains)
 
     def test_mock_service_itself_would_raise_if_forbidden_verbs_were_ever_invoked(self):
         # Defense in depth / documents intent: even if some future edit added

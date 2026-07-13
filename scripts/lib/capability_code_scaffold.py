@@ -325,10 +325,18 @@ class ${class_prefix}Adapter:
             "TODO: reverse the mutation for "
             f"{unit.unit_id!r} against raw_client here (restore unit.undo_ref).")
 
-    def verify_one(self, raw_client: Any, unit: EffectUnit) -> Any:
+    def verify_one(self, observer: Any, unit: EffectUnit) -> Any:
+        # READ-ONLY OBSERVER (run-time verification): `observer` is the
+        # READ-ONLY facade the kernel builds for this op_kind -- NEVER the
+        # write-capable client apply_one/undo_one receive. Observe this unit's
+        # current state and return an opaque poststate mapping that this
+        # adapter's verify_apply_landed predicate can evaluate. Reading the
+        # write-capable client here would defeat credential isolation.
         raise NotImplementedError(
-            "TODO: read back the live state for "
-            f"{unit.unit_id!r} against raw_client and report whether it matches.")
+            "TODO: OBSERVE the live state for "
+            f"{unit.unit_id!r} via the read-only `observer` (never a "
+            "write-capable client) and return a poststate mapping "
+            "verify_apply_landed can check.")
 
 
 register_adapter(OP_KIND, ${class_prefix}Adapter())

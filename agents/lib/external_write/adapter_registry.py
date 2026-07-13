@@ -64,9 +64,21 @@ class Adapter(Protocol):
     undo_one   — reverse exactly one previously-applied EffectUnit, if the unit is
                  reversible (undo_ref is not None). Not invoked by this
                  module's dispatch path; reserved for a later rollback/undo task.
-    verify_one — verify exactly one applied EffectUnit landed as intended. Not
-                 invoked by this module's dispatch path; reserved for a later
-                 verification task.
+    verify_one — READ-ONLY OBSERVER (Task 3, A2 run-time — v0.12.0 Slice 1):
+                 given a READ-ONLY facade/client (never the write-capable
+                 `raw_client` handed to apply_one/undo_one), observe exactly
+                 one applied EffectUnit's current state on the real surface
+                 and return an opaque poststate mapping. WIRED into
+                 `adapters._run_adapter_operation` (see that module's
+                 docstring): post-apply, the kernel builds a `read_facade.
+                 ReadFacade` for this op_kind from a read-only-scoped client
+                 (`AdapterDispatch.provision_read_only_client`, if the class
+                 self-provisions one, else the caller-supplied
+                 `read_only_client`) and calls `verify_one(self, facade,
+                 unit)` — the SAME credential-isolation seam `build_write_
+                 client` provides for writes, mirrored for reads. Never
+                 invoke a mutating method against what `verify_one` is
+                 handed; it must observe only.
 
     build_write_client (OPTIONAL — the credential-isolation keystone) —
                  an adapter MAY additionally define
@@ -97,6 +109,31 @@ class Adapter(Protocol):
                  reference adapter, exercised with a hand-provided
                  ``raw_client``) simply omits it and falls back to
                  run_operation's ``client`` argument, unchanged.
+
+    build_read_only_client (OPTIONAL — Task 3, A2 run-time, v0.12.0 Slice 1 —
+                 the READ-side mirror of ``build_write_client`` above) —
+                 an adapter MAY additionally define
+                 ``build_read_only_client(self, op) -> raw_read_only_client``:
+                 the ONE place this op_kind's READ-ONLY-scoped client is
+                 constructed or obtained, for ``_run_adapter_operation`` to
+                 wrap in a ``read_facade.ReadFacade`` and hand to
+                 ``verify_one`` after apply. When present, it is called
+                 INTERNALLY by the kernel, exactly like
+                 ``build_write_client`` — never by a caller of
+                 ``run_operation`` and never by capability/proposal-side
+                 code. When ABSENT (the common case for an adapter, like the
+                 Gmail reference adapter, whose write client is also
+                 caller-supplied), ``_run_adapter_operation`` falls back to
+                 ``run_operation``'s own ``read_only_client`` keyword
+                 argument, unchanged — mirroring the ``client``/
+                 ``build_write_client`` fallback exactly. If NEITHER a
+                 self-provisioned nor a caller-supplied read-only client is
+                 available, run-time verification cannot query the real
+                 surface at all: every applied unit is reported
+                 ``applied_not_verified`` (honest fail-safe), never
+                 ``verified``. Deliberately NOT a required ``Adapter``
+                 Protocol member, for the same back-compat reason as
+                 ``build_write_client``.
 
     verify_apply_landed / verify_undo_restored / verify_durability
                  (OPTIONAL — Task 1, B4/T1, v0.12.0 Slice 1's per-op_kind
@@ -200,6 +237,21 @@ class AdapterDispatch:
                The captured value is still resolved via the SAME
                scanner-invisible `getattr(cls, "build_write_client", None)`
                string-literal call the rest of this module already relies on.
+    provision_read_only_client:
+               `getattr(type(adapter), "build_read_only_client", None)` —
+               the READ-side mirror of `provision_write_client` (Task 3, A2
+               run-time — v0.12.0 Slice 1), captured the same way and for
+               the same reason: an adapter that self-provisions its own
+               read-only-scoped client keeps working with no emitter change;
+               None if the class does not define `build_read_only_client`
+               (the fallback path in `adapters._run_adapter_operation` then
+               uses `run_operation`'s own `read_only_client` argument,
+               unchanged). Not a scan.py-curated symbol (unlike
+               `build_write_client`/`write_credential_provider`): this hook
+               only ever yields a READ-ONLY-scoped client, never a
+               write-capable credential, so it is not part of the
+               credential_provider_reference threat class that rule
+               polices.
     verify_apply_landed / verify_undo_restored / verify_durability
                (Task 1, B4/T1 — v0.12.0 Slice 1, the per-op_kind EVIDENCE
                PREDICATE): `getattr(type(adapter), "verify_apply_landed",
@@ -236,6 +288,7 @@ class AdapterDispatch:
     undo_one: Callable
     verify_one: Callable
     provision_write_client: Optional[Callable]
+    provision_read_only_client: Optional[Callable]
     verify_apply_landed: Optional[Callable]
     verify_undo_restored: Optional[Callable]
     verify_durability: Optional[Callable]
@@ -259,7 +312,9 @@ def register_adapter(op_kind: str, adapter: Adapter) -> None:
     AdapterDispatch's docstring) and stores it in `_DISPATCH_REGISTRY`, keyed
     by the same op_kind. Also auto-captures the Task 1 (B4/T1) optional
     evidence predicates (`verify_apply_landed`/`verify_undo_restored`/
-    `verify_durability`) off the class, same as `provision_write_client`."""
+    `verify_durability`) off the class, same as `provision_write_client`, and
+    the Task 3 (A2 run-time) `provision_read_only_client` (from
+    `build_read_only_client`, if the class defines it) the same way."""
     _REGISTRY[op_kind] = adapter
     cls = type(adapter)
     _DISPATCH_REGISTRY[op_kind] = AdapterDispatch(
@@ -269,6 +324,7 @@ def register_adapter(op_kind: str, adapter: Adapter) -> None:
         undo_one=cls.undo_one,
         verify_one=cls.verify_one,
         provision_write_client=getattr(cls, "build_write_client", None),
+        provision_read_only_client=getattr(cls, "build_read_only_client", None),
         verify_apply_landed=getattr(cls, "verify_apply_landed", None),
         verify_undo_restored=getattr(cls, "verify_undo_restored", None),
         verify_durability=getattr(cls, "verify_durability", None),
