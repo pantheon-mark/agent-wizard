@@ -57,6 +57,25 @@ class _BuildClientStubAdapter(_StubAdapter):
         return "fake-write-client"
 
 
+class _EvidencePredicateStubAdapter(_StubAdapter):
+    """Stub adapter whose CLASS defines the Task 1 (B4/T1) evidence
+    predicates -- verify_apply_landed / verify_undo_restored /
+    verify_durability -- for proving AdapterDispatch auto-captures them off
+    the class, exactly like plan/apply_one/undo_one/verify_one and
+    build_write_client above. Deliberately does not touch `evidence` beyond
+    a generic mapping lookup -- the shape-neutrality of this stub is the
+    point (it is not Gmail- or field-shaped, just a signature probe)."""
+
+    def verify_apply_landed(self, evidence):
+        return bool(evidence.poststate.get("landed"))
+
+    def verify_undo_restored(self, evidence):
+        return bool(evidence.poststate.get("restored"))
+
+    def verify_durability(self, evidence):
+        return bool(evidence.poststate.get("durable"))
+
+
 class TestAdapterRegistry(unittest.TestCase):
 
     def tearDown(self):
@@ -145,6 +164,87 @@ class TestAdapterDispatchCapture(unittest.TestCase):
         unregister_adapter("_dispatch_probe_a")
         self.assertIsNone(get_adapter("_dispatch_probe_a"))
         self.assertIsNone(get_dispatch("_dispatch_probe_a"))
+
+
+class TestAdapterDispatchEvidencePredicateCapture(unittest.TestCase):
+    """Task 1 (B4/T1) -- v0.12.0 Slice 1. The per-op_kind evidence predicate
+    (verify_apply_landed / verify_undo_restored / optional verify_durability)
+    must be captured OFF THE CLASS at registration time, exactly like
+    plan/apply_one/undo_one/verify_one and provision_write_client above --
+    same defense-in-depth rationale (TestAdapterDispatchCapture's docstring):
+    a capability that obtains the adapter instance must not be able to
+    shadow the predicate with an instance-attribute reassignment and have
+    that shadow reach anything that later dispatches through
+    AdapterDispatch."""
+
+    def tearDown(self):
+        unregister_adapter("_evidence_probe_a")
+        unregister_adapter("_evidence_probe_b")
+
+    def test_dispatch_has_none_for_evidence_predicates_when_class_does_not_define_them(self):
+        # _StubAdapter (used throughout this module) defines none of the
+        # three evidence predicates -- back-compat: every adapter registered
+        # before this task keeps working, with these fields simply None.
+        adapter = _StubAdapter()
+        register_adapter("_evidence_probe_a", adapter)
+        dispatch = get_dispatch("_evidence_probe_a")
+        self.assertIsNone(dispatch.verify_apply_landed)
+        self.assertIsNone(dispatch.verify_undo_restored)
+        self.assertIsNone(dispatch.verify_durability)
+
+    def test_dispatch_captures_evidence_predicates_off_the_class_when_defined(self):
+        adapter = _EvidencePredicateStubAdapter()
+        register_adapter("_evidence_probe_b", adapter)
+        dispatch = get_dispatch("_evidence_probe_b")
+        self.assertIs(dispatch.verify_apply_landed,
+                      _EvidencePredicateStubAdapter.verify_apply_landed)
+        self.assertIs(dispatch.verify_undo_restored,
+                      _EvidencePredicateStubAdapter.verify_undo_restored)
+        self.assertIs(dispatch.verify_durability,
+                      _EvidencePredicateStubAdapter.verify_durability)
+
+    def test_instance_reassignment_of_evidence_predicates_does_not_change_captured_dispatch(self):
+        """The core monkey-patch-inert proof for the evidence predicates,
+        mirroring test_instance_apply_one_reassignment_does_not_change_the_
+        captured_dispatch above: reassigning
+        adapter.verify_apply_landed/verify_undo_restored/verify_durability
+        AFTER registration (an ordinary instance-attribute shadow) must not
+        be visible through get_dispatch."""
+        adapter = _EvidencePredicateStubAdapter()
+        register_adapter("_evidence_probe_b", adapter)
+        original_apply_landed = get_dispatch("_evidence_probe_b").verify_apply_landed
+        original_undo_restored = get_dispatch("_evidence_probe_b").verify_undo_restored
+        original_durability = get_dispatch("_evidence_probe_b").verify_durability
+
+        adapter.verify_apply_landed = lambda evidence: True  # thief
+        adapter.verify_undo_restored = lambda evidence: True  # thief
+        adapter.verify_durability = lambda evidence: True  # thief
+
+        dispatch_after = get_dispatch("_evidence_probe_b")
+        self.assertIs(dispatch_after.verify_apply_landed, original_apply_landed)
+        self.assertIs(dispatch_after.verify_undo_restored, original_undo_restored)
+        self.assertIs(dispatch_after.verify_durability, original_durability)
+        self.assertIs(dispatch_after.verify_apply_landed,
+                      _EvidencePredicateStubAdapter.verify_apply_landed)
+
+    def test_verify_durability_is_optional_independent_of_the_other_two(self):
+        """An adapter may define verify_apply_landed/verify_undo_restored
+        without verify_durability (the non-persistent-binding common case) --
+        verify_durability alone stays None, the other two are still captured."""
+
+        class _NoDurabilityAdapter(_StubAdapter):
+            def verify_apply_landed(self, evidence):
+                return True
+
+            def verify_undo_restored(self, evidence):
+                return True
+
+        adapter = _NoDurabilityAdapter()
+        register_adapter("_evidence_probe_a", adapter)
+        dispatch = get_dispatch("_evidence_probe_a")
+        self.assertIsNotNone(dispatch.verify_apply_landed)
+        self.assertIsNotNone(dispatch.verify_undo_restored)
+        self.assertIsNone(dispatch.verify_durability)
 
 
 if __name__ == "__main__":

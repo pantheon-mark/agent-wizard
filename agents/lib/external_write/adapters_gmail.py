@@ -75,6 +75,7 @@ if TYPE_CHECKING:  # pragma: no cover - type-only; never executes at runtime.
 
 from external_write.adapter_registry import register_adapter
 from external_write.operations import EffectUnit
+from external_write.evidence import AdapterEvidence
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +206,31 @@ class GmailMessageTrashAdapter:
     def verify_one(self, raw_client: Any, unit: EffectUnit) -> Any:
         prior = unit.undo_ref["prior_label_ids"] if unit.undo_ref else ()
         return _label_diff(raw_client, unit.target_ref["message_id"], prior)
+
+    # -----------------------------------------------------------------
+    # Evidence predicates (Task 1, B4/T1 -- v0.12.0 Slice 1). Reads LABEL
+    # STATE: `evidence.poststate` carries the SAME shape `verify_one`/
+    # `_label_diff` already produces (`is_trashed`/`matches_prestate`) -- a
+    # kernel task (Task 3, run-time) is expected to populate it from exactly
+    # that call; a kernel task (Task 2, proof-time) is expected to populate
+    # it from a captured evidence file recording the same observation made
+    # during the copy-run. NEITHER predicate below re-reads the surface
+    # itself or takes a path/ref argument -- see adapter_registry.py's
+    # AdapterDispatch docstring for the anti-tautology property this relies
+    # on.
+    # -----------------------------------------------------------------
+
+    def verify_apply_landed(self, evidence: AdapterEvidence) -> bool:
+        """Apply landed iff the observed live label state shows the
+        message actually trashed (TRASH present, INBOX absent) -- never
+        merely that `apply_one` returned without raising."""
+        return bool(evidence.poststate.get("is_trashed"))
+
+    def verify_undo_restored(self, evidence: AdapterEvidence) -> bool:
+        """Undo restored iff the observed live label state exactly matches
+        the prestate (`prior_label_ids`) supplied when the evidence was
+        captured."""
+        return bool(evidence.poststate.get("matches_prestate"))
 
 
 # ---------------------------------------------------------------------------
@@ -380,6 +406,25 @@ class GmailFilterCreateAdapter:
             "criteria": existing.get("criteria"),
             "action": existing.get("action"),
         }
+
+    # -----------------------------------------------------------------
+    # Evidence predicate (Task 1, B4/T1 -- v0.12.0 Slice 1). gmail.filter.
+    # create is the one op_kind in this reference set whose contract
+    # declares introduces_persistent_binding=True (a created filter is a
+    # STANDING rule, not a one-shot edit) -- the narrow case
+    # `verify_durability` (optional on every other adapter here) exists for.
+    # `evidence.poststate` carries the SAME shape `verify_one` above already
+    # produces (`exists`/`filter_id`); a kernel task (Task 2's
+    # copy_run_proof.durability_checks) is expected to populate it by
+    # re-checking the filter's existence AFTER ordinary operator actions
+    # (sort/filter/insert/delete/move) were performed on the copy.
+    # -----------------------------------------------------------------
+
+    def verify_durability(self, evidence: AdapterEvidence) -> bool:
+        """Durable iff the observed evidence shows the created filter still
+        resolvable -- i.e. the persistent binding survived, not merely that
+        `apply_one` once succeeded."""
+        return bool(evidence.poststate.get("exists"))
 
 
 # ---------------------------------------------------------------------------

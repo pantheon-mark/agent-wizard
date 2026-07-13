@@ -97,6 +97,33 @@ class Adapter(Protocol):
                  reference adapter, exercised with a hand-provided
                  ``raw_client``) simply omits it and falls back to
                  run_operation's ``client`` argument, unchanged.
+
+    verify_apply_landed / verify_undo_restored / verify_durability
+                 (OPTIONAL — Task 1, B4/T1, v0.12.0 Slice 1's per-op_kind
+                 EVIDENCE PREDICATE) — an adapter MAY additionally define
+                 ``verify_apply_landed(self, evidence) -> bool``,
+                 ``verify_undo_restored(self, evidence) -> bool``, and/or
+                 ``verify_durability(self, evidence) -> bool`` (the latter
+                 only meaningful for an op_kind whose contract declares
+                 ``introduces_persistent_binding=True``). ``evidence`` is a
+                 kernel-constructed ``evidence.AdapterEvidence`` — an
+                 already-materialized, lineage-typed record (see
+                 ``evidence.py``); the predicate signature takes NO path/ref
+                 argument, so a predicate is structurally incapable of
+                 reading outside what it was handed (the anti-tautology
+                 property this closes; extends ``verifiers.py``'s lineage
+                 lock). Like ``build_write_client``, these are auto-captured
+                 OFF THE CLASS by ``register_adapter`` (see
+                 ``AdapterDispatch``'s docstring) — deliberately NOT required
+                 Protocol members, so every adapter registered before this
+                 task keeps working unchanged (all three simply resolve to
+                 None). Nothing in THIS module's dispatch path invokes them
+                 yet: proof-time evaluation (`copy_run_proof.
+                 validate_copy_run_proof`) and run-time evaluation
+                 (`adapters._run_adapter_operation`) are separate, later
+                 tasks that consume the captured predicate — this task only
+                 builds the capture + the evidence type + proves the
+                 predicate signature is sound against ≥2 divergent op_kinds.
     """
 
     def plan(self, params: Optional[dict]) -> List[EffectUnit]:
@@ -173,6 +200,34 @@ class AdapterDispatch:
                The captured value is still resolved via the SAME
                scanner-invisible `getattr(cls, "build_write_client", None)`
                string-literal call the rest of this module already relies on.
+    verify_apply_landed / verify_undo_restored / verify_durability
+               (Task 1, B4/T1 — v0.12.0 Slice 1, the per-op_kind EVIDENCE
+               PREDICATE): `getattr(type(adapter), "verify_apply_landed",
+               None)` etc. — auto-captured OFF THE CLASS at registration
+               time, same rationale and same mechanism as
+               `provision_write_client` immediately above: an adapter class
+               MAY optionally define
+               ``verify_apply_landed(self, evidence) -> bool``,
+               ``verify_undo_restored(self, evidence) -> bool``, and/or
+               ``verify_durability(self, evidence) -> bool`` (durability is
+               the narrow, optional check for ops whose contract declares
+               `introduces_persistent_binding=True`). Each is None when the
+               class does not define it — back-compat: every adapter
+               registered before this task keeps working unchanged, with
+               these three fields simply None; nothing dispatches through
+               them yet (that is Task 2/Task 3's job — proof-time
+               `validate_copy_run_proof` and run-time `_run_adapter_operation`
+               wiring, respectively). `evidence` is a kernel-constructed,
+               already-materialized `evidence.AdapterEvidence` record — the
+               predicate's signature takes NO path/ref argument, so it is
+               structurally incapable of reading outside what it was handed
+               (the anti-tautology property; see `evidence.py`'s module
+               docstring). Capturing these off the class rather than the
+               instance closes the exact same monkey-patch-hijack class this
+               whole record exists to close: a capability that obtained the
+               adapter instance and reassigned `instance.verify_apply_landed`
+               to a function that always returns True could otherwise forge
+               a "verified" claim.
     """
 
     instance: Any
@@ -181,6 +236,9 @@ class AdapterDispatch:
     undo_one: Callable
     verify_one: Callable
     provision_write_client: Optional[Callable]
+    verify_apply_landed: Optional[Callable]
+    verify_undo_restored: Optional[Callable]
+    verify_durability: Optional[Callable]
 
 
 # op_kind -> AdapterDispatch. Populated alongside _REGISTRY by register_adapter;
@@ -199,7 +257,9 @@ def register_adapter(op_kind: str, adapter: Adapter) -> None:
     calls) need no update. In addition to the existing instance registration,
     this now also captures an AdapterDispatch record OFF `type(adapter)` (see
     AdapterDispatch's docstring) and stores it in `_DISPATCH_REGISTRY`, keyed
-    by the same op_kind."""
+    by the same op_kind. Also auto-captures the Task 1 (B4/T1) optional
+    evidence predicates (`verify_apply_landed`/`verify_undo_restored`/
+    `verify_durability`) off the class, same as `provision_write_client`."""
     _REGISTRY[op_kind] = adapter
     cls = type(adapter)
     _DISPATCH_REGISTRY[op_kind] = AdapterDispatch(
@@ -209,6 +269,9 @@ def register_adapter(op_kind: str, adapter: Adapter) -> None:
         undo_one=cls.undo_one,
         verify_one=cls.verify_one,
         provision_write_client=getattr(cls, "build_write_client", None),
+        verify_apply_landed=getattr(cls, "verify_apply_landed", None),
+        verify_undo_restored=getattr(cls, "verify_undo_restored", None),
+        verify_durability=getattr(cls, "verify_durability", None),
     )
 
 
