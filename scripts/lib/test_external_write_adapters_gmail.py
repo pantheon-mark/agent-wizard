@@ -706,10 +706,24 @@ class TestInvariantEightPositiveControl(unittest.TestCase):
                 "copy_apply_proof": {
                     "apply_receipt_ref": "agents/handoffs/.gmail_apply_receipt.json",
                     "apply_verification": _verification(),
+                    # Evidence-checked apply (Task 2, A2 proof-time — v0.12.0
+                    # Slice 1): a genuine observed round-trip, matching the SAME
+                    # poststate shape GmailMessageTrashAdapter.verify_apply_landed
+                    # reads (adapters_gmail.py's _label_diff output).
+                    "apply_evidence": {
+                        "unit_id": "m1",
+                        "poststate": {"message_id": "m1", "current_label_ids": ["TRASH"],
+                                      "is_trashed": True, "matches_prestate": False},
+                    },
                 },
                 "copy_undo_proof": {
                     "undo_receipt_ref": "agents/handoffs/.gmail_undo_receipt.json",
                     "undo_verification": _verification(),
+                    "undo_evidence": {
+                        "unit_id": "m1",
+                        "poststate": {"message_id": "m1", "current_label_ids": ["INBOX"],
+                                      "is_trashed": False, "matches_prestate": True},
+                    },
                 },
                 "durability_checks": [],  # gmail.message.trash is non-binding -- must be empty
                 "accepted_for_live_use": True,
