@@ -429,6 +429,90 @@ class TestVoiceSettingsFromFile(unittest.TestCase):
             self.assertIn("42", text)
             self.assertIn("25", text)
 
+    def test_literal_emitted_technical_level_tokens_round_trip_to_themselves(self):
+        # This is the REAL format the scaffold substitutes into the table
+        # cell: the literal closed-vocabulary token
+        # voice_settings.voice_settings_inputs emits (see
+        # wizard/scripts/lib/voice_settings.py ~L82-92: "plain" /
+        # "some-technical" / "technical") — NOT free-form prose like "Very
+        # technical, I write code". Prose-only fixtures (above) never
+        # exercised this literal format and masked a real bug: the
+        # prose-heuristic branch `"technical" in low` also matches as a
+        # substring of the literal token "some-technical", so the real
+        # emitted token was misresolved to "technical". Prove every real
+        # token round-trips to itself.
+        for tech_token in ("plain", "some-technical", "technical"):
+            with tempfile.TemporaryDirectory() as d:
+                p = Path(d) / "voice_and_style.md"
+                p.write_text(
+                    "| Explanation depth | standard |\n"
+                    f"| Technical level | {tech_token} |\n",
+                    encoding="utf-8")
+                settings = load_voice_settings_from_file(str(p))
+                self.assertEqual(
+                    settings.get("TECHNICAL_LEVEL"), tech_token,
+                    f"literal emitted token {tech_token!r} must round-trip "
+                    f"to itself; got {settings.get('TECHNICAL_LEVEL')!r}")
+
+    def test_literal_emitted_explanation_depth_tokens_round_trip_to_themselves(self):
+        # Same fixture-format fix as above, for EXPLANATION_DEPTH's literal
+        # emitted tokens ("brief" / "standard" / "detailed").
+        for depth_token in ("brief", "standard", "detailed"):
+            with tempfile.TemporaryDirectory() as d:
+                p = Path(d) / "voice_and_style.md"
+                p.write_text(
+                    f"| Explanation depth | {depth_token} |\n"
+                    "| Technical level | plain |\n",
+                    encoding="utf-8")
+                settings = load_voice_settings_from_file(str(p))
+                self.assertEqual(
+                    settings.get("EXPLANATION_DEPTH"), depth_token,
+                    f"literal emitted token {depth_token!r} must round-trip "
+                    f"to itself; got {settings.get('EXPLANATION_DEPTH')!r}")
+
+
+# ===========================================================================
+# Cross-module vocabulary drift pin — consent_narration's accepted
+# TECHNICAL_LEVEL/EXPLANATION_DEPTH tokens must never silently diverge from
+# voice_settings.py's ACTUAL emitted token set (the exact module boundary
+# that caused the literal-token misparse bug above).
+# ===========================================================================
+
+class TestVoiceVocabularyDriftPin(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        _SCRIPTS_LIB = Path(__file__).resolve().parent
+        if str(_SCRIPTS_LIB) not in sys.path:
+            sys.path.insert(0, str(_SCRIPTS_LIB))
+        from voice_settings import voice_settings_inputs  # noqa: E402
+        import external_write.consent_narration as cn_mod  # noqa: E402
+        cls.voice_settings_inputs = staticmethod(voice_settings_inputs)
+        cls.cn_mod = cn_mod
+
+    def test_technical_level_vocab_matches_voice_settings_emitter(self):
+        emitted = {
+            self.voice_settings_inputs({"UP_TECHNICAL_LITERACY": raw})["TECHNICAL_LEVEL"]
+            for raw in ("not technical at all", "very technical, I write code",
+                        "somewhat familiar")
+        }
+        self.assertEqual(
+            emitted, set(self.cn_mod._VALID_TECH_LEVELS),
+            "consent_narration._VALID_TECH_LEVELS has drifted from the "
+            "TECHNICAL_LEVEL tokens voice_settings.py actually emits — "
+            "update _VALID_TECH_LEVELS (and its parse branches) to match.")
+
+    def test_explanation_depth_vocab_matches_voice_settings_emitter(self):
+        emitted = {
+            self.voice_settings_inputs({"NOTIFICATION_VERBOSITY": raw})["EXPLANATION_DEPTH"]
+            for raw in ("minimal", "detailed", "standard, please")
+        }
+        self.assertEqual(
+            emitted, set(self.cn_mod._VALID_DEPTHS),
+            "consent_narration._VALID_DEPTHS has drifted from the "
+            "EXPLANATION_DEPTH tokens voice_settings.py actually emits — "
+            "update _VALID_DEPTHS (and its parse branches) to match.")
+
 
 # ===========================================================================
 # reversibility_phrase — direct unit coverage of the fail-safe mapping

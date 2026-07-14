@@ -154,8 +154,13 @@ def load_voice_settings_from_file(path: Any) -> Dict[str, str]:
 
     depth_cell = _extract_table_value(raw, "Explanation depth")
     if depth_cell and not depth_cell.startswith("{{"):
-        low = depth_cell.lower()
-        if "brief" in low or "minimal" in low or "concise" in low:
+        low = depth_cell.lower().strip()
+        if low in _VALID_DEPTHS:
+            # Exact-token fast path: the literal closed-vocabulary token
+            # voice_settings.py actually renders into the table cell (not
+            # free-form prose) — must always round-trip to itself.
+            out["EXPLANATION_DEPTH"] = low
+        elif "brief" in low or "minimal" in low or "concise" in low:
             out["EXPLANATION_DEPTH"] = "brief"
         elif "detail" in low:
             out["EXPLANATION_DEPTH"] = "detailed"
@@ -164,9 +169,21 @@ def load_voice_settings_from_file(path: Any) -> Dict[str, str]:
 
     tech_cell = _extract_table_value(raw, "Technical level")
     if tech_cell and not tech_cell.startswith("{{"):
-        low = tech_cell.lower()
-        if "not tech" in low or "non-tech" in low or "plain" in low:
+        low = tech_cell.lower().strip()
+        if low in _VALID_TECH_LEVELS:
+            # Exact-token fast path (see above). This is the fix for the
+            # real bug: without it, the literal token "some-technical" fell
+            # through to the prose heuristics below, where the bare
+            # "technical" in low check also matches as a SUBSTRING of
+            # "some-technical" and misresolved it to "technical".
+            out["TECHNICAL_LEVEL"] = low
+        elif "not tech" in low or "non-tech" in low or "plain" in low:
             out["TECHNICAL_LEVEL"] = "plain"
+        elif "some-technical" in low or "some tech" in low or "somewhat" in low:
+            # Checked BEFORE the bare "technical" substring check below, for
+            # the same reason as the exact-token fast path above: any prose
+            # containing "some-technical" also contains "technical".
+            out["TECHNICAL_LEVEL"] = "some-technical"
         elif "very" in low or "comfortable" in low or "technical" in low:
             out["TECHNICAL_LEVEL"] = "technical"
         else:
@@ -350,8 +367,10 @@ def build_standing_automation_notice(
     """The F-49 fix, standalone: states the real ongoing/unattended nature of
     a standing-automation run and makes NO "every batch pauses for your yes"
     promise. Also usable on its own (e.g. re-shown at a later check-in)."""
-    _normalize_voice(voice)  # validated for symmetry; no depth variance here —
-    # the ongoing-nature statement is itself a prescribed fact, not tone.
+    # ``voice`` is accepted for a consistent call shape across this module's
+    # builders, but this notice has no depth/technical-level variance — the
+    # ongoing-nature statement is itself a prescribed fact, not tone — so
+    # there is nothing here to normalize or use.
     cap_noun = _noun(op_kind, session_cap)
     text = (
         "Once you approve this, it keeps applying on its own in the "
@@ -406,7 +425,9 @@ def build_ceiling_checkin_prose(
             and remaining_count >= 0):
         raise ValueError("remaining_count must be a non-negative integer")
 
-    _normalize_voice(voice)  # validated for symmetry / future tone hooks.
+    # ``voice`` is accepted for a consistent call shape across this module's
+    # builders, but this check-in prose has no depth/technical-level
+    # variance today, so there is nothing here to normalize or use.
 
     noun_now = _noun(op_kind, count_now)
     lines: List[str] = []
