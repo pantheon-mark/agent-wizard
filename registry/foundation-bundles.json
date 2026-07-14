@@ -277,7 +277,7 @@
       "recommendation_reason": "If you build new write-back capabilities, approve batches of changes, run anything on a schedule, or use a credential that needs a specific permission, this update makes each of those safer and easier to trust \u2014 most operators should take it.",
       "release_date": "2026-07-14",
       "safety_class": "routine_improvement",
-      "source_commit": "pending",
+      "source_commit": "2a762b3",
       "status": "prerelease"
     }
   ],
