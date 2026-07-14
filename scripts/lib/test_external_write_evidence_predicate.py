@@ -257,6 +257,77 @@ class TestGmailAdapterEvidencePredicate(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# gmail.filter.create's apply/undo predicates (Task 2b follow-on -- closes
+# task-2-report.md Concern 1: at Task 1 time this adapter defined ONLY
+# verify_durability, so its own copy_run_proof could never pass the
+# apply/undo evidence gate copy_run_proof.py (Task 2) added -- see
+# test_external_write_copy_run_proof_evidence.py's
+# TestGmailFilterCreateFullEvidenceCheckedProof for the end-to-end proof-time
+# exercise). Both predicates read the SAME `exists`/`filter_id` shape
+# `verify_one` already produces, at two different observation points
+# (right after create vs. right after delete) -- undo-restored is the
+# reverse of apply-landed for this create/delete pair.
+# ---------------------------------------------------------------------------
+
+class TestGmailFilterCreateApplyUndoPredicate(unittest.TestCase):
+
+    def test_captures_verify_apply_landed_and_verify_undo_restored(self):
+        dispatch = get_dispatch(OP_FILTER_CREATE)
+        self.assertIsNotNone(dispatch)
+        self.assertIs(dispatch.verify_apply_landed,
+                      GmailFilterCreateAdapter.verify_apply_landed)
+        self.assertIs(dispatch.verify_undo_restored,
+                      GmailFilterCreateAdapter.verify_undo_restored)
+
+    def test_apply_landed_true_when_poststate_reports_filter_exists(self):
+        dispatch = get_dispatch(OP_FILTER_CREATE)
+        evidence = AdapterEvidence(
+            op_kind=OP_FILTER_CREATE, unit_id="filter-0",
+            poststate={"unit_id": "filter-0", "exists": True, "filter_id": "f1"},
+            source_lineage=_lineage(),
+        )
+        self.assertTrue(dispatch.verify_apply_landed(dispatch.instance, evidence))
+
+    def test_apply_landed_false_when_poststate_reports_filter_never_created(self):
+        """apply_one was claimed to succeed but the observed evidence shows
+        the filter never actually resolves -- must be caught, not
+        rubber-stamped (this is the create-side F-38 shape)."""
+        dispatch = get_dispatch(OP_FILTER_CREATE)
+        evidence = AdapterEvidence(
+            op_kind=OP_FILTER_CREATE, unit_id="filter-0",
+            poststate={"unit_id": "filter-0", "exists": False, "filter_id": None},
+            source_lineage=_lineage(),
+        )
+        self.assertFalse(dispatch.verify_apply_landed(dispatch.instance, evidence))
+
+    def test_undo_restored_true_when_poststate_reports_filter_gone(self):
+        dispatch = get_dispatch(OP_FILTER_CREATE)
+        evidence = AdapterEvidence(
+            op_kind=OP_FILTER_CREATE, unit_id="filter-0",
+            poststate={"unit_id": "filter-0", "exists": False, "filter_id": None},
+            source_lineage=_lineage(),
+        )
+        self.assertTrue(dispatch.verify_undo_restored(dispatch.instance, evidence))
+
+    def test_undo_restored_false_when_poststate_still_reports_filter_exists(self):
+        """undo_one was claimed to delete the filter but the observed
+        evidence shows it STILL resolves -- the delete-side F-38 shape."""
+        dispatch = get_dispatch(OP_FILTER_CREATE)
+        evidence = AdapterEvidence(
+            op_kind=OP_FILTER_CREATE, unit_id="filter-0",
+            poststate={"unit_id": "filter-0", "exists": True, "filter_id": "f1"},
+            source_lineage=_lineage(),
+        )
+        self.assertFalse(dispatch.verify_undo_restored(dispatch.instance, evidence))
+
+    def test_predicate_signature_has_no_path_or_ref_parameter(self):
+        dispatch = get_dispatch(OP_FILTER_CREATE)
+        for predicate in (dispatch.verify_apply_landed, dispatch.verify_undo_restored):
+            params = list(inspect.signature(predicate).parameters)
+            self.assertEqual(params, ["self", "evidence"])
+
+
+# ---------------------------------------------------------------------------
 # Optional verify_durability — exercised on gmail.filter.create, the one
 # op_kind in this reference set with introduces_persistent_binding=True
 # (contracts._gmail_filter_create_contract).

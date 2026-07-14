@@ -430,17 +430,49 @@ class GmailFilterCreateAdapter:
         }
 
     # -----------------------------------------------------------------
-    # Evidence predicate (Task 1, B4/T1 -- v0.12.0 Slice 1). gmail.filter.
-    # create is the one op_kind in this reference set whose contract
-    # declares introduces_persistent_binding=True (a created filter is a
-    # STANDING rule, not a one-shot edit) -- the narrow case
-    # `verify_durability` (optional on every other adapter here) exists for.
+    # Evidence predicates (Task 1, B4/T1 -- v0.12.0 Slice 1; apply/undo
+    # closed as a Task 2b follow-on -- see task-2-report.md Concern 1).
     # `evidence.poststate` carries the SAME shape `verify_one` above already
-    # produces (`exists`/`filter_id`); a kernel task (Task 2's
-    # copy_run_proof.durability_checks) is expected to populate it by
-    # re-checking the filter's existence AFTER ordinary operator actions
-    # (sort/filter/insert/delete/move) were performed on the copy.
+    # produces (`exists`/`filter_id`) for ALL THREE predicates below --
+    # apply-landed, undo-restored, and durability all reduce to the same
+    # observed fact ("does this filter id still resolve on the live
+    # surface"), evaluated against evidence captured at three different
+    # moments:
+    #   * verify_apply_landed  -- evidence captured right after apply_one
+    #     (raw_client.filters().create); a kernel task (Task 2's
+    #     copy_run_proof.copy_apply_proof.apply_evidence / Task 3's
+    #     run-time verify_one call) is expected to populate it from a
+    #     fresh `get_filter` observation.
+    #   * verify_undo_restored -- evidence captured right after undo_one
+    #     (raw_client.filters().delete); populated the same way, but AFTER
+    #     the delete -- "restored" for a create/delete pair means the
+    #     filter is GONE again, the reverse of apply-landed's "exists".
+    #   * verify_durability    -- evidence captured LATER, after ordinary
+    #     operator actions (sort/filter/insert/delete/move) were performed
+    #     on the copy (Task 2's copy_run_proof.durability_checks); same
+    #     "does it still exist" question, at a later observation point.
+    # gmail.filter.create is the one op_kind in this reference set whose
+    # contract declares introduces_persistent_binding=True, which is why
+    # `verify_durability` (optional on every other adapter here) is defined
+    # here at all -- but a "verified" apply/undo claim needs the other two
+    # regardless of the persistent-binding contract flag; see
+    # copy_run_proof.py's fail-closed rule ("adapter declares no
+    # evidence predicate" fails ANY registered-adapter op_kind, not only
+    # binding ones).
     # -----------------------------------------------------------------
+
+    def verify_apply_landed(self, evidence: AdapterEvidence) -> bool:
+        """Apply landed iff the observed evidence shows the created filter
+        resolvable on the live surface -- never merely that `apply_one`
+        returned without raising."""
+        return bool(evidence.poststate.get("exists"))
+
+    def verify_undo_restored(self, evidence: AdapterEvidence) -> bool:
+        """Undo restored iff the observed evidence shows the filter is NO
+        LONGER resolvable -- the created filter was actually removed, the
+        reverse of `verify_apply_landed` -- never merely that `undo_one`
+        returned without raising."""
+        return not bool(evidence.poststate.get("exists"))
 
     def verify_durability(self, evidence: AdapterEvidence) -> bool:
         """Durable iff the observed evidence shows the created filter still

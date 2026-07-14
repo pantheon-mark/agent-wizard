@@ -49,10 +49,10 @@ from external_write.verifiers import POSTWRITE_VERIFICATION_SCHEMA  # noqa: E402
 from external_write.operations import EffectUnit  # noqa: E402
 from external_write.evidence import AdapterEvidence  # noqa: E402
 from external_write.adapter_registry import (  # noqa: E402
-    register_adapter, unregister_adapter,
+    register_adapter, unregister_adapter, get_dispatch,
 )
 from external_write.adapters_gmail import (  # noqa: E402
-    OP_TRASH, OP_UNTRASH,
+    OP_TRASH, OP_UNTRASH, OP_FILTER_CREATE,
 )
 
 
@@ -245,6 +245,122 @@ class TestUnregisteredOpKindUnaffected(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# gmail.filter.create -- Task 2b follow-on (closes task-2-report.md Concern
+# 1). At Task 2 time, GmailFilterCreateAdapter defined ONLY verify_durability
+# -- gmail.filter.create's own copy_run_proof could never pass this gate at
+# all: it would fail at "declares no evidence predicate" (the
+# TestAdapterWithNoPredicateFailsClosed shape above) before durability was
+# ever reached, even for a genuinely-landed create/delete round trip. Task 2b
+# added verify_apply_landed/verify_undo_restored to the shipped adapter (see
+# adapters_gmail.py); this is the full end-to-end exercise of all three
+# predicates through validate_copy_run_proof itself, including the
+# durability_checks this op_kind's contract makes mandatory
+# (introduces_persistent_binding=True -- see
+# contracts._gmail_filter_create_contract).
+# ---------------------------------------------------------------------------
+
+class TestGmailFilterCreateFullEvidenceCheckedProof(unittest.TestCase):
+
+    def test_adapter_now_declares_apply_undo_predicates(self):
+        """Sanity/regression guard: before Task 2b, both of these were
+        None, which is exactly why every gmail.filter.create proof failed
+        closed at "declares no evidence predicate" -- see
+        TestAdapterWithNoPredicateFailsClosed above for that same shape
+        against gmail.message.untrash, still true today."""
+        dispatch = get_dispatch(OP_FILTER_CREATE)
+        self.assertIsNotNone(dispatch)
+        self.assertIsNotNone(dispatch.verify_apply_landed)
+        self.assertIsNotNone(dispatch.verify_undo_restored)
+
+    def test_genuine_create_then_remove_round_trip_passes(self):
+        p = _proof(
+            OP_FILTER_CREATE,
+            apply_evidence={
+                "unit_id": "filter-0",
+                "poststate": {"unit_id": "filter-0", "exists": True, "filter_id": "f1"},
+            },
+            undo_evidence={
+                "unit_id": "filter-0",
+                "poststate": {"unit_id": "filter-0", "exists": False, "filter_id": None},
+            },
+            durability=[{"action": "sort", "binding_survived": True}],
+            durability_evidence={
+                "unit_id": "filter-0",
+                "poststate": {"unit_id": "filter-0", "exists": True, "filter_id": "f1"},
+            },
+        )
+        r = validate_copy_run_proof(p)
+        self.assertTrue(r.ok, r.reason)
+
+    def test_regression_apply_claimed_landed_but_filter_never_created_fails(self):
+        """apply_verification asserts 'verified'/accepted, but the observed
+        evidence shows the filter was never actually created -- must fail,
+        not pass on the strength of the self-report alone."""
+        p = _proof(
+            OP_FILTER_CREATE,
+            apply_evidence={
+                "unit_id": "filter-0",
+                "poststate": {"unit_id": "filter-0", "exists": False, "filter_id": None},
+            },
+            undo_evidence={
+                "unit_id": "filter-0",
+                "poststate": {"unit_id": "filter-0", "exists": False, "filter_id": None},
+            },
+            durability=[{"action": "sort", "binding_survived": True}],
+            durability_evidence={
+                "unit_id": "filter-0",
+                "poststate": {"unit_id": "filter-0", "exists": False, "filter_id": None},
+            },
+            accepted=True,
+        )
+        r = validate_copy_run_proof(p)
+        self.assertFalse(r.ok)
+        self.assertIn("verify_apply_landed", r.reason)
+
+    def test_regression_undo_claimed_restored_but_filter_still_exists_fails(self):
+        """The undo half claims restored, but the observed evidence shows
+        the filter is STILL resolvable -- delete never actually landed."""
+        p = _proof(
+            OP_FILTER_CREATE,
+            apply_evidence={
+                "unit_id": "filter-0",
+                "poststate": {"unit_id": "filter-0", "exists": True, "filter_id": "f1"},
+            },
+            undo_evidence={
+                "unit_id": "filter-0",
+                "poststate": {"unit_id": "filter-0", "exists": True, "filter_id": "f1"},
+            },
+            durability=[{"action": "sort", "binding_survived": True}],
+            durability_evidence={
+                "unit_id": "filter-0",
+                "poststate": {"unit_id": "filter-0", "exists": True, "filter_id": "f1"},
+            },
+            accepted=True,
+        )
+        r = validate_copy_run_proof(p)
+        self.assertFalse(r.ok)
+        self.assertIn("verify_undo_restored", r.reason)
+
+    def test_missing_apply_evidence_fails_closed(self):
+        p = _proof(
+            OP_FILTER_CREATE,
+            apply_evidence=None,
+            undo_evidence={
+                "unit_id": "filter-0",
+                "poststate": {"unit_id": "filter-0", "exists": False, "filter_id": None},
+            },
+            durability=[{"action": "sort", "binding_survived": True}],
+            durability_evidence={
+                "unit_id": "filter-0",
+                "poststate": {"unit_id": "filter-0", "exists": True, "filter_id": "f1"},
+            },
+        )
+        r = validate_copy_run_proof(p)
+        self.assertFalse(r.ok)
+        self.assertIn("apply_evidence", r.reason)
+
+
+# ---------------------------------------------------------------------------
 # Divergent exemplar 2: a field/spreadsheet-shaped op_kind (throwaway test
 # fixture, ported from Task 1's test_external_write_evidence_predicate.py
 # _FieldStyleAdapter) -- proves the mechanism is not accidentally Gmail-shaped.
@@ -373,12 +489,23 @@ class TestFieldStyleEvidenceCheckedProof(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Durability evidence-check path (the "+ durability when
 # introduces_persistent_binding" half of Task 2's spec). A throwaway
-# persistent-binding fixture that defines ALL THREE predicates (unlike either
-# shipped exemplar: GmailMessageTrashAdapter defines only apply/undo,
-# GmailFilterCreateAdapter defines only durability -- see the note in
-# task-2-report.md) so this code path is exercised end-to-end through
-# validate_copy_run_proof itself, not just the raw predicate (already covered
-# by test_external_write_evidence_predicate.py for gmail.filter.create).
+# persistent-binding fixture that defines ALL THREE predicates (a different
+# evaluation shape -- prestate-diff -- from gmail.filter.create's boolean
+# existence check below) so this code path is exercised end-to-end through
+# validate_copy_run_proof itself with a divergent poststate shape, not just
+# the raw predicate (already covered by test_external_write_evidence_
+# predicate.py for gmail.filter.create).
+#
+# NOTE (Task 2b follow-on, closes task-2-report.md Concern 1): at Task 2
+# time, GmailFilterCreateAdapter defined ONLY verify_durability --
+# gmail.filter.create's own copy_run_proof could never pass the apply/undo
+# evidence gate above (it would always fail at "declares no evidence
+# predicate" before durability was even reached). Task 2b added
+# verify_apply_landed/verify_undo_restored to GmailFilterCreateAdapter (see
+# adapters_gmail.py) -- TestGmailFilterCreateFullEvidenceCheckedProof below
+# is the full end-to-end copy_run_proof exercise of the shipped
+# gmail.filter.create adapter (all three predicates + durability_checks)
+# this note used to flag as missing.
 # ---------------------------------------------------------------------------
 
 class _BindingFieldStyleAdapter(_FieldStyleAdapter):
