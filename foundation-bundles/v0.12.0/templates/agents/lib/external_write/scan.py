@@ -137,6 +137,15 @@ Bypass classes CAUGHT at v0
                              ``adapters_`` prefix requires a trailing
                              underscore + a non-empty suffix, so "adapters"
                              alone never collides with "adapters_gmail" etc.
+                             NOTE (v0.12.0 S1): importing the bare
+                             ``external_write.adapters`` MODULE is still not an
+                             ``adapter_module_import`` violation, BUT naming the
+                             ``run_operation`` SYMBOL it exports now IS a
+                             separate ``raw_run_operation_reference`` violation
+                             in the CAPABILITY zone (see that rule below) — the
+                             sanctioned CAPABILITY live-write entrypoint is
+                             ``capability_api.run_enveloped_operation``, not raw
+                             ``run_operation``.
                              This additionally
                              matches the PACKAGE-LEVEL import shape — ``from
                              external_write import adapters_<vendor>`` / ``from
@@ -299,6 +308,40 @@ Bypass classes CAUGHT at v0
                          ``__subclasses__``, none of these five appear in
                          ordinary capability code, so banning them carries the
                          same no-over-fire guarantee.
+  raw_run_operation_reference -- (CAPABILITY-zone-ONLY, v0.12.0 S1 — RunEnvelope
+                         trust core) naming the RAW kernel write primitive
+                         ``run_operation`` — as an import alias, a bare Name, or
+                         an Attribute — regardless of the module a capability
+                         claims to reach it through (``external_write.adapters``,
+                         a relative/bare ``adapters`` import,
+                         ``external_write.capability_api``, or any re-export).
+                         The run-level trust protections (disk-authoritative
+                         envelope spendability, consent-receipt binding,
+                         APPLY-BY-ID against the frozen ``reviewed_set``, and the
+                         AGGREGATE CEILING) live ONLY inside
+                         ``run_enveloped_operation`` (run_envelope.py), which
+                         calls ``run_operation`` ONCE per approved op; a
+                         CAPABILITY module that reaches ``run_operation``
+                         directly can loop it and bypass every one of them.
+                         This REVERSES the prior explicit allowance of the
+                         bare-adapters / capability_api ``run_operation``
+                         entrypoint for CAPABILITY code — the sanctioned
+                         CAPABILITY live-write entrypoint is now
+                         ``capability_api.run_enveloped_operation``.
+                         ``run_operation``'s own signature/contract is
+                         deliberately UNCHANGED (a "refuse >1 unit" guard was
+                         rejected — it breaks already-accepted operator
+                         capabilities); the enforcement is this build-time rule
+                         plus the sanctioned surface. CAPABILITY-zone-ONLY like
+                         the three rules above: SEALED_KERNEL ``run_envelope.py``
+                         (wraps ``run_operation``) and ``adapters.py`` (defines
+                         it) stay exempt. Exact-name match, so the sanctioned
+                         ``run_enveloped_operation`` is never mistaken for it.
+                         Curated single-name surface — a string-literal
+                         ``getattr(mod, "run_operation")`` resolves via a
+                         Constant node invisible to this attribute-NAME check,
+                         the same disclosed residual as ``build_write_client`` /
+                         the registry symbols, not closed here.
 
 ------------------------------------------------------------------------------
 Bounds NOT covered at v0 (disclosed — no silent caps)
@@ -505,18 +548,23 @@ rule — see ``zones.py`` for the full rationale and the canonical taxonomy)
     SEALED_KERNEL    -- the gate machinery (run_operation, write_gate,
                         broker, receipt validation, the invocation ledger,
                         operations/contracts/proof_hash/effects_manifest,
-                        the adapter registry, the read facade, this scanner
+                        the adapter registry, the read facade, the RunEnvelope
+                        trust core (run_envelope.py), this scanner
                         and the coverage gate). Held to the SAME checks as
                         capability code below — it simply never trips them,
                         because none of this code needs a vendor SDK import
                         or a write-capable credential. ONE deliberate
                         exception: the adapter_module_import /
-                        adapter_registry_reference / introspection_escape_hatch
+                        adapter_registry_reference / introspection_escape_hatch /
+                        raw_run_operation_reference
                         rules are CAPABILITY-zone-ONLY and do NOT apply here —
                         adapters.py and effects_manifest.py are the registry's
                         own intended kernel-side consumers (get_dispatch /
-                        get_adapter), and read_facade.py legitimately calls
-                        vars(cls) — see those rules' docstring sections.
+                        get_adapter), read_facade.py legitimately calls
+                        vars(cls), and run_envelope.py legitimately wraps
+                        run_operation (the one place a run-level envelope is
+                        enforced around it) — see those rules' docstring
+                        sections.
     ADAPTER_PROFILE  -- registered per-vendor adapter modules. The ONLY zone
                         exempt from every check this module enforces —
                         importing a vendor SDK, calling a mutation verb, and
@@ -583,7 +631,7 @@ class Violation(NamedTuple):
               'dynamic_import', 'subprocess_network',
               'credential_construction', 'credential_provider_reference',
               'adapter_module_import', 'adapter_registry_reference',
-              'introspection_escape_hatch',
+              'introspection_escape_hatch', 'raw_run_operation_reference',
               'unparseable'.
             Specific enough that a build-failure message tells the operator or
             agent WHAT to fix.
@@ -821,6 +869,40 @@ _ADAPTER_REGISTRY_SYMBOLS = frozenset(
 # collision _CREDENTIAL_CLASS_NAMES's design note warns about.
 _INTROSPECTION_BARE_NAMES = frozenset({"__import__", "globals", "vars"})
 
+# The RAW kernel write primitive (v0.12.0 S1 — RunEnvelope trust core). Banned
+# by NAME in the CAPABILITY zone — as an import alias, a bare Name, or an
+# Attribute — regardless of which module a capability claims to reach it
+# through (``external_write.adapters``, a relative/bare ``adapters`` import,
+# ``external_write.capability_api``, or any re-export). Modeled directly on
+# _ADAPTER_REGISTRY_SYMBOLS / _CREDENTIAL_PROVIDER_SYMBOLS (visit_ImportFrom /
+# visit_Name / visit_Attribute against a curated name).
+#
+# WHY this reverses the prior explicit allowance of the bare-adapters/
+# capability_api ``run_operation`` entrypoint for CAPABILITY code: the
+# run-level trust protections — disk-authoritative envelope spendability,
+# consent-receipt binding, APPLY-BY-ID against the frozen ``reviewed_set``, and
+# the AGGREGATE CEILING — live ONLY inside ``run_enveloped_operation``
+# (run_envelope.py), which then calls this raw primitive ONCE per approved op.
+# A CAPABILITY-zone module that reaches ``run_operation`` directly can loop it
+# and bypass every one of those run-level checks (the per-op write gate alone
+# does not cap a reversible bulk run). ``run_operation``'s own contract is
+# deliberately NOT changed (a "refuse >1 unit" guard was rejected — it breaks
+# already-accepted operator capabilities); the enforcement is this build-time
+# scanner rule plus the sanctioned surface. The sanctioned CAPABILITY
+# live-write entrypoint is now ``capability_api.run_enveloped_operation``.
+#
+# SEALED_KERNEL stays exempt (this rule is CAPABILITY-zone-ONLY, like
+# adapter_module_import / adapter_registry_reference / introspection_escape_hatch):
+# ``run_envelope.py`` (the trust core that legitimately wraps ``run_operation``)
+# and ``adapters.py`` (which DEFINES it) are SEALED_KERNEL members, so naming
+# ``run_operation`` there never trips this. Exact-name match, so the sanctioned
+# ``run_enveloped_operation`` is never mistaken for it (not a substring check).
+# Curated single-name surface, same disclosed-bound spirit as every other
+# symbol set in this module (a string-literal ``getattr(mod, "run_operation")``
+# resolves via a Constant node invisible to this attribute-NAME check — the
+# identical disclosed residual as ``build_write_client`` / the registry symbols).
+_RAW_RUN_OPERATION_SYMBOL = "run_operation"
+
 # Function/method-object internals — attribute names banned by NAME alone,
 # any base. ``run_operation`` is
 # the real function object defined in the sealed kernel module, so its
@@ -1047,11 +1129,13 @@ class _Scanner(ast.NodeVisitor):
     def __init__(self, path: str, zone: Zone = Zone.CAPABILITY):
         self.path = path
         self.violations: List[Violation] = []
-        # Three rules (adapter_module_import,
-        # adapter_registry_reference, introspection_escape_hatch) are
+        # Four rules (adapter_module_import,
+        # adapter_registry_reference, introspection_escape_hatch, and
+        # raw_run_operation_reference) are
         # CAPABILITY-zone-ONLY — see the module docstring's zone-scoping
         # rationale (SEALED_KERNEL legitimately imports/calls
-        # get_dispatch/get_adapter/vars(cls)). Every other rule in this class
+        # get_dispatch/get_adapter/vars(cls), and run_envelope.py legitimately
+        # wraps run_operation). Every other rule in this class
         # is unconditional (SEALED_KERNEL + CAPABILITY both scanned in full;
         # ADAPTER_PROFILE never reaches this class at all — see _scan_file's
         # early return).
@@ -1165,6 +1249,11 @@ class _Scanner(ast.NodeVisitor):
             # (CAPABILITY-only — see class docstring / module docstring).
             if self._capability_zone and alias.name in _ADAPTER_REGISTRY_SYMBOLS:
                 self._add(node.lineno, "adapter_registry_reference")
+            # Raw kernel write primitive banned by NAME in CAPABILITY zone,
+            # regardless of the source module (bare adapters, capability_api,
+            # a relative/bare adapters import, or any re-export) — v0.12.0 S1.
+            if self._capability_zone and alias.name == _RAW_RUN_OPERATION_SYMBOL:
+                self._add(node.lineno, "raw_run_operation_reference")
             # The PACKAGE-LEVEL import
             # form -- ``from external_write import adapters_gmail`` /
             # ``from external_write import adapter_registry`` -- puts the
@@ -1211,6 +1300,11 @@ class _Scanner(ast.NodeVisitor):
                 self._add(node.lineno, "adapter_registry_reference")
             if node.id in _INTROSPECTION_BARE_NAMES:
                 self._add(node.lineno, "introspection_escape_hatch")
+            # Bare-name reference to the raw kernel write primitive (holding
+            # it by reference, or calling it after a `from ... import
+            # run_operation`) — naming it at all is the bypass. v0.12.0 S1.
+            if node.id == _RAW_RUN_OPERATION_SYMBOL:
+                self._add(node.lineno, "raw_run_operation_reference")
         self.generic_visit(node)
 
     # --- calls -------------------------------------------------------------
@@ -1237,6 +1331,11 @@ class _Scanner(ast.NodeVisitor):
         if self._capability_zone:
             self._check_adapter_registry_attribute(node)
             self._check_introspection_attribute(node)
+            # Attribute reach to the raw kernel write primitive —
+            # `adapters.run_operation` / `capability_api.run_operation` /
+            # `mod.run_operation` — regardless of the base expression. v0.12.0 S1.
+            if node.attr == _RAW_RUN_OPERATION_SYMBOL:
+                self._add(node.lineno, "raw_run_operation_reference")
         self.generic_visit(node)
 
     def _check_adapter_registry_attribute(self, node: ast.Attribute) -> None:

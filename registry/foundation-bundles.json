@@ -256,7 +256,7 @@
     },
     {
       "bundle_manifest_sha256": "sha256:72c28a16982ec64cdcd2b462c136044e6d13673a877e8330b0cd0588644e1cff",
-      "bundle_tree_sha256": "sha256:e6f2ee6016d2770d30744b39b770fb8efb29bcc9b5224fc37c7cac8d52de075d",
+      "bundle_tree_sha256": "sha256:88b6828c4d98c018d025a5289a221ac48cd7928ab6be808a3724e8eeddb7a90a",
       "changelog": "One addition under the hood: a run-level safety envelope for bulk actions. When a capability acts on many things at once, a single running ledger now tracks everything that run touches, an overall ceiling caps how much one run can change (scaled to how reversible the action is, on top of the existing cap on a single action), and the run does exactly the set you reviewed \u2014 if the plan changed after you approved it, the run stops rather than acting on something you did not see. \"Verified\" now means the change was confirmed against your real account, both when a capability is proven and each time it runs, not just that the code finished. And the exact sentence you approve is built from what the run will really do, so what you consent to always matches what happens. No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.",
       "foundation_bundle_version": "v0.12.0",
       "manifest": "foundation-bundles/v0.12.0/manifest.yaml",

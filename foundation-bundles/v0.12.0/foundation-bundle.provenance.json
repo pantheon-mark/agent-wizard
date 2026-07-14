@@ -97,7 +97,7 @@
       "path": "templates/agents/lib/external_write/broker.py"
     },
     {
-      "hash": "sha256:c4958d63a2f793db40ef92d2b7d2ce94697964a710b4515658c3c670eb3c3e60",
+      "hash": "sha256:0c5778f73a4363145ac81616cf19700a6a9a33c60b440b2625b815110bf5175a",
       "path": "templates/agents/lib/external_write/capability_api.py"
     },
     {
@@ -153,7 +153,7 @@
       "path": "templates/agents/lib/external_write/run_envelope.py"
     },
     {
-      "hash": "sha256:720f0485c109902d9397054418b35b7fcb3134ab44861847c03cea5f5161d0ac",
+      "hash": "sha256:27d075df8d5af4274547a3897572042219aa10afc9adf442c2b489da89cc0d0f",
       "path": "templates/agents/lib/external_write/scan.py"
     },
     {
@@ -169,7 +169,7 @@
       "path": "templates/agents/lib/external_write/write_gate.py"
     },
     {
-      "hash": "sha256:6de1bc7615f6134b6463ddd9596638f56c73f9f1abdef811ac0c73614f81b456",
+      "hash": "sha256:c7a39745d66df8c4bd550e4bd35dcf783934768c966b94666c59ef6648a4932d",
       "path": "templates/agents/lib/external_write/zones.py"
     },
     {
@@ -494,12 +494,12 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-07-14T01:53:56Z",
-  "generator_version": "e499a623c5d7a5f76f35857b3eb0482e1fce71d5",
+  "generated_at": "2026-07-14T09:06:08Z",
+  "generator_version": "b968c91c3d857200e732852a9ef10c68e8d6852a",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.12.0",
-  "source_registry_entry_hash": "sha256:6a67a494b9a885ae2f554acbe17b0d2158b847b6dbb1e72cdab5ab28306a3801",
+  "source_registry_entry_hash": "sha256:28b769feae81fb75fcba7176e8fb881a0ed4383dbd82b3a937bb17cab3864b38",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
   "template_tree_hash": "sha256:2bb200832538ef783e35624cb22bff7c1c1f64538821fee80e008a8f6e794857",
