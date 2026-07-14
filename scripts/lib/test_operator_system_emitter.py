@@ -669,6 +669,39 @@ class ExternalWriteLibRegistryEnrollmentTests(unittest.TestCase):
             f"fresh operator project (before the operator's first add-capability "
             f"ever runs); stderr:\n{result.stderr}")
 
+    def test_emitted_triage_module_is_physically_present_and_imports_cleanly(self):
+        # Task 8 (A3 / F-48, v0.13.0 Slice 2): triage.py must be enrolled in
+        # _EXTERNAL_WRITE_LIB_FILES AND physically emitted, or a freshly-emitted
+        # writes-back system's operator-facing triage skill has no module to
+        # import at all. Nothing else in the lib imports it at module scope (it
+        # is a standalone read-only primitive), so this proves both the
+        # enrollment and that the module imports cleanly standalone in a fresh
+        # operator project.
+        plan = self._plan()
+        fixture_build_repo_root = self._fixture_build_repo_root()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name)
+
+        emit_operator_system(plan, staging, fixture_build_repo_root)
+
+        triage_path = staging / "agents" / "lib" / "external_write" / "triage.py"
+        self.assertTrue(
+            triage_path.is_file(),
+            "triage.py must be enrolled in _EXTERNAL_WRITE_LIB_FILES and "
+            "physically emitted -- the operator-facing triage skill has no "
+            "module to import without it")
+
+        result = subprocess.run(
+            [sys.executable, "-c",
+             "import sys; sys.path.insert(0, 'agents/lib'); "
+             "import external_write.triage"],
+            cwd=str(staging), capture_output=True, text=True)
+        self.assertEqual(
+            result.returncode, 0,
+            "emitted external_write.triage must import cleanly in a fresh "
+            f"operator project; stderr:\n{result.stderr}")
+
 
 class ExternalWriteLibEmitFromBundleTests(unittest.TestCase):
     """Task 7 (D): end-to-end assertion that a writes-back plan built from the bundle

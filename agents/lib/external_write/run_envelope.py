@@ -103,6 +103,116 @@ RUN_CONSENT_RECEIPT_SCHEMA = "run_consent_receipt-v1"
 # a reversible bulk run (which the gate does not cap) is still bounded.
 AGGREGATE_LEDGER_KEY = "__run_envelope_aggregate__"
 
+# ---------------------------------------------------------------------------
+# reviewed_set schema versioning (Task 8, A3 / F-48 — v0.13.0 Slice 2)
+# ---------------------------------------------------------------------------
+#
+# v1 (the v0.12.0 shape): `mint_run_envelope` validates only that `reviewed_set`
+# is a non-empty list/tuple of mappings — the minimal shape every existing
+# caller/test already produces (e.g. `{"unit_id": "row1", "prestate_digest": "d",
+# ...}`). This is UNCHANGED and remains the default so every v0.12.0 caller
+# keeps working with zero changes.
+#
+# v2 (the triage-driven shape): a reviewed_set produced by a judgment-path
+# triage tool (see `triage.py`) carries stronger per-entry guarantees the
+# operator's review actually depended on — a unique `unit_id`, a `reason_shown`
+# the operator was told, and a `source_snapshot_digest` binding the entry to the
+# exact state that was reviewed. F-48: without this, a mis-bucketed destructive
+# item could be minted into a spendable envelope with nothing checking that the
+# reviewed entries are what the operator actually reviewed, one at a time.
+#
+# ANTI-DOWNGRADE (AC-T8b): a caller cannot simply omit `reviewed_set_schema` (or
+# pass v1) to skip the stronger v2 checks on a reviewed_set that is CLEARLY
+# triage-shaped (carries the v2-only marker fields). `_looks_v2_shaped` catches
+# exactly this: entries carrying `reason_shown` / `source_snapshot_digest` but
+# declared v1 refuse the mint outright, rather than silently falling through to
+# the weaker v1 validation. A genuinely legacy, non-triage v1 caller (the
+# existing `_reviewed_set()` test shape — no `reason_shown` / no
+# `source_snapshot_digest`) is unaffected and keeps minting exactly as before.
+REVIEWED_SET_SCHEMA_V1 = "reviewed_set-v1"
+REVIEWED_SET_SCHEMA_V2 = "reviewed_set-v2"
+_REVIEWED_SET_SCHEMAS = (REVIEWED_SET_SCHEMA_V1, REVIEWED_SET_SCHEMA_V2)
+
+# The v2-only marker fields: their mere PRESENCE on an entry is what triggers
+# the anti-downgrade refusal above when the caller declares v1 anyway.
+_V2_MARKER_KEYS = ("reason_shown", "source_snapshot_digest")
+
+
+def _looks_v2_shaped(reviewed_set: Any) -> bool:
+    """True if ANY entry carries a v2-only marker field. Used to refuse a
+    declared-v1 mint over a reviewed_set that is clearly triage-shaped (AC-T8b
+    anti-downgrade) -- never silently validated under the weaker v1 rules."""
+    return any(
+        isinstance(e, dict) and any(k in e for k in _V2_MARKER_KEYS)
+        for e in (reviewed_set or []))
+
+
+def _validate_reviewed_set_v2(reviewed_set: Any) -> Optional[str]:
+    """The reviewed_set-v2 schema check (AC-T8b): every entry must carry a
+    unique, non-empty ``unit_id``, ``reason_shown``, and
+    ``source_snapshot_digest``. Returns a refusal reason string on the FIRST
+    violation found (missing / empty / duplicate), or ``None`` when every
+    entry passes -- fail-closed, never a partial acceptance."""
+    seen_ids = set()
+    for entry in (reviewed_set or []):
+        uid = entry.get("unit_id") if isinstance(entry, dict) else None
+        if not (isinstance(uid, str) and uid.strip()):
+            return "reviewed_set-v2 entry is missing a non-empty unit_id"
+        if uid in seen_ids:
+            return (
+                f"reviewed_set-v2 has a duplicate unit_id {uid!r} — every "
+                "reviewed entry must be uniquely identified")
+        seen_ids.add(uid)
+        reason = entry.get("reason_shown")
+        if not (isinstance(reason, str) and reason.strip()):
+            return f"reviewed_set-v2 entry {uid!r} is missing a non-empty reason_shown"
+        digest = entry.get("source_snapshot_digest")
+        if not (isinstance(digest, str) and digest.strip()):
+            return (
+                f"reviewed_set-v2 entry {uid!r} is missing a non-empty "
+                "source_snapshot_digest")
+    return None
+
+
+def render_review_artifact(reviewed_set: Any) -> Tuple[str, str]:
+    """Deterministically render the operator-facing review artifact from the
+    FROZEN ``reviewed_set`` — pure: an identical reviewed_set (content + order)
+    always renders identical bytes/digest; no clock, no randomness. Returns
+    ``(artifact_text, digest)``.
+
+    This is the consent-binding surface AC-T8a closes: the caller shows this
+    rendered text to the operator, the operator approves it, and the caller
+    hands the EXACT approved text back to ``mint_run_envelope`` as
+    ``operator_approved_review_artifact``. Mint NEVER trusts a caller-supplied
+    digest number for this artifact — it always recomputes ``digest`` here,
+    from the frozen reviewed_set, and separately hashes the approved text
+    itself, then compares the two. A caller cannot simply assert "this digest
+    matches" — the two hashes must actually agree.
+
+    Rendered fields are the human-facing ones only — ``unit_id``, ``category``,
+    ``reason_shown`` — never a raw internal hash: ``source_snapshot_digest``
+    stays part of the underlying reviewed_set (and so still binds via
+    ``reviewed_set_digest``), it is simply not printed into operator-facing
+    text (no internal-label/digest leaks — Operator Interaction Contract §1,
+    the same convention ``consent_narration.py`` follows). A missing field
+    renders as an empty string rather than raising — this function is pure
+    rendering, never validation (schema validation is
+    ``_validate_reviewed_set_v2``'s job)."""
+    normalized = [dict(e) for e in (reviewed_set or [])]
+    lines: List[str] = [
+        "REVIEWED ITEMS FOR APPROVAL",
+        f"total: {len(normalized)}",
+        "",
+    ]
+    for e in normalized:
+        unit_id = e.get("unit_id", "")
+        category = e.get("category", "")
+        reason = e.get("reason_shown", "")
+        lines.append(f"- {unit_id} [{category}]: {reason}")
+    artifact = "\n".join(lines) + "\n"
+    digest = hashlib.sha256(artifact.encode("utf-8")).hexdigest()
+    return artifact, digest
+
 
 # ---------------------------------------------------------------------------
 # Digest / identity derivation (never a trusted stored field)
@@ -193,6 +303,12 @@ class RunEnvelope:
     evidence_policy: Dict[str, Any]
     tranches: Tuple[Tranche, ...]
     stored_ledger_window_id: str = ""
+    # Task 8 (A3 / F-48): the reviewed_set schema tag ("reviewed_set-v1" default
+    # / "reviewed_set-v2") and the review-artifact digest the operator's
+    # approval is bound to (v2 only; empty for v1). See the "reviewed_set
+    # schema versioning" section above `RunEnvelope` for the full rationale.
+    reviewed_set_schema: str = REVIEWED_SET_SCHEMA_V1
+    review_artifact_digest: str = ""
 
     @property
     def ledger_window_id(self) -> str:
@@ -230,6 +346,23 @@ class RunEnvelope:
             return False
         if self.stored_ledger_window_id != self.ledger_window_id:
             return False
+        # AC-T8a (verify half): for a reviewed_set-v2 envelope, the stored
+        # review_artifact_digest must RECOMPUTE from the CURRENT reviewed_set
+        # via render_review_artifact — never trusted as a bare stored field.
+        # This mirrors the reviewed_set_digest self-check just above; it
+        # catches a tamper of review_artifact_digest alone, or a reviewed_set
+        # edit that leaves a now-stale review_artifact_digest behind. (A
+        # single WHOLESALE self-consistent tamper of every one of these
+        # fields together is the same disclosed residual the reviewed_set_digest/
+        # consent self-check already carries -- see the "Receipt binding"
+        # section above; closing that fully is the independent-receipt
+        # mechanism, out of this check's scope.)
+        if self.reviewed_set_schema == REVIEWED_SET_SCHEMA_V2:
+            if not self.review_artifact_digest:
+                return False
+            _, recomputed_artifact_digest = render_review_artifact(self.reviewed_set)
+            if self.review_artifact_digest != recomputed_artifact_digest:
+                return False
         return True
 
     def remaining_budget(self) -> int:
@@ -254,7 +387,8 @@ def _empty_envelope(run_id: str) -> RunEnvelope:
         reviewed_set=(), reviewed_set_digest="", population_count=0,
         stratification_summary={},
         ceiling=Ceiling(0, 0, 0, FAIL_SAFE_RECOVERY_TIER),
-        consent=None, evidence_policy={}, tranches=(), stored_ledger_window_id="")
+        consent=None, evidence_policy={}, tranches=(), stored_ledger_window_id="",
+        reviewed_set_schema=REVIEWED_SET_SCHEMA_V1, review_artifact_digest="")
 
 
 def _to_disk_dict(env: RunEnvelope) -> Dict[str, Any]:
@@ -284,6 +418,8 @@ def _to_disk_dict(env: RunEnvelope) -> Dict[str, Any]:
         "evidence_policy": dict(env.evidence_policy),
         # Persist the DERIVED window id (tamper-detected on load).
         "ledger_window_id": env.ledger_window_id,
+        "reviewed_set_schema": env.reviewed_set_schema,
+        "review_artifact_digest": env.review_artifact_digest,
         "tranches": [
             {
                 "applied_unit_ids": list(t.applied_unit_ids),
@@ -357,6 +493,8 @@ def _from_disk_dict(raw: Dict[str, Any], run_id: str) -> RunEnvelope:
         evidence_policy=raw.get("evidence_policy") or {},
         tranches=tuple(tranches),
         stored_ledger_window_id=str(raw.get("ledger_window_id", "")),
+        reviewed_set_schema=str(raw.get("reviewed_set_schema") or REVIEWED_SET_SCHEMA_V1),
+        review_artifact_digest=str(raw.get("review_artifact_digest", "")),
     )
 
 
@@ -645,6 +783,8 @@ def mint_run_envelope(
     envelope_dir: Optional[str] = None,
     sample_percent: float = DEFAULT_SAMPLE_PERCENT,
     floor: int = DEFAULT_KNOB_B_FLOOR,
+    reviewed_set_schema: Optional[str] = None,
+    operator_approved_review_artifact: Optional[str] = None,
 ) -> MintResult:
     """Mint an APPROVED, spendable RunEnvelope and persist it atomically — the
     SOLE minter (I1). Fail-safe: any missing / ambiguous / empty input refuses
@@ -654,7 +794,15 @@ def mint_run_envelope(
     frozen ``population_count`` and the op_kind's contract risk class; the
     ``ledger_window_id`` is DERIVED from the verified identity; the consent is
     bound to the ``reviewed_set_digest``. (The machine-generated consent SENTENCE
-    is Task 6 and apply-by-id enforcement is Task 5 — this mints the manifest.)"""
+    is Task 6 and apply-by-id enforcement is Task 5 — this mints the manifest.)
+
+    Task 8 (A3 / F-48) adds two OPTIONAL, backward-compatible parameters:
+    ``reviewed_set_schema`` (default "reviewed_set-v1" — every v0.12.0 caller's
+    existing call keeps minting exactly as before) and, for
+    ``"reviewed_set-v2"`` only, ``operator_approved_review_artifact`` — the
+    EXACT text of the rendered review artifact (``render_review_artifact``) the
+    operator approved. See the "reviewed_set schema versioning" section near
+    the top of this module for the full v1/v2 + anti-downgrade rationale."""
     for name, val in (("run_id", run_id), ("capability_id", capability_id),
                       ("op_kind", op_kind), ("contract_hash", contract_hash),
                       ("implementation_hash", implementation_hash)):
@@ -667,6 +815,25 @@ def mint_run_envelope(
             "reviewed candidate set")
     if not all(isinstance(e, dict) for e in reviewed_set):
         return _mint_refuse("reviewed_set entries must be mappings")
+
+    # reviewed_set schema resolution + validation (Task 8 / AC-T8b). Resolve
+    # FIRST, before anything else touches reviewed_set, so a bad/downgraded
+    # schema refuses before any budget/consent work happens.
+    schema = (reviewed_set_schema if isinstance(reviewed_set_schema, str)
+              and reviewed_set_schema.strip() else REVIEWED_SET_SCHEMA_V1)
+    if schema not in _REVIEWED_SET_SCHEMAS:
+        return _mint_refuse(f"unrecognized reviewed_set_schema {schema!r}")
+    if schema == REVIEWED_SET_SCHEMA_V1 and _looks_v2_shaped(reviewed_set):
+        return _mint_refuse(
+            "reviewed_set entries carry reviewed_set-v2 fields (reason_shown / "
+            "source_snapshot_digest) but reviewed_set_schema was not declared "
+            "'reviewed_set-v2' — a triage-driven reviewed set may not downgrade "
+            "to v1 to skip v2 validation; pass "
+            "reviewed_set_schema='reviewed_set-v2' explicitly")
+    if schema == REVIEWED_SET_SCHEMA_V2:
+        v2_reason = _validate_reviewed_set_v2(reviewed_set)
+        if v2_reason:
+            return _mint_refuse(v2_reason)
 
     # Honest capture: an empty operator "yes" is not consent (mirrors
     # operator_acceptance.record_operator_acceptance).
@@ -703,6 +870,33 @@ def mint_run_envelope(
     reviewed_set_tuple: Tuple[Dict[str, Any], ...] = tuple(dict(e) for e in reviewed_set)
     reviewed_set_digest = compute_reviewed_set_digest(reviewed_set_tuple)
     resolved_approved_at = approved_at if approved_at else _now_iso_z()
+
+    # AC-T8a — the consent-artifact binding (v2 only): recompute the review
+    # artifact digest from the FROZEN, schema-validated reviewed_set and
+    # compare it to a digest WE compute over the operator-approved text. Never
+    # trust a caller-supplied artifact digest as authoritative — there is no
+    # parameter here that even accepts one; only the raw approved TEXT, hashed
+    # by this function itself.
+    review_artifact_digest = ""
+    if schema == REVIEWED_SET_SCHEMA_V2:
+        if not (isinstance(operator_approved_review_artifact, str)
+                and operator_approved_review_artifact.strip()):
+            return _mint_refuse(
+                "reviewed_set-v2 requires operator_approved_review_artifact — "
+                "the operator must approve the rendered review artifact "
+                "(render_review_artifact), not merely give a verbatim "
+                "confirmation string")
+        _, recomputed_artifact_digest = render_review_artifact(reviewed_set_tuple)
+        approved_digest = hashlib.sha256(
+            operator_approved_review_artifact.encode("utf-8")).hexdigest()
+        if recomputed_artifact_digest != approved_digest:
+            return _mint_refuse(
+                "review artifact digest mismatch: the artifact rendered from "
+                "the frozen reviewed_set does not match the artifact the "
+                "operator approved — refusing rather than trusting a "
+                "caller-supplied digest or acting on an artifact the operator "
+                "never actually saw")
+        review_artifact_digest = recomputed_artifact_digest
 
     consent = Consent(
         operator_approval_verbatim=operator_approval_verbatim,
@@ -742,6 +936,8 @@ def mint_run_envelope(
                                                  "verification_mode": None}),
         tranches=(),
         stored_ledger_window_id="",  # never trusted; the property derives it
+        reviewed_set_schema=schema,
+        review_artifact_digest=review_artifact_digest,
     )
 
     path = _envelope_path(run_id, envelope_dir)
@@ -774,6 +970,8 @@ def append_tranche(env: RunEnvelope, tranche: Tranche, *,
         evidence_policy=env.evidence_policy,
         tranches=env.tranches + (tranche,),
         stored_ledger_window_id=env.stored_ledger_window_id,
+        reviewed_set_schema=env.reviewed_set_schema,
+        review_artifact_digest=env.review_artifact_digest,
     )
     _atomic_write_json(_envelope_path(env.run_id, envelope_dir), _to_disk_dict(updated))
     return updated

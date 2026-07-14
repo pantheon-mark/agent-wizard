@@ -48,10 +48,13 @@ from external_write.run_envelope import (  # noqa: E402
     Ceiling,
     Consent,
     RunEnvelope,
+    REVIEWED_SET_SCHEMA_V1,
+    REVIEWED_SET_SCHEMA_V2,
     compute_reviewed_set_digest,
     derive_ledger_window_id,
     load_run_envelope,
     mint_run_envelope,
+    render_review_artifact,
     run_enveloped_operation,
 )
 
@@ -559,6 +562,198 @@ class TestI3AggregateCeilingComposesWithPerOpCap(unittest.TestCase):
                              "would exceed granted_this_approval, even though the "
                              "reversible per-op gate passes every chunk (I-3)")
             self.assertEqual(r3.detail.get("gate"), "run_envelope_aggregate_ceiling")
+
+
+# ===========================================================================
+# Task 8 (A3 / F-48) — reviewed_set-v2 schema + consent-artifact binding
+# (AC-T8a, AC-T8b)
+# ===========================================================================
+
+def _v2_reviewed_set(n=3, prefix="row", category="status_change", protected=False):
+    """A reviewed_set-v2-shaped set: every entry carries the v2-only marker
+    fields (reason_shown, source_snapshot_digest) alongside a unique unit_id."""
+    return [
+        {"unit_id": f"{prefix}{i}", "reason_shown": f"Change {prefix}{i} to Complete",
+         "source_snapshot_digest": f"snap-{prefix}{i}", "category": category,
+         "protected_status": protected}
+        for i in range(n)
+    ]
+
+
+class TestReviewedSetV2AndArtifactBinding(unittest.TestCase):
+    """AC-T8a (consent-artifact binding) + AC-T8b (reviewed_set-v2 versioning
+    + anti-downgrade). See run_envelope.py's "reviewed_set schema versioning"
+    section for the full rationale."""
+
+    def setUp(self):
+        _register_field_contract()
+
+    def tearDown(self):
+        _unregister_field_contract()
+
+    def _mint_v2(self, d, reviewed_set, *, artifact=None, run_id="run-v2",
+                op_kind=FIELD_OP, schema=REVIEWED_SET_SCHEMA_V2):
+        if artifact is None:
+            artifact, _ = render_review_artifact(reviewed_set)
+        return mint_run_envelope(
+            run_id=run_id, capability_id="cap:test", op_kind=op_kind,
+            contract_hash="ch-abc", implementation_hash="ih-abc",
+            reviewed_set=reviewed_set, population_count=len(reviewed_set),
+            stratification_summary={}, operator_approval_verbatim="yes, apply these",
+            consent_sentence_shown="Apply the reviewed set.", envelope_dir=d,
+            reviewed_set_schema=schema, operator_approved_review_artifact=artifact)
+
+    # --- AC-T8b: versioning ---------------------------------------------
+
+    def test_legacy_v1_caller_without_v2_fields_still_accepted(self):
+        # A genuinely legacy, non-triage v1 caller (existing shape: unit_id +
+        # prestate_digest, no reason_shown / source_snapshot_digest at all)
+        # must keep minting exactly as before -- no schema param at all.
+        with tempfile.TemporaryDirectory() as d:
+            res = mint_run_envelope(
+                run_id="run-legacy", capability_id="cap:test", op_kind=FIELD_OP,
+                contract_hash="ch", implementation_hash="ih",
+                reviewed_set=_reviewed_set(3), population_count=100,
+                stratification_summary={}, operator_approval_verbatim="yes",
+                consent_sentence_shown="Apply 3 changes.", envelope_dir=d)
+            self.assertTrue(res.accepted, res.reason)
+            self.assertEqual(res.envelope.reviewed_set_schema, REVIEWED_SET_SCHEMA_V1)
+
+    def test_v2_shaped_set_declared_v1_refuses_anti_downgrade(self):
+        # A triage-driven (v2-shaped) reviewed_set declared v1 (or the schema
+        # param simply omitted) must REFUSE -- it may not downgrade to skip
+        # the v2 checks.
+        with tempfile.TemporaryDirectory() as d:
+            reviewed = _v2_reviewed_set(3)
+            res = mint_run_envelope(
+                run_id="run-downgrade", capability_id="cap:test", op_kind=FIELD_OP,
+                contract_hash="ch", implementation_hash="ih",
+                reviewed_set=reviewed, population_count=100,
+                stratification_summary={}, operator_approval_verbatim="yes",
+                consent_sentence_shown="Apply 3 changes.", envelope_dir=d)
+            self.assertFalse(res.accepted)
+            self.assertIn("downgrade", res.reason)
+
+            # Explicitly declaring v1 over v2-shaped entries refuses the same way.
+            res2 = mint_run_envelope(
+                run_id="run-downgrade2", capability_id="cap:test", op_kind=FIELD_OP,
+                contract_hash="ch", implementation_hash="ih",
+                reviewed_set=reviewed, population_count=100,
+                stratification_summary={}, operator_approval_verbatim="yes",
+                consent_sentence_shown="Apply 3 changes.", envelope_dir=d,
+                reviewed_set_schema=REVIEWED_SET_SCHEMA_V1)
+            self.assertFalse(res2.accepted)
+            self.assertIn("downgrade", res2.reason)
+
+    def test_v2_declared_applies_v2_checks_and_mints(self):
+        with tempfile.TemporaryDirectory() as d:
+            reviewed = _v2_reviewed_set(3)
+            res = self._mint_v2(d, reviewed)
+            self.assertTrue(res.accepted, res.reason)
+            self.assertEqual(res.envelope.reviewed_set_schema, REVIEWED_SET_SCHEMA_V2)
+            self.assertTrue(res.envelope.review_artifact_digest)
+
+    def test_v2_duplicate_unit_id_refuses(self):
+        with tempfile.TemporaryDirectory() as d:
+            reviewed = _v2_reviewed_set(2)
+            reviewed[1]["unit_id"] = reviewed[0]["unit_id"]  # duplicate id
+            res = self._mint_v2(d, reviewed)
+            self.assertFalse(res.accepted)
+            self.assertIn("duplicate", res.reason)
+
+    def test_v2_missing_reason_shown_refuses(self):
+        with tempfile.TemporaryDirectory() as d:
+            reviewed = _v2_reviewed_set(2)
+            reviewed[0]["reason_shown"] = ""
+            res = self._mint_v2(d, reviewed)
+            self.assertFalse(res.accepted)
+            self.assertIn("reason_shown", res.reason)
+
+    def test_v2_missing_source_snapshot_digest_refuses(self):
+        with tempfile.TemporaryDirectory() as d:
+            reviewed = _v2_reviewed_set(2)
+            del reviewed[0]["source_snapshot_digest"]
+            res = self._mint_v2(d, reviewed)
+            self.assertFalse(res.accepted)
+            self.assertIn("source_snapshot_digest", res.reason)
+
+    # --- AC-T8a: consent-artifact binding --------------------------------
+
+    def test_render_review_artifact_is_deterministic(self):
+        reviewed = _v2_reviewed_set(3)
+        a1, d1 = render_review_artifact(reviewed)
+        a2, d2 = render_review_artifact(reviewed)
+        self.assertEqual(a1, a2)
+        self.assertEqual(d1, d2)
+
+    def test_matching_artifact_and_reviewed_set_mints_and_records_both_digests(self):
+        with tempfile.TemporaryDirectory() as d:
+            reviewed = _v2_reviewed_set(3)
+            artifact, digest = render_review_artifact(reviewed)
+            res = self._mint_v2(d, reviewed, artifact=artifact)
+            self.assertTrue(res.accepted, res.reason)
+            self.assertEqual(res.envelope.review_artifact_digest, digest)
+            self.assertEqual(res.envelope.reviewed_set_digest,
+                             compute_reviewed_set_digest(reviewed))
+
+    def test_mutated_artifact_alone_refuses(self):
+        # The reviewed_set is untouched; the text the operator supposedly
+        # approved was tampered with independently.
+        with tempfile.TemporaryDirectory() as d:
+            reviewed = _v2_reviewed_set(3)
+            artifact, _ = render_review_artifact(reviewed)
+            tampered_artifact = artifact + "\nTAMPERED LINE\n"
+            res = self._mint_v2(d, reviewed, artifact=tampered_artifact)
+            self.assertFalse(res.accepted)
+            self.assertIn("mismatch", res.reason)
+
+    def test_mutated_reviewed_set_alone_refuses(self):
+        # The artifact text the operator approved is untouched; the
+        # reviewed_set passed to mint was mutated independently (an extra
+        # entry snuck in after the operator saw the artifact).
+        with tempfile.TemporaryDirectory() as d:
+            reviewed = _v2_reviewed_set(3)
+            artifact, _ = render_review_artifact(reviewed)
+            mutated_reviewed = reviewed + _v2_reviewed_set(1, prefix="sneaked-in-")
+            res = self._mint_v2(d, mutated_reviewed, artifact=artifact)
+            self.assertFalse(res.accepted)
+            self.assertIn("mismatch", res.reason)
+
+    def test_missing_operator_approved_artifact_refuses_for_v2(self):
+        with tempfile.TemporaryDirectory() as d:
+            reviewed = _v2_reviewed_set(2)
+            res = mint_run_envelope(
+                run_id="run-noartifact", capability_id="cap:test", op_kind=FIELD_OP,
+                contract_hash="ch", implementation_hash="ih",
+                reviewed_set=reviewed, population_count=100,
+                stratification_summary={}, operator_approval_verbatim="yes",
+                consent_sentence_shown="Apply.", envelope_dir=d,
+                reviewed_set_schema=REVIEWED_SET_SCHEMA_V2)
+            self.assertFalse(res.accepted)
+            self.assertIn("operator_approved_review_artifact", res.reason)
+
+    def test_load_round_trips_v2_schema_and_artifact_digest(self):
+        with tempfile.TemporaryDirectory() as d:
+            reviewed = _v2_reviewed_set(2)
+            res = self._mint_v2(d, reviewed)
+            loaded = load_run_envelope("run-v2", envelope_dir=d)
+            self.assertEqual(loaded.reviewed_set_schema, REVIEWED_SET_SCHEMA_V2)
+            self.assertEqual(loaded.review_artifact_digest, res.envelope.review_artifact_digest)
+            self.assertTrue(loaded.is_spendable())
+
+    def test_tampered_review_artifact_digest_on_disk_is_not_spendable(self):
+        # AC-T8a "verify" half: is_spendable() recomputes the artifact digest
+        # from the CURRENT on-disk reviewed_set and refuses a stored
+        # review_artifact_digest that no longer matches.
+        with tempfile.TemporaryDirectory() as d:
+            reviewed = _v2_reviewed_set(2)
+            self._mint_v2(d, reviewed, run_id="run-tamper")
+            env_path = Path(d) / "run-tamper.json"
+            raw = json.loads(env_path.read_text())
+            raw["review_artifact_digest"] = "deadbeef_not_the_real_digest"
+            env_path.write_text(json.dumps(raw), encoding="utf-8")
+            tampered = load_run_envelope("run-tamper", envelope_dir=d)
+            self.assertFalse(tampered.is_spendable())
 
 
 if __name__ == "__main__":

@@ -109,6 +109,13 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # the operator's first add-capability ever creates the file. Same failure class
     # as the T14/R7/v0.12.0-S1 entries above.
     "registered_adapters.py",
+    # Task 8 (A3 / F-48, v0.13.0 Slice 2): the read-only judgment-path triage tool.
+    # Nothing else in the lib imports it at module scope (it is a standalone,
+    # read-only primitive an emitted capability's judgment-path skill calls
+    # directly), but a writes-back system's operator-facing triage skill needs
+    # `external_write.triage` present on disk to import at all -- omit it and that
+    # skill's very first invocation dies with ModuleNotFoundError.
+    "triage.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
@@ -163,7 +170,7 @@ def _plan_has_writes_back(plan: "EmissionPlan") -> bool:
 def external_write_lib_emit_set(plan: "EmissionPlan") -> List[str]:
     """The emitted-tree relpaths of the external_write lib files this plan should emit.
 
-    Returns all twenty-seven lib files under agents/lib/external_write/ when the plan has a
+    Returns all twenty-eight lib files under agents/lib/external_write/ when the plan has a
     writes-back dependency: the original four substrate files (operations, adapters,
     broker, scan), the six contract-and-verification modules (verification_modes,
     contracts, verifiers, boundary, proof_hash, copy_run_proof), the two B1-4/B1-5
