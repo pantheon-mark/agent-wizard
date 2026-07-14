@@ -130,6 +130,28 @@ PAUSED_MECHANISMS_DIR_REL = ".wizard/paused-mechanisms"
 MIGRATION_QUEUE_REL = "agents/handoffs/pending_migrations.json"
 UPGRADE_REVIEW_DIR_REL = ".wizard/upgrade-review"
 IMPACT_NOTICE_BASENAME = "impact-notice.md"
+CRON_CONFIG_REL = "agents/cron/cron_config.md"
+
+# Read/report-shaped keyword indicators (F-43): a heuristic, deliberately broad,
+# textual signal that a file's OWN source surfaces read-only output (a digest, an
+# alert, a backup, ...). Broad on purpose -- a false positive here only makes the
+# notice say "paused too" about something that was actually fine (the safe
+# failure direction); it never causes a false continuity promise, which requires
+# POSITIVE verification of a separate entrypoint (see
+# ``_classify_read_output_entanglement``).
+_READ_OUTPUT_INDICATORS: Tuple[str, ...] = (
+    "digest", "alert", "backup", "summary", "notify", "report", "email",
+)
+
+# Naming convention this module checks for a genuinely SEPARATE read-only
+# companion file living alongside a flagged writer (e.g. "estate_upkeep.py" +
+# "estate_upkeep_digest.py"). Finding a candidate is necessary but not
+# sufficient -- it must also have zero scan violations of its own AND an
+# unpaused, ungated wrapper before it counts as verified (see
+# ``_classify_read_output_entanglement``).
+_READONLY_COMPANION_SUFFIXES: Tuple[str, ...] = (
+    "_read", "_readonly", "_digest", "_report", "_summary",
+)
 
 _GUARD_BEGIN = "# --- BEGIN upgrade-reconcile safe-pause (managed; do not edit by hand) ---"
 _GUARD_END = "# --- END upgrade-reconcile safe-pause ---"
@@ -150,6 +172,37 @@ class MechanismReport:
                         wrapper was found (nothing was paused automatically).
     paused:             True iff an entrypoint was found and safe-paused.
     pause_note:         operator/agent-facing note on what happened (or why not).
+
+    Read-output/entanglement fields (F-43 fix — the honest safe-pause notice).
+    A paused entrypoint may ALSO be the thing that produces read-only outputs the
+    operator relies on (a digest, phone alerts, a backup) — the real estate-tracker
+    dogfood incident this fixes was exactly that: one entrypoint did digest + alert
+    + backup + the gated write, so pausing it paused all of them, and the emitted
+    notice said the opposite. These fields are DENY-BY-DEFAULT: they default to
+    "unknown", and the notice renderer (``render_impact_notice``) treats unknown
+    exactly like entangled — a continuity promise is only ever emitted when
+    ``carries_read_outputs is False`` AND ``separate_readonly_entrypoint`` names a
+    positively-verified companion (see ``_classify_read_output_entanglement``).
+    carries_read_outputs:        True  -> the paused entrypoint's own file also
+                                  surfaces read/report-shaped output (entangled).
+                                  False -> a separate read-only entrypoint was
+                                  positively verified to survive the pause.
+                                  None  -> unverified/not applicable (e.g. nothing
+                                  was paused, or verification could not be done) —
+                                  treated as entangled by the notice.
+    separate_readonly_entrypoint: relpath of the verified-separate read-only
+                                  companion entrypoint, or None.
+    entangled_read_outputs:       human-readable labels (e.g. ["digest", "backup"])
+                                  the entangled file's own source surfaced, used to
+                                  name which awareness function is now dark. Empty
+                                  when not entangled or unknown.
+    orchestrator_routed:          True iff this mechanism was discovered scheduled
+                                  through the Orchestrator (see
+                                  ``_orchestrator_routed_entrypoint``) rather than
+                                  via a dedicated ``run_<stem>.sh`` wrapper. Always
+                                  paired with ``paused=False`` -- there is no
+                                  per-mechanism file this module can gate in that
+                                  shape (see that function's docstring).
     """
     mechanism_id: str
     writer_relpath: str
@@ -157,6 +210,10 @@ class MechanismReport:
     entrypoint_relpath: Optional[str]
     paused: bool
     pause_note: str = ""
+    carries_read_outputs: Optional[bool] = None
+    separate_readonly_entrypoint: Optional[str] = None
+    entangled_read_outputs: List[str] = field(default_factory=list)
+    orchestrator_routed: bool = False
 
 
 @dataclass
@@ -259,6 +316,104 @@ def _find_entrypoint(operator_project_dir: Path, writer_relpath: str) -> Optiona
     if (Path(operator_project_dir) / candidate).is_file():
         return candidate
     return None
+
+
+def _orchestrator_routed_entrypoint(
+    operator_project_dir: Path, mechanism_id: str,
+) -> Optional[str]:
+    """Detect the OTHER scheduling shape: a scheduled job invoked through the
+    Orchestrator (the wizard's default scheduling model — see
+    ``agent_emitter._orchestrator_invocation``, which embeds a literal
+    ``agent=<agent_id> cadence=...`` trigger string into ``cron_config.md``),
+    rather than a dedicated ``run_<stem>.sh`` wrapper script.
+
+    There is no per-mechanism wrapper FILE to gate in this shape — the
+    Orchestrator invocation is a single inline command this module does not own
+    or safely rewrite (doing so is out of this module's scope; it would mean
+    editing the Orchestrator's own routing, not an operator-authored mechanism
+    file). So this is DETECTION-only: it never causes anything to be paused, and
+    the reconcile loop / notice renderer word this shape honestly (no auto-pause
+    happened, so no continuity claim is made about it either — deny-by-default).
+
+    Returns the ``cron_config.md`` relpath when a matching scheduled row is
+    found for ``mechanism_id``, else None.
+    """
+    cron_config = Path(operator_project_dir) / CRON_CONFIG_REL
+    if not cron_config.is_file():
+        return None
+    try:
+        text = cron_config.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    marker = f"agent={mechanism_id} "
+    if marker in text or text.rstrip().endswith(f"agent={mechanism_id}"):
+        return CRON_CONFIG_REL
+    return None
+
+
+def _detect_entangled_read_outputs(source_text: str) -> List[str]:
+    """Which read/report-shaped keywords (see ``_READ_OUTPUT_INDICATORS``) this
+    file's own source (function names, docstrings, comments) surfaces — a
+    heuristic (disclosed bound: textual, not semantic) signal that the SAME
+    file/entrypoint that was just paused also produces read-only output the
+    operator relies on. Order-stable and de-duplicated for deterministic notice
+    wording."""
+    lowered = source_text.lower()
+    return [kw for kw in _READ_OUTPUT_INDICATORS if kw in lowered]
+
+
+def _classify_read_output_entanglement(
+    operator_project_dir: Path,
+    writer_relpath: str,
+    flagged_relpaths: Sequence[str],
+) -> Tuple[Optional[bool], Optional[str], List[str]]:
+    """Classify whether the entrypoint just paused ALSO carries read-only
+    outputs the operator relies on (entangled) or whether a genuinely separate,
+    positively-verified read-only entrypoint survives the pause untouched
+    (separate). DENY-BY-DEFAULT: only returns ``(False, <relpath>, [])`` when a
+    companion is POSITIVELY verified; every other case returns
+    ``carries_read_outputs`` as ``True`` (entangled) or ``None`` (unknown), and
+    both are treated identically by ``render_impact_notice`` — never a
+    continuity promise without positive proof.
+
+    Returns ``(carries_read_outputs, separate_readonly_entrypoint, labels)``.
+    """
+    writer_path = Path(operator_project_dir) / writer_relpath
+    try:
+        source_text = writer_path.read_text(encoding="utf-8")
+    except OSError:
+        return None, None, []
+
+    labels = _detect_entangled_read_outputs(source_text)
+    if labels:
+        return True, None, labels
+
+    # No entanglement signal in the writer's OWN file -- look for a genuinely
+    # separate, verified read-only companion using the <stem><suffix> naming
+    # convention. A candidate only counts as "verified" when it (a) exists,
+    # (b) carries no scan violations of its own, and (c) has its own wrapper
+    # that is neither missing nor already gated by this module.
+    stem_path = Path(writer_relpath)
+    for suffix in _READONLY_COMPANION_SUFFIXES:
+        candidate_relpath = str(stem_path.parent / f"{stem_path.stem}{suffix}.py")
+        candidate_file = Path(operator_project_dir) / candidate_relpath
+        if not candidate_file.is_file():
+            continue
+        if candidate_relpath in flagged_relpaths:
+            continue  # it has violations of its own -- not verified read-only
+        candidate_wrapper_relpath = _wrapper_relpath_for(candidate_relpath)
+        candidate_wrapper = Path(operator_project_dir) / candidate_wrapper_relpath
+        if not candidate_wrapper.is_file():
+            continue
+        try:
+            wrapper_text = candidate_wrapper.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if _GUARD_BEGIN in wrapper_text:
+            continue  # already paused itself -- not a surviving continuity path
+        return False, candidate_wrapper_relpath, []
+
+    return None, None, []
 
 
 def _pause_marker_path(operator_project_dir: Path, mechanism_id: str) -> Path:
@@ -410,11 +565,65 @@ def _append_migration_request(
 
 # ===== 4. NOTICE (plain language) ================================================
 
+def _human_join(items: Sequence[str]) -> str:
+    items = list(items)
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
+def _pause_notice_lines(m: MechanismReport) -> List[str]:
+    """The per-mechanism notice line(s) for a PAUSED mechanism (F-43 fix).
+
+    Deny-by-default honesty: a continuity promise (the "keeps running exactly
+    as before" line) is emitted ONLY when ``m.carries_read_outputs is False``
+    AND a verified ``m.separate_readonly_entrypoint`` exists. Every other case
+    -- entangled (``True``) or unknown/unverified (``None``) -- tells the
+    operator the read-only outputs are paused too, names what is going dark
+    when that is known, and says it stays dark until this mechanism is rebuilt
+    and re-migrated. An uncertain case never fails toward false reassurance.
+    """
+    paused_line = (
+        f"  - It has been paused (`{m.entrypoint_relpath}` will not make that "
+        "change until this is fixed)."
+    )
+    if m.carries_read_outputs is False and m.separate_readonly_entrypoint:
+        return [
+            paused_line + " A separate part that only reads and reports to you "
+            f"(`{m.separate_readonly_entrypoint}`) was checked and confirmed "
+            "untouched by this — that keeps running exactly as before."
+        ]
+    if m.carries_read_outputs:
+        what = _human_join(m.entangled_read_outputs) or "reads and reports to you"
+        return [
+            paused_line + f" This is the same place that produces your {what} for "
+            f"you, so your {what} is paused too, not just the change it was making "
+            "-- it stays dark until this is rebuilt and reviewed again."
+        ]
+    # Unknown / unverified: fail toward "paused too", never toward reassurance.
+    return [
+        paused_line + " It has not been confirmed whether this same place also "
+        "reads and reports to you (a summary, an alert, a backup). Until that is "
+        "checked, treat anything it reports to you as paused too, not running as "
+        "before -- it comes back once this is rebuilt and reviewed again."
+    ]
+
+
 def render_impact_notice(
     mechanisms: List[MechanismReport], from_version: str, to_version: str,
 ) -> str:
     """A plain-language, non-technical impact notice: what changed, which
-    capability is affected, what happens next. No jargon."""
+    capability is affected, what happens next. No jargon.
+
+    F-43 fix: there is no unconditional "keeps running exactly as before" line
+    any more (see ``_pause_notice_lines``) — a continuity claim is only ever
+    made when a separate read-only entrypoint was positively verified to
+    survive the pause.
+    """
     lines = [
         "# Upgrade safety notice",
         "",
@@ -434,10 +643,14 @@ def render_impact_notice(
             "outside the project directly, without going through the safety check."
         )
         if m.paused:
+            lines.extend(_pause_notice_lines(m))
+        elif m.orchestrator_routed:
             lines.append(
-                f"  - It has been paused (`{m.entrypoint_relpath}` will not make that "
-                "change until this is fixed). Anything that only reads and reports to "
-                "you was not touched — that keeps running exactly as before."
+                "  - This runs on a schedule through your assistant (the Orchestrator), "
+                "so it could not be automatically switched off the way a direct "
+                "scheduled script can be. Until it is reviewed by hand, treat anything "
+                "it reads and reports to you the same as its change to your "
+                "information: not verified safe, not confirmed to still be running."
             )
         else:
             lines.append(
@@ -493,11 +706,16 @@ def reconcile_upgrade(
     by_relpath = scan_operator_mechanisms(
         operator_project_dir, build_repo_root, operator_code_dirs=operator_code_dirs)
 
+    flagged_relpaths = list(by_relpath)
     mechanisms: List[MechanismReport] = []
     for relpath in sorted(by_relpath):
         violations = by_relpath[relpath]
         mechanism_id = Path(relpath).stem
         entrypoint = _find_entrypoint(operator_project_dir, relpath)
+        carries_read_outputs: Optional[bool] = None
+        separate_readonly_entrypoint: Optional[str] = None
+        entangled_read_outputs: List[str] = []
+        orchestrator_routed = False
         if entrypoint:
             _safe_pause_entrypoint(
                 operator_project_dir, mechanism_id, relpath, entrypoint,
@@ -505,12 +723,28 @@ def reconcile_upgrade(
             )
             paused = True
             note = f"entrypoint {entrypoint} safe-paused"
-        else:
-            paused = False
-            note = (
-                "no conventional schedule/entrypoint file was found for this mechanism "
-                "-- it could not be paused automatically; review it by hand"
+            carries_read_outputs, separate_readonly_entrypoint, entangled_read_outputs = (
+                _classify_read_output_entanglement(
+                    operator_project_dir, relpath, flagged_relpaths)
             )
+        else:
+            orchestrator_entry = _orchestrator_routed_entrypoint(
+                operator_project_dir, mechanism_id)
+            paused = False
+            if orchestrator_entry:
+                orchestrator_routed = True
+                note = (
+                    "scheduled through your assistant (the Orchestrator) via "
+                    f"{orchestrator_entry}; no dedicated wrapper file exists to "
+                    "safe-pause automatically -- review by hand"
+                )
+            else:
+                orchestrator_routed = False
+                note = (
+                    "no conventional schedule/entrypoint file was found for this "
+                    "mechanism -- it could not be paused automatically; review it "
+                    "by hand"
+                )
         _append_migration_request(
             operator_project_dir, mechanism_id, relpath, entrypoint, violations,
             from_version, to_version,
@@ -522,6 +756,10 @@ def reconcile_upgrade(
             entrypoint_relpath=entrypoint,
             paused=paused,
             pause_note=note,
+            carries_read_outputs=carries_read_outputs,
+            separate_readonly_entrypoint=separate_readonly_entrypoint,
+            entangled_read_outputs=entangled_read_outputs,
+            orchestrator_routed=orchestrator_routed,
         ))
 
     notice_path: Optional[Path] = None

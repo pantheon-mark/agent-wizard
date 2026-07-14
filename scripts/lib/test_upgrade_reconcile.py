@@ -25,8 +25,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from upgrade_reconcile import (  # noqa: E402
     MIGRATION_QUEUE_REL,
     PAUSED_MECHANISMS_DIR_REL,
+    MechanismReport,
     ReconcileResult,
     reconcile_upgrade,
+    render_impact_notice,
     render_reconcile_result,
     scan_operator_mechanisms,
 )
@@ -201,6 +203,15 @@ class ReconcileEndToEndTests(_Base):
         for jargon in ("AST", "op_kind", "run_operation(", "bypass scanner"):
             self.assertNotIn(jargon, notice_text)
 
+        # F-43: entanglement with estate_upkeep's OWN read outputs is unverified
+        # here (no naming-convention companion exists) -- deny-by-default means
+        # NO continuity promise, even though a wholly separate, unflagged
+        # mechanism (estate_report.py) happens to sit alongside it untouched.
+        self.assertIsNone(m.carries_read_outputs)
+        self.assertIsNone(m.separate_readonly_entrypoint)
+        self.assertNotIn("keeps running exactly as before", notice_text)
+        self.assertIn("not been confirmed", notice_text.lower())
+
         # 6. Migration handed to the enhancement flow via the durable queue file.
         self.assertIsNotNone(result.migration_queue_path)
         queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
@@ -266,6 +277,189 @@ class ReconcileEndToEndTests(_Base):
             encoding="utf-8")
         self.assertIn("paused pending migration", wrapper)
 
+        # F-43 (the live estate dogfood defect): the SAME entrypoint that was just
+        # paused is ALSO where the digest comes from -- this must be DETECTED as
+        # entangled, and the notice must tell the truth about it: no unconditional
+        # "keeps running exactly as before" claim, name what's dark (the digest),
+        # and say it stays dark until rebuilt.
+        m = result.mechanisms[0]
+        self.assertTrue(m.carries_read_outputs)
+        self.assertIsNone(m.separate_readonly_entrypoint)
+        self.assertIn("digest", m.entangled_read_outputs)
+
+        notice_text = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertNotIn("keeps running exactly as before", notice_text)
+        self.assertIn("digest", notice_text.lower())
+        self.assertIn("paused too", notice_text.lower())
+        self.assertIn("rebuilt", notice_text.lower())
+
+    def test_split_read_write_agent_verified_separate_gets_continuity_promise(self):
+        # Anti-overfit shape 2: read and write are cleanly split into two
+        # entrypoints for the SAME mechanism. The read-only companion is
+        # positively verified -- it exists, carries no violations of its own,
+        # and its own wrapper is neither missing nor already gated -- so (and
+        # ONLY so) the notice may promise continuity for that specific part.
+        proj = _write_project(self.tmp, writer_body=_DIRECT_WRITER, with_read_only=False)
+        cron = proj / "agents" / "cron"
+        (cron / "estate_upkeep_digest.py").write_text(_READ_ONLY_REPORT, encoding="utf-8")
+        digest_wrapper = cron / "run_estate_upkeep_digest.sh"
+        digest_wrapper.write_text(
+            _WRAPPER_TEMPLATE.format(name="estate_upkeep_digest"), encoding="utf-8")
+        digest_wrapper.chmod(digest_wrapper.stat().st_mode | stat.S_IEXEC)
+        original_digest_wrapper = digest_wrapper.read_text(encoding="utf-8")
+
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="v0.10.2", to_version="v0.11.0",
+        )
+        self.assertTrue(result.any_paused)
+        m = result.mechanisms[0]
+        self.assertEqual(m.mechanism_id, "estate_upkeep")
+        self.assertFalse(m.carries_read_outputs)
+        self.assertEqual(
+            m.separate_readonly_entrypoint, "agents/cron/run_estate_upkeep_digest.sh")
+
+        notice_text = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertIn("keeps running exactly as before", notice_text)
+        self.assertIn("run_estate_upkeep_digest.sh", notice_text)
+
+        # The verified companion wrapper was never touched or gated.
+        self.assertEqual(digest_wrapper.read_text(encoding="utf-8"), original_digest_wrapper)
+        self.assertNotIn("paused pending migration", original_digest_wrapper)
+
+    def test_unverified_entanglement_fails_toward_paused_too_not_reassurance(self):
+        # Deny-by-default honesty: no entangled keyword in the writer's own
+        # file, and no positively verified separate companion either -- must
+        # fail toward "paused too", never a false continuity promise.
+        proj = _write_project(self.tmp, writer_body=_DIRECT_WRITER, with_read_only=False)
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="v0.10.2", to_version="v0.11.0",
+        )
+        m = result.mechanisms[0]
+        self.assertIsNone(m.carries_read_outputs)
+        self.assertIsNone(m.separate_readonly_entrypoint)
+        notice_text = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertNotIn("keeps running exactly as before", notice_text)
+        self.assertIn("not been confirmed", notice_text.lower())
+
+    def test_orchestrator_routed_shape_is_detected_and_notice_is_honest_about_it(self):
+        # Anti-overfit shape 3: the mechanism is scheduled through the
+        # Orchestrator (agent_emitter._orchestrator_invocation's convention --
+        # a literal "agent=<id> cadence=..." trigger embedded in
+        # cron_config.md), not a dedicated run_<stem>.sh wrapper. There is no
+        # per-mechanism wrapper file to gate, so it cannot be auto-paused --
+        # but the notice must still be honest about that (no continuity claim,
+        # no generic "review at your leisure" framing) rather than silently
+        # falling into the same bucket as "nothing scheduled at all."
+        proj = self.tmp / "operator_orchestrator_routed"
+        scripts = proj / "agents" / "scripts"
+        scripts.mkdir(parents=True, exist_ok=True)
+        (scripts / "estate_upkeep.py").write_text(_DIRECT_WRITER, encoding="utf-8")
+        cron = proj / "agents" / "cron"
+        cron.mkdir(parents=True, exist_ok=True)
+        (cron / "cron_config.md").write_text(
+            "| estate_upkeep | Daily upkeep | Every day at 6 AM | `0 6 * * *` | "
+            "claude --model opus --print \"Act as the Orchestrator "
+            "(agents/prompts/orchestrator_prompt.md). Scheduled trigger: "
+            "agent=estate_upkeep cadence=0 6 * * *. Read the work queue...\" | "
+            "— | — |\n",
+            encoding="utf-8",
+        )
+        (proj / ".wizard").mkdir(parents=True, exist_ok=True)
+
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="v0.10.2", to_version="v0.11.0",
+        )
+        self.assertTrue(result.any_affected)
+        self.assertFalse(result.any_paused)  # no wrapper file exists to gate
+        m = result.mechanisms[0]
+        self.assertEqual(m.mechanism_id, "estate_upkeep")
+        self.assertIn("Orchestrator", m.pause_note)
+        self.assertTrue(m.orchestrator_routed)
+
+        notice_text = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertNotIn("keeps running exactly as before", notice_text)
+        self.assertIn("assistant", notice_text.lower())
+
+
+class RenderImpactNoticeTests(unittest.TestCase):
+    """Direct unit coverage of the F-43 notice-honesty branching in
+    ``render_impact_notice`` / ``_pause_notice_lines`` -- no filesystem or
+    scanner involved, just the ``MechanismReport`` data model driving the text.
+    """
+
+    def _paused(self, **overrides):
+        base = dict(
+            mechanism_id="estate_upkeep",
+            writer_relpath="agents/cron/estate_upkeep.py",
+            violation_summaries=["direct_api_call:10"],
+            entrypoint_relpath="agents/cron/run_estate_upkeep.sh",
+            paused=True,
+        )
+        base.update(overrides)
+        return MechanismReport(**base)
+
+    def test_entangled_true_never_promises_continuity(self):
+        m = self._paused(carries_read_outputs=True, entangled_read_outputs=["digest", "alert"])
+        text = render_impact_notice([m], "v0.11.0", "v0.12.0")
+        self.assertNotIn("keeps running exactly as before", text)
+        self.assertIn("digest and alert", text)
+        self.assertIn("paused too", text.lower())
+        self.assertIn("rebuilt", text.lower())
+
+    def test_unknown_entanglement_never_promises_continuity(self):
+        m = self._paused(carries_read_outputs=None, separate_readonly_entrypoint=None)
+        text = render_impact_notice([m], "v0.11.0", "v0.12.0")
+        self.assertNotIn("keeps running exactly as before", text)
+        self.assertIn("not been confirmed", text.lower())
+
+    def test_verified_separate_allows_continuity_promise(self):
+        m = self._paused(
+            carries_read_outputs=False,
+            separate_readonly_entrypoint="agents/cron/run_estate_digest.sh",
+        )
+        text = render_impact_notice([m], "v0.11.0", "v0.12.0")
+        self.assertIn("keeps running exactly as before", text)
+        self.assertIn("agents/cron/run_estate_digest.sh", text)
+
+    def test_separate_entrypoint_without_verified_false_does_not_promise(self):
+        # carries_read_outputs left at its default (None/unknown) even though a
+        # separate_readonly_entrypoint string is present -- must NOT be treated
+        # as verified. Only carries_read_outputs is False AND a companion is
+        # set together count as verified (belt-and-suspenders on the deny-by-
+        # default rule -- guards against a future caller setting one field but
+        # not the other).
+        m = self._paused(
+            carries_read_outputs=None,
+            separate_readonly_entrypoint="agents/cron/run_estate_digest.sh",
+        )
+        text = render_impact_notice([m], "v0.11.0", "v0.12.0")
+        self.assertNotIn("keeps running exactly as before", text)
+
+    def test_not_paused_no_entrypoint_never_promises_continuity(self):
+        m = self._paused(paused=False, entrypoint_relpath=None,
+                          pause_note="no conventional schedule/entrypoint file was found")
+        text = render_impact_notice([m], "v0.11.0", "v0.12.0")
+        self.assertNotIn("keeps running exactly as before", text)
+        self.assertIn("review it by hand", text.lower())
+
+    def test_orchestrator_routed_flag_never_promises_continuity(self):
+        m = self._paused(paused=False, entrypoint_relpath=None,
+                          orchestrator_routed=True,
+                          pause_note="scheduled through your assistant (the Orchestrator)")
+        text = render_impact_notice([m], "v0.11.0", "v0.12.0")
+        self.assertNotIn("keeps running exactly as before", text)
+        self.assertIn("assistant", text.lower())
+        self.assertNotIn("no automatic schedule was found", text.lower())
+
+    def test_no_unconditional_continuity_line_remains_in_source(self):
+        # Guard against regression at the source level -- the OLD unconditional
+        # line must not exist anywhere in the module, under ANY MechanismReport
+        # shape (paused, unpaused, orchestrator-routed, entangled, separate).
+        import upgrade_reconcile
+        src = Path(upgrade_reconcile.__file__).read_text(encoding="utf-8")
+        self.assertNotIn(
+            "Anything that only reads and reports to you was not touched", src)
+
 
 class RenderReconcileResultTests(unittest.TestCase):
     def test_empty_when_nothing_affected(self):
@@ -274,7 +468,6 @@ class RenderReconcileResultTests(unittest.TestCase):
         self.assertEqual(render_reconcile_result(result), "")
 
     def test_summarizes_paused_mechanism(self):
-        from upgrade_reconcile import MechanismReport
         result = ReconcileResult(
             operator_project_path="/tmp/x", from_version="v1", to_version="v2",
             mechanisms=[MechanismReport(
