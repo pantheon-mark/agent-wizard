@@ -12,6 +12,23 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-14 — the everyday steps around a capability are easier and more honest (v0.13.0)
+
+**Public-facing change:** A set of operability improvements so the parts of a build you actually touch — turning a capability on, deciding what to keep, running things on a schedule, and setting up access — stay inside reach for a non-technical operator.
+
+- **Turning a capability on just works.** The one command that records your "yes, turn it on" now loads everything it needs by itself. Before, that step could stop and ask for hand-written code; now it runs exactly as written.
+- **You get help deciding, not just deleting.** When a capability sorts through a lot of items, your system now shows them grouped and de-duplicated — the clean ones, the mixed ones itemized, and the ones to review with the reason they were kept — so you can decide what to keep, and it acts on exactly the set you reviewed.
+- **Scheduled jobs have a safe "check" mode.** A job that runs on a schedule can now be run in a check-only mode that plans and reports without sending or changing anything, and an unrecognized option makes it stop rather than quietly run for real.
+- **A paused job tells you the truth.** When an update pauses a capability, the notice no longer promises that your summaries and alerts "keep running" unless a genuinely separate read-only path was checked to still be working — if reading and writing shared one job, it says plainly that those are paused too.
+- **Access problems surface early and in plain language.** A permission that hasn't been proven is shown as "granted, not yet exercised," not "verified"; a missing permission is caught before a live trial (not during one), with one clear step to fix and a place to pick back up; and a login failure prints one plain sentence, never a wall of technical error text.
+- No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
+
+This is a feature addition (`v0.13.0`, operator-explicit as always). Foundation documents are byte-identical to `v0.12.0`.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-07-13 — bulk actions are now bounded and verified as a whole run (v0.12.0)
 
 **Public-facing change:** One addition under the hood: a run-level safety envelope for bulk actions. When a capability acts on many things at once, your system now bounds and verifies the whole run — not just each single action.
