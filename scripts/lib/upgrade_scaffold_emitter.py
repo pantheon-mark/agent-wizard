@@ -131,6 +131,12 @@ _EXACT_LIFECYCLE = {
     "agents/cron/cron_config.md": "runtime_state",
     ".gitignore": "operator_config",
     ".env": "operator_config",   # operator-owned secrets file, emitted empty; never wizard-overwritten
+    # Root-level Python dependency pin file (F-35; only present for a writes-back
+    # system — system-artifacts.json: delivery wizard, render_kind copy, merge_strategy
+    # operator_review from templates/root/requirements_template). Same contract shape
+    # as .env above: wizard-seeded once, operator may add packages over time, never
+    # silently clobbered on upgrade.
+    "requirements.txt": "operator_config",
     COMMAND_SURFACE_REL: "inherited_content",
     # Durable, read-only-to-the-AI update-source reference. Wizard-authored safety
     # config; the apply path refreshes it under the authoritative control_plane_refresh

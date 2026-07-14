@@ -266,6 +266,19 @@
       "safety_class": "routine_improvement",
       "source_commit": "551dfc8",
       "status": "prerelease"
+    },
+    {
+      "bundle_manifest_sha256": "sha256:4c217a9527ca87800de6450d9458f6dbb6ee31a8d43d0f1e4487418b3dc1a8e4",
+      "bundle_tree_sha256": "sha256:5a75970e857a4f1c2c905aad01a41487dc82ec152ed3eb12ac24e8d739a91a20",
+      "changelog": "Four additions under the hood. Getting a newly built capability approved and running is now turnkey \u2014 the operator-acceptance step no longer refuses a freshly built capability just because nothing had loaded its code yet. Deciding what belongs in a bulk approval now has its own tool: it groups and classifies candidates for you and binds your approval to exactly what you were shown, so a run can never quietly act on something you did not see. A recurring or unattended job (a filter sweep, a scheduled digest, ...) can no longer fall through to a real run on a flag it does not recognize \u2014 it always has a safe preview, and an unrecognized instruction stops it rather than running anyway. And a credential that needs a specific permission (an OAuth scope) is now checked for that exact permission before anything live is attempted, with an honest three-state record (not granted / granted but unproven / verified) \u2014 and if a permission is not ready yet, only the live trial for that one part is paused; everything else stays built and running. No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.",
+      "foundation_bundle_version": "v0.13.0",
+      "manifest": "foundation-bundles/v0.13.0/manifest.yaml",
+      "path": "foundation-bundles/v0.13.0/",
+      "recommendation_reason": "If you build new write-back capabilities, approve batches of changes, run anything on a schedule, or use a credential that needs a specific permission, this update makes each of those safer and easier to trust \u2014 most operators should take it.",
+      "release_date": "2026-07-14",
+      "safety_class": "routine_improvement",
+      "source_commit": "pending",
+      "status": "prerelease"
     }
   ],
   "registry_schema_version": "v2",

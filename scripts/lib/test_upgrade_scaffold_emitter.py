@@ -171,6 +171,19 @@ class UpgradeScaffoldEmitterTests(unittest.TestCase):
         with self.assertRaises(UpgradeScaffoldError):
             classify_lifecycle("totally_unknown_root_file.md")
 
+    def test_root_requirements_txt_classifies_without_raising(self):
+        """A root-level requirements.txt (F-35; only present for a writes-back system,
+        per system-artifacts.json's delivery:wizard/render_kind:copy/merge_strategy:
+        operator_review contract from templates/root/requirements_template) previously
+        matched no exact override and no directory prefix (a bare root filename never
+        matches a "prefix/"-style directory rule), so a full-pipeline emit against a
+        bundle >= v0.11.0 raised UpgradeScaffoldError('unclassified staged file
+        ...'). It must classify to the same operator_config bucket as the sibling
+        wizard-seeded-once, operator-editable root file .env, never raise."""
+        lifecycle = classify_lifecycle("requirements.txt")
+        self.assertEqual(lifecycle, "operator_config")
+        self.assertEqual(LIFECYCLE_POLICY[lifecycle]["merge_strategy"], "operator_review")
+
     def test_operator_owned_files_classify_to_operator_review(self):
         """Operator-state clobber fix: a file the operator or the system WRITES during operation must
         stamp merge_strategy=operator_review in the fresh-emit manifest (single source

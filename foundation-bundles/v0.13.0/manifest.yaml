@@ -1,0 +1,71 @@
+# Foundation bundle v0.13.0 manifest
+# Minor-additive release over v0.12.0 (operability slice): adds turnkey acceptance-CLI,
+# judgment-path triage + consent-artifact binding, safe standing-automation, an offline
+# scope grant-check, and an honest safe-pause notice to the emitted external_write lib
+# (agents/lib/external_write/): three new modules (registered_adapters.py, triage.py,
+# standing_automation.py) plus targeted extensions to existing modules (adapter_registry.py,
+# adapters.py, adapters_gmail.py, operator_acceptance.py, run_envelope.py, zones.py). Also
+# ships a new operator-facing skill (wizard/skills/triage-review.md) and updates to
+# credential-setup.md, next-phase.md, agents/cron_config.md, security/credentials_registry.md,
+# and work/stub_tracker.md. No breaking changes; all existing capabilities are byte-for-byte
+# unaffected and previously released bundles still replay. Foundation docs byte-identical to
+# v0.12.0 (schema unchanged, v0.3). JSON sidecar (manifest.json) is what the engine consumes.
+_note: JSON sidecar for manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing
+  companion. Both files MUST stay in sync.
+agent_contract_version: v0-pre-rebuild
+bundle_manifest_schema_version: v2
+foundation_bundle_version: v0.13.0
+foundation_schema_version: v0.3
+included_templates:
+  foundation_docs:
+  - vision.md
+  - approach.md
+  - technical_architecture.md
+  - execution_plan.md
+  - test_cases.md
+  - audit_framework.md
+managed_files:
+  foundation/approach.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/audit_framework.md:
+    local_modifications: not_recommended
+    managed_by: wizard
+    merge_strategy: warn_on_drift
+  foundation/execution_plan.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/prd.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/technical_architecture.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/test_cases.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/vision.md:
+    local_modifications: expected
+    managed_by: shared
+    merge_strategy: three_way
+min_engine_version: v1.0.0
+public_api:
+  required_files:
+  - foundation/vision.md
+  - foundation/prd.md
+  - foundation/approach.md
+  - foundation/execution_plan.md
+  - foundation/technical_architecture.md
+  - foundation/test_cases.md
+  - foundation/audit_framework.md
+  required_frontmatter_fields_per_file: see the canonical foundation-versioning specification § 1.1
+  required_sections_per_doc_type: see schemas/section-schema.yaml in this bundle
+  section_schema: schemas/section-schema.yaml
+release_date: '2026-07-14'
+source_commit: PENDING
+status: prerelease
