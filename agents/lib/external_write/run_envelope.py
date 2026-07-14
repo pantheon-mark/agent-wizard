@@ -174,6 +174,22 @@ def _validate_reviewed_set_v2(reviewed_set: Any) -> Optional[str]:
     return None
 
 
+# Static enum -> plain-language label map for the operator-facing category
+# column in ``render_review_artifact``. FIXED constant, never derived at
+# render time — ``render_review_artifact`` must render identical bytes for an
+# identical reviewed_set on every call (mint AND ``is_spendable`` both
+# recompute the artifact from the frozen set and compare digests against it),
+# so this map cannot vary by time, locale, or caller. An unrecognized/unknown
+# category value is rendered verbatim (fail-safe) rather than raising, so an
+# out-of-vocabulary value never breaks rendering or the digest.
+_CATEGORY_PLAIN_LABELS: Dict[str, str] = {
+    "uniformly_safe": "Uniformly safe",
+    "contains_exceptions": "Contains exceptions",
+    "requires_review": "Requires review",
+    "protected": "Protected",
+}
+
+
 def render_review_artifact(reviewed_set: Any) -> Tuple[str, str]:
     """Deterministically render the operator-facing review artifact from the
     FROZEN ``reviewed_set`` — pure: an identical reviewed_set (content + order)
@@ -189,14 +205,19 @@ def render_review_artifact(reviewed_set: Any) -> Tuple[str, str]:
     itself, then compares the two. A caller cannot simply assert "this digest
     matches" — the two hashes must actually agree.
 
-    Rendered fields are the human-facing ones only — ``unit_id``, ``category``,
-    ``reason_shown`` — never a raw internal hash: ``source_snapshot_digest``
-    stays part of the underlying reviewed_set (and so still binds via
-    ``reviewed_set_digest``), it is simply not printed into operator-facing
-    text (no internal-label/digest leaks — Operator Interaction Contract §1,
-    the same convention ``consent_narration.py`` follows). A missing field
-    renders as an empty string rather than raising — this function is pure
-    rendering, never validation (schema validation is
+    Rendered fields are ``unit_id``, a plain-language rendering of
+    ``category`` (via the fixed ``_CATEGORY_PLAIN_LABELS`` map — an
+    unrecognized value renders verbatim rather than raising), and
+    ``reason_shown``. ``unit_id`` and the category label are deliberately
+    INCLUDED here — they are exactly what the operator's approval must bind
+    to (which items, and how each was classified), per the consent-binding
+    purpose this function serves. What is EXCLUDED is the raw internal hash:
+    ``source_snapshot_digest`` stays part of the underlying reviewed_set (and
+    so still binds via ``reviewed_set_digest``), it is simply not printed
+    into operator-facing text — no digest/hash leaks into the consent
+    surface, the same convention ``consent_narration.py`` follows. A missing
+    field renders as an empty string rather than raising — this function is
+    pure rendering, never validation (schema validation is
     ``_validate_reviewed_set_v2``'s job)."""
     normalized = [dict(e) for e in (reviewed_set or [])]
     lines: List[str] = [
@@ -207,8 +228,9 @@ def render_review_artifact(reviewed_set: Any) -> Tuple[str, str]:
     for e in normalized:
         unit_id = e.get("unit_id", "")
         category = e.get("category", "")
+        category_label = _CATEGORY_PLAIN_LABELS.get(category, category)
         reason = e.get("reason_shown", "")
-        lines.append(f"- {unit_id} [{category}]: {reason}")
+        lines.append(f"- {unit_id} [{category_label}]: {reason}")
     artifact = "\n".join(lines) + "\n"
     digest = hashlib.sha256(artifact.encode("utf-8")).hexdigest()
     return artifact, digest
