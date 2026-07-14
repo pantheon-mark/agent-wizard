@@ -17,6 +17,8 @@ DIFFERENT merge strategies to DIFFERENT docs, so an estate-specific assumption (
 """
 
 import json
+import os
+import stat
 import sys
 import tempfile
 import unittest
@@ -1507,6 +1509,212 @@ class CopyKindWritePathTests(_Base):
         self.assertTrue(collision_entries, "no collision surface entry for the colliding path")
         from upgrade_apply import SURFACE_COLLISION
         self.assertEqual(collision_entries[0].classification, SURFACE_COLLISION)
+
+
+class ManagedModeReconcileTests(_Base):
+    """F-54: a managed file's on-disk MODE must be reconciled to its contract mode at
+    commit, for BOTH the delivery path (content changes across versions, so the file is
+    freshly staged) and the restore path (content is IDENTICAL across versions, so the
+    file is never re-written -- yet its mode may have been stripped by a prior buggy
+    apply, exactly the estate's `start-session.sh` situation).
+
+    Exercises the render_kind:render operating-layer write path (upgrade_apply step 4c),
+    where real scripts like `start-session.sh` / `agents/scripts/*.sh` live. Before the
+    fix this path tracked NO mode at all (unlike the copy-kind path, which tracked mode
+    only on its content-changed branches) -- so a script here never got chmod'd, changed
+    or not.
+
+    Anti-overfit: asserts over TWO distinct managed script relpaths (one delivery, one
+    restore), both driven purely by the contract's `mode` field -- plus a negative
+    control (a 0644 managed markdown file must NOT be made executable) and an unmanaged
+    file (must never be touched at all).
+    """
+
+    _BASE = "v0.90.0"
+    _TARGET = "v0.90.1"
+    _SCRIPT_A = "start-session.sh"              # content CHANGES base -> target (delivery)
+    _SCRIPT_B = "agents/scripts/coordinator.sh"  # content UNCHANGED base -> target (restore)
+    _MD = "operating_notes.md"                  # 0644 managed file; must stay non-executable
+
+    def _add_operating_contract(self, build_root: Path, version: str, *, script_a_label: str):
+        """Add a system-artifacts.json (+ bundle-resident templates) declaring the two
+        managed scripts (mode 0755) and one managed markdown (mode 0644) to `version`'s
+        bundle. Called for BOTH the base and target bundles (the CURRENT-version render
+        used by the replay-conformance gate needs the base bundle's own contract+templates
+        too)."""
+        bundle_dir = build_root / "wizard" / "foundation-bundles" / version
+        root_dir = bundle_dir / "templates" / "root"
+        root_dir.mkdir(parents=True, exist_ok=True)
+        (root_dir / "start-session.sh").write_text(
+            f"#!/bin/bash\n# start-session.sh ({script_a_label})\necho '{script_a_label}'\n",
+            encoding="utf-8",
+        )
+        (root_dir / "coordinator.sh").write_text(
+            "#!/bin/bash\n# coordinator.sh (stable)\necho 'stable-coordinator'\n",
+            encoding="utf-8",
+        )
+        (root_dir / "operating_notes.md").write_text(
+            "# Operating notes\n\nstable-notes\n", encoding="utf-8",
+        )
+        artifacts = [
+            {"delivery": "wizard", "relpath": self._SCRIPT_A, "render_kind": "render",
+             "merge_strategy": "warn_on_drift", "mode": "0755",
+             "template_path": "templates/root/start-session.sh"},
+            {"delivery": "wizard", "relpath": self._SCRIPT_B, "render_kind": "render",
+             "merge_strategy": "warn_on_drift", "mode": "0755",
+             "template_path": "templates/root/coordinator.sh"},
+            {"delivery": "wizard", "relpath": self._MD, "render_kind": "render",
+             "merge_strategy": "three_way", "mode": "0644",
+             "template_path": "templates/root/operating_notes.md"},
+        ]
+        contract = {
+            "contract_id": "system-artifacts",
+            "contract_version": "system-artifacts-v1",
+            "bundle_version": version,
+            "artifacts": artifacts,
+        }
+        (bundle_dir / "system-artifacts.json").write_text(
+            json.dumps(contract, indent=2) + "\n", encoding="utf-8",
+        )
+
+    def _setup_repo(self):
+        build_root, reg = _write_build_repo(
+            self.tmp, base_version=self._BASE, target_version=self._TARGET,
+        )
+        # Base bundle: start-session.sh labeled "base". Target bundle: labeled "TARGET"
+        # -- a genuine content change, so start-session.sh exercises the DELIVERY branch.
+        # coordinator.sh + operating_notes.md are byte-identical in both bundles, so they
+        # exercise the "target unchanged" branch (the RESTORE / negative-control cases).
+        self._add_operating_contract(build_root, self._BASE, script_a_label="base")
+        self._add_operating_contract(build_root, self._TARGET, script_a_label="TARGET")
+        return build_root, reg
+
+    def _build_operator(self, build_root: Path):
+        from upgrade_apply import _render_operating_layer
+
+        proj, mp, _ = _build_operator_project(self.tmp, build_root, base_version=self._BASE)
+
+        # Upgrade the capsule to v2 (carries an `operating` block) so the operating-layer
+        # render path is taken instead of needs_capsule_upgrade.
+        capsule_path = proj / ".wizard" / "replay-capsule.json"
+        capsule = json.loads(_read(capsule_path))
+        capsule["schema_version"] = "replay-capsule-v2"
+        capsule["operating"] = {"resolved_scaffold_inputs": {}, "by_relpath": {}}
+        capsule_path.write_text(
+            json.dumps(capsule, indent=2, sort_keys=True) + "\n", encoding="utf-8",
+        )
+
+        project_name = "Acme Helper"
+        relpaths = [self._SCRIPT_A, self._SCRIPT_B, self._MD]
+        rendered = _render_operating_layer(
+            self._BASE, relpaths, capsule=capsule, capsule_inputs=_CAPSULE_INPUTS,
+            project_name=project_name, build_repo_root=build_root,
+        )
+
+        manifest = json.loads(_read(mp))
+        for rel, strategy in (
+            (self._SCRIPT_A, "warn_on_drift"),
+            (self._SCRIPT_B, "warn_on_drift"),
+            (self._MD, "three_way"),
+        ):
+            content = rendered[rel]
+            dest = proj / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content, encoding="utf-8")
+            # Simulate the F-54 pre-fix stripped state: EVERY managed file sits at the
+            # umask-default 0644 on disk, regardless of what its contract mode says.
+            os.chmod(dest, 0o644)
+            digest = "sha256:" + sha256_bytes(content.encode("utf-8"))
+            manifest["managed_files"][rel] = {
+                "managed": "true",
+                "managed_by": "shared",
+                "base_hash": digest,
+                "base_content_hash": digest,
+                "current_hash_last_seen": digest,
+                "local_modifications": "expected",
+                "merge_strategy": strategy,
+                "render_kind": "render",
+                "source_refs": [],
+                "live_lineage_version": self._BASE,
+            }
+
+        # An unmanaged, non-contract file -- must never be touched by the reconcile.
+        unmanaged = proj / "notes" / "private.txt"
+        unmanaged.parent.mkdir(parents=True, exist_ok=True)
+        unmanaged.write_text("operator's own private note\n", encoding="utf-8")
+        os.chmod(unmanaged, 0o600)
+
+        mp.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return proj, mp, rendered, project_name
+
+    def test_delivery_and_restore_reconcile_to_contract_mode(self):
+        """RED before the fix / GREEN after: a re-delivered script (content changed) AND
+        a content-unchanged script both land at their contract mode (0755) + X_OK after
+        apply; a 0644 managed markdown is left non-executable; an unmanaged file is left
+        completely untouched."""
+        from upgrade_apply import _render_operating_layer
+
+        build_root, reg = self._setup_repo()
+        proj, mp, base_rendered, project_name = self._build_operator(build_root)
+
+        # Precondition: both scripts + the md file are all sitting at 0644 (stripped),
+        # exactly as a prior buggy apply (or a never-chmod'd emit) would leave them.
+        for rel in (self._SCRIPT_A, self._SCRIPT_B, self._MD):
+            self.assertEqual(
+                stat.S_IMODE((proj / rel).stat().st_mode), 0o644,
+                f"precondition: {rel} must start at 0644",
+            )
+
+        res = _apply(proj, mp, reg, build_root, target_version=self._TARGET)
+
+        script_a_path = proj / self._SCRIPT_A
+        script_b_path = proj / self._SCRIPT_B
+        md_path = proj / self._MD
+        unmanaged_path = proj / "notes" / "private.txt"
+
+        # --- Delivery case: start-session.sh content changed -> adopted + mode fixed.
+        target_rendered = _render_operating_layer(
+            self._TARGET, [self._SCRIPT_A], capsule=json.loads(_read(proj / ".wizard" / "replay-capsule.json")),
+            capsule_inputs=_CAPSULE_INPUTS, project_name=project_name, build_repo_root=build_root,
+        )
+        self.assertEqual(
+            script_a_path.read_text(encoding="utf-8"), target_rendered[self._SCRIPT_A],
+            "delivery case: start-session.sh content not adopted from the target version",
+        )
+        self.assertIn(self._SCRIPT_A, res.files_written)
+
+        # --- Restore case: coordinator.sh content UNCHANGED, but mode must still heal.
+        self.assertEqual(
+            script_b_path.read_text(encoding="utf-8"), base_rendered[self._SCRIPT_B],
+            "restore case: coordinator.sh content should be unchanged",
+        )
+
+        # --- Both scripts: mode == 0755 and executable, driven by the contract, not a
+        # hardcoded path.
+        for path, label in (
+            (script_a_path, "start-session.sh (delivery)"),
+            (script_b_path, "agents/scripts/coordinator.sh (restore)"),
+        ):
+            mode = stat.S_IMODE(path.stat().st_mode)
+            self.assertEqual(mode, 0o755, f"{label}: expected contract mode 0755, got {oct(mode)}")
+            self.assertTrue(os.access(path, os.X_OK), f"{label}: not executable (X_OK) after apply")
+
+        # --- Negative control: a 0644 managed markdown must NOT be made executable.
+        md_mode = stat.S_IMODE(md_path.stat().st_mode)
+        self.assertEqual(md_mode, 0o644, "managed 0644 markdown file's mode changed unexpectedly")
+        self.assertFalse(
+            os.access(md_path, os.X_OK), "0644 managed markdown was made executable"
+        )
+
+        # --- Unmanaged file: never touched (content or mode).
+        self.assertEqual(
+            stat.S_IMODE(unmanaged_path.stat().st_mode), 0o600,
+            "unmanaged/operator file's mode was touched by the reconcile",
+        )
+        self.assertEqual(
+            unmanaged_path.read_text(encoding="utf-8"), "operator's own private note\n",
+            "unmanaged/operator file's content was touched by the reconcile",
+        )
 
 
 if __name__ == "__main__":

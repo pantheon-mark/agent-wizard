@@ -44,6 +44,7 @@ import json
 import os
 import re
 import shutil
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -1311,8 +1312,6 @@ def apply_upgrade(
     #   - Track file mode from the contract (0755 for .sh, else 0644).
     #   - new-in-target: create additively; add to manifest.
 
-    # staged_modes: relpath -> octal int — mode to apply at atomic-replace time.
-    staged_modes: Dict[str, int] = {}
     # new_copy_manifest_entries: relpath -> manifest entry dict for newly created files.
     new_copy_manifest_entries: Dict[str, Dict[str, Any]] = {}
 
@@ -1369,19 +1368,17 @@ def apply_upgrade(
             rel, theirs_copy, capsule, build_repo_root
         )
 
-        # Resolve mode from the contract entry (default 0644).
+        # Resolve mode from the contract entry (default 0644) -- for the manifest's
+        # `mode` field only. The actual on-disk chmod is a single centralized reconcile
+        # pass over the full contract at commit time (`_reconcile_managed_modes`), not
+        # tracked per-staging-region here (see that function's docstring for why).
         mode_str = str(_contract_entries_map.get(rel, {}).get("mode", "0644"))
-        try:
-            mode_int = int(mode_str, 8)
-        except ValueError:
-            mode_int = 0o644
 
         theirs_hash = "sha256:" + sha256_bytes(theirs_copy.encode("utf-8"))
 
         if cls == SURFACE_NEW:
             # Additive creation — no existing managed entry, no existing disk file.
             staged_writes[rel] = theirs_copy
-            staged_modes[rel] = mode_int
             new_copy_manifest_entries[rel] = {
                 "managed": "true",
                 "managed_by": "shared",
@@ -1429,13 +1426,11 @@ def apply_upgrade(
                 frozen_blocks.append(rel)
                 continue
             staged_writes[rel] = theirs_copy
-            staged_modes[rel] = mode_int
             decisions.append(FileDecision(rel, strategy, FILE_ADOPTED, drifted,
                                           note="frozen copy file, no operator edits; adopted the new version"))
         elif strategy == MERGE_STRATEGY_THREE_WAY:
             if not drifted:
                 staged_writes[rel] = theirs_copy
-                staged_modes[rel] = mode_int
                 decisions.append(FileDecision(rel, strategy, FILE_ADOPTED, drifted,
                                               note="no operator edits; adopted the new version"))
             else:
@@ -1457,7 +1452,6 @@ def apply_upgrade(
                     "No files were changed."
                 )
             staged_writes[rel] = theirs_copy
-            staged_modes[rel] = mode_int
             decisions.append(FileDecision(rel, strategy, FILE_ADOPTED, drifted,
                                           note=("acknowledged; adopted the new version" if drifted
                                                 else "no operator edits; adopted the new version")))
@@ -1846,13 +1840,21 @@ def apply_upgrade(
                     _write_review_sidecar(staging_review_dir, rel, ours, theirs, overlay_note=overlay)
                 )
 
-            # All staged + validated. Commit: per-file atomic os.replace of content +
-            # sidecars + manifest, then append history. Any OSError here triggers the
-            # broadened rollback below.
+            # All staged + validated. Commit: per-file atomic os.replace of content,
+            # then the mode reconcile, THEN sidecars + manifest + history -- so the
+            # manifest/history (the "this upgrade landed" record) are the LAST things
+            # committed, after every file mode is already settled. Any OSError here
+            # triggers the broadened rollback below.
             for rel in staged_writes:
                 _atomic_replace(staging / rel, operator_project_dir / rel)
-                if rel in staged_modes:
-                    os.chmod(operator_project_dir / rel, staged_modes[rel])
+
+            # Mode reconcile (F-54): chmod EVERY managed (delivery=="wizard") file on
+            # disk to its target-contract mode -- staged writes AND content-unchanged
+            # files alike. A content-only commit loop (the per-region `staged_modes`
+            # this replaces) silently strips `+x` on delivery and never heals an
+            # already-stripped script; this single pass closes both gaps at once.
+            _reconcile_managed_modes(target_contract, operator_project_dir)
+
             for rrel in review_rel_paths:
                 _atomic_replace(staging / rrel, operator_project_dir / rrel)
                 review_paths_written.append(rrel)
@@ -1979,6 +1981,56 @@ def _atomic_replace(src: Path, dest: Path) -> None:
     """Atomic per-file install from staging into the live tree."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     os.replace(str(src), str(dest))
+
+
+def _reconcile_managed_modes(
+    target_contract: Optional[Dict[str, Any]], operator_project_dir: Path,
+) -> List[str]:
+    """Chmod every on-disk managed (`delivery=="wizard"`) file to its TARGET contract
+    mode (F-54).
+
+    Runs once at commit, over the FULL managed-artifacts set declared in the target
+    bundle's system-artifacts.json -- not just the files staged for a content write.
+    This is deliberately a single centralized pass rather than per-staging-region mode
+    tracking (the prior `staged_modes` approach), because a scattered per-region
+    tracker can silently forget a region (exactly what happened: the managed-artifacts
+    staging region and the operating-layer render region both wrote content with no
+    mode counterpart at all, so a script's `+x` was stripped on delivery and never
+    self-healed on a later no-op upgrade).
+
+    Covers BOTH cases in one mechanism:
+      - delivery: a freshly staged/re-delivered file lands at its contract mode.
+      - restore: a content-UNCHANGED managed file already on disk (e.g. a script an
+        earlier buggy apply left at 0644) is healed back to its contract mode even
+        though its bytes never changed.
+
+    Only ever touches relpaths that are explicit `delivery=="wizard"` contract entries
+    -- never operator-owned files, dynamic review sidecars, or anything outside the
+    contract. Only chmods when the current mode actually differs (no needless syscalls).
+    Returns the sorted relpaths whose mode was changed (informational).
+    """
+    changed: List[str] = []
+    if not target_contract:
+        return changed
+    for entry in target_contract.get("artifacts", []):
+        if entry.get("delivery") != "wizard":
+            continue
+        rel = entry.get("relpath")
+        if not rel:
+            continue
+        mode_str = str(entry.get("mode", "0644"))
+        try:
+            mode_int = int(mode_str, 8)
+        except ValueError:
+            mode_int = 0o644
+        target_path = operator_project_dir / rel
+        if not target_path.is_file():
+            continue
+        current_mode = stat.S_IMODE(target_path.stat().st_mode)
+        if current_mode != mode_int:
+            os.chmod(target_path, mode_int)
+            changed.append(rel)
+    return sorted(changed)
 
 
 def _read_target_generator_version(target_bundle_dir: Path) -> Optional[str]:
