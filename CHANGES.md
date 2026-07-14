@@ -12,6 +12,17 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-14 — an update no longer removes a script's ability to run (toolkit fix, no version change)
+
+**Public-facing change:** A fix to the update tool itself (delivered via `wizard self-update`, not a bundle version). Previously, applying an update could quietly strip the "executable" permission from your system's shell scripts — so a command like `./start-session.sh` would afterward fail with "permission denied." The update tool now sets every managed file's permissions from the delivered contract on each apply — both for files it delivers and for files already on disk — so a script that should be runnable is made runnable again, even if an earlier update had stripped it.
+
+- If your `start-session.sh` (or any system script) currently says "permission denied," updating the tool (`wizard self-update`) and then applying your next update restores it automatically — no manual fix needed.
+- This is a tool fix, so it carries no foundation-bundle version change; every released bundle is untouched.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-07-14 — the everyday steps around a capability are easier and more honest (v0.13.0)
 
 **Public-facing change:** A set of operability improvements so the parts of a build you actually touch — turning a capability on, deciding what to keep, running things on a schedule, and setting up access — stay inside reach for a non-technical operator.
