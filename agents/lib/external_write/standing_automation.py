@@ -73,7 +73,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional, Sequence
 
 from external_write.operations import Operation, Result
-from external_write.adapters import run_operation
+from external_write.adapters import run_operation, describe_auth_failure
 
 # The only two recognized flags -- aliases for the same intent (a read + plan +
 # gate-evaluate preview that makes no external call). Exactly one, alone, is
@@ -104,6 +104,11 @@ MODE_REFUSED = "refused_bad_args"
 # error).
 EXIT_OK = 0
 EXIT_BAD_ARGS = 2
+# Task 11 (B3 / F-52,F-47 -- v0.13.0 Slice 2): the live run attempted but was
+# blocked by a recognized auth/setup failure (e.g. an ungranted OAuth scope)
+# -- "refused by domain logic" in the same sense EXIT_BAD_ARGS documents
+# above, distinct from a usage error.
+EXIT_LIVE_AUTH_ERROR = 1
 
 
 @dataclass(frozen=True)
@@ -242,9 +247,21 @@ def run_standing_automation(
     Returns
     -------
     A `StandingAutomationOutcome`. `run_standing_automation` itself never
-    raises for a parse failure or a --check preview; the live path (mode ==
-    "live") propagates whatever `run_live` itself raises or returns --
-    that is the caller's own job logic, unchanged.
+    raises for a parse failure or a --check preview. The live path (mode ==
+    "live") propagates whatever `run_live` itself RETURNS unchanged -- that
+    is the caller's own job logic. If `run_live` RAISES, this function
+    classifies the exception (Task 11, B3 / F-52,F-47 --
+    `adapters.describe_auth_failure`): a recognized auth/setup-shaped
+    failure (an ungranted OAuth scope, an expired/invalid credential) is
+    caught here and turned into a plain-language, resumable
+    `StandingAutomationOutcome` (mode="live", exit_code=EXIT_LIVE_AUTH_ERROR,
+    result=None) instead of an uncaught traceback -- the concrete fix for the
+    dogfood incident where exactly this shape of failure surfaced as a raw
+    ~10-frame Python traceback to a non-technical operator mid live-trial.
+    Anything that does NOT classify as auth-shaped is deliberately
+    RE-RAISED, unchanged from the prior behavior -- this is a targeted fix
+    for the acute auth-failure path, not a general catch-all around the
+    caller's own job logic.
     """
     mode, error = parse_standing_automation_args(argv)
     if mode is None:
@@ -261,6 +278,13 @@ def run_standing_automation(
             mode=MODE_CHECK, exit_code=EXIT_OK, message=_check_message(result), result=result)
 
     # mode == MODE_LIVE -- the only path that may ever touch `client` for real.
-    live_result = run_live(client)
+    try:
+        live_result = run_live(client)
+    except Exception as exc:
+        auth_message = describe_auth_failure(exc)
+        if auth_message is None:
+            raise  # not a recognized auth/setup shape -- unchanged prior behavior.
+        return StandingAutomationOutcome(
+            mode=MODE_LIVE, exit_code=EXIT_LIVE_AUTH_ERROR, message=auth_message, result=None)
     return StandingAutomationOutcome(
         mode=MODE_LIVE, exit_code=EXIT_OK, message="Live run completed.", result=live_result)

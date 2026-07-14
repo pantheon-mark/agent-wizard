@@ -159,18 +159,21 @@ Work through each login/key dependency in turn and capture its credential metada
 - **Type:** API key / OAuth token / username+password login / other. You can usually tell from the provider; confirm only the part the operator would actually know (e.g. "you sign into this one with a username and password, right?").
 - **Provider:** the service it comes from.
 - **Expiry behavior (PROVISIONAL: your proposal, never an assertion).** From what you know about the provider, propose whether it expires and how it renews, said honestly. **Default to Unknown when unsure.** Never ask the operator to state a provider's expiry rules.
+- **Declared scope (OAuth token type only — skip entirely for every other type).** The exact permission scope the system will request from this provider for this dependency (e.g. "read-only access to your Gmail", technically `gmail.readonly`). Propose the narrowest scope that covers what the system actually does with this dependency, from what you know of the provider's scope model — never propose a broader scope "to be safe." This is the exact scope a later check confirms is actually granted, so it must name the one the system truly uses, not a broader one that happens to also work.
+- **Needs an org admin to grant (OAuth token type only — skip entirely for every other type).** Whether obtaining or granting this scope needs an organization admin — a Google Workspace or Microsoft 365 admin, a domain-wide-delegation grant, or similar — rather than something the operator can do themselves from a personal account. Propose your best read from the provider and account type; the operator confirms (they may not know the technical term, but they know whether it's a personal account or a work/school one managed by someone else).
 
 **For each login/key dependency, say:**
 
 > **[Dependency name]:** this comes from [provider], and it's [a key the system uses / a login you sign into].
 > The system will store it under the name `[ENV_VAR_NAME]`.
 > [Provisional expiry, said honestly, e.g. "I believe this kind of key doesn't expire on its own; I haven't checked your account, so the system will keep an eye on it and tell you if that changes." OR "I'm not certain how this one expires. The system will watch it and confirm."]
+> [For an OAuth token only: "This will need [plain-language description of the scope, e.g. "read-only access to your Gmail"]." And, if you believe an org admin grant is needed: "Because this is a [Workspace/Microsoft 365/managed] account, granting this may need your organization's admin — I'll walk you through exactly what to ask for when we set this up."]
 >
 > Does that look right? Anything to correct?
 
-**Wait for answer.** Record the confirmed metadata (ENV-variable name, type, provider, provisional expiry) against that dependency. You are NOT collecting the value and NOT testing anything here. If the operator corrects the type, provider, or expiry, use their correction; if they don't know, leave expiry as Unknown.
+**Wait for answer.** Record the confirmed metadata (ENV-variable name, type, provider, provisional expiry, and — for an OAuth token — declared scope and whether an org admin grant is needed) against that dependency. You are NOT collecting the value and NOT testing anything here. If the operator corrects the type, provider, expiry, scope, or admin-grant flag, use their correction; if they don't know, leave expiry as Unknown and the admin-grant flag as your best proposal.
 
-This metadata is what pre-populates the credentials registry (`Status: Pending`, no values) at close, and what the first-boot credential-setup skill uses to walk the operator through obtaining each value.
+This metadata is what pre-populates the credentials registry (`Status: Pending`, no values, `Declared scope`/`Needs admin grant` filled in for OAuth tokens and `N/A` for everything else) at close, and what the first-boot credential-setup skill uses to walk the operator through obtaining each value — including, for an OAuth token that needs one, requesting the org-admin grant as its own first-class, sequenced step before anything is tried live (see the credential-setup skill).
 
 Write sub-step marker: Append `step_09_CRED-META: complete | <timestamp>` to `~/claude-wizard-draft/wizard_progress.md`.
 

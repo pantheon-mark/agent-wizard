@@ -227,6 +227,44 @@ class TestAdapterDispatchEvidencePredicateCapture(unittest.TestCase):
         self.assertIs(dispatch_after.verify_apply_landed,
                       _EvidencePredicateStubAdapter.verify_apply_landed)
 
+    def test_dispatch_has_none_for_grant_preflight_when_class_does_not_define_it(self):
+        """Task 11 (B3 / F-52,F-47 -- v0.13.0 Slice 2). _StubAdapter defines no
+        grant_preflight -- back-compat: every adapter registered before this
+        task keeps working, with the field simply None (the non-scope-auth
+        / no-grant-check-support N/A signal check_scope_grant relies on)."""
+        adapter = _StubAdapter()
+        register_adapter("_evidence_probe_a", adapter)
+        dispatch = get_dispatch("_evidence_probe_a")
+        self.assertIsNone(dispatch.grant_preflight)
+
+    def test_dispatch_captures_grant_preflight_off_the_class_when_defined(self):
+        class _GrantPreflightStubAdapter(_StubAdapter):
+            def grant_preflight(self, token_info):
+                return "declared" in token_info.get("scope", "")
+
+        adapter = _GrantPreflightStubAdapter()
+        register_adapter("_evidence_probe_b", adapter)
+        dispatch = get_dispatch("_evidence_probe_b")
+        self.assertIs(dispatch.grant_preflight, _GrantPreflightStubAdapter.grant_preflight)
+
+    def test_instance_reassignment_of_grant_preflight_does_not_change_captured_dispatch(self):
+        """Same monkey-patch-inert proof as verify_apply_landed/etc above,
+        applied to grant_preflight: a capability holding the adapter instance
+        must not be able to forge a favorable grant-check result."""
+        class _GrantPreflightStubAdapter(_StubAdapter):
+            def grant_preflight(self, token_info):
+                return False
+
+        adapter = _GrantPreflightStubAdapter()
+        register_adapter("_evidence_probe_b", adapter)
+        original = get_dispatch("_evidence_probe_b").grant_preflight
+
+        adapter.grant_preflight = lambda token_info: True  # thief -- always "granted"
+
+        dispatch_after = get_dispatch("_evidence_probe_b")
+        self.assertIs(dispatch_after.grant_preflight, original)
+        self.assertIs(dispatch_after.grant_preflight, _GrantPreflightStubAdapter.grant_preflight)
+
     def test_verify_durability_is_optional_independent_of_the_other_two(self):
         """An adapter may define verify_apply_landed/verify_undo_restored
         without verify_durability (the non-persistent-binding common case) --

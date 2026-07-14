@@ -42,7 +42,7 @@ Stdlib only — no third-party dependencies.
 """
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, runtime_checkable
 
 from external_write.operations import EffectUnit
 
@@ -161,6 +161,44 @@ class Adapter(Protocol):
                  tasks that consume the captured predicate — this task only
                  builds the capture + the evidence type + proves the
                  predicate signature is sound against ≥2 divergent op_kinds.
+
+    grant_preflight (OPTIONAL — Task 11, B3 / F-52,F-47 — v0.13.0 Slice 2, the
+                 OFFLINE SCOPE-PREFLIGHT primitive) — an adapter MAY additionally
+                 define ``grant_preflight(self, token_info) -> bool``: a SAFE,
+                 read-only OAuth tokeninfo-class introspection of an
+                 ALREADY-OBTAINED token-introspection response (e.g. Google's
+                 tokeninfo endpoint shape, ``{"scope": "<space-delimited
+                 granted scopes>"}``), answering "does the current token
+                 already carry the op_kind's declared read-only scope" —
+                 NEVER a destructive write, and NEVER an operation this method
+                 performs itself (obtaining `token_info` — the one safe network
+                 call to the provider's introspection endpoint — is the
+                 CALLER's job; this method only interprets a response it was
+                 handed, exactly like `verify_one` only observes a facade it
+                 was handed rather than building one itself). Ground truth this
+                 closes (F-52/F-47): a live dogfood recorded a Gmail credential
+                 "read-verified" from a check against the broader
+                 `gmail.modify` scope, while the DECLARED read-only scope
+                 (`gmail.readonly`) had never actually been checked or
+                 exercised — the mismatch surfaced only at live-trial time, as
+                 an `unauthorized_client` failure, with no offline signal ahead
+                 of it. `grant_preflight` is that offline signal. Each vendor
+                 adapter interprets its OWN introspection response shape
+                 (Google's tokeninfo differs from another provider's OAuth
+                 introspection shape) — the kernel (this module's
+                 `check_scope_grant`, below) does not parse `token_info`
+                 itself; it only decides WHETHER a grant-check applies at all
+                 (deferring entirely to whether the adapter defines this
+                 method) and dispatches to it. Like `build_write_client` and
+                 the evidence predicates above, this is auto-captured OFF THE
+                 CLASS by `register_adapter` — deliberately NOT a required
+                 Protocol member, so every adapter registered before this task
+                 keeps working unchanged (the field simply resolves to None).
+                 ABSENT (None) means this op_kind's auth type has no
+                 OAuth-scope concept to check at all (an API key, HTTP basic
+                 auth, or a session cookie) — callers MUST treat that as N/A,
+                 never as a false "not granted" failure (see
+                 `check_scope_grant`'s ``GRANT_STATUS_NA`` below).
     """
 
     def plan(self, params: Optional[dict]) -> List[EffectUnit]:
@@ -280,6 +318,15 @@ class AdapterDispatch:
                adapter instance and reassigned `instance.verify_apply_landed`
                to a function that always returns True could otherwise forge
                a "verified" claim.
+    grant_preflight
+               (Task 11, B3 / F-52,F-47 — v0.13.0 Slice 2): `getattr(type(adapter),
+               "grant_preflight", None)` — captured off the class for the same
+               monkey-patch-inert reason as every other optional hook above.
+               None when the class does not define it (the common case for an
+               op_kind whose auth type has no OAuth-scope concept — API key /
+               basic / cookie — or for any adapter registered before this task);
+               `check_scope_grant` (below) treats a None here as GRANT_STATUS_NA,
+               never as a false "not granted".
     """
 
     instance: Any
@@ -292,6 +339,7 @@ class AdapterDispatch:
     verify_apply_landed: Optional[Callable]
     verify_undo_restored: Optional[Callable]
     verify_durability: Optional[Callable]
+    grant_preflight: Optional[Callable]
 
 
 # op_kind -> AdapterDispatch. Populated alongside _REGISTRY by register_adapter;
@@ -314,7 +362,9 @@ def register_adapter(op_kind: str, adapter: Adapter) -> None:
     evidence predicates (`verify_apply_landed`/`verify_undo_restored`/
     `verify_durability`) off the class, same as `provision_write_client`, and
     the Task 3 (A2 run-time) `provision_read_only_client` (from
-    `build_read_only_client`, if the class defines it) the same way."""
+    `build_read_only_client`, if the class defines it) the same way. Also
+    auto-captures the Task 11 (B3 / F-52,F-47) `grant_preflight` off the
+    class the identical way."""
     _REGISTRY[op_kind] = adapter
     cls = type(adapter)
     _DISPATCH_REGISTRY[op_kind] = AdapterDispatch(
@@ -328,6 +378,7 @@ def register_adapter(op_kind: str, adapter: Adapter) -> None:
         verify_apply_landed=getattr(cls, "verify_apply_landed", None),
         verify_undo_restored=getattr(cls, "verify_undo_restored", None),
         verify_durability=getattr(cls, "verify_durability", None),
+        grant_preflight=getattr(cls, "grant_preflight", None),
     )
 
 
@@ -367,3 +418,128 @@ def unregister_adapter(op_kind: str) -> None:
     instance registry entry and the captured dispatch record."""
     _REGISTRY.pop(op_kind, None)
     _DISPATCH_REGISTRY.pop(op_kind, None)
+
+
+# ---------------------------------------------------------------------------
+# Offline scope grant-check + exercise-record vocabulary (Task 11, B3 /
+# F-52,F-47 — v0.13.0 Slice 2 — "scope provisioning at the non-technical
+# bar").
+#
+# Ground truth: a live dogfood recorded a Gmail credential "read-verified"
+# from a check against the broader `gmail.modify` scope, while the op_kind's
+# actually-DECLARED read-only scope (`gmail.readonly`) had never been checked
+# or exercised at all. At live-trial time, a read using that narrower scope
+# failed `unauthorized_client ... not authorized for any of the scopes
+# requested` — with no offline signal ahead of it, and the emitted flow then
+# routed the unassisted operator into an org-admin edit mid-trial, right
+# after a raw traceback.
+#
+# Two DISTINCT, deliberately separate questions this section answers, never
+# conflated:
+#   1. check_scope_grant  — "is the declared scope CURRENTLY GRANTED on the
+#      token" (offline, safe, tokeninfo-class introspection of an
+#      already-obtained response — never a destructive write, never a live
+#      read/write of real data).
+#   2. resolve_scope_status — "has that granted scope actually been
+#      EXERCISED" (a real call using EXACTLY that scope has succeeded) — the
+#      deny-by-default rule that a scope is `verified` ONLY with a recorded
+#      exercise, never merely because it was found granted. A readonly scope
+#      may be exercised by a benign read at preflight; a WRITE scope's
+#      exercise is the first bounded gated live apply (already trust-core-
+#      bounded elsewhere in this package) — never a preflight write. This
+#      module does not perform either kind of exercise itself; it only
+#      defines the honest vocabulary a caller's exercise-record resolves
+#      into.
+# ---------------------------------------------------------------------------
+
+# check_scope_grant's three possible answers.
+GRANT_STATUS_GRANTED = "granted"
+GRANT_STATUS_NOT_GRANTED = "not_granted"
+# N/A: the auth type has no OAuth-scope concept (API key / basic / cookie),
+# OR the op_kind declares no read_only_scope, OR the op_kind's registered
+# adapter (if any) does not define grant_preflight. Never treated as a
+# failure — there is nothing to compare.
+GRANT_STATUS_NA = "n/a"
+
+
+def check_scope_grant(op_kind: str, declared_scope: Optional[str],
+                       token_info: Mapping[str, Any]) -> str:
+    """Offline, SAFE grant-check: does `token_info` (an already-obtained
+    OAuth tokeninfo-class introspection response) already grant
+    `declared_scope` for `op_kind`?
+
+    Returns one of GRANT_STATUS_GRANTED / GRANT_STATUS_NOT_GRANTED /
+    GRANT_STATUS_NA. NEVER raises — a `grant_preflight` call that itself
+    raises (a malformed `token_info`, an adapter bug) resolves to
+    GRANT_STATUS_NOT_GRANTED, the fail-safe direction (never silently treated
+    as granted).
+
+    N/A (GRANT_STATUS_NA) — deliberately NOT a failure — whenever any of:
+      * `declared_scope` is falsy (None/""): the op_kind's contract declares
+        no read-only scope at all, e.g. a non-OAuth auth type (API key,
+        HTTP basic, a session cookie) has no scope concept to compare.
+      * `op_kind` has no registered adapter, or its registered adapter's
+        class does not define `grant_preflight` — there is no grant-check
+        support for it, offline or otherwise.
+
+    This function deliberately does NOT import `contracts.py` (this module's
+    own long-standing division of concerns — see the module docstring: "It
+    performs NO validation of op_kind against contracts.py"); the caller
+    resolves `declared_scope` (typically `contracts.get_contract(op_kind).
+    read_only_scope`) and passes it in. See `adapters.scope_preflight` for
+    the join.
+
+    This function does not know or care what SHAPE `token_info` is — that is
+    entirely delegated to the adapter's own `grant_preflight`, which is why
+    this is integration-agnostic: a Gmail adapter's tokeninfo shape (a
+    space-delimited `"scope"` string) and a differently-shaped vendor's
+    OAuth introspection response are both just whatever `token_info` the
+    caller obtained and handed in, unexamined here.
+    """
+    if not declared_scope:
+        return GRANT_STATUS_NA
+    dispatch = get_dispatch(op_kind)
+    if dispatch is None or dispatch.grant_preflight is None:
+        return GRANT_STATUS_NA
+    try:
+        granted = bool(dispatch.grant_preflight(dispatch.instance, token_info))
+    except Exception:
+        return GRANT_STATUS_NOT_GRANTED
+    return GRANT_STATUS_GRANTED if granted else GRANT_STATUS_NOT_GRANTED
+
+
+# resolve_scope_status's four possible answers — the credentials_registry.md
+# "Scope status" column vocabulary (see that template + credential-setup.md).
+SCOPE_STATUS_NA = "n/a"
+SCOPE_STATUS_NOT_GRANTED = "not_granted"
+# Honest intermediate state: the offline grant-check found the scope
+# granted, but no real call using it has succeeded yet. NEVER reported as
+# "verified" — that would be exactly the F-52/F-47 failure this task closes.
+SCOPE_STATUS_GRANTED_NOT_EXERCISED = "granted_not_exercised"
+# The ONLY status meaning "verified": granted AND a recorded exercise exists.
+SCOPE_STATUS_VERIFIED = "verified"
+
+
+def resolve_scope_status(grant_status: str, *, exercised: bool) -> str:
+    """Deny-by-default resolution of a scope's exercise-record status (item 2,
+    F-52/F-47): SCOPE_STATUS_VERIFIED is returned ONLY when `grant_status` is
+    GRANT_STATUS_GRANTED **and** `exercised` is True. There is no other path
+    to "verified" in this function — a scope found merely granted, with no
+    recorded exercise, resolves to the honest SCOPE_STATUS_GRANTED_NOT_EXERCISED,
+    never SCOPE_STATUS_VERIFIED. `exercised=True` passed alongside anything
+    other than GRANT_STATUS_GRANTED (e.g. a caller bug that marks something
+    exercised despite the grant-check finding it not granted, or N/A) is
+    likewise NEVER promoted to "verified" — deny-by-default, not merely
+    "verified iff the last thing you told me was good news".
+
+    `exercised` is the caller's own already-established fact (a benign
+    preflight read for a readonly scope, or the first bounded gated live
+    apply for a write scope actually having succeeded) — this function does
+    not perform or observe an exercise itself, it only refuses to call
+    anything "verified" without one.
+    """
+    if grant_status == GRANT_STATUS_NA:
+        return SCOPE_STATUS_NA
+    if grant_status != GRANT_STATUS_GRANTED:
+        return SCOPE_STATUS_NOT_GRANTED
+    return SCOPE_STATUS_VERIFIED if exercised else SCOPE_STATUS_GRANTED_NOT_EXERCISED

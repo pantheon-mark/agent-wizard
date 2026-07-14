@@ -18,7 +18,7 @@
 
 | Type | Examples |
 |------|---------|
-| Credential | API key not yet obtained, OAuth flow not yet configured |
+| Credential | API key not yet obtained, OAuth flow not yet configured, or a declared OAuth scope not yet granted (see `security/credentials_registry.md`'s Scope status column and the Credential Setup skill) |
 | Source | Data source identified but not yet connected |
 | Agent | Agent planned but not yet built |
 | Configuration | Setting identified but value not yet determined |

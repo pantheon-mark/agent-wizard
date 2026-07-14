@@ -68,7 +68,7 @@ Stdlib only at runtime; the vendor SDK's shape is duck-typed, never actually
 imported outside the type-checking guard.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence
 
 if TYPE_CHECKING:  # pragma: no cover - type-only; never executes at runtime.
     from googleapiclient.discovery import Resource  # noqa: F401
@@ -88,6 +88,36 @@ OP_FILTER_CREATE = "gmail.filter.create"
 
 TRASH_LABEL = "TRASH"
 INBOX_LABEL = "INBOX"
+
+# The short-form scope name every op_kind in this module declares as its
+# contract's read_only_scope (contracts.py's _gmail_message_contract /
+# _gmail_filter_create_contract — all four pass read_only_scope="gmail.readonly").
+GMAIL_READONLY_SCOPE = "gmail.readonly"
+
+
+# ---------------------------------------------------------------------------
+# grant_preflight (Task 11, B3 / F-52,F-47 -- v0.13.0 Slice 2). SAFE, offline
+# OAuth tokeninfo-class introspection, shared by all four op_kinds below
+# (they all declare the SAME read_only_scope). See adapter_registry.py's
+# Adapter protocol docstring for the full contract this fulfils: interprets
+# an ALREADY-OBTAINED Google tokeninfo-shaped response
+# (https://oauth2.googleapis.com/tokeninfo?access_token=... -- a SPACE-
+# DELIMITED string of granted scopes under the "scope" key, e.g.
+# {"scope": "https://www.googleapis.com/auth/gmail.readonly ..."}) -- never
+# fetches that response itself, and never touches a real message or filter.
+# Matches either the short form ("gmail.readonly") or the fully-qualified
+# auth URL form (".../auth/gmail.readonly"), since providers are not
+# consistent about which one a token-introspection response reports.
+# ---------------------------------------------------------------------------
+
+def _gmail_scope_granted(token_info: Any, declared_scope: str = GMAIL_READONLY_SCOPE) -> bool:
+    if not isinstance(token_info, dict):
+        return False
+    granted_raw = token_info.get("scope", "")
+    tokens = set(str(granted_raw or "").split())
+    if declared_scope in tokens:
+        return True
+    return any(t.endswith(f"/auth/{declared_scope}") for t in tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +281,12 @@ class GmailMessageTrashAdapter:
         captured."""
         return bool(evidence.poststate.get("matches_prestate"))
 
+    def grant_preflight(self, token_info: Mapping[str, Any]) -> bool:
+        """OPTIONAL, SAFE, offline scope grant-check (Task 11, B3/F-52,F-47)
+        -- see `_gmail_scope_granted`'s docstring above; NEVER a destructive
+        write, and never fetches `token_info` itself."""
+        return _gmail_scope_granted(token_info)
+
 
 # ---------------------------------------------------------------------------
 # gmail.message.untrash
@@ -296,6 +332,12 @@ class GmailMessageUntrashAdapter:
     def verify_one(self, observer: Any, unit: EffectUnit) -> Any:
         prior = unit.target_ref.get("prior_label_ids", ())
         return _label_diff(observer, unit.target_ref["message_id"], prior)
+
+    def grant_preflight(self, token_info: Mapping[str, Any]) -> bool:
+        """OPTIONAL, SAFE, offline scope grant-check (Task 11, B3/F-52,F-47)
+        -- see `_gmail_scope_granted`'s docstring above; NEVER a destructive
+        write, and never fetches `token_info` itself."""
+        return _gmail_scope_granted(token_info)
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +390,12 @@ class GmailMessageModifyLabelsAdapter:
     def verify_one(self, observer: Any, unit: EffectUnit) -> Any:
         prior = unit.undo_ref["prior_label_ids"] if unit.undo_ref else ()
         return _label_diff(observer, unit.target_ref["message_id"], prior)
+
+    def grant_preflight(self, token_info: Mapping[str, Any]) -> bool:
+        """OPTIONAL, SAFE, offline scope grant-check (Task 11, B3/F-52,F-47)
+        -- see `_gmail_scope_granted`'s docstring above; NEVER a destructive
+        write, and never fetches `token_info` itself."""
+        return _gmail_scope_granted(token_info)
 
 
 # ---------------------------------------------------------------------------
@@ -479,6 +527,15 @@ class GmailFilterCreateAdapter:
         resolvable -- i.e. the persistent binding survived, not merely that
         `apply_one` once succeeded."""
         return bool(evidence.poststate.get("exists"))
+
+    def grant_preflight(self, token_info: Mapping[str, Any]) -> bool:
+        """OPTIONAL, SAFE, offline scope grant-check (Task 11, B3/F-52,F-47)
+        -- see `_gmail_scope_granted`'s docstring above; NEVER a destructive
+        write, and never fetches `token_info` itself. Note: this checks the
+        READ-ONLY scope eligible for offline preflight; `gmail.filter.create`
+        is itself a WRITE op_kind whose own exercise is the first bounded
+        gated live apply (item 2's write-scope rule), never this preflight."""
+        return _gmail_scope_granted(token_info)
 
 
 # ---------------------------------------------------------------------------

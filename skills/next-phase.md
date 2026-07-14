@@ -70,6 +70,23 @@ Tell the operator:
 
 Once all credentials the phase needs are in place, continue.
 
+### Live-trial-readiness gate (offline scope-preflight — blocks the trial, never the build)
+
+This is the pre-live-trial checkpoint: it is checked here, in Step 3, because this is the last gate before the build-and-run steps below — nothing past this point should discover a missing scope for the first time by trying it live. It gates ONLY Step 5's supervised trial (and, downstream, live authorization) — it never blocks Steps 1–4, and it never blocks this phase's build.
+
+For each credential this phase's agents actually use that carries a `Declared scope` other than `N/A` in `security/credentials_registry.md`, check that credential's `Scope status` column:
+
+- **`verified` or `granted, not yet exercised`:** this scope is ready. Continue.
+- **`N/A`, `(set at runtime)` never having been checked, or `not granted`:** this scope is NOT confirmed ready. Do the following, then STOP for this phase — do not proceed to Step 4 or Step 5:
+  1. Run the Credential Setup skill's Step 4 offline check for this exact credential (re-running the same `python3 agents/lib/external_write/adapters.py --op-kind ... --token-info-json ...` check) to get its current, real state — never rely on a stale registry cell without re-checking.
+  2. If it now reports `granted, not yet exercised` or better, the registry was stale — update it and continue with this phase.
+  3. If it still reports `not_granted` (or `n/a` for a credential this phase genuinely needs a scope for), add an entry to `/work/stub_tracker.md` (Type: `Credential`) naming: the exact dependency and declared scope, the current grant state (`not granted`), the ONE validation command from Credential Setup Step 4 to re-check it, and that this phase's live trial is what depends on it. Tell the operator plainly:
+
+     > This phase is built and ready, but before I can run it live against your real [dependency name], one credential's permission ([declared scope, plain language]) isn't confirmed yet. Nothing else is affected — the rest of your system stays exactly as it is. Run the Credential Setup skill to fix this one credential, then come back and run this phase again — I'll re-check automatically and pick up right where we left off.
+  4. Stop here for this phase. Do NOT treat this as a reason to fail or roll back the build itself — the phase's code stays built and intact; only its live trial (Step 5) and downstream live authorization are withheld until the stub above is cleared.
+
+This check reads the registry only — it does not itself call any provider. If a credential's `Scope status` cell looks stale (e.g. it was last checked before a scope was re-granted), re-run Credential Setup's Step 4 rather than trusting the cell blindly.
+
 ## Clean baseline before building (do this before Step 4)
 
 Before you build anything, make sure there is a clean, committed baseline to fall back to.

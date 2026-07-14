@@ -33,14 +33,14 @@ Stdlib only — no third-party dependencies.
 
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from external_write.operations import Operation, Result
 from external_write.verifiers import validate_postwrite_verification
 from external_write.write_gate import evaluate_write_gate, InvocationLedger, resolve_effective_cap
-from external_write.adapter_registry import get_dispatch
+from external_write.adapter_registry import get_dispatch, check_scope_grant, GRANT_STATUS_NOT_GRANTED
 from external_write.evidence import AdapterEvidence
-from external_write.contracts import SourceLineage
+from external_write.contracts import SourceLineage, get_contract
 from external_write.read_facade import build_read_facade, ReadFacadeEligibilityError
 
 
@@ -715,3 +715,136 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     if _gate_audit:
         detail.update(_gate_audit)
     return Result(status="written", detail=detail)
+
+
+# ---------------------------------------------------------------------------
+# Offline scope-preflight (Task 11, B3 / F-52,F-47 — v0.13.0 Slice 2)
+# ---------------------------------------------------------------------------
+
+def scope_preflight(op_kind: str, token_info: Mapping[str, Any]) -> str:
+    """The join this package's division of concerns calls for: resolve
+    `op_kind`'s DECLARED read-only scope from its registered contract
+    (`contracts.get_contract`), then delegate the offline grant-check itself
+    to `adapter_registry.check_scope_grant` — mirroring exactly how
+    `run_operation` above is the one place that already joins
+    `adapter_registry` + `contracts` for op_kind resolution (`adapter_registry.py`'s
+    own module docstring: "that join happens in adapters.py").
+
+    Returns one of adapter_registry.GRANT_STATUS_GRANTED /
+    GRANT_STATUS_NOT_GRANTED / GRANT_STATUS_NA. GRANT_STATUS_NA covers a
+    non-scope auth type (an op_kind whose contract declares no
+    `read_only_scope` — e.g. the seeded field ops, an API-key/basic/cookie
+    surface) exactly as it covers an unregistered op_kind or one whose
+    adapter defines no `grant_preflight` — there is nothing to compare in
+    either case, never a false failure.
+
+    This is OFFLINE and SAFE: it never touches the real vendor surface
+    itself (no read, no write) — `token_info` must already have been
+    obtained by the caller (e.g. the credential-setup skill's documented
+    tokeninfo-endpoint validation command; see this module's own `__main__`
+    CLI below), exactly like `run_operation`'s `client`/`read_only_client`
+    are always caller-supplied, never constructed here.
+    """
+    contract = get_contract(op_kind)
+    declared_scope = contract.read_only_scope if contract is not None else None
+    return check_scope_grant(op_kind, declared_scope, token_info)
+
+
+# Recognizable auth/setup-failure vocabulary (Task 11, B3 / F-52,F-47):
+# deliberately narrow and vendor-agnostic (OAuth2 / RFC 6749 error codes,
+# common HTTP auth status text, and generic credential/permission wording) —
+# broad enough to catch a real scope/credential failure across providers,
+# narrow enough not to misclassify an unrelated bug as an auth problem. Kept
+# as plain substrings (not a vendor exception class import) so this stays
+# stdlib-only and applies to ANY exception shape, not just one SDK's.
+_AUTH_FAILURE_MARKERS = (
+    "unauthorized_client", "invalid_grant", "invalid_token", "invalid_client",
+    "insufficient_scope", "insufficient_permission", "access_denied",
+    "permission_denied", "unauthorized", "forbidden", "authenticationerror",
+    "not authorized", "401", "403",
+)
+
+
+def describe_auth_failure(exc: BaseException) -> Optional[str]:
+    """Classify `exc` as an auth/setup-shaped failure and, if so, return ONE
+    plain-language, resumable, operator-facing line for it — NEVER a
+    traceback, NEVER an internal label (op_kind, scope name, risk_class,
+    exception class) leaked into the text. Returns None for anything that
+    does NOT look auth-shaped (a caller must re-raise in that case — this
+    function deliberately does not widen into a generic catch-all; see the
+    callers below for why only the recognized auth shape is ever swallowed).
+
+    Ground truth (F-52/F-47): the live dogfood incident this task closes was
+    exactly this — a raw, ~10-frame Python traceback from an
+    `unauthorized_client` scope failure, surfaced directly to a non-technical
+    operator mid live-trial, with no plain-language landing point and no
+    resumable next step. This function is that landing point.
+    """
+    text = f"{type(exc).__name__}: {exc}".lower()
+    if not any(marker in text for marker in _AUTH_FAILURE_MARKERS):
+        return None
+    return (
+        "This step needs a credential or permission that isn't working right "
+        "now — a sign-in or access problem, not an error in your data. "
+        "Nothing was changed. Run the Credential Setup skill to check and fix "
+        "it (it will tell you exactly what's missing), then come back and "
+        "try this step again."
+    )
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import json as _json
+    import sys as _sys
+
+    # Turnkey-CLI fix (mirrors operator_acceptance.py's own __main__ import of
+    # this SAME module, Task 7 / F-37): a freshly-invoked process has not yet
+    # imported any adapter module, so `get_dispatch(op_kind)` would resolve
+    # None for e.g. "gmail.message.trash" even though its contract IS
+    # registered -- silently reporting GRANT_STATUS_NA instead of the real
+    # granted/not_granted answer. Importing `registered_adapters` fires every
+    # shipped (and capability-added) adapter module's module-scope
+    # registration before this CLI resolves anything. Deliberately done HERE
+    # (inside __main__), not at this module's top level: `adapters.py` is
+    # imported as a LIBRARY by most of this package (standing_automation.py,
+    # run_envelope.py, ...) and must not eagerly register every adapter as a
+    # side effect of that import -- only this standalone CLI invocation needs it.
+    import external_write.registered_adapters  # noqa: E402,F401
+
+    _args = _sys.argv[1:]
+    _usage = (
+        "Usage: adapters.py --op-kind <op_kind> --token-info-json <json>\n"
+        "Offline, safe check: does the given OAuth token-introspection "
+        "response already grant this op_kind's declared read-only scope? "
+        "Prints one of: granted | not_granted | n/a."
+    )
+    _opts: Dict[str, Optional[str]] = {"--op-kind": None, "--token-info-json": None}
+    _i = 0
+    while _i < len(_args):
+        _a = _args[_i]
+        if _a in _opts:
+            if _i + 1 >= len(_args):
+                print(_usage, file=_sys.stderr)
+                _sys.exit(2)
+            _opts[_a] = _args[_i + 1]
+            _i += 2
+        else:
+            print(f"unknown argument {_a!r}\n{_usage}", file=_sys.stderr)
+            _sys.exit(2)
+    for _req in ("--op-kind", "--token-info-json"):
+        if _opts[_req] is None:
+            print(f"missing required {_req}\n{_usage}", file=_sys.stderr)
+            _sys.exit(2)
+
+    try:
+        _token_info = _json.loads(_opts["--token-info-json"])
+    except _json.JSONDecodeError as _exc:
+        print(
+            "Could not read the token info you provided — it was not valid "
+            f"JSON ({_exc}). Nothing was checked.",
+            file=_sys.stderr,
+        )
+        _sys.exit(2)
+
+    _status = scope_preflight(_opts["--op-kind"], _token_info)
+    print(_status)
+    _sys.exit(1 if _status == GRANT_STATUS_NOT_GRANTED else 0)

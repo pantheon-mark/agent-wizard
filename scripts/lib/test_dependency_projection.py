@@ -97,6 +97,34 @@ class ReshapeTest(unittest.TestCase):
         body = dp.project("INPUT_TYPE_INVENTORY", _IDENTITY, _ANNOTATION)
         self.assertIn("malformed rows mis-route work", body)  # boundary_input_facet.input_risk
 
+    def test_non_oauth_credential_gets_na_declared_scope_and_scope_status(self):
+        """Task 11 (B3 / F-52,F-47): an API-key/Password credential (no
+        `declared_scope` in its credential_facet) must show N/A in BOTH
+        the Declared scope and Scope status columns -- never a runtime
+        placeholder for a credential that structurally has no scope
+        concept to check."""
+        body = dp.project("CREDENTIAL_REGISTRY_ROWS", _IDENTITY, _ANNOTATION)
+        row = [ln for ln in body.splitlines() if "GOOGLE_SHEETS_API_KEY" in ln][0]
+        self.assertIn(dp.SCOPE_NOT_APPLICABLE, row)
+        self.assertEqual(row.count(dp.SCOPE_NOT_APPLICABLE), 2)  # Declared scope + Scope status
+        self.assertIn("No", row)  # Needs admin grant defaults to No
+
+    def test_oauth_credential_carries_declared_scope_and_admin_grant_flag(self):
+        identity = json.dumps([
+            {"id": "gmail_account", "name": "Gmail account", "type": "OAuth",
+             "roles": ["needs_credential"],
+             "credential_facet": {"env_var": "GMAIL_TOKEN", "cred_type": "OAuth token",
+                                  "provider": "Google", "provisional_expiry": "Unknown",
+                                  "declared_scope": "gmail.readonly",
+                                  "requires_admin_grant": True}},
+        ])
+        body = dp.project("CREDENTIAL_REGISTRY_ROWS", identity, "[]")
+        row = [ln for ln in body.splitlines() if "GMAIL_TOKEN" in ln][0]
+        self.assertIn("gmail.readonly", row)
+        self.assertIn("Yes", row)             # Needs admin grant
+        self.assertIn(dp.RUNTIME_PLACEHOLDER, row)  # Scope status not yet knowable at wizard-run time
+        self.assertNotIn(dp.SCOPE_NOT_APPLICABLE, row)
+
 
 class EmptyCaseTest(unittest.TestCase):
     def test_zero_dependencies_gives_empty_body(self):

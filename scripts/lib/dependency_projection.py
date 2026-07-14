@@ -5,9 +5,20 @@ confirms — two payload fields:
 
   EXTERNAL_DEPENDENCY_IDENTITY   (JSON array; the integration-boundary decision surface):
       [{id, name, type, roles:[boundary_input|boundary_output|health_monitored|needs_credential],
-        credential_facet?:{env_var, cred_type, provider, provisional_expiry},
+        credential_facet?:{env_var, cred_type, provider, provisional_expiry,
+        declared_scope?, requires_admin_grant?},
         action_class?, risk_class?, recovery_profile_ref?, declared_test_target?,
         blast_radius_cap?}]
+      `credential_facet.declared_scope` / `requires_admin_grant` (Task 11, B3 /
+      F-52,F-47 — v0.13.0 Slice 2, "scope provisioning at the non-technical bar")
+      are two further OPTIONAL sub-fields, captured only for an OAuth-type
+      credential: `declared_scope` is the exact scope string the system will
+      request (e.g. "gmail.readonly") — absent/empty for a non-scope auth type
+      (API key / basic / cookie), which is the N/A signal `CREDENTIAL_REGISTRY_ROWS`'
+      "Scope status" column below resolves on; `requires_admin_grant` (bool) flags a
+      credential that needs an org admin / domain-wide-delegation grant to obtain,
+      surfaced verbatim into the "Needs admin grant" column so it is never
+      discovered for the first time mid live-trial.
       The five `action_class?`..`blast_radius_cap?` fields are the typed capability descriptor
       (B1-1; design §5.2 domain-neutral action taxonomy, §4.5/§4.7/F-28/F-29 risk-enforcement
       classes) — OPTIONAL and default-safe when absent. See ACTION_CLASSES / RISK_CLASSES /
@@ -109,6 +120,11 @@ RUNTIME_PLACEHOLDER = "(set at runtime)"
 STATUS_PENDING = "Pending"
 HEALTH_FLAG_PENDING = "Pending"
 UNKNOWN = "Unknown"
+# Task 11 (B3 / F-52,F-47): the credentials-registry "Declared scope" /
+# "Scope status" literal for a non-scope auth type (API key / basic / cookie) —
+# genuinely knowable at wizard-run time (there is no scope concept to defer to
+# runtime), unlike the other RUNTIME_PLACEHOLDER cells on this same surface.
+SCOPE_NOT_APPLICABLE = "N/A"
 
 # The canonical field keys (the projection's _derivation_inputs).
 IDENTITY_FIELD = "EXTERNAL_DEPENDENCY_IDENTITY"
@@ -255,6 +271,26 @@ def _g(d: Dict[str, Any], key: str, default: str = UNKNOWN) -> str:
     return v if (isinstance(v, str) and v.strip()) else default
 
 
+def _declared_scope(dep: Dict[str, Any]) -> str:
+    return _g(_cred(dep), "declared_scope", SCOPE_NOT_APPLICABLE)
+
+
+def _needs_admin_grant(dep: Dict[str, Any]) -> str:
+    return "Yes" if bool(_cred(dep).get("requires_admin_grant")) else "No"
+
+
+def _scope_status(dep: Dict[str, Any]) -> str:
+    """Task 11 (B3 / F-52,F-47) — the initial "Scope status" cell. N/A
+    (SCOPE_NOT_APPLICABLE) whenever the credential declares no scope at
+    all (a non-OAuth auth type) — the same deterministic-at-wizard-time
+    fact `_declared_scope` above already resolves. Otherwise this is a
+    genuinely runtime fact (whether the declared scope is actually
+    granted, and later exercised) — never synthesized here, exactly like
+    every other observed-state cell on this surface (RUNTIME_PLACEHOLDER),
+    per the module's setup-time-honesty discipline."""
+    return RUNTIME_PLACEHOLDER if _declared_scope(dep) != SCOPE_NOT_APPLICABLE else SCOPE_NOT_APPLICABLE
+
+
 # (role, [(header, extractor)]) per projection field.
 _SURFACES: Dict[str, Tuple[str, List[Tuple[str, Callable[[Dict[str, Any]], str]]]]] = {
     "INPUT_TYPE_INVENTORY": (ROLE_BOUNDARY_INPUT, [
@@ -285,6 +321,15 @@ _SURFACES: Dict[str, Tuple[str, List[Tuple[str, Callable[[Dict[str, Any]], str]]
         ("Rotation method", lambda d: RUNTIME_PLACEHOLDER),
         ("Last verified", lambda d: RUNTIME_PLACEHOLDER),
         ("Status", lambda d: STATUS_PENDING),
+        # Task 11 (B3 / F-52,F-47 — v0.13.0 Slice 2): the offline
+        # scope-preflight + deny-by-default exercise-record columns. "Declared
+        # scope" is knowable at wizard-run time (N/A for a non-OAuth
+        # credential); "Needs admin grant" flags an org-admin/domain-wide-
+        # delegation dependency up front, never discovered mid live-trial;
+        # "Scope status" is a genuinely runtime fact (see _scope_status).
+        ("Declared scope", _declared_scope),
+        ("Needs admin grant", _needs_admin_grant),
+        ("Scope status", _scope_status),
     ]),
 }
 

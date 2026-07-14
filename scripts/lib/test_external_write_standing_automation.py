@@ -43,6 +43,7 @@ sys.path.insert(0, str(_AGENTS_LIB))
 from external_write.operations import Operation, SCHEMA_V2_ACTION  # noqa: E402
 from external_write.standing_automation import (  # noqa: E402
     EXIT_BAD_ARGS,
+    EXIT_LIVE_AUTH_ERROR,
     EXIT_OK,
     MODE_CHECK,
     MODE_LIVE,
@@ -307,6 +308,59 @@ class TestLiveModeRunsExactlyOnce(unittest.TestCase):
         self.assertEqual(run_live.call_count, 1)
         self.assertEqual(run_live.calls[0][0], (client,))
         self.assertEqual(outcome.result, "sent")
+
+
+class TestLiveModeAuthFailureHandling(unittest.TestCase):
+    """Task 11 (B3 / F-52,F-47 -- v0.13.0 Slice 2). Ground truth: a live
+    dogfood incident hit an `unauthorized_client ... not authorized for any
+    of the scopes requested` failure DURING a live run, and it surfaced to
+    the non-technical operator as a raw, ~10-frame Python traceback. This is
+    the concrete, testable runner-side fix: if `run_live` raises a
+    recognized auth/setup-shaped exception, `run_standing_automation` must
+    catch it and return a plain-language, resumable outcome -- never let it
+    propagate as a traceback. A NON-auth-shaped exception must still
+    propagate unchanged (this is a targeted fix, not a general catch-all)."""
+
+    def test_auth_shaped_exception_from_run_live_becomes_plain_language_outcome(self):
+        def _run_live(client):
+            raise RuntimeError(
+                "unauthorized_client: Client is not authorized for any of the "
+                "scopes requested."
+            )
+
+        outcome = run_standing_automation(
+            [], build_operation=_never_call, run_live=_run_live, client=object())
+
+        self.assertEqual(outcome.mode, MODE_LIVE)
+        self.assertEqual(outcome.exit_code, EXIT_LIVE_AUTH_ERROR)
+        self.assertIsNone(outcome.result)
+        # Plain language, resumable, and NEVER a traceback / internal label leak.
+        self.assertNotIn("Traceback", outcome.message)
+        self.assertNotIn("RuntimeError", outcome.message)
+        self.assertNotIn("unauthorized_client", outcome.message)
+        self.assertIn("Credential Setup", outcome.message)
+
+    def test_insufficient_scope_variant_also_caught(self):
+        """A second, differently-worded auth failure -- proving this is not
+        a single-string-match special case for the exact incident text."""
+        def _run_live(client):
+            raise PermissionError("403 Forbidden: insufficient_scope for this request")
+
+        outcome = run_standing_automation(
+            [], build_operation=_never_call, run_live=_run_live, client=object())
+        self.assertEqual(outcome.exit_code, EXIT_LIVE_AUTH_ERROR)
+        self.assertNotIn("Traceback", outcome.message)
+
+    def test_non_auth_exception_from_run_live_still_propagates_unchanged(self):
+        """Targeted fix, not a general catch-all: a non-auth-shaped failure
+        (e.g. a genuine bug) must still propagate exactly as it did before
+        this task -- this function must never silently swallow it."""
+        def _run_live(client):
+            raise ValueError("the recipient list was empty")
+
+        with self.assertRaises(ValueError):
+            run_standing_automation(
+                [], build_operation=_never_call, run_live=_run_live, client=object())
 
 
 # ---------------------------------------------------------------------------
