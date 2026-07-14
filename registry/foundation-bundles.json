@@ -264,7 +264,7 @@
       "recommendation_reason": "Bulk actions that change many things at once are now bounded and verified as a whole run: an overall ceiling caps a single run, the run does exactly what you reviewed, and \"verified\" means checked against your real account \u2014 so a large batch is safe to run and easy to trust.",
       "release_date": "2026-07-13",
       "safety_class": "routine_improvement",
-      "source_commit": "PENDING",
+      "source_commit": "551dfc8",
       "status": "prerelease"
     }
   ],
