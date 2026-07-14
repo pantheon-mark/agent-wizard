@@ -702,6 +702,41 @@ class ExternalWriteLibRegistryEnrollmentTests(unittest.TestCase):
             "emitted external_write.triage must import cleanly in a fresh "
             f"operator project; stderr:\n{result.stderr}")
 
+    def test_emitted_standing_automation_module_is_physically_present_and_imports_cleanly(self):
+        # Task 9 (B2 / F-42, v0.13.0 Slice 2): standing_automation.py must be enrolled in
+        # _EXTERNAL_WRITE_LIB_FILES AND physically emitted, or a freshly-emitted
+        # writes-back system's standing-automation runners have no safe primitive to
+        # import at all -- the F-42 fail-open defect this primitive closes would have
+        # nothing to route through. Nothing else in the lib imports it at module scope
+        # (it is a standalone dispatcher a standing-automation runner calls directly),
+        # so this proves both the enrollment and that the module imports cleanly
+        # standalone in a fresh operator project.
+        plan = self._plan()
+        fixture_build_repo_root = self._fixture_build_repo_root()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name)
+
+        emit_operator_system(plan, staging, fixture_build_repo_root)
+
+        standing_automation_path = (
+            staging / "agents" / "lib" / "external_write" / "standing_automation.py")
+        self.assertTrue(
+            standing_automation_path.is_file(),
+            "standing_automation.py must be enrolled in _EXTERNAL_WRITE_LIB_FILES and "
+            "physically emitted -- a standing-automation runner has no safe primitive "
+            "to import without it")
+
+        result = subprocess.run(
+            [sys.executable, "-c",
+             "import sys; sys.path.insert(0, 'agents/lib'); "
+             "import external_write.standing_automation"],
+            cwd=str(staging), capture_output=True, text=True)
+        self.assertEqual(
+            result.returncode, 0,
+            "emitted external_write.standing_automation must import cleanly in a fresh "
+            f"operator project; stderr:\n{result.stderr}")
+
 
 class ExternalWriteLibEmitFromBundleTests(unittest.TestCase):
     """Task 7 (D): end-to-end assertion that a writes-back plan built from the bundle

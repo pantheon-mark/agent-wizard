@@ -116,6 +116,15 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # `external_write.triage` present on disk to import at all -- omit it and that
     # skill's very first invocation dies with ModuleNotFoundError.
     "triage.py",
+    # Task 9 (B2 / F-42, v0.13.0 Slice 2): the safe standing-automation entrypoint
+    # primitive. Nothing else in the lib imports it at module scope (it is a
+    # standalone dispatcher a standing-automation runner script calls directly),
+    # but a writes-back system's standing-automation runners (a Gmail filter
+    # sweep, a recurring digest, ...) need `external_write.standing_automation`
+    # present on disk to import at all -- omit it and the runner's very first
+    # invocation dies with ModuleNotFoundError, and the F-42 fail-open defect
+    # this primitive closes has nothing to route through.
+    "standing_automation.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

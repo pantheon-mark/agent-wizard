@@ -1437,7 +1437,14 @@ class TestS253ContractDelta(unittest.TestCase):
         # twenty-eight lib files total.
         import agent_emitter
         self.assertIn("triage.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 28)
+
+    def test_emit_set_lists_the_task9_standing_automation_file(self):
+        # Task 9 (B2 / F-42, v0.13.0 Slice 2): standing_automation.py must be enrolled,
+        # or an emitted writes-back system's standing-automation runners have no safe
+        # primitive to import — twenty-nine lib files total.
+        import agent_emitter
+        self.assertIn("standing_automation.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 29)
 
     def _writes_back_plan(self):
         import copy, json
