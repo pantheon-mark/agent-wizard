@@ -19,7 +19,7 @@ Entries appear newest-first.
 - If your `start-session.sh` (or any system script) currently says "permission denied," updating the tool (`wizard self-update`) and then applying your next update restores it automatically — no manual fix needed.
 - This is a tool fix, so it carries no foundation-bundle version change; every released bundle is untouched.
 
-`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `ee9b85c` (private build repo) · public repo commit `pending`
 
 ---
 
