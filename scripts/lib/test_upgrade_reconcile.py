@@ -64,14 +64,15 @@ if __name__ == "__main__":
     main()
 '''
 
-_CONFORMANT_WRITER = '''"""Conformant capability: routes writes through run_operation (the gate)."""
-from agents.lib.external_write.adapters import run_operation
+_CONFORMANT_WRITER = '''"""Conformant capability: routes writes through the sanctioned
+run-envelope entrypoint (run_enveloped_operation), never raw run_operation (v0.12.0 S1)."""
+from agents.lib.external_write.capability_api import run_enveloped_operation
 from agents.lib.external_write.operations import Operation
 
 
-def do_tidy_status():
+def do_tidy_status(envelope):
     op = Operation(op_kind="sheets.status.tidy", params={})
-    return run_operation(op)
+    return run_enveloped_operation(envelope, op, None, None)
 
 
 def main():

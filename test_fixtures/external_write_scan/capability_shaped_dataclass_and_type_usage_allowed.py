@@ -9,7 +9,7 @@ adapter-registry symbols. Must NOT be flagged.
 
 from dataclasses import dataclass
 
-from external_write.capability_api import run_operation
+from external_write.capability_api import run_enveloped_operation
 
 
 @dataclass
@@ -26,5 +26,5 @@ def same_type(a, b):
     return a.__class__ == b.__class__
 
 
-def run_approved(op, receipt, client):
-    return run_operation(op, receipt, client)
+def run_approved(envelope, op, receipt, client):
+    return run_enveloped_operation(envelope, op, receipt, client)

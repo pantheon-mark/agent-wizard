@@ -26,6 +26,7 @@ Test intents:
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 # Single-home: import from wizard/agents/lib/external_write (canonical location).
 _AGENTS_LIB = Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib"
@@ -641,17 +642,47 @@ class TestNestedAdapterPackageCapabilityBan(unittest.TestCase):
 
 class TestAdapterRegistryNegativeGuards(unittest.TestCase):
     """False-positive discipline (Task R7-T4): the curated capability-facing
-    surfaces and ordinary introspection idioms must stay clean."""
+    surfaces and ordinary introspection idioms must stay clean.
 
-    def test_bare_kernel_adapters_module_run_operation_not_flagged(self):
+    v0.12.0 S1 reversal note: several fixtures here also exercise raw
+    ``run_operation`` as the (formerly sanctioned) CAPABILITY write path.
+    That entrypoint is now BANNED (raw_run_operation_reference). The original
+    intent of these guards -- that the bare ``adapters`` / ``capability_api``
+    MODULE import itself is NOT an ``adapter_module_import`` /
+    ``adapter_registry_reference`` over-fire -- is PRESERVED (asserted
+    explicitly below); what changed is that naming the ``run_operation``
+    SYMBOL now trips the new rule, which these updated guards assert too. The
+    genuinely-clean guards (operations / read_facades / introspection idioms)
+    are unchanged."""
+
+    def _assert_module_rules_off_but_run_operation_flagged(self, v):
+        """Original over-fire intent PRESERVED: the bare-module import is not
+        an adapter_module_import / adapter_registry_reference violation. New:
+        naming raw run_operation now is a raw_run_operation_reference violation."""
+        kinds = _kinds(v)
+        self.assertNotIn("adapter_module_import", kinds,
+                         "the bare adapters/capability_api module import itself "
+                         "is still legal (over-fire guard preserved)")
+        self.assertNotIn("adapter_registry_reference", kinds,
+                         "run_operation is not an adapter-registry symbol")
+        self.assertIn("raw_run_operation_reference", kinds,
+                      "raw run_operation is now banned in the CAPABILITY zone")
+
+    def test_bare_kernel_adapters_module_import_ok_but_run_operation_flagged(self):
+        # REVERSED (v0.12.0 S1): `from external_write.adapters import
+        # run_operation` -- the bare adapters MODULE import is still not an
+        # adapter_module_import over-fire, but the run_operation SYMBOL is now
+        # a raw_run_operation_reference violation.
         v = scan_paths(
             [_FIXTURES / "capability_bare_adapters_run_operation_allowed.py"]
         )
-        self.assertEqual(v, [])
+        self._assert_module_rules_off_but_run_operation_flagged(v)
 
-    def test_capability_api_reexport_not_flagged(self):
+    def test_capability_api_reexport_run_operation_now_flagged(self):
+        # REVERSED (v0.12.0 S1): the curated surface no longer re-exports
+        # run_operation; a capability naming it via capability_api is flagged.
         v = scan_paths([_FIXTURES / "capability_api_reexport_allowed.py"])
-        self.assertEqual(v, [])
+        self._assert_module_rules_off_but_run_operation_flagged(v)
 
     def test_emitted_read_facades_shape_not_flagged(self):
         v = scan_paths(
@@ -673,13 +704,15 @@ class TestAdapterRegistryNegativeGuards(unittest.TestCase):
         )
         self.assertEqual(v, [])
 
-    def test_package_level_capability_api_import_not_flagged(self):
-        # Task R9-T1 negative guard: `from external_write import
-        # capability_api` is the curated capability-facing surface.
+    def test_package_level_capability_api_import_run_operation_now_flagged(self):
+        # REVERSED (v0.12.0 S1): `from external_write import capability_api`
+        # (the module import) is still not an adapter_module_import over-fire,
+        # but the fixture's `capability_api.run_operation(...)` attribute call
+        # is now a raw_run_operation_reference violation.
         v = scan_paths(
             [_FIXTURES / "capability_package_level_capability_api_import_allowed.py"]
         )
-        self.assertEqual(v, [])
+        self._assert_module_rules_off_but_run_operation_flagged(v)
 
     def test_package_level_read_facades_gmail_import_not_flagged(self):
         # Task R9-T1 negative guard: `from external_write import
@@ -690,14 +723,15 @@ class TestAdapterRegistryNegativeGuards(unittest.TestCase):
         )
         self.assertEqual(v, [])
 
-    def test_package_level_bare_adapters_import_not_flagged(self):
-        # Task R9-T1 negative guard: `from external_write import adapters`
-        # (bare kernel dispatch module) + using run_operation must stay
-        # clean -- "adapters".startswith("adapters_") is False.
+    def test_package_level_bare_adapters_import_ok_but_run_operation_flagged(self):
+        # REVERSED (v0.12.0 S1): `from external_write import adapters`
+        # (bare kernel dispatch module) is still not an adapter_module_import
+        # over-fire ("adapters".startswith("adapters_") is False), but the
+        # fixture's `adapters.run_operation(...)` is now flagged.
         v = scan_paths(
             [_FIXTURES / "capability_package_level_bare_adapters_import_allowed.py"]
         )
-        self.assertEqual(v, [])
+        self._assert_module_rules_off_but_run_operation_flagged(v)
 
     def test_relative_import_operations_not_flagged(self):
         # Task R10-T1 negative guard: `from . import operations` -- neither
@@ -707,22 +741,23 @@ class TestAdapterRegistryNegativeGuards(unittest.TestCase):
         )
         self.assertEqual(v, [])
 
-    def test_relative_bare_adapters_import_not_flagged(self):
-        # Task R10-T1 negative guard: `from . import adapters` (bare kernel
-        # dispatch module) + using run_operation must stay clean --
-        # "adapters".startswith("adapters_") is False.
+    def test_relative_bare_adapters_import_ok_but_run_operation_flagged(self):
+        # REVERSED (v0.12.0 S1): `from . import adapters` (bare kernel dispatch
+        # module) is still not an adapter_module_import over-fire, but the
+        # fixture's `adapters.run_operation(...)` is now flagged.
         v = scan_paths(
             [_FIXTURES / "capability_relative_import_bare_adapters_allowed.py"]
         )
-        self.assertEqual(v, [])
+        self._assert_module_rules_off_but_run_operation_flagged(v)
 
-    def test_relative_import_capability_api_not_flagged(self):
-        # Task R10-T1 negative guard: `from . import capability_api` -- the
-        # curated capability-facing surface.
+    def test_relative_import_capability_api_run_operation_now_flagged(self):
+        # REVERSED (v0.12.0 S1): `from . import capability_api` (the module
+        # import) is still clean, but the fixture's
+        # `capability_api.run_operation(...)` is now flagged.
         v = scan_paths(
             [_FIXTURES / "capability_relative_import_capability_api_allowed.py"]
         )
-        self.assertEqual(v, [])
+        self._assert_module_rules_off_but_run_operation_flagged(v)
 
     def test_relative_import_read_facades_gmail_not_flagged(self):
         # Task R10-T1 negative guard: `from . import read_facades_gmail` --
@@ -733,14 +768,15 @@ class TestAdapterRegistryNegativeGuards(unittest.TestCase):
         )
         self.assertEqual(v, [])
 
-    def test_relative_dotted_bare_adapters_not_flagged(self):
-        # Task R10-T1 negative guard: `from .adapters import run_operation`
-        # (relative dotted form of the bare kernel dispatch module) --
-        # "adapters".startswith("adapters_") is False.
+    def test_relative_dotted_bare_adapters_import_ok_but_run_operation_flagged(self):
+        # REVERSED (v0.12.0 S1): `from .adapters import run_operation`
+        # (relative dotted form of the bare kernel dispatch module) is still
+        # not an adapter_module_import over-fire, but the run_operation SYMBOL
+        # is now flagged.
         v = scan_paths(
             [_FIXTURES / "capability_relative_from_adapters_bare_allowed.py"]
         )
-        self.assertEqual(v, [])
+        self._assert_module_rules_off_but_run_operation_flagged(v)
 
     def test_relative_up_package_unrelated_module_not_flagged(self):
         # Task R10-T1 negative guard: `from ..something import x` (level 2,
@@ -752,22 +788,24 @@ class TestAdapterRegistryNegativeGuards(unittest.TestCase):
         )
         self.assertEqual(v, [])
 
-    def test_bare_import_adapters_kernel_not_flagged(self):
-        # Task R11-T1, F1 negative guard: `import adapters` (bare, no
-        # external_write. prefix, no relative dot) -- "adapters" is not
-        # "adapter_registry" and does not start with "adapters_".
+    def test_bare_import_adapters_kernel_import_ok_but_run_operation_flagged(self):
+        # REVERSED (v0.12.0 S1): `import adapters` (bare, no external_write.
+        # prefix, no relative dot) is still not an adapter_module_import
+        # over-fire, but the fixture's `adapters.run_operation(...)` is now
+        # flagged.
         v = scan_paths(
             [_FIXTURES / "capability_bare_import_adapters_kernel_allowed.py"]
         )
-        self.assertEqual(v, [])
+        self._assert_module_rules_off_but_run_operation_flagged(v)
 
-    def test_bare_from_import_adapters_kernel_not_flagged(self):
-        # Task R11-T1, F1 negative guard: `from adapters import
-        # run_operation` (bare, non-relative).
+    def test_bare_from_import_adapters_kernel_run_operation_now_flagged(self):
+        # REVERSED (v0.12.0 S1): `from adapters import run_operation` (bare,
+        # non-relative) -- the module import is still clean, but the
+        # run_operation SYMBOL is now flagged.
         v = scan_paths(
             [_FIXTURES / "capability_bare_from_import_adapters_kernel_allowed.py"]
         )
-        self.assertEqual(v, [])
+        self._assert_module_rules_off_but_run_operation_flagged(v)
 
     def test_bare_import_operations_and_capability_api_not_flagged(self):
         # Task R11-T1, F1 negative guard: `import operations` / `import
@@ -965,6 +1003,179 @@ class TestFunctionIntrospectionKernelStaysClean(unittest.TestCase):
             f"real kernel/adapter-profile code must stay clean under the "
             f"new function-introspection bans; got {v}",
         )
+
+
+# ---------------------------------------------------------------------------
+# v0.12.0 S1 (RunEnvelope trust core) — raw_run_operation_reference rule.
+#
+# The run-level protections (disk-authoritative envelope spendability,
+# consent-receipt binding, APPLY-BY-ID against the frozen reviewed_set, and the
+# AGGREGATE CEILING) live ONLY inside run_enveloped_operation, which then calls
+# raw run_operation. So a CAPABILITY-zone module that loops raw run_operation
+# BYPASSES every run-level protection. This rule flags any CAPABILITY-zone
+# reference to raw `run_operation` (import, bare name, or attribute) in ALL
+# reach forms, REVERSING the prior explicit allowance of the bare adapters /
+# capability_api run_operation entrypoint for CAPABILITY code. The sanctioned
+# CAPABILITY live-write entrypoint is now capability_api.run_enveloped_operation.
+# ---------------------------------------------------------------------------
+
+_NEW_KIND = "raw_run_operation_reference"
+
+
+def _scan_source(src, *, filename="cap.py", sealed=frozenset(),
+                 adapter_profile=frozenset()):
+    """Write `src` to a temp file and scan it, controlling its zone via the
+    explicit allowlists (default: neither sealed nor adapter-profile == the
+    fail-closed CAPABILITY zone). Mirrors the inline-tmp fixture idiom already
+    used in test_capability_code_scaffold.py."""
+    with TemporaryDirectory() as td:
+        root = Path(td)
+        f = root / filename
+        f.write_text(src, encoding="utf-8")
+        return scan_paths(
+            [f],
+            allowed_root=root,
+            sealed_kernel_paths=sealed,
+            adapter_profile_paths=adapter_profile,
+        )
+
+
+class TestRawRunOperationCapabilityBan(unittest.TestCase):
+    """v0.12.0 S1 — CAPABILITY-zone code must be flagged for referencing raw
+    `run_operation` in EVERY reach form, so it cannot loop the kernel primitive
+    and bypass the run-level envelope protections. CAPABILITY-zone-ONLY: the
+    SEALED_KERNEL run_envelope.py legitimately calls run_operation and stays
+    exempt (see TestRawRunOperationKernelExempt)."""
+
+    def test_from_external_write_adapters_import_run_operation_is_flagged(self):
+        v = _scan_source(
+            "from external_write.adapters import run_operation\n\n"
+            "def go(op, receipt, client):\n"
+            "    return run_operation(op, receipt, client)\n"
+        )
+        self.assertIn(_NEW_KIND, _kinds(v))
+
+    def test_relative_dotted_from_adapters_import_run_operation_is_flagged(self):
+        v = _scan_source(
+            "from .adapters import run_operation\n\n"
+            "def go(op, receipt, client):\n"
+            "    return run_operation(op, receipt, client)\n"
+        )
+        self.assertIn(_NEW_KIND, _kinds(v))
+
+    def test_bare_from_adapters_import_run_operation_is_flagged(self):
+        v = _scan_source(
+            "from adapters import run_operation\n\n"
+            "def go(op, receipt, client):\n"
+            "    return run_operation(op, receipt, client)\n"
+        )
+        self.assertIn(_NEW_KIND, _kinds(v))
+
+    def test_import_external_write_adapters_then_attr_call_is_flagged(self):
+        v = _scan_source(
+            "import external_write.adapters as adapters\n\n"
+            "def go(op, receipt, client):\n"
+            "    return adapters.run_operation(op, receipt, client)\n"
+        )
+        self.assertIn(_NEW_KIND, _kinds(v))
+
+    def test_relative_bare_import_adapters_then_attr_call_is_flagged(self):
+        v = _scan_source(
+            "from . import adapters\n\n"
+            "def go(op, receipt, client):\n"
+            "    return adapters.run_operation(op, receipt, client)\n"
+        )
+        self.assertIn(_NEW_KIND, _kinds(v))
+
+    def test_package_level_import_adapters_then_attr_call_is_flagged(self):
+        v = _scan_source(
+            "from external_write import adapters\n\n"
+            "def go(op, receipt, client):\n"
+            "    return adapters.run_operation(op, receipt, client)\n"
+        )
+        self.assertIn(_NEW_KIND, _kinds(v))
+
+    def test_capability_api_run_operation_attribute_call_is_flagged(self):
+        v = _scan_source(
+            "from external_write import capability_api\n\n"
+            "def go(op, receipt, client):\n"
+            "    return capability_api.run_operation(op, receipt, client)\n"
+        )
+        self.assertIn(_NEW_KIND, _kinds(v))
+
+    def test_from_capability_api_import_run_operation_is_flagged(self):
+        v = _scan_source(
+            "from external_write.capability_api import run_operation\n\n"
+            "def go(op, receipt, client):\n"
+            "    return run_operation(op, receipt, client)\n"
+        )
+        self.assertIn(_NEW_KIND, _kinds(v))
+
+    def test_run_operation_reference_without_call_is_flagged(self):
+        # Holding it by reference is no defense (mirrors the credential-provider
+        # rule): naming the symbol at all is the bypass.
+        v = _scan_source(
+            "from external_write.adapters import run_operation\n\n"
+            "def go():\n"
+            "    return run_operation\n"
+        )
+        self.assertIn(_NEW_KIND, _kinds(v))
+
+
+class TestRawRunOperationNegativeGuards(unittest.TestCase):
+    """False-positive discipline: the sanctioned run_enveloped_operation
+    entrypoint stays clean, and run_enveloped_operation must NOT be mistaken
+    for run_operation (exact-name match, not a substring)."""
+
+    def test_run_enveloped_operation_via_capability_api_is_clean(self):
+        v = _scan_source(
+            "from external_write.capability_api import (\n"
+            "    build_read_facade, run_enveloped_operation)\n"
+            "from external_write.operations import Operation\n\n"
+            "def go(envelope, op, receipt, client):\n"
+            "    return run_enveloped_operation(envelope, op, receipt, client)\n"
+        )
+        self.assertEqual(v, [], f"sanctioned enveloped entrypoint must be clean; got {v}")
+
+    def test_run_enveloped_operation_from_run_envelope_is_clean(self):
+        v = _scan_source(
+            "from external_write.run_envelope import run_enveloped_operation\n\n"
+            "def go(envelope, op, receipt, client):\n"
+            "    return run_enveloped_operation(envelope, op, receipt, client)\n"
+        )
+        self.assertEqual(v, [], f"run_enveloped_operation is not run_operation; got {v}")
+
+
+class TestRawRunOperationKernelExempt(unittest.TestCase):
+    """Zone-scoping: the rule is CAPABILITY-zone-ONLY. A SEALED_KERNEL module
+    (run_envelope.py is the trust core that wraps run_operation) must NOT be
+    flagged, exactly as adapters.py / write_gate.py are not."""
+
+    def test_sealed_kernel_module_calling_run_operation_is_clean(self):
+        v = _scan_source(
+            "from external_write.adapters import run_operation\n\n"
+            "def run_enveloped_operation(envelope, op, receipt, client):\n"
+            "    return run_operation(op, receipt, client)\n",
+            filename="run_envelope_like.py",
+            sealed=frozenset({"run_envelope_like.py"}),
+        )
+        self.assertEqual(
+            v, [],
+            f"a SEALED_KERNEL module wrapping run_operation must be exempt; got {v}",
+        )
+
+    def test_real_run_envelope_module_scans_clean(self):
+        # The real run_envelope.py imports+calls run_operation and MUST be
+        # SEALED_KERNEL (added to zones.SEALED_KERNEL_MODULE_PATHS) so it is
+        # exempt from this CAPABILITY-only rule.
+        v = scan_paths([_ADAPTER_DIR / "run_envelope.py"])
+        self.assertEqual(v, [], f"real run_envelope.py must scan clean; got {v}")
+
+    def test_real_capability_api_module_scans_clean(self):
+        # After the surface change capability_api.py imports run_enveloped_operation
+        # (not run_operation), so it must scan clean even though it is CAPABILITY.
+        v = scan_paths([_ADAPTER_DIR / "capability_api.py"])
+        self.assertEqual(v, [], f"real capability_api.py must scan clean; got {v}")
 
 
 if __name__ == "__main__":

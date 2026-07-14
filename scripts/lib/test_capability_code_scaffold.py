@@ -232,12 +232,15 @@ class TestGoldenEmitZoneClean(unittest.TestCase):
         self.assertEqual(roots, {"typing", "external_write"})
 
     def test_capability_module_import_list_is_EXACTLY_the_curated_surface(self):
-        """The single most important golden-emit assertion (R7-T3): the
+        """The single most important golden-emit assertion (R7-T3, updated
+        for v0.12.0 S1): the
         emitted capability module's `external_write` imports are EXACTLY
-        `capability_api` (run_operation, build_read_facade) and `operations`
+        `capability_api` (run_enveloped_operation, build_read_facade) and
+        `operations`
         (whatever symbols it actually uses) -- nothing else. In particular
         it must NOT import adapters_<cap>, adapter_registry, get_adapter,
-        read_facades_<cap>, or external_write.read_facade at all."""
+        read_facades_<cap>, external_write.read_facade, or the raw
+        run_operation primitive at all."""
         tree = ast.parse(self.capability_path.read_text(encoding="utf-8"))
         imports_by_module = {}
         for node in ast.walk(tree):
@@ -253,8 +256,15 @@ class TestGoldenEmitZoneClean(unittest.TestCase):
         )
         self.assertEqual(
             imports_by_module["external_write.capability_api"],
-            {"run_operation", "build_read_facade"},
+            {"run_enveloped_operation", "build_read_facade"},
         )
+        # The raw kernel primitive must NOT be imported through any module.
+        for mod, names in imports_by_module.items():
+            self.assertNotIn(
+                "run_operation", names,
+                f"capability module must route through run_enveloped_operation, "
+                f"not raw run_operation (found in import from {mod})",
+            )
         self.assertTrue(
             imports_by_module["external_write.operations"],
             "must import at least one symbol from external_write.operations",
@@ -523,6 +533,112 @@ class TestRegistryIdempotency(unittest.TestCase):
             _, _, _, registry_path = emit_capability_code_scaffold(spec, project_root)
             entries = json.loads(registry_path.read_text(encoding="utf-8"))
             self.assertEqual(entries, ["adapters_idem_test_cap_rf.py"])
+
+
+class TestRunEnvelopeSurfaceIsShapeNeutral(unittest.TestCase):
+    """v0.12.0 S1 anti-overfit: the surface change (route through
+    run_enveloped_operation, never raw run_operation) must be shape-neutral --
+    it holds for divergent op_kinds, not just the record/row sample. Exercises
+    a Gmail-style VERB op AND a field/row op end-to-end: the emitted capability
+    module (1) imports run_enveloped_operation, (2) NEVER references raw
+    run_operation anywhere, and (3) scans clean under the new
+    raw_run_operation_reference rule (with an EMPTY adapter-profile allowlist,
+    so the capability module's cleanliness is on its own CAPABILITY-zone
+    merits)."""
+
+    # Two deliberately divergent op_kinds (mirrors the scanner's Sheets/Gmail
+    # verb split): a Gmail-style verb op and an Acme field/row op.
+    _DIVERGENT_SPECS = (
+        dict(capability_id="gmail_message_archiver",
+             display_name="Gmail message archiver",
+             op_kind="gmail.message.archive",
+             surface="gmail",
+             read_only_scope="gmail.readonly",
+             blast_radius_cap=5,
+             read_methods=("list_messages", "get_message")),
+        dict(capability_id="acme_field_updater",
+             display_name="Acme field updater",
+             op_kind="acme_crm.field.update",
+             surface="acme_crm",
+             read_only_scope="acme_crm.readonly",
+             blast_radius_cap=25,
+             read_methods=("list_rows", "get_row")),
+    )
+
+    def _emit_and_read_capability(self, td, spec_kwargs):
+        spec = CapabilityCodeSpec(**spec_kwargs)
+        written = emit_capability_code_scaffold(spec, Path(td))
+        _adapter, _rf, capability_path, _registry = written
+        lib_dir = Path(td) / "agents" / "lib" / "external_write"
+        return spec, capability_path, lib_dir
+
+    def test_divergent_op_kinds_route_through_envelope_and_scan_clean(self):
+        for spec_kwargs in self._DIVERGENT_SPECS:
+            with self.subTest(op_kind=spec_kwargs["op_kind"]):
+                with TemporaryDirectory() as td:
+                    spec, capability_path, lib_dir = self._emit_and_read_capability(
+                        td, spec_kwargs)
+                    src = capability_path.read_text(encoding="utf-8")
+
+                    # (1) imports the sanctioned enveloped entrypoint...
+                    tree = ast.parse(src)
+                    imported = set()
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.ImportFrom):
+                            imported.update(a.name for a in node.names)
+                    self.assertIn("run_enveloped_operation", imported)
+
+                    # (2) ...and NEVER references raw run_operation (import,
+                    # bare Name, or attribute) anywhere in the module.
+                    offenders = []
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.ImportFrom):
+                            offenders += [a.name for a in node.names
+                                          if a.name == "run_operation"]
+                        elif isinstance(node, ast.Name) and node.id == "run_operation":
+                            offenders.append(node.id)
+                        elif isinstance(node, ast.Attribute) and node.attr == "run_operation":
+                            offenders.append(node.attr)
+                    self.assertEqual(
+                        offenders, [],
+                        f"emitted capability for {spec.op_kind} must not name raw "
+                        f"run_operation; found {offenders}")
+
+                    # (3) scans clean on its own CAPABILITY-zone merits (empty
+                    # adapter-profile + sealed-kernel allowlists), including the
+                    # new raw_run_operation_reference rule.
+                    violations = scan.scan_paths(
+                        [capability_path],
+                        allowed_root=lib_dir,
+                        adapter_profile_paths=frozenset(),
+                        sealed_kernel_paths=frozenset(),
+                    )
+                    self.assertEqual(
+                        violations, [],
+                        f"emitted capability for {spec.op_kind} must scan clean; "
+                        f"got {violations}")
+
+    def test_whole_divergent_emit_trio_scans_clean(self):
+        # End-to-end: emit the full trio for each divergent op_kind and scan
+        # the whole lib_dir + cap_dir together under the REAL effective
+        # adapter-profile allowlist -- the anti-overfit end-to-end check.
+        for spec_kwargs in self._DIVERGENT_SPECS:
+            with self.subTest(op_kind=spec_kwargs["op_kind"]):
+                with TemporaryDirectory() as td:
+                    spec = CapabilityCodeSpec(**spec_kwargs)
+                    emit_capability_code_scaffold(spec, Path(td))
+                    lib_dir = Path(td) / "agents" / "lib" / "external_write"
+                    cap_dir = Path(td) / "agents" / "capabilities"
+                    effective = zones.effective_adapter_profile_paths(lib_dir)
+                    violations = scan.scan_paths(
+                        [lib_dir, cap_dir],
+                        allowed_root=lib_dir,
+                        adapter_profile_paths=effective,
+                    )
+                    self.assertEqual(
+                        violations, [],
+                        f"divergent emit trio for {spec.op_kind} must be "
+                        f"zone-clean; got {violations}")
 
 
 if __name__ == "__main__":

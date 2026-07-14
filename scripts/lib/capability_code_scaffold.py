@@ -49,18 +49,23 @@ proven by `read_facades_gmail.py`):
   3. A **capability module** (the CAPABILITY trust zone) —
      `agents/capabilities/<capability_id>_capability.py`. Imports ONLY the
      curated kernel surface — `external_write.capability_api`
-     (`run_operation` + `build_read_facade`) and `external_write.operations`
+     (`run_enveloped_operation` + `build_read_facade`) and
+     `external_write.operations`
      (pure data) — never a vendor SDK, never the adapter module, never the
-     adapter registry, never the concrete `<Prefix>ReadFacade` class. It
+     adapter registry, never the concrete `<Prefix>ReadFacade` class, and
+     never the raw `run_operation` primitive. It
      resolves its read facade via `build_read_facade(op_kind,
      read_only_client)` (the two-arg, kernel-registry-resolved form — the
      concrete subclass is found via the read-facade module's registration,
      not by import), and cannot even NAME a write-credential provider. It
-     routes any actual write through `capability_api.run_operation`, which
-     resolves the write-capable client INTERNALLY from the registered
-     adapter's `build_write_client` method (the credential-isolation
-     keystone — enforced deterministically by scan.py's
-     credential_provider_reference rule, not by a comment convention).
+     routes any actual write through `capability_api.run_enveloped_operation`
+     (under a ceremony-minted RunEnvelope — so the run-level protections apply
+     by construction), which internally resolves the write-capable client from
+     the registered adapter's `build_write_client` method (the
+     credential-isolation keystone — enforced deterministically by scan.py's
+     credential_provider_reference rule, and the raw_run_operation_reference
+     rule that flags any capability reaching raw run_operation, not by a
+     comment convention).
 
 The structural point of the three-way split: before this rewiring, the
 capability module imported its `<Prefix>ReadFacade` class from the SAME
@@ -456,15 +461,17 @@ def render_read_facade_module(spec: CapabilityCodeSpec) -> str:
 
 # ---------------------------------------------------------------------------
 # Capability module (CAPABILITY zone) template — imports ONLY the
-# curated kernel surface (external_write.capability_api's run_operation +
-# build_read_facade, and external_write.operations' pure data types) — never
+# curated kernel surface (external_write.capability_api's run_enveloped_operation
+# + build_read_facade, and external_write.operations' pure data types) — never
 # the adapter module, never the adapter registry, never the concrete
-# ReadFacade subclass. No vendor import, no write credential, no client
-# re-stash, and no importable credential-provider symbol to reach; reads only
-# via the facade capability_api.build_read_facade resolves from the kernel
-# registry (populated by the sibling read_facades_<capability_id>.py module at
-# import time); routes any write through capability_api.run_operation, which
-# resolves the write client internally from the registered adapter's
+# ReadFacade subclass, and never the raw run_operation primitive. No vendor
+# import, no write credential, no client re-stash, and no importable
+# credential-provider symbol to reach; reads only via the facade
+# capability_api.build_read_facade resolves from the kernel registry (populated
+# by the sibling read_facades_<capability_id>.py module at import time); routes
+# any write through capability_api.run_enveloped_operation (under a
+# ceremony-minted RunEnvelope), which enforces the run-level envelope checks
+# and internally resolves the write client from the registered adapter's
 # build_write_client method.
 # ---------------------------------------------------------------------------
 
@@ -478,9 +485,11 @@ adapters_gmail.py's own "Structural safety" section): this module never
 imports a vendor SDK, never constructs or references a write-capable
 credential, and never calls anything shaped like a raw vendor mutation. Its
 ENTIRE external_write import surface is the curated kernel surface --
-``external_write.capability_api`` (``run_operation`` + ``build_read_facade``)
+``external_write.capability_api`` (``run_enveloped_operation`` +
+``build_read_facade``)
 and ``external_write.operations`` (pure data) -- it never imports
-${adapter_module_stem}.py, the adapter registry, ``get_adapter``, or the
+${adapter_module_stem}.py, the adapter registry, ``get_adapter``, the raw
+``run_operation`` primitive, or the
 concrete ${class_prefix}ReadFacade class (see
 ${read_facade_module_stem}.py, which registers that class against the kernel
 read-facade registry at import time; ``build_read_facade`` resolves it from
@@ -488,9 +497,9 @@ there, keyed by op_kind, so this module never needs to name it at all).
 
 It cannot even NAME a write-credential provider: the write-capable credential
 is built solely by the adapter module's ${class_prefix}Adapter.build_write_client,
-resolved INTERNALLY by run_operation inside the adapter execution path
-(enforced deterministically by scan.py's credential_provider_reference
-rule, not by a comment convention).
+resolved INTERNALLY inside the adapter execution path (run_enveloped_operation
+calls the kernel primitive, which resolves it) -- enforced deterministically
+by scan.py's credential_provider_reference rule, not by a comment convention.
 
 NOTE for whoever wires this capability's entrypoint together: `build_facade`
 below requires ${read_facade_module_stem}.py to have been imported at least
@@ -508,7 +517,7 @@ the real design in vision.md / execution_plan.md.
 
 from typing import Any, List, Optional
 
-from external_write.capability_api import build_read_facade, run_operation
+from external_write.capability_api import build_read_facade, run_enveloped_operation
 from external_write.operations import Operation, SCHEMA_V2_ACTION
 
 
@@ -535,15 +544,26 @@ def propose_operations(facade: Any, batch_id: str) -> List[Operation]:
         "'${op_kind}' here.")
 
 
-def run_approved(op: Operation, receipt: Any, *, target: Optional[str] = None,
-                 descriptor_set: Any = None, cap_ledger: Any = None) -> Any:
-    """Execute an already-approved Operation. Passes NO write-credential
-    provider -- this capability zone cannot obtain one. run_operation resolves
-    the write-capable client internally, keyed by the registered adapter
+def run_approved(envelope: Any, op: Operation, receipt: Any, *,
+                 target: str = "live", descriptor_set: Any = None,
+                 cap_ledger: Any = None) -> Any:
+    """Execute an already-approved Operation UNDER a ceremony-minted
+    RunEnvelope -- the ONLY sanctioned CAPABILITY live-write path. Routing
+    through run_enveloped_operation (never the raw run_operation primitive)
+    is what enforces the run-level protections by construction:
+    disk-authoritative envelope spendability, consent-receipt binding,
+    APPLY-BY-ID against the frozen reviewed_set, and the AGGREGATE CEILING.
+    (scan.py's raw_run_operation_reference rule deterministically flags any
+    capability that reaches raw run_operation instead.)
+
+    Passes NO write-credential provider -- this capability zone cannot obtain
+    one. run_enveloped_operation calls the kernel primitive internally, which
+    resolves the write-capable client keyed by the registered adapter
     (${class_prefix}Adapter.build_write_client), inside the adapter execution
-    path, only once dispatch is committed."""
-    return run_operation(
-        op, receipt, None,
+    path, only once dispatch is committed. Returns
+    (updated_envelope, result)."""
+    return run_enveloped_operation(
+        envelope, op, receipt, None,
         target=target, descriptor_set=descriptor_set, cap_ledger=cap_ledger,
     )
 ''')

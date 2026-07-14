@@ -6,14 +6,34 @@ pure data — Operation/EffectUnit — and carries nothing credential-reachable
 either) that emitted capability code is meant to import. It re-exports
 EXACTLY the two capability-facing entrypoints and NOTHING else:
 
-    run_operation      (external_write.adapters)   -- the single external-
-                        write chokepoint; capability code builds an
-                        Operation and a receipt and calls this to execute it.
+    run_enveloped_operation  (external_write.run_envelope) -- the sanctioned
+                        CAPABILITY live-write entrypoint. Capability code runs
+                        an approved Operation UNDER a ceremony-minted
+                        RunEnvelope, so the run-level trust protections are
+                        enforced by construction: disk-authoritative envelope
+                        spendability, consent-receipt binding, APPLY-BY-ID
+                        against the frozen `reviewed_set`, and the AGGREGATE
+                        CEILING. Internally this calls the raw kernel primitive
+                        `run_operation` ONCE per approved op.
     build_read_facade  (external_write.read_facade) -- resolves a registered
                         ReadFacade subclass for an op_kind (the capability-
                         facing two-arg call shape: `build_read_facade(op_kind,
                         read_only_client)` — the kernel resolves the concrete
                         subclass from its own registry; see read_facade.py).
+
+WHY raw `run_operation` is deliberately NOT re-exported here (a change from
+the prior surface): `run_operation` is the kernel write PRIMITIVE — it applies
+one approved Operation but knows nothing about the run-level envelope. The
+run-level protections (spendability / consent binding / apply-by-id / aggregate
+ceiling) live ONLY inside `run_enveloped_operation`, which wraps it. If
+capability code could reach `run_operation` directly it could loop it and
+bypass every one of those checks (the per-op write gate alone does not cap a
+reversible bulk run). So capability code must go through the envelope: this
+module no longer exposes the raw primitive, and scan.py's CAPABILITY-zone-ONLY
+`raw_run_operation_reference` rule deterministically flags any capability
+module that names `run_operation` through any reach path. `run_operation`'s
+own signature/contract is unchanged — it stays the kernel primitive
+`run_enveloped_operation` calls.
 
 It deliberately does NOT re-export:
   * `get_adapter` / `get_dispatch` / `AdapterDispatch` / the adapter registry
@@ -57,7 +77,7 @@ itself.
 Stdlib only — no third-party dependencies.
 """
 
-from external_write.adapters import run_operation
 from external_write.read_facade import build_read_facade
+from external_write.run_envelope import run_enveloped_operation
 
-__all__ = ["run_operation", "build_read_facade"]
+__all__ = ["run_enveloped_operation", "build_read_facade"]

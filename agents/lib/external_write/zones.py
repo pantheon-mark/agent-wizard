@@ -112,6 +112,16 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         "operator_acceptance.py",
         "proof_hash.py",
         "read_facade.py",
+        # run_envelope.py — the v0.12.0 RunEnvelope trust core. It legitimately
+        # wraps the raw kernel primitive run_operation (the ONE place the
+        # run-level envelope — disk-authoritative spendability, consent-receipt
+        # binding, APPLY-BY-ID against the frozen reviewed_set, and the
+        # AGGREGATE CEILING — is enforced around it). It is kernel machinery,
+        # exactly like adapters.py / write_gate.py, so it belongs in
+        # SEALED_KERNEL and is exempt from the CAPABILITY-zone-ONLY
+        # raw_run_operation_reference rule scan.py enforces (a capability
+        # module reaching run_operation directly would bypass that envelope).
+        "run_envelope.py",
         "scan.py",
         "verification_modes.py",
         "verifiers.py",

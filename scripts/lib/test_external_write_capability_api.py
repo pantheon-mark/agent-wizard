@@ -4,9 +4,16 @@ generalization).
 
 `capability_api.py` is the ONLY `external_write` module (besides
 `operations`) emitted capability code is meant to import — it must
-re-export EXACTLY `run_operation` + `build_read_facade` and expose no
-credential-reachable symbol (no `get_adapter`, no registry, no Adapter
+re-export EXACTLY `run_enveloped_operation` + `build_read_facade` and expose
+no credential-reachable symbol (no `get_adapter`, no registry, no Adapter
 class, no credential provisioner).
+
+v0.12.0 S1 (RunEnvelope trust core) — the sanctioned CAPABILITY live-write
+entrypoint is now `run_enveloped_operation`, NOT the raw kernel primitive
+`run_operation`. `run_operation` cannot enforce the run-level envelope checks
+(spendability / consent binding / apply-by-id / aggregate ceiling), so it is
+deliberately NOT re-exported here; capability code must go through the
+envelope. This module must NOT expose `run_operation` at all.
 
 Two groups:
   1. TestCapabilityApiSurface — the exact re-exported symbol set, and that
@@ -15,7 +22,8 @@ Two groups:
   2. TestCapabilityApiExposesNoCredentialReachableSymbol — none of the
      names this module WOULD have re-exported (get_adapter, the adapter
      registry, register_read_facade / the read-facade registry, any
-     credential-provider symbol) are actually present on it.
+     credential-provider symbol, AND the raw run_operation primitive) are
+     actually present on it.
 """
 
 import sys
@@ -27,7 +35,9 @@ _AGENTS_LIB = Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib"
 sys.path.insert(0, str(_AGENTS_LIB))
 
 import external_write.capability_api as capability_api  # noqa: E402
-from external_write.adapters import run_operation as _kernel_run_operation  # noqa: E402
+from external_write.run_envelope import (  # noqa: E402
+    run_enveloped_operation as _kernel_run_enveloped_operation,
+)
 from external_write.read_facade import (  # noqa: E402
     build_read_facade as _kernel_build_read_facade,
 )
@@ -35,12 +45,13 @@ from external_write.read_facade import (  # noqa: E402
 
 class TestCapabilityApiSurface(unittest.TestCase):
 
-    def test_all_lists_exactly_run_operation_and_build_read_facade(self):
+    def test_all_lists_exactly_run_enveloped_operation_and_build_read_facade(self):
         self.assertEqual(sorted(capability_api.__all__),
-                         sorted(["run_operation", "build_read_facade"]))
+                         sorted(["run_enveloped_operation", "build_read_facade"]))
 
-    def test_run_operation_is_the_real_kernel_run_operation(self):
-        self.assertIs(capability_api.run_operation, _kernel_run_operation)
+    def test_run_enveloped_operation_is_the_real_kernel_entrypoint(self):
+        self.assertIs(capability_api.run_enveloped_operation,
+                      _kernel_run_enveloped_operation)
 
     def test_build_read_facade_is_the_real_kernel_build_read_facade(self):
         self.assertIs(capability_api.build_read_facade, _kernel_build_read_facade)
@@ -53,12 +64,23 @@ class TestCapabilityApiSurface(unittest.TestCase):
             n for n in dir(capability_api)
             if not n.startswith("_")
         )
-        self.assertEqual(public_names, sorted(["build_read_facade", "run_operation"]))
+        self.assertEqual(public_names,
+                         sorted(["build_read_facade", "run_enveloped_operation"]))
+
+    def test_raw_run_operation_is_NOT_exported(self):
+        # The raw kernel primitive must not be reachable through this surface
+        # (it cannot enforce the run-level envelope checks).
+        self.assertFalse(hasattr(capability_api, "run_operation"),
+                         "capability_api must not expose the raw run_operation "
+                         "primitive -- capability code must go through "
+                         "run_enveloped_operation")
+        self.assertNotIn("run_operation", capability_api.__all__)
 
 
 class TestCapabilityApiExposesNoCredentialReachableSymbol(unittest.TestCase):
 
     CREDENTIAL_REACHABLE_NAMES = (
+        "run_operation",
         "get_adapter",
         "register_adapter",
         "unregister_adapter",
