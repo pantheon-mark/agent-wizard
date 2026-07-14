@@ -87,6 +87,20 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # import time the same way the T14 five above would.
     "capability_api.py",
     "read_facades_gmail.py",
+    # v0.12.0 Slice 1 (RunEnvelope trust core): the four modules this slice added under
+    # agents/lib/external_write/. evidence.py is HARD-load-bearing — adapters.py, adapters_gmail.py,
+    # and copy_run_proof.py all `from external_write.evidence import AdapterEvidence` at module load,
+    # so omitting it breaks the emitted package at import time (same failure class as T14/R7 above).
+    # run_envelope.py (the run_enveloped_operation orchestrator carrying the persistent ledger +
+    # apply-by-id + aggregate ceiling) and consent_narration.py (the machine-generated consent
+    # sentence + narration) are the trust core's leaf API surfaces — emitted capability code imports
+    # them directly, so nothing inside the lib imports them, but the routing invariant REQUIRES them
+    # present or a live multi-unit write has no enveloped path to route through. bounds.py is pulled
+    # in by run_envelope.py (two-knob progressive ceiling) and breaks run_envelope's import if absent.
+    "evidence.py",
+    "run_envelope.py",
+    "bounds.py",
+    "consent_narration.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
@@ -141,18 +155,20 @@ def _plan_has_writes_back(plan: "EmissionPlan") -> bool:
 def external_write_lib_emit_set(plan: "EmissionPlan") -> List[str]:
     """The emitted-tree relpaths of the external_write lib files this plan should emit.
 
-    Returns all twenty lib files under agents/lib/external_write/ when the plan has a
+    Returns all twenty-six lib files under agents/lib/external_write/ when the plan has a
     writes-back dependency: the original four substrate files (operations, adapters,
     broker, scan), the six contract-and-verification modules (verification_modes,
     contracts, verifiers, boundary, proof_hash, copy_run_proof), the two B1-4/B1-5
     safety-gate modules (coverage_gate — build-time descriptor-coverage gate; write_gate —
     runtime pre-write gate) enrolled at B2-T2, the three B2 operator-originated-enhancement
     flow modules (acceptance_ceremony, capability_registration, operator_acceptance) enrolled at
-    B2-T9a, and the five external-write-gate-generalization modules (adapter_registry,
-    adapters_gmail, effects_manifest, read_facade, zones) enrolled at T14 (canonical
+    B2-T9a, the five external-write-gate-generalization modules (adapter_registry,
+    adapters_gmail, effects_manifest, read_facade, zones) enrolled at T14, the two R7
+    CAPABILITY-zone modules (capability_api, read_facades_gmail), and the four v0.12.0 Slice-1
+    RunEnvelope-trust-core modules (evidence, run_envelope, bounds, consent_narration). Canonical
     enrollment; the physical bundle copy + system-artifacts.json + parity entries land at the
-    T14 bundle cut — the copy below is already source-gated on the bundle carrying the file,
-    so this enrollment is a no-op until then).
+    bundle cut — each copy below is source-gated on the bundle carrying the file, so a newly
+    enrolled name is a no-op until that file exists in the source bundle.
 
     Returns [] when the plan has no writes-back (boundary_output) dependency — no dead
     code for read-only systems, and none for foundation-only plans (which have no agent

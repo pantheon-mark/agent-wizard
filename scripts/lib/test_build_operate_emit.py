@@ -1407,11 +1407,22 @@ class TestS253ContractDelta(unittest.TestCase):
     def test_emit_set_lists_the_two_r7_capability_zone_files(self):
         # R7 (external-write-gate-generalization, CAPABILITY-zone hardening): capability_api.py
         # and read_facades_gmail.py must be enrolled, or an emitted writes-back system's package
-        # breaks at import time — twenty-two lib files total.
+        # breaks at import time.
         import agent_emitter
         for name in ("capability_api.py", "read_facades_gmail.py"):
             self.assertIn(name, agent_emitter._EXTERNAL_WRITE_LIB_FILES)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 22)
+
+    def test_emit_set_lists_the_four_v0_12_0_runenvelope_files(self):
+        # v0.12.0 Slice 1 (RunEnvelope trust core): evidence.py is hard-load-bearing (adapters.py /
+        # adapters_gmail.py / copy_run_proof.py import AdapterEvidence at module load); run_envelope.py
+        # + consent_narration.py are the trust-core leaf API surfaces emitted capability code imports;
+        # bounds.py is pulled in by run_envelope.py. All four must be enrolled or the emitted writes-back
+        # package either breaks at import time (evidence/bounds) or has no enveloped route for a live
+        # multi-unit write (run_envelope/consent_narration) — twenty-six lib files total.
+        import agent_emitter
+        for name in ("evidence.py", "run_envelope.py", "bounds.py", "consent_narration.py"):
+            self.assertIn(name, agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 26)
 
     def _writes_back_plan(self):
         import copy, json

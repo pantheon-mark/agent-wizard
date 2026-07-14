@@ -12,6 +12,23 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-13 — bulk actions are now bounded and verified as a whole run (v0.12.0)
+
+**Public-facing change:** One addition under the hood: a run-level safety envelope for bulk actions. When a capability acts on many things at once, your system now bounds and verifies the whole run — not just each single action.
+
+- **One running ledger per run.** Everything a bulk run touches is tracked in a single persistent record, so the run's total reach is known and capped as a whole.
+- **An overall ceiling on a run.** On top of the existing cap on how much a single action can touch, there is now an overall ceiling on how much one run can change — scaled to how reversible the action is (a reversible action like moving mail to Trash gets more headroom than something harder to undo).
+- **It does exactly what you reviewed.** The run applies exactly the set you approved. If the plan changed after you approved it, the run stops rather than acting on something you did not see.
+- **"Verified" now means checked against your real account.** When a capability is proven, and each time it runs, the change is confirmed against the actual account — not just that the code finished without error.
+- **What you consent to matches what happens.** The exact sentence you approve is built from what the run will really do, so the plain-language description can never drift from the mechanism underneath it.
+- No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
+
+This is a feature addition (`v0.12.0`, operator-explicit as always). Foundation documents are byte-identical to `v0.11.0`.
+
+`Source-Meta-Commit:` `PENDING` (private build repo) · public repo commit `PENDING`
+
+---
+
 ## 2026-07-11 — more building blocks for writes-back capabilities, and a paused capability is protected during an update (v0.11.0)
 
 **Public-facing change:** Two additions under the hood. Future write-back capabilities have more proven building blocks to draw on, and if something you already had running no longer follows your system's current safety rules, an update now catches it and pauses it safely instead of breaking it or leaving it running unprotected.
