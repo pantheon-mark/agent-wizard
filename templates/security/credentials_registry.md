@@ -30,7 +30,7 @@
 
 | Status | Meaning |
 |--------|---------|
-| Active | Verified working |
+| Active | The credential value is stored and reachable. For an OAuth credential this is a SEPARATE axis from whether the specific scope this system needs actually works — that is tracked on its own in the `Scope status` column, never folded into `Active`. A credential can be `Active` while its `Scope status` is still `granted, not yet exercised` (or even `not granted`): the value is in place, but the scope's real use is proven separately. |
 | Expiring | Within rotation lead-time window — rotation in progress |
 | Expired | Past expiry — system cannot use this credential until rotated |
 | Pending | Identified during wizard setup but not yet configured |

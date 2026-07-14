@@ -350,6 +350,28 @@ class TestDescribeAuthFailure(unittest.TestCase):
         self.assertIsNone(describe_auth_failure(ValueError("the recipient list was empty")))
         self.assertIsNone(describe_auth_failure(KeyError("message_id")))
 
+    def test_bare_status_number_without_auth_context_is_not_misclassified(self):
+        """The over-firing guard: a non-auth exception that merely mentions
+        the number 401/403 (a record count, an amount) must NOT be swallowed
+        as an auth failure -- otherwise a genuine bug hides behind a 'check
+        your credentials' message."""
+        self.assertIsNone(describe_auth_failure(ValueError("processed 401 records successfully")))
+        self.assertIsNone(describe_auth_failure(RuntimeError("row 403 had a malformed date")))
+
+    def test_bare_forbidden_word_without_status_or_token_is_not_misclassified(self):
+        """A plain business 'forbidden'/'unauthorized' word with no auth
+        status code and no OAuth token must not be reclassified as auth."""
+        self.assertIsNone(
+            describe_auth_failure(ValueError("that combination is forbidden by the workflow rules")))
+
+    def test_http_status_with_auth_context_still_classified(self):
+        """The legitimate HTTP-auth case still fires: a 401/403 alongside an
+        auth-context word (the real googleapiclient / requests shapes)."""
+        self.assertIsNotNone(
+            describe_auth_failure(Exception("HttpError 403 ... insufficient authentication scopes")))
+        self.assertIsNotNone(
+            describe_auth_failure(Exception("401 Client Error: Unauthorized for url")))
+
     def test_returned_message_is_a_single_plain_line_no_internal_labels(self):
         message = describe_auth_failure(RuntimeError("unauthorized_client"))
         self.assertNotIn("op_kind", message)
@@ -490,6 +512,22 @@ class TestNextPhaseReadinessGateContent(unittest.TestCase):
     def test_gate_blocks_trial_not_build(self):
         text = self._read()
         self.assertIn("never blocks Steps 1", text.replace("1–4", "1-4").replace("–", "-"))
+
+    def test_gate_stop_instruction_does_not_halt_step_4_build_verification(self):
+        """Regression pin (self-review Finding 1): the gate's STOP/withhold
+        instruction must name ONLY Step 5 (the supervised live trial), never
+        Step 4 (technical verification / bringing agents to a runnable
+        state) -- withholding Step 4 would block the build, contradicting
+        the gate's own stated 'never blocks the build' design."""
+        text = self._read()
+        gate_start = text.find("### Live-trial-readiness gate")
+        gate_end = text.find("\n## ", gate_start)
+        gate_text = text[gate_start:gate_end if gate_end != -1 else len(text)]
+        # The gate must not instruct halting/withholding Step 4.
+        self.assertNotIn("do not proceed to Step 4", gate_text)
+        self.assertNotIn("Step 4 or Step 5", gate_text)
+        # It must explicitly permit Steps 1-4.
+        self.assertIn("Steps 1", gate_text.replace("1–4", "1-4").replace("–", "-"))
 
     def test_gate_emits_resumable_onboarding_task_via_stub_tracker(self):
         text = self._read()

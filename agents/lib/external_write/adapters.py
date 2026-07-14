@@ -751,18 +751,28 @@ def scope_preflight(op_kind: str, token_info: Mapping[str, Any]) -> str:
 
 
 # Recognizable auth/setup-failure vocabulary (Task 11, B3 / F-52,F-47):
-# deliberately narrow and vendor-agnostic (OAuth2 / RFC 6749 error codes,
-# common HTTP auth status text, and generic credential/permission wording) —
-# broad enough to catch a real scope/credential failure across providers,
-# narrow enough not to misclassify an unrelated bug as an auth problem. Kept
-# as plain substrings (not a vendor exception class import) so this stays
-# stdlib-only and applies to ANY exception shape, not just one SDK's.
-_AUTH_FAILURE_MARKERS = (
+# deliberately narrow and vendor-agnostic. Two tiers, so a bare numeric HTTP
+# status in unrelated text (a record count, a dollar amount) is NEVER enough
+# on its own to misclassify a non-auth bug as an auth problem:
+#   * _AUTH_FAILURE_TOKENS — unambiguous OAuth2/RFC-6749 error codes and
+#     credential/permission phrases specific enough to match on their own.
+#   * an auth-status code (401/403) is only treated as auth when it CO-OCCURS
+#     with an auth-context word (unauthorized/forbidden/scope/token/...); the
+#     status code alone is not sufficient.
+# Kept as plain lowercased substring / small-regex checks (not a vendor
+# exception-class import) so this stays stdlib-only and applies to ANY
+# exception shape, not just one SDK's.
+_AUTH_FAILURE_TOKENS = (
     "unauthorized_client", "invalid_grant", "invalid_token", "invalid_client",
-    "insufficient_scope", "insufficient_permission", "access_denied",
-    "permission_denied", "unauthorized", "forbidden", "authenticationerror",
-    "not authorized", "401", "403",
+    "insufficient_scope", "insufficient_permission", "insufficient authentication",
+    "access_denied", "permission_denied", "permissiondenied", "authenticationerror",
+    "not authorized", "invalid credentials", "invalid authentication",
+    "expired token", "token has expired", "token has been expired",
 )
+_AUTH_STATUS_RE = re.compile(r"\b(?:401|403)\b")
+_AUTH_CONTEXT_RE = re.compile(
+    r"unauthorized|forbidden|auth|scope|permission|credential|token|"
+    r"sign[- ]?in|log[- ]?in")
 
 
 def describe_auth_failure(exc: BaseException) -> Optional[str]:
@@ -774,6 +784,13 @@ def describe_auth_failure(exc: BaseException) -> Optional[str]:
     function deliberately does not widen into a generic catch-all; see the
     callers below for why only the recognized auth shape is ever swallowed).
 
+    Two-tier match (see the vocabulary comment above): an unambiguous auth
+    token matches on its own; a bare HTTP 401/403 status matches ONLY
+    alongside an auth-context word, so an unrelated exception that merely
+    happens to mention the number 401/403 is NOT reclassified as an auth
+    failure (which would otherwise silently swallow a genuine bug behind a
+    "check your credentials" message — the opposite of the targeted intent).
+
     Ground truth (F-52/F-47): the live dogfood incident this task closes was
     exactly this — a raw, ~10-frame Python traceback from an
     `unauthorized_client` scope failure, surfaced directly to a non-technical
@@ -781,7 +798,10 @@ def describe_auth_failure(exc: BaseException) -> Optional[str]:
     resumable next step. This function is that landing point.
     """
     text = f"{type(exc).__name__}: {exc}".lower()
-    if not any(marker in text for marker in _AUTH_FAILURE_MARKERS):
+    is_auth = any(token in text for token in _AUTH_FAILURE_TOKENS)
+    if not is_auth and _AUTH_STATUS_RE.search(text) and _AUTH_CONTEXT_RE.search(text):
+        is_auth = True
+    if not is_auth:
         return None
     return (
         "This step needs a credential or permission that isn't working right "
@@ -815,7 +835,9 @@ if __name__ == "__main__":  # pragma: no cover
         "Usage: adapters.py --op-kind <op_kind> --token-info-json <json>\n"
         "Offline, safe check: does the given OAuth token-introspection "
         "response already grant this op_kind's declared read-only scope? "
-        "Prints one of: granted | not_granted | n/a."
+        "Prints one of: granted | not_granted | n/a.\n"
+        "Exit codes: 0 = granted or n/a (nothing to fix); 1 = not_granted "
+        "(scope missing); 2 = usage error / malformed input."
     )
     _opts: Dict[str, Optional[str]] = {"--op-kind": None, "--token-info-json": None}
     _i = 0
