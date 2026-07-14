@@ -62,6 +62,25 @@ from external_write.acceptance_ceremony import (
     AcceptanceResult,
     OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA,
 )
+from external_write.adapter_registry import get_adapter, get_dispatch
+from external_write.contracts import get_contract
+from external_write.effects_manifest import unresolvable_adapter_seal_gap
+from external_write.proof_hash import (
+    compute_contract_hash,
+    compute_implementation_hash,
+    ProofHashError,
+)
+
+# Task 7 (A4 / F-37, v0.13.0 Slice 2): importing this ONE module fires every
+# shipped AND every capability-added adapter module's module-scope
+# `register_adapter`/`register_contract` call -- see registered_adapters.py's
+# own docstring for the full "why". This MUST be a top-of-module import (it
+# runs once, before any function in this module executes), so BOTH the
+# `__main__` CLI wrapper below AND `record_operator_acceptance` (the runner
+# every other caller of this module actually goes through) get the fix
+# regardless of which one is invoked -- the turnkey acceptance CLI never
+# needs its own knowledge of which adapter module a given op_kind lives in.
+import external_write.registered_adapters  # noqa: E402,F401
 
 # Default on-disk home for the minted receipt (project-root-relative; disk-first + audit).
 DEFAULT_RECEIPT_DIR = "security/acceptance_receipts"
@@ -97,6 +116,22 @@ def _refuse(reason: str, receipt_ref: Optional[str] = None,
 
 def _now_iso_z() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _load_json_for_precheck(path: str) -> Optional[dict]:
+    """Fail-safe JSON load for the BI-2 pre-check below: returns None on a
+    missing / unreadable / malformed / non-dict file. A narrow local copy of
+    acceptance_ceremony._load_json_file's fail-safe shape (that helper is
+    module-private there) -- deliberately not imported from the ceremony, so
+    this module's pre-check does not couple to the ceremony's internals; the
+    ceremony re-reads and re-validates the same proof independently regardless
+    (it trusts nothing this helper computed -- see the module docstring)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _atomic_write_text(path: str, text: str) -> None:
@@ -211,6 +246,57 @@ def record_operator_acceptance(
         return _refuse(
             "operator confirmation is empty — the operator has not confirmed acceptance; "
             "nothing is minted and nothing is accepted")
+
+    # --- BI-2 (Task 7 / F-37) pre-check: resolve the proof's declared op_kind's
+    # contract + (if adapter-backed) dispatch, and confirm the trust-hash canon
+    # actually computes, BEFORE anything is written. `external_write.
+    # registered_adapters` (imported at this module's top) has already fired
+    # every shipped and capability-added adapter module's registration by the
+    # time this function runs, so an op_kind that still fails to resolve here
+    # is a REAL build-time gap (an adapter module that was never added to
+    # registered_adapters.py) -- never a traceback, always a plain,
+    # resumable refusal that names the missing piece and the one fix step.
+    # Refusing here means the receipt mint below never runs on this path, so
+    # a refusal never leaves a stale receipt behind (the deferred
+    # "receipt-left-on-refuse" minor this task also closes).
+    proof_for_precheck = _load_json_for_precheck(copy_run_proof_ref)
+    if proof_for_precheck is None:
+        return _refuse(
+            f"could not read the copy_run_proof at {copy_run_proof_ref!r} as JSON -- "
+            "fix step: confirm the path is correct and the file holds one valid "
+            "copy_run_proof-v1 JSON object; nothing was written")
+    proof_op_kind = proof_for_precheck.get("op_kind")
+    if not (isinstance(proof_op_kind, str) and proof_op_kind.strip()):
+        return _refuse(
+            "the copy_run_proof carries no op_kind -- fix step: re-run the "
+            "supervised copy-run so it records the operation kind being proved; "
+            "nothing was written")
+    contract = get_contract(proof_op_kind)
+    if contract is None:
+        return _refuse(
+            f"operation kind {proof_op_kind!r} has no registered contract -- fix "
+            "step: add this capability's adapter module to "
+            "agents/lib/external_write/registered_adapters.py (the add-capability "
+            "build cascade does this for you via "
+            "wizard/scripts/lib/capability_code_scaffold.py) so it registers at "
+            "import time, then re-run this command; nothing was written")
+    adapter = get_adapter(proof_op_kind)
+    if adapter is not None and get_dispatch(proof_op_kind) is None:
+        return _refuse(
+            f"operation kind {proof_op_kind!r} has a registered adapter but no "
+            "captured dispatch record -- fix step: re-import "
+            "agents/lib/external_write/registered_adapters.py cleanly and retry "
+            "(this indicates a partial adapter registration); nothing was written")
+    seal_gap = unresolvable_adapter_seal_gap(proof_op_kind)
+    if seal_gap is not None:
+        return _refuse(f"{seal_gap}; nothing was written")
+    try:
+        compute_contract_hash(proof_op_kind)
+        compute_implementation_hash(proof_op_kind)
+    except ProofHashError as e:
+        return _refuse(
+            f"could not compute the trust hashes for operation kind "
+            f"{proof_op_kind!r} -- fix step: {e}; nothing was written")
 
     if receipt_path is None:
         # A per-capability receipt filename; deterministic so a re-run overwrites its own prior

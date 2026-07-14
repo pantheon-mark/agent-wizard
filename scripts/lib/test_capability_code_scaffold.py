@@ -131,8 +131,8 @@ class TestGoldenEmitZoneClean(unittest.TestCase):
         self.project_root = Path(self._td.name)
         self.spec = _sample_spec()
         self.written = emit_capability_code_scaffold(self.spec, self.project_root)
-        (self.adapter_path, self.read_facade_path,
-         self.capability_path, self.registry_path) = self.written
+        (self.adapter_path, self.read_facade_path, self.capability_path,
+         self.registry_path, self.registered_adapters_path) = self.written
         self.lib_dir = self.project_root / "agents" / "lib" / "external_write"
         self.cap_dir = self.project_root / "agents" / "capabilities"
 
@@ -372,7 +372,7 @@ class TestRuntimeRegistration(unittest.TestCase):
             op_kind="acme_crm_rt.record.archive",
         )
         written = emit_capability_code_scaffold(self.spec, self.project_root)
-        self.adapter_path, self.read_facade_path, self.capability_path, _ = written
+        self.adapter_path, self.read_facade_path, self.capability_path, _, _ = written
 
         adapter_modname = "t10_golden_adapter_runtime_test_mod"
         adapter_spec_obj = importlib.util.spec_from_file_location(
@@ -457,7 +457,7 @@ class TestReadFacadeSplitRegistryResolution(unittest.TestCase):
             op_kind="acme_crm_reg.record.archive",
         )
         written = emit_capability_code_scaffold(self.spec, self.project_root)
-        self.adapter_path, self.read_facade_path, self.capability_path, _ = written
+        self.adapter_path, self.read_facade_path, self.capability_path, _, _ = written
 
         adapter_modname = "t10_reg_adapter_test_mod"
         adapter_spec_obj = importlib.util.spec_from_file_location(
@@ -510,9 +510,13 @@ class TestRegistryIdempotency(unittest.TestCase):
             project_root = Path(td)
             spec = _sample_spec(capability_id="idem_test_cap")
             emit_capability_code_scaffold(spec, project_root)
-            _, _, _, registry_path = emit_capability_code_scaffold(spec, project_root)
+            _, _, _, registry_path, ra_path = emit_capability_code_scaffold(spec, project_root)
             entries = json.loads(registry_path.read_text(encoding="utf-8"))
             self.assertEqual(entries, ["adapters_idem_test_cap.py"])
+            # registered_adapters.py (Task 7 / F-37): re-emitting the same
+            # capability's own module must not duplicate its import line.
+            ra_content = ra_path.read_text(encoding="utf-8")
+            self.assertEqual(ra_content.count("import external_write.adapters_idem_test_cap"), 1)
 
     def test_reemit_preserves_other_capabilities_already_registered(self):
         with TemporaryDirectory() as td:
@@ -521,18 +525,40 @@ class TestRegistryIdempotency(unittest.TestCase):
             second = _sample_spec(capability_id="second_cap",
                                   op_kind="second_cap.record.archive")
             emit_capability_code_scaffold(first, project_root)
-            _, _, _, registry_path = emit_capability_code_scaffold(second, project_root)
+            _, _, _, registry_path, ra_path = emit_capability_code_scaffold(second, project_root)
             entries = set(json.loads(registry_path.read_text(encoding="utf-8")))
             self.assertEqual(entries, {"adapters_first_cap.py", "adapters_second_cap.py"})
+            ra_content = ra_path.read_text(encoding="utf-8")
+            self.assertIn("import external_write.adapters_first_cap", ra_content)
+            self.assertIn("import external_write.adapters_second_cap", ra_content)
 
     def test_reemit_never_adds_the_read_facade_module_to_the_registry(self):
         with TemporaryDirectory() as td:
             project_root = Path(td)
             spec = _sample_spec(capability_id="idem_test_cap_rf")
             emit_capability_code_scaffold(spec, project_root)
-            _, _, _, registry_path = emit_capability_code_scaffold(spec, project_root)
+            _, _, _, registry_path, ra_path = emit_capability_code_scaffold(spec, project_root)
             entries = json.loads(registry_path.read_text(encoding="utf-8"))
             self.assertEqual(entries, ["adapters_idem_test_cap_rf.py"])
+            ra_content = ra_path.read_text(encoding="utf-8")
+            self.assertNotIn("read_facades_idem_test_cap_rf", ra_content)
+
+    def test_reemit_two_different_capabilities_with_colliding_op_kind_refuses(self):
+        """AC-T7/BI-1: the scaffold generation asserts the registry's import
+        set registers no duplicate op_kind -- a plain, resumable
+        CapabilityCodeScaffoldError, not a silent double-registration."""
+        with TemporaryDirectory() as td:
+            project_root = Path(td)
+            first = _sample_spec(capability_id="dup_op_kind_cap_a",
+                                 op_kind="dup_test.record.archive")
+            second = _sample_spec(capability_id="dup_op_kind_cap_b",
+                                  op_kind="dup_test.record.archive")
+            emit_capability_code_scaffold(first, project_root)
+            with self.assertRaises(CapabilityCodeScaffoldError) as ctx:
+                emit_capability_code_scaffold(second, project_root)
+            msg = str(ctx.exception)
+            self.assertIn("dup_test.record.archive", msg)
+            self.assertIn("adapters_dup_op_kind_cap_a.py", msg)
 
 
 class TestRunEnvelopeSurfaceIsShapeNeutral(unittest.TestCase):
@@ -568,7 +594,7 @@ class TestRunEnvelopeSurfaceIsShapeNeutral(unittest.TestCase):
     def _emit_and_read_capability(self, td, spec_kwargs):
         spec = CapabilityCodeSpec(**spec_kwargs)
         written = emit_capability_code_scaffold(spec, Path(td))
-        _adapter, _rf, capability_path, _registry = written
+        _adapter, _rf, capability_path, _registry, _reg_adapters = written
         lib_dir = Path(td) / "agents" / "lib" / "external_write"
         return spec, capability_path, lib_dir
 

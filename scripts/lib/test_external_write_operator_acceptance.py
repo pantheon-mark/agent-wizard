@@ -10,6 +10,8 @@ REFUSES an unaccepted one. No mocks of the units under test.
 """
 
 import json
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -17,6 +19,12 @@ from tempfile import TemporaryDirectory
 
 _AGENTS_LIB = Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib"
 sys.path.insert(0, str(_AGENTS_LIB))
+
+# Single-home (mirrors test_capability_code_scaffold.py's own sys.path setup):
+# import the wizard TOOLKIT emitter by bare name from this directory.
+_SCRIPTS_LIB_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_LIB_DIR))
 
 from external_write.operator_acceptance import (  # noqa: E402
     record_operator_acceptance,
@@ -38,6 +46,11 @@ from external_write.write_gate import (  # noqa: E402
     load_descriptor_set,
     evaluate_write_gate,
     LIVE_TARGET,
+)
+
+from capability_code_scaffold import (  # noqa: E402
+    CapabilityCodeSpec,
+    emit_capability_code_scaffold,
 )
 
 
@@ -373,6 +386,194 @@ class ClosePendingMigrationHelperUnitTest(unittest.TestCase):
 
     def test_default_path_constant(self):
         self.assertEqual(PENDING_MIGRATIONS_REL, "agents/handoffs/pending_migrations.json")
+
+
+def _copy_real_external_write_package(project_root: Path) -> Path:
+    """Copy the REAL, committed external_write package (this task's
+    registered_adapters.py included) into
+    ``<project_root>/agents/lib/external_write/``, so a subprocess run of
+    the ACTUAL ``operator_acceptance.py`` CLI against `project_root`
+    exercises the real, shipped turnkey-acceptance machinery end to end --
+    never a stand-in or a hand-simulated substitute."""
+    dest = project_root / "agents" / "lib" / "external_write"
+    shutil.copytree(_AGENTS_LIB / "external_write", dest)
+    lib_init = _AGENTS_LIB / "__init__.py"
+    if lib_init.is_file():
+        shutil.copy(lib_init, project_root / "agents" / "lib" / "__init__.py")
+    return dest
+
+
+def _precompute_hashes(project_root: Path, op_kind: str) -> dict:
+    """Compute the trust-hash canon for `op_kind` in a FRESH subprocess
+    against the temp project's own copy of the package. This guarantees the
+    values match EXACTLY what the CLI subprocess (below) will independently
+    recompute: both run against the identical on-disk files, in unrelated
+    Python processes, so there is no shared sys.modules cache to reason
+    about (this test file already has the real dev-tree `external_write.*`
+    cached under a DIFFERENT path from this test's own top-of-file imports;
+    reusing that cache in-process for the temp copy's own op_kind would be
+    unsound)."""
+    script = (
+        "import sys, json\n"
+        "sys.path.insert(0, 'agents/lib')\n"
+        "import external_write.registered_adapters\n"
+        "from external_write.proof_hash import (\n"
+        "    compute_contract_hash, compute_implementation_hash)\n"
+        f"op_kind = {op_kind!r}\n"
+        "print(json.dumps({'contract_hash': compute_contract_hash(op_kind),\n"
+        "                   'implementation_hash': compute_implementation_hash(op_kind)}))\n"
+    )
+    result = subprocess.run([sys.executable, "-c", script], cwd=str(project_root),
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        raise AssertionError(f"hash precompute subprocess failed: {result.stderr}")
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
+    """Task 7 (A4 / F-37) — the emitted e2e smoke test the task brief's spec
+    item 3 calls for: declare a FRESH (non-Gmail, never-before-registered)
+    op_kind with a real, capability-code-scaffold-emitted adapter module,
+    confirm it lands in registered_adapters.py, then run the
+    operator-acceptance CLI VERBATIM AS DOCUMENTED in skills/next-phase.md's
+    Step 6 (a subprocess of agents/lib/external_write/operator_acceptance.py
+    from the project root, the exact argument shape that file prescribes) --
+    must succeed turnkey and mint a receipt, with NO hand-import of the
+    adapter module anywhere in this test's CLI invocation. This is the RED ->
+    GREEN proof for Task 7: before the fix, this exact invocation refused
+    with "no registered contract" for any freshly-declared capability."""
+
+    CAPABILITY_ID = "fixture_e2e_cap"
+    OP_KIND = "fixture_e2e.record.set_status"
+    PHASE = "phase_e2e"
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.project_root = Path(self._td.name)
+        self.external_write_dir = _copy_real_external_write_package(self.project_root)
+
+        spec = CapabilityCodeSpec(
+            capability_id=self.CAPABILITY_ID,
+            display_name="Fixture e2e capability",
+            op_kind=self.OP_KIND,
+            surface="fixture_e2e_surface",
+            read_only_scope="fixture_e2e.readonly",
+            blast_radius_cap=10,
+            risk_class="sensitive_data",
+            writes=("Status",),
+            read_methods=("list_items", "get_item"),
+            verifier_set=("prestate_snapshot_diff_v1",),
+        )
+        written = emit_capability_code_scaffold(spec, self.project_root)
+        (self.adapter_path, self.read_facade_path, self.capability_path,
+         self.registry_path, self.registered_adapters_path) = written
+
+        # The scaffold's emitted adapter is a structural STUB (plan/apply_one/
+        # undo_one/verify_one only -- see capability_code_scaffold.py's own
+        # module docstring: "the actual per-vendor call shape" is a later,
+        # human TODO). copy_run_proof.validate_copy_run_proof fail-closes on
+        # ANY registered-adapter op_kind with no evidence predicate (Task 1,
+        # B4/T1) -- a real capability build would fill these in against the
+        # real vendor semantics before its first copy-run proof; this test
+        # does the same minimal fill-in (not a scaffold change; out of scope
+        # for Task 7) so the e2e proof can validate.
+        adapter_text = self.adapter_path.read_text(encoding="utf-8")
+        class_name = f"{spec.class_prefix}Adapter"
+        fill_in = (
+            f"\n\ndef _{spec.capability_id}_verify_apply_landed(self, evidence):\n"
+            "    return True\n\n\n"
+            f"def _{spec.capability_id}_verify_undo_restored(self, evidence):\n"
+            "    return True\n\n\n"
+            f"{class_name}.verify_apply_landed = _{spec.capability_id}_verify_apply_landed\n"
+            f"{class_name}.verify_undo_restored = _{spec.capability_id}_verify_undo_restored\n\n\n"
+        )
+        marker = f"register_adapter(OP_KIND, {class_name}())"
+        self.assertIn(marker, adapter_text)
+        adapter_text = adapter_text.replace(marker, fill_in.strip("\n") + "\n" + marker)
+        self.adapter_path.write_text(adapter_text, encoding="utf-8")
+
+        self.security_dir = self.project_root / "security"
+        self.security_dir.mkdir(parents=True, exist_ok=True)
+        self.descriptor_set_path = self.security_dir / "capability_descriptors.json"
+        self.proof_path = (self.project_root / "agents" / "handoffs"
+                          / f"{self.CAPABILITY_ID}.copy_run_proof.json")
+        self.proof_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def test_fresh_op_kind_lands_in_the_generated_registry(self):
+        # Spec item 1/3: "ensure it's in the registry" -- both the shipped
+        # Gmail baseline AND the fresh capability's own import are present.
+        content = self.registered_adapters_path.read_text(encoding="utf-8")
+        self.assertIn("import external_write.adapters_gmail", content)
+        self.assertIn(f"import external_write.{self.adapter_path.stem}", content)
+
+    def test_cli_verbatim_as_documented_succeeds_turnkey(self):
+        hashes = _precompute_hashes(self.project_root, self.OP_KIND)
+
+        descriptor = {
+            "id": self.CAPABILITY_ID, "name": self.CAPABILITY_ID,
+            "action_class": "update", "risk_class": "sensitive_data",
+            "recovery_profile_ref": None, "declared_test_target": "copy",
+            "blast_radius_cap": 10, "accepted": False, "phase_id": self.PHASE,
+        }
+        self.descriptor_set_path.write_text(
+            json.dumps([descriptor], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        proof = {
+            "schema": COPY_RUN_PROOF_SCHEMA,
+            "operation_id": "op-e2e-001",
+            "op_kind": self.OP_KIND,
+            "capability_id": self.CAPABILITY_ID,
+            "data_class": "fixture_e2e_rows",
+            "copy_source_ref": "copies/fixture_e2e_copy.csv",
+            "prestate_snapshot_ref": "copies/fixture_e2e_copy.prestate.csv",
+            "copy_apply_proof": {
+                "apply_receipt_ref": "agents/handoffs/.apply_receipt.json",
+                "apply_verification": _verification(),
+                "apply_evidence": {"unit_id": "row-1", "poststate": {"value": "Done"}},
+            },
+            "copy_undo_proof": {
+                "undo_receipt_ref": "agents/handoffs/.undo_receipt.json",
+                "undo_verification": _verification(),
+                "undo_evidence": {"unit_id": "row-1", "poststate": {"value": "Todo"}},
+            },
+            "durability_checks": [],
+            "accepted_for_live_use": True,
+            "implementation_hash": hashes["implementation_hash"],
+            "contract_hash": hashes["contract_hash"],
+            # Invariant 7 (wire-verification): the CAPABILITY's own
+            # write-affecting module, never the trusted adapter module.
+            "capability_module_paths": [str(self.capability_path.resolve())],
+        }
+        self.proof_path.write_text(json.dumps(proof), encoding="utf-8")
+
+        # The EXACT documented invocation shape (skills/next-phase.md, Step
+        # 6) -- a fresh subprocess, run from the project root, with no
+        # PYTHONPATH and no hand-import of any adapter module by this test.
+        cli_path = self.external_write_dir / "operator_acceptance.py"
+        result = subprocess.run(
+            [sys.executable, str(cli_path),
+             "--capability-id", self.CAPABILITY_ID,
+             "--phase-id", self.PHASE,
+             "--copy-run-proof", str(self.proof_path),
+             "--operator-confirmation",
+             "Yes -- I accept this capability for live use."],
+            cwd=str(self.project_root), capture_output=True, text=True,
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            msg=f"CLI refused turnkey acceptance for a fresh op_kind -- "
+                f"stdout={result.stdout!r} stderr={result.stderr!r}")
+        self.assertIn("ACCEPTED", result.stdout)
+
+        receipt_path = (self.security_dir / "acceptance_receipts"
+                       / f"{self.CAPABILITY_ID}.receipt.json")
+        self.assertTrue(receipt_path.is_file(), "acceptance must mint a receipt")
+
+        entries = json.loads(self.descriptor_set_path.read_text(encoding="utf-8"))
+        self.assertTrue(entries[0]["accepted"])
 
 
 if __name__ == "__main__":

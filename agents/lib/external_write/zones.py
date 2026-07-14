@@ -112,6 +112,16 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         "operator_acceptance.py",
         "proof_hash.py",
         "read_facade.py",
+        # registered_adapters.py (Task 7 / F-37 — v0.13.0 Slice 2): the
+        # build-emitted static adapter registry `operator_acceptance.py`
+        # imports at module scope so the operator-acceptance CLI is turnkey.
+        # It exists SOLELY to import adapter modules (adapters_gmail.py, and
+        # any capability-added adapters_<id>.py) at module scope -- exactly
+        # the "registry's own intended kernel-side consumer" rationale
+        # already given for adapters.py/effects_manifest.py above, so it is
+        # exempt from the CAPABILITY-zone-ONLY adapter_module_import rule the
+        # same way they are.
+        "registered_adapters.py",
         # run_envelope.py — the v0.12.0 RunEnvelope trust core. It legitimately
         # wraps the raw kernel primitive run_operation (the ONE place the
         # run-level envelope — disk-authoritative spendability, consent-receipt
