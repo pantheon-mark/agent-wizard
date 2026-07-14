@@ -517,12 +517,19 @@ class TestI3AggregateCeilingComposesWithPerOpCap(unittest.TestCase):
 
     def _mint(self, d):
         # population 50, reversible -> Knob B ceiling clamps to the floor (25).
+        # The frozen reviewed_set carries every row id run_chunk() will ever
+        # plan (row0..row9, applied repeatedly across chunks) — apply-by-id
+        # (Task 5) requires every planned unit to be a member of this set, so
+        # this fixture must name them all, not just one, to keep exercising
+        # the aggregate-ceiling behavior this test targets.
+        reviewed = [{"unit_id": f"row{i}", "prestate_digest": "d",
+                    "intended_mutation": {"value": "Complete"},
+                    "category": "status", "protected_status": False}
+                   for i in range(10)]
         return mint_run_envelope(
             run_id="run-agg", capability_id="cap:test", op_kind=self.OP_KIND,
             contract_hash="ch", implementation_hash="ih",
-            reviewed_set=[{"unit_id": "row0", "prestate_digest": "d",
-                           "intended_mutation": {"value": "Complete"},
-                           "category": "status", "protected_status": False}],
+            reviewed_set=reviewed,
             population_count=50, stratification_summary={},
             operator_approval_verbatim="yes", consent_sentence_shown="Apply changes.",
             envelope_dir=d).envelope

@@ -89,6 +89,11 @@ RUN_ENVELOPE_SCHEMA = "run_envelope-v1"
 # Project-root-relative home for persisted run envelopes (disk-first + audit).
 DEFAULT_ENVELOPE_DIR = "security/run_envelopes"
 
+# Schema tag for the INDEPENDENT run-consent receipt (Task 5, A1 — v0.12.0
+# Slice 1, design §4). See the "Receipt binding" section below for why this
+# is a SEPARATE persisted artifact from the envelope's own `consent` field.
+RUN_CONSENT_RECEIPT_SCHEMA = "run_consent_receipt-v1"
+
 # I-3: the persistent-ledger key under which the envelope's AGGREGATE Knob B
 # ceiling (``ceiling.granted_this_approval``) is enforced across the whole run.
 # It is deliberately NOT of the form ``surface::op_kind`` (the per-op gate key),
@@ -402,6 +407,207 @@ def load_run_envelope(run_id: str, *, envelope_dir: Optional[str] = None) -> Run
 
 
 # ---------------------------------------------------------------------------
+# Receipt binding (Task 5, A1/T5 — v0.12.0 Slice 1, design §4; closes F-40's
+# consent-fidelity half)
+# ---------------------------------------------------------------------------
+#
+# WHY A SEPARATE ARTIFACT, when the envelope already carries a `consent` field
+# whose `approval_bound_to` is checked against `reviewed_set_digest` by
+# `is_spendable()`? Because that internal check can only ever compare the
+# envelope's OWN fields against EACH OTHER — a single, wholesale, SELF-
+# CONSISTENT tamper of the persisted envelope file (rewrite `reviewed_set`,
+# recompute `reviewed_set_digest` to match, and rewrite
+# `consent.approval_bound_to` to match too) would still satisfy
+# `is_spendable()`, because nothing outside that one file is ever consulted.
+# The run-consent RECEIPT is minted ONCE, at the same ceremony moment
+# (`mint_run_envelope`), into its OWN file — mirroring exactly how
+# `acceptance_ceremony` does not trust a descriptor's own fields in isolation
+# but cross-checks them against the INDEPENDENTLY-produced
+# `operator_acceptance_receipt-v1`. A receipt whose bound
+# `reviewed_set_digest` disagrees with the envelope's CURRENT
+# `reviewed_set_digest` — because the reviewed set was mutated, reordered
+# (order is digest-significant; see `compute_reviewed_set_digest`), or
+# re-scanned post-approval — is refused, even if the envelope file alone
+# looks perfectly self-consistent.
+#
+# Disk-authoritative, exactly like the envelope itself (C1): the receipt is
+# always re-loaded from its own file by `verify_run_consent_receipt`, never
+# trusted from a caller-supplied in-memory value.
+
+
+def _consent_receipt_path(run_id: str, receipt_dir: Optional[str]) -> str:
+    # Stored ALONGSIDE the envelope by default (same directory) so every
+    # existing call site that scopes an envelope to a directory (tests, a
+    # per-run working directory) automatically scopes its receipt too, with
+    # no extra plumbing required.
+    directory = receipt_dir if receipt_dir else DEFAULT_ENVELOPE_DIR
+    return os.path.join(directory, f"{_safe_run_id(run_id)}.consent_receipt.json")
+
+
+def load_run_consent_receipt(run_id: str, *, receipt_dir: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Fail-safe load of the persisted run-consent receipt. Returns None on an
+    absent / unreadable / malformed file — NEVER raises, never treats a
+    malformed receipt as present."""
+    if not (isinstance(run_id, str) and run_id):
+        return None
+    path = _consent_receipt_path(run_id, receipt_dir)
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def _mint_run_consent_receipt(
+    *, run_id: str, reviewed_set_digest: str, operator_confirmation: str,
+    approved_at: str, receipt_dir: Optional[str] = None,
+) -> str:
+    """Persist the run-consent receipt atomically. Raises on any write failure
+    (the caller — `mint_run_envelope` — treats that as a mint refusal)."""
+    receipt = {
+        "schema": RUN_CONSENT_RECEIPT_SCHEMA,
+        "run_id": run_id,
+        "reviewed_set_digest": reviewed_set_digest,
+        "operator_confirmation": operator_confirmation,
+        "approved_at": approved_at,
+    }
+    path = _consent_receipt_path(run_id, receipt_dir)
+    _atomic_write_json(path, receipt)
+    return path
+
+
+def verify_run_consent_receipt(
+    envelope: RunEnvelope, *, receipt_dir: Optional[str] = None,
+) -> Tuple[bool, Optional[str]]:
+    """Verify that an INDEPENDENTLY-persisted run-consent receipt exists for
+    ``envelope.run_id`` and binds the operator's approval to EXACTLY
+    ``envelope``'s CURRENT ``reviewed_set_digest``. Fail-closed on every
+    branch: absent, unreadable, malformed, wrong schema/run_id, an empty
+    confirmation, or ANY digest mismatch all refuse — (ok=False, reason).
+    ``(True, None)`` only when every check holds."""
+    receipt = load_run_consent_receipt(envelope.run_id, receipt_dir=receipt_dir)
+    if not isinstance(receipt, dict):
+        return False, (
+            "no run-consent receipt found for this run — a live run may not "
+            "proceed without an independently-persisted record of the "
+            "operator's approval bound to the reviewed set")
+    if receipt.get("schema") != RUN_CONSENT_RECEIPT_SCHEMA:
+        return False, (
+            f"run-consent receipt has an unexpected schema "
+            f"{receipt.get('schema')!r}; expected {RUN_CONSENT_RECEIPT_SCHEMA!r}")
+    if receipt.get("run_id") != envelope.run_id:
+        return False, (
+            "run-consent receipt run_id does not match this envelope's run_id "
+            "— it does not authorize this run")
+    bound_digest = receipt.get("reviewed_set_digest")
+    if not (isinstance(bound_digest, str) and bound_digest):
+        return False, "run-consent receipt carries no non-empty reviewed_set_digest"
+    if bound_digest != envelope.reviewed_set_digest:
+        return False, (
+            f"run-consent receipt is bound to reviewed_set_digest {bound_digest!r}, "
+            f"which does not match the envelope's CURRENT reviewed_set_digest "
+            f"{envelope.reviewed_set_digest!r} — the reviewed set was mutated, "
+            "reordered, or re-scanned since the operator approved it; refusing "
+            "rather than acting on a set the operator never actually saw")
+    confirmation = receipt.get("operator_confirmation")
+    if not (isinstance(confirmation, str) and confirmation.strip()):
+        return False, "run-consent receipt carries no non-empty operator_confirmation"
+    return True, None
+
+
+# ---------------------------------------------------------------------------
+# Apply-by-id + forced diff-and-reconfirm (Task 5, A1/T5 — v0.12.0 Slice 1,
+# design §4; closes F-40's mechanism half)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ReviewedSetDiff:
+    """A CONCRETE, id-keyed diff between a FROZEN reviewed set and a fresh
+    re-scan — never a full-population diff, however large the population.
+    Entries are sorted unit_id tuples for deterministic comparison/testing."""
+    added_ids: Tuple[str, ...]
+    removed_ids: Tuple[str, ...]
+    changed_category_ids: Tuple[str, ...]
+    changed_protected_status_ids: Tuple[str, ...]
+
+    def is_divergent(self) -> bool:
+        return bool(self.added_ids or self.removed_ids
+                    or self.changed_category_ids or self.changed_protected_status_ids)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "added_ids": list(self.added_ids),
+            "removed_ids": list(self.removed_ids),
+            "changed_category_ids": list(self.changed_category_ids),
+            "changed_protected_status_ids": list(self.changed_protected_status_ids),
+        }
+
+
+def diff_reviewed_set_against_rescan(
+    frozen_reviewed_set: Any, rescanned_entries: Any,
+) -> ReviewedSetDiff:
+    """Compute the CONCRETE diff between the FROZEN reviewed_set (the entries
+    an approved envelope carries) and a fresh re-scan of the same candidate
+    shape (`{unit_id, prestate_digest, intended_mutation, category,
+    protected_status}` entries). Used when a re-scan is genuinely unavoidable
+    (design §4): never a silent re-scan, never a 15k-line/full-population
+    diff — exactly which ids were added, removed, or changed category/
+    protected-status. Malformed entries (not a dict, or no `unit_id`) are
+    ignored on both sides (they cannot be compared by identity)."""
+    def _by_id(entries: Any) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        for e in (entries or []):
+            if isinstance(e, dict):
+                uid = e.get("unit_id")
+                if isinstance(uid, str) and uid:
+                    out[uid] = e
+        return out
+
+    frozen_by_id = _by_id(frozen_reviewed_set)
+    rescan_by_id = _by_id(rescanned_entries)
+    frozen_ids = set(frozen_by_id)
+    rescan_ids = set(rescan_by_id)
+
+    added = tuple(sorted(rescan_ids - frozen_ids))
+    removed = tuple(sorted(frozen_ids - rescan_ids))
+    common = frozen_ids & rescan_ids
+    changed_category = tuple(sorted(
+        uid for uid in common
+        if frozen_by_id[uid].get("category") != rescan_by_id[uid].get("category")))
+    changed_protected = tuple(sorted(
+        uid for uid in common
+        if frozen_by_id[uid].get("protected_status") != rescan_by_id[uid].get("protected_status")))
+    return ReviewedSetDiff(added, removed, changed_category, changed_protected)
+
+
+def refuse_on_rescan_divergence(
+    frozen_reviewed_set: Any, rescanned_entries: Any,
+) -> Optional[Result]:
+    """If a re-scan is genuinely unavoidable, call this BEFORE proceeding.
+    Returns a `Result(status="refused", ...)` carrying the CONCRETE diff when
+    the fresh scan diverges from the frozen reviewed set in ANY way (added /
+    removed / changed category / changed protected-status) — the caller must
+    force a fresh operator reconfirm on that exact diff before continuing,
+    NEVER proceed silently. Returns None when the re-scan matches the frozen
+    set exactly (nothing to reconfirm)."""
+    diff = diff_reviewed_set_against_rescan(frozen_reviewed_set, rescanned_entries)
+    if not diff.is_divergent():
+        return None
+    return Result(
+        status="refused",
+        detail={
+            "reason": (
+                "a re-scan of the candidate population diverges from the "
+                "reviewed set the operator approved — re-confirm with the "
+                "operator on this EXACT diff before proceeding; never a "
+                "silent re-scan, never a full-population diff"),
+            "gate": "reviewed_set_rescan_divergence",
+            "diff": diff.as_dict(),
+        })
+
+
+# ---------------------------------------------------------------------------
 # I1 — the SOLE minter of a spendable approved envelope
 # ---------------------------------------------------------------------------
 
@@ -411,6 +617,7 @@ class MintResult:
     reason: Optional[str] = None
     envelope_ref: Optional[str] = None
     envelope: Optional[RunEnvelope] = None
+    receipt_ref: Optional[str] = None
 
 
 def _mint_refuse(reason: str) -> MintResult:
@@ -495,13 +702,29 @@ def mint_run_envelope(
 
     reviewed_set_tuple: Tuple[Dict[str, Any], ...] = tuple(dict(e) for e in reviewed_set)
     reviewed_set_digest = compute_reviewed_set_digest(reviewed_set_tuple)
+    resolved_approved_at = approved_at if approved_at else _now_iso_z()
 
     consent = Consent(
         operator_approval_verbatim=operator_approval_verbatim,
         consent_sentence_shown=consent_sentence_shown if isinstance(consent_sentence_shown, str) else "",
-        approved_at=approved_at if approved_at else _now_iso_z(),
+        approved_at=resolved_approved_at,
         approval_bound_to=reviewed_set_digest,
     )
+
+    # Receipt binding (Task 5, design §4): mint the INDEPENDENT run-consent
+    # receipt FIRST, bound to this exact reviewed_set_digest, before the
+    # envelope itself is persisted. If the receipt cannot be written, refuse
+    # outright — nothing spendable is left on disk without an independently
+    # verifiable record of the operator's approval (see the "Receipt binding"
+    # section above for why this is a SEPARATE artifact from `consent`).
+    try:
+        receipt_ref = _mint_run_consent_receipt(
+            run_id=run_id, reviewed_set_digest=reviewed_set_digest,
+            operator_confirmation=operator_approval_verbatim,
+            approved_at=resolved_approved_at, receipt_dir=envelope_dir)
+    except Exception as e:
+        return _mint_refuse(
+            f"could not persist the run-consent receipt; nothing minted: {e}")
 
     env = RunEnvelope(
         run_id=run_id,
@@ -530,7 +753,7 @@ def mint_run_envelope(
     # Re-load from disk so the returned envelope carries the persisted
     # (derived) ledger_window_id and matches exactly what any consumer will see.
     loaded = load_run_envelope(run_id, envelope_dir=envelope_dir)
-    return MintResult(accepted=True, envelope_ref=path, envelope=loaded)
+    return MintResult(accepted=True, envelope_ref=path, envelope=loaded, receipt_ref=receipt_ref)
 
 
 # ---------------------------------------------------------------------------
@@ -588,6 +811,7 @@ def run_enveloped_operation(
     target: str = "live",
     envelope_dir: Optional[str] = None,
     ledger_dir: Optional[str] = None,
+    receipt_dir: Optional[str] = None,
 ) -> Tuple[RunEnvelope, Result]:
     """Run one operation UNDER an approved envelope, counting against the
     persistent ledger keyed by the envelope's derived ``ledger_window_id`` and
@@ -619,6 +843,17 @@ def run_enveloped_operation(
     preserved — the read-only client is passed ONLY as ``run_operation``'s
     ``read_only_client`` argument, never as the write ``client``.
 
+    RECEIPT BINDING + APPLY-BY-ID (Task 5, A1/T5 — v0.12.0 Slice 1, design §4;
+    closes F-40): two ADDITIONAL fail-closed checks run before anything is
+    applied. (1) ``verify_run_consent_receipt`` re-loads an INDEPENDENTLY
+    persisted receipt (never the passed envelope's own ``consent`` field) and
+    refuses if it is not bound to this envelope's CURRENT
+    ``reviewed_set_digest``. (2) every planned effect unit's ``unit_id`` must
+    be a member of the envelope's FROZEN ``reviewed_set`` — any id outside it
+    (a live re-scan result, a regenerated loop's fresh query, "--all" instead
+    of the reviewed subset) refuses with a CONCRETE diff, never silently and
+    never a full-population diff.
+
     Returns ``(updated_envelope, result)``. On any refusal the returned envelope
     is the disk-authoritative one (or the empty envelope), and no tranche is
     appended."""
@@ -637,6 +872,20 @@ def run_enveloped_operation(
             })
     envelope = disk_envelope
 
+    # Receipt binding (Task 5, design §4): the envelope's own internal
+    # consistency (is_spendable, just above) is NOT sufficient on its own — a
+    # wholesale, self-consistent tamper of the envelope file would still pass
+    # it (see the "Receipt binding" section's docstring above). Independently
+    # re-load the run-consent receipt and verify it is bound to EXACTLY this
+    # envelope's CURRENT reviewed_set_digest. Absent / malformed / mismatched
+    # -> refuse before anything is applied.
+    receipt_ok, receipt_reason = verify_run_consent_receipt(
+        envelope, receipt_dir=receipt_dir if receipt_dir is not None else envelope_dir)
+    if not receipt_ok:
+        return envelope, Result(
+            status="refused",
+            detail={"reason": receipt_reason, "gate": "run_envelope_consent_receipt"})
+
     ledger = cap_ledger if cap_ledger is not None else PersistentInvocationLedger(
         envelope.ledger_window_id,
         ledger_dir=ledger_dir if ledger_dir is not None else DEFAULT_LEDGER_DIR)
@@ -644,14 +893,15 @@ def run_enveloped_operation(
     # Deferred import to avoid any import-order coupling at package load; adapters
     # imports write_gate, this module imports both, and adapters never imports
     # this module — so there is no cycle, but the local import keeps the run path
-    # self-evidently side-effect-free at module import time. ``planned_unit_count``
+    # self-evidently side-effect-free at module import time. ``planned_unit_ids``
     # lives in adapters (not here) so the adapter-registry reference stays inside a
     # scanner-exempt module — see its docstring.
-    from external_write.adapters import planned_unit_count, run_operation
+    from external_write.adapters import planned_unit_ids, run_operation
 
     # I-3: enforce the aggregate Knob B ceiling BEFORE applying. Size the
-    # reservation by the same planned unit count run_operation will use.
-    n_units = planned_unit_count(op)
+    # reservation by the same planned unit ids run_operation will use.
+    ids = planned_unit_ids(op)
+    n_units = None if ids is None else len(ids)
     granted = envelope.ceiling.granted_this_approval if envelope.ceiling else 0
 
     if n_units is None:
@@ -661,6 +911,43 @@ def run_enveloped_operation(
             op, receipt, client, target=target, descriptor_set=descriptor_set,
             cap_ledger=ledger, clock=clock, read_only_client=read_only_client)
         return envelope, result
+
+    # APPLY-BY-ID (Task 5, design §4 — the core F-40 fix): the planned effect
+    # units this op will apply must be addressed by their STABLE unit_id, and
+    # every one of those ids must be a MEMBER of the FROZEN reviewed_set this
+    # envelope was approved against. This is never a live re-scan check on the
+    # candidate POPULATION — it is a structural guarantee that the op ACTUALLY
+    # being applied cannot touch anything outside what the operator reviewed
+    # and approved, however its params were constructed upstream (a regenerated
+    # loop, a "--all" re-scan, a reordered/mutated candidate list). Any id
+    # planned that is NOT in the frozen reviewed set refuses with a CONCRETE
+    # diff (added ids named explicitly) — never silently, never a
+    # full-population diff, and never applied.
+    frozen_ids = {
+        e.get("unit_id") for e in envelope.reviewed_set
+        if isinstance(e, dict) and isinstance(e.get("unit_id"), str)
+    }
+    divergent_ids = sorted(set(ids) - frozen_ids)
+    if divergent_ids:
+        return envelope, Result(
+            status="refused",
+            detail={
+                "reason": (
+                    "run refused: this operation plans to apply "
+                    f"{len(divergent_ids)} effect unit(s) whose id is NOT a "
+                    "member of the frozen reviewed set this run was approved "
+                    "against — apply-by-id requires every applied unit to be "
+                    "one the operator actually reviewed; re-confirm with the "
+                    "operator on this exact diff before proceeding (never a "
+                    "silent re-scan, never applied)."
+                ),
+                "gate": "run_envelope_apply_by_id",
+                "diff": {
+                    "added_ids": divergent_ids,
+                    "reviewed_set_size": len(frozen_ids),
+                    "planned_size": len(ids),
+                },
+            })
 
     outcome = ledger.reserve(AGGREGATE_LEDGER_KEY, n_units, granted)
     if not outcome.reserved:

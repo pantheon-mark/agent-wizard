@@ -33,7 +33,7 @@ Stdlib only — no third-party dependencies.
 
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from external_write.operations import Operation, Result
 from external_write.verifiers import validate_postwrite_verification
@@ -415,16 +415,54 @@ def planned_unit_count(op: Operation) -> Optional[int]:
     registry — the registry reference stays inside this (registry-adjacent) module,
     which the ADAPTER_PROFILE scanner already exempts. Mirrors run_operation's own
     plan hoist exactly, so the count it returns matches what run_operation will use."""
+    ids = planned_unit_ids(op)
+    return None if ids is None else len(ids)
+
+
+def planned_unit_ids(op: Operation) -> Optional[List[str]]:
+    """The STABLE identity (``EffectUnit.unit_id``) of each effect unit ``op``
+    plans to apply — the apply-by-id primitive (Task 5, A1 — v0.12.0 Slice 1,
+    design §4; closes F-40). Mirrors ``planned_unit_count``'s pure ``plan()``
+    hoist exactly (same dispatch resolution, same purity assumption, same
+    fail-safe-None-on-failure contract), but returns the actual ids rather
+    than just a count, so a caller (``run_envelope.run_enveloped_operation``)
+    can check them for membership in a FROZEN reviewed set — never a live
+    re-query — without planning a second time.
+
+    Returns:
+      * ``[op.object_id]`` for the legacy field-write path (no registered
+        adapter) when ``object_id`` is a non-empty string — the implied
+        single unit of that path's one field write. ``None`` if
+        ``object_id`` is not a usable string (mirrors the None-on-failure
+        contract; the caller lets ``run_operation`` produce the clean
+        fail-safe refusal downstream).
+      * The planned ``[unit.unit_id for unit in units]`` for a registered
+        adapter's ``plan()`` result.
+      * ``None`` if ``plan()`` raises, returns a non-list, or any planned
+        entry is not an ``EffectUnit``-shaped object exposing ``unit_id``.
+
+    ``unit_id`` is whatever STABLE VENDOR IDENTITY the adapter's own
+    ``plan()`` chose to assign (e.g. a Gmail message id, a spreadsheet row's
+    own key) — this function does not interpret or normalize it, it only
+    reads it. A ``plan()`` that (incorrectly) derived ``unit_id`` from list
+    POSITION rather than a real identity is an adapter-authoring bug this
+    function cannot detect; the apply-by-id guard it feeds is only as sound
+    as the identity the adapter actually assigns (see adapters_gmail.py's
+    ``message_id``-keyed units and the field-op exemplar test fixtures for
+    the row-identity-not-row-number convention this relies on)."""
     dispatch = get_dispatch(op.op_kind)
     if dispatch is None:
-        return 1
+        return [op.object_id] if isinstance(op.object_id, str) and op.object_id else None
     try:
         planned = dispatch.plan(dispatch.instance, op.params)
     except Exception:
         return None
     if not isinstance(planned, list):
         return None
-    return len(planned)
+    try:
+        return [unit.unit_id for unit in planned]
+    except AttributeError:
+        return None
 
 
 def run_operation(op: Operation, receipt: Any, client: Any,
