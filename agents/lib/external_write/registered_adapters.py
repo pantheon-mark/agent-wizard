@@ -62,6 +62,17 @@ Importing this module has side effects (registration at import time) — that
 IS the point; see `adapter_registry.py`'s own module docstring ("populated by
 `register_adapter` at import time").
 
+Cross-reference (single-source-of-truth discipline): `wizard/scripts/lib/
+capability_code_scaffold.py`'s `_REGISTERED_ADAPTERS_BASELINE` duplicates
+this module's ENTIRE source (this docstring + the import line below)
+VERBATIM as its fallback-content constant (used only when a target project's
+copy of this file does not exist yet) -- that module's own boundary
+discipline forbids importing this package to derive it live, so it is text,
+not code. If this docstring or the import line changes, update that constant
+to match in the same commit -- a byte-equality test in
+test_capability_code_scaffold.py pins the two together so a missed update
+fails closed rather than silently drifting.
+
 Stdlib only — no third-party dependencies.
 """
 

@@ -561,6 +561,31 @@ class TestRegistryIdempotency(unittest.TestCase):
             self.assertIn("adapters_dup_op_kind_cap_a.py", msg)
 
 
+class TestRegisteredAdaptersBaselineMatchesShippedFile(unittest.TestCase):
+    """MINOR regression (Task 7 code-review finding): `_REGISTERED_ADAPTERS_BASELINE`
+    (the fallback content used ONLY when a target project's registered_adapters.py
+    does not exist yet) is a hand-duplicated second source of truth for the real,
+    shipped `agents/lib/external_write/registered_adapters.py` -- previously it
+    carried a ~2-line stub docstring against the real file's ~40-line one, already
+    drifted. Both files now carry an explicit cross-reference comment pointing at
+    each other; this test is the enforcement half of that discipline -- it pins
+    BYTE equality between the baseline constant and the real shipped file, so a
+    future edit to one without the other fails closed here instead of silently
+    drifting again."""
+
+    def test_baseline_constant_is_byte_identical_to_shipped_file(self):
+        shipped_path = (
+            Path(__file__).resolve().parents[2]
+            / "agents" / "lib" / "external_write" / "registered_adapters.py")
+        shipped_content = shipped_path.read_text(encoding="utf-8")
+        self.assertEqual(
+            ccs._REGISTERED_ADAPTERS_BASELINE, shipped_content,
+            "capability_code_scaffold._REGISTERED_ADAPTERS_BASELINE has drifted "
+            "from the real agents/lib/external_write/registered_adapters.py -- "
+            "update the baseline constant to match (see the cross-reference "
+            "comment above the constant, and in that file's own docstring)")
+
+
 class TestRunEnvelopeSurfaceIsShapeNeutral(unittest.TestCase):
     """v0.12.0 S1 anti-overfit: the surface change (route through
     run_enveloped_operation, never raw run_operation) must be shape-neutral --

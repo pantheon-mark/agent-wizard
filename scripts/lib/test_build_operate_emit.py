@@ -1422,7 +1422,15 @@ class TestS253ContractDelta(unittest.TestCase):
         import agent_emitter
         for name in ("evidence.py", "run_envelope.py", "bounds.py", "consent_narration.py"):
             self.assertIn(name, agent_emitter._EXTERNAL_WRITE_LIB_FILES)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 26)
+
+    def test_emit_set_lists_the_task7_registered_adapters_file(self):
+        # Task 7 (A4 / F-37, v0.13.0 Slice 2): registered_adapters.py must be enrolled, or an
+        # emitted writes-back system's operator_acceptance.py (which hard-imports
+        # external_write.registered_adapters at module scope) breaks at import time —
+        # twenty-seven lib files total.
+        import agent_emitter
+        self.assertIn("registered_adapters.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 27)
 
     def _writes_back_plan(self):
         import copy, json

@@ -101,6 +101,14 @@ _EXTERNAL_WRITE_LIB_FILES = (
     "run_envelope.py",
     "bounds.py",
     "consent_narration.py",
+    # Task 7 (A4 / F-37, v0.13.0 Slice 2): the static adapter-registration import
+    # list. operator_acceptance.py hard-imports `external_write.registered_adapters`
+    # at module scope (see that module's own docstring) -- omitting it here means a
+    # freshly-emitted writes-back system ships operator_acceptance.py WITHOUT the
+    # module it imports, dying with a raw ModuleNotFoundError at import time, before
+    # the operator's first add-capability ever creates the file. Same failure class
+    # as the T14/R7/v0.12.0-S1 entries above.
+    "registered_adapters.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
@@ -155,7 +163,7 @@ def _plan_has_writes_back(plan: "EmissionPlan") -> bool:
 def external_write_lib_emit_set(plan: "EmissionPlan") -> List[str]:
     """The emitted-tree relpaths of the external_write lib files this plan should emit.
 
-    Returns all twenty-six lib files under agents/lib/external_write/ when the plan has a
+    Returns all twenty-seven lib files under agents/lib/external_write/ when the plan has a
     writes-back dependency: the original four substrate files (operations, adapters,
     broker, scan), the six contract-and-verification modules (verification_modes,
     contracts, verifiers, boundary, proof_hash, copy_run_proof), the two B1-4/B1-5
@@ -164,11 +172,12 @@ def external_write_lib_emit_set(plan: "EmissionPlan") -> List[str]:
     flow modules (acceptance_ceremony, capability_registration, operator_acceptance) enrolled at
     B2-T9a, the five external-write-gate-generalization modules (adapter_registry,
     adapters_gmail, effects_manifest, read_facade, zones) enrolled at T14, the two R7
-    CAPABILITY-zone modules (capability_api, read_facades_gmail), and the four v0.12.0 Slice-1
-    RunEnvelope-trust-core modules (evidence, run_envelope, bounds, consent_narration). Canonical
-    enrollment; the physical bundle copy + system-artifacts.json + parity entries land at the
-    bundle cut — each copy below is source-gated on the bundle carrying the file, so a newly
-    enrolled name is a no-op until that file exists in the source bundle.
+    CAPABILITY-zone modules (capability_api, read_facades_gmail), the four v0.12.0 Slice-1
+    RunEnvelope-trust-core modules (evidence, run_envelope, bounds, consent_narration), and the
+    Task 7 (v0.13.0 Slice 2) static adapter-registration import list (registered_adapters).
+    Canonical enrollment; the physical bundle copy + system-artifacts.json + parity entries land
+    at the bundle cut — each copy below is source-gated on the bundle carrying the file, so a
+    newly enrolled name is a no-op until that file exists in the source bundle.
 
     Returns [] when the plan has no writes-back (boundary_output) dependency — no dead
     code for read-only systems, and none for foundation-only plans (which have no agent

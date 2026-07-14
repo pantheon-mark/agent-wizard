@@ -8,6 +8,8 @@ build provenance, and the whole emission is deterministic (emit twice ->
 byte-identical).
 """
 
+import shutil
+import subprocess
 import sys
 import unittest
 import tempfile
@@ -551,6 +553,121 @@ class ExternalWriteLibEmitDecisionTests(unittest.TestCase):
         plan = validate_emission_plan(p, self.contract)
         self.assertEqual(external_write_lib_emit_set(plan), [],
                          "foundation-only systems have no agent layer -> no external_write lib")
+
+
+class ExternalWriteLibRegistryEnrollmentTests(unittest.TestCase):
+    """CRITICAL regression (Task 7 code-review finding): `registered_adapters.py`
+    must be enrolled in `_EXTERNAL_WRITE_LIB_FILES`, or a freshly-emitted
+    writes-back system ships `operator_acceptance.py` (which hard-imports
+    `external_write.registered_adapters` at module scope) WITHOUT the module it
+    imports -- a raw ModuleNotFoundError at import time in a real operator
+    project, before the operator's first add-capability ever creates the file.
+
+    No bundle has cut the current external_write/ yet (the physical bundle copy
+    lands at the v0.13.0 bundle cut -- this task is enrollment-only and must not
+    touch foundation-bundles/). So this test builds an isolated FIXTURE
+    build-repo-root: a full copy of the real, already-cut v0.10.2 bundle (has the
+    operating-layer contract, predates the F-35 requirements.txt template so it
+    stays clear of that unrelated/pre-existing lifecycle-classifier gap), with
+    its `agents/lib/external_write/` template subdir overlaid by the CURRENT
+    dev-tree `wizard/agents/lib/external_write/` (which already carries both
+    `operator_acceptance.py`'s hard top-level import and `registered_adapters.py`)
+    -- reproducing exactly what the v0.13.0 bundle cut will ship for this
+    subdir -- and drives the REAL production emit surface (`emit_operator_system`,
+    which calls `agent_emitter._emit_external_write_lib`) against it.
+
+    Deliberately NOT the dev-tree `shutil.copytree` the existing e2e acceptance
+    test (`test_external_write_operator_acceptance.py`) uses to build its temp
+    project -- that copies the whole directory regardless of the manifest, so it
+    can never catch a manifest-enrollment gap. This test exercises the same
+    file-by-file, manifest-gated copy loop (`_EXTERNAL_WRITE_LIB_FILES`)
+    production emission actually uses -- the production emit surface the review
+    finding says the e2e test missed.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.contract = load_contract(default_contract_path())
+
+    def _fixture_build_repo_root(self) -> Path:
+        """A synthetic build_repo_root that mirrors the real toolkit layout (so
+        every OTHER bundle/registry/contract lookup the full emit pipeline makes
+        resolves exactly as it would against REPO_ROOT), except that the v0.10.2
+        bundle's `agents/lib/external_write/` template subdir is overlaid by the
+        CURRENT dev-tree `wizard/agents/lib/external_write/` -- simulating the
+        not-yet-cut v0.13.0 bundle state without touching foundation-bundles/."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        fixture_root = Path(tmp.name)
+        # Mirror the real BUILD-REPO layout (fixture_root/wizard/...) -- some
+        # resolvers (e.g. upgrade_scaffold_emitter._resolve_source_commit) hardcode
+        # `build_repo_root / "wizard" / "registry"` rather than going through the
+        # layout-agnostic wizard_subroot() helper, so the fixture must match that
+        # layout exactly. Whole registry + foundation-bundles trees (cheap: ~14MB),
+        # so every version-independent contract/registry lookup the full emit
+        # pipeline makes (foundation-doc rendering, corpus, scaffold, etc.) resolves
+        # exactly as it would against REPO_ROOT -- only the v0.10.2 bundle's
+        # external_write subdir is overlaid below.
+        shutil.copytree(
+            REPO_ROOT / "wizard" / "registry", fixture_root / "wizard" / "registry")
+        shutil.copytree(
+            REPO_ROOT / "wizard" / "foundation-bundles",
+            fixture_root / "wizard" / "foundation-bundles")
+
+        fixture_bundle_dir = fixture_root / "wizard" / "foundation-bundles" / "v0.10.2"
+        ew_template_dir = fixture_bundle_dir / "templates" / "agents" / "lib" / "external_write"
+        shutil.rmtree(ew_template_dir)
+        dev_tree_ew = REPO_ROOT / "wizard" / "agents" / "lib" / "external_write"
+        shutil.copytree(dev_tree_ew, ew_template_dir)
+
+        # Package marker one level up (agents/lib/__init__.py) -- mirrors the real
+        # dev-tree layout _emit_external_write_lib reads via
+        # `pkg_init_src = src_dir.parent / "__init__.py"`.
+        dev_lib_init = REPO_ROOT / "wizard" / "agents" / "lib" / "__init__.py"
+        if dev_lib_init.is_file():
+            shutil.copy(
+                dev_lib_init,
+                fixture_bundle_dir / "templates" / "agents" / "lib" / "__init__.py")
+        return fixture_root
+
+    def _plan(self):
+        import copy
+        import json
+        from test_emission_plan import _valid_plan
+        p = copy.deepcopy(_valid_plan())
+        p["bundle_version"] = "v0.10.2"
+        p["foundation_doc_inputs"]["EXTERNAL_DEPENDENCY_IDENTITY"] = json.dumps(
+            [{"id": "t", "name": "company_tracker", "type": "Sheet",
+              "roles": ["boundary_output"], "owner_agent_id": "researcher"}])
+        return validate_emission_plan(p, self.contract)
+
+    def test_emitted_external_write_package_imports_cleanly(self):
+        plan = self._plan()
+        fixture_build_repo_root = self._fixture_build_repo_root()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name)
+
+        emit_operator_system(plan, staging, fixture_build_repo_root)
+
+        registered_adapters_path = (
+            staging / "agents" / "lib" / "external_write" / "registered_adapters.py")
+        self.assertTrue(
+            registered_adapters_path.is_file(),
+            "registered_adapters.py must be enrolled in _EXTERNAL_WRITE_LIB_FILES "
+            "and physically emitted -- operator_acceptance.py hard-imports it at "
+            "module scope")
+
+        result = subprocess.run(
+            [sys.executable, "-c",
+             "import sys; sys.path.insert(0, 'agents/lib'); "
+             "import external_write.operator_acceptance"],
+            cwd=str(staging), capture_output=True, text=True)
+        self.assertEqual(
+            result.returncode, 0,
+            "emitted external_write.operator_acceptance must import cleanly in a "
+            f"fresh operator project (before the operator's first add-capability "
+            f"ever runs); stderr:\n{result.stderr}")
 
 
 class ExternalWriteLibEmitFromBundleTests(unittest.TestCase):
