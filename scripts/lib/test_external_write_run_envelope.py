@@ -1,0 +1,398 @@
+"""Tests for the RunEnvelope primitive (Task 4, A1 — v0.12.0 Slice 1, design
+§0) + the envelope-driven run path that threads the read-only client and
+records per-unit verification into ``tranches[]``.
+
+Invariants under test:
+  * I1 SOLE-MINTER — an approved RunEnvelope with spendable budget may be
+    minted ONLY by ``mint_run_envelope`` (the consent-ceremony entry point),
+    receipt-bound. A caller-chosen / fabricated ``run_id`` yields an EMPTY
+    envelope (0 budget, no frozen reviewed set) -> fail-closed. A fabricated
+    on-disk envelope (wrong reviewed_set_digest, tampered ledger_window_id, or
+    absent operator consent) is NOT spendable. ``ledger_window_id`` is DERIVED
+    from verified identity, never a trusted stored field.
+  * Fail-closed load — absent / unreadable / malformed envelope file loads as
+    the empty envelope (0 budget), never as a permissive one.
+  * Run-path wiring (closes the Task 3 carry-forward at broker.py:128 — a run
+    path that calls run_operation WITHOUT a read-only client): the enveloped
+    run threads ``read_only_client`` into ``run_operation`` and records the
+    per-unit verification result into ``RunEnvelope.tranches[]``, keeping
+    credential isolation intact.
+
+Anti-overfit (Global Constraint #3): exercised on ≥2 divergent op_kinds — a
+field/spreadsheet op AND the gmail.message.trash op_kind.
+
+Runner: unittest, from wizard/scripts. Stdlib only.
+"""
+
+import hashlib
+import json
+import sys
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+_AGENTS_LIB = Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib"
+sys.path.insert(0, str(_AGENTS_LIB))
+
+from external_write import contracts as contracts_mod  # noqa: E402
+from external_write.contracts import OperationContract  # noqa: E402
+from external_write.operations import Operation, EffectUnit  # noqa: E402
+from external_write.adapter_registry import (  # noqa: E402
+    register_adapter, unregister_adapter,
+)
+from external_write.read_facade import (  # noqa: E402
+    ReadFacade, register_read_facade, unregister_read_facade,
+)
+from external_write.run_envelope import (  # noqa: E402
+    RunEnvelope,
+    compute_reviewed_set_digest,
+    derive_ledger_window_id,
+    load_run_envelope,
+    mint_run_envelope,
+    run_enveloped_operation,
+)
+
+
+def _receipt(op):
+    digest = hashlib.sha256(op.canonical_repr().encode()).hexdigest()
+    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=900)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ")
+    return {"approved_operation_digest": digest, "expires_at": expires_at}
+
+
+def _reviewed_set(n=3, prefix="row"):
+    return [
+        {"unit_id": f"{prefix}{i}", "prestate_digest": f"d{i}",
+         "intended_mutation": {"value": "Complete"},
+         "category": "status_change", "protected_status": False}
+        for i in range(n)
+    ]
+
+
+# A reversible field op_kind so mint computes a real (reversible-tier) ceiling.
+FIELD_OP = "_env_field_probe"
+GMAIL_OP = "gmail.message.trash"
+
+
+def _register_field_contract():
+    contracts_mod.OPERATION_CONTRACTS[FIELD_OP] = OperationContract(
+        op_kind=FIELD_OP, writes=("Status",), produces=(), dependency_set=(),
+        verifier_set=(), introduces_persistent_binding=False,
+        risk_class="reversible_external", read_only_scope="fixture.readonly")
+
+
+def _unregister_field_contract():
+    contracts_mod.OPERATION_CONTRACTS.pop(FIELD_OP, None)
+
+
+# ===========================================================================
+# Minting + serialization round-trip
+# ===========================================================================
+
+class TestMintAndLoad(unittest.TestCase):
+
+    def setUp(self):
+        _register_field_contract()
+
+    def tearDown(self):
+        _unregister_field_contract()
+
+    def _mint(self, d, run_id="run-1", population=15000, op_kind=FIELD_OP):
+        return mint_run_envelope(
+            run_id=run_id, capability_id="cap:test", op_kind=op_kind,
+            contract_hash="ch-abc", implementation_hash="ih-abc",
+            reviewed_set=_reviewed_set(3), population_count=population,
+            stratification_summary={"status_change": 3},
+            operator_approval_verbatim="yes, apply these three changes",
+            consent_sentence_shown="Apply 3 reversible status changes.",
+            envelope_dir=d)
+
+    def test_mint_produces_spendable_envelope_with_budget(self):
+        with tempfile.TemporaryDirectory() as d:
+            res = self._mint(d)
+            self.assertTrue(res.accepted, res.reason)
+            env = res.envelope
+            self.assertTrue(env.is_spendable())
+            self.assertGreater(env.remaining_budget(), 0)
+            # reversible tier, population 15000 -> clamped to the reversible cap.
+            self.assertEqual(env.ceiling.recovery_tier, "reversible")
+            self.assertEqual(env.remaining_budget(), env.ceiling.granted_this_approval)
+
+    def test_load_round_trips_a_minted_spendable_envelope(self):
+        with tempfile.TemporaryDirectory() as d:
+            minted = self._mint(d).envelope
+            loaded = load_run_envelope("run-1", envelope_dir=d)
+            self.assertTrue(loaded.is_spendable())
+            self.assertEqual(loaded.remaining_budget(), minted.remaining_budget())
+            self.assertEqual(loaded.reviewed_set_digest, minted.reviewed_set_digest)
+            self.assertEqual(loaded.ledger_window_id, minted.ledger_window_id)
+
+    def test_reviewed_set_digest_matches_the_frozen_set(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d).envelope
+            self.assertEqual(
+                env.reviewed_set_digest,
+                compute_reviewed_set_digest(_reviewed_set(3)))
+
+    def test_ledger_window_id_is_derived_from_identity(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d).envelope
+            expected = derive_ledger_window_id(
+                run_id="run-1", capability_id="cap:test", op_kind=FIELD_OP,
+                contract_hash="ch-abc", implementation_hash="ih-abc",
+                reviewed_set_digest=env.reviewed_set_digest)
+            self.assertEqual(env.ledger_window_id, expected)
+
+    def test_gmail_op_kind_mints_reversible_tier_envelope(self):
+        # Divergent op_kind #2: gmail.message.trash (sensitive_data -> reversible tier).
+        with tempfile.TemporaryDirectory() as d:
+            res = self._mint(d, run_id="run-gmail", op_kind=GMAIL_OP)
+            self.assertTrue(res.accepted, res.reason)
+            self.assertEqual(res.envelope.ceiling.recovery_tier, "reversible")
+            self.assertTrue(res.envelope.is_spendable())
+
+
+# ===========================================================================
+# I1 — sole-minter + fail-closed
+# ===========================================================================
+
+class TestI1SoleMinter(unittest.TestCase):
+
+    def setUp(self):
+        _register_field_contract()
+
+    def tearDown(self):
+        _unregister_field_contract()
+
+    def test_fabricated_run_id_never_minted_loads_empty_zero_budget(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = load_run_envelope("a_run_id_the_loop_made_up", envelope_dir=d)
+            self.assertFalse(env.is_spendable())
+            self.assertEqual(env.remaining_budget(), 0)
+            self.assertEqual(len(env.reviewed_set), 0)
+
+    def test_mint_refuses_empty_operator_confirmation(self):
+        # Honest capture: an empty operator "yes" is not consent; nothing minted.
+        with tempfile.TemporaryDirectory() as d:
+            res = mint_run_envelope(
+                run_id="run-x", capability_id="cap:test", op_kind=FIELD_OP,
+                contract_hash="ch", implementation_hash="ih",
+                reviewed_set=_reviewed_set(3), population_count=100,
+                stratification_summary={}, operator_approval_verbatim="   ",
+                consent_sentence_shown="Apply 3 changes.", envelope_dir=d)
+            self.assertFalse(res.accepted)
+            # And nothing spendable was written to disk.
+            self.assertFalse(load_run_envelope("run-x", envelope_dir=d).is_spendable())
+
+    def test_mint_refuses_empty_reviewed_set(self):
+        with tempfile.TemporaryDirectory() as d:
+            res = mint_run_envelope(
+                run_id="run-y", capability_id="cap:test", op_kind=FIELD_OP,
+                contract_hash="ch", implementation_hash="ih",
+                reviewed_set=[], population_count=100,
+                stratification_summary={}, operator_approval_verbatim="yes",
+                consent_sentence_shown="x", envelope_dir=d)
+            self.assertFalse(res.accepted)
+
+    def test_hand_fabricated_envelope_with_fake_budget_is_not_spendable(self):
+        # A loop writes its OWN envelope file with a huge budget but a
+        # reviewed_set_digest that does not match its reviewed_set -> the
+        # consistency check refuses it (0 budget). It cannot fabricate a fresh
+        # approved window to escape an exhausted budget.
+        with tempfile.TemporaryDirectory() as d:
+            forged = {
+                "schema": "run_envelope-v1",
+                "run_id": "forged", "capability_id": "cap:test",
+                "op_kind": FIELD_OP, "contract_hash": "ch", "implementation_hash": "ih",
+                "reviewed_set": _reviewed_set(3),
+                "reviewed_set_digest": "deadbeef_not_the_real_digest",
+                "population_count": 3,
+                "stratification_summary": {},
+                "ceiling": {"granted_this_approval": 999999, "remaining_budget": 999999,
+                            "absolute_cap": 600, "recovery_tier": "reversible"},
+                "consent": {"operator_approval_verbatim": "yes",
+                            "consent_sentence_shown": "x", "approved_at": "now",
+                            "approval_bound_to": "deadbeef_not_the_real_digest"},
+                "evidence_policy": {},
+                "ledger_window_id": "whatever",
+                "tranches": [],
+            }
+            (Path(d) / "forged.json").write_text(json.dumps(forged), encoding="utf-8")
+            env = load_run_envelope("forged", envelope_dir=d)
+            self.assertFalse(env.is_spendable())
+            self.assertEqual(env.remaining_budget(), 0)
+
+    def test_tampered_ledger_window_id_is_not_spendable_and_property_is_derived(self):
+        with tempfile.TemporaryDirectory() as d:
+            mint_run_envelope(
+                run_id="run-t", capability_id="cap:test", op_kind=FIELD_OP,
+                contract_hash="ch", implementation_hash="ih",
+                reviewed_set=_reviewed_set(3), population_count=100,
+                stratification_summary={}, operator_approval_verbatim="yes",
+                consent_sentence_shown="Apply 3 changes.", envelope_dir=d)
+            p = Path(d) / "run-t.json"
+            raw = json.loads(p.read_text())
+            raw["ledger_window_id"] = "tampered_window_id"
+            p.write_text(json.dumps(raw), encoding="utf-8")
+            env = load_run_envelope("run-t", envelope_dir=d)
+            self.assertFalse(env.is_spendable(),
+                             "a tampered ledger_window_id must void spendability")
+            # The property is DERIVED, never the trusted stored field.
+            self.assertNotEqual(env.ledger_window_id, "tampered_window_id")
+            self.assertEqual(env.ledger_window_id, derive_ledger_window_id(
+                run_id="run-t", capability_id="cap:test", op_kind=FIELD_OP,
+                contract_hash="ch", implementation_hash="ih",
+                reviewed_set_digest=env.reviewed_set_digest))
+
+    def test_malformed_envelope_file_loads_empty(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "junk.json").write_text("{not valid json", encoding="utf-8")
+            env = load_run_envelope("junk", envelope_dir=d)
+            self.assertFalse(env.is_spendable())
+            self.assertEqual(env.remaining_budget(), 0)
+
+
+# ===========================================================================
+# Run path — threads read_only_client + records verification into tranches
+# ===========================================================================
+
+class _FieldWriteClient:
+    def __init__(self, store):
+        self._store = store
+        self.write_calls = []
+
+    def write_row(self, row_id, value):
+        self.write_calls.append((row_id, value))
+        self._store[row_id] = {"value": value}
+
+
+class _FieldReadOnlyClient:
+    def __init__(self, store):
+        self._store = store
+        self.read_calls = []
+
+    def read_row(self, row_id):
+        self.read_calls.append(row_id)
+        return dict(self._store.get(row_id, {}))
+
+
+class _FieldReadFacade(ReadFacade):
+    read_methods = ("read_row",)
+
+    def read_row(self, row_id):
+        return self._read("read_row", row_id)
+
+
+class _FieldAdapter:
+    def plan(self, params):
+        params = params or {}
+        return [EffectUnit(unit_id=r["row_id"], target_ref=r)
+                for r in params.get("rows", [])]
+
+    def apply_one(self, raw_client, unit):
+        raw_client.write_row(unit.unit_id, unit.target_ref["intended_value"])
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, observer, unit):
+        observed = observer.read_row(unit.unit_id)
+        return {"value": observed.get("value"),
+                "intended_value": unit.target_ref["intended_value"]}
+
+    def verify_apply_landed(self, evidence):
+        return evidence.poststate.get("value") == evidence.poststate.get("intended_value")
+
+
+class TestEnvelopedRunPathRecordsTranches(unittest.TestCase):
+
+    OP_KIND = "_env_run_field_probe"
+
+    def setUp(self):
+        contracts_mod.OPERATION_CONTRACTS[self.OP_KIND] = OperationContract(
+            op_kind=self.OP_KIND, writes=("Status",), produces=(), dependency_set=(),
+            verifier_set=(), introduces_persistent_binding=False,
+            risk_class="reversible_external",  # ungated: isolates the run-path wiring
+            read_only_scope="fixture.readonly")
+        register_read_facade(self.OP_KIND, _FieldReadFacade)
+        register_adapter(self.OP_KIND, _FieldAdapter())
+
+    def tearDown(self):
+        contracts_mod.OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+        unregister_adapter(self.OP_KIND)
+        unregister_read_facade(self.OP_KIND)
+
+    def _op(self):
+        return Operation(surface="fixture_surface", op_kind=self.OP_KIND,
+                         batch_id="e2e-1",
+                         params={"rows": [{"row_id": "row1", "intended_value": "Complete"}]})
+
+    def _mint(self, d):
+        return mint_run_envelope(
+            run_id="run-e2e", capability_id="cap:test", op_kind=self.OP_KIND,
+            contract_hash="ch", implementation_hash="ih",
+            reviewed_set=[{"unit_id": "row1", "prestate_digest": "d",
+                           "intended_mutation": {"value": "Complete"},
+                           "category": "status", "protected_status": False}],
+            population_count=50, stratification_summary={},
+            operator_approval_verbatim="yes", consent_sentence_shown="Apply 1 change.",
+            envelope_dir=d).envelope
+
+    def test_run_path_records_verification_into_a_tranche(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d)
+            store = {"row1": {"value": "Open"}}
+            write_client = _FieldWriteClient(store)
+            read_only_client = _FieldReadOnlyClient(store)
+            op = self._op()
+
+            updated, result = run_enveloped_operation(
+                env, op, _receipt(op), write_client,
+                read_only_client=read_only_client, envelope_dir=d)
+
+            self.assertEqual(result.status, "written")
+            # A tranche was appended recording the real-surface verification.
+            self.assertEqual(len(updated.tranches), 1)
+            tr = updated.tranches[0]
+            self.assertIn("row1", tr.applied_unit_ids)
+            self.assertEqual(tr.per_unit_result["row1"]["status"], "verified")
+            self.assertEqual(tr.verification_status, "verified")
+            # Credential isolation preserved: the verification read reached the
+            # read-only client, the write reached the write client.
+            self.assertEqual(write_client.write_calls, [("row1", "Complete")])
+            self.assertEqual(read_only_client.read_calls, ["row1"])
+            # The tranche was persisted to disk (reloadable).
+            reloaded = load_run_envelope("run-e2e", envelope_dir=d)
+            self.assertEqual(len(reloaded.tranches), 1)
+
+    def test_run_path_threads_read_only_client_unverified_without_it(self):
+        # Without a read-only client the run still applies, but the tranche is
+        # honestly recorded as applied_not_verified (never verified) — proving
+        # the read-only client is what the run path threads for verification.
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d)
+            store = {"row1": {"value": "Open"}}
+            write_client = _FieldWriteClient(store)
+            op = self._op()
+            updated, result = run_enveloped_operation(
+                env, op, _receipt(op), write_client, envelope_dir=d)  # no ro client
+            self.assertEqual(result.status, "written")
+            tr = updated.tranches[0]
+            self.assertEqual(tr.per_unit_result["row1"]["status"], "applied_not_verified")
+            self.assertEqual(tr.verification_status, "applied_not_verified")
+
+    def test_run_path_refuses_a_non_spendable_envelope(self):
+        with tempfile.TemporaryDirectory() as d:
+            empty = load_run_envelope("never-minted", envelope_dir=d)
+            store = {"row1": {"value": "Open"}}
+            op = self._op()
+            updated, result = run_enveloped_operation(
+                empty, op, _receipt(op), _FieldWriteClient(store),
+                read_only_client=_FieldReadOnlyClient(store), envelope_dir=d)
+            self.assertEqual(result.status, "refused")
+            self.assertEqual(len(updated.tranches), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

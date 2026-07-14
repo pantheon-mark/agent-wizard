@@ -184,6 +184,14 @@ class Result:
                                   OR this was a dry_run simulation: no external write
                                   and no read-back occurred, and detail['dry_run'] is
                                   True to mark the distinction unambiguously.
+                                  NOTE (v0.12.0 Slice 1 / Task 3): 'written' NO LONGER
+                                  implies the apply was confirmed on the real surface.
+                                  Real-surface run-time verification is reported
+                                  SEPARATELY in detail['verification'] — per-unit
+                                  'verified' vs the honest 'applied_not_verified' (the
+                                  kernel could not confirm the apply landed). Read
+                                  detail['verification'], not the bare 'written' status,
+                                  to know whether a write was verified.
         'needs_operator_choice' — surface rejected the value as out-of-vocab;
                                   detail['allowed'] carries the surface's allowed set.
         'refused'              — receipt was missing, invalid, expired, or digest

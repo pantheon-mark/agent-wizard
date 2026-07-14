@@ -43,9 +43,16 @@ Stdlib only — no third-party dependencies.
 """
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
+
+try:  # POSIX advisory file locking (mac/Linux — the operator-project target).
+    import fcntl as _fcntl
+except Exception:  # pragma: no cover - non-POSIX fallback (no cross-process lock)
+    _fcntl = None
 
 from external_write.operations import Operation, Result
 from external_write.contracts import OperationContract, get_contract
@@ -153,6 +160,14 @@ def _iso_z(dt: datetime) -> str:
 # path resolves correctly from either caller.
 DESCRIPTOR_SET_PATH: Optional[str] = "security/capability_descriptors.json"
 
+# The project-root-relative directory holding the persistent, per-run
+# blast-radius ledgers (one JSON file per ledger_window_id — see
+# PersistentInvocationLedger). Disk-first + audit convention, resolved against
+# cwd exactly like DESCRIPTOR_SET_PATH (agents run from the operator project
+# root). Fail-safe: an absent ledger file reads as zero consumed, not an open
+# gate — see PersistentInvocationLedger._read_counts.
+DEFAULT_LEDGER_DIR = "security/invocation_ledgers"
+
 
 def load_descriptor_set(path: Optional[str] = None) -> List[Dict[str, Any]]:
     """Load the machine-readable descriptor set (the render_descriptor_registry_json shape: a
@@ -200,6 +215,125 @@ class InvocationLedger:
         invocations). Defaults to 1 so every call site that predates unit-aware
         counting — one invocation, one slot — is unaffected."""
         self._counts[key] = self.count(key) + n
+
+
+class PersistentInvocationLedger:
+    """The blast-radius counter, PERSISTED TO DISK and keyed by the run's
+    ``ledger_window_id`` — the Task 4 (v0.12.0 Slice 1, design §1) fix for F-39.
+
+    F-39 (the defect): a bulk driver built a FRESH in-memory ``InvocationLedger``
+    per chunk, so the accumulated blast-radius count reset to zero each chunk and
+    the cap never accumulated across a session. This class makes the count
+    DISK-AUTHORITATIVE: it lives in one JSON file per ``ledger_window_id``, so
+    constructing a fresh ledger object per chunk (or after a restart / a
+    regenerated loop) re-reads the SAME accumulated count — the window cannot be
+    reset. The ``ledger_window_id`` is DERIVED by the caller from the verified
+    RunEnvelope identity (never a mutable trusted field); this class only
+    persists counts under it.
+
+    Interface-compatible with ``InvocationLedger`` (``count`` / ``record``), so
+    ``evaluate_write_gate`` consumes it with no change: the only difference is
+    LIFETIME + persistence + key, exactly as the design specifies. Within one
+    window the counts are still keyed by ``surface::op_kind`` (the gate's
+    ``_ledger_key``), unchanged.
+
+    I2 (atomic ledger): every ``record`` is a read-modify-write performed under
+    an EXCLUSIVE advisory file lock (``fcntl.flock`` on a per-window lock file)
+    and committed with an atomic temp-file + ``os.replace``. Two concurrent
+    runners therefore cannot double-spend budget or lose an update — the disk
+    count is the single authority both serialize on.
+
+    Fail-safe: an absent ledger file means zero consumed (nothing spent yet) —
+    NOT a permissive open gate. The gate's own fail-safe (an ABSENT ``cap_ledger``
+    argument refuses a live gated op) is unchanged and orthogonal: this class is
+    a ledger that exists, with a count of zero until something is recorded."""
+
+    SCHEMA = "invocation_ledger-v1"
+
+    def __init__(self, ledger_window_id: str, *, ledger_dir: Optional[str] = None) -> None:
+        if not (isinstance(ledger_window_id, str) and ledger_window_id):
+            raise ValueError("ledger_window_id must be a non-empty string")
+        self._window_id = ledger_window_id
+        self._dir = ledger_dir if ledger_dir else DEFAULT_LEDGER_DIR
+        # Filenames are derived from the window id (already a hex digest in
+        # normal use); sanitize defensively so an unexpected value can never
+        # escape the ledger directory.
+        safe = "".join(ch if (ch.isalnum() or ch in "-_.") else "_"
+                       for ch in ledger_window_id)
+        self._path = os.path.join(self._dir, f"{safe}.ledger.json")
+        self._lock_path = self._path + ".lock"
+
+    @property
+    def path(self) -> str:
+        return self._path
+
+    @property
+    def ledger_window_id(self) -> str:
+        return self._window_id
+
+    def _read_counts(self) -> Dict[str, int]:
+        """Read the authoritative counts from disk. Fail-safe: a missing /
+        unreadable / malformed file reads as an empty (all-zero) ledger — never
+        raises, never invents a non-zero count."""
+        try:
+            with open(self._path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        counts = data.get("counts")
+        if not isinstance(counts, dict):
+            return {}
+        out: Dict[str, int] = {}
+        for k, v in counts.items():
+            if isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool):
+                out[k] = v
+        return out
+
+    def _atomic_write_counts(self, counts: Dict[str, int]) -> None:
+        os.makedirs(self._dir, exist_ok=True)
+        payload = {"schema": self.SCHEMA, "ledger_window_id": self._window_id,
+                   "counts": counts}
+        text = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+        fd, tmp = tempfile.mkstemp(prefix=".invocation_ledger.", suffix=".tmp",
+                                   dir=self._dir)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self._path)
+        except Exception:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+            raise
+
+    def count(self, key: str) -> int:
+        """The authoritative consumed-unit count for ``key`` in this window,
+        read fresh from disk every call (the disk is the single source of
+        truth — no cached in-process count that a fresh instance could miss)."""
+        return self._read_counts().get(key, 0)
+
+    def record(self, key: str, n: int = 1) -> None:
+        """Consume ``n`` slots for ``key`` atomically: acquire the exclusive
+        per-window lock, read the current disk count, add ``n``, and commit via
+        an atomic replace, then release. Serializes concurrent runners so no
+        update is lost and the cap cannot be double-spent (I2)."""
+        os.makedirs(self._dir, exist_ok=True)
+        with open(self._lock_path, "w", encoding="utf-8") as lock_file:
+            if _fcntl is not None:
+                _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_EX)
+            try:
+                counts = self._read_counts()
+                counts[key] = counts.get(key, 0) + n
+                self._atomic_write_counts(counts)
+            finally:
+                if _fcntl is not None:
+                    _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------------------
