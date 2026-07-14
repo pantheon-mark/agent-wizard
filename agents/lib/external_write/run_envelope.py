@@ -89,6 +89,15 @@ RUN_ENVELOPE_SCHEMA = "run_envelope-v1"
 # Project-root-relative home for persisted run envelopes (disk-first + audit).
 DEFAULT_ENVELOPE_DIR = "security/run_envelopes"
 
+# I-3: the persistent-ledger key under which the envelope's AGGREGATE Knob B
+# ceiling (``ceiling.granted_this_approval``) is enforced across the whole run.
+# It is deliberately NOT of the form ``surface::op_kind`` (the per-op gate key),
+# so the aggregate bound and the per-op cap occupy DISTINCT slots in the same
+# per-window ledger file and compose — neither masks the other. This bound is
+# enforced for EVERY op_kind regardless of the write gate's risk-class gating, so
+# a reversible bulk run (which the gate does not cap) is still bounded.
+AGGREGATE_LEDGER_KEY = "__run_envelope_aggregate__"
+
 
 # ---------------------------------------------------------------------------
 # Digest / identity derivation (never a trusted stored field)
@@ -207,8 +216,14 @@ class RunEnvelope:
             return False
         if self.ceiling is None or self.ceiling.granted_this_approval <= 0:
             return False
-        if self.stored_ledger_window_id and \
-                self.stored_ledger_window_id != self.ledger_window_id:
+        # C1: the stored window id must be PRESENT and equal the derived value.
+        # A minted envelope always persists the derived id, so an EMPTY stored
+        # value can no longer short-circuit this check to "spendable" — it fails
+        # closed (a hand-built envelope that leaves it blank is refused), and a
+        # tampered value that disagrees with the derived one is refused too.
+        if not self.stored_ledger_window_id:
+            return False
+        if self.stored_ledger_window_id != self.ledger_window_id:
             return False
         return True
 
@@ -578,26 +593,49 @@ def run_enveloped_operation(
     persistent ledger keyed by the envelope's derived ``ledger_window_id`` and
     recording the per-unit verification into ``tranches[]``.
 
-    This closes the Task 3 carry-forward (broker.py:128 — a run path that called
-    ``run_operation`` WITHOUT a read-only client): the ``read_only_client`` is
-    THREADED straight into ``run_operation`` so Task 3's ``_verify_applied_units``
+    C1 — DISK-AUTHORITATIVE: the passed ``envelope`` is NEVER trusted for its
+    spendability. Every input ``is_spendable`` checks is caller-computable
+    (``reviewed_set_digest``, ``consent.approval_bound_to``, ``ceiling``, and the
+    derivable ``ledger_window_id``), so generated loop code could hand-build a
+    spendable-LOOKING envelope with a FRESH ``run_id`` to escape an exhausted
+    budget. To close that, this reloads the persisted envelope via
+    ``load_run_envelope(envelope.run_id)`` and enforces ``is_spendable`` on the
+    DISK object — a ``run_id`` never minted to disk loads EMPTY (0 budget) and is
+    refused. This mirrors the write gate reading acceptance from disk
+    (``load_descriptor_set``) rather than trusting an in-memory flag.
+
+    I-3 — AGGREGATE CEILING: before applying, the op's planned unit count is
+    reserved atomically against ``ceiling.granted_this_approval`` on the
+    persistent ledger (key ``AGGREGATE_LEDGER_KEY``). This aggregate bound is
+    enforced for EVERY op_kind regardless of the write gate's per-op gating, and
+    composes WITH the per-op cap (both count against the same per-window ledger
+    in distinct slots; neither masks the other) — so a reversible bulk run, which
+    the gate does not cap, is still bounded. If the reservation would exceed the
+    granted budget the run refuses (require re-confirm), applying nothing.
+
+    This also closes the Task 3 carry-forward (broker.py:128): ``read_only_client``
+    is THREADED straight into ``run_operation`` so Task 3's ``_verify_applied_units``
     runs a real-surface check on envelope-driven ops. Credential isolation is
     preserved — the read-only client is passed ONLY as ``run_operation``'s
     ``read_only_client`` argument, never as the write ``client``.
 
-    Fail-closed: a NON-SPENDABLE envelope refuses immediately (no ledger, no
-    write, no tranche) — a fabricated / absent / tampered / budgetless envelope
-    cannot drive a live write (I1). Returns ``(updated_envelope, result)``."""
-    if not envelope.is_spendable():
-        return envelope, Result(
+    Returns ``(updated_envelope, result)``. On any refusal the returned envelope
+    is the disk-authoritative one (or the empty envelope), and no tranche is
+    appended."""
+    # C1: reload and enforce spendability on the DISK object, never the passed one.
+    disk_envelope = load_run_envelope(envelope.run_id, envelope_dir=envelope_dir)
+    if not disk_envelope.is_spendable():
+        return disk_envelope, Result(
             status="refused",
             detail={
                 "reason": (
                     "run envelope is not spendable (absent / malformed / "
-                    "tampered / no approved budget) — fail-closed; a live run "
-                    "may not proceed without a ceremony-minted envelope"),
+                    "tampered / no approved budget, or never minted to disk under "
+                    "this run_id) — fail-closed; a live run may not proceed "
+                    "without a ceremony-minted envelope on disk"),
                 "gate": "run_envelope_v1",
             })
+    envelope = disk_envelope
 
     ledger = cap_ledger if cap_ledger is not None else PersistentInvocationLedger(
         envelope.ledger_window_id,
@@ -606,14 +644,57 @@ def run_enveloped_operation(
     # Deferred import to avoid any import-order coupling at package load; adapters
     # imports write_gate, this module imports both, and adapters never imports
     # this module — so there is no cycle, but the local import keeps the run path
-    # self-evidently side-effect-free at module import time.
-    from external_write.adapters import run_operation
+    # self-evidently side-effect-free at module import time. ``planned_unit_count``
+    # lives in adapters (not here) so the adapter-registry reference stays inside a
+    # scanner-exempt module — see its docstring.
+    from external_write.adapters import planned_unit_count, run_operation
+
+    # I-3: enforce the aggregate Knob B ceiling BEFORE applying. Size the
+    # reservation by the same planned unit count run_operation will use.
+    n_units = planned_unit_count(op)
+    granted = envelope.ceiling.granted_this_approval if envelope.ceiling else 0
+
+    if n_units is None:
+        # plan() failed / malformed params: nothing will be applied, so consume
+        # no aggregate budget — let run_operation return the clean refusal.
+        result = run_operation(
+            op, receipt, client, target=target, descriptor_set=descriptor_set,
+            cap_ledger=ledger, clock=clock, read_only_client=read_only_client)
+        return envelope, result
+
+    outcome = ledger.reserve(AGGREGATE_LEDGER_KEY, n_units, granted)
+    if not outcome.reserved:
+        if outcome.refusal == "lock_unavailable":
+            reason = (
+                "run refused: the blast-radius ledger's cross-process lock is "
+                "unavailable, so the aggregate approval ceiling cannot be enforced "
+                "atomically — fail-closed rather than risk exceeding it (I-2).")
+        else:
+            reason = (
+                "run refused: this operation would exceed the aggregate approval "
+                f"ceiling for this run ({granted} unit(s) granted this approval): "
+                f"{outcome.consumed_before} already applied under this run, this "
+                f"operation plans {n_units} more, bringing the total to "
+                f"{outcome.consumed_before + n_units}. Re-confirm a further tranche "
+                "with the operator before continuing.")
+        return envelope, Result(
+            status="refused",
+            detail={
+                "reason": reason,
+                "gate": "run_envelope_aggregate_ceiling",
+                "granted_this_approval": granted,
+                "units_consumed_before": outcome.consumed_before,
+                "n_units": n_units,
+            })
 
     result = run_operation(
         op, receipt, client, target=target, descriptor_set=descriptor_set,
         cap_ledger=ledger, clock=clock, read_only_client=read_only_client)
 
-    # A refused/needs-choice op applied nothing — record no tranche.
+    # A refused/needs-choice op applied nothing — record no tranche. (The
+    # aggregate reservation already consumed n_units; over-counting on a later
+    # refusal is the SAFE direction for a blast-radius cap — same convention the
+    # write gate uses for its per-op ledger.)
     if result.status != "written":
         return envelope, result
 

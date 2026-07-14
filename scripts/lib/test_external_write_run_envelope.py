@@ -45,6 +45,8 @@ from external_write.read_facade import (  # noqa: E402
     ReadFacade, register_read_facade, unregister_read_facade,
 )
 from external_write.run_envelope import (  # noqa: E402
+    Ceiling,
+    Consent,
     RunEnvelope,
     compute_reviewed_set_digest,
     derive_ledger_window_id,
@@ -252,6 +254,26 @@ class TestI1SoleMinter(unittest.TestCase):
             self.assertFalse(env.is_spendable())
             self.assertEqual(env.remaining_budget(), 0)
 
+    def test_empty_stored_ledger_window_id_is_not_spendable(self):
+        # C1: an EMPTY stored ledger_window_id can no longer short-circuit the
+        # tamper check to "spendable" — it fails closed even when every other
+        # field is internally consistent (a minted envelope always persists the
+        # derived id, so a blank one is a hand-built envelope skipping the ceremony).
+        reviewed = _reviewed_set(3)
+        digest = compute_reviewed_set_digest(reviewed)
+        env = RunEnvelope(
+            run_id="r", capability_id="c", op_kind=FIELD_OP,
+            contract_hash="ch", implementation_hash="ih",
+            reviewed_set=tuple(reviewed), reviewed_set_digest=digest,
+            population_count=3, stratification_summary={},
+            ceiling=Ceiling(granted_this_approval=10, remaining_budget=10,
+                            absolute_cap=600, recovery_tier="reversible"),
+            consent=Consent(operator_approval_verbatim="yes", consent_sentence_shown="x",
+                            approved_at="now", approval_bound_to=digest),
+            evidence_policy={}, tranches=(), stored_ledger_window_id="")
+        self.assertFalse(env.is_spendable(),
+                         "an empty stored ledger_window_id must fail the tamper check (C1)")
+
 
 # ===========================================================================
 # Run path — threads read_only_client + records verification into tranches
@@ -349,7 +371,7 @@ class TestEnvelopedRunPathRecordsTranches(unittest.TestCase):
 
             updated, result = run_enveloped_operation(
                 env, op, _receipt(op), write_client,
-                read_only_client=read_only_client, envelope_dir=d)
+                read_only_client=read_only_client, envelope_dir=d, ledger_dir=d)
 
             self.assertEqual(result.status, "written")
             # A tranche was appended recording the real-surface verification.
@@ -376,7 +398,8 @@ class TestEnvelopedRunPathRecordsTranches(unittest.TestCase):
             write_client = _FieldWriteClient(store)
             op = self._op()
             updated, result = run_enveloped_operation(
-                env, op, _receipt(op), write_client, envelope_dir=d)  # no ro client
+                env, op, _receipt(op), write_client, envelope_dir=d,
+                ledger_dir=d)  # no ro client
             self.assertEqual(result.status, "written")
             tr = updated.tranches[0]
             self.assertEqual(tr.per_unit_result["row1"]["status"], "applied_not_verified")
@@ -389,9 +412,146 @@ class TestEnvelopedRunPathRecordsTranches(unittest.TestCase):
             op = self._op()
             updated, result = run_enveloped_operation(
                 empty, op, _receipt(op), _FieldWriteClient(store),
-                read_only_client=_FieldReadOnlyClient(store), envelope_dir=d)
+                read_only_client=_FieldReadOnlyClient(store), envelope_dir=d, ledger_dir=d)
             self.assertEqual(result.status, "refused")
             self.assertEqual(len(updated.tranches), 0)
+
+    def test_run_path_refuses_a_fabricated_in_memory_spendable_envelope(self):
+        # C1: a hand-built in-memory envelope that PASSES is_spendable() in memory
+        # (every field is caller-computable, INCLUDING the correctly-derived stored
+        # ledger_window_id) but was NEVER minted to disk under this run_id must be
+        # REFUSED by the disk-authoritative run path — a fresh fabricated run_id
+        # has no persisted budget, so generated loop code cannot escape an
+        # exhausted cap by fabricating a fresh approved window.
+        with tempfile.TemporaryDirectory() as d:
+            reviewed = [{"unit_id": "row1", "prestate_digest": "d",
+                         "intended_mutation": {"value": "Complete"},
+                         "category": "status", "protected_status": False}]
+            digest = compute_reviewed_set_digest(reviewed)
+            window = derive_ledger_window_id(
+                run_id="fresh-fabricated-run-id", capability_id="cap:test",
+                op_kind=self.OP_KIND, contract_hash="ch", implementation_hash="ih",
+                reviewed_set_digest=digest)
+            fabricated = RunEnvelope(
+                run_id="fresh-fabricated-run-id", capability_id="cap:test",
+                op_kind=self.OP_KIND, contract_hash="ch", implementation_hash="ih",
+                reviewed_set=tuple(reviewed), reviewed_set_digest=digest,
+                population_count=3, stratification_summary={},
+                ceiling=Ceiling(granted_this_approval=999999, remaining_budget=999999,
+                                absolute_cap=600, recovery_tier="reversible"),
+                consent=Consent(operator_approval_verbatim="yes", consent_sentence_shown="x",
+                                approved_at="now", approval_bound_to=digest),
+                evidence_policy={}, tranches=(), stored_ledger_window_id=window)
+            # The threat is real: in memory this LOOKS fully spendable.
+            self.assertTrue(fabricated.is_spendable(),
+                            "the fabricated envelope must look spendable in memory — "
+                            "that is exactly the C1 threat the disk-authoritative path closes")
+            store = {"row1": {"value": "Open"}}
+            write_client = _FieldWriteClient(store)
+            op = self._op()
+            updated, result = run_enveloped_operation(
+                fabricated, op, _receipt(op), write_client,
+                read_only_client=_FieldReadOnlyClient(store), envelope_dir=d, ledger_dir=d)
+            self.assertEqual(result.status, "refused",
+                             "a fabricated in-memory envelope with a fresh run_id must be "
+                             "refused — the run path reloads authority from disk (C1)")
+            self.assertEqual(len(updated.tranches), 0)
+            self.assertEqual(write_client.write_calls, [],
+                             "nothing may be written for a fabricated envelope")
+            self.assertEqual(store["row1"]["value"], "Open")
+
+
+# ===========================================================================
+# I-3 — aggregate Knob B ceiling enforced in the run path, composing with the
+# per-op cap, applying even to a REVERSIBLE op the write gate does not cap
+# ===========================================================================
+
+class _MultiRowFieldAdapter:
+    """Plans one effect unit per row in params['rows'] — so a single op applies
+    n_units = len(rows), exercising the aggregate ceiling across chunks."""
+
+    def plan(self, params):
+        params = params or {}
+        return [EffectUnit(unit_id=r["row_id"], target_ref=r)
+                for r in params.get("rows", [])]
+
+    def apply_one(self, raw_client, unit):
+        raw_client.write_row(unit.unit_id, unit.target_ref["intended_value"])
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, observer, unit):
+        observed = observer.read_row(unit.unit_id)
+        return {"value": observed.get("value"),
+                "intended_value": unit.target_ref["intended_value"]}
+
+    def verify_apply_landed(self, evidence):
+        return evidence.poststate.get("value") == evidence.poststate.get("intended_value")
+
+
+class TestI3AggregateCeilingComposesWithPerOpCap(unittest.TestCase):
+
+    OP_KIND = "_env_agg_field_probe"
+
+    def setUp(self):
+        # reversible_external -> the write gate does NOT cap it (not gated), so the
+        # aggregate ceiling is the ONLY blast-radius bound: proves reversible bulk
+        # is bounded by the envelope even though the per-op gate lets it through.
+        contracts_mod.OPERATION_CONTRACTS[self.OP_KIND] = OperationContract(
+            op_kind=self.OP_KIND, writes=("Status",), produces=(), dependency_set=(),
+            verifier_set=(), introduces_persistent_binding=False,
+            risk_class="reversible_external", read_only_scope="fixture.readonly")
+        register_read_facade(self.OP_KIND, _FieldReadFacade)
+        register_adapter(self.OP_KIND, _MultiRowFieldAdapter())
+
+    def tearDown(self):
+        contracts_mod.OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+        unregister_adapter(self.OP_KIND)
+        unregister_read_facade(self.OP_KIND)
+
+    def _op_n_rows(self, n):
+        rows = [{"row_id": f"row{i}", "intended_value": "Complete"} for i in range(n)]
+        return Operation(surface="fixture_surface", op_kind=self.OP_KIND,
+                         batch_id="agg-1", params={"rows": rows})
+
+    def _mint(self, d):
+        # population 50, reversible -> Knob B ceiling clamps to the floor (25).
+        return mint_run_envelope(
+            run_id="run-agg", capability_id="cap:test", op_kind=self.OP_KIND,
+            contract_hash="ch", implementation_hash="ih",
+            reviewed_set=[{"unit_id": "row0", "prestate_digest": "d",
+                           "intended_mutation": {"value": "Complete"},
+                           "category": "status", "protected_status": False}],
+            population_count=50, stratification_summary={},
+            operator_approval_verbatim="yes", consent_sentence_shown="Apply changes.",
+            envelope_dir=d).envelope
+
+    def test_aggregate_ceiling_refuses_bulk_that_each_chunk_passes_per_op(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d)
+            self.assertEqual(env.ceiling.granted_this_approval, 25)
+            store = {f"row{i}": {"value": "Open"} for i in range(10)}
+
+            def run_chunk():
+                # A fresh op + fresh clients each chunk (the F-39-shaped driver);
+                # the aggregate persists on disk across chunks via the same window.
+                op = self._op_n_rows(10)
+                return run_enveloped_operation(
+                    env, op, _receipt(op), _FieldWriteClient(store),
+                    read_only_client=_FieldReadOnlyClient(store),
+                    envelope_dir=d, ledger_dir=d)
+
+            _, r1 = run_chunk()   # aggregate 0 -> 10
+            _, r2 = run_chunk()   # aggregate 10 -> 20
+            _, r3 = run_chunk()   # aggregate 20 + 10 = 30 > 25 -> refused
+            self.assertEqual(r1.status, "written")
+            self.assertEqual(r2.status, "written")
+            self.assertEqual(r3.status, "refused",
+                             "the aggregate approval ceiling must refuse the chunk that "
+                             "would exceed granted_this_approval, even though the "
+                             "reversible per-op gate passes every chunk (I-3)")
+            self.assertEqual(r3.detail.get("gate"), "run_envelope_aggregate_ceiling")
 
 
 if __name__ == "__main__":

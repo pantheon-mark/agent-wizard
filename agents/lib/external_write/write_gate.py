@@ -45,6 +45,7 @@ Stdlib only — no third-party dependencies.
 import json
 import os
 import tempfile
+from collections import namedtuple
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
@@ -197,6 +198,14 @@ def load_descriptor_set(path: Optional[str] = None) -> List[Dict[str, Any]]:
 # Blast-radius invocation ledger (deterministic counter, outside the LLM)
 # ---------------------------------------------------------------------------
 
+# The outcome of an atomic reserve-under-cap (I-1). ``reserved`` is True iff the
+# slots were consumed; ``consumed_before`` is the authoritative count for the key
+# BEFORE this reservation; ``refusal`` is None on success, or a machine-readable
+# cause when refused ("cap" — would exceed the cap; "lock_unavailable" — no
+# cross-process lock, so an atomic reserve cannot be guaranteed, fail-closed I-2).
+ReserveOutcome = namedtuple("ReserveOutcome", ["reserved", "consumed_before", "refusal"])
+
+
 class InvocationLedger:
     """A simple in-memory invocation counter — the deterministic blast-radius window.
 
@@ -215,6 +224,18 @@ class InvocationLedger:
         invocations). Defaults to 1 so every call site that predates unit-aware
         counting — one invocation, one slot — is unaffected."""
         self._counts[key] = self.count(key) + n
+
+    def reserve(self, key: str, n: int, cap: int) -> ReserveOutcome:
+        """Atomically check-and-consume ``n`` slots for ``key`` iff doing so would
+        NOT exceed ``cap`` (I-1). Single-process/in-memory, so the check and the
+        increment are trivially one critical section. Returns a ``ReserveOutcome``:
+        on success the slots are consumed and ``reserved`` is True; if it would
+        exceed the cap, NOTHING is consumed and ``refusal`` is "cap"."""
+        consumed = self.count(key)
+        if consumed + n > cap:
+            return ReserveOutcome(False, consumed, "cap")
+        self._counts[key] = consumed + n
+        return ReserveOutcome(True, consumed, None)
 
 
 class PersistentInvocationLedger:
@@ -237,11 +258,16 @@ class PersistentInvocationLedger:
     window the counts are still keyed by ``surface::op_kind`` (the gate's
     ``_ledger_key``), unchanged.
 
-    I2 (atomic ledger): every ``record`` is a read-modify-write performed under
-    an EXCLUSIVE advisory file lock (``fcntl.flock`` on a per-window lock file)
-    and committed with an atomic temp-file + ``os.replace``. Two concurrent
-    runners therefore cannot double-spend budget or lose an update — the disk
-    count is the single authority both serialize on.
+    I2 (atomic ledger): every mutation (``record`` and the atomic ``reserve``)
+    is a read-modify-write performed under an EXCLUSIVE advisory file lock
+    (``fcntl.flock`` on a per-window lock file) and committed with an atomic
+    temp-file + ``os.replace``. Two concurrent runners therefore cannot lose an
+    update. Cap enforcement goes through ``reserve``, which performs the cap
+    CHECK and the increment inside the SAME critical section (I-1) — so the
+    check-then-consume TOCTOU that let two runners double-spend the last slot is
+    closed. If the advisory lock is unavailable (non-POSIX ``_fcntl is None``),
+    both ``record`` and ``reserve`` FAIL CLOSED rather than proceed unlocked
+    (I-2) — an unlocked consume is never the safe direction for a cap.
 
     Fail-safe: an absent ledger file means zero consumed (nothing spent yet) —
     NOT a permissive open gate. The gate's own fail-safe (an ABSENT ``cap_ledger``
@@ -322,18 +348,54 @@ class PersistentInvocationLedger:
         """Consume ``n`` slots for ``key`` atomically: acquire the exclusive
         per-window lock, read the current disk count, add ``n``, and commit via
         an atomic replace, then release. Serializes concurrent runners so no
-        update is lost and the cap cannot be double-spent (I2)."""
+        update is lost and the cap cannot be double-spent (I2).
+
+        I-2 (fail-closed): if the POSIX advisory lock is unavailable
+        (``_fcntl is None``), this REFUSES rather than proceeding through an
+        unlocked read-modify-write — an unlocked consume can lose an update /
+        double-spend, which is never the safe direction for a blast-radius cap."""
+        if _fcntl is None:
+            raise RuntimeError(
+                "blast-radius ledger refuses to record without a cross-process "
+                "lock: POSIX fcntl.flock is unavailable on this platform, so an "
+                "atomic update cannot be guaranteed (fail-closed, I-2)")
         os.makedirs(self._dir, exist_ok=True)
         with open(self._lock_path, "w", encoding="utf-8") as lock_file:
-            if _fcntl is not None:
-                _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_EX)
+            _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_EX)
             try:
                 counts = self._read_counts()
                 counts[key] = counts.get(key, 0) + n
                 self._atomic_write_counts(counts)
             finally:
-                if _fcntl is not None:
-                    _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_UN)
+                _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_UN)
+
+    def reserve(self, key: str, n: int, cap: int) -> ReserveOutcome:
+        """Atomically reserve ``n`` slots for ``key`` under ``cap`` — the I-1 fix
+        for the check-then-consume TOCTOU. The read of the current count, the
+        cap check, and the increment all happen INSIDE ONE exclusive-lock
+        critical section, so two concurrent runners can never both observe the
+        same headroom and both consume it (the double-spend the old lockless
+        ``count`` + separate ``record`` allowed). If the reservation would exceed
+        the cap, NOTHING is written and ``refusal`` is "cap".
+
+        I-2 (fail-closed): if the advisory lock is unavailable (``_fcntl is
+        None``), REFUSE with ``refusal`` == "lock_unavailable" — never fall back
+        to an unlocked reserve, which could double-spend the cap."""
+        if _fcntl is None:
+            return ReserveOutcome(False, self.count(key), "lock_unavailable")
+        os.makedirs(self._dir, exist_ok=True)
+        with open(self._lock_path, "w", encoding="utf-8") as lock_file:
+            _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_EX)
+            try:
+                counts = self._read_counts()
+                consumed = counts.get(key, 0)
+                if consumed + n > cap:
+                    return ReserveOutcome(False, consumed, "cap")
+                counts[key] = consumed + n
+                self._atomic_write_counts(counts)
+                return ReserveOutcome(True, consumed, None)
+            finally:
+                _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------------------
@@ -541,8 +603,21 @@ def _enforce_live_funnel(op: Operation, risk_class: str, contract: Optional[Oper
             "gated action.",
             op_kind=op.op_kind, risk_class=risk_class, blast_radius_cap=effective_cap)
     key = _ledger_key(op)
-    consumed = cap_ledger.count(key)
-    if consumed + n_units > effective_cap:
+    # I-1: the cap CHECK and the consume are ONE atomic reserve-under-cap — never
+    # a lockless ``count`` read followed by a separate ``record``. Two concurrent
+    # runners can no longer both observe the same headroom and both consume it
+    # (the double-spend TOCTOU). The reserve refuses WITHOUT incrementing when it
+    # would exceed the cap, and fails closed if the lock is unavailable (I-2).
+    outcome = cap_ledger.reserve(key, n_units, effective_cap)
+    if not outcome.reserved:
+        if outcome.refusal == "lock_unavailable":
+            return _refuse(
+                "live gated op refused: the blast-radius ledger's cross-process lock is "
+                "unavailable on this platform, so an atomic reserve-under-cap cannot be "
+                "guaranteed. Refusing rather than risking a double-spend of the cap "
+                f"({effective_cap}) through an unlocked consume.",
+                op_kind=op.op_kind, risk_class=risk_class, blast_radius_cap=effective_cap)
+        consumed = outcome.consumed_before
         return _refuse(
             f"live gated op refused: blast-radius cap of {effective_cap} reached for this "
             "capability in the current window — the window is bounded in UNITS, not "
@@ -551,7 +626,7 @@ def _enforce_live_funnel(op: Operation, risk_class: str, contract: Optional[Oper
             f"exceeding the cap of {effective_cap}.",
             op_kind=op.op_kind, risk_class=risk_class, blast_radius_cap=effective_cap,
             n_units=n_units, units_consumed_before=consumed)
-    cap_ledger.record(key, n_units)
+    units_consumed_after = outcome.consumed_before + n_units
 
     # Per design §4.7: a live irreversible action writes an explicit, clock-stamped
     # "this cannot be reversed" acknowledgement. The timestamp comes from the clock, NEVER
@@ -565,9 +640,11 @@ def _enforce_live_funnel(op: Operation, risk_class: str, contract: Optional[Oper
                 "op_kind": op.op_kind,
                 "blast_radius_cap": effective_cap,
                 # units_consumed_in_window (renamed from invocation_index): the
-                # CUMULATIVE unit count consumed in this window so far, post-record — no
+                # CUMULATIVE unit count consumed in this window so far, post-reserve — no
                 # longer an invocation index, since one operation can consume many units.
-                "units_consumed_in_window": cap_ledger.count(key),
+                # Taken from the atomic reserve's own before-count + n_units (not a
+                # fresh disk read, which a concurrent runner could have moved).
+                "units_consumed_in_window": units_consumed_after,
                 "recorded_at": _iso_z(clock()),
             }
         }

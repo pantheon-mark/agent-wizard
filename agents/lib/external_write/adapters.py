@@ -402,6 +402,31 @@ def _run_adapter_operation(op: Operation, raw_client: Any, dispatch: Any,
 # Core dispatch
 # ---------------------------------------------------------------------------
 
+def planned_unit_count(op: Operation) -> Optional[int]:
+    """The number of effect units ``op`` plans to apply — the SAME pure ``plan()``
+    hoist run_operation performs at its Step -1 (``plan()`` is contractually pure,
+    so this touches no surface). Returns 1 for the legacy field-write path (no
+    registered adapter), the planned ``len(units)`` for a registered adapter, or
+    None if ``plan()`` fails / returns a non-list (in which case the caller lets
+    run_operation produce the clean fail-safe refusal).
+
+    Exists so run_envelope's aggregate-ceiling reservation (a bound it must apply
+    BEFORE the write) can size itself WITHOUT run_envelope importing the adapter
+    registry — the registry reference stays inside this (registry-adjacent) module,
+    which the ADAPTER_PROFILE scanner already exempts. Mirrors run_operation's own
+    plan hoist exactly, so the count it returns matches what run_operation will use."""
+    dispatch = get_dispatch(op.op_kind)
+    if dispatch is None:
+        return 1
+    try:
+        planned = dispatch.plan(dispatch.instance, op.params)
+    except Exception:
+        return None
+    if not isinstance(planned, list):
+        return None
+    return len(planned)
+
+
 def run_operation(op: Operation, receipt: Any, client: Any,
                   postwrite_verification: Any = None, *,
                   target: Optional[str] = None,

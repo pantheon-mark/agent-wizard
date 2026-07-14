@@ -160,32 +160,94 @@ class TestI2AtomicLedger(unittest.TestCase):
             self.assertEqual(final, n_threads * per_thread,
                              "lost updates under concurrency — ledger is not atomic (I2)")
 
-    def test_two_concurrent_runners_cannot_double_spend_last_slot(self):
-        # Both runners see 4/5 consumed and race to consume the final slot; with
-        # an atomic locked increment, the disk total can never exceed the cap by
-        # more than one in-flight op, and re-reading shows a single authoritative
-        # count both runners agree on.
+    def test_atomic_reserve_under_cap_refuses_without_incrementing(self):
+        # A direct reserve at the cap edge: reserving the last slot succeeds, a
+        # further reserve is refused WITHOUT incrementing (the disk count stays at
+        # the cap, not one past it) — the atomic check-and-consume (I-1).
         with tempfile.TemporaryDirectory() as d:
             key = "google_sheets::delete_record"
-            window = "run-lastslot"
+            window = "run-reserve"
+            led = PersistentInvocationLedger(window, ledger_dir=d)
+            led.record(key, 4)
+            ok = led.reserve(key, 1, 5)      # 4 -> 5, at the cap
+            self.assertTrue(ok.reserved)
+            self.assertEqual(led.count(key), 5)
+            over = led.reserve(key, 1, 5)     # would be 6 > 5 -> refuse, no write
+            self.assertFalse(over.reserved)
+            self.assertEqual(over.refusal, "cap")
+            self.assertEqual(led.count(key), 5,
+                             "a refused reserve must NOT increment the count (I-1)")
+
+
+# ===========================================================================
+# I-1 — double-spend TOCTOU closed THROUGH evaluate_write_gate (the real path)
+# ===========================================================================
+
+class TestI1NoDoubleSpendThroughGate(unittest.TestCase):
+    """The check-then-consume TOCTOU, exercised through the REAL gate path. Two
+    concurrent gate evaluations racing for the final slot of a cap must NOT both
+    permit: exactly one permits, the other refuses, and the authoritative disk
+    count never exceeds the cap. (The prior test recorded directly, off the gate,
+    and asserted the count reaching 6 vs cap 5 as DESIRED — a false green; it is
+    deleted in favor of this one.)"""
+
+    def test_two_concurrent_gate_evaluations_cannot_double_spend_the_last_slot(self):
+        ds = [_accepted_entry(id="google_sheets", risk_class="irreversible_external",
+                              blast_radius_cap=5)]
+        with tempfile.TemporaryDirectory() as d:
+            window = "run-gate-race"
+            op = _op("delete_record", "google_sheets")
+            key = _ledger_key(op)
+            # Pre-consume 4 of 5 so both racers contend for the single last slot.
             PersistentInvocationLedger(window, ledger_dir=d).record(key, 4)
 
             results = []
             barrier = threading.Barrier(2)
 
             def runner():
-                barrier.wait()
                 led = PersistentInvocationLedger(window, ledger_dir=d)
-                led.record(key, 1)
-                results.append(led.count(key))
+                barrier.wait()
+                dec = evaluate_write_gate(op, target="live", descriptor_set=ds,
+                                          cap_ledger=led, n_units=1)
+                results.append(dec.permitted)
 
             t1 = threading.Thread(target=runner)
             t2 = threading.Thread(target=runner)
             t1.start(); t2.start(); t1.join(); t2.join()
 
+            self.assertEqual(sorted(results), [False, True],
+                             "exactly one of two racing gate evaluations may take the "
+                             "last slot — the other must refuse (I-1)")
             final = PersistentInvocationLedger(window, ledger_dir=d).count(key)
-            # Two atomic increments from 4 -> 6, never a lost update leaving it at 5.
-            self.assertEqual(final, 6)
+            self.assertEqual(final, 5,
+                             "atomic reserve-under-cap must never let the count exceed the cap")
+
+
+# ===========================================================================
+# I-2 — non-POSIX lock fails CLOSED (gated consume refuses, never proceeds unlocked)
+# ===========================================================================
+
+class TestI2LockUnavailableFailsClosed(unittest.TestCase):
+
+    def test_gated_consume_refuses_when_lock_unavailable(self):
+        import external_write.write_gate as wg
+        ds = [_accepted_entry(id="google_sheets", risk_class="irreversible_external",
+                              blast_radius_cap=5)]
+        with tempfile.TemporaryDirectory() as d:
+            op = _op("delete_record", "google_sheets")
+            led = PersistentInvocationLedger("run-nolock", ledger_dir=d)
+            orig = wg._fcntl
+            wg._fcntl = None  # simulate a non-POSIX platform (no cross-process lock)
+            try:
+                dec = evaluate_write_gate(op, target="live", descriptor_set=ds,
+                                          cap_ledger=led, n_units=1)
+            finally:
+                wg._fcntl = orig
+            self.assertFalse(dec.permitted,
+                             "a gated consume must fail CLOSED when the lock is unavailable")
+            self.assertEqual(
+                PersistentInvocationLedger("run-nolock", ledger_dir=d).count(_ledger_key(op)),
+                0, "nothing may be consumed when the lock is unavailable (I-2)")
 
 
 if __name__ == "__main__":

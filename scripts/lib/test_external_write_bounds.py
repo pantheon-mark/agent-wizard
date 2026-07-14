@@ -240,6 +240,28 @@ class TestKnobACoverageSample(unittest.TestCase):
     def test_empty_population_returns_empty(self):
         self.assertEqual(select_coverage_sample([]), [])
 
+    def test_soft_cap_downsample_protects_the_residual_stratum(self):
+        # M-1: the soft-cap down-sample must NOT be able to drop every residual/
+        # low-confidence representative. Many declared strata overshoot the soft
+        # cap; a small residual group must survive the down-sample (the mandatory-
+        # residual guarantee holds THROUGH the cap, not just before it).
+        rng = random.Random(0)
+        cands = []
+        for s in range(8):                       # 8 declared strata x 3 = 24 members
+            for i in range(3):
+                cands.append({"unit_id": f"s{s}_{i}", "risk_stratum": f"stratum_{s}"})
+        for i in range(5):                       # 5 residual (no stratum) members
+            cands.append({"unit_id": f"res{i}"})  # no risk_stratum key
+        # depth 8 covers each 3-member stratum fully -> 24 + 5 residual = 29 selected,
+        # well over a soft cap of 10 -> forces the down-sample path.
+        sel = select_coverage_sample(cands, depth=8, floor=25, soft_cap=10, rng=rng)
+        self.assertEqual(len(sel), 10, "soft cap not respected")
+        residual_in_sel = [c for c in sel if "risk_stratum" not in c]
+        self.assertEqual(
+            len(residual_in_sel), 5,
+            "M-1: the down-sample dropped residual representatives — the residual "
+            "quota (all 5, within depth+spot-checks and the soft cap) must be protected")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -258,8 +258,24 @@ def select_coverage_sample(candidates: Sequence[Any], *,
         remaining = [m for m in pool if id(m) not in seen]
         _take(remaining, floor - len(selected))
 
-    # Honor the soft cap: down-sample deterministically if we overshot.
+    # Honor the soft cap: down-sample deterministically if we overshot — but
+    # PROTECT a residual quota first (M-1). A naive ``rng.sample(selected,
+    # soft_cap)`` can, by chance, drop EVERY residual / low-confidence
+    # representative, defeating the mandatory-residual-stratum guarantee. So the
+    # residual members already selected are set aside up to a quota (their
+    # intended coverage: per-stratum depth + the residual spot-checks, bounded by
+    # how many were actually selected and by the soft cap), kept first, and the
+    # remaining slots filled from the non-residual selections.
     if len(selected) > soft_cap:
-        selected = rng.sample(selected, soft_cap)
+        residual_selected = [m for m in selected if stratum_of(m) == RESIDUAL_STRATUM]
+        non_residual_selected = [m for m in selected if stratum_of(m) != RESIDUAL_STRATUM]
+        residual_quota = min(len(residual_selected), depth + residual_spot_checks, soft_cap)
+        keep_residual = (residual_selected if len(residual_selected) <= residual_quota
+                         else rng.sample(residual_selected, residual_quota))
+        remaining_slots = soft_cap - len(keep_residual)
+        keep_non_residual = (non_residual_selected
+                             if len(non_residual_selected) <= remaining_slots
+                             else rng.sample(non_residual_selected, remaining_slots))
+        selected = keep_residual + keep_non_residual
 
     return selected
