@@ -10,7 +10,10 @@ set, unknown risk) must NEVER open the gate.
 Uses stub clients only; no network.
 """
 
+import inspect
+import json
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -776,6 +779,179 @@ class TestSingleObjectCapSlotInvariant(unittest.TestCase):
                            target=LIVE_TARGET, descriptor_set=ds, cap_ledger=led)
         self.assertEqual(r2.status, "written")
         self.assertEqual(led.count("google_sheets::delete_record"), 2)
+
+
+# ---------------------------------------------------------------------------
+# F-55 B2 — paused op_kind deny-branch: the fail-closed runtime deny on the
+# sanctioned route (evaluate_write_gate). The trust-critical joint the whole
+# reconcile / write_gate slice exists to build: a still-runnable capability's
+# live writes must be denied at runtime once its op_kind is paused.
+# ---------------------------------------------------------------------------
+
+class TestPausedOpKindDenyBranch(unittest.TestCase):
+    OP_KIND = "inbox_trash"
+
+    def setUp(self):
+        contracts_mod.OPERATION_CONTRACTS[self.OP_KIND] = OperationContract(
+            op_kind=self.OP_KIND, writes=("Status",), produces=(),
+            dependency_set=("adapters.py",), verifier_set=("prestate_snapshot_diff_v1",),
+            introduces_persistent_binding=False, risk_class="irreversible_external",
+            blast_radius_cap=5)
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.marker_dir = Path(self._tmpdir.name) / "markers"
+
+    def tearDown(self):
+        contracts_mod.OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+
+    def _write_marker(self, name: str, text: str) -> None:
+        self.marker_dir.mkdir(parents=True, exist_ok=True)
+        (self.marker_dir / name).write_text(text, encoding="utf-8")
+
+    def test_paused_op_kind_refused_all_live_classes(self):
+        # (a) A marker naming this op_kind refuses it under EVERY declared
+        # target class -- live, both LIVE_BOUNDED test targets, and both
+        # ISOLATED test targets. The pause check runs before target
+        # resolution, so it intercepts regardless of which class the op
+        # would otherwise fall into.
+        self._write_marker("estate_upkeep.json",
+                           json.dumps({"paused_op_kinds": [self.OP_KIND]}))
+        for target in ("live", "bounded_sample", "native_undo", "copy", "dry_run"):
+            op = _op(self.OP_KIND, surface="google_sheets", object_id=f"obj:{target}")
+            d = evaluate_write_gate(op, target=target, paused_root=str(self.marker_dir))
+            self.assertFalse(d.permitted, target)
+            self.assertIn("paused", d.refusal.detail["reason"], target)
+
+    def test_unrelated_op_kind_unaffected_by_marker(self):
+        # Anti-overfit: a DIFFERENT op_kind sharing nothing with the paused
+        # marker must be completely unaffected -- proves the check is keyed
+        # on op_kind, not a blanket "any marker present" refusal.
+        self._write_marker("estate_upkeep.json",
+                           json.dumps({"paused_op_kinds": [self.OP_KIND]}))
+        ds = [_accepted_entry(risk_class="irreversible_external")]
+        d = evaluate_write_gate(_op("delete_record", surface="google_sheets"),
+                                target=LIVE_TARGET, descriptor_set=ds,
+                                cap_ledger=InvocationLedger(), paused_root=str(self.marker_dir))
+        self.assertTrue(d.permitted)
+
+    def test_malformed_pause_state_fails_closed(self):
+        # (b) A marker directory containing UNPARSEABLE JSON: the true paused
+        # set cannot be computed, so refuse -- never permit -- even for an
+        # op_kind that would otherwise be entirely ungated (reversible_external
+        # set_status). Placement (after read_only_local, before the
+        # gated/ungated split) means this covers the ungated path too.
+        self._write_marker("corrupt.json", "{ this is not valid json")
+        op = _op("set_status", field="Status", new_value="x")
+        d = evaluate_write_gate(op, paused_root=str(self.marker_dir))
+        self.assertFalse(d.permitted)
+
+    def test_malformed_pause_state_wrong_shape_fails_closed(self):
+        # Valid JSON, but paused_op_kinds is not a list of strings -- same
+        # fail-closed treatment as unparseable JSON (wrong shape).
+        self._write_marker("wrong_shape.json", json.dumps({"paused_op_kinds": "not_a_list"}))
+        op = _op("set_status", field="Status", new_value="x")
+        d = evaluate_write_gate(op, paused_root=str(self.marker_dir))
+        self.assertFalse(d.permitted)
+
+    def test_missing_paused_op_kinds_key_is_not_malformed(self):
+        # A legacy B1 entrypoint_paused state marker never carries
+        # paused_op_kinds at all -- that must NOT be treated as malformed; it
+        # contributes the empty set, same as an absent marker directory.
+        self._write_marker("estate_upkeep.json", json.dumps({
+            "mechanism_id": "estate_upkeep", "state": "entrypoint_paused"}))
+        ds = [_accepted_entry(risk_class="irreversible_external")]
+        d = evaluate_write_gate(_op("delete_record", surface="google_sheets"),
+                                target=LIVE_TARGET, descriptor_set=ds,
+                                cap_ledger=InvocationLedger(), paused_root=str(self.marker_dir))
+        self.assertTrue(d.permitted)
+
+    def test_read_only_local_never_blocked_by_corrupt_marker(self):
+        # RATIONALE for the placement (after read_only_local, before the
+        # gated/ungated split): a corrupt marker must NEVER block a pure
+        # local read.
+        self._write_marker("corrupt.json", "{ this is not valid json")
+        contracts_mod.OPERATION_CONTRACTS["_ro_local_paused_probe"] = OperationContract(
+            op_kind="_ro_local_paused_probe", writes=("Field",), produces=(),
+            dependency_set=("adapters.py",), verifier_set=("prestate_snapshot_diff_v1",),
+            introduces_persistent_binding=False, risk_class="read_only_local")
+        try:
+            d = evaluate_write_gate(_op("_ro_local_paused_probe", field="Field"),
+                                    paused_root=str(self.marker_dir))
+            self.assertTrue(d.permitted)
+        finally:
+            contracts_mod.OPERATION_CONTRACTS.pop("_ro_local_paused_probe", None)
+
+    def test_no_marker_dir_previously_permitted_ops_still_permit(self):
+        # (d) Regression: an absent paused_root resolves to "no paused set" --
+        # byte-identical to pre-F-55-B2 behavior. Covers a live accepted op,
+        # a LIVE_BOUNDED declared op, and an ungated status op.
+        absent = str(Path(self._tmpdir.name) / "does-not-exist")
+        ds = [_accepted_entry(risk_class="irreversible_external")]
+        d = evaluate_write_gate(_op("delete_record", surface="google_sheets"),
+                                target=LIVE_TARGET, descriptor_set=ds,
+                                cap_ledger=InvocationLedger(), paused_root=absent)
+        self.assertTrue(d.permitted)
+
+        result = run_operation(
+            _op("set_status", field="Status", new_value="Complete"),
+            _receipt(_op("set_status", field="Status", new_value="Complete")),
+            _AcceptingClient())
+        self.assertEqual(result.status, "written")
+
+    def test_paused_root_kwarg_defaults_to_module_constant(self):
+        # No paused_root passed at all -- resolves to PAUSED_MECHANISMS_DIR
+        # relative to cwd, which does not exist in the test process's cwd, so
+        # this must fall through unchanged (no new denial from the default).
+        result = run_operation(
+            _op("set_status", field="Status", new_value="Complete"),
+            _receipt(_op("set_status", field="Status", new_value="Complete")),
+            _AcceptingClient())
+        self.assertEqual(result.status, "written")
+
+
+class TestPausedMarkerRuntimeChokepointBoundary(unittest.TestCase):
+    """(c) NEGATIVE/boundary doc test. The paused-op_kind deny-branch lives
+    SOLELY inside evaluate_write_gate, reached only via the SANCTIONED route
+    (capability_api.run_enveloped_operation -> adapters.run_operation ->
+    write_gate.evaluate_write_gate). A caller that reaches the adapter layer
+    DIRECTLY (adapters._run_adapter_operation, or an Adapter's own apply_one)
+    bypasses this marker entirely -- it is never consulted on that path.
+    Closing THAT bypass is a BUILD-TIME job: scan.py's CAPABILITY-zone bans on
+    a capability module even NAMING the adapter layer / raw run_operation
+    (see scan.py's raw_run_operation_reference rule and
+    capability_code_scaffold.py's own "Structural safety" sections) — never a
+    runtime check inside write_gate. This test documents that boundary
+    honestly rather than overclaiming coverage this module does not have."""
+
+    def test_paused_marker_loader_is_consulted_only_by_evaluate_write_gate(self):
+        src = inspect.getsource(write_gate)
+        # Exactly two occurrences: the `def` and the ONE call site inside
+        # evaluate_write_gate. No other function in this module reaches it.
+        self.assertEqual(src.count("_load_paused_op_kinds("), 2)
+
+    def test_adapter_layer_has_no_independent_paused_check(self):
+        from external_write import adapters as adapters_mod
+        adapter_src = inspect.getsource(adapters_mod._run_adapter_operation)
+        self.assertNotIn("paused", adapter_src.lower())
+        self.assertNotIn("PAUSED_MECHANISMS_DIR", adapter_src)
+        # _run_adapter_operation runs strictly AFTER run_operation's own Step 0
+        # gate call has already permitted -- it never calls evaluate_write_gate
+        # (or anything else) itself; a caller that reaches it WITHOUT going
+        # through run_operation first gets no gate at all, paused or otherwise.
+        self.assertNotIn("evaluate_write_gate", adapter_src)
+
+
+class TestPausedMechanismsDirAntiDrift(unittest.TestCase):
+    def test_matches_upgrade_reconcile_constant_by_value(self):
+        # (e) BUILD<->RUNTIME value contract: upgrade_reconcile.py (toolkit,
+        # build-side) WRITES markers under PAUSED_MECHANISMS_DIR_REL; this
+        # emitted runtime module READS them via PAUSED_MECHANISMS_DIR. Neither
+        # can import the other, so the two constants must be pinned equal BY
+        # VALUE here (this test file, run from wizard/scripts/lib, can import
+        # both trees).
+        import upgrade_reconcile
+        self.assertEqual(write_gate.PAUSED_MECHANISMS_DIR,
+                         upgrade_reconcile.PAUSED_MECHANISMS_DIR_REL)
 
 
 if __name__ == "__main__":

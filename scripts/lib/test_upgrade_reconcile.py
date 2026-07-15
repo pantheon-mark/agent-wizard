@@ -26,6 +26,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from upgrade_reconcile import (  # noqa: E402
+    CAPABILITY_DESCRIPTOR_SET_REL,
     MIGRATION_QUEUE_REL,
     PAUSED_MECHANISMS_DIR_REL,
     MechanismReport,
@@ -33,7 +34,9 @@ from upgrade_reconcile import (  # noqa: E402
     reconcile_upgrade,
     render_impact_notice,
     render_reconcile_result,
+    resolve_paused_op_kinds,
     scan_operator_mechanisms,
+    _write_paused_live_write_state,
 )
 
 _REAL_REPO = Path(__file__).resolve().parents[3]
@@ -451,6 +454,21 @@ class RenderImpactNoticeTests(unittest.TestCase):
         self.assertIn("paused too", text.lower())
         self.assertIn("rebuilt", text.lower())
 
+    def test_paused_live_write_state_is_honest_and_jargon_free(self):
+        # (F-55 B2) Distinct wording from both "paused" (entrypoint switched
+        # off) and "broken_requires_migration" (cannot run at all): this state
+        # keeps running, only its specific write(s) are blocked. No internal
+        # identifiers (raw op_kind strings) leak into operator-facing text.
+        m = self._paused(paused=False, entrypoint_relpath=None, state="paused_live_write",
+                         paused_op_kinds=["acme.widget.delete"])
+        text = render_impact_notice([m], "v0.13.0", "v0.13.1")
+        self.assertIn("keeps running", text.lower())
+        self.assertNotIn("keeps running exactly as before", text)
+        self.assertNotIn("cannot run as-is", text.lower())
+        self.assertNotIn("acme.widget.delete", text)
+        for jargon in ("op_kind", "AST"):
+            self.assertNotIn(jargon, text)
+
     def test_unknown_entanglement_never_promises_continuity(self):
         m = self._paused(carries_read_outputs=None, separate_readonly_entrypoint=None)
         text = render_impact_notice([m], "v0.11.0", "v0.12.0")
@@ -526,6 +544,149 @@ class RenderReconcileResultTests(unittest.TestCase):
         self.assertIn("estate_upkeep", out)
         self.assertIn("paused", out)
         self.assertIn("impact-notice.md", out)
+
+
+# ===================================================================================
+# F-55 B2 — paused_op_kinds resolution + writer, exercised at the HELPER level
+# directly (constructed inputs), not by forcing an unreachable reconcile_upgrade
+# path -- see resolve_paused_op_kinds's own docstring for why the real
+# scanner-driven reconcile_upgrade path can never reach scan_clean=True today.
+# ===================================================================================
+
+class ResolvePausedOpKindsTests(_Base):
+    CAP_SOURCE = (
+        '"""Widget-delete capability (CAPABILITY zone)."""\n'
+        'from external_write.capability_api import build_read_facade, run_enveloped_operation\n'
+        '\n'
+        'OP_KIND = "acme.widget.delete"\n'
+        'SURFACE = "acme_widgets"\n'
+    )
+
+    def _project_with_capability(self, *, capability_id="acme_widget_deleter",
+                                 with_descriptor=True):
+        proj = self.tmp / "operator_proj"
+        capdir = proj / "agents" / "capabilities"
+        capdir.mkdir(parents=True)
+        relpath = f"agents/capabilities/{capability_id}.py"
+        (proj / relpath).write_text(self.CAP_SOURCE, encoding="utf-8")
+        descriptor_set = []
+        if with_descriptor:
+            secdir = proj / "security"
+            secdir.mkdir(parents=True, exist_ok=True)
+            descriptor_set = [{
+                "id": capability_id, "name": capability_id, "action_class": "delete",
+                "risk_class": "irreversible_external", "recovery_profile_ref": None,
+                "declared_test_target": "copy", "blast_radius_cap": 3,
+                "accepted": False, "phase_id": "phase-1",
+            }]
+            (secdir / "capability_descriptors.json").write_text(
+                json.dumps(descriptor_set), encoding="utf-8")
+        return proj, relpath, descriptor_set
+
+    def test_resolves_op_kind_from_writer_source_when_descriptor_exists(self):
+        proj, relpath, ds = self._project_with_capability()
+        kinds = resolve_paused_op_kinds(proj, "acme_widget_deleter", relpath, ds)
+        self.assertEqual(kinds, ["acme.widget.delete"])
+
+    def test_empty_when_no_matching_descriptor_entry(self):
+        # Fail-closed/empty-safe: even though the writer's own source carries a
+        # perfectly good OP_KIND literal, an UNDECLARED capability (no
+        # descriptor entry with id == mechanism_id) resolves to [] -- never
+        # guesses at an op_kind for something never declared.
+        proj, relpath, _ = self._project_with_capability(with_descriptor=False)
+        kinds = resolve_paused_op_kinds(proj, "acme_widget_deleter", relpath, [])
+        self.assertEqual(kinds, [])
+
+    def test_empty_when_writer_source_has_no_op_kind_literal(self):
+        proj, relpath, ds = self._project_with_capability()
+        (proj / relpath).write_text('"""No OP_KIND constant here."""\n', encoding="utf-8")
+        kinds = resolve_paused_op_kinds(proj, "acme_widget_deleter", relpath, ds)
+        self.assertEqual(kinds, [])
+
+    def test_empty_when_writer_file_is_missing(self):
+        proj, relpath, ds = self._project_with_capability()
+        (proj / relpath).unlink()
+        kinds = resolve_paused_op_kinds(proj, "acme_widget_deleter", relpath, ds)
+        self.assertEqual(kinds, [])
+
+    def test_descriptor_set_path_constant_matches_write_gate_convention(self):
+        # Same value as write_gate.DESCRIPTOR_SET_PATH ("security/
+        # capability_descriptors.json") -- duplicated (not imported) per this
+        # module's own boundary discipline; pinned here so it can't drift.
+        self.assertEqual(CAPABILITY_DESCRIPTOR_SET_REL, "security/capability_descriptors.json")
+
+
+class WritePausedLiveWriteStateTests(_Base):
+    def test_writer_produces_state_json_with_resolved_op_kind(self):
+        # (f) unit test the paused_op_kinds WRITER directly -- constructed
+        # inputs, no reconcile_upgrade call.
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        relpath = "agents/capabilities/acme_widget_deleter.py"
+        (proj / "agents" / "capabilities").mkdir(parents=True)
+        (proj / relpath).write_text("OP_KIND = 'acme.widget.delete'\n", encoding="utf-8")
+
+        _write_paused_live_write_state(
+            proj, "acme_widget_deleter", relpath, violations=[],
+            from_version="v0.13.0", to_version="v0.13.1",
+            paused_op_kinds=["acme.widget.delete"],
+        )
+
+        state_path = proj / PAUSED_MECHANISMS_DIR_REL / "acme_widget_deleter.json"
+        marker_path = proj / PAUSED_MECHANISMS_DIR_REL / "acme_widget_deleter.pause"
+        self.assertTrue(marker_path.exists())
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(state["mechanism_id"], "acme_widget_deleter")
+        self.assertEqual(state["state"], "paused_live_write")
+        self.assertEqual(state["paused_op_kinds"], ["acme.widget.delete"])
+        self.assertIsNone(state["entrypoint_relpath"])
+        self.assertTrue(state["credentials_preserved"])
+        self.assertEqual(state["from_version"], "v0.13.0")
+        self.assertEqual(state["to_version"], "v0.13.1")
+
+        # This state file is exactly what write_gate.evaluate_write_gate's
+        # runtime deny-branch globs for (*.json under PAUSED_MECHANISMS_DIR) --
+        # cross-check it parses back with a non-empty paused_op_kinds union,
+        # the same shape the runtime loader expects.
+        self.assertIsInstance(state["paused_op_kinds"], list)
+        self.assertTrue(all(isinstance(k, str) for k in state["paused_op_kinds"]))
+
+    def test_idempotent_rerun_does_not_duplicate_marker(self):
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        relpath = "agents/capabilities/acme_widget_deleter.py"
+        (proj / "agents" / "capabilities").mkdir(parents=True)
+        (proj / relpath).write_text("OP_KIND = 'acme.widget.delete'\n", encoding="utf-8")
+        for _ in range(2):
+            _write_paused_live_write_state(
+                proj, "acme_widget_deleter", relpath, violations=[],
+                from_version="v0.13.0", to_version="v0.13.1",
+                paused_op_kinds=["acme.widget.delete"],
+            )
+        marker_dir = proj / PAUSED_MECHANISMS_DIR_REL
+        self.assertEqual(len(list(marker_dir.glob("acme_widget_deleter.*"))), 2)
+
+
+class ReconcileUpgradePausedLiveWriteWiringTests(_Base):
+    def test_real_scanner_path_never_reaches_paused_live_write(self):
+        # Documents the honest scaffolding claim made in MechanismReport.state's
+        # docstring and resolve_paused_op_kinds's: every relpath the REAL
+        # scanner-driven reconcile_upgrade loop sees is scanner-red by
+        # construction (that's how it entered by_relpath), so scan_clean is
+        # always False and this capability-dir mechanism must still classify
+        # as broken_requires_migration, exactly as before this task -- T1/T2
+        # behavior is unchanged.
+        proj = self.tmp
+        capdir = proj / "agents" / "capabilities"
+        capdir.mkdir(parents=True)
+        (capdir / "still_broken_capability.py").write_text(
+            "from external_write.capability_api import run_operation\n"
+            "def go():\n    return run_operation(None, None)\n", encoding="utf-8")
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+        m = result.mechanisms[0]
+        self.assertEqual(m.state, "broken_requires_migration")
+        self.assertEqual(m.paused_op_kinds, [])
 
 
 # ===================================================================================

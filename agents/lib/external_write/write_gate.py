@@ -169,6 +169,20 @@ DESCRIPTOR_SET_PATH: Optional[str] = "security/capability_descriptors.json"
 # gate — see PersistentInvocationLedger._read_counts.
 DEFAULT_LEDGER_DIR = "security/invocation_ledgers"
 
+# The project-root-relative directory the emitted upgrade-reconcile step
+# (wizard/scripts/lib/upgrade_reconcile.py, build-side) writes per-mechanism
+# pause-state JSON into (F-55 B2). BUILD<->RUNTIME VALUE CONTRACT: that module
+# defines its own PAUSED_MECHANISMS_DIR_REL constant with this SAME string
+# value -- it WRITES the markers, this module READS them, and neither can
+# import the other (upgrade_reconcile.py is a build-side script; this module
+# is emitted into the operator runtime and must not import the build-side
+# tree). The two constants are pinned equal BY VALUE in
+# test_external_write_write_gate.py (a cross-tree test, run from
+# wizard/scripts/lib, which CAN import both modules) -- never let them drift
+# independently. Resolved against cwd exactly like DESCRIPTOR_SET_PATH /
+# DEFAULT_LEDGER_DIR above (agents run from the operator project root).
+PAUSED_MECHANISMS_DIR = ".wizard/paused-mechanisms"
+
 
 def load_descriptor_set(path: Optional[str] = None) -> List[Dict[str, Any]]:
     """Load the machine-readable descriptor set (the render_descriptor_registry_json shape: a
@@ -192,6 +206,61 @@ def load_descriptor_set(path: Optional[str] = None) -> List[Dict[str, Any]]:
     if not isinstance(data, list):
         return []
     return data
+
+
+def _load_paused_op_kinds(paused_root: str) -> Optional[frozenset]:
+    """(F-55 B2) Load the UNION of ``paused_op_kinds`` across every ``*.json``
+    marker file directly under ``paused_root``.
+
+    Returns:
+      * ``frozenset()`` (empty) when ``paused_root`` does not exist, is not a
+        directory, cannot be listed, or contains no ``*.json`` files at all --
+        the ABSENT-markers case. No new denial: byte-identical to the prior
+        (pre-F-55-B2) behavior.
+      * the UNION frozenset of every marker's ``paused_op_kinds`` list when
+        every marker present parses cleanly.
+      * ``None`` -- the FAIL-CLOSED signal -- when ANY ``*.json`` file in the
+        directory is unreadable, is not valid JSON, is not a JSON object, or
+        carries a ``paused_op_kinds`` value that is not a list of strings. A
+        missing ``paused_op_kinds`` KEY (e.g. an existing B1
+        ``entrypoint_paused`` state file, which never carries this field) is
+        NOT malformed -- it contributes the empty list, same as an absent
+        key entirely. The caller MUST treat ``None`` as "the true paused set
+        cannot be computed" and refuse the write in front of it: a corrupt
+        marker could be hiding a real pause for exactly the op_kind about to
+        run, so ONE unreadable marker anywhere in the directory is enough to
+        refuse EVERY write reaching this check (never just the op_kind the
+        corrupt file happens to name) -- matching this module's "every branch
+        defaults to refuse" posture.
+    """
+    try:
+        if not os.path.isdir(paused_root):
+            return frozenset()
+        names = sorted(n for n in os.listdir(paused_root) if n.endswith(".json"))
+    except OSError:
+        # Cannot even list the directory -- treat exactly like "absent" (an
+        # OS-level listing failure is not marker CONTENT corruption; the
+        # fail-closed contract above is about a marker that exists and was
+        # read but could not be trusted, not about the directory itself).
+        return frozenset()
+
+    union: set = set()
+    for name in names:
+        path = os.path.join(paused_root, name)
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return None
+        if not isinstance(data, dict):
+            return None
+        kinds = data.get("paused_op_kinds", [])
+        if kinds is None:
+            kinds = []
+        if not isinstance(kinds, list) or not all(isinstance(k, str) for k in kinds):
+            return None
+        union.update(kinds)
+    return frozenset(union)
 
 
 # ---------------------------------------------------------------------------
@@ -656,7 +725,8 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
                         descriptor_set: Optional[Sequence[Dict[str, Any]]] = None,
                         cap_ledger: Optional[InvocationLedger] = None,
                         clock: Optional[Any] = None,
-                        n_units: int = 1) -> GateDecision:
+                        n_units: int = 1,
+                        paused_root: Optional[str] = None) -> GateDecision:
     """The deterministic pre-write gate. Returns a GateDecision; the caller returns the refusal
     immediately when not permitted, and merges `audit` into the success Result otherwise.
 
@@ -666,9 +736,26 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
     unit-aware window) is unaffected: 1 unit consumes exactly 1 window slot, byte-identical to
     the prior per-invocation behavior.
 
+    paused_root (F-55 B2, default None => PAUSED_MECHANISMS_DIR): the directory of
+    per-mechanism pause-state JSON markers the emitted upgrade-reconcile step writes. Checked
+    immediately after the read_only_local short-circuit (step 2 below) and before every other
+    branch, so it covers every WRITE path — gated (copy/dry_run/bounded_sample/native_undo/live)
+    AND the ungated reversible_external path — while a pure local read (step 2) can never be
+    blocked by a write-pause or by a corrupt marker. SCOPE (disclosed, do not overclaim): this is
+    a runtime check on the SANCTIONED external-write route only
+    (run_enveloped_operation -> run_operation -> evaluate_write_gate). A caller reaching the
+    adapter layer directly (_run_adapter_operation / an Adapter's own apply_one) bypasses this
+    marker entirely — closing THAT bypass is a BUILD-TIME job (scan.py's CAPABILITY-zone bans),
+    never this runtime check; see test_external_write_write_gate.py's boundary-documenting test.
+
     Order (each step fails safe):
       1. Resolve the contract + effective risk class (fail-safe classification).
       2. read_only_local => never trips (design §4.5): permit untouched.
+      2.5. Paused op_kind deny-branch (F-55 B2): any op_kind named in the union of every
+           readable paused-mechanisms marker's `paused_op_kinds` => refuse ("... is paused
+           pending migration ..."). Any marker present but unreadable/malformed/wrong-shape =>
+           refuse fail-closed (the true paused set cannot be computed). No markers / absent dir
+           => fall through unchanged (byte-identical to pre-F-55-B2 behavior).
       3. Not gated (reversible_external, ungated) => permit untouched (byte-identical to the ungated path).
       4. Gated => resolve target: absent => refuse. Otherwise the resolved target falls into
          exactly one of three classes:
@@ -695,6 +782,30 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
     # risk_class resolved to FAIL_SAFE_RISK_CLASS above, so it can never reach this branch).
     if risk_class == READ_ONLY_LOCAL:
         return _PERMIT
+
+    # (2.5) F-55 B2 — paused op_kind deny-branch. Deliberately placed HERE: after the
+    # read_only_local short-circuit (a write-pause, and a fail-closed refusal on a corrupt
+    # marker, must NEVER block a pure local read) and BEFORE the `gated` computation below, so
+    # every WRITE path — every gated class (copy/dry_run/bounded_sample/native_undo/live) AND
+    # the ungated reversible_external path — still passes through this check (they all fall
+    # through to here). SCOPE: this is enforced only on the SANCTIONED route
+    # (run_enveloped_operation -> run_operation -> evaluate_write_gate); a caller reaching the
+    # adapter layer directly bypasses it — that bypass is closed at BUILD time by scan.py, not
+    # here (see this module's docstring for the full disclosure).
+    resolved_paused_root = paused_root if paused_root is not None else PAUSED_MECHANISMS_DIR
+    paused_op_kinds = _load_paused_op_kinds(resolved_paused_root)
+    if paused_op_kinds is None:
+        return _refuse(
+            "gated operation refused: a paused-mechanisms marker exists but could not be read "
+            "(unreadable, malformed JSON, or the wrong shape) — the true set of paused op_kinds "
+            "cannot be computed, so this write is refused rather than risk missing an active "
+            "pause",
+            op_kind=op.op_kind)
+    if op.op_kind in paused_op_kinds:
+        return _refuse(
+            f"gated operation refused: op_kind {op.op_kind!r} is paused pending migration "
+            "(rebuild it through add-capability before it runs live again)",
+            op_kind=op.op_kind, paused=True)
 
     # (3) Is this op gated at all?  Unknown/uncovered writer (no contract) is gated;
     # any GATED_RISK_CLASSES member is gated; an explicit requires_accepted_phase is gated.

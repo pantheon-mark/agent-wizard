@@ -83,6 +83,7 @@ Stdlib only — no third-party dependencies (operator/runtime path).
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import sys
@@ -134,6 +135,16 @@ OPERATOR_CODE_DIRS: Tuple[str, ...] = (
 )
 
 PAUSED_MECHANISMS_DIR_REL = ".wizard/paused-mechanisms"
+
+# (F-55 B2) Project-root-relative path to the operator project's descriptor
+# set -- the SAME value as write_gate.DESCRIPTOR_SET_PATH ("security/
+# capability_descriptors.json"). Duplicated as a plain string rather than
+# imported: this module deliberately does not import the operator-emitted
+# external_write package as production code (only the AST scanner, via
+# _scan_module, and only for DETECTION -- see the module docstring's "Reuse
+# discipline" note). Used only by resolve_paused_op_kinds below.
+CAPABILITY_DESCRIPTOR_SET_REL = "security/capability_descriptors.json"
+
 MIGRATION_QUEUE_REL = "agents/handoffs/pending_migrations.json"
 UPGRADE_REVIEW_DIR_REL = ".wizard/upgrade-review"
 IMPACT_NOTICE_BASENAME = "impact-notice.md"
@@ -234,13 +245,42 @@ class MechanismReport:
                                         cannot run at all. Honest state, not a
                                         continuity claim: nothing was "paused"
                                         because nothing could run.
-                                    "paused_live_write"       -- reserved for a
-                                        future still-runnable-capability primitive
-                                        (T3); no detection path for it exists yet
-                                        in this module.
+                                    "paused_live_write"       -- (F-55 B2, this
+                                        task) a still-RUNNABLE capability (import
+                                        clean AND scan clean) under the
+                                        operator-capability directory: it is not
+                                        gated at the entrypoint level (there is
+                                        none to gate at this shape -- see
+                                        _is_under_capability_dir), so instead its
+                                        live writes are denied at RUNTIME by the
+                                        emitted write_gate's deny-branch, keyed on
+                                        this mechanism's `paused_op_kinds` (written
+                                        into its pause-state marker; see
+                                        resolve_paused_op_kinds /
+                                        _write_paused_live_write_state).
+                                        GENERAL PRIMITIVE, HONEST SCAFFOLDING: this
+                                        module's ONLY detection channel is the AST
+                                        scanner (see scan_operator_mechanisms
+                                        above), which returns ONLY scanner-red
+                                        files -- so every relpath that reaches this
+                                        classification already has a non-empty
+                                        `violations` list, and "scan clean" is
+                                        therefore always False in the REAL
+                                        reconcile_upgrade path today. This state is
+                                        unreachable through the real scanner-driven
+                                        flow as a result -- it exists so a FUTURE
+                                        non-scanner detection signal (one that can
+                                        supply a genuinely scan-clean mechanism_id)
+                                        has a real, tested primitive to land on,
+                                        without this module inventing a fake path
+                                        to reach it today.
                                   Defaults to "manual_review" to preserve existing
                                   behavior for any caller that does not set it
                                   explicitly.
+    paused_op_kinds:               (F-55 B2) the resolved op_kind(s) this
+                                  mechanism's live writes are denied for, when
+                                  state == "paused_live_write". Empty for every
+                                  other state.
     """
     mechanism_id: str
     writer_relpath: str
@@ -253,6 +293,7 @@ class MechanismReport:
     entangled_read_outputs: List[str] = field(default_factory=list)
     orchestrator_routed: bool = False
     state: str = "manual_review"
+    paused_op_kinds: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -465,6 +506,148 @@ def _classify_read_output_entanglement(
         return False, candidate_wrapper_relpath, []
 
     return None, None, []
+
+
+# ===== F-55 B2: paused_op_kinds resolution + the paused_live_write writer =====
+
+def _load_capability_descriptor_set(operator_project_dir: Path) -> List[Dict[str, Any]]:
+    """Fail-safe loader for the operator project's descriptor set
+    (security/capability_descriptors.json). Mirrors write_gate.load_descriptor_set's
+    own fail-safe convention exactly: absent / unreadable / malformed / non-array all
+    resolve to [] -- never raises."""
+    path = Path(operator_project_dir) / CAPABILITY_DESCRIPTOR_SET_REL
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _extract_op_kind_literal(source_text: str) -> List[str]:
+    """Statically extract a module-level ``OP_KIND = "<literal>"`` string
+    assignment from a capability module's own source -- AST parse only, NEVER
+    imported/executed (this module never runs operator-authored code).
+    ``capability_code_scaffold.py``'s ``render_capability_module`` bakes exactly
+    this constant into every emitted CAPABILITY-zone module (the SAME file
+    this reconcile module flags under ``agents/capabilities/``) -- duplicated
+    verbatim from its paired adapter module's own ``OP_KIND`` constant by
+    design (see that template's own docstring on why it is duplicated, not
+    imported). Returns ``[]`` when the source does not parse, or carries no
+    such literal string assignment -- fail-closed/empty-safe, never guesses."""
+    try:
+        tree = ast.parse(source_text)
+    except SyntaxError:
+        return []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, ast.Name) and target.id == "OP_KIND":
+                value = node.value
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    return [value.value]
+    return []
+
+
+def resolve_paused_op_kinds(
+    operator_project_dir: Path,
+    mechanism_id: str,
+    writer_relpath: str,
+    descriptor_set: Sequence[Dict[str, Any]],
+) -> List[str]:
+    """(F-55 B2) Resolve the normalized ``paused_op_kinds`` for a flagged
+    capability -- the value recorded into its pause-state marker so the
+    emitted write_gate's runtime deny-branch (write_gate.evaluate_write_gate /
+    PAUSED_MECHANISMS_DIR) can key on it.
+
+    DESIGN NOTE -- a disclosed resolution of a real schema gap, not a
+    pre-existing pinned mapping: the descriptor-entry schema
+    (capability_registration.REGISTERED_ENTRY_KEYS /
+    capability_descriptor_registry.ENTRY_KEYS) carries id / name / risk_class /
+    recovery_profile_ref / declared_test_target / blast_radius_cap / accepted /
+    phase_id -- NEVER an op_kind field. op_kind is not part of a descriptor
+    entry anywhere in this codebase (confirmed: OperationContract itself
+    carries no capability/descriptor id either -- the two are joined only by
+    an Operation instance's own surface/op_kind pair, and the add-capability
+    convention that a declared descriptor's id equals the capability_id /
+    mechanism_id, never by a stored op_kind field). So "resolved from the
+    capability's descriptor entry" is implemented here as a two-part,
+    fail-closed lookup:
+      1. a descriptor entry with ``id == mechanism_id`` must EXIST -- the
+         documented add-capability convention (descriptor id == capability_id
+         == mechanism_id/file-stem; see wizard/skills/add-capability.md).
+         Absent entry => ``[]`` (empty-safe, per this task's explicit
+         contract -- never guesses at an op_kind for an undeclared
+         capability).
+      2. the actual op_kind VALUE is read from the flagged file's OWN
+         SOURCE, never invented: capability_code_scaffold.py's emitted
+         CAPABILITY-zone module (exactly the file this reconcile module
+         flags) carries a literal ``OP_KIND = "..."`` module-level constant
+         (render_capability_module / _CAPABILITY_MODULE_TEMPLATE) -- parsed
+         statically by ``_extract_op_kind_literal``.
+    Returns ``[]`` if either step fails to resolve -- fail-closed/empty-safe,
+    never fabricates an op_kind."""
+    has_descriptor = any(
+        isinstance(e, dict) and e.get("id") == mechanism_id for e in descriptor_set
+    )
+    if not has_descriptor:
+        return []
+    writer_path = Path(operator_project_dir) / writer_relpath
+    try:
+        source_text = writer_path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return _extract_op_kind_literal(source_text)
+
+
+def _write_paused_live_write_state(
+    operator_project_dir: Path,
+    mechanism_id: str,
+    writer_relpath: str,
+    violations: List[Any],
+    from_version: str,
+    to_version: str,
+    paused_op_kinds: List[str],
+) -> None:
+    """(F-55 B2) Write the pause-state marker for a ``paused_live_write``
+    capability. Unlike ``_safe_pause_entrypoint``, this NEVER touches an
+    entrypoint wrapper -- there is none to gate at this shape (see
+    ``_is_under_capability_dir``'s own docstring). The capability keeps
+    running; its live writes for the resolved ``paused_op_kinds`` are denied
+    at RUNTIME instead, by the emitted write_gate's deny-branch reading this
+    exact marker file (any ``*.json`` directly under
+    PAUSED_MECHANISMS_DIR_REL). Mirrors ``_safe_pause_entrypoint``'s state
+    shape (mechanism_id / writer_relpath / credentials_preserved /
+    migration_status) with ``paused_op_kinds`` ADDED and
+    ``entrypoint_relpath`` explicitly ``None``."""
+    marker_path = _pause_marker_path(operator_project_dir, mechanism_id)
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    if not marker_path.exists():
+        marker_path.write_text("", encoding="utf-8")
+
+    state = {
+        "mechanism_id": mechanism_id,
+        "writer_relpath": writer_relpath,
+        "entrypoint_relpath": None,
+        "state": "paused_live_write",
+        "paused_op_kinds": list(paused_op_kinds),
+        "paused_at": _utcnow_iso(),
+        "from_version": from_version,
+        "to_version": to_version,
+        "reason": "external-write gate violation detected on upgrade",
+        "violations": [
+            {"path": writer_relpath, "line": getattr(v, "lineno", None),
+             "kind": getattr(v, "kind", "")}
+            for v in violations
+        ],
+        "credentials_preserved": True,
+        "migration_status": "pending",
+    }
+    _pause_state_path(operator_project_dir, mechanism_id).parent.mkdir(
+        parents=True, exist_ok=True)
+    _atomic_write(
+        _pause_state_path(operator_project_dir, mechanism_id),
+        json.dumps(state, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+    )
 
 
 def _pause_marker_path(operator_project_dir: Path, mechanism_id: str) -> Path:
@@ -717,6 +900,18 @@ def render_impact_notice(
                 "will be rebuilt through the same reviewed process used for any new "
                 "capability before it runs again."
             )
+        elif m.state == "paused_live_write":
+            # (F-55 B2) Honest state: distinct from BOTH "paused" (an entrypoint
+            # was switched off) and "broken_requires_migration" (it cannot run at
+            # all) -- this one still runs, but its specific external-write
+            # action(s) are blocked every time it tries them until it is rebuilt.
+            # Deliberately no internal identifiers (op_kind strings) in operator-
+            # facing text -- plain language only, matching every other branch here.
+            lines.append(
+                "  - It keeps running, but the specific change(s) it makes outside this "
+                "project have been switched off every time it tries them -- until it is "
+                "rebuilt through the same reviewed process used for any new capability."
+            )
         else:
             lines.append(
                 "  - No automatic schedule was found for it, so nothing could be paused "
@@ -781,6 +976,7 @@ def reconcile_upgrade(
         separate_readonly_entrypoint: Optional[str] = None
         entangled_read_outputs: List[str] = []
         orchestrator_routed = False
+        paused_op_kinds: List[str] = []
         if entrypoint:
             _safe_pause_entrypoint(
                 operator_project_dir, mechanism_id, relpath, entrypoint,
@@ -815,12 +1011,47 @@ def reconcile_upgrade(
                 # That is a stronger, more honest claim than "review by hand":
                 # the fix is queued, not merely recommended.
                 if _is_under_capability_dir(relpath):
-                    state = "broken_requires_migration"
-                    note = (
-                        "no wrapper and not orchestrator-scheduled; this "
-                        "capability was built against a safety interface that "
-                        "changed and cannot run as-is -- migration queued"
-                    )
+                    # (F-55 B2) GENERAL PRIMITIVE: import-clean AND scan-clean
+                    # classifies as paused_live_write (still runnable; deny writes
+                    # at RUNTIME via write_gate's op_kind marker) rather than
+                    # broken_requires_migration. This module's ONLY detection
+                    # channel is the AST scanner (scan_operator_mechanisms above),
+                    # which returns ONLY scanner-red files -- there is no separate
+                    # import-execution check here (this module never runs
+                    # operator-authored code), so "import-clean" collapses to "not
+                    # scanner-flagged" at this call site. `violations` is NEVER
+                    # empty for a relpath that reached this loop (that is exactly
+                    # why it is a key of `by_relpath`), so `scan_clean` below is
+                    # always False through the REAL scanner-driven path today --
+                    # this branch is unreachable in practice, by construction, and
+                    # exists as honest scaffolding for a FUTURE non-scanner
+                    # detection signal that could supply a genuinely scan-clean
+                    # mechanism_id here (see MechanismReport.state's docstring).
+                    scan_clean = not violations
+                    resolved_paused_op_kinds: List[str] = []
+                    if scan_clean:
+                        descriptor_set = _load_capability_descriptor_set(operator_project_dir)
+                        resolved_paused_op_kinds = resolve_paused_op_kinds(
+                            operator_project_dir, mechanism_id, relpath, descriptor_set)
+                    if scan_clean and resolved_paused_op_kinds:
+                        state = "paused_live_write"
+                        paused_op_kinds = resolved_paused_op_kinds
+                        _write_paused_live_write_state(
+                            operator_project_dir, mechanism_id, relpath, violations,
+                            from_version, to_version, resolved_paused_op_kinds,
+                        )
+                        note = (
+                            "still runs, but its live write(s) for "
+                            f"{_human_join(sorted(resolved_paused_op_kinds))} are denied "
+                            "at runtime pending migration"
+                        )
+                    else:
+                        state = "broken_requires_migration"
+                        note = (
+                            "no wrapper and not orchestrator-scheduled; this "
+                            "capability was built against a safety interface that "
+                            "changed and cannot run as-is -- migration queued"
+                        )
                 else:
                     state = "manual_review"
                     note = (
@@ -844,6 +1075,7 @@ def reconcile_upgrade(
             entangled_read_outputs=entangled_read_outputs,
             orchestrator_routed=orchestrator_routed,
             state=state,
+            paused_op_kinds=paused_op_kinds,
         ))
 
     notice_path: Optional[Path] = None
