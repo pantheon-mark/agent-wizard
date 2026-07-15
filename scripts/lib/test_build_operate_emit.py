@@ -1441,10 +1441,18 @@ class TestS253ContractDelta(unittest.TestCase):
     def test_emit_set_lists_the_task9_standing_automation_file(self):
         # Task 9 (B2 / F-42, v0.13.0 Slice 2): standing_automation.py must be enrolled,
         # or an emitted writes-back system's standing-automation runners have no safe
-        # primitive to import — twenty-nine lib files total.
+        # primitive to import — twenty-nine lib files total (pre-Task-4-v0.13.1).
         import agent_emitter
         self.assertIn("standing_automation.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 29)
+
+    def test_emit_set_lists_the_task4_capability_health_file(self):
+        # Task 4 (F-55 C, v0.13.1): capability_health.py must be enrolled, or a
+        # writes-back system's session-start orientation (T5) / add-capability
+        # consult has no composite AST-first capability health-check module to
+        # import at all — thirty lib files total.
+        import agent_emitter
+        self.assertIn("capability_health.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 30)
 
     def _writes_back_plan(self):
         import copy, json

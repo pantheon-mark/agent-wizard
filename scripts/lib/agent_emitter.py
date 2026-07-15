@@ -125,6 +125,15 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # invocation dies with ModuleNotFoundError, and the F-42 fail-open defect
     # this primitive closes has nothing to route through.
     "standing_automation.py",
+    # Task 4 (F-55 C, v0.13.1): the composite, AST-first capability
+    # health-check primitive. Nothing else in the lib imports it at module
+    # scope (it is a standalone, read-only probe an agent's session-start
+    # orientation -- or an operator's own add-capability consult -- calls
+    # directly), but a writes-back system's orientation step needs
+    # `external_write.capability_health` present on disk to import at all --
+    # omit it and the deterministic "don't invite the operator into a broken
+    # capability" check this module backs has nothing to route through.
+    "capability_health.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
@@ -179,7 +188,7 @@ def _plan_has_writes_back(plan: "EmissionPlan") -> bool:
 def external_write_lib_emit_set(plan: "EmissionPlan") -> List[str]:
     """The emitted-tree relpaths of the external_write lib files this plan should emit.
 
-    Returns all twenty-nine lib files under agents/lib/external_write/ when the plan has a
+    Returns all thirty lib files under agents/lib/external_write/ when the plan has a
     writes-back dependency: the original four substrate files (operations, adapters,
     broker, scan), the six contract-and-verification modules (verification_modes,
     contracts, verifiers, boundary, proof_hash, copy_run_proof), the two B1-4/B1-5
@@ -191,8 +200,10 @@ def external_write_lib_emit_set(plan: "EmissionPlan") -> List[str]:
     CAPABILITY-zone modules (capability_api, read_facades_gmail), the four v0.12.0 Slice-1
     RunEnvelope-trust-core modules (evidence, run_envelope, bounds, consent_narration), the
     Task 7 (v0.13.0 Slice 2) static adapter-registration import list (registered_adapters), the
-    Task 8 (v0.13.0 Slice 2) read-only judgment-path triage tool (triage), and the Task 9
-    (v0.13.0 Slice 2) standing-automation entrypoint primitive (standing_automation).
+    Task 8 (v0.13.0 Slice 2) read-only judgment-path triage tool (triage), the Task 9
+    (v0.13.0 Slice 2) standing-automation entrypoint primitive (standing_automation), and the
+    Task 4 (F-55 C, v0.13.1) composite AST-first capability health-check primitive
+    (capability_health).
     Canonical enrollment; the physical bundle copy + system-artifacts.json + parity entries land
     at the bundle cut — each copy below is source-gated on the bundle carrying the file, so a
     newly enrolled name is a no-op until that file exists in the source bundle.
