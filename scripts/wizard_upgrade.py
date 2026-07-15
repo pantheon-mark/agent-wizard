@@ -7,12 +7,15 @@ Subcommands (per the foundation-versioning policy upgrade flow):
     upgrade-check          Inspect operator-project drift + available targets
     upgrade                Plan-only by default; --apply performs the merge-apply
     upgrade-plan           Synonym for `upgrade --plan-only`
+    reconcile              Re-run the upgrade safety check against the currently-installed
+                           version, no apply (recovery entry point for an already-upgraded project)
 
 Usage:
     wizard_upgrade.py upgrade-check [--manifest-path PATH] [--registry-path PATH] [--json]
     wizard_upgrade.py upgrade --to VERSION --plan-only [--manifest-path PATH] [--registry-path PATH] [--json]
     wizard_upgrade.py upgrade --to VERSION --apply [--ack] [--manifest-path PATH] [--registry-path PATH]
     wizard_upgrade.py upgrade-plan --to VERSION [--manifest-path PATH] [--registry-path PATH] [--json]
+    wizard_upgrade.py reconcile [--manifest-path PATH] [--registry-path PATH]
 
 Exit codes:
     0  success (plan emitted; or apply completed cleanly)
@@ -32,6 +35,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
@@ -414,6 +418,42 @@ def _run_reconcile_best_effort(operator_dir: Path, build_repo_root: Path, result
     out = render_reconcile_result(reconcile_result)
     if out:
         print(out, end="")
+
+
+def cmd_reconcile(args: argparse.Namespace) -> int:
+    """`wizard reconcile` — re-run the upgrade safety check against the CURRENTLY
+    installed version, with no apply.
+
+    The apply-time reconcile (T1-T3, invoked from `cmd_apply` above) only runs
+    DURING an `upgrade --apply`. An operator who already upgraded across the
+    retired-surface boundary before this fix existed will never take that code
+    path again, so their project never gets scanned. This is the standalone
+    recovery entry point (F-55 D): from_version == to_version == the manifest's
+    current `foundation_bundle_version`, so it never attempts an apply and never
+    requires a newer target to be available — it only scans the installed
+    operator tree for now-non-conformant mechanisms (DETECT/NOTICE/SAFE-PAUSE/
+    GUIDE-MIGRATE), exactly as `_run_reconcile_best_effort` already does after a
+    real apply. Idempotent: the migration-queue + pause-marker writers it calls
+    into already de-dup, so re-running this is always safe."""
+    manifest_path = _resolve_manifest_path(args.manifest_path)
+    registry_path = _resolve_registry_path(args.registry_path)
+
+    # Same operator/config-error handling shape as cmd_upgrade_check.
+    try:
+        manifest = load_operator_manifest(manifest_path)
+    except UpgradeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    operator_dir = manifest_path.parent.parent
+    current_version = manifest.get("foundation_bundle_version", "")
+    build_repo_root = _resolve_build_repo_root(registry_path)
+
+    result = SimpleNamespace(
+        from_version=current_version, to_version=current_version, upgrade_id="",
+    )
+    _run_reconcile_best_effort(operator_dir, build_repo_root, result)
+    return 0
 
 
 def cmd_apply(args: argparse.Namespace) -> int:
@@ -943,6 +983,18 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Git remote the self-update fetches from (default: origin). Advanced/testing.")
     sup_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON to stdout")
     sup_p.set_defaults(func=cmd_self_upgrade)
+
+    recon_p = sub.add_parser(
+        "reconcile",
+        help="Re-run the upgrade safety check against the currently-installed version "
+             "(no apply) -- the recovery entry point for a project that already "
+             "upgraded across a retired-surface boundary before this check existed",
+    )
+    recon_p.add_argument("--manifest-path", default=None,
+                         help="Path to operator-project `.wizard/manifest.json` (default: ./.wizard/manifest.json)")
+    recon_p.add_argument("--registry-path", default=None,
+                         help="Path to `wizard/registry/foundation-bundles.json` (default: cwd-relative)")
+    recon_p.set_defaults(func=cmd_reconcile)
 
     ip_p = sub.add_parser(
         "install-path",

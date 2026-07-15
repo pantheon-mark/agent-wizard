@@ -760,6 +760,53 @@ class CliWiringTests(unittest.TestCase):
         queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
         self.assertEqual(queue[0]["mechanism_id"], "estate_upkeep")
 
+    def test_cmd_reconcile_detects_retired_surface_on_already_upgraded_project(self):
+        # F-55 D: the estate already upgraded across the retired-surface boundary
+        # BEFORE this fix existed, so no `--apply` run will ever invoke reconcile
+        # for them. `wizard reconcile` is the standalone recovery entry point --
+        # it re-runs DETECT/NOTICE/SAFE-PAUSE/GUIDE-MIGRATE against the CURRENTLY
+        # installed version (from_version == to_version == current manifest
+        # version), with no apply attempted and no newer target required.
+        from test_upgrade_apply import _write_build_repo, _build_operator_project
+        _scripts_dir = str(Path(__file__).resolve().parents[1])  # wizard/scripts
+        if _scripts_dir not in sys.path:
+            sys.path.insert(0, _scripts_dir)
+        import wizard_upgrade as cli  # noqa: E402
+
+        build_root, registry_path = _write_build_repo(self.tmp)
+        real_lib = _REAL_REPO / "wizard" / "agents" / "lib" / "external_write"
+        dest_lib = build_root / "wizard" / "agents" / "lib" / "external_write"
+        dest_lib.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(real_lib, dest_lib)
+
+        proj, manifest_path, _ = _build_operator_project(self.tmp, build_root)
+
+        # Simulate an estate that already upgraded to the current version
+        # (foundation_bundle_version is at the current version; a retired-surface
+        # capability was added under agents/capabilities/, which the pre-fix
+        # apply-time reconcile never saw).
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["foundation_bundle_version"] = "v0.13.1"
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                                  encoding="utf-8")
+
+        capdir = proj / "agents" / "capabilities"
+        capdir.mkdir(parents=True, exist_ok=True)
+        (capdir / "inbox_management_capability.py").write_text(
+            "from external_write.capability_api import run_operation\n"
+            "def go():\n    return run_operation(None, None)\n", encoding="utf-8")
+
+        rc = cli.main([
+            "reconcile",
+            "--manifest-path", str(manifest_path),
+            "--registry-path", str(registry_path),
+        ])
+        self.assertEqual(rc, 0)
+
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        self.assertEqual({e["mechanism_id"] for e in queue},
+                          {"inbox_management_capability"})
+
     def test_reconcile_fallback_message_lists_all_operator_code_dirs(self):
         # F-55 review fix: the except-branch fallback message used to hardcode
         # "agents/cron and agents/scripts" -- a second, independent copy of the
