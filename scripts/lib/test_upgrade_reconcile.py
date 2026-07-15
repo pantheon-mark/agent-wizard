@@ -12,6 +12,8 @@ synthetic-build-repo fixture helpers from ``test_upgrade_apply.py``, with the re
 ``agents/lib/external_write`` package copied in so the scanner resolves).
 """
 
+import contextlib
+import io
 import json
 import shutil
 import stat
@@ -19,6 +21,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -154,7 +157,7 @@ class DetectTests(_Base):
         self.assertIn(ccs.DEFAULT_CAPABILITIES_REL.as_posix(), OPERATOR_CODE_DIRS)
 
     def test_retired_surface_capability_detected(self):
-        proj = Path(self._tmpdir.name)
+        proj = self.tmp
         capdir = proj / "agents" / "capabilities"
         capdir.mkdir(parents=True)
         (capdir / "inbox_management_capability.py").write_text(
@@ -549,6 +552,35 @@ class CliWiringTests(unittest.TestCase):
         self.assertTrue((proj / PAUSED_MECHANISMS_DIR_REL / "estate_upkeep.pause").exists())
         queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
         self.assertEqual(queue[0]["mechanism_id"], "estate_upkeep")
+
+    def test_reconcile_fallback_message_lists_all_operator_code_dirs(self):
+        # F-55 review fix: the except-branch fallback message used to hardcode
+        # "agents/cron and agents/scripts" -- a second, independent copy of the
+        # scan scope that went blind to agents/capabilities/ exactly like the
+        # pre-fix OPERATOR_CODE_DIRS did. Force the except branch and assert every
+        # OPERATOR_CODE_DIRS entry is named in the operator-facing message, so this
+        # can't silently re-drift from the single source of truth again.
+        _scripts_dir = str(Path(__file__).resolve().parents[1])  # wizard/scripts
+        if _scripts_dir not in sys.path:
+            sys.path.insert(0, _scripts_dir)
+        import wizard_upgrade as cli  # noqa: E402
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("synthetic reconcile failure")
+
+        original = cli.reconcile_upgrade
+        cli.reconcile_upgrade = _boom
+        try:
+            result = SimpleNamespace(from_version="v1", to_version="v2", upgrade_id="u1")
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                cli._run_reconcile_best_effort(self.tmp, self.tmp, result)
+        finally:
+            cli.reconcile_upgrade = original
+
+        message = buf.getvalue()
+        for code_dir in cli.OPERATOR_CODE_DIRS:
+            self.assertIn(code_dir, message)
 
 
 if __name__ == "__main__":

@@ -79,6 +79,7 @@ from lib.upgrade_apply import (  # noqa: E402
     UpgradeApplyError,
 )
 from lib.upgrade_reconcile import (  # noqa: E402
+    OPERATOR_CODE_DIRS,
     reconcile_upgrade,
     render_reconcile_result,
 )
@@ -405,7 +406,7 @@ def _run_reconcile_best_effort(operator_dir: Path, build_repo_root: Path, result
     except Exception as e:  # noqa: BLE001 - see docstring: never fatal to a completed apply
         print(
             f"note: the upgrade safety check could not complete ({e}). Run a manual review "
-            "of agents/cron and agents/scripts against agents/lib/external_write/scan.py "
+            f"of {', '.join(OPERATOR_CODE_DIRS)} against agents/lib/external_write/scan.py "
             "before relying on any scheduled write.",
             file=sys.stderr,
         )
