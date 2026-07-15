@@ -17,6 +17,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 # Single-home: import from wizard/agents/lib/external_write (canonical location).
 _AGENTS_LIB = Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib"
@@ -897,6 +898,36 @@ class TestPausedOpKindDenyBranch(unittest.TestCase):
             _receipt(_op("set_status", field="Status", new_value="Complete")),
             _AcceptingClient())
         self.assertEqual(result.status, "written")
+
+    def test_unlistable_marker_dir_fails_closed_not_absent(self):
+        # (F-55 B2 review fix) An EXISTING paused-markers directory whose
+        # os.listdir() raises OSError (e.g. permission-denied) must fail
+        # closed (refuse) -- NOT be treated like a genuinely-absent
+        # directory. A gated write's op_kind could be named by a marker
+        # hidden behind the listing failure.
+        self.marker_dir.mkdir(parents=True, exist_ok=True)
+        real_listdir = write_gate.os.listdir
+
+        def _raising_listdir(path):
+            if str(path) == str(self.marker_dir):
+                raise OSError("permission denied")
+            return real_listdir(path)
+
+        op = _op(self.OP_KIND, surface="google_sheets", object_id="obj:1")
+        with mock.patch.object(write_gate.os, "listdir", side_effect=_raising_listdir):
+            d = evaluate_write_gate(op, paused_root=str(self.marker_dir))
+        self.assertFalse(d.permitted)
+        self.assertIn("could not be read", d.refusal.detail["reason"])
+
+        # Regression: a genuinely ABSENT directory (isdir False) is
+        # unaffected by this change -- still permits (byte-identical to the
+        # pre-fix absent-dir behavior), even with the same listdir patch in
+        # place (it must never even be reached for a non-existent dir).
+        absent = str(Path(self._tmpdir.name) / "does-not-exist")
+        with mock.patch.object(write_gate.os, "listdir", side_effect=_raising_listdir):
+            d2 = evaluate_write_gate(_op("set_status", field="Status", new_value="x"),
+                                      paused_root=absent)
+        self.assertTrue(d2.permitted)
 
     def test_paused_root_kwarg_defaults_to_module_constant(self):
         # No paused_root passed at all -- resolves to PAUSED_MECHANISMS_DIR

@@ -213,36 +213,50 @@ def _load_paused_op_kinds(paused_root: str) -> Optional[frozenset]:
     marker file directly under ``paused_root``.
 
     Returns:
-      * ``frozenset()`` (empty) when ``paused_root`` does not exist, is not a
-        directory, cannot be listed, or contains no ``*.json`` files at all --
-        the ABSENT-markers case. No new denial: byte-identical to the prior
-        (pre-F-55-B2) behavior.
+      * ``frozenset()`` (empty) when ``paused_root`` does not exist or is not
+        a directory (the genuinely-ABSENT-markers case), or exists but
+        contains no ``*.json`` files at all. No new denial: byte-identical to
+        the prior (pre-F-55-B2) behavior.
       * the UNION frozenset of every marker's ``paused_op_kinds`` list when
         every marker present parses cleanly.
-      * ``None`` -- the FAIL-CLOSED signal -- when ANY ``*.json`` file in the
-        directory is unreadable, is not valid JSON, is not a JSON object, or
-        carries a ``paused_op_kinds`` value that is not a list of strings. A
-        missing ``paused_op_kinds`` KEY (e.g. an existing B1
-        ``entrypoint_paused`` state file, which never carries this field) is
-        NOT malformed -- it contributes the empty list, same as an absent
-        key entirely. The caller MUST treat ``None`` as "the true paused set
-        cannot be computed" and refuse the write in front of it: a corrupt
-        marker could be hiding a real pause for exactly the op_kind about to
-        run, so ONE unreadable marker anywhere in the directory is enough to
-        refuse EVERY write reaching this check (never just the op_kind the
-        corrupt file happens to name) -- matching this module's "every branch
-        defaults to refuse" posture.
+      * ``None`` -- the FAIL-CLOSED signal -- when the directory EXISTS but
+        cannot be listed (e.g. a permission-denied ``os.listdir`` failure),
+        or when ANY ``*.json`` file in the directory is unreadable, is not
+        valid JSON, is not a JSON object, or carries a ``paused_op_kinds``
+        value that is not a list of strings. A missing ``paused_op_kinds``
+        KEY (e.g. an existing B1 ``entrypoint_paused`` state file, which
+        never carries this field) is NOT malformed -- it contributes the
+        empty list, same as an absent key entirely. The caller MUST treat
+        ``None`` as "the true paused set cannot be computed" and refuse the
+        write in front of it: a corrupt (or unlistable) marker directory
+        could be hiding a real pause for exactly the op_kind about to run,
+        so ONE unreadable marker -- or an existing-but-unlistable directory
+        -- anywhere in this check is enough to refuse EVERY write reaching it
+        (never just the op_kind the corrupt file happens to name) --
+        matching this module's "every branch defaults to refuse" posture.
+        An existing-but-UNLISTABLE directory is unreadable markers, not an
+        absent directory: it must NOT be conflated with the genuinely-absent
+        case above, which is the only one that is safe to permit through.
     """
+    # These two checks are DELIBERATELY split into separate try/except blocks
+    # (not one try wrapping both): `isdir` failing/False means the directory
+    # genuinely isn't there (safe to permit through as "absent"), but an
+    # `isdir`-True directory whose `listdir` then raises OSError (e.g.
+    # permission-denied) is an EXISTING, UNREADABLE marker set -- that must
+    # fail closed (None), never be conflated with the absent case.
     try:
-        if not os.path.isdir(paused_root):
-            return frozenset()
+        is_dir = os.path.isdir(paused_root)
+    except OSError:
+        return frozenset()
+    if not is_dir:
+        return frozenset()
+    try:
         names = sorted(n for n in os.listdir(paused_root) if n.endswith(".json"))
     except OSError:
-        # Cannot even list the directory -- treat exactly like "absent" (an
-        # OS-level listing failure is not marker CONTENT corruption; the
-        # fail-closed contract above is about a marker that exists and was
-        # read but could not be trusted, not about the directory itself).
-        return frozenset()
+        # The directory EXISTS but could not be listed -- unreadable markers,
+        # not an absent directory. Fail closed: a marker naming the op_kind
+        # about to run could be hiding behind this listing failure.
+        return None
 
     union: set = set()
     for name in names:

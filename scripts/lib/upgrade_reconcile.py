@@ -533,18 +533,32 @@ def _extract_op_kind_literal(source_text: str) -> List[str]:
     verbatim from its paired adapter module's own ``OP_KIND`` constant by
     design (see that template's own docstring on why it is duplicated, not
     imported). Returns ``[]`` when the source does not parse, or carries no
-    such literal string assignment -- fail-closed/empty-safe, never guesses."""
+    such literal string assignment -- fail-closed/empty-safe, never guesses.
+
+    MODULE-LEVEL ONLY (matches the docstring's own claim): this scans
+    ``tree.body`` directly -- the top-level statement list of the parsed
+    module -- rather than ``ast.walk`` (which would also visit an ``OP_KIND``
+    assignment nested inside a function/class/branch). The emitted form this
+    function targets (``capability_code_scaffold.py``'s
+    ``render_capability_module``) always writes ``OP_KIND = "..."`` at
+    module scope, so restricting the scan here can never miss the real
+    literal -- it only prevents an unrelated nested ``OP_KIND`` name (e.g.
+    inside a helper function) from being picked up by mistake."""
     try:
         tree = ast.parse(source_text)
     except SyntaxError:
         return []
-    for node in ast.walk(tree):
+    for node in tree.body:
         if isinstance(node, ast.Assign) and len(node.targets) == 1:
             target = node.targets[0]
-            if isinstance(target, ast.Name) and target.id == "OP_KIND":
-                value = node.value
-                if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                    return [value.value]
+        elif isinstance(node, ast.AnnAssign):
+            target = node.target
+        else:
+            continue
+        if isinstance(target, ast.Name) and target.id == "OP_KIND":
+            value = node.value
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                return [value.value]
     return []
 
 
@@ -1102,7 +1116,12 @@ def render_reconcile_result(result: ReconcileResult) -> str:
         return ""
     lines = ["", "Upgrade safety check found something to review:"]
     for m in result.mechanisms:
-        status = "paused" if m.paused else "needs manual review (no schedule found)"
+        if m.paused:
+            status = "paused"
+        elif m.state == "paused_live_write":
+            status = "paused (live-write blocked pending migration)"
+        else:
+            status = "needs manual review (no schedule found)"
         lines.append(f"  - {m.mechanism_id}: {status}")
     if result.notice_path:
         lines.append(f"  See {result.notice_path} for what this means and what happens next.")

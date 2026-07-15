@@ -545,6 +545,26 @@ class RenderReconcileResultTests(unittest.TestCase):
         self.assertIn("paused", out)
         self.assertIn("impact-notice.md", out)
 
+    def test_paused_live_write_state_gets_honest_status_not_manual_review(self):
+        # (review fix) A mechanism whose state is "paused_live_write" (not the
+        # entrypoint-pause boolean `paused`) must NOT fall into the generic
+        # "needs manual review (no schedule found)" bucket -- that mislabels
+        # it. It gets its own short, accurate one-liner.
+        result = ReconcileResult(
+            operator_project_path="/tmp/x", from_version="v1", to_version="v2",
+            mechanisms=[MechanismReport(
+                mechanism_id="acme_widget_deleter",
+                writer_relpath="agents/capabilities/acme_widget_deleter.py",
+                violation_summaries=[], entrypoint_relpath=None, paused=False,
+                state="paused_live_write",
+            )],
+            notice_path="/tmp/x/.wizard/upgrade-review/u1/impact-notice.md",
+        )
+        out = render_reconcile_result(result)
+        self.assertIn("acme_widget_deleter", out)
+        self.assertIn("paused (live-write blocked pending migration)", out)
+        self.assertNotIn("no schedule found", out)
+
 
 # ===================================================================================
 # F-55 B2 — paused_op_kinds resolution + writer, exercised at the HELPER level
