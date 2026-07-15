@@ -514,6 +514,25 @@ class RenderImpactNoticeTests(unittest.TestCase):
         self.assertIn("assistant", text.lower())
         self.assertNotIn("no automatic schedule was found", text.lower())
 
+    def test_from_equals_to_version_uses_recheck_wording_not_upgrade_wording(self):
+        # (review fix, F-55 D) `wizard reconcile` re-checks the CURRENTLY
+        # installed version -- from_version == to_version by construction, no
+        # upgrade happened. "upgraded from v0.13.1 to v0.13.1" would be
+        # misleading; this must read as a safety re-check of the current
+        # version instead.
+        m = self._paused()
+        text = render_impact_notice([m], "0.13.1", "0.13.1")
+        self.assertNotIn("upgraded from", text.lower())
+        self.assertIn("0.13.1", text)
+        self.assertIn("checked", text.lower())
+
+    def test_differing_versions_still_use_upgrade_wording(self):
+        # Guard the conditional both ways: a real version change must keep the
+        # existing upgrade-wording opener untouched.
+        m = self._paused()
+        text = render_impact_notice([m], "v0.11.0", "v0.12.0")
+        self.assertIn("upgraded from v0.11.0 to v0.12.0", text)
+
     def test_no_unconditional_continuity_line_remains_in_source(self):
         # Guard against regression at the source level -- the OLD unconditional
         # line must not exist anywhere in the module, under ANY MechanismReport
@@ -563,6 +582,27 @@ class RenderReconcileResultTests(unittest.TestCase):
         out = render_reconcile_result(result)
         self.assertIn("acme_widget_deleter", out)
         self.assertIn("paused (live-write blocked pending migration)", out)
+        self.assertNotIn("no schedule found", out)
+
+    def test_broken_requires_migration_gets_honest_status_not_manual_review(self):
+        # (review fix, F-55 D) A broken_requires_migration mechanism never had a
+        # schedule to review by hand -- it is import-broken and the fix is
+        # already auto-queued. It must NOT fall into the generic "needs manual
+        # review (no schedule found)" bucket; it gets its own honest one-liner
+        # matching the impact-notice's framing (nothing to review, fix queued).
+        result = ReconcileResult(
+            operator_project_path="/tmp/x", from_version="v1", to_version="v2",
+            mechanisms=[MechanismReport(
+                mechanism_id="inbox_management_capability",
+                writer_relpath="agents/capabilities/inbox_management_capability.py",
+                violation_summaries=[], entrypoint_relpath=None, paused=False,
+                state="broken_requires_migration",
+            )],
+            notice_path="/tmp/x/.wizard/upgrade-review/u1/impact-notice.md",
+        )
+        out = render_reconcile_result(result)
+        self.assertIn("inbox_management_capability", out)
+        self.assertIn("queued for rebuild", out.lower())
         self.assertNotIn("no schedule found", out)
 
 

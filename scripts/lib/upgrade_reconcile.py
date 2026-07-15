@@ -872,12 +872,27 @@ def render_impact_notice(
     made when a separate read-only entrypoint was positively verified to
     survive the pause.
     """
+    if from_version == to_version:
+        # (review fix, F-55 D) `wizard reconcile` re-checks the CURRENTLY
+        # installed version against today's safety rules -- from_version ==
+        # to_version by construction (no upgrade happened). The upgrade-
+        # wording opener would misleadingly read as "upgraded from v0.13.1
+        # to v0.13.1", so this path gets an honest re-check framing instead.
+        opener = (
+            f"Your system (version {to_version}) was checked against the current "
+            "safety rules for anything that changes information outside this project "
+            "(a spreadsheet, an inbox, a file store, and so on)."
+        )
+    else:
+        opener = (
+            f"Your system was upgraded from {from_version} to {to_version}. That upgrade adds "
+            "a stronger check on anything that changes information outside this project "
+            "(a spreadsheet, an inbox, a file store, and so on)."
+        )
     lines = [
         "# Upgrade safety notice",
         "",
-        f"Your system was upgraded from {from_version} to {to_version}. That upgrade adds "
-        "a stronger check on anything that changes information outside this project "
-        "(a spreadsheet, an inbox, a file store, and so on).",
+        opener,
         "",
         "While applying that check, it found something built before this rule existed "
         "that does not yet follow it.",
@@ -1120,6 +1135,8 @@ def render_reconcile_result(result: ReconcileResult) -> str:
             status = "paused"
         elif m.state == "paused_live_write":
             status = "paused (live-write blocked pending migration)"
+        elif m.state == "broken_requires_migration":
+            status = "cannot run as-is -- queued for rebuild"
         else:
             status = "needs manual review (no schedule found)"
         lines.append(f"  - {m.mechanism_id}: {status}")
