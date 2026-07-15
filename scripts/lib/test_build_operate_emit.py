@@ -744,10 +744,12 @@ class ControlledVocabularyRuleWiringTests(unittest.TestCase):
         cls.od_path = REPO_ROOT / "wizard" / "templates" / "root" / "operating_discipline.md"
         cls.rl_path = REPO_ROOT / "wizard" / "templates" / "quality" / "rules_library.md"
         cls.sb_path = REPO_ROOT / "wizard" / "templates" / "root" / "session_bootstrap.md"
+        cls.rc_path = REPO_ROOT / "wizard" / "templates" / "root" / "CLAUDE.md"
         cls.pi_text = cls.pi_path.read_text(encoding="utf-8")
         cls.od_text = cls.od_path.read_text(encoding="utf-8")
         cls.rl_text = cls.rl_path.read_text(encoding="utf-8")
         cls.sb_text = cls.sb_path.read_text(encoding="utf-8")
+        cls.rc_text = cls.rc_path.read_text(encoding="utf-8")
 
     def test_project_instructions_states_controlled_vocab_rule(self):
         """project_instructions.md carries the controlled-vocabulary standing rule."""
@@ -884,9 +886,36 @@ class ControlledVocabularyRuleWiringTests(unittest.TestCase):
         pattern = re.compile(r'S2\.[0-9]|RW-[0-9]|ADR-[0-9]|IDQ-[0-9]|AR-[0-9]|W-[0-9]|F-2[0-9]')
         for name, text in [("templates/root/project_instructions.md", self.pi_text),
                            ("templates/root/operating_discipline.md", self.od_text),
-                           ("templates/quality/rules_library.md", self.rl_text)]:
+                           ("templates/quality/rules_library.md", self.rl_text),
+                           ("templates/root/CLAUDE.md", self.rc_text)]:
             m = pattern.search(text)
             self.assertIsNone(m, f"build ID found in {name}: {m}")
+
+    def test_update_notice_separates_info_from_apply_consent(self):
+        """The root CLAUDE.md 'System-update notices' section must not let a 'see what's
+        new' information request be misread as consent to apply an update. 'see what's
+        new' authorizes only the read-only upgrade-check + reporting back, and returns the
+        operator to their choice; applying requires a separate, explicit approval that
+        names applying. The 'never discourage a safe update' posture must remain intact."""
+        text = self.rc_text
+        lower = text.lower()
+        self.assertIn("see what's new", lower)
+        self.assertRegex(
+            lower,
+            r"see what's new[^.]*only[^.]*read|returns you to",
+            "CLAUDE.md must state 'see what's new' authorizes ONLY the read (upgrade-check) "
+            "and returns the operator to their choice — never implicit apply-consent",
+        )
+        self.assertRegex(
+            lower,
+            r"separate.*explicit|explicit.*apply",
+            "CLAUDE.md must state that applying an update requires a SEPARATE, EXPLICIT "
+            "approval distinct from the 'see what's new' informational path",
+        )
+        # The existing "never discourage a safe update" posture must remain intact.
+        self.assertIn("do not discourage a safe update", lower)
+        self.assertIn("never", lower)
+        self.assertIn("steer", lower)
 
     def test_operating_discipline_has_capability_health_gate(self):
         """Task 5 (F-55 C): operating_discipline.md's Orientation section names the
