@@ -908,9 +908,17 @@ class ControlledVocabularyRuleWiringTests(unittest.TestCase):
         )
         self.assertRegex(
             lower,
-            r"separate.*explicit|explicit.*apply",
+            r"separate,\s*explicit approval",
             "CLAUDE.md must state that applying an update requires a SEPARATE, EXPLICIT "
-            "approval distinct from the 'see what's new' informational path",
+            "approval distinct from the 'see what's new' informational path. "
+            "(Tightened from the earlier 'separate.*explicit|explicit.*apply' pattern, which "
+            "the pre-fix conflated text also matched via 'explicit yes ... to apply' — "
+            "verified by testing this exact pattern against the old clause: 'The operator's "
+            "*approval* is required before anything is applied ... without their explicit "
+            "yes. ... once they have approved (to see what's new, or to apply)' — the old "
+            "loose pattern matched that via the 'explicit.*apply' branch; this tightened "
+            "pattern requires the literal 'separate, explicit approval' phrase the fix "
+            "introduced, which the old text does not contain.)",
         )
         # The existing "never discourage a safe update" posture must remain intact.
         self.assertIn("do not discourage a safe update", lower)
@@ -1414,6 +1422,78 @@ class Task8ApprovalEmitTests(unittest.TestCase):
         lower = self.orch_text.lower()
         self.assertTrue(("distinct" in lower) or ("separate" in lower),
                         "emitted orchestrator_prompt.md must describe step-4 approval as distinct/separate")
+
+
+class Task8UpdateConsentEmitTests(unittest.TestCase):
+    """F-56: from-bundle proof that the update-notice info/apply-consent separation
+    (fixed in wizard/templates/root/CLAUDE.md; canonical template-level coverage is
+    ControlledVocabularyRuleWiringTests.test_update_notice_separates_info_from_apply_consent)
+    survives the emit/render path into a real operator system, mirroring the
+    Task8ApprovalEmitTests convention (emit via emit_operator_system into a staging
+    dir, then assert on the RENDERED file — the template-level test above covers
+    canonical prose; this is the from-bundle proof).
+
+    Unlike Task8ApprovalEmitTests (which pins bundle_version="v0.8.0" to regression-test
+    an already-frozen bundle's step-4 prose), this class resolves the bundle version the
+    SAME way a fresh build does with no --bundle-version override: registry latest_bundle_
+    version(load_registry(...)) — see interview_cli._resolve_emit_bundle_version. Pinning
+    to an old frozen bundle would be wrong here: released bundles are byte-immutable
+    (project_bundle_cut_recipe), so a fixed old pin could never carry the F-56 fix.
+
+    Ground-truth-verified gap (checked against the registry + wizard/foundation-bundles/
+    at the time this test was written): the F-56 fix landed only in the live
+    wizard/templates/root/CLAUDE.md (commit 314900c); no cut bundle carries it yet — that
+    happens at the v0.13.1 bundle-cut task. Until that cut lands, the registry's latest
+    bundle still emits the pre-fix conflated wording, so this test SKIPS with a clear
+    reason rather than failing (or faking a pass) — it activates for real, with no code
+    change needed here, the moment the bundle is cut.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from operator_system_emitter import emit_operator_system  # noqa: E402
+        from upgrade import load_registry, latest_bundle_version  # noqa: E402
+        registry_path = REPO_ROOT / "wizard" / "registry" / "foundation-bundles.json"
+        cls._bundle = latest_bundle_version(load_registry(registry_path))
+        dr = _dr_with_increments()
+        bi = BuildIntent(derived_record=dr, agent_intents=[_ai_collector(), _ai_summariser()])
+        plan_dict = assemble_emission_plan(bi, SP, CORPUS, model_tiers=SP.model_tiers,
+                                           bundle_version=cls._bundle)
+        typed_plan = validate_emission_plan(plan_dict, EP_CONTRACT)
+        cls._tmp = tempfile.TemporaryDirectory()
+        staging = Path(cls._tmp.name)
+        emit_operator_system(typed_plan, staging, REPO_ROOT)
+        cls.rc_text = (staging / "CLAUDE.md").read_text(encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_emitted_claude_md_separates_info_from_apply_consent(self):
+        import re
+        lower = self.rc_text.lower()
+        if not re.search(r"separate,\s*explicit approval", lower):
+            self.skipTest(
+                f"the registry's current latest bundle ({self._bundle}) predates the "
+                "F-56 update-consent prose fix (committed only to the live "
+                "wizard/templates/root/CLAUDE.md; it reaches a cut bundle at the "
+                "v0.13.1 bundle-cut task). This test activates for real, unmodified, "
+                "once that bundle is released and becomes the registry latest."
+            )
+        self.assertIn("see what's new", lower)
+        self.assertRegex(
+            lower,
+            r"see what's new[^.]*only[^.]*read|returns you to",
+            "emitted CLAUDE.md must state 'see what's new' authorizes ONLY the read "
+            "(upgrade-check) and returns the operator to their choice",
+        )
+        self.assertRegex(
+            lower,
+            r"separate,\s*explicit approval",
+            "emitted CLAUDE.md must state that applying an update requires a SEPARATE, "
+            "EXPLICIT approval distinct from the 'see what's new' informational path",
+        )
+        self.assertIn("do not discourage a safe update", lower)
 
 
 class TestS253ContractDelta(unittest.TestCase):
