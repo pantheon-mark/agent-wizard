@@ -210,6 +210,37 @@ class MechanismReport:
                                   paired with ``paused=False`` -- there is no
                                   per-mechanism file this module can gate in that
                                   shape (see that function's docstring).
+    state:                        (F-55 B1) the honest, operator-facing state
+                                  discriminator for this mechanism. One of:
+                                    "entrypoint_paused"       -- a conventional
+                                        ``run_<stem>.sh`` wrapper was found and
+                                        safe-paused (existing cron path).
+                                    "orchestrator_routed"     -- scheduled through
+                                        the Orchestrator; no per-mechanism file to
+                                        gate (existing path).
+                                    "manual_review"           -- no wrapper, not
+                                        orchestrator-routed, and the writer is NOT
+                                        under the operator-capability directory --
+                                        the pre-existing "no schedule found"
+                                        fallback.
+                                    "broken_requires_migration" -- (B1, this task)
+                                        no wrapper, not orchestrator-routed, and the
+                                        writer IS under the operator-capability
+                                        directory. Every mechanism this module ever
+                                        sees is scanner-red (the AST scanner only
+                                        returns violating files), and a capability
+                                        in this shape has no structural entrypoint
+                                        to safe-pause -- it is import-broken and
+                                        cannot run at all. Honest state, not a
+                                        continuity claim: nothing was "paused"
+                                        because nothing could run.
+                                    "paused_live_write"       -- reserved for a
+                                        future still-runnable-capability primitive
+                                        (T3); no detection path for it exists yet
+                                        in this module.
+                                  Defaults to "manual_review" to preserve existing
+                                  behavior for any caller that does not set it
+                                  explicitly.
     """
     mechanism_id: str
     writer_relpath: str
@@ -221,6 +252,7 @@ class MechanismReport:
     separate_readonly_entrypoint: Optional[str] = None
     entangled_read_outputs: List[str] = field(default_factory=list)
     orchestrator_routed: bool = False
+    state: str = "manual_review"
 
 
 @dataclass
@@ -316,6 +348,18 @@ def _wrapper_relpath_for(writer_relpath: str) -> str:
     ``agents/cron/run_estate_upkeep.sh`` wrapping ``agents/cron/estate_upkeep.py``)."""
     p = Path(writer_relpath)
     return str(p.parent / f"run_{p.stem}.sh")
+
+
+def _is_under_capability_dir(writer_relpath: str) -> bool:
+    """(F-55 B1) True iff the flagged writer lives under the operator-capability
+    directory (``agents/capabilities/`` in a real emitted project). Derived from
+    the emitter's own ``DEFAULT_CAPABILITIES_REL`` — never hardcoded — so this
+    stays correct if that convention ever moves. A capability in this shape has
+    no ``run_<stem>.sh`` wrapper convention and is not cron/orchestrator-scheduled,
+    so the entrypoint-level safe-pause mechanism does not structurally apply to
+    it; see ``reconcile_upgrade``'s ``broken_requires_migration`` branch."""
+    prefix = DEFAULT_CAPABILITIES_REL.as_posix().rstrip("/") + "/"
+    return Path(writer_relpath).as_posix().startswith(prefix)
 
 
 def _find_entrypoint(operator_project_dir: Path, writer_relpath: str) -> Optional[str]:
@@ -659,6 +703,20 @@ def render_impact_notice(
                 "it reads and reports to you the same as its change to your "
                 "information: not verified safe, not confirmed to still be running."
             )
+        elif m.state == "broken_requires_migration":
+            # (F-55 B1) Honest state: this was built against a safety interface
+            # that has since changed, so it cannot run at all right now -- not
+            # "paused", because there was never a schedule to switch off. NO
+            # continuity/"keeps running" claim, and entanglement (read-only
+            # outputs surviving alongside a paused write) does not apply to
+            # something that cannot run in the first place.
+            lines.append(
+                "  - This was built against a safety check that has since changed, so "
+                "it cannot run as-is right now. It was not on any automatic schedule, "
+                "so there was nothing to switch off. The fix has been queued, and it "
+                "will be rebuilt through the same reviewed process used for any new "
+                "capability before it runs again."
+            )
         else:
             lines.append(
                 "  - No automatic schedule was found for it, so nothing could be paused "
@@ -730,6 +788,7 @@ def reconcile_upgrade(
             )
             paused = True
             note = f"entrypoint {entrypoint} safe-paused"
+            state = "entrypoint_paused"
             carries_read_outputs, separate_readonly_entrypoint, entangled_read_outputs = (
                 _classify_read_output_entanglement(
                     operator_project_dir, relpath, flagged_relpaths)
@@ -740,6 +799,7 @@ def reconcile_upgrade(
             paused = False
             if orchestrator_entry:
                 orchestrator_routed = True
+                state = "orchestrator_routed"
                 note = (
                     "scheduled through your assistant (the Orchestrator) via "
                     f"{orchestrator_entry}; no dedicated wrapper file exists to "
@@ -747,11 +807,27 @@ def reconcile_upgrade(
                 )
             else:
                 orchestrator_routed = False
-                note = (
-                    "no conventional schedule/entrypoint file was found for this "
-                    "mechanism -- it could not be paused automatically; review it "
-                    "by hand"
-                )
+                # (F-55 B1) No wrapper, not orchestrator-routed. If the writer
+                # lives under the operator-capability directory, it has no
+                # structural entrypoint to safe-pause at all (no run_<stem>.sh
+                # convention applies there) and -- because this module only ever
+                # sees scanner-red files -- it is import-broken and cannot run.
+                # That is a stronger, more honest claim than "review by hand":
+                # the fix is queued, not merely recommended.
+                if _is_under_capability_dir(relpath):
+                    state = "broken_requires_migration"
+                    note = (
+                        "no wrapper and not orchestrator-scheduled; this "
+                        "capability was built against a safety interface that "
+                        "changed and cannot run as-is -- migration queued"
+                    )
+                else:
+                    state = "manual_review"
+                    note = (
+                        "no conventional schedule/entrypoint file was found for "
+                        "this mechanism -- it could not be paused automatically; "
+                        "review it by hand"
+                    )
         _append_migration_request(
             operator_project_dir, mechanism_id, relpath, entrypoint, violations,
             from_version, to_version,
@@ -767,6 +843,7 @@ def reconcile_upgrade(
             separate_readonly_entrypoint=separate_readonly_entrypoint,
             entangled_read_outputs=entangled_read_outputs,
             orchestrator_routed=orchestrator_routed,
+            state=state,
         ))
 
     notice_path: Optional[Path] = None

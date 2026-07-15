@@ -168,6 +168,32 @@ class DetectTests(_Base):
 
 
 class ReconcileEndToEndTests(_Base):
+    def test_capabilities_broken_requires_migration_two_locations(self):
+        # F-55 B1: a retired-surface capability under agents/capabilities/ has no
+        # run_<stem>.sh wrapper and is not orchestrator-scheduled, so the existing
+        # entrypoint-level safe-pause does not structurally apply to it. It is
+        # import-broken and scanner-red -- it cannot run -- so it must classify as
+        # broken_requires_migration, not manual_review, and the notice must never
+        # claim it "keeps running exactly as before". Two distinct capability ids
+        # (anti-overfit) prove this isn't keyed on a single hardcoded id.
+        proj = Path(self._tmpdir.name)
+        capdir = proj / "agents" / "capabilities"
+        capdir.mkdir(parents=True)
+        for cid in ("inbox_management_capability", "estate_upkeep_capability"):
+            (capdir / f"{cid}.py").write_text(
+                "from external_write.capability_api import run_operation\n"
+                "def go():\n    return run_operation(None, None)\n", encoding="utf-8")
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.11.0", to_version="0.13.1")
+        states = {m.mechanism_id: m.state for m in result.mechanisms}
+        self.assertEqual(states["inbox_management_capability"], "broken_requires_migration")
+        self.assertEqual(states["estate_upkeep_capability"], "broken_requires_migration")
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text())
+        self.assertEqual({e["mechanism_id"] for e in queue},
+                          {"inbox_management_capability", "estate_upkeep_capability"})
+        notice = (proj / result.notice_path).read_text() if result.notice_path else ""
+        self.assertNotIn("keeps running exactly as before", notice)
+
     def test_direct_writer_paused_read_only_untouched_notice_and_queue_written(self):
         proj = _write_project(self.tmp, writer_body=_DIRECT_WRITER)
         writer_path = proj / "agents" / "cron" / "estate_upkeep.py"
