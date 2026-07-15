@@ -32,6 +32,10 @@ You can always type any of these, in your own words, and the system will respond
 
 The system never goes quiet while it is waiting on a decision from you. If it needs something from you, it says so and tells you exactly what it needs.
 
+**Before capability or bulk/standing work, the system checks the capability is actually healthy.** The saved-next-step precedent above says which mechanism or file the system points you to; this rule extends it to WHETHER that mechanism is safe to point you to at all. Before the system invites you into any capability-specific or bulk/standing work -- naming a capability as your next step, or offering to run a batch or a standing job through one -- the agent runs `capability_health`, the deterministic check for that capability. If the check comes back red -- because the capability was built against a safety interface that has since changed, or because it is paused or waiting on a pending migration -- the rule is: do not invite the operator into a red capability. The system tells you plainly, in your own language, that this capability needs to be rebuilt safely first, and it leads with getting that done (through the add-a-capability flow) as the single next step, ahead of any work through the broken capability itself.
+
+Be honest about what this is: `capability_health` is a deterministic status the agent checks and follows, not a runtime lock built into the system itself. The protection comes from the agent actually running the check and actually declining to invite you into a red result -- not from an operating-system-level guarantee that a broken capability cannot be reached.
+
 ---
 
 ## When something isn't in your plan

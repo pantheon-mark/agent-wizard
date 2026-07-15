@@ -888,6 +888,42 @@ class ControlledVocabularyRuleWiringTests(unittest.TestCase):
             m = pattern.search(text)
             self.assertIsNone(m, f"build ID found in {name}: {m}")
 
+    def test_operating_discipline_has_capability_health_gate(self):
+        """Task 5 (F-55 C): operating_discipline.md's Orientation section names the
+        capability_health check as the mechanism the agent runs before inviting the
+        operator into capability or bulk/standing work, and states plainly that a red
+        capability is not something the operator is invited into."""
+        text = self.od_text
+        self.assertIn("capability_health", text,
+                      "operating_discipline.md must name the capability_health mechanism "
+                      "the agent runs before inviting the operator into capability work")
+        self.assertIn("do not invite", text.lower(),
+                      "operating_discipline.md must state the system does NOT invite the "
+                      "operator into a red/broken capability")
+
+
+class AddCapabilitySkillHealthProbeTests(unittest.TestCase):
+    """Task 5 (F-55 C): wizard/skills/add-capability.md's Step A must name the
+    capability_health probe, so a broken capability is caught even when there is no
+    pending_migrations.json entry for it (a reconcile scope miss must not strand the
+    operator)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.ac_path = REPO_ROOT / "wizard" / "skills" / "add-capability.md"
+        cls.ac_text = cls.ac_path.read_text(encoding="utf-8")
+
+    def test_add_capability_step_a_names_capability_health_probe(self):
+        lower = self.ac_text.lower()
+        step_a_idx = lower.find("## step a")
+        step_b_idx = lower.find("## step b")
+        self.assertNotEqual(step_a_idx, -1, "add-capability.md must have a '## Step A' section")
+        self.assertNotEqual(step_b_idx, -1, "add-capability.md must have a '## Step B' section")
+        step_a_text = self.ac_text[step_a_idx:step_b_idx]
+        self.assertIn("capability_health", step_a_text,
+                      "add-capability.md Step A must name the capability_health probe it runs, "
+                      "so a broken capability with no pending_migrations.json entry is still caught")
+
 
 class WritesBackOwnershipCaptureTests(unittest.TestCase):
     """Task 7 (A): interview step 09 captures, per writes-back dependency, the owning agent,
