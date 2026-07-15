@@ -97,6 +97,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from bundle_templates import wizard_subroot  # type: ignore  # noqa: E402
+from capability_code_scaffold import DEFAULT_CAPABILITIES_REL  # type: ignore  # noqa: E402
 
 
 # ===== Reused T5 scanner (single-home import; canonical location) ===========
@@ -124,7 +125,13 @@ def _scan_module(build_repo_root: Path):
 # scan target here — it is the trusted infrastructure the gate exists to enforce,
 # not operator-authored capability code, and rescanning it would just reproduce
 # the build-time gate battery inside the operator's own upgrade for no benefit.
-OPERATOR_CODE_DIRS: Tuple[str, ...] = ("agents/cron", "agents/scripts")
+# Scheduled-mechanism dirs + the capability emitter's real output dir (derive,
+# don't drift -- this is the fix for F-55: the set used to be hardcoded and
+# went blind to agents/capabilities/ once add-capability started emitting
+# there).
+OPERATOR_CODE_DIRS: Tuple[str, ...] = (
+    "agents/cron", "agents/scripts", DEFAULT_CAPABILITIES_REL.as_posix(),
+)
 
 PAUSED_MECHANISMS_DIR_REL = ".wizard/paused-mechanisms"
 MIGRATION_QUEUE_REL = "agents/handoffs/pending_migrations.json"

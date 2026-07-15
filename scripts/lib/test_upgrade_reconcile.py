@@ -147,6 +147,22 @@ class DetectTests(_Base):
         by_relpath = scan_operator_mechanisms(proj, _REAL_REPO)
         self.assertNotIn("agents/lib/external_write/adapters.py", by_relpath)
 
+    def test_scan_scope_covers_capabilities_dir_derived_from_emitter(self):
+        # anti-drift: the scanned set must CONTAIN the emitter's real output dir
+        import capability_code_scaffold as ccs
+        from upgrade_reconcile import OPERATOR_CODE_DIRS
+        self.assertIn(ccs.DEFAULT_CAPABILITIES_REL.as_posix(), OPERATOR_CODE_DIRS)
+
+    def test_retired_surface_capability_detected(self):
+        proj = Path(self._tmpdir.name)
+        capdir = proj / "agents" / "capabilities"
+        capdir.mkdir(parents=True)
+        (capdir / "inbox_management_capability.py").write_text(
+            "from external_write.capability_api import build_read_facade, run_operation\n"
+            "def go():\n    return run_operation(None, None)\n", encoding="utf-8")
+        by_relpath = scan_operator_mechanisms(proj, _REAL_REPO)
+        self.assertIn("agents/capabilities/inbox_management_capability.py", by_relpath)
+
 
 class ReconcileEndToEndTests(_Base):
     def test_direct_writer_paused_read_only_untouched_notice_and_queue_written(self):
