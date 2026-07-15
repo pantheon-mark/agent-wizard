@@ -45,6 +45,7 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -1983,6 +1984,53 @@ def _atomic_replace(src: Path, dest: Path) -> None:
     os.replace(str(src), str(dest))
 
 
+_GIT_SUBPROCESS_TIMEOUT = 5
+
+
+def _persist_git_tracked_exec_mode(operator_project_dir: Path, rel: str) -> bool:
+    """Persist the git INDEX mode for `rel` to executable (100755), independent of
+    whatever the working-tree mode already is (F-57).
+
+    F-54's working-tree chmod only fires when the on-disk mode differs from the
+    contract mode. On an estate where F-54 has already healed the working tree once,
+    a later re-run sees current_mode == mode_int and skips the chmod entirely -- yet
+    git's TRACKED mode (what a fresh `git clone`/checkout restores) can still be
+    100644, because working-tree mode and index mode are independent facts and only
+    `git update-index --chmod` (or a `git add`) moves the index. So this must be
+    called for every executable-mode managed file UNCONDITIONALLY, never gated on
+    whether the working-tree chmod branch fired.
+
+    Guarded + best-effort: if `operator_project_dir` is not a git repo, `rel` is not
+    tracked, or any git invocation fails/raises/times out, this silently does
+    nothing and returns False. A git failure must never raise, undo the working-tree
+    chmod, or fail the upgrade -- the working-tree fix already stands on its own.
+    Returns True only if `git update-index --chmod=+x` was actually run (idempotent;
+    a no-op if the index is already 100755).
+    """
+    try:
+        in_repo = subprocess.run(
+            ["git", "-C", str(operator_project_dir), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True, timeout=_GIT_SUBPROCESS_TIMEOUT,
+        )
+        if in_repo.returncode != 0:
+            return False
+
+        tracked = subprocess.run(
+            ["git", "-C", str(operator_project_dir), "ls-files", "--error-unmatch", rel],
+            capture_output=True, timeout=_GIT_SUBPROCESS_TIMEOUT,
+        )
+        if tracked.returncode != 0:
+            return False
+
+        chmod = subprocess.run(
+            ["git", "-C", str(operator_project_dir), "update-index", "--chmod=+x", rel],
+            capture_output=True, timeout=_GIT_SUBPROCESS_TIMEOUT,
+        )
+        return chmod.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def _reconcile_managed_modes(
     target_contract: Optional[Dict[str, Any]], operator_project_dir: Path,
 ) -> List[str]:
@@ -2006,8 +2054,19 @@ def _reconcile_managed_modes(
 
     Only ever touches relpaths that are explicit `delivery=="wizard"` contract entries
     -- never operator-owned files, dynamic review sidecars, or anything outside the
-    contract. Only chmods when the current mode actually differs (no needless syscalls).
-    Returns the sorted relpaths whose mode was changed (informational).
+    contract. Only chmods the working tree when the current mode actually differs
+    (no needless syscalls). Returns the sorted relpaths whose WORKING-TREE mode was
+    changed (informational).
+
+    F-57: for every executable-mode (`mode_int & 0o111`) managed entry, this ALSO
+    persists git's TRACKED mode via `_persist_git_tracked_exec_mode`, called
+    UNCONDITIONALLY -- not nested inside the `current_mode != mode_int` branch above.
+    Git stores only 100644/100755 and tracks it independently of the working-tree
+    mode bits, so a prior run that already healed the working tree (current_mode ==
+    mode_int, no chmod fires) can still leave the index at 100644; a fresh
+    clone/checkout would then revert the file to non-executable. The git persist is
+    guarded + best-effort (see that function) and never affects this function's
+    working-tree behavior or return value.
     """
     changed: List[str] = []
     if not target_contract:
@@ -2030,6 +2089,8 @@ def _reconcile_managed_modes(
         if current_mode != mode_int:
             os.chmod(target_path, mode_int)
             changed.append(rel)
+        if mode_int & 0o111:
+            _persist_git_tracked_exec_mode(operator_project_dir, rel)
     return sorted(changed)
 
 

@@ -19,6 +19,7 @@ DIFFERENT merge strategies to DIFFERENT docs, so an estate-specific assumption (
 import json
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -1715,6 +1716,148 @@ class ManagedModeReconcileTests(_Base):
             unmanaged_path.read_text(encoding="utf-8"), "operator's own private note\n",
             "unmanaged/operator file's content was touched by the reconcile",
         )
+
+
+class GitTrackedExecModeReconcileTests(_Base):
+    """F-57: `_reconcile_managed_modes` must persist git's TRACKED mode for managed
+    executable-mode files, independent of whether the working-tree chmod fires.
+
+    The critical F-57 scenario: F-54 already healed the working tree to 0755 on a
+    prior run, so `current_mode == mode_int` and the working-tree chmod branch does
+    NOT fire on a re-run -- yet the git index can still be 100644 (working-tree mode
+    and git's tracked mode are independent facts; only `git update-index --chmod` or
+    a fresh `git add` moves the index). The git-tracked-mode persist must fire
+    regardless of whether the working-tree chmod branch fired.
+
+    Anti-overfit: exercises TWO distinct managed exec relpaths (start-session.sh and
+    a nested agents/scripts/*.sh) plus a non-git-repo fixture (working-tree chmod
+    still heals; nothing raises) and an untracked-file-in-a-git-repo fixture (git
+    persist silently skipped; nothing raises).
+    """
+
+    _SCRIPT_A = "start-session.sh"
+    _SCRIPT_B = "agents/scripts/run.sh"
+
+    def _contract(self):
+        return {
+            "contract_id": "system-artifacts",
+            "artifacts": [
+                {"delivery": "wizard", "relpath": self._SCRIPT_A, "mode": "0755"},
+                {"delivery": "wizard", "relpath": self._SCRIPT_B, "mode": "0755"},
+            ],
+        }
+
+    def _git(self, repo, *args):
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=5,
+        )
+
+    def _init_git_repo(self):
+        repo = self.tmp / "repo"
+        repo.mkdir()
+        self._git(repo, "init", "-q")
+        self._git(repo, "config", "user.email", "test@example.com")
+        self._git(repo, "config", "user.name", "Test")
+        return repo
+
+    def _write_script(self, repo, rel, working_tree_mode):
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/bash\necho hi\n", encoding="utf-8")
+        os.chmod(path, working_tree_mode)
+        return path
+
+    def test_git_persist_fires_even_when_working_tree_already_healed(self):
+        """The exact F-57 case: the working tree is ALREADY 0755 before the reconcile
+        runs (so the working-tree chmod branch does NOT fire), but the git index is
+        still 100644. The reconcile must still flip the index to 100755."""
+        from upgrade_apply import _reconcile_managed_modes
+
+        repo = self._init_git_repo()
+        for rel in (self._SCRIPT_A, self._SCRIPT_B):
+            path = self._write_script(repo, rel, 0o644)
+            # Track at 0644 first (git records whatever the working-tree mode is at
+            # `git add` time).
+            self._git(repo, "add", rel)
+            # Now heal the WORKING TREE to executable -- simulating a prior F-54 run
+            # that already fixed the on-disk mode -- while the index is still 100644.
+            os.chmod(path, 0o755)
+
+        # Precondition: the git index is 100644 for both, even though the working
+        # tree is already 0755.
+        for rel in (self._SCRIPT_A, self._SCRIPT_B):
+            staged = self._git(repo, "ls-files", "-s", rel).stdout
+            self.assertTrue(staged.startswith("100644"),
+                             f"precondition failed for {rel}: {staged!r}")
+            self.assertTrue(os.access(repo / rel, os.X_OK),
+                             f"precondition: {rel} working tree must already be executable")
+
+        changed = _reconcile_managed_modes(self._contract(), repo)
+
+        # The working-tree chmod branch should NOT have fired (mode already
+        # matched) -- `changed` only tracks working-tree changes, so it's empty.
+        self.assertEqual(changed, [],
+                          "working-tree chmod branch fired even though mode already matched")
+
+        for rel in (self._SCRIPT_A, self._SCRIPT_B):
+            staged = self._git(repo, "ls-files", "-s", rel).stdout
+            self.assertTrue(staged.startswith("100755"),
+                             f"git-tracked mode not persisted for {rel}: {staged!r}")
+
+    def test_git_persist_also_fires_when_working_tree_chmod_fires(self):
+        """The ordinary case: the working tree starts at 0644 (needs the chmod) AND
+        the git index starts at 100644 -- both the working-tree fix and the git
+        persist must land."""
+        from upgrade_apply import _reconcile_managed_modes
+
+        repo = self._init_git_repo()
+        for rel in (self._SCRIPT_A, self._SCRIPT_B):
+            self._write_script(repo, rel, 0o644)
+            self._git(repo, "add", rel)
+
+        changed = _reconcile_managed_modes(self._contract(), repo)
+
+        self.assertEqual(sorted(changed), sorted([self._SCRIPT_A, self._SCRIPT_B]))
+        for rel in (self._SCRIPT_A, self._SCRIPT_B):
+            self.assertTrue(os.access(repo / rel, os.X_OK), f"{rel} working tree not healed")
+            staged = self._git(repo, "ls-files", "-s", rel).stdout
+            self.assertTrue(staged.startswith("100755"),
+                             f"git-tracked mode not persisted for {rel}: {staged!r}")
+
+    def test_non_git_dir_working_tree_chmod_still_heals_and_nothing_raises(self):
+        """No `.git` at all: the working-tree chmod must still heal the mode, and the
+        git-persist attempt must fail silently (no raise)."""
+        from upgrade_apply import _reconcile_managed_modes
+
+        plain = self.tmp / "plain"
+        plain.mkdir()
+        for rel in (self._SCRIPT_A, self._SCRIPT_B):
+            self._write_script(plain, rel, 0o644)
+
+        changed = _reconcile_managed_modes(self._contract(), plain)  # must not raise
+
+        self.assertEqual(sorted(changed), sorted([self._SCRIPT_A, self._SCRIPT_B]))
+        for rel in (self._SCRIPT_A, self._SCRIPT_B):
+            self.assertTrue(os.access(plain / rel, os.X_OK), f"{rel} not healed in non-git dir")
+
+    def test_untracked_file_in_git_repo_persist_skipped_no_raise(self):
+        """A file exists on disk in a git repo but was never `git add`ed: the git
+        persist must be skipped silently; the working-tree chmod must still heal."""
+        from upgrade_apply import _reconcile_managed_modes
+
+        repo = self._init_git_repo()
+        contract = {
+            "artifacts": [{"delivery": "wizard", "relpath": self._SCRIPT_A, "mode": "0755"}],
+        }
+        self._write_script(repo, self._SCRIPT_A, 0o644)  # never `git add`ed
+
+        changed = _reconcile_managed_modes(contract, repo)  # must not raise
+
+        self.assertEqual(changed, [self._SCRIPT_A])
+        self.assertTrue(os.access(repo / self._SCRIPT_A, os.X_OK))
+        # Confirm it really is untracked (git ls-files returns nothing for it).
+        untracked_check = self._git(repo, "ls-files", self._SCRIPT_A)
+        self.assertEqual(untracked_check.stdout.strip(), "")
 
 
 if __name__ == "__main__":
