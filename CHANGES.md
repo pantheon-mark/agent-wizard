@@ -12,6 +12,30 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-15 — an upgrade won't invite you back into a capability that can't run, and applying an update always asks you first (v0.13.1)
+
+**Public-facing change:** A safety fix around your own capabilities and around updates themselves.
+
+- **An upgrade now also checks capabilities you added yourself.** Before, the safety check that runs during an update looked only at the parts your system shipped with. Now it also checks a capability you added — so if one of those can no longer run (for example, because an earlier update retired something it depended on), the update catches it and does not invite you back into it; instead it tells you plainly what needs fixing before you resume.
+- **Applying an update always requires your own separate, explicit "yes."** Asking to see what's new, or getting a notice that an update is available, never applies anything by itself — those are information only, and they always return you to the choice of whether to apply.
+- No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
+
+This is a safety fix (`v0.13.1`, operator-explicit as always). Foundation documents are byte-identical to `v0.13.0`.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
+## 2026-07-15 — an update keeps your scripts able to run, even across a git-tracked project (toolkit fix, no version change)
+
+**Public-facing change:** A follow-on to the July 14 "executable permission" fix. That fix restored a script's "run" permission on disk, but if your system project is tracked in git, git itself also records whether a file is executable — and the update tool wasn't updating that git-tracked record, only the file on disk. The update tool now sets both the disk permission and the git-tracked record together on every apply, so a script stays runnable through a commit, a checkout on another machine, or a fresh clone — not just in the copy already sitting on disk.
+
+- This is a tool fix, so it carries no foundation-bundle version change; every released bundle is untouched.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-07-14 — an update no longer removes a script's ability to run (toolkit fix, no version change)
 
 **Public-facing change:** A fix to the update tool itself (delivered via `wizard self-update`, not a bundle version). Previously, applying an update could quietly strip the "executable" permission from your system's shell scripts — so a command like `./start-session.sh` would afterward fail with "permission denied." The update tool now sets every managed file's permissions from the delivered contract on each apply — both for files it delivers and for files already on disk — so a script that should be runnable is made runnable again, even if an earlier update had stripped it.

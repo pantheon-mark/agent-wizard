@@ -1,0 +1,73 @@
+# Foundation bundle v0.13.1 manifest
+# Patch release over v0.13.0 (F-55/F-56/F-57 reconcile + operability fixes): the upgrade
+# reconcile now also scopes agents/capabilities/ so a retired-surface capability whose imports
+# are broken is paused as import-broken rather than left as merely "paused" (F-55); a new
+# composite, read-only capability health-check primitive (agents/lib/external_write/
+# capability_health.py) lets a session-start orientation check catch an import-broken
+# capability before inviting the operator into it; the runtime write_gate.py deny-branch for a
+# paused capability is corrected; and the update-notice prose (templates/root/CLAUDE.md) now
+# separates the informational "see what's new" read from the separate, explicit approval an
+# apply requires, and templates/root/operating_discipline.md's orientation-health rule wires the
+# new health-check into session start. No breaking changes; all existing capabilities are
+# byte-for-byte unaffected and previously released bundles still replay. Foundation docs
+# byte-identical to v0.13.0 (schema unchanged, v0.3). JSON sidecar (manifest.json) is what the
+# engine consumes.
+_note: JSON sidecar for manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing
+  companion. Both files MUST stay in sync.
+agent_contract_version: v0-pre-rebuild
+bundle_manifest_schema_version: v2
+foundation_bundle_version: v0.13.1
+foundation_schema_version: v0.3
+included_templates:
+  foundation_docs:
+  - vision.md
+  - approach.md
+  - technical_architecture.md
+  - execution_plan.md
+  - test_cases.md
+  - audit_framework.md
+managed_files:
+  foundation/approach.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/audit_framework.md:
+    local_modifications: not_recommended
+    managed_by: wizard
+    merge_strategy: warn_on_drift
+  foundation/execution_plan.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/prd.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/technical_architecture.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/test_cases.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/vision.md:
+    local_modifications: expected
+    managed_by: shared
+    merge_strategy: three_way
+min_engine_version: v1.0.0
+public_api:
+  required_files:
+  - foundation/vision.md
+  - foundation/prd.md
+  - foundation/approach.md
+  - foundation/execution_plan.md
+  - foundation/technical_architecture.md
+  - foundation/test_cases.md
+  - foundation/audit_framework.md
+  required_frontmatter_fields_per_file: see the canonical foundation-versioning specification § 1.1
+  required_sections_per_doc_type: see schemas/section-schema.yaml in this bundle
+  section_schema: schemas/section-schema.yaml
+release_date: '2026-07-15'
+source_commit: PENDING
+status: prerelease
