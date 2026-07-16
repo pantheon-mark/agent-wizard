@@ -224,7 +224,7 @@ This is a small fix-only change (`v0.6.9`, operator-explicit as always). Your ow
 
 This is a small fix-only change (`v0.6.8`, operator-explicit as always). Your own files and customizations are untouched; a backup is taken before anything is applied.
 
-`Source-Meta-Commit:` `6d04776` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `6d04776` (private build repo) · public repo commit `3ec686a` (2026-07-16 provenance housekeeping; was `pending`)
 
 ---
 
@@ -237,7 +237,7 @@ This is a small fix-only change (`v0.6.8`, operator-explicit as always). Your ow
 
 This is a small fix-only change (`v0.6.7`, operator-explicit as always). Your own files and customizations are untouched; a backup is taken before anything is applied.
 
-`Source-Meta-Commit:` `3cc28a7` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `3cc28a7` (private build repo) · public repo commit `fd0d5a7` (2026-07-16 provenance housekeeping; was `pending`)
 
 ---
 
@@ -251,7 +251,7 @@ This is a small fix-only change (`v0.6.7`, operator-explicit as always). Your ow
 
 This is a small fix-only change (`v0.6.6`, operator-explicit as always). Your own files and customizations are untouched; a backup is taken before anything is applied.
 
-`Source-Meta-Commit:` `a6bc510` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `a6bc510` (private build repo) · public repo commit `a7098bd` (2026-07-16 provenance housekeeping; was `pending`)
 
 ---
 
@@ -265,7 +265,7 @@ This is a small fix-only change (`v0.6.6`, operator-explicit as always). Your ow
 
 This is a small fix-only change (`v0.6.5`, operator-explicit as always). Your own files and customizations are untouched; a backup is taken before anything is applied.
 
-`Source-Meta-Commit:` `7ba1dbf` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `7ba1dbf` (private build repo) · public repo commit `c67e78d` (2026-07-16 provenance housekeeping; was `pending`)
 
 ---
 
