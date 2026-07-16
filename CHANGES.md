@@ -22,7 +22,7 @@ Entries appear newest-first.
 
 This is a safety fix (`v0.13.1`, operator-explicit as always). Foundation documents are byte-identical to `v0.13.0`.
 
-`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `01fbba7` (private build repo) · public repo commit `pending`
 
 ---
 
@@ -32,7 +32,7 @@ This is a safety fix (`v0.13.1`, operator-explicit as always). Foundation docume
 
 - This is a tool fix, so it carries no foundation-bundle version change; every released bundle is untouched.
 
-`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `01fbba7` (private build repo) · public repo commit `pending`
 
 ---
 

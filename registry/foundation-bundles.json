@@ -290,7 +290,7 @@
       "recommendation_reason": "If your system runs a capability you added yourself (not one it shipped with), this update makes sure an upgrade will not invite you back into one that has stopped working, and makes sure applying any future update always asks you first \u2014 most operators should take it.",
       "release_date": "2026-07-15",
       "safety_class": "safety_fix",
-      "source_commit": "PENDING",
+      "source_commit": "01fbba7",
       "status": "prerelease"
     }
   ],
