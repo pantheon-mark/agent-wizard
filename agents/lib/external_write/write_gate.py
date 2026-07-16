@@ -44,6 +44,7 @@ Stdlib only — no third-party dependencies.
 
 import json
 import os
+import stat as _stat
 import tempfile
 from collections import namedtuple
 from dataclasses import dataclass
@@ -209,47 +210,72 @@ def load_descriptor_set(path: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 def _load_paused_op_kinds(paused_root: str) -> Optional[frozenset]:
-    """(F-55 B2) Load the UNION of ``paused_op_kinds`` across every ``*.json``
-    marker file directly under ``paused_root``.
+    """(F-55 B2; corrected by the xvendor Fix A stat-based check) Load the
+    UNION of ``paused_op_kinds`` across every ``*.json`` marker file directly
+    under ``paused_root``.
 
     Returns:
-      * ``frozenset()`` (empty) when ``paused_root`` does not exist or is not
-        a directory (the genuinely-ABSENT-markers case), or exists but
-        contains no ``*.json`` files at all. No new denial: byte-identical to
-        the prior (pre-F-55-B2) behavior.
+      * ``frozenset()`` (empty) when ``paused_root`` is genuinely ABSENT
+        (``os.stat`` raises ``FileNotFoundError``), or exists as a directory
+        but contains no ``*.json`` files at all. No new denial: byte-identical
+        to the prior (pre-F-55-B2) behavior.
       * the UNION frozenset of every marker's ``paused_op_kinds`` list when
         every marker present parses cleanly.
-      * ``None`` -- the FAIL-CLOSED signal -- when the directory EXISTS but
-        cannot be listed (e.g. a permission-denied ``os.listdir`` failure),
-        or when ANY ``*.json`` file in the directory is unreadable, is not
-        valid JSON, is not a JSON object, or carries a ``paused_op_kinds``
-        value that is not a list of strings. A missing ``paused_op_kinds``
-        KEY (e.g. an existing B1 ``entrypoint_paused`` state file, which
-        never carries this field) is NOT malformed -- it contributes the
-        empty list, same as an absent key entirely. The caller MUST treat
-        ``None`` as "the true paused set cannot be computed" and refuse the
-        write in front of it: a corrupt (or unlistable) marker directory
-        could be hiding a real pause for exactly the op_kind about to run,
-        so ONE unreadable marker -- or an existing-but-unlistable directory
-        -- anywhere in this check is enough to refuse EVERY write reaching it
-        (never just the op_kind the corrupt file happens to name) --
-        matching this module's "every branch defaults to refuse" posture.
-        An existing-but-UNLISTABLE directory is unreadable markers, not an
-        absent directory: it must NOT be conflated with the genuinely-absent
-        case above, which is the only one that is safe to permit through.
+      * ``None`` -- the FAIL-CLOSED signal -- when ``paused_root`` EXISTS but
+        is INACCESSIBLE (``os.stat`` raises any ``OSError`` other than
+        ``FileNotFoundError`` -- e.g. permission-denied), when a NON-DIRECTORY
+        sits at that path, when the directory EXISTS but cannot be listed
+        (e.g. a permission-denied ``os.listdir`` failure), or when ANY
+        ``*.json`` file in the directory is unreadable, is not valid JSON, is
+        not a JSON object, or carries a ``paused_op_kinds`` value that is not
+        a list of strings. A missing ``paused_op_kinds`` KEY (e.g. an existing
+        B1 ``entrypoint_paused`` state file, which never carries this field)
+        is NOT malformed -- it contributes the empty list, same as an absent
+        key entirely. The caller MUST treat ``None`` as "the true paused set
+        cannot be computed" and refuse the write in front of it: an
+        inaccessible/corrupt/unlistable marker directory could be hiding a
+        real pause for exactly the op_kind about to run, so ONE unreadable
+        marker -- or an inaccessible/non-directory/unlistable path -- anywhere
+        in this check is enough to refuse EVERY write reaching it (never just
+        the op_kind the corrupt file happens to name) -- matching this
+        module's "every branch defaults to refuse" posture. An
+        existing-but-INACCESSIBLE or existing-but-UNLISTABLE path is
+        unreadable markers, not an absent directory: it must NOT be conflated
+        with the genuinely-absent case above, which is the only one that is
+        safe to permit through.
+
+    Fix A (xvendor trust-surface finding): the prior implementation used
+    ``os.path.isdir(paused_root)`` to decide "absent vs. present", but
+    ``os.path.isdir`` INTERNALLY SWALLOWS ``PermissionError``/``OSError`` and
+    returns ``False`` on any stat failure -- so an EXISTING-but-UNREADABLE
+    marker directory (a marker naming the op_kind about to run could be
+    hiding inside it) was indistinguishable from a genuinely-absent one and
+    fell through to the permissive "absent" branch: a fail-OPEN hole. This
+    stat-based check distinguishes the two: ``FileNotFoundError`` from
+    ``os.stat`` is the ONLY genuinely-absent signal; every other ``OSError``
+    (including a swallowed-by-isdir permission failure) and every
+    non-directory result at that path fail closed (``None``).
     """
-    # These two checks are DELIBERATELY split into separate try/except blocks
-    # (not one try wrapping both): `isdir` failing/False means the directory
-    # genuinely isn't there (safe to permit through as "absent"), but an
-    # `isdir`-True directory whose `listdir` then raises OSError (e.g.
-    # permission-denied) is an EXISTING, UNREADABLE marker set -- that must
-    # fail closed (None), never be conflated with the absent case.
+    # These checks are DELIBERATELY split into separate try/except blocks (not
+    # one try wrapping everything): a `FileNotFoundError` from `os.stat` means
+    # the path genuinely isn't there (safe to permit through as "absent"),
+    # but ANY OTHER `OSError` from `stat` (e.g. permission-denied -- which
+    # `os.path.isdir` would have swallowed into a bare `False`), a
+    # non-directory at that path, or a `listdir` that then raises `OSError`,
+    # is an EXISTING, UNREADABLE/WRONG-SHAPE marker set -- that must fail
+    # closed (`None`), never be conflated with the absent case.
     try:
-        is_dir = os.path.isdir(paused_root)
+        st = os.stat(paused_root)
+    except FileNotFoundError:
+        return frozenset()
     except OSError:
-        return frozenset()
-    if not is_dir:
-        return frozenset()
+        # Exists but could not be stat'd (e.g. permission-denied) -- fail
+        # closed. This is exactly the case `os.path.isdir` used to swallow.
+        return None
+    if not _stat.S_ISDIR(st.st_mode):
+        # A non-directory sits at this path -- something is wrong; never
+        # treat it like "absent".
+        return None
     try:
         names = sorted(n for n in os.listdir(paused_root) if n.endswith(".json"))
     except OSError:

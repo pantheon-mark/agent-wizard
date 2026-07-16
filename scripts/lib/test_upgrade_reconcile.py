@@ -750,6 +750,143 @@ class ReconcileUpgradePausedLiveWriteWiringTests(_Base):
 
 
 # ===================================================================================
+# xvendor Finding-1 -- a scanner-red capability-dir writer must be RUNTIME-BLOCKED
+# (a paused_op_kinds marker written) whenever its op_kind is resolvable, closing the
+# safety gap where a PREVIOUSLY-ACCEPTED, scanner-red-but-importable capability was
+# classified broken_requires_migration + migration-queued but NOT runtime-blocked
+# (no marker was ever written for that classification pre-fix) -- so write_gate's
+# accepted-descriptor branch still permitted its live writes. Also covers the honest
+# reword of the broken_requires_migration notice branch (no more "cannot run as-is"
+# overclaim).
+# ===================================================================================
+
+class ScannerRedCapabilityRuntimeBlockTests(_Base):
+    CAP_SOURCE_WITH_OP_KIND = (
+        '"""Widget-delete capability (scanner-red + OP_KIND literal, xvendor '
+        'Finding-1 test fixture)."""\n'
+        'from external_write.capability_api import run_operation\n'
+        '\n'
+        'OP_KIND = "acme.widget.delete"\n'
+        '\n'
+        'def go():\n'
+        '    return run_operation(None, None)\n'
+    )
+    CAP_SOURCE_NO_OP_KIND = (
+        '"""Widget-delete capability (scanner-red, NO OP_KIND literal, xvendor '
+        'Finding-1 test fixture)."""\n'
+        'from external_write.capability_api import run_operation\n'
+        '\n'
+        'def go():\n'
+        '    return run_operation(None, None)\n'
+    )
+
+    def _project_with_scanner_red_capability(self, *, capability_id="acme_widget_deleter",
+                                             with_op_kind=True):
+        proj = self.tmp / "operator_proj"
+        capdir = proj / "agents" / "capabilities"
+        capdir.mkdir(parents=True)
+        relpath = f"agents/capabilities/{capability_id}.py"
+        source = self.CAP_SOURCE_WITH_OP_KIND if with_op_kind else self.CAP_SOURCE_NO_OP_KIND
+        (proj / relpath).write_text(source, encoding="utf-8")
+        secdir = proj / "security"
+        secdir.mkdir(parents=True, exist_ok=True)
+        # accepted: True -- a PREVIOUSLY-ACCEPTED capability. Pre-fix, this is
+        # exactly the shape write_gate's accepted-descriptor branch would
+        # still permit a live write for, since no paused_op_kinds marker was
+        # ever written for a broken_requires_migration classification.
+        descriptor_set = [{
+            "id": capability_id, "name": capability_id, "action_class": "delete",
+            "risk_class": "irreversible_external", "recovery_profile_ref": None,
+            "declared_test_target": "copy", "blast_radius_cap": 3,
+            "accepted": True, "phase_id": "phase-1",
+        }]
+        (secdir / "capability_descriptors.json").write_text(
+            json.dumps(descriptor_set), encoding="utf-8")
+        return proj, relpath, descriptor_set
+
+    def test_resolvable_op_kind_writes_marker_and_write_gate_refuses_even_when_accepted(self):
+        proj, relpath, descriptor_set = self._project_with_scanner_red_capability()
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+        m = result.mechanisms[0]
+        self.assertEqual(m.mechanism_id, "acme_widget_deleter")
+        # The STATE NAME is unchanged by this fix -- only whether a runtime
+        # block got installed varies with op_kind resolvability.
+        self.assertEqual(m.state, "broken_requires_migration")
+        self.assertEqual(m.paused_op_kinds, ["acme.widget.delete"])
+
+        marker_path = proj / PAUSED_MECHANISMS_DIR_REL / "acme_widget_deleter.json"
+        self.assertTrue(marker_path.exists(), "expected a paused_op_kinds marker to be written")
+        state = json.loads(marker_path.read_text(encoding="utf-8"))
+        self.assertEqual(state["paused_op_kinds"], ["acme.widget.delete"])
+
+        # THE SAFETY-GAP REGRESSION, end-to-end: the descriptor entry above
+        # is accepted:true at risk_class irreversible_external -- pre-fix,
+        # write_gate's covering-ACCEPTED-descriptor branch would PERMIT a
+        # live write for this op_kind despite the capability being
+        # scanner-red and migration-queued (no marker existed to refuse it).
+        # The marker reconcile just wrote must refuse it regardless of the
+        # accepted descriptor being present.
+        #
+        # Force a FRESH import of the real agents/lib/external_write package
+        # from its canonical location: CliWiringTests (which runs earlier,
+        # alphabetically, in this same test module/process) copies a
+        # TEMPORARY external_write package into a build_root that gets
+        # cleaned up in its own tearDown, and Python caches that under
+        # sys.modules["external_write"] -- a stale reference whose __path__
+        # points at an already-deleted directory. Purging any cached
+        # external_write* modules and putting the real agents_lib first on
+        # sys.path guarantees this import resolves to the REAL package,
+        # regardless of what ran earlier in this process.
+        agents_lib = _REAL_REPO / "wizard" / "agents" / "lib"
+        for mod_name in list(sys.modules):
+            if mod_name == "external_write" or mod_name.startswith("external_write."):
+                del sys.modules[mod_name]
+        sys.path.insert(0, str(agents_lib))
+        from external_write.write_gate import (  # noqa: E402
+            evaluate_write_gate, InvocationLedger, LIVE_TARGET,
+        )
+        from external_write.operations import Operation  # noqa: E402
+
+        op = Operation(surface="acme_widget_deleter", object_id="obj:1", field="__record__",
+                       new_value="<x>", op_kind="acme.widget.delete", batch_id="b1")
+        decision = evaluate_write_gate(
+            op, target=LIVE_TARGET, descriptor_set=descriptor_set,
+            cap_ledger=InvocationLedger(),
+            paused_root=str(proj / PAUSED_MECHANISMS_DIR_REL))
+        self.assertFalse(
+            decision.permitted,
+            "write_gate must REFUSE this op_kind even with an accepted descriptor present")
+        self.assertIn("paused", decision.refusal.detail["reason"])
+
+    def test_notice_drops_cannot_run_as_is_and_states_switched_off_until_rebuilt(self):
+        proj, relpath, _ = self._project_with_scanner_red_capability()
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+        notice = (proj / result.notice_path).read_text() if result.notice_path else ""
+        self.assertNotIn("cannot run as-is", notice)
+        self.assertIn("switched off", notice)
+        self.assertIn("until it is rebuilt", notice)
+
+    def test_unresolvable_op_kind_writes_no_marker_and_says_could_not_auto_install(self):
+        proj, relpath, _ = self._project_with_scanner_red_capability(
+            capability_id="acme_widget_deleter_2", with_op_kind=False)
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+        m = result.mechanisms[0]
+        self.assertEqual(m.state, "broken_requires_migration")
+        self.assertEqual(m.paused_op_kinds, [])
+
+        marker_dir = proj / PAUSED_MECHANISMS_DIR_REL
+        self.assertFalse((marker_dir / f"{m.mechanism_id}.json").exists())
+        self.assertFalse((marker_dir / f"{m.mechanism_id}.pause").exists())
+
+        notice = (proj / result.notice_path).read_text() if result.notice_path else ""
+        self.assertNotIn("cannot run as-is", notice)
+        self.assertIn("could not be automatically installed", notice)
+
+
+# ===================================================================================
 # CLI-wiring test: prove `wizard upgrade --to V --apply` actually invokes reconcile
 # after a real apply_upgrade. Reuses the synthetic-build-repo fixture helpers from
 # test_upgrade_apply.py (same anti-overfit posture), with the real

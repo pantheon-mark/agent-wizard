@@ -30,6 +30,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 # Single-home: import from wizard/agents/lib/external_write (canonical
 # location) -- mirrors test_external_write_write_gate.py's own convention.
@@ -241,6 +242,108 @@ class TestDescriptorOnlyCapabilityWithNoSourceFile(CapabilityHealthTestBase):
         self.assertFalse(record["importable"])
         self.assertFalse(record["scanner_clean"])
         self.assertEqual(record["health"], "red")
+
+
+class TestUnreadablePauseMarkerFailsClosedRed(CapabilityHealthTestBase):
+    def test_unreadable_pause_marker_is_red_not_green(self):
+        # (xvendor Fix B) An otherwise-clean+importable capability whose
+        # pause-marker file EXISTS but cannot be stat'd (e.g.
+        # permission-denied) must be RED, not GREEN -- the prior
+        # Path.is_file()-based check swallowed the OSError into a bare
+        # False ("not paused"), a fail-OPEN hole this closes.
+        self._write_capability(
+            "clean_cap", _CLEAN_CAPABILITY_SOURCE.format(display_name="Clean Cap"))
+        marker_dir = self.project_root / PAUSED_MECHANISMS_DIR_REL
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        marker_path = marker_dir / "clean_cap.pause"
+        marker_path.write_text("", encoding="utf-8")
+
+        real_stat = capability_health.os.stat
+
+        def _raising_stat(path, *a, **kw):
+            if str(path) == str(marker_path):
+                raise PermissionError("permission denied")
+            return real_stat(path, *a, **kw)
+
+        with mock.patch.object(capability_health.os, "stat", side_effect=_raising_stat):
+            records = capability_health.check_capabilities(self.project_root)
+        record = self._record_for(records, "clean_cap")
+
+        self.assertTrue(record["importable"])
+        self.assertTrue(record["scanner_clean"])
+        self.assertFalse(record["paused"])
+        self.assertTrue(record.get("state_read_error"))
+        self.assertEqual(record["health"], "red")
+
+
+class TestUnreadableMigrationQueueFailsClosedRed(CapabilityHealthTestBase):
+    def test_unreadable_migration_queue_is_red_not_green(self):
+        # (xvendor Fix B) An otherwise-clean+importable capability whose
+        # pending_migrations.json EXISTS but cannot be read must be RED, not
+        # GREEN -- the prior implementation folded any read/parse error into
+        # a bare False ("no pending migration").
+        self._write_capability(
+            "clean_cap2", _CLEAN_CAPABILITY_SOURCE.format(display_name="Clean Cap 2"))
+        queue_path = self.project_root / MIGRATION_QUEUE_REL
+        queue_path.parent.mkdir(parents=True, exist_ok=True)
+        queue_path.write_text("[]", encoding="utf-8")
+
+        real_read_text = capability_health.Path.read_text
+
+        def _raising_read_text(self, *a, **kw):
+            if str(self) == str(queue_path):
+                raise PermissionError("permission denied")
+            return real_read_text(self, *a, **kw)
+
+        with mock.patch.object(capability_health.Path, "read_text", new=_raising_read_text):
+            records = capability_health.check_capabilities(self.project_root)
+        record = self._record_for(records, "clean_cap2")
+
+        self.assertTrue(record["importable"])
+        self.assertTrue(record["scanner_clean"])
+        self.assertFalse(record["pending_migration"])
+        self.assertTrue(record.get("state_read_error"))
+        self.assertEqual(record["health"], "red")
+
+
+class TestDescriptorEnumerationErrorSurfaced(CapabilityHealthTestBase):
+    def test_malformed_descriptor_file_surfaces_sentinel_red_not_silently_dropped(self):
+        # (xvendor Fix B) A malformed descriptor set (exists, but not valid
+        # JSON) must NOT silently collapse to the empty set -- that would
+        # DROP a descriptor-only capability_id (no source file) from
+        # enumeration with zero signal. The checker itself must report
+        # degraded via the sentinel record.
+        path = self.project_root / DESCRIPTOR_SET_REL
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{ not valid json", encoding="utf-8")
+
+        records = capability_health.check_capabilities(self.project_root)
+        sentinel = self._record_for(
+            records, capability_health.SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID)
+        self.assertEqual(sentinel["health"], "red")
+        self.assertTrue(sentinel["state_read_error"])
+
+    def test_unreadable_descriptor_file_surfaces_sentinel_red_not_silently_dropped(self):
+        # Same signal, permission-error flavor rather than malformed-JSON.
+        path = self.project_root / DESCRIPTOR_SET_REL
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps([{"id": "ghost_cap_2"}]), encoding="utf-8")
+
+        real_read_text = capability_health.Path.read_text
+
+        def _raising_read_text(self, *a, **kw):
+            if str(self) == str(path):
+                raise PermissionError("permission denied")
+            return real_read_text(self, *a, **kw)
+
+        with mock.patch.object(capability_health.Path, "read_text", new=_raising_read_text):
+            records = capability_health.check_capabilities(self.project_root)
+        sentinel = self._record_for(
+            records, capability_health.SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID)
+        self.assertEqual(sentinel["health"], "red")
+        # ghost_cap_2 could not be positively enumerated this run -- it must
+        # not silently appear as a normal (implicitly clean) record.
+        self.assertNotIn("ghost_cap_2", {r["capability_id"] for r in records})
 
 
 class TestMultipleCapabilitiesEnumeratedAtRealRelpath(CapabilityHealthTestBase):

@@ -916,18 +916,35 @@ def render_impact_notice(
                 "information: not verified safe, not confirmed to still be running."
             )
         elif m.state == "broken_requires_migration":
-            # (F-55 B1) Honest state: this was built against a safety interface
-            # that has since changed, so it cannot run at all right now -- not
-            # "paused", because there was never a schedule to switch off. NO
-            # continuity/"keeps running" claim, and entanglement (read-only
-            # outputs surviving alongside a paused write) does not apply to
-            # something that cannot run in the first place.
+            # (F-55 B1; reworded by xvendor Finding-1) Honest state: this was
+            # built against a safety interface that has since changed. The
+            # OLD wording here ("it cannot run as-is right now") was an
+            # overclaim for a capability that references the raw kernel
+            # write primitive directly (the scanner-red shape that lands a
+            # mechanism here) but may still be importable -- import-broken
+            # was never verified before this text was written. The TRUE
+            # statement, whether or not it can still import, is that its
+            # ability to make changes outside this project has been switched
+            # off until it is rebuilt: when an op_kind could be resolved
+            # (m.paused_op_kinds non-empty), a runtime block was actually
+            # installed via the write_gate's paused-op_kind deny-branch --
+            # closing the real safety gap (a previously-ACCEPTED capability
+            # in this shape was otherwise not runtime-blocked at all). It was
+            # not on any automatic schedule, so there was nothing to switch
+            # off there; NO continuity/"keeps running as before" claim, and
+            # entanglement does not apply to something built against a
+            # changed safety interface.
             lines.append(
                 "  - This was built against a safety check that has since changed, so "
-                "it cannot run as-is right now. It was not on any automatic schedule, "
-                "so there was nothing to switch off. The fix has been queued, and it "
-                "will be rebuilt through the same reviewed process used for any new "
-                "capability before it runs again."
+                "its ability to make changes outside your project has been switched "
+                "off until it is rebuilt. It was not on any automatic schedule, so "
+                "there was nothing to switch off there. The fix has been queued, and "
+                "it will be rebuilt through the same reviewed process used for any "
+                "new capability before it runs live again."
+                + ("" if m.paused_op_kinds else (
+                    " A runtime block could not be automatically installed for it, so "
+                    "do not rely on it being blocked until it is rebuilt."
+                ))
             )
         elif m.state == "paused_live_write":
             # (F-55 B2) Honest state: distinct from BOTH "paused" (an entrypoint
@@ -1040,35 +1057,49 @@ def reconcile_upgrade(
                 # That is a stronger, more honest claim than "review by hand":
                 # the fix is queued, not merely recommended.
                 if _is_under_capability_dir(relpath):
-                    # (F-55 B2) GENERAL PRIMITIVE: import-clean AND scan-clean
-                    # classifies as paused_live_write (still runnable; deny writes
-                    # at RUNTIME via write_gate's op_kind marker) rather than
-                    # broken_requires_migration. This module's ONLY detection
-                    # channel is the AST scanner (scan_operator_mechanisms above),
-                    # which returns ONLY scanner-red files -- there is no separate
-                    # import-execution check here (this module never runs
-                    # operator-authored code), so "import-clean" collapses to "not
-                    # scanner-flagged" at this call site. `violations` is NEVER
-                    # empty for a relpath that reached this loop (that is exactly
-                    # why it is a key of `by_relpath`), so `scan_clean` below is
-                    # always False through the REAL scanner-driven path today --
-                    # this branch is unreachable in practice, by construction, and
-                    # exists as honest scaffolding for a FUTURE non-scanner
-                    # detection signal that could supply a genuinely scan-clean
-                    # mechanism_id here (see MechanismReport.state's docstring).
+                    # (F-55 B2 general primitive; xvendor Finding-1 fix) A
+                    # scan_clean=True capability classifies as
+                    # paused_live_write (still runnable; deny writes at
+                    # RUNTIME via write_gate's op_kind marker). This module's
+                    # ONLY detection channel is the AST scanner
+                    # (scan_operator_mechanisms above), which returns ONLY
+                    # scanner-red files, so `violations` is NEVER empty for a
+                    # relpath that reached this loop -- `scan_clean` below is
+                    # always False through the REAL scanner-driven path
+                    # today. `scan_clean=True` remains honest scaffolding for
+                    # a FUTURE non-scanner detection signal (see
+                    # MechanismReport.state's docstring); it is the
+                    # `scan_clean=False` branch below that is the REAL path.
+                    #
+                    # xvendor Finding-1 (the safety gap this closes): a
+                    # scanner-red-but-IMPORTABLE capability that was
+                    # PREVIOUSLY ACCEPTED (its descriptor still carries
+                    # accepted:true) was classified broken_requires_migration
+                    # and migration-queued, but -- because no paused_op_kinds
+                    # marker was ever written for it -- write_gate's
+                    # PAUSED-op_kind deny-branch had nothing to key on, so
+                    # the write_gate's ACCEPTED-descriptor branch still
+                    # permitted its live writes: not runtime-blocked despite
+                    # the impact notice implying otherwise. So op_kind
+                    # resolution + marker-writing now run for EVERY detected
+                    # capability-dir scanner-red writer, regardless of
+                    # `scan_clean` -- not only the (currently unreachable)
+                    # scan_clean=True case above. The STATE NAME
+                    # ("broken_requires_migration") is unchanged; only
+                    # whether a runtime block got installed varies with
+                    # whether an op_kind could be resolved.
                     scan_clean = not violations
-                    resolved_paused_op_kinds: List[str] = []
-                    if scan_clean:
-                        descriptor_set = _load_capability_descriptor_set(operator_project_dir)
-                        resolved_paused_op_kinds = resolve_paused_op_kinds(
-                            operator_project_dir, mechanism_id, relpath, descriptor_set)
-                    if scan_clean and resolved_paused_op_kinds:
-                        state = "paused_live_write"
+                    descriptor_set = _load_capability_descriptor_set(operator_project_dir)
+                    resolved_paused_op_kinds = resolve_paused_op_kinds(
+                        operator_project_dir, mechanism_id, relpath, descriptor_set)
+                    if resolved_paused_op_kinds:
                         paused_op_kinds = resolved_paused_op_kinds
                         _write_paused_live_write_state(
                             operator_project_dir, mechanism_id, relpath, violations,
                             from_version, to_version, resolved_paused_op_kinds,
                         )
+                    if scan_clean and resolved_paused_op_kinds:
+                        state = "paused_live_write"
                         note = (
                             "still runs, but its live write(s) for "
                             f"{_human_join(sorted(resolved_paused_op_kinds))} are denied "
@@ -1076,11 +1107,22 @@ def reconcile_upgrade(
                         )
                     else:
                         state = "broken_requires_migration"
-                        note = (
-                            "no wrapper and not orchestrator-scheduled; this "
-                            "capability was built against a safety interface that "
-                            "changed and cannot run as-is -- migration queued"
-                        )
+                        if resolved_paused_op_kinds:
+                            note = (
+                                "no wrapper and not orchestrator-scheduled; this "
+                                "capability was built against a safety interface that "
+                                "changed -- a runtime block on its live write(s) for "
+                                f"{_human_join(sorted(resolved_paused_op_kinds))} has "
+                                "been installed; migration queued"
+                            )
+                        else:
+                            note = (
+                                "no wrapper and not orchestrator-scheduled; this "
+                                "capability was built against a safety interface that "
+                                "changed and a runtime block could not be "
+                                "auto-installed (no resolvable op_kind) -- migration "
+                                "queued; do not rely on it until rebuilt"
+                            )
                 else:
                     state = "manual_review"
                     note = (

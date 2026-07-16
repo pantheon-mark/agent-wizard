@@ -29,12 +29,39 @@ For each capability this module finds, health is RED iff ANY of:
   * the capability is paused (an upgrade-reconcile safe-pause marker exists
     for it under ``.wizard/paused-mechanisms/``), OR
   * the capability has a pending migration request queued in
-    ``agents/handoffs/pending_migrations.json``.
+    ``agents/handoffs/pending_migrations.json``, OR
+  * ``state_read_error`` is True — the pause-marker state and/or the
+    migration queue EXISTS but could not be read/parsed for this capability,
+    so "paused"/"pending_migration" could not be POSITIVELY determined
+    either way (xvendor Fix B; see ``_is_paused`` / ``_is_pending_migration``
+    below). Treated the same as a confirmed-paused/confirmed-pending
+    capability: fail-closed to RED, never a silent "not paused" guess.
 Otherwise health is GREEN. There is no third state: a capability this module
-cannot positively verify clean, importable, unpaused, AND unqueued is RED —
-fail-closed, mirroring every other disclosed-bound convention in this package
-(``write_gate.load_descriptor_set``'s "any missing input ... returns []", not
-a raise and not a silent permissive default).
+cannot positively verify clean, importable, unpaused, unqueued, AND
+positively-read is RED — fail-closed, mirroring every other disclosed-bound
+convention in this package (``write_gate.load_descriptor_set``'s "any missing
+input ... returns []", not a raise and not a silent permissive default).
+A missing/absent file (nothing yet written) is a NORMAL, non-error input for
+every one of these checks — it is only an EXISTING-but-unreadable/malformed
+file that signals ``state_read_error`` or the descriptor-enumeration sentinel
+below; "absent" and "unreadable" are deliberately never conflated (the same
+distinction ``write_gate._load_paused_op_kinds`` draws between a genuinely
+absent marker directory and an inaccessible one).
+
+Descriptor-enumeration degradation (xvendor Fix B)
+------------------------------------------------------------------------------
+``_load_descriptor_ids`` enumerates capability_ids declared in
+``security/capability_descriptors.json`` (see "Enumeration" below). If that
+file EXISTS but cannot be read or parsed, this module does NOT silently
+resolve to the empty set — doing so would DROP a descriptor-only capability
+(one with no source file, so it is enumerated ONLY via the descriptor set)
+from the result entirely: a false all-clear, not a red flag, for exactly the
+capability this checker exists to protect against inviting the operator into.
+Instead ``check_capabilities`` inserts one additional sentinel record, keyed
+``SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID``, with ``health: "red"`` — so an
+agent reading this module's output sees the health check ITSELF is degraded,
+never a false all-clear for the capabilities it could still enumerate from
+disk.
 
 AST-first, import-second (the side-effect-safety ordering this module exists
 to get right)
@@ -84,10 +111,11 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 # sys.path bootstrap: mirrors scan.py's own convention so this module also
 # works if ever run/imported in a context where the ``external_write``
@@ -124,6 +152,22 @@ MIGRATION_QUEUE_REL = "agents/handoffs/pending_migrations.json"
 # Bounded so a hung/broken capability import can never hang this checker.
 IMPORT_TIMEOUT_SECONDS = 20
 
+# (xvendor Fix B) The sentinel capability_id `check_capabilities` inserts, with
+# health "red", when the descriptor set file EXISTS but could not be read or
+# parsed -- signaling the health CHECK ITSELF is degraded (enumeration may be
+# missing a descriptor-only capability_id) rather than silently reporting a
+# false all-clear. See `_load_descriptor_ids` / `_DescriptorEnumerationError`.
+SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID = "__capability_health_check_degraded__"
+
+
+class _DescriptorEnumerationError(Exception):
+    """Raised internally by `_load_descriptor_ids` when the descriptor set
+    file EXISTS but could not be read/parsed -- the capability_id union this
+    module enumerates from might be missing a descriptor-only capability.
+    Always caught by `check_capabilities`, which converts it into the single
+    RED sentinel record (`SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID`). Never
+    escapes this module."""
+
 # The subprocess program that attempts the import, path-addressed (capability
 # files are not necessarily importable by dotted module name — they live
 # under agents/capabilities/, not inside a package this process has already
@@ -142,20 +186,41 @@ _spec.loader.exec_module(_module)
 
 
 def _load_descriptor_ids(project_root: Path) -> Set[str]:
-    """The set of capability_ids declared in the descriptor set. Fail-safe:
-    an absent/unreadable/malformed descriptor set yields the empty set —
-    never raises, never crashes the checker (mirrors
-    ``write_gate.load_descriptor_set``'s own fail-safe discipline, though
-    this module deliberately does not import that runtime module — it reads
-    the same file independently so this checker has no dependency on the
-    write-gate's own import surface)."""
+    """The set of capability_ids declared in the descriptor set.
+
+    Fail-safe on the genuinely-ABSENT case ONLY: a descriptor set file that
+    does not exist yields the empty set — never raises, never crashes the
+    checker (mirrors ``write_gate.load_descriptor_set``'s own fail-safe
+    discipline, though this module deliberately does not import that runtime
+    module — it reads the same file independently so this checker has no
+    dependency on the write-gate's own import surface).
+
+    (xvendor Fix B) EXISTING-but-unreadable/malformed is NOT the same as
+    absent, and must not silently collapse to the empty set: doing so would
+    DROP a descriptor-only capability_id (one enumerated ONLY via this file,
+    with no source file on disk) from ``check_capabilities``'s result
+    entirely — a false all-clear for exactly the capability this checker
+    exists to catch. So this function RAISES ``_DescriptorEnumerationError``
+    when the file exists but cannot be read (``OSError`` other than
+    ``FileNotFoundError``), is not valid JSON, or is not a JSON array;
+    ``check_capabilities`` catches that and inserts a RED sentinel record
+    instead of silently under-enumerating."""
     path = project_root / DESCRIPTOR_SET_REL
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
         return set()
+    except OSError as exc:
+        raise _DescriptorEnumerationError(
+            f"descriptor set {path} exists but could not be read: {exc}") from exc
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise _DescriptorEnumerationError(
+            f"descriptor set {path} exists but is not valid JSON: {exc}") from exc
     if not isinstance(data, list):
-        return set()
+        raise _DescriptorEnumerationError(
+            f"descriptor set {path} exists but is not a JSON array")
     ids: Set[str] = set()
     for entry in data:
         if isinstance(entry, dict):
@@ -182,45 +247,75 @@ def _capability_source_files(project_root: Path) -> Dict[str, Path]:
     return found
 
 
-def _is_paused(project_root: Path, capability_id: str) -> bool:
-    """True iff an upgrade-reconcile safe-pause marker exists for
-    ``capability_id`` — either the bare ``.pause`` sentinel or the ``.json``
-    pause-state record (either one existing is sufficient; this module does
-    not need to parse the JSON to know the mechanism is paused). Fail-safe:
-    any filesystem error reading the paused-mechanisms directory is treated
-    as "not paused" for that check, never a crash."""
+def _is_paused(project_root: Path, capability_id: str) -> Tuple[bool, bool]:
+    """Returns ``(paused, read_error)``. ``paused`` is True iff an
+    upgrade-reconcile safe-pause marker exists for ``capability_id`` —
+    either the bare ``.pause`` sentinel or the ``.json`` pause-state record
+    (either one existing is sufficient; this module does not need to parse
+    the JSON to know the mechanism is paused). ``read_error`` is True iff a
+    marker path EXISTS but could not be stat'd (e.g. permission-denied) — a
+    case that must NOT be silently treated as "not paused":
+
+    (xvendor Fix B) the prior implementation used ``Path.is_file()``, which
+    INTERNALLY SWALLOWS ``PermissionError``/``OSError`` and returns ``False``
+    on any stat failure — indistinguishable from a genuinely-absent marker,
+    so an existing-but-unreadable pause marker silently read as "not paused"
+    (fail-OPEN). This stat-based check distinguishes the two:
+    ``FileNotFoundError`` is the only genuinely-absent signal (fine, not an
+    error); any other ``OSError`` sets ``read_error`` and the caller
+    (``check_capabilities``) folds it into the RED verdict rather than
+    guessing "not paused"."""
     paused_dir = project_root / PAUSED_MECHANISMS_DIR_REL
+    read_error = False
     for suffix in (".pause", ".json"):
+        marker = paused_dir / f"{capability_id}{suffix}"
         try:
-            if (paused_dir / f"{capability_id}{suffix}").is_file():
-                return True
-        except OSError:
+            st = os.stat(str(marker))
+        except FileNotFoundError:
             continue
-    return False
+        except OSError:
+            read_error = True
+            continue
+        if stat.S_ISREG(st.st_mode):
+            return True, read_error
+    return False, read_error
 
 
-def _is_pending_migration(project_root: Path, capability_id: str) -> bool:
-    """True iff ``agents/handoffs/pending_migrations.json`` carries an entry
-    whose ``mechanism_id`` (or, defensively, ``capability_id``) equals
-    ``capability_id``. Fail-safe: an absent/unreadable/malformed queue file
-    reads as "no pending migration" — never a crash, never a permissive
-    guess in the other direction that would matter (a genuinely queued
-    migration that could not be READ here still leaves the entrypoint-level
-    safe-pause, if any, as the operative signal; this field is best-effort
-    enrichment, not the sole gate)."""
+def _is_pending_migration(project_root: Path, capability_id: str) -> Tuple[bool, bool]:
+    """Returns ``(pending, read_error)``. ``pending`` is True iff
+    ``agents/handoffs/pending_migrations.json`` carries an entry whose
+    ``mechanism_id`` (or, defensively, ``capability_id``) equals
+    ``capability_id``. An ABSENT queue file is a normal, non-error input:
+    reads as ``(False, False)`` — nothing has ever been queued.
+
+    (xvendor Fix B) an EXISTING queue file that is unreadable or malformed
+    is NOT the same as absent, and must not silently collapse to "not
+    pending" (fail-OPEN — the prior implementation folded both cases into a
+    bare ``False``, and this field feeds directly into the RED/GREEN
+    verdict). Such a file returns ``read_error=True``; the caller
+    (``check_capabilities``) folds that into the RED verdict rather than
+    guessing "no pending migration". This is best-effort enrichment on top
+    of the entrypoint-level safe-pause (``_is_paused``), not the sole gate,
+    but a read failure here must never present as a clean bill of health."""
     path = project_root / MIGRATION_QUEUE_REL
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False, False
+    except OSError:
+        return False, True
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return False, True
     if not isinstance(data, list):
-        return False
+        return False, True
     for entry in data:
         if not isinstance(entry, dict):
             continue
         if entry.get("mechanism_id") == capability_id or entry.get("capability_id") == capability_id:
-            return True
-    return False
+            return True, False
+    return False, False
 
 
 def _scan_source(cap_path: Path) -> List[scan.Violation]:
@@ -281,10 +376,16 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
     Each record:
       ``{"capability_id": str, "importable": bool, "scanner_clean": bool,
         "violations": List[str], "paused": bool, "pending_migration": bool,
-        "health": "green" | "red"}``
+        "state_read_error": bool, "health": "green" | "red"}``
 
     ``health == "red"`` iff (NOT importable) OR (NOT scanner_clean) OR paused
-    OR pending_migration; else ``"green"``.
+    OR pending_migration OR state_read_error; else ``"green"``.
+
+    ``state_read_error`` (xvendor Fix B) is True iff the pause-marker state
+    and/or the migration queue EXISTS but could not be positively read for
+    this capability (see ``_is_paused`` / ``_is_pending_migration``) — an
+    unreadable state is never silently treated as "not paused"/"not
+    pending"; it forces RED exactly like a confirmed pause would.
 
     AST-FIRST, IMPORT-SECOND (safety ordering, not an optimization): a
     capability is only ever handed to the isolated-subprocess import attempt
@@ -299,22 +400,52 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
     same direction as every other disclosed-bound convention in this
     package).
 
-    Deterministic, ordered by capability_id. Never raises: every disk read
-    this function performs is individually fail-safe (see the private
-    helpers above); a missing project_root, missing descriptor set, missing
-    capabilities directory, and missing paused/migration files are all
-    ordinary, silently-tolerated inputs, not error conditions.
+    DESCRIPTOR-ENUMERATION DEGRADATION (xvendor Fix B): if the descriptor set
+    file itself exists but could not be read/parsed, this function does NOT
+    silently enumerate only the capabilities it could still find on disk --
+    that would drop a descriptor-only capability_id from the result with no
+    signal at all (a false all-clear). Instead it inserts ONE additional
+    sentinel record, keyed ``SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID``, with
+    ``health: "red"``, alongside every capability_id it could still enumerate
+    from source files on disk.
+
+    Deterministic, ordered by capability_id (the sentinel record, when
+    present, is inserted first). Never raises: every disk read this function
+    performs is individually fail-safe or funneled through the sentinel
+    above (see the private helpers above); a missing project_root, missing
+    descriptor set, missing capabilities directory, and missing
+    paused/migration files are all ordinary, silently-tolerated inputs, not
+    error conditions -- only an EXISTING-but-unreadable/malformed file
+    triggers ``state_read_error`` or the sentinel record.
     """
     root = Path(project_root)
-    descriptor_ids = _load_descriptor_ids(root)
+    descriptor_enumeration_degraded = False
+    try:
+        descriptor_ids = _load_descriptor_ids(root)
+    except _DescriptorEnumerationError:
+        descriptor_ids = set()
+        descriptor_enumeration_degraded = True
     source_files = _capability_source_files(root)
     all_ids = sorted(descriptor_ids | set(source_files))
 
     records: List[Dict[str, Any]] = []
+    if descriptor_enumeration_degraded:
+        records.append({
+            "capability_id": SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID,
+            "importable": False,
+            "scanner_clean": False,
+            "violations": [],
+            "paused": False,
+            "pending_migration": False,
+            "state_read_error": True,
+            "health": "red",
+        })
+
     for cap_id in all_ids:
         cap_path = source_files.get(cap_id)
-        paused = _is_paused(root, cap_id)
-        pending_migration = _is_pending_migration(root, cap_id)
+        paused, paused_read_error = _is_paused(root, cap_id)
+        pending_migration, migration_read_error = _is_pending_migration(root, cap_id)
+        state_read_error = paused_read_error or migration_read_error
 
         if cap_path is None:
             # Declared but no source file to scan or import against.
@@ -334,6 +465,7 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
         health = (
             "red"
             if (not importable) or (not scanner_clean) or paused or pending_migration
+               or state_read_error
             else "green"
         )
 
@@ -344,6 +476,7 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
             "violations": violations,
             "paused": paused,
             "pending_migration": pending_migration,
+            "state_read_error": state_read_error,
             "health": health,
         })
 

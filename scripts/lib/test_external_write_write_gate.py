@@ -929,6 +929,55 @@ class TestPausedOpKindDenyBranch(unittest.TestCase):
                                       paused_root=absent)
         self.assertTrue(d2.permitted)
 
+    def test_unreadable_marker_dir_fails_closed_not_absent(self):
+        # (xvendor Fix A) An EXISTING-but-UNREADABLE paused-markers directory:
+        # os.path.isdir() INTERNALLY SWALLOWS PermissionError/OSError and
+        # returns False, so the OLD isdir-based check could not tell this
+        # apart from a genuinely-absent directory and fell through to the
+        # permissive "absent" branch -- fail OPEN. The stat-based check must
+        # distinguish the two and refuse (fail-closed) here.
+        self.marker_dir.mkdir(parents=True, exist_ok=True)
+        real_stat = write_gate.os.stat
+
+        def _raising_stat(path, *a, **kw):
+            if str(path) == str(self.marker_dir):
+                raise PermissionError("permission denied")
+            return real_stat(path, *a, **kw)
+
+        ds = [_accepted_entry(risk_class="irreversible_external")]
+        op = _op("delete_record", surface="google_sheets", object_id="obj:permdenied")
+        with mock.patch.object(write_gate.os, "stat", side_effect=_raising_stat):
+            d = evaluate_write_gate(op, target=LIVE_TARGET, descriptor_set=ds,
+                                    cap_ledger=InvocationLedger(),
+                                    paused_root=str(self.marker_dir))
+        self.assertFalse(d.permitted)
+
+    def test_non_directory_at_paused_root_fails_closed(self):
+        # A plain FILE sitting at paused_root (not a directory) -- something
+        # is wrong; must refuse, never treat it like "absent".
+        self.marker_dir.parent.mkdir(parents=True, exist_ok=True)
+        self.marker_dir.write_text("not a directory", encoding="utf-8")
+        ds = [_accepted_entry(risk_class="irreversible_external")]
+        op = _op("delete_record", surface="google_sheets", object_id="obj:notadir")
+        d = evaluate_write_gate(op, target=LIVE_TARGET, descriptor_set=ds,
+                                cap_ledger=InvocationLedger(),
+                                paused_root=str(self.marker_dir))
+        self.assertFalse(d.permitted)
+
+    def test_genuinely_absent_dir_still_permits_regression(self):
+        # (regression, pairs with the two tests above) A genuinely-absent
+        # paused_root (os.stat raises FileNotFoundError) must still permit a
+        # previously-permitted op -- byte-identical to the pre-fix absent-dir
+        # behavior. Exercises a live accepted op specifically (distinct from
+        # the existing ungated-status-op regression coverage elsewhere in
+        # this class).
+        absent = str(Path(self._tmpdir.name) / "does-not-exist-either")
+        ds = [_accepted_entry(risk_class="irreversible_external")]
+        op = _op("delete_record", surface="google_sheets", object_id="obj:absentregress")
+        d = evaluate_write_gate(op, target=LIVE_TARGET, descriptor_set=ds,
+                                cap_ledger=InvocationLedger(), paused_root=absent)
+        self.assertTrue(d.permitted)
+
     def test_paused_root_kwarg_defaults_to_module_constant(self):
         # No paused_root passed at all -- resolves to PAUSED_MECHANISMS_DIR
         # relative to cwd, which does not exist in the test process's cwd, so
