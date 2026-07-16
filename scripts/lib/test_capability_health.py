@@ -276,6 +276,32 @@ class TestUnreadablePauseMarkerFailsClosedRed(CapabilityHealthTestBase):
         self.assertEqual(record["health"], "red")
 
 
+class TestPauseMarkerAsDirectoryIsRedNotGreen(CapabilityHealthTestBase):
+    def test_pause_marker_as_directory_is_paused_red(self):
+        # (xvendor round-2, R2-3) A `.pause` marker existing as a DIRECTORY
+        # (the wrong shape -- this module's own writer never creates it that
+        # way) must still count as paused: the entrypoint wrapper this marker
+        # gates checks for it with a plain shell `[ -e ... ]` test, which
+        # pauses on ANY existing path regardless of shape. The prior
+        # `stat.S_ISREG`-only check silently read this as "not paused" -- a
+        # false green for a capability the wrapper itself would refuse to run.
+        self._write_capability(
+            "dirpause_cap", _CLEAN_CAPABILITY_SOURCE.format(display_name="Dirpause Cap"))
+        marker_dir = self.project_root / PAUSED_MECHANISMS_DIR_REL
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        (marker_dir / "dirpause_cap.pause").mkdir()
+
+        records = capability_health.check_capabilities(self.project_root)
+        record = self._record_for(records, "dirpause_cap")
+
+        # Otherwise-healthy on every other axis -- the directory-shaped
+        # `.pause` marker alone must flip it red.
+        self.assertTrue(record["importable"])
+        self.assertTrue(record["scanner_clean"])
+        self.assertTrue(record["paused"])
+        self.assertEqual(record["health"], "red")
+
+
 class TestUnreadableMigrationQueueFailsClosedRed(CapabilityHealthTestBase):
     def test_unreadable_migration_queue_is_red_not_green(self):
         # (xvendor Fix B) An otherwise-clean+importable capability whose

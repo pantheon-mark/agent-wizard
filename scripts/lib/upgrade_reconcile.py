@@ -180,7 +180,15 @@ class MechanismReport:
     """One operator-authored mechanism the reconcile found affected by the
     changed contract.
 
-    mechanism_id:       derived from the flagged file's stem (e.g. "estate_upkeep").
+    mechanism_id:       derived from the flagged file's stem (e.g. "estate_upkeep"),
+                        via ``_capability_mechanism_id`` (see xvendor round-2 R2-1).
+                        For a writer under the operator-capability directory
+                        (``agents/capabilities/``), exactly ONE trailing
+                        ``_capability`` suffix is stripped from the stem first, so
+                        mechanism_id equals the SAME capability_id the emitted
+                        scaffold's descriptor entry declares as its ``id`` — the
+                        join ``resolve_paused_op_kinds`` needs. Every other writer's
+                        mechanism_id is its plain, unmodified file stem.
                         NOTE (disclosed bound): keyed on stem only, so two flagged
                         files with the same stem in DIFFERENT operator-code
                         directories would collide — acceptable at v0 (the real
@@ -401,6 +409,39 @@ def _is_under_capability_dir(writer_relpath: str) -> bool:
     it; see ``reconcile_upgrade``'s ``broken_requires_migration`` branch."""
     prefix = DEFAULT_CAPABILITIES_REL.as_posix().rstrip("/") + "/"
     return Path(writer_relpath).as_posix().startswith(prefix)
+
+
+# (xvendor round-2, R2-1) The production scaffold
+# (capability_code_scaffold.py's ``capability_module_stem``) writes a
+# capability's module as ``agents/capabilities/<capability_id>_capability.py``
+# -- so the file's own STEM carries this suffix, but its descriptor ``id`` (in
+# security/capability_descriptors.json) equals the BARE ``capability_id``,
+# with NO suffix. Before this fix, every mechanism_id derived below was the
+# raw ``Path(relpath).stem`` -- WITH the suffix -- so ``resolve_paused_op_kinds``
+# (which requires a descriptor entry with ``id == mechanism_id``) could never
+# join against a REAL scaffolded capability's descriptor: the join silently
+# failed, no ``paused_op_kinds`` marker was ever written, and the
+# broken_requires_migration runtime-block fix (xvendor Finding-1) was
+# defeated for every real capability. (The pre-fix regression test used a
+# fixture filename with NO ``_capability`` suffix at all -- a real-emitted-
+# path overfit that could never exercise this join.)
+CAPABILITY_MODULE_SUFFIX = "_capability"
+
+
+def _capability_mechanism_id(writer_relpath: str) -> str:
+    """Normalize the mechanism_id for a flagged writer: strip exactly ONE
+    trailing ``_capability`` suffix, but ONLY for a file under the
+    operator-capability directory (see ``_is_under_capability_dir``) --
+    never for a cron/scripts writer, whose mechanism_id is its plain file
+    stem and must not be altered. Making ``mechanism_id == capability_id ==
+    descriptor id`` here is what makes the pause-marker filename, the
+    migration-queue entry, and ``resolve_paused_op_kinds``'s descriptor
+    lookup all agree with each other and with the id the operator
+    re-declares through add-capability."""
+    stem = Path(writer_relpath).stem
+    if _is_under_capability_dir(writer_relpath) and stem.endswith(CAPABILITY_MODULE_SUFFIX):
+        return stem[: -len(CAPABILITY_MODULE_SUFFIX)]
+    return stem
 
 
 def _find_entrypoint(operator_project_dir: Path, writer_relpath: str) -> Optional[str]:
@@ -1016,7 +1057,7 @@ def reconcile_upgrade(
     mechanisms: List[MechanismReport] = []
     for relpath in sorted(by_relpath):
         violations = by_relpath[relpath]
-        mechanism_id = Path(relpath).stem
+        mechanism_id = _capability_mechanism_id(relpath)
         entrypoint = _find_entrypoint(operator_project_dir, relpath)
         carries_read_outputs: Optional[bool] = None
         separate_readonly_entrypoint: Optional[str] = None
@@ -1178,7 +1219,13 @@ def render_reconcile_result(result: ReconcileResult) -> str:
         elif m.state == "paused_live_write":
             status = "paused (live-write blocked pending migration)"
         elif m.state == "broken_requires_migration":
-            status = "cannot run as-is -- queued for rebuild"
+            # (xvendor round-2, R2-2) "cannot run as-is" was the same overclaim
+            # the impact-notice text already dropped for this state (see the
+            # module docstring's Finding-1 note just above) -- import-broken
+            # was never actually verified before this label was written. The
+            # honest claim, matching the notice: its ability to write outside
+            # this project was switched off, not a claim about importability.
+            status = "external writes switched off -- queued for rebuild"
         else:
             status = "needs manual review (no schedule found)"
         lines.append(f"  - {m.mechanism_id}: {status}")

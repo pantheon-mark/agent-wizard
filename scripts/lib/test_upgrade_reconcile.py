@@ -179,21 +179,25 @@ class ReconcileEndToEndTests(_Base):
         # broken_requires_migration, not manual_review, and the notice must never
         # claim it "keeps running exactly as before". Two distinct capability ids
         # (anti-overfit) prove this isn't keyed on a single hardcoded id.
+        # (xvendor round-2, R2-1) Filenames use the REAL scaffold convention
+        # (``<capability_id>_capability.py``) — mechanism_id must normalize
+        # to the bare capability_id (see _capability_mechanism_id), NOT the
+        # raw file stem.
         proj = Path(self._tmpdir.name)
         capdir = proj / "agents" / "capabilities"
         capdir.mkdir(parents=True)
-        for cid in ("inbox_management_capability", "estate_upkeep_capability"):
-            (capdir / f"{cid}.py").write_text(
+        for capability_id in ("inbox_management", "estate_upkeep"):
+            (capdir / f"{capability_id}_capability.py").write_text(
                 "from external_write.capability_api import run_operation\n"
                 "def go():\n    return run_operation(None, None)\n", encoding="utf-8")
         result = reconcile_upgrade(
             proj, _REAL_REPO, from_version="0.11.0", to_version="0.13.1")
         states = {m.mechanism_id: m.state for m in result.mechanisms}
-        self.assertEqual(states["inbox_management_capability"], "broken_requires_migration")
-        self.assertEqual(states["estate_upkeep_capability"], "broken_requires_migration")
+        self.assertEqual(states["inbox_management"], "broken_requires_migration")
+        self.assertEqual(states["estate_upkeep"], "broken_requires_migration")
         queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text())
         self.assertEqual({e["mechanism_id"] for e in queue},
-                          {"inbox_management_capability", "estate_upkeep_capability"})
+                          {"inbox_management", "estate_upkeep"})
         notice = (proj / result.notice_path).read_text() if result.notice_path else ""
         self.assertNotIn("keeps running exactly as before", notice)
 
@@ -604,6 +608,11 @@ class RenderReconcileResultTests(unittest.TestCase):
         self.assertIn("inbox_management_capability", out)
         self.assertIn("queued for rebuild", out.lower())
         self.assertNotIn("no schedule found", out)
+        # (xvendor round-2, R2-2) the CLI summary must not overclaim
+        # importability ("cannot run as-is") -- it must match the honest,
+        # already-fixed impact-notice wording instead.
+        self.assertNotIn("cannot run as-is", out.lower())
+        self.assertIn("switched off", out.lower())
 
 
 # ===================================================================================
@@ -887,6 +896,129 @@ class ScannerRedCapabilityRuntimeBlockTests(_Base):
 
 
 # ===================================================================================
+# xvendor round-2, R2-1 -- the durable regression guard: the filename↔descriptor-id
+# join must work for a REAL scaffolded capability, not the earlier overfit fixture
+# (ScannerRedCapabilityRuntimeBlockTests above uses a bare "<id>.py" filename with NO
+# "_capability" suffix -- exactly the shape that missed this bug, because it never
+# forces the mechanism_id normalization this fix adds). This class uses the ACTUAL
+# production filename convention capability_code_scaffold.py's capability_module_stem
+# emits: "agents/capabilities/<capability_id>_capability.py", with a descriptor id ==
+# the bare capability_id (no suffix) -- and proves BOTH that reconcile writes the
+# correctly-normalized pause marker AND that write_gate actually refuses the op_kind
+# at runtime even with an accepted descriptor present.
+# ===================================================================================
+
+class RealScaffoldFilenameMechanismIdJoinTests(_Base):
+    CAP_SOURCE_WITH_OP_KIND = (
+        '"""Widget-delete capability (REAL scaffold filename convention, xvendor '
+        'round-2 R2-1 regression fixture)."""\n'
+        'from external_write.capability_api import run_operation\n'
+        '\n'
+        'OP_KIND = "acme.widget.delete"\n'
+        '\n'
+        'def go():\n'
+        '    return run_operation(None, None)\n'
+    )
+
+    def _project_with_real_scaffolded_capability(self, *, capability_id="acme_widget_deleter"):
+        proj = self.tmp / "operator_proj"
+        capdir = proj / "agents" / "capabilities"
+        capdir.mkdir(parents=True)
+        # THE REAL convention: capability_code_scaffold.capability_module_stem
+        # returns f"{capability_id}_capability" -- the file stem carries the
+        # suffix; the descriptor id below does NOT.
+        relpath = f"agents/capabilities/{capability_id}_capability.py"
+        (proj / relpath).write_text(self.CAP_SOURCE_WITH_OP_KIND, encoding="utf-8")
+        secdir = proj / "security"
+        secdir.mkdir(parents=True, exist_ok=True)
+        # accepted: True -- a previously-accepted real capability. Descriptor
+        # id == capability_id, WITHOUT the "_capability" suffix -- exactly
+        # what add-capability's own convention declares (descriptor id ==
+        # capability_id == mechanism_id/re-declared id), and exactly what a
+        # RAW (unnormalized) file-stem mechanism_id could never join against.
+        descriptor_set = [{
+            "id": capability_id, "name": capability_id, "action_class": "delete",
+            "risk_class": "irreversible_external", "recovery_profile_ref": None,
+            "declared_test_target": "copy", "blast_radius_cap": 3,
+            "accepted": True, "phase_id": "phase-1",
+        }]
+        (secdir / "capability_descriptors.json").write_text(
+            json.dumps(descriptor_set), encoding="utf-8")
+        return proj, relpath, descriptor_set
+
+    def test_real_filename_joins_descriptor_and_writes_normalized_marker(self):
+        capability_id = "acme_widget_deleter"
+        proj, relpath, descriptor_set = self._project_with_real_scaffolded_capability(
+            capability_id=capability_id)
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+        m = result.mechanisms[0]
+
+        # The mechanism_id must normalize to the BARE capability_id -- equal
+        # to the descriptor's own "id" -- not the raw "<id>_capability" stem.
+        self.assertEqual(m.mechanism_id, capability_id)
+        self.assertEqual(m.state, "broken_requires_migration")
+        self.assertEqual(m.paused_op_kinds, ["acme.widget.delete"])
+
+        # The pause marker filename is keyed on the NORMALIZED mechanism_id
+        # (proves the join actually resolved an op_kind and wrote a marker --
+        # pre-fix, this join silently failed and no marker was ever written
+        # for a real "<id>_capability.py" filename).
+        marker_path = proj / PAUSED_MECHANISMS_DIR_REL / f"{capability_id}.json"
+        self.assertTrue(
+            marker_path.exists(),
+            "expected a paused_op_kinds marker keyed on the bare capability_id "
+            "-- the filename<->descriptor-id join must succeed for a REAL "
+            "scaffolded '<id>_capability.py' capability")
+        state = json.loads(marker_path.read_text(encoding="utf-8"))
+        self.assertEqual(state["mechanism_id"], capability_id)
+        self.assertEqual(state["paused_op_kinds"], ["acme.widget.delete"])
+
+        # The migration-queue entry also carries the normalized id -- so the
+        # operator re-declaring this SAME capability_id through add-capability
+        # auto-closes the SAME queue entry (the migration-queue<->add-capability
+        # coherence this fix must preserve).
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        self.assertEqual({e["mechanism_id"] for e in queue}, {capability_id})
+
+    def test_write_gate_refuses_the_resolved_op_kind_even_with_accepted_descriptor(self):
+        capability_id = "acme_widget_deleter"
+        proj, relpath, descriptor_set = self._project_with_real_scaffolded_capability(
+            capability_id=capability_id)
+        reconcile_upgrade(proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+
+        # Force a FRESH import of the real agents/lib/external_write package
+        # (see ScannerRedCapabilityRuntimeBlockTests's own test for why this
+        # purge-and-reinsert is needed -- an earlier test in this same process
+        # may have cached a stale external_write module under a deleted
+        # temporary build_root).
+        agents_lib = _REAL_REPO / "wizard" / "agents" / "lib"
+        for mod_name in list(sys.modules):
+            if mod_name == "external_write" or mod_name.startswith("external_write."):
+                del sys.modules[mod_name]
+        sys.path.insert(0, str(agents_lib))
+        from external_write.write_gate import (  # noqa: E402
+            evaluate_write_gate, InvocationLedger, LIVE_TARGET,
+        )
+        from external_write.operations import Operation  # noqa: E402
+
+        op = Operation(surface=capability_id, object_id="obj:1", field="__record__",
+                       new_value="<x>", op_kind="acme.widget.delete", batch_id="b1")
+        decision = evaluate_write_gate(
+            op, target=LIVE_TARGET, descriptor_set=descriptor_set,
+            cap_ledger=InvocationLedger(),
+            paused_root=str(proj / PAUSED_MECHANISMS_DIR_REL))
+        self.assertFalse(
+            decision.permitted,
+            "write_gate must REFUSE this op_kind for a REAL '<id>_capability.py' "
+            "scaffolded capability even with an accepted descriptor present -- "
+            "this is exactly the safety gap R2-1 closes: pre-fix, the marker "
+            "was never written at all for this real filename shape, so this "
+            "assertion would have failed (decision.permitted would be True).")
+        self.assertIn("paused", decision.refusal.detail["reason"])
+
+
+# ===================================================================================
 # CLI-wiring test: prove `wizard upgrade --to V --apply` actually invokes reconcile
 # after a real apply_upgrade. Reuses the synthetic-build-repo fixture helpers from
 # test_upgrade_apply.py (same anti-overfit posture), with the real
@@ -980,9 +1112,13 @@ class CliWiringTests(unittest.TestCase):
         ])
         self.assertEqual(rc, 0)
 
+        # (xvendor round-2, R2-1) filename is the REAL scaffold convention
+        # ("inbox_management_capability.py" == "<capability_id>_capability.py"
+        # for capability_id "inbox_management") -- mechanism_id normalizes to
+        # the bare capability_id, not the raw file stem.
         queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
         self.assertEqual({e["mechanism_id"] for e in queue},
-                          {"inbox_management_capability"})
+                          {"inbox_management"})
 
     def test_reconcile_fallback_message_lists_all_operator_code_dirs(self):
         # F-55 review fix: the except-branch fallback message used to hardcode

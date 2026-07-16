@@ -253,8 +253,9 @@ def _is_paused(project_root: Path, capability_id: str) -> Tuple[bool, bool]:
     either the bare ``.pause`` sentinel or the ``.json`` pause-state record
     (either one existing is sufficient; this module does not need to parse
     the JSON to know the mechanism is paused). ``read_error`` is True iff a
-    marker path EXISTS but could not be stat'd (e.g. permission-denied) — a
-    case that must NOT be silently treated as "not paused":
+    marker path EXISTS but could not be positively verified as a normal
+    paused/absent signal (e.g. permission-denied, or a ``.json`` path of the
+    wrong shape) — a case that must NOT be silently treated as "not paused":
 
     (xvendor Fix B) the prior implementation used ``Path.is_file()``, which
     INTERNALLY SWALLOWS ``PermissionError``/``OSError`` and returns ``False``
@@ -264,7 +265,28 @@ def _is_paused(project_root: Path, capability_id: str) -> Tuple[bool, bool]:
     ``FileNotFoundError`` is the only genuinely-absent signal (fine, not an
     error); any other ``OSError`` sets ``read_error`` and the caller
     (``check_capabilities``) folds it into the RED verdict rather than
-    guessing "not paused"."""
+    guessing "not paused".
+
+    (xvendor round-2, R2-3) SHAPE handling differs by suffix, and is itself
+    fail-closed:
+      * ``.pause`` — this module's own writer (``upgrade_reconcile.
+        _safe_pause_entrypoint`` / ``_write_paused_live_write_state``) always
+        creates it as an empty REGULAR file, but the entrypoint wrapper this
+        marker gates checks for it with a plain shell ``[ -e ... ]`` test —
+        which pauses on ANY existing path, regardless of shape. So ANY
+        existing ``.pause`` path — regular file, directory, or anything
+        else — is treated as a positive pause signal here too, matching the
+        wrapper's own check exactly. The prior ``stat.S_ISREG``-only gate
+        silently read a ``.pause`` marker that existed as a directory (the
+        wrong shape — never legitimately written that way) as "not paused":
+        a false green for a capability the wrapper itself would refuse to
+        run.
+      * ``.json`` — this is a STATE RECORD this module (and write_gate's
+        runtime deny-branch) actually parses; an existing path of the wrong
+        shape (not a regular file) is not a genuine pause-state record and
+        not a genuinely-absent marker either — it is unreadable/malformed
+        state, so it is folded into ``read_error`` (forces RED) rather than
+        silently treated as absent."""
     paused_dir = project_root / PAUSED_MECHANISMS_DIR_REL
     read_error = False
     for suffix in (".pause", ".json"):
@@ -276,8 +298,15 @@ def _is_paused(project_root: Path, capability_id: str) -> Tuple[bool, bool]:
         except OSError:
             read_error = True
             continue
+        if suffix == ".pause":
+            # Any EXISTING path counts as paused, regardless of shape (see
+            # docstring) — mirrors the wrapper's own `[ -e ]` check.
+            return True, read_error
         if stat.S_ISREG(st.st_mode):
             return True, read_error
+        # ".json" of the wrong shape: existing but not a genuine state
+        # record — force red via read_error, never silently "not paused".
+        read_error = True
     return False, read_error
 
 

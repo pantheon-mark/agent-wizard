@@ -101,7 +101,7 @@
       "path": "templates/agents/lib/external_write/capability_api.py"
     },
     {
-      "hash": "sha256:f73e0ffae5363d53fcc1658a689d77ff0dd0b454961e5f302fd5e3b836d1e42a",
+      "hash": "sha256:5577229113d4a59bbd4fc35645abcf08190c9eb9620687db07ef00a988aec38c",
       "path": "templates/agents/lib/external_write/capability_health.py"
     },
     {
@@ -514,12 +514,12 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-07-16T01:18:36Z",
-  "generator_version": "f234f5d50a64b8187d0e75b272adf03477877b23",
+  "generated_at": "2026-07-16T01:38:28Z",
+  "generator_version": "a6394505ceb62da1e91afcc7bed23cfc0672dec2",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.13.1",
-  "source_registry_entry_hash": "sha256:fb0be1ed60743e959b1ebbc84703d3f859c79ca0133e29bd3cf6761e7c26508a",
+  "source_registry_entry_hash": "sha256:46d4c3589efc013306aa012c7e7813ae6fbda9a0ef5d738f3a741deff8e14c29",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
   "template_tree_hash": "sha256:fdfb7ae8a5a96a8648b392bb5d3f18872379cf2e22da7091eb23780a8ccecd20",
