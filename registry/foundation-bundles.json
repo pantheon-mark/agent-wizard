@@ -281,8 +281,8 @@
       "status": "prerelease"
     },
     {
-      "bundle_manifest_sha256": "sha256:b31c703d70e3d0e8f348b58d5b08f9643654103a6697bf392ccfddfbc91ab8b5",
-      "bundle_tree_sha256": "sha256:f21972aebcab5c590d4e113162ef7c56edb7afb589a6cc2e7d422c30f7988b73",
+      "bundle_manifest_sha256": "sha256:c0650a83ac06e71834331440d9a5b49fa6f34325aa158a9419827bab72ce3507",
+      "bundle_tree_sha256": "sha256:b25866149cc55b81427e79f9601e9e6c23c03e2dcfb632bed77c841c7c41d3fd",
       "changelog": "This update makes an upgrade safer around your capabilities. First, the safety check that runs during an update now also looks at a capability you added yourself (not just the ones your system shipped with) \u2014 so if one of those can no longer run (for example, because an earlier update retired something it depended on), the update catches it and will not invite you back into it; instead it tells you plainly what needs fixing before you resume. Second, applying an update now always requires your own separate, explicit \"yes, apply it\" \u2014 asking to see what is new, or getting a notice that an update is available, never applies anything by itself. Third, running an update keeps your system's scripts able to run afterward, on top of everything you already had. No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.",
       "foundation_bundle_version": "v0.13.1",
       "manifest": "foundation-bundles/v0.13.1/manifest.yaml",

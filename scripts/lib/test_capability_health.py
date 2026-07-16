@@ -37,6 +37,15 @@ _AGENTS_LIB = Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib"
 sys.path.insert(0, str(_AGENTS_LIB))
 
 from external_write import capability_health  # noqa: E402
+from external_write import write_gate  # noqa: E402
+
+# Build-side owners of the four values capability_health.py duplicates by
+# value (see TestPathConstantsAntiDrift below) -- both importable here
+# because this test file, run from wizard/scripts/lib, can see both the
+# agents/lib/external_write tree (inserted above) and the scripts/lib tree
+# (its own directory, already on sys.path under ``python3 -m unittest``).
+import capability_code_scaffold  # noqa: E402
+import upgrade_reconcile  # noqa: E402
 
 
 CAPABILITIES_DIR_REL = capability_health.CAPABILITIES_DIR_REL
@@ -269,6 +278,44 @@ class TestEmptyProjectYieldsNoRecords(CapabilityHealthTestBase):
     def test_empty_project_yields_empty_list_no_crash(self):
         records = capability_health.check_capabilities(self.project_root)
         self.assertEqual(records, [])
+
+
+class TestPathConstantsAntiDrift(unittest.TestCase):
+    """BUILD<->RUNTIME value contract (FINAL-review Fix 1). capability_health.py
+    is emitted runtime code and cannot import its four canonical owners
+    across the build/runtime boundary, so each of its four path constants is
+    duplicated BY VALUE from its owner instead. Nothing previously pinned
+    those duplicates to their owners, so a real drift (the owner's value
+    changing without this module's copy changing too) would go undetected
+    until an operator hit it live. These four tests are that pin -- this
+    test file, run from wizard/scripts/lib, can import all four owners,
+    mirroring test_external_write_write_gate.py's own
+    TestPausedMechanismsDirAntiDrift::test_matches_upgrade_reconcile_constant_by_value
+    pattern for write_gate.PAUSED_MECHANISMS_DIR."""
+
+    def test_capabilities_dir_rel_matches_capability_code_scaffold(self):
+        self.assertEqual(
+            capability_health.CAPABILITIES_DIR_REL,
+            capability_code_scaffold.DEFAULT_CAPABILITIES_REL.as_posix(),
+        )
+
+    def test_descriptor_set_rel_matches_write_gate_descriptor_set_path(self):
+        self.assertEqual(
+            capability_health.DESCRIPTOR_SET_REL,
+            write_gate.DESCRIPTOR_SET_PATH,
+        )
+
+    def test_paused_mechanisms_dir_rel_matches_write_gate_paused_mechanisms_dir(self):
+        self.assertEqual(
+            capability_health.PAUSED_MECHANISMS_DIR_REL,
+            write_gate.PAUSED_MECHANISMS_DIR,
+        )
+
+    def test_migration_queue_rel_matches_upgrade_reconcile_constant(self):
+        self.assertEqual(
+            capability_health.MIGRATION_QUEUE_REL,
+            upgrade_reconcile.MIGRATION_QUEUE_REL,
+        )
 
 
 if __name__ == "__main__":

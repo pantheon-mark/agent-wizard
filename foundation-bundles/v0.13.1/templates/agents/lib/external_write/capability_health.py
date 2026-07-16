@@ -106,9 +106,13 @@ from external_write import scan  # noqa: E402
 # Project-root-relative locations this module reads. Every one of these is
 # duplicated-by-value from its own canonical owner (never imported across the
 # build/runtime boundary — this module is emitted runtime code, the owners
-# below are build-side or sibling-runtime modules with their own value-pinned
-# cross-tests) — same discipline write_gate.py's PAUSED_MECHANISMS_DIR uses
-# against upgrade_reconcile.py's PAUSED_MECHANISMS_DIR_REL.
+# below are build-side or sibling-runtime modules) and pinned equal to that
+# owner BY VALUE in a build-side cross-test in
+# scripts/lib/test_capability_health.py (TestPathConstantsAntiDrift) — same
+# discipline write_gate.py's PAUSED_MECHANISMS_DIR uses against
+# upgrade_reconcile.py's PAUSED_MECHANISMS_DIR_REL, pinned in
+# scripts/lib/test_external_write_write_gate.py
+# (TestPausedMechanismsDirAntiDrift).
 # ---------------------------------------------------------------------------
 
 CAPABILITIES_DIR_REL = "agents/capabilities"

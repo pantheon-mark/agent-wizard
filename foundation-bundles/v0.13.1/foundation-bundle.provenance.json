@@ -33,11 +33,11 @@
       "path": "manifest.yaml"
     },
     {
-      "hash": "sha256:b31c703d70e3d0e8f348b58d5b08f9643654103a6697bf392ccfddfbc91ab8b5",
+      "hash": "sha256:c0650a83ac06e71834331440d9a5b49fa6f34325aa158a9419827bab72ce3507",
       "path": "migration-manifest.json"
     },
     {
-      "hash": "sha256:51d3b8d8502292d42cde7ccb24eca4345f3241bb6d051913e1cf45ca68db50dd",
+      "hash": "sha256:6a67a90c2578db2eedb755bd20ed83980dead723946cfc9a44c4a64a445ff431",
       "path": "migration-manifest.yaml"
     },
     {
@@ -101,7 +101,7 @@
       "path": "templates/agents/lib/external_write/capability_api.py"
     },
     {
-      "hash": "sha256:ddb1806db6beec0c825336f819ab23da45d1efaf73ed1ad5c374ea49ccac7e3d",
+      "hash": "sha256:5d2fadf9a8ac46bb87db0a748a32b9299f46467d656718babd45fd47c677c5c5",
       "path": "templates/agents/lib/external_write/capability_health.py"
     },
     {
@@ -514,12 +514,12 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-07-16T00:12:55Z",
-  "generator_version": "54f03743f867dd3f51fe9494efcd8e369385dffc",
+  "generated_at": "2026-07-16T00:51:16Z",
+  "generator_version": "22b8f15951478bfcecb1dedf04db6ea8081d37e0",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.13.1",
-  "source_registry_entry_hash": "sha256:589fa674e0242b77659f459e34162201cbb8c90bc9595d1f1be848de9bdffa61",
+  "source_registry_entry_hash": "sha256:697c5bc070237618d0d2f273288cfef529d9d7f90f0a985918ee614fa9b49c67",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
   "template_tree_hash": "sha256:fdfb7ae8a5a96a8648b392bb5d3f18872379cf2e22da7091eb23780a8ccecd20",

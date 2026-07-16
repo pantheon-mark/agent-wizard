@@ -39,10 +39,10 @@ artifact_notes:
     write back or read from a connected account, so capability code never has a path to the credential-holding adapter
     itself.
   agents/lib/external_write/capability_health.py: 'New — the composite, AST-first, read-only capability health-check
-    primitive: given a capability''s descriptor, checks that its module still imports cleanly and that its declared
-    write op_kinds still resolve against the current adapter registry, so a retired-surface capability whose imports
-    are broken is reported import-broken (not merely "paused") before the operator is ever invited into it. Performs
-    no external write of any kind.'
+    primitive: for each capability, checks whether its source is scanner-clean, whether its module still imports
+    cleanly, and whether it is paused or has a migration request queued, so a capability that fails any one of those
+    checks is reported unhealthy — not merely "paused" — before the operator is ever invited into it. Performs no
+    external write of any kind.'
   agents/lib/external_write/capability_registration.py: Registers an operator-originated capability (one the operator
     asks for mid-run) into the descriptor set with its risk class and protections.
   agents/lib/external_write/consent_narration.py: New — builds the consent sentence you approve from the actual
