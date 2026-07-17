@@ -46,7 +46,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 # sys.path bootstrap (mirrors acceptance_ceremony.py / capability_registration.py): make the
 # package parent importable when run as a direct script from the project root, so the sibling
@@ -63,6 +63,10 @@ from external_write.acceptance_ceremony import (
     OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA,
 )
 from external_write.adapter_registry import get_adapter, get_dispatch
+from external_write.capability_identity import (
+    build_capability_index,
+    IdentityResolutionError,
+)
 from external_write.contracts import get_contract
 from external_write.effects_manifest import unresolvable_adapter_seal_gap
 from external_write.proof_hash import (
@@ -93,19 +97,51 @@ PENDING_MIGRATIONS_REL = "agents/handoffs/pending_migrations.json"
 
 
 @dataclass(frozen=True)
+class MigrationCloseResult:
+    """Outcome of ``close_pending_migration_if_matched`` (Task A3 / F-60 fix)
+    — SURFACED (never a bare, silently-swallowed bit) so a caller on the
+    acceptance path can see WHAT happened to the pending-migration queue,
+    not just whether *something* closed.
+
+    closed:            True iff at least one pending entry was removed this call.
+    closed_raw_ids:    The raw ``mechanism_id`` values (as written in the queue file) of the
+                       entries removed — empty when nothing closed.
+    unresolved_note:   None when nothing noteworthy happened. Otherwise a plain-language note
+                       (no traceback) describing an identity-resolution problem hit while
+                       examining the queue — e.g. a raw id matched more than one capability
+                       (ambiguous) and could not be attributed with confidence. This is surfaced
+                       so a genuinely-unresolved or mismatched migration id is never a silent
+                       no-op; it never blocks or undoes the acceptance itself (which has already
+                       completed by the time this runs) — it is visibility into the bookkeeping
+                       step only.
+    """
+    closed: bool
+    closed_raw_ids: Tuple[str, ...] = ()
+    unresolved_note: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class OperatorAcceptanceResult:
     """Outcome of the operator-acceptance step.
 
-    accepted:      True IFF the receipt was minted AND the ceremony flipped the descriptor.
-    reason:        On refusal, a specific human-readable reason (None on success).
-    receipt_ref:   Path of the minted receipt (None if minting itself refused before writing).
-    acceptance:    The underlying AcceptanceResult from the ceremony (None if the helper refused
-                   before invoking it — e.g. an empty operator confirmation).
+    accepted:        True IFF the receipt was minted AND the ceremony flipped the descriptor.
+    reason:          On refusal, a specific human-readable reason (None on success).
+    receipt_ref:     Path of the minted receipt (None if minting itself refused before writing).
+    acceptance:      The underlying AcceptanceResult from the ceremony (None if the helper
+                     refused before invoking it — e.g. an empty operator confirmation).
+    migration_close: The outcome of the best-effort pending-migration-queue cleanup
+                     (``close_pending_migration_if_matched``), populated whenever the ceremony
+                     itself succeeded (None if acceptance did not reach that point). SURFACED
+                     here (Task A3 / F-60 fix) so a caller can see whether the queue cleanup
+                     found and closed a matching entry, found nothing (normal), or hit an
+                     identity-resolution problem it could not silently resolve — never just a
+                     dropped return value.
     """
     accepted: bool
     reason: Optional[str] = None
     receipt_ref: Optional[str] = None
     acceptance: Optional[AcceptanceResult] = None
+    migration_close: Optional[MigrationCloseResult] = None
 
 
 def _refuse(reason: str, receipt_ref: Optional[str] = None,
@@ -154,13 +190,38 @@ def _atomic_write_text(path: str, text: str) -> None:
         raise
 
 
+def _resolve_or_literal(index, raw: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve ``raw`` to its canonical capability id via the identity index, falling back to
+    the literal string itself when the index has nothing to say about it (e.g. a project with
+    no scaffolded capability modules at all yet — the pre-A1 literal-match convention this
+    function preserves for that case). Returns ``(canonical_or_literal, ambiguous_note)``.
+
+    An UNRESOLVED lookup is a completely normal outcome (most raw ids in a queue simply do not
+    correspond to the capability being examined) and falls back silently to the literal value —
+    no note. An AMBIGUOUS lookup (the raw id corroborates two or more DIFFERENT capabilities) is
+    a genuine identity problem that must not be silently guessed either way: it is surfaced via
+    the returned note, and the canonical slot is left ``None`` so it can never spuriously equal
+    anything (F-60 fix — the acceptance path must see this, not swallow it)."""
+    if not (isinstance(raw, str) and raw):
+        return None, None
+    try:
+        identity = index.resolve(raw, "unknown")
+    except IdentityResolutionError as e:
+        if e.kind == "ambiguous":
+            return None, e.operator_message
+        return raw, None  # unresolved -- normal; fall back to the literal id.
+    return identity.canonical_id, None
+
+
 def close_pending_migration_if_matched(
     capability_id: str,
     pending_migrations_path: Optional[str] = None,
-) -> bool:
+    *,
+    project_root: Optional[str] = None,
+) -> MigrationCloseResult:
     """Best-effort cleanup (Task 10 — external-write-gate-generalization; carries the T9
-    CARRY item forward): if `capability_id` matches a pending migration's `mechanism_id`,
-    remove that entry from the queue so it stops being surfaced as still-pending.
+    CARRY item forward; Task A3 / F-60 fix): if `capability_id` matches a pending migration's
+    `mechanism_id`, remove that entry from the queue so it stops being surfaced as still-pending.
 
     The matching convention (documented to the operator via add-capability.md Step A/E): when
     a capability is designed to migrate a mechanism that upgrade-reconcile (Task 9) safe-paused,
@@ -168,31 +229,71 @@ def close_pending_migration_if_matched(
     closure match automatically — no new field, no schema change to the pinned descriptor-entry
     shape (`capability_registration.REGISTERED_ENTRY_KEYS`).
 
-    Deliberately fail-soft: this runs AFTER the ceremony has already flipped the descriptor (the
-    trust-critical write is already done by the time this is called) — it is bookkeeping
-    tidy-up on a best-effort queue file, never a second authority. A missing file, malformed
-    JSON, a non-list body, or simply no matching entry are all silent no-ops (return False);
-    nothing here ever raises or blocks the caller's already-completed acceptance.
-    """
+    F-60 fix: matching is no longer a RAW string join. Both the pending entry's `mechanism_id`
+    and the accepted `capability_id` are resolved to their CANONICAL capability id via
+    `capability_identity.build_capability_index(project_root).resolve(raw, "unknown")` before
+    being compared — so a capability whose identity is split across names (the estate case:
+    accepted capability_id `inbox_management`, stray queue entry `mechanism_id="inbox-labels"`,
+    corroborated via `inbox_management`'s own declared `SURFACE`) still closes correctly. A raw
+    id the index cannot resolve at all falls back to a literal comparison (preserves the
+    pre-A1 behavior for a project with no capability modules on disk yet); a raw id the index
+    finds AMBIGUOUS (matches two or more different capabilities) is never silently treated as a
+    match OR a non-match — it is surfaced via the returned result's `unresolved_note`.
+
+    Deliberately fail-soft on the WRITE side only: this runs AFTER the ceremony has already
+    flipped the descriptor (the trust-critical write is already done by the time this is
+    called) — it is bookkeeping tidy-up on a best-effort queue file, never a second authority,
+    and NEVER raises or blocks the caller's already-completed acceptance. A missing file,
+    malformed JSON, or a non-list body are all silent no-ops (``MigrationCloseResult(closed=
+    False)``, no note — these are not identity problems). But an identity-resolution ambiguity
+    encountered while examining actual entries is SURFACED via `unresolved_note` rather than
+    disappearing into a bare `False` (the F-60 silent-no-op this fix closes)."""
     path = pending_migrations_path or PENDING_MIGRATIONS_REL
     try:
         with open(path, encoding="utf-8") as f:
             entries = json.load(f)
     except Exception:
-        return False
+        return MigrationCloseResult(closed=False)
     if not isinstance(entries, list):
-        return False
-    remaining = [
-        e for e in entries
-        if not (isinstance(e, dict) and e.get("mechanism_id") == capability_id)
-    ]
-    if len(remaining) == len(entries):
-        return False  # nothing matched -- not a migrated mechanism, or already closed.
+        return MigrationCloseResult(closed=False)
+
+    index = build_capability_index(project_root or ".")
+    accepted_canonical, accepted_note = _resolve_or_literal(index, capability_id)
+
+    notes = []
+    if accepted_note:
+        notes.append(accepted_note)
+
+    remaining = []
+    closed_raw_ids = []
+    for e in entries:
+        if not isinstance(e, dict):
+            remaining.append(e)
+            continue
+        raw_mechanism_id = e.get("mechanism_id")
+        entry_canonical, entry_note = _resolve_or_literal(index, raw_mechanism_id)
+        if entry_note:
+            notes.append(entry_note)
+        matched = (
+            accepted_canonical is not None
+            and entry_canonical is not None
+            and accepted_canonical == entry_canonical
+        )
+        if matched:
+            closed_raw_ids.append(raw_mechanism_id)
+        else:
+            remaining.append(e)
+
+    note = "; ".join(notes) if notes else None
+    if not closed_raw_ids:
+        return MigrationCloseResult(closed=False, unresolved_note=note)
+
     try:
         _atomic_write_text(path, json.dumps(remaining, indent=2, ensure_ascii=False) + "\n")
     except Exception:
-        return False
-    return True
+        return MigrationCloseResult(closed=False, unresolved_note=note)
+    return MigrationCloseResult(
+        closed=True, closed_raw_ids=tuple(closed_raw_ids), unresolved_note=note)
 
 
 def record_operator_acceptance(
@@ -207,6 +308,7 @@ def record_operator_acceptance(
     audit_log_path: Optional[str] = None,
     accepted_at: Optional[str] = None,
     pending_migrations_path: Optional[str] = None,
+    project_root: Optional[str] = None,
 ) -> OperatorAcceptanceResult:
     """Mint the operator-acceptance receipt from the operator's VERBATIM confirmation and drive
     the acceptance ceremony. Fail-safe: on any missing / empty / ambiguous input, refuse and
@@ -229,6 +331,10 @@ def record_operator_acceptance(
     pending_migrations_path: Forwarded to close_pending_migration_if_matched on success
                            (default: PENDING_MIGRATIONS_REL). Best-effort only — see that
                            function's docstring.
+    project_root:          Forwarded to close_pending_migration_if_matched on success (default:
+                           ``"."`` — this package's convention of assuming the process runs from
+                           the operator project root). Used to build the capability identity
+                           index for the F-60 canonical-id migration-queue match.
     """
     if not (isinstance(capability_id, str) and capability_id.strip()):
         return _refuse("no target capability_id supplied")
@@ -331,11 +437,16 @@ def record_operator_acceptance(
 
     # Task 10 carry-forward from Task 9: a capability that migrates a paused mechanism
     # closes that mechanism's pending-migration entry the moment it is actually accepted —
-    # best-effort, never blocks the acceptance that already happened above.
-    close_pending_migration_if_matched(capability_id, pending_migrations_path)
+    # best-effort, never blocks the acceptance that already happened above. Task A3 / F-60:
+    # the outcome is captured and returned (never silently dropped) so a caller can see whether
+    # a matching entry actually closed, or whether the queue examination hit an identity problem
+    # it could not resolve with confidence.
+    migration_close = close_pending_migration_if_matched(
+        capability_id, pending_migrations_path, project_root=project_root)
 
     return OperatorAcceptanceResult(
-        accepted=True, reason=None, receipt_ref=receipt_path, acceptance=acceptance)
+        accepted=True, reason=None, receipt_ref=receipt_path, acceptance=acceptance,
+        migration_close=migration_close)
 
 
 # ---------------------------------------------------------------------------

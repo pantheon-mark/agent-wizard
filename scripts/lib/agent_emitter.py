@@ -134,6 +134,17 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # omit it and the deterministic "don't invite the operator into a broken
     # capability" check this module backs has nothing to route through.
     "capability_health.py",
+    # Task A1/A2/A3 (identity split fix, Phase 3 Cut 1): the capability identity index +
+    # resolver. `capability_registration.py` already hard-imports
+    # `external_write.capability_identity` at module scope (A2's four-way coherence gate), and
+    # Task A3 adds the SAME hard import to `operator_acceptance.py` (canonical-id
+    # migration-queue match) and `capability_health.py` (canonical-owning-module health
+    # resolution) -- omitting this file here means an emitted writes-back system ships three
+    # modules that hard-import a module never physically copied into the package, a
+    # ModuleNotFoundError at import time, not a caught omission (see
+    # ExternalWriteLibRegistryEnrollmentTests, the same regression class this file's own docstring
+    # already documents for registered_adapters.py/triage.py/standing_automation.py).
+    "capability_identity.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

@@ -1594,10 +1594,20 @@ class TestS253ContractDelta(unittest.TestCase):
         # Task 4 (F-55 C, v0.13.1): capability_health.py must be enrolled, or a
         # writes-back system's session-start orientation (T5) / add-capability
         # consult has no composite AST-first capability health-check module to
-        # import at all — thirty lib files total.
+        # import at all.
         import agent_emitter
         self.assertIn("capability_health.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 30)
+
+    def test_emit_set_lists_the_taskA_capability_identity_file(self):
+        # Task A1/A2/A3 (identity split fix, Phase 3 Cut 1): capability_identity.py must be
+        # enrolled, or an emitted writes-back system ships capability_registration.py,
+        # operator_acceptance.py, and capability_health.py -- all three of which hard-import
+        # `external_write.capability_identity` at module scope -- without the module they
+        # import: a ModuleNotFoundError at import time, not a caught omission. Thirty-one lib
+        # files total.
+        import agent_emitter
+        self.assertIn("capability_identity.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 31)
 
     def _writes_back_plan(self):
         import copy, json

@@ -91,6 +91,22 @@ _BROKEN_IMPORT_SOURCE = '''"""{display_name} -- static-clean but raises on impor
 raise ImportError("simulated broken dependency for {display_name}")
 '''
 
+_SPLIT_IDENTITY_CAPABILITY_SOURCE = '''"""{display_name} -- gate-clean capability whose descriptor id
+differs from its module stem (F-61 estate-split fixture)."""
+
+from typing import Any
+
+SURFACE = "{surface}"
+
+
+def describe() -> str:
+    return "{display_name} ready"
+
+
+def propose_operations(facade: Any, batch_id: str):
+    return []
+'''
+
 
 class CapabilityHealthTestBase(unittest.TestCase):
     def setUp(self):
@@ -242,6 +258,38 @@ class TestDescriptorOnlyCapabilityWithNoSourceFile(CapabilityHealthTestBase):
         self.assertFalse(record["importable"])
         self.assertFalse(record["scanner_clean"])
         self.assertEqual(record["health"], "red")
+
+
+class TestDescriptorAliasResolvesToOwningModuleGreen(CapabilityHealthTestBase):
+    """F-61 (Task A3) -- the estate split: a descriptor id ("inbox-labels")
+    differs from its module stem ("inbox_management"). Before this fix, the
+    same-named-file check found no ``inbox-labels_capability.py`` on disk and
+    reported the capability RED, even though the module for it is healthy and
+    importable under its own (different) name. The health check must resolve
+    the descriptor row to its OWNING module via the identity index (surface-
+    corroborated: the module's own declared SURFACE equals the descriptor id)
+    before that check, and report GREEN."""
+
+    def test_split_identity_capability_reports_green_not_false_red(self):
+        self._write_capability(
+            "inbox_management",
+            _SPLIT_IDENTITY_CAPABILITY_SOURCE.format(
+                display_name="Inbox Management", surface="inbox-labels"),
+        )
+        self._write_descriptor_set([{"id": "inbox-labels", "name": "inbox-labels"}])
+
+        records = capability_health.check_capabilities(self.project_root)
+
+        record = self._record_for(records, "inbox_management")
+        self.assertEqual(record["health"], "green")
+        self.assertTrue(record["importable"])
+        self.assertTrue(record["scanner_clean"])
+        self.assertFalse(record["paused"])
+        self.assertFalse(record["pending_migration"])
+
+        # The alias id must be resolved away, not ALSO reported as a separate
+        # (false-red) row for the same underlying capability.
+        self.assertNotIn("inbox-labels", {r["capability_id"] for r in records})
 
 
 class TestUnreadablePauseMarkerFailsClosedRed(CapabilityHealthTestBase):

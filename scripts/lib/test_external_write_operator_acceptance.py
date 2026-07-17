@@ -333,10 +333,96 @@ class PendingMigrationAutoCloseTest(unittest.TestCase):
         remaining = json.loads(pm_path.read_text(encoding="utf-8"))
         self.assertEqual(len(remaining), 1)
 
+    # -- Task A3 / F-60: the outcome is SURFACED on the full acceptance path, not just the
+    #    bare bookkeeping helper in isolation. ANTI-OVERFIT: capability module written at the
+    #    real emitted relpath (agents/capabilities/<id>_capability.py) inside a fresh tmp tree.
+
+    def _write_capability_module(self, capability_id, *, surface):
+        cap_dir = self.tmp / "agents" / "capabilities"
+        cap_dir.mkdir(parents=True, exist_ok=True)
+        source = (
+            f'"""{capability_id} -- test fixture capability."""\n\n'
+            f'SURFACE = "{surface}"\n\n\n'
+            "def describe():\n    return \"ready\"\n"
+        )
+        (cap_dir / f"{capability_id}_capability.py").write_text(source, encoding="utf-8")
+
+    def test_estate_split_stray_entry_closed_via_index_on_full_acceptance(self):
+        # The estate shape, driven through the FULL acceptance ceremony (not just the bare
+        # helper): accepted capability_id "google_sheets" declares SURFACE "gs-legacy-mechanism"
+        # -- a STRAY pending-migration entry keyed by that surface (not the literal
+        # capability_id) must still close via canonical resolution, and the outcome must be
+        # observable on the returned OperatorAcceptanceResult, not silently swallowed.
+        self._write_capability_module("google_sheets", surface="gs-legacy-mechanism")
+        pm_path = self.tmp / "agents" / "handoffs" / "pending_migrations.json"
+        pm_path.parent.mkdir(parents=True, exist_ok=True)
+        pm_path.write_text(json.dumps([
+            {"mechanism_id": "gs-legacy-mechanism", "writer_relpath": "agents/cron/x.py",
+             "entrypoint_relpath": "agents/cron/run_x.sh", "violations": [],
+             "suggested_next_step": "migrate via add-capability", "status": "pending"},
+        ], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        self._write_set([_descriptor(id="google_sheets")])
+        self._write_proof()
+
+        res = record_operator_acceptance(
+            "google_sheets", PHASE, str(self.proof_path),
+            "Yes — I accept this capability for live use.",
+            receipt_path=str(self.receipt_path), descriptor_set_path=str(self.set_path),
+            audit_log_path=str(self.audit_path), pending_migrations_path=str(pm_path),
+            project_root=str(self.tmp))
+        self.assertTrue(res.accepted, res.reason)
+
+        # Surfaced (Task A3 / F-60): the acceptance result itself carries the closure outcome.
+        self.assertIsNotNone(res.migration_close)
+        self.assertTrue(res.migration_close.closed, res.migration_close.unresolved_note)
+        self.assertEqual(res.migration_close.closed_raw_ids, ("gs-legacy-mechanism",))
+        remaining = json.loads(pm_path.read_text(encoding="utf-8"))
+        self.assertEqual(remaining, [])
+
+    def test_ambiguous_migration_id_surfaced_on_full_acceptance_not_silent_noop(self):
+        # Two DIFFERENT capabilities share a surface -- a queued entry keyed by that shared
+        # surface is genuinely ambiguous and must never silently read as "nothing to close".
+        # The acceptance itself still succeeds (this is bookkeeping-only), but the returned
+        # result must SURFACE the ambiguity.
+        self._write_capability_module("google_sheets", surface="shared_surface")
+        self._write_capability_module("other_capability", surface="shared_surface")
+        pm_path = self.tmp / "agents" / "handoffs" / "pending_migrations.json"
+        pm_path.parent.mkdir(parents=True, exist_ok=True)
+        pm_path.write_text(json.dumps([
+            {"mechanism_id": "shared_surface", "status": "pending"},
+        ], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        self._write_set([_descriptor(id="google_sheets")])
+        self._write_proof()
+
+        res = record_operator_acceptance(
+            "google_sheets", PHASE, str(self.proof_path),
+            "Yes — I accept this capability for live use.",
+            receipt_path=str(self.receipt_path), descriptor_set_path=str(self.set_path),
+            audit_log_path=str(self.audit_path), pending_migrations_path=str(pm_path),
+            project_root=str(self.tmp))
+        self.assertTrue(res.accepted, res.reason)
+
+        self.assertIsNotNone(res.migration_close)
+        self.assertFalse(res.migration_close.closed)
+        self.assertIsNotNone(
+            res.migration_close.unresolved_note,
+            "a genuinely-ambiguous migration id must be surfaced, not a silent no-op")
+        remaining = json.loads(pm_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(remaining), 1, "the ambiguous entry must be left untouched")
+
 
 class ClosePendingMigrationHelperUnitTest(unittest.TestCase):
     """Direct unit coverage of close_pending_migration_if_matched's fail-soft
-    behavior, independent of the full acceptance ceremony."""
+    behavior, independent of the full acceptance ceremony.
+
+    Task A3 / F-60: the function now returns a ``MigrationCloseResult`` (not a bare bool) --
+    every assertion here checks ``.closed`` explicitly (a dataclass instance is truthy
+    regardless of its fields, so ``assertTrue``/``assertFalse`` directly on the return value
+    would silently stop verifying anything). These fixtures deliberately build NO
+    ``agents/capabilities`` tree, so the identity index resolves nothing and
+    ``close_pending_migration_if_matched`` falls back to its pre-A1 literal-id comparison --
+    the estate-split (canonical-resolution) path is covered separately below in
+    ``ClosePendingMigrationIdentityResolutionTest``."""
 
     def setUp(self):
         self._td = TemporaryDirectory()
@@ -351,41 +437,139 @@ class ClosePendingMigrationHelperUnitTest(unittest.TestCase):
     def test_matched_entry_removed_returns_true(self):
         p = self._path()
         Path(p).write_text(json.dumps([{"mechanism_id": "cap1"}]), encoding="utf-8")
-        self.assertTrue(close_pending_migration_if_matched("cap1", p))
+        result = close_pending_migration_if_matched("cap1", p, project_root=str(self.tmp))
+        self.assertTrue(result.closed)
+        self.assertEqual(result.closed_raw_ids, ("cap1",))
+        self.assertIsNone(result.unresolved_note)
         self.assertEqual(json.loads(Path(p).read_text(encoding="utf-8")), [])
 
     def test_no_match_returns_false_and_leaves_file_untouched(self):
         p = self._path()
         original = json.dumps([{"mechanism_id": "cap1"}])
         Path(p).write_text(original, encoding="utf-8")
-        self.assertFalse(close_pending_migration_if_matched("cap2", p))
+        result = close_pending_migration_if_matched("cap2", p, project_root=str(self.tmp))
+        self.assertFalse(result.closed)
+        self.assertIsNone(result.unresolved_note)
         self.assertEqual(Path(p).read_text(encoding="utf-8"), original)
 
     def test_missing_file_returns_false(self):
-        self.assertFalse(close_pending_migration_if_matched(
-            "cap1", str(self.tmp / "nope.json")))
+        result = close_pending_migration_if_matched(
+            "cap1", str(self.tmp / "nope.json"), project_root=str(self.tmp))
+        self.assertFalse(result.closed)
 
     def test_malformed_json_returns_false(self):
         p = self._path()
         Path(p).write_text("{not json", encoding="utf-8")
-        self.assertFalse(close_pending_migration_if_matched("cap1", p))
+        result = close_pending_migration_if_matched("cap1", p, project_root=str(self.tmp))
+        self.assertFalse(result.closed)
 
     def test_non_list_body_returns_false(self):
         p = self._path()
         Path(p).write_text(json.dumps({"mechanism_id": "cap1"}), encoding="utf-8")
-        self.assertFalse(close_pending_migration_if_matched("cap1", p))
+        result = close_pending_migration_if_matched("cap1", p, project_root=str(self.tmp))
+        self.assertFalse(result.closed)
 
     def test_only_matching_entry_removed_among_several(self):
         p = self._path()
         Path(p).write_text(json.dumps([
             {"mechanism_id": "cap1"}, {"mechanism_id": "cap2"}, {"mechanism_id": "cap3"},
         ]), encoding="utf-8")
-        self.assertTrue(close_pending_migration_if_matched("cap2", p))
+        result = close_pending_migration_if_matched("cap2", p, project_root=str(self.tmp))
+        self.assertTrue(result.closed)
+        self.assertEqual(result.closed_raw_ids, ("cap2",))
         remaining = json.loads(Path(p).read_text(encoding="utf-8"))
         self.assertEqual([e["mechanism_id"] for e in remaining], ["cap1", "cap3"])
 
     def test_default_path_constant(self):
         self.assertEqual(PENDING_MIGRATIONS_REL, "agents/handoffs/pending_migrations.json")
+
+
+class ClosePendingMigrationIdentityResolutionTest(unittest.TestCase):
+    """Task A3 -- the two behaviors this task adds to
+    ``close_pending_migration_if_matched``: (1) F-60's headline fix, the estate-split
+    canonical-id match; (2) an identity resolution that comes back AMBIGUOUS must be
+    SURFACED via ``unresolved_note``, never a silent no-op.
+
+    ANTI-OVERFIT: fixtures are written at the REAL emitted relpaths
+    (``agents/capabilities/<id>_capability.py``) inside a fresh temp project tree built from
+    scratch -- never a copytree of the dev tree (mirrors the v0.13.0 T7 / test_capability_health
+    lesson already applied elsewhere in this package's test suites)."""
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.project_root = Path(self._td.name)
+        self.capabilities_dir = self.project_root / "agents" / "capabilities"
+        self.capabilities_dir.mkdir(parents=True, exist_ok=True)
+        self.pending_path = self.project_root / "agents" / "handoffs" / "pending_migrations.json"
+        self.pending_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _write_capability(self, capability_id, *, surface=None):
+        surface_line = f'SURFACE = "{surface}"\n' if surface else ""
+        source = (
+            f'"""{capability_id} -- test fixture capability."""\n\n{surface_line}\n'
+            "def describe():\n    return \"ready\"\n"
+        )
+        (self.capabilities_dir / f"{capability_id}_capability.py").write_text(
+            source, encoding="utf-8")
+
+    def _write_pending(self, entries):
+        self.pending_path.write_text(
+            json.dumps(entries, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    def test_estate_split_stray_entry_closes_via_canonical_resolution(self):
+        # The estate shape: module stem / accepted capability_id "inbox_management"; a STRAY
+        # pending-migration entry keyed by the descriptor id "inbox-labels" (which
+        # inbox_management's own module declares as its SURFACE -- corroborated resolution,
+        # not a raw string match, since "inbox-labels" != "inbox_management").
+        self._write_capability("inbox_management", surface="inbox-labels")
+        self._write_pending([{"mechanism_id": "inbox-labels", "status": "pending"}])
+
+        result = close_pending_migration_if_matched(
+            "inbox_management", str(self.pending_path), project_root=str(self.project_root))
+
+        self.assertTrue(result.closed, result.unresolved_note)
+        self.assertEqual(result.closed_raw_ids, ("inbox-labels",))
+        remaining = json.loads(self.pending_path.read_text(encoding="utf-8"))
+        self.assertEqual(remaining, [])
+
+    def test_unrelated_capability_present_does_not_cause_a_false_close(self):
+        # A second, unrelated capability exists in the same project -- the estate-split
+        # resolution must attribute the stray entry to the ONE capability that actually
+        # corroborates it (via SURFACE), never to whichever capability happens to be accepted.
+        self._write_capability("inbox_management", surface="inbox-labels")
+        self._write_capability("asana_sync", surface="asana")
+        self._write_pending([{"mechanism_id": "inbox-labels", "status": "pending"}])
+
+        result = close_pending_migration_if_matched(
+            "asana_sync", str(self.pending_path), project_root=str(self.project_root))
+
+        self.assertFalse(result.closed)
+        remaining = json.loads(self.pending_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(remaining), 1)
+
+    def test_ambiguous_migration_id_is_surfaced_not_a_silent_noop(self):
+        # Two DIFFERENT capabilities both declare the SAME surface -- a raw id that
+        # corroborates via that surface is genuinely ambiguous (matches two canonicals). This
+        # must never be silently treated as "no match" with zero signal: the F-60 fix requires
+        # it to be surfaced via `unresolved_note`.
+        self._write_capability("cap_alpha", surface="shared_surface")
+        self._write_capability("cap_beta", surface="shared_surface")
+        self._write_pending([{"mechanism_id": "shared_surface", "status": "pending"}])
+
+        result = close_pending_migration_if_matched(
+            "cap_alpha", str(self.pending_path), project_root=str(self.project_root))
+
+        self.assertFalse(result.closed)
+        self.assertIsNotNone(
+            result.unresolved_note,
+            "an ambiguous migration-queue identity must be surfaced, not a silent no-op")
+        self.assertIn("shared_surface", result.unresolved_note)
+        # Bookkeeping-only: the ambiguous entry is left untouched, never guessed at.
+        remaining = json.loads(self.pending_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(remaining), 1)
 
 
 def _copy_real_external_write_package(project_root: Path) -> Path:

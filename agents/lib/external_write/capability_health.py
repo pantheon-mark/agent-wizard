@@ -128,6 +128,10 @@ if __package__ in (None, ""):  # pragma: no cover - only true when run as a scri
         _bootstrap_sys.path.insert(0, _pkg_parent)
 
 from external_write import scan  # noqa: E402
+from external_write.capability_identity import (  # noqa: E402
+    build_capability_index,
+    IdentityResolutionError,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +459,31 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
         descriptor_ids = set()
         descriptor_enumeration_degraded = True
     source_files = _capability_source_files(root)
-    all_ids = sorted(descriptor_ids | set(source_files))
+
+    # F-61 (Task A3): resolve each descriptor-only id to its OWNING module via the capability
+    # identity index BEFORE the same-named-file check below. A capability whose module stem
+    # differs from its descriptor id (the estate split: descriptor id "inbox-labels", module
+    # stem "inbox_management") previously had no source file under its own exact name and was
+    # reported red for "no source file to scan or import against" -- even though a healthy,
+    # importable module for it exists on disk under a different name. A descriptor id that
+    # already matches a module stem directly is left alone; one that cannot be resolved to
+    # exactly one canonical (unresolved -- a genuinely orphaned descriptor entry -- or
+    # ambiguous) is also left as its own raw id, unchanged fail-closed behavior (see
+    # TestDescriptorOnlyCapabilityWithNoSourceFile / TestPathConstantsAntiDrift below).
+    identity_index = build_capability_index(str(root))
+    resolved_descriptor_ids: Set[str] = set()
+    for d_id in descriptor_ids:
+        if d_id in source_files:
+            resolved_descriptor_ids.add(d_id)
+            continue
+        try:
+            identity = identity_index.resolve(d_id, "descriptor_id")
+        except IdentityResolutionError:
+            resolved_descriptor_ids.add(d_id)
+            continue
+        resolved_descriptor_ids.add(identity.canonical_id)
+
+    all_ids = sorted(resolved_descriptor_ids | set(source_files))
 
     records: List[Dict[str, Any]] = []
     if descriptor_enumeration_degraded:
