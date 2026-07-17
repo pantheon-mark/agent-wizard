@@ -179,6 +179,46 @@ class TestAssertIdentityCoherent(unittest.TestCase):
         self.assertEqual(_sample_spec().canonical_id, _sample_spec().capability_id)
 
 
+class TestAssertIdentityCoherentCrossTreePin(unittest.TestCase):
+    """capability_registration.py (operate-time; MUST NOT import the build-side tree) cannot
+    import this module's `assert_identity_coherent` directly, so `capability_identity.py` (same
+    package as capability_registration.py) carries its own duplicate -- exactly the established
+    duplicate-plus-cross-tree-pin convention this codebase already uses for
+    REGISTERED_ENTRY_KEYS / BASE_DESCRIPTOR_ID_PREFIX / etc. This pins the two copies' behavior
+    (and message wording) equal, so a future edit to one without the other fails closed here
+    instead of silently drifting."""
+
+    def test_pass_fail_decisions_match_across_a_battery_of_inputs(self):
+        from external_write.capability_identity import (
+            assert_identity_coherent as operate_time_assert,
+            IdentityCoherenceError,
+        )
+        cases = [
+            dict(descriptor_id="acme_crm_sync", capability_id="acme_crm_sync",
+                mechanism_id="acme_crm_sync", module_stem="acme_crm_sync"),
+            dict(descriptor_id="inbox-labels", capability_id="inbox_management",
+                mechanism_id="inbox_management", module_stem="inbox_management"),
+            dict(descriptor_id="a", capability_id="b", mechanism_id="c", module_stem="d"),
+        ]
+        for kwargs in cases:
+            with self.subTest(kwargs=kwargs):
+                build_raised = None
+                try:
+                    assert_identity_coherent(**kwargs)
+                except CapabilityCodeScaffoldError as e:
+                    build_raised = str(e)
+                operate_raised = None
+                try:
+                    operate_time_assert(**kwargs)
+                except IdentityCoherenceError as e:
+                    operate_raised = str(e)
+                self.assertEqual(build_raised is None, operate_raised is None,
+                                 "the two copies must agree on pass/fail")
+                if build_raised is not None:
+                    self.assertEqual(build_raised, operate_raised,
+                                     "the two copies' messages must stay byte-identical")
+
+
 class TestCapabilityRegistrationIdentityCoherence(unittest.TestCase):
     """A2 / A3.1 integration: capability_registration.register_declared_capability refuses to
     land a descriptor whose id does not match the canonical id of the capability module it
@@ -213,10 +253,14 @@ class TestCapabilityRegistrationIdentityCoherence(unittest.TestCase):
             declared,
             descriptor_set_path=str(self.descriptor_set_path),
             co_protected_path=str(self.co_protected_path),
+            project_root=str(self.project_root),
         )
 
-    def test_descriptor_id_matching_its_own_emitted_module_registers(self):
-        spec = _sample_spec()  # capability_id="acme_crm_sync", surface="acme_crm"
+    def test_capability_id_differing_from_its_own_surface_is_allowed(self):
+        # The keystone regression: surface != capability_id must never itself trigger a refusal.
+        # (Also doubles as the ordinary happy-path case: a descriptor id that matches its own
+        # emitted module registers normally.)
+        spec = _sample_spec(capability_id="acme_crm_sync", surface="acme_crm")
         emit_capability_code_scaffold(spec, self.project_root)
         res = self._register("acme_crm_sync")
         self.assertTrue(res.registered, res.reason)
@@ -232,12 +276,44 @@ class TestCapabilityRegistrationIdentityCoherence(unittest.TestCase):
         entries = json.loads(self.descriptor_set_path.read_text(encoding="utf-8"))
         self.assertEqual(entries, [])
 
-    def test_capability_id_differing_from_its_own_surface_is_allowed(self):
-        # The keystone regression: surface != capability_id must never itself trigger a refusal.
-        spec = _sample_spec(capability_id="acme_crm_sync", surface="acme_crm")
+    def test_refusal_goes_through_assert_identity_coherent_primitive(self):
+        # CRITICAL regression (coordinator review): assert_identity_coherent must be a REAL
+        # production caller on the registration path, not a zero-caller trust primitive that
+        # only its own unit tests exercise. Proves it two ways: (a) monkeypatching
+        # capability_registration's imported reference and observing it is actually invoked
+        # with the real four values (descriptor_id, capability_id, mechanism_id, module_stem);
+        # (b) the refusal message carries assert_identity_coherent's own distinctive wording,
+        # not just a bespoke registration-layer string.
+        from external_write import capability_registration as cr
+
+        spec = _sample_spec(capability_id="inbox_management", surface="inbox-labels",
+                            op_kind="inbox.label.apply2")
         emit_capability_code_scaffold(spec, self.project_root)
-        res = self._register("acme_crm_sync")
-        self.assertTrue(res.registered, res.reason)
+
+        calls = []
+        real_assert = cr.assert_identity_coherent
+
+        def _spy(**kwargs):
+            calls.append(kwargs)
+            return real_assert(**kwargs)
+
+        cr.assert_identity_coherent = _spy
+        try:
+            res = self._register("inbox-labels")
+        finally:
+            cr.assert_identity_coherent = real_assert
+
+        self.assertFalse(res.registered)
+        self.assertEqual(len(calls), 1, "assert_identity_coherent must be called exactly once "
+                         "on the registration path")
+        self.assertEqual(calls[0]["descriptor_id"], "inbox-labels")
+        self.assertEqual(calls[0]["capability_id"], "inbox_management")
+        self.assertEqual(calls[0]["module_stem"], "inbox_management")
+        self.assertEqual(calls[0]["mechanism_id"], "inbox_management")
+        self.assertIn(
+            "must all be the exact SAME identifier", res.reason,
+            "refusal message must carry assert_identity_coherent's own wording -- proving the "
+            "primitive, not a bespoke bypassing check, decided the refusal")
 
     def test_not_yet_emitted_capability_id_registers_normally(self):
         # No capability module has been emitted anywhere yet under this id -- a legitimate,
@@ -251,6 +327,19 @@ class TestCapabilityRegistrationIdentityCoherence(unittest.TestCase):
         spec = _sample_spec()
         emit_capability_code_scaffold(spec, self.project_root)
         res = self._register("some_other_new_capability")
+        self.assertTrue(res.registered, res.reason)
+
+    def test_new_capability_id_matching_an_unrelated_surface_is_allowed(self):
+        # Coordinator review fix (resolve() precedence): registering "foo" must not be refused
+        # merely because some OTHER already-emitted capability's own SURFACE happens to equal
+        # "foo" -- an exact canonical-id / own-module-stem match must always win.
+        foo_spec = _sample_spec(capability_id="foo", surface="foo_surface_unused",
+                                op_kind="foo.op.kind")
+        bar_spec = _sample_spec(capability_id="bar_sync", surface="foo",
+                                op_kind="bar.op.kind")
+        emit_capability_code_scaffold(foo_spec, self.project_root)
+        emit_capability_code_scaffold(bar_spec, self.project_root)
+        res = self._register("foo")
         self.assertTrue(res.registered, res.reason)
 
 

@@ -26,8 +26,10 @@ Fail-safe / fail-closed properties (every branch defaults to refuse + write noth
   * for a GATED capability the co-protected table MUST be present and locatable; if it is not, the
     descriptor is not landed;
   * a descriptor id that resolves -- via an already-emitted capability module's own stem OR its
-    declared SURFACE -- to a DIFFERENT capability than the id being registered is refused (Task
-    A2 / A3.1's four-way identity coherence check). This closes the seam where a descriptor id
+    declared SURFACE -- to a DIFFERENT capability than the id being registered is refused, via a
+    real call to ``capability_identity.assert_identity_coherent`` (Task A2 / A3.1's four-way
+    identity coherence check — descriptor_id / capability_id / mechanism_id / module_stem must
+    all agree; ``surface`` is deliberately excluded). This closes the seam where a descriptor id
     was silently authored to equal a capability's external-system SURFACE instead of its
     capability_id (the estate finding: descriptor id "inbox-labels" vs. capability_id/module
     "inbox_management"), which broke migration-close and health downstream. A cap_id that
@@ -74,7 +76,12 @@ if __package__ in (None, ""):  # pragma: no cover - only true when run as a scri
     if _pkg_parent not in _bootstrap_sys.path:
         _bootstrap_sys.path.insert(0, _pkg_parent)
 
-from external_write.capability_identity import build_capability_index, IdentityResolutionError
+from external_write.capability_identity import (
+    build_capability_index,
+    IdentityResolutionError,
+    assert_identity_coherent,
+    IdentityCoherenceError,
+)
 from external_write.contracts import RISK_CLASSES
 from external_write.write_gate import (
     GATED_RISK_CLASSES,
@@ -278,6 +285,7 @@ def register_declared_capability(
     *,
     descriptor_set_path: Optional[str] = None,
     co_protected_path: Optional[str] = None,
+    project_root: Optional[str] = None,
 ) -> RegistrationResult:
     """Land one newly-DECLARED (accepted:false) capability descriptor in the descriptor set and, for
     a GATED capability, regenerate the co-protected table in the same fail-safe operation.
@@ -292,6 +300,15 @@ def register_declared_capability(
                         phase_id. ``accepted`` must be absent or false.
     descriptor_set_path: The descriptor-set file (default write_gate.DESCRIPTOR_SET_PATH).
     co_protected_path:   The co-protected table file (default DEFAULT_CO_PROTECTED_PATH).
+    project_root:        The operator project root, used to look up any already-emitted
+                        capability module for the four-way identity coherence check (see below).
+                        Defaults to ``Path(descriptor_set_path).resolve().parent.parent`` --
+                        i.e. inferred from the conventional ``<root>/security/
+                        capability_descriptors.json`` layout -- when not given explicitly. Pass
+                        this explicitly whenever the caller's ``descriptor_set_path`` does not
+                        sit at that conventional depth, so the identity check resolves against
+                        the REAL project root rather than silently degrading to "nothing found"
+                        (fail-open on that one check) for a nonstandard path shape.
     """
     if not isinstance(declared, dict):
         return _refuse("declared capability is not an object", None)
@@ -350,18 +367,23 @@ def register_declared_capability(
                 f"a descriptor with id {cap_id!r} already exists — refusing to register a "
                 "duplicate", cap_id)
 
-    # --- A2 / A3.1: four-way identity coherence -- refuse a descriptor id that resolves (via an
-    # already-emitted capability module's own stem OR its declared SURFACE) to a DIFFERENT
-    # capability than cap_id itself. Catches the estate anti-pattern (descriptor id set to a
-    # capability's SURFACE, e.g. "inbox-labels", instead of its capability_id, e.g.
-    # "inbox_management") BEFORE the mismatched descriptor is ever landed. A cap_id that matches
-    # NOTHING yet (no capability module emitted under this id, and it is not any existing
-    # capability's surface either) is a normal not-yet-built capability (e.g. a read-only one,
-    # which skips the code-scaffold step entirely) and is NOT refused here -- see
-    # capability_identity.py's own module docstring for the exact-alias-only resolution rule this
-    # reuses (no fuzzy matching, no guessing). `surface` is never checked against ITS OWN
-    # capability_id by this reuse -- only against WHICH capability (if any) cap_id corroborates.
-    project_root = Path(descriptor_set_path).resolve().parent.parent
+    # --- A2 / A3.1: four-way identity coherence -- ACTUALLY GATED by assert_identity_coherent
+    # (coordinator review fix: this must be a real production caller of that primitive, not a
+    # narrower hand-rolled check that quietly bypasses it). First resolve cap_id against any
+    # already-emitted capability module (by its own stem OR its declared SURFACE) via
+    # capability_identity's exact-alias-only resolution (no fuzzy matching, no guessing) -- a
+    # cap_id that resolves to NOTHING yet (no capability module emitted under this id, and it is
+    # not any existing capability's surface either) is a normal not-yet-built capability (e.g. a
+    # read-only one, which skips the code-scaffold step entirely) and is NOT refused. Once
+    # resolved, the four canonical values (descriptor_id = cap_id itself; capability_id /
+    # module_stem = the resolved capability's canonical id; mechanism_id = its own recorded
+    # mechanism alias, or construction-derived to the canonical id when none is on record yet)
+    # are asserted through assert_identity_coherent -- THAT call is what decides the refusal,
+    # catching the estate anti-pattern (descriptor id set to a capability's SURFACE, e.g.
+    # "inbox-labels", instead of its capability_id, e.g. "inbox_management") BEFORE the
+    # mismatched descriptor is ever landed.
+    if project_root is None:
+        project_root = Path(descriptor_set_path).resolve().parent.parent
     try:
         identity = build_capability_index(str(project_root)).resolve(cap_id, "unknown")
     except IdentityResolutionError as e:
@@ -370,13 +392,20 @@ def register_declared_capability(
                 f"capability id {cap_id!r} cannot be registered: {e.operator_message}", cap_id)
         # kind == "unresolved" -- nothing on disk claims this id yet; proceed normally.
     else:
-        if identity.canonical_id != cap_id:
+        module_stem_value = identity.module_stem if identity.module_stem is not None else identity.canonical_id
+        mechanism_id_value = identity.mechanism_id if identity.mechanism_id is not None else identity.canonical_id
+        try:
+            assert_identity_coherent(
+                descriptor_id=cap_id,
+                capability_id=identity.canonical_id,
+                mechanism_id=mechanism_id_value,
+                module_stem=module_stem_value,
+            )
+        except IdentityCoherenceError as e:
             return _refuse(
                 f"descriptor id {cap_id!r} does not match this capability's own identity -- it "
                 f"resolves instead to the already-emitted capability {identity.canonical_id!r}. "
-                f"This usually means {cap_id!r} is that other capability's external-system "
-                "SURFACE, not a capability_id -- use the SAME id as the capability_id given "
-                "when this capability's code was generated (not its external-system surface).",
+                f"{e}",
                 cap_id)
 
     new_entry = {
@@ -464,9 +493,10 @@ if __name__ == "__main__":  # pragma: no cover
     _args = _sys.argv[1:]
     _opts: Dict[str, Optional[str]] = {
         "--descriptor": None, "--descriptor-set": None, "--co-protected": None,
+        "--project-root": None,
     }
     _usage = ("Usage: capability_registration.py --descriptor <declared.json> "
-              "[--descriptor-set <path>] [--co-protected <path>]")
+              "[--descriptor-set <path>] [--co-protected <path>] [--project-root <path>]")
     _i = 0
     while _i < len(_args):
         _a = _args[_i]
@@ -494,7 +524,8 @@ if __name__ == "__main__":  # pragma: no cover
     _res = register_declared_capability(
         _declared,
         descriptor_set_path=_opts["--descriptor-set"],
-        co_protected_path=_opts["--co-protected"])
+        co_protected_path=_opts["--co-protected"],
+        project_root=_opts["--project-root"])
     if _res.registered:
         _msg = f"REGISTERED: capability {_res.capability_id!r} declared (accepted:false)."
         if _res.co_protected_updated:

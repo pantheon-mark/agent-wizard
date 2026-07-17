@@ -235,6 +235,24 @@ class TestCapabilityIndex(unittest.TestCase):
                 msg,
             )
 
+    # --- coordinator review fix: resolve() precedence (surface must never outrank an exact
+    # canonical-id / own-module-stem match) ---
+
+    def test_own_canonical_id_wins_over_another_capabilitys_surface_corroboration(self):
+        # A NEW capability whose capability_id happens to equal an UNRELATED existing
+        # capability's own declared SURFACE must resolve to ITSELF -- never be
+        # "corroborated away" to the other capability. Before the fix, resolve("foo",
+        # "unknown") unioned module_stem_map's direct {"foo"} hit with surface_map's {"bar_sync"}
+        # hit (bar_sync's own SURFACE=="foo"), producing a false "ambiguous" refusal for a
+        # perfectly legitimate, unrelated new capability.
+        ci = _load(MODPATH)
+        with tempfile.TemporaryDirectory() as root:
+            _write_capability(root, "foo", "foo_surface_unused")
+            _write_capability(root, "bar_sync", "foo")  # bar_sync's OWN surface happens to be "foo"
+            idx = ci.build_capability_index(root)
+            got = idx.resolve("foo", "unknown")
+            self.assertEqual(got.canonical_id, "foo")
+
     def test_absent_descriptor_file_is_normal_not_state_read_error(self):
         # Absent is NOT the same as unreadable/malformed -- a project that
         # simply has no descriptor file yet must not report state_read_error.

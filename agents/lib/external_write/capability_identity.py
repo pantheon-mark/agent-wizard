@@ -155,6 +155,63 @@ MIGRATION_QUEUE_REL = "agents/handoffs/pending_migrations.json"
 _NAMED_NAMESPACES: tuple = ("module_stem", "descriptor_id", "mechanism_id", "surface")
 
 
+class IdentityCoherenceError(Exception):
+    """Raised by ``assert_identity_coherent`` (Task A2 / A3.1) when a capability's
+    descriptor_id, capability_id, mechanism_id, and module_stem are not ALL the same string.
+    Plain-language message, no traceback text."""
+
+
+def assert_identity_coherent(descriptor_id: str, capability_id: str, mechanism_id: str,
+                              module_stem: str) -> None:
+    """Raise ``IdentityCoherenceError`` unless ``descriptor_id``, ``capability_id``,
+    ``mechanism_id``, and ``module_stem`` are ALL the exact same string -- the four-way
+    build-time identity invariant (Task A2 / A3.1) that makes a capability's identity split (the
+    estate bug: descriptor id ``"inbox-labels"`` vs. capability_id/module_stem
+    ``"inbox_management"``) impossible to re-create by construction.
+
+    OPERATE-TIME DUPLICATE of ``wizard/scripts/lib/capability_code_scaffold.py``'s
+    ``assert_identity_coherent`` -- capability_registration.py (this package) MUST NOT import the
+    build-side tree, and capability_code_scaffold.py (build-side) MUST NOT import this
+    ``external_write`` package (see each module's own boundary-discipline docstring), so this is
+    the SAME duplicate-plus-cross-tree-pin convention this codebase already uses for
+    ``REGISTERED_ENTRY_KEYS`` / ``BASE_DESCRIPTOR_ID_PREFIX`` / etc. -- pinned byte-equal (message
+    included) by ``test_capability_code_scaffold.TestAssertIdentityCoherentCrossTreePin``. Keep
+    the two copies' bodies identical (bar the exception class name) if either changes.
+
+    ``surface`` (the external-system identifier a capability talks to, e.g. ``"acme_crm"`` for
+    capability_id ``"acme_crm_sync"``) is DELIBERATELY NOT a parameter here and is NEVER checked
+    against the other three -- two different capabilities may legitimately share a surface, and
+    one capability's own surface legitimately differs from its capability_id (see this module's
+    own "Surface is excluded from identity" section above). Checking it here would re-introduce
+    exactly the false-positive class this correction exists to rule out (``surface !=
+    capability_id`` MUST be allowed).
+
+    ``module_stem`` here means the CANONICAL form -- the module stem with any trailing
+    ``_capability`` suffix already stripped; every caller is responsible for canonicalizing
+    before calling.
+
+    Fail-closed: raises on ANY inequality among the four, with a plain-language message (no
+    traceback) naming every value and the likely cause, so a non-technical operator's project
+    never lands a capability whose identity is split across these four surfaces.
+    """
+    values = {
+        "descriptor_id": descriptor_id,
+        "capability_id": capability_id,
+        "mechanism_id": mechanism_id,
+        "module_stem": module_stem,
+    }
+    if len(set(values.values())) > 1:
+        detail = "; ".join(f"{k}={v!r}" for k, v in values.items())
+        raise IdentityCoherenceError(
+            "This capability's identity is not consistent across the system -- its descriptor "
+            "id, capability_id, mechanism_id, and module name must all be the exact SAME "
+            f"identifier, but they are not ({detail}). This is very likely because one of these "
+            "was set to the capability's external-system SURFACE (e.g. the vendor name) instead "
+            "of its capability_id -- surface is a separate field and is allowed to differ; these "
+            "four identity fields are not allowed to differ. Fix: make all four the same value "
+            "as the capability's capability_id.")
+
+
 class IdentityResolutionError(Exception):
     """Raised by ``CapabilityIndex.resolve`` when a raw token cannot be
     resolved to EXACTLY ONE canonical capability id. Fail-closed: this is
@@ -447,11 +504,31 @@ class CapabilityIndex:
         namespace it came from) to its ``CapabilityIdentity``. Exact-alias
         lookup only -- see module docstring. Raises
         ``IdentityResolutionError`` (``kind="unresolved"`` or
-        ``kind="ambiguous"``) rather than ever guessing."""
+        ``kind="ambiguous"``) rather than ever guessing.
+
+        ``namespace="unknown"`` precedence (coordinator review fix): surface-corroboration to
+        some OTHER capability must NEVER outrank ``raw`` being an exact canonical id / own module
+        stem in its own right. Before this fix, ``"unknown"`` unioned all four namespace maps
+        flatly -- so a BRAND NEW capability whose ``capability_id`` happened to equal an UNRELATED
+        existing capability's own declared ``SURFACE`` was reported ambiguous (matching both
+        itself AND the unrelated capability), a false refusal for a perfectly legitimate id. Tiers
+        are tried in order, each ONLY if the previous is empty:
+
+          1. exact canonical id / own module stem (``raw`` IS a real capability, full stop);
+          2. exact ``descriptor_id`` / ``mechanism_id`` alias (each entry here already resolves to
+             exactly one canonical -- possibly itself already surface-corroborated or
+             sole-candidate-resolved, see ``_build_name_alias_map`` -- but always ONE canonical
+             per raw token, so tier 2 cannot itself introduce an ambiguity across tiers);
+          3. surface corroboration to some OTHER capability's own declared surface -- the
+             lowest-precedence, most indirect signal, only consulted once 1 and 2 found nothing.
+        """
         if namespace == "unknown":
-            matched: Set[str] = set()
-            for ns in _NAMED_NAMESPACES:
-                matched |= self._maps[ns].get(raw, set())
+            matched: Set[str] = self._maps["module_stem"].get(raw, set())
+            if not matched:
+                matched = (self._maps["descriptor_id"].get(raw, set())
+                           | self._maps["mechanism_id"].get(raw, set()))
+            if not matched:
+                matched = self._maps["surface"].get(raw, set())
         else:
             matched = self._maps.get(namespace, {}).get(raw, set())
 
