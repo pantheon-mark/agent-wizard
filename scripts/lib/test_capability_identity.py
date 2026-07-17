@@ -173,6 +173,77 @@ class TestCapabilityIndex(unittest.TestCase):
                 idx.resolve("no-such-surface", "surface")
             self.assertEqual(cm.exception.kind, "unresolved")
 
+    # --- coordinator review fixes ---
+
+    def test_unrelated_stale_descriptor_does_not_ride_single_canonical_shortcut(self):
+        # CRITICAL regression (review finding): with only ONE capability in
+        # the project, the single-canonical fallback previously fired for
+        # EVERY unmatched descriptor id -- including one that has nothing to
+        # do with this capability at all. A genuinely-unrelated/stale
+        # descriptor entry must never be silently attributed to the sole
+        # capability just because it's the only one that exists.
+        #
+        # "inbox-labels" IS genuinely this capability's own alias (it is the
+        # module's own declared SURFACE too, an exact cross-reference) and
+        # must still resolve; "totally_unrelated_stale_descriptor" matches
+        # nothing at all (not the module stem, not the declared surface) and
+        # must stay unresolved rather than being swept up by "there's only
+        # one capability so it must mean that one".
+        ci = _load(MODPATH)
+        with tempfile.TemporaryDirectory() as root:
+            _write_capability(root, "inbox_management", "inbox-labels")
+            _write_descriptors(root, [
+                {"id": "inbox-labels"},
+                {"id": "totally_unrelated_stale_descriptor"},
+            ])
+            idx = ci.build_capability_index(root)
+            got = idx.resolve("inbox-labels", "descriptor_id")
+            self.assertEqual(got.canonical_id, "inbox_management")
+            with self.assertRaises(ci.IdentityResolutionError) as cm:
+                idx.resolve("totally_unrelated_stale_descriptor", "descriptor_id")
+            self.assertEqual(cm.exception.kind, "unresolved")
+
+    def test_malformed_descriptor_file_sets_state_read_error_and_says_so(self):
+        # IMPORTANT (review finding): a present-but-corrupted descriptor file
+        # must not be silently treated the same as an absent one -- an
+        # operator told "does not exist" when the truth is "a state file is
+        # broken" would be misdirected toward the wrong remedy (recreating
+        # the capability) instead of the right one (repairing the file).
+        ci = _load(MODPATH)
+        with tempfile.TemporaryDirectory() as root:
+            _write_capability(root, "inbox_management", "inbox-labels")
+            sec_dir = Path(root) / "security"
+            sec_dir.mkdir(parents=True, exist_ok=True)
+            (sec_dir / "capability_descriptors.json").write_text(
+                "{ this is not valid json", encoding="utf-8")
+            idx = ci.build_capability_index(root)
+            self.assertTrue(idx.state_read_error)
+            with self.assertRaises(ci.IdentityResolutionError) as cm:
+                idx.resolve("inbox-labels", "descriptor_id")
+            self.assertEqual(cm.exception.kind, "unresolved")
+            msg = cm.exception.operator_message
+            self.assertNotIn("Traceback", msg)
+            # Must NOT claim non-existence as fact (the plain "not found"
+            # wording used when there is no read error) -- it may still
+            # explicitly DISCLAIM that reading, e.g. "this is NOT a
+            # confirmation that X does not exist", which is the opposite of
+            # asserting it.
+            self.assertNotIn("was not found among", msg.lower())
+            self.assertTrue(
+                "could not be read" in msg.lower() or "corrupted" in msg.lower()
+                or "could not verify" in msg.lower(),
+                msg,
+            )
+
+    def test_absent_descriptor_file_is_normal_not_state_read_error(self):
+        # Absent is NOT the same as unreadable/malformed -- a project that
+        # simply has no descriptor file yet must not report state_read_error.
+        ci = _load(MODPATH)
+        with tempfile.TemporaryDirectory() as root:
+            _write_capability(root, "inbox_management", "inbox-labels")
+            idx = ci.build_capability_index(root)
+            self.assertFalse(idx.state_read_error)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -69,22 +69,42 @@ For each of ``descriptor_id`` and ``mechanism_id``, a raw value that
 EXACTLY EQUALS an existing module stem is trivially that stem's own
 canonical id -- no ambiguity possible. A raw value that does not match any
 module stem (the estate case: descriptor id ``inbox-labels`` vs. module stem
-``inbox_management``) can only be safely attributed to a canonical WITHOUT
-guessing if there is exactly one canonical in the whole project: with only
-one capability that could possibly be meant, there is no fuzzy/similarity
-judgement involved in attributing an unmatched name to it -- it is the only
-candidate that exists. The moment a project has two or more capabilities,
-an unmatched descriptor/mechanism id has no unambiguous default target and
-is left unresolved (never silently guessed) until something disambiguates
-it (typically: the descriptor set gets corrected to use the real
-capability_id, per ``wizard/skills/add-capability.md``'s own convention that
-``mechanism_id == capability_id``).
+``inbox_management``) is attributed to a canonical WITHOUT guessing via
+exactly two avenues, checked in this order, both exact string equality:
 
-``surface`` never gets this single-canonical fallback: it is read directly
-from each module's OWN declared ``SURFACE`` constant, so it is always
-directly (not by elimination) attributed to the module that declared it;
-what can still make it ambiguous AS A LOOKUP KEY is two different modules
-declaring the identical surface value (see above).
+  (A) SURFACE-CORROBORATED: the raw value exactly equals the ``SURFACE``
+      some canonical module itself declares (the estate case: descriptor id
+      ``inbox-labels`` equals ``inbox_management``'s own declared
+      ``SURFACE``). This directly identifies the ONE SPECIFIC canonical the
+      raw value corroborates -- not "whichever canonical happens to be the
+      only one in the project" -- so it applies regardless of how many
+      OTHER unmatched raw ids or canonicals exist in the same project. If
+      two different canonicals both declare that same surface, the raw
+      value maps to both and ``resolve`` correctly reports it ambiguous
+      (same rule as a direct ``surface`` lookup -- see above).
+  (B) SOLE-CANDIDATE FALLBACK: only when (A) found no corroborating
+      surface, AND this raw value is the ONLY unmatched raw id remaining in
+      this namespace, AND there is exactly one canonical in the whole
+      project -- i.e. there is truly nothing else it could possibly refer
+      to. This is a cardinality fact, not a similarity judgement.
+
+      Fixed bug (post-A1-review finding): earlier logic fired (B) for
+      EVERY unmatched raw id whenever the project had exactly one
+      capability, regardless of how many other unmatched, unrelated raw ids
+      existed alongside it -- so a genuinely stale/unrelated descriptor
+      entry (one that doesn't match the module stem OR the module's own
+      surface OR anything else) was silently attributed to the sole
+      capability anyway. Requiring "only ONE unmatched id in this
+      namespace" (not just "only one canonical") closes that hole: a
+      second, uncorroborated stale id sharing the namespace now makes BOTH
+      uncorroborated ids stay unresolved rather than one being guessed.
+
+The moment neither avenue applies, an unmatched descriptor/mechanism id has
+no unambiguous default target and is left unresolved (never silently
+guessed) until something disambiguates it (typically: the descriptor set
+gets corrected to use the real capability_id, per
+``wizard/skills/add-capability.md``'s own convention that
+``mechanism_id == capability_id``).
 
 AST-only extraction, never import (mirrors capability_health.py's own
 AST-first, import-second discipline)
@@ -108,7 +128,7 @@ import ast
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, FrozenSet, List, Literal, Optional, Set
+from typing import Dict, FrozenSet, List, Literal, Optional, Set, Tuple
 
 # The four resolvable identity namespaces, plus "unknown" for a caller that
 # does not know which namespace a raw token came from (searches all four).
@@ -147,27 +167,55 @@ class IdentityResolutionError(Exception):
     failure, with no traceback text -- this is read by an agent's
     orientation prose / a migration-close step inside a non-technical
     operator's project, never surfaced as a raw Python exception.
+
+    ``state_read_error`` (review finding, IMPORTANT): True iff the index
+    this error came from was built while a present-but-unreadable/malformed
+    descriptor set or migration queue file was encountered (see
+    ``CapabilityIndex.state_read_error`` / ``_load_descriptor_ids`` /
+    ``_load_mechanism_ids``). When True, ``operator_message`` says the
+    lookup could NOT be fully verified because a state file is broken --
+    never "does not exist" -- so the operator is pointed at repairing the
+    file, not at recreating a capability that may well still exist.
     """
 
     def __init__(self, kind: ErrorKind, raw: str, namespace: Namespace,
-                 candidates: Optional[List[str]] = None) -> None:
+                 candidates: Optional[List[str]] = None,
+                 state_read_error: bool = False) -> None:
         self.kind = kind
         self.raw = raw
         self.namespace = namespace
         self.candidates = list(candidates) if candidates else []
-        self.operator_message = _build_operator_message(kind, raw, namespace, self.candidates)
+        self.state_read_error = state_read_error
+        self.operator_message = _build_operator_message(
+            kind, raw, namespace, self.candidates, state_read_error)
         super().__init__(self.operator_message)
 
 
-def _build_operator_message(kind: ErrorKind, raw: str, namespace: Namespace, candidates: List[str]) -> str:
+def _build_operator_message(kind: ErrorKind, raw: str, namespace: Namespace, candidates: List[str],
+                             state_read_error: bool = False) -> str:
     ns_label = "an unspecified" if namespace == "unknown" else f'a "{namespace}"'
     if kind == "ambiguous":
         joined = ", ".join(sorted(candidates))
-        return (
+        message = (
             f'The value "{raw}" (looked up as {ns_label} identifier) matches more than '
             f"one capability ({joined}) and cannot be resolved automatically. This usually "
             f'means two different capabilities share the same external identifier. Use '
             f"each capability's own capability_id directly instead of \"{raw}\"."
+        )
+        if state_read_error:
+            message += (
+                " Note: a project state file (the capability descriptor list or the "
+                "pending-migrations queue) also could not be fully read, so this list of "
+                "matches may be incomplete -- repair that file before relying on this result."
+            )
+        return message
+    if state_read_error:
+        return (
+            f'Could not verify whether "{raw}" (looked up as {ns_label} identifier) matches a '
+            f"known capability, because a project state file -- the capability descriptor list "
+            f"or the pending-migrations queue -- exists but could not be read or is corrupted. "
+            f'This is NOT a confirmation that "{raw}" does not exist. Repair or restore that '
+            f"file, then check again."
         )
     return (
         f'The value "{raw}" (looked up as {ns_label} identifier) does not match any '
@@ -183,6 +231,15 @@ class CapabilityIdentity:
     the external-system identifier, but is deliberately NOT part of
     ``aliases`` and is NEVER used to decide whether two ``CapabilityIdentity``
     values refer to the same capability -- only ``canonical_id`` does that.
+
+    ``descriptor_id`` / ``mechanism_id`` caveat: when MORE THAN ONE alias
+    unambiguously maps to this same canonical (e.g. two differently-named
+    descriptor entries both corroborated as this capability), each of these
+    two fields holds only ONE representative alias (the alphabetically first
+    -- an arbitrary but deterministic pick), not the full set. ``aliases``
+    is the authoritative membership set for "every name known to resolve to
+    this canonical" -- always consult it, never assume ``descriptor_id`` /
+    ``mechanism_id`` are exhaustive.
     """
 
     canonical_id: str
@@ -218,7 +275,14 @@ def _extract_surface(path: Path) -> Optional[str]:
     file cannot be read, the source cannot be parsed, or no module-level
     ``SURFACE`` string-literal assignment is present. Every one of those is
     a normal, non-error input here -- a capability predating this
-    convention simply has no recorded surface, not a build failure."""
+    convention simply has no recorded surface, not a build failure.
+
+    Matches both plain ``SURFACE = "..."`` (``ast.Assign`` -- the form
+    ``capability_code_scaffold.py`` actually emits today) and annotated
+    ``SURFACE: str = "..."`` (``ast.AnnAssign``) -- the annotated form isn't
+    emitted by anything in this codebase yet, but recognizing it too costs
+    nothing and avoids a silent ``surface=None`` if a capability module is
+    ever hand-written or generated with a type annotation on the constant."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
@@ -228,87 +292,115 @@ def _extract_surface(path: Path) -> Optional[str]:
     except SyntaxError:
         return None
     for node in tree.body:
-        if not isinstance(node, ast.Assign):
+        if isinstance(node, ast.Assign):
+            if not any(isinstance(t, ast.Name) and t.id == "SURFACE" for t in node.targets):
+                continue
+            value = node.value
+        elif isinstance(node, ast.AnnAssign):
+            target = node.target
+            if not (isinstance(target, ast.Name) and target.id == "SURFACE"):
+                continue
+            value = node.value
+        else:
             continue
-        if not any(isinstance(t, ast.Name) and t.id == "SURFACE" for t in node.targets):
-            continue
-        value = node.value
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
             return value.value
     return None
 
 
-def _load_descriptor_ids(project_root: Path) -> Set[str]:
+def _load_descriptor_ids(project_root: Path) -> Tuple[Set[str], bool]:
     """The set of capability_ids declared in
-    ``security/capability_descriptors.json``. Fail-safe: an absent file
-    yields the empty set; an existing-but-unreadable-or-malformed file also
-    yields the empty set here (unlike capability_health.py's own stricter
-    treatment of this same file) -- the worst-case consequence of
-    under-reading this file is a descriptor alias staying UNRESOLVED
-    (fail-closed: never a wrong canonical), not a false positive, so this
-    module does not need the sentinel-record escalation capability_health.py
-    uses for its own (stronger) "never invite the operator into a red
-    capability" guarantee."""
+    ``security/capability_descriptors.json``, plus whether reading it hit a
+    state-read error. Returns ``(ids, read_error)``.
+
+    An ABSENT file is a normal, non-error input: ``(set(), False)`` --
+    nothing has been declared yet, not a problem.
+
+    (review finding, IMPORTANT) An EXISTING-but-unreadable-or-malformed file
+    is NOT the same as absent, and must not be silently collapsed into the
+    same "no descriptors" outcome with no signal at all: without a
+    distinguishable ``read_error=True``, a ``resolve()`` failure caused by a
+    broken state file would report "does not exist" to the operator --
+    misdirecting them toward recreating a capability that may still be
+    perfectly fine, instead of toward repairing the actual broken file
+    (mirrors capability_health.py's own distinction between a genuinely
+    absent marker and an inaccessible one). Such a file returns
+    ``(set(), True)``; ``build_capability_index`` folds this into
+    ``CapabilityIndex.state_read_error``, which ``resolve()`` uses to pick
+    the correct ``operator_message`` wording."""
     path = project_root / DESCRIPTOR_SET_REL
     try:
         text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return set(), False
     except OSError:
-        return set()
+        return set(), True
     try:
         data = json.loads(text)
     except ValueError:
-        return set()
+        return set(), True
     if not isinstance(data, list):
-        return set()
+        return set(), True
     ids: Set[str] = set()
     for entry in data:
         if isinstance(entry, dict):
             cap_id = entry.get("id")
             if isinstance(cap_id, str) and cap_id:
                 ids.add(cap_id)
-    return ids
+    return ids, False
 
 
-def _load_mechanism_ids(project_root: Path) -> Set[str]:
+def _load_mechanism_ids(project_root: Path) -> Tuple[Set[str], bool]:
     """The set of ``mechanism_id`` values declared in
-    ``agents/handoffs/pending_migrations.json``. Fail-safe in the same
-    sense as ``_load_descriptor_ids`` above: absent or unreadable/malformed
-    both yield the empty set."""
+    ``agents/handoffs/pending_migrations.json``, plus whether reading it hit
+    a state-read error. Returns ``(ids, read_error)`` -- same absent-vs.
+    -unreadable/malformed distinction as ``_load_descriptor_ids`` above."""
     path = project_root / MIGRATION_QUEUE_REL
     try:
         text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return set(), False
     except OSError:
-        return set()
+        return set(), True
     try:
         data = json.loads(text)
     except ValueError:
-        return set()
+        return set(), True
     if not isinstance(data, list):
-        return set()
+        return set(), True
     ids: Set[str] = set()
     for entry in data:
         if isinstance(entry, dict):
             mech_id = entry.get("mechanism_id")
             if isinstance(mech_id, str) and mech_id:
                 ids.add(mech_id)
-    return ids
+    return ids, False
 
 
-def _build_name_alias_map(raw_ids: Set[str], canonical_ids: Set[str]) -> Dict[str, Set[str]]:
+def _build_name_alias_map(raw_ids: Set[str], canonical_ids: Set[str],
+                           surface_by_canonical: Dict[str, Optional[str]]) -> Dict[str, Set[str]]:
     """Build a ``raw_token -> {canonical_ids}`` map for a name-shaped
     namespace (``descriptor_id`` / ``mechanism_id``). Exact-match only, no
-    fuzzy matching:
+    fuzzy matching -- see the module docstring's "How aliases are
+    discovered" section for the full rationale. Summary:
 
       * a raw id that EXACTLY EQUALS an existing canonical maps to that
-        canonical directly -- unambiguous by construction (canonical ids are
-        a set, so at most one canonical can equal any given string).
-      * a raw id that matches NO canonical (the estate case) can only be
-        attributed to a canonical without guessing if there is EXACTLY ONE
-        canonical in the whole project -- with only one capability that
-        could possibly be meant, attributing the unmatched name to it is
-        not a similarity judgement, it is the only candidate that exists.
-        With zero or two-or-more canonicals, an unmatched raw id is left
-        out of the map entirely (unresolved, never guessed).
+        canonical directly -- unambiguous by construction.
+      * an unmatched raw id maps via (A) SURFACE-CORROBORATED: it exactly
+        equals some canonical's own declared ``SURFACE`` -- identifies that
+        SPECIFIC canonical regardless of what else is unmatched.
+      * otherwise via (B) SOLE-CANDIDATE FALLBACK, but ONLY when this raw id
+        is the single unmatched id in the whole ``raw_ids`` set AND there is
+        exactly one canonical in the whole project -- i.e. truly nothing
+        else it could refer to. (Post-A1-review fix: previously this fired
+        for EVERY unmatched raw id whenever only one canonical existed,
+        which let a genuinely unrelated/stale raw id silently attach to the
+        sole capability merely because it was the only one around. Scoping
+        this to "only ONE unmatched id total" closes that hole -- a second,
+        uncorroborated stale id sharing the namespace now leaves BOTH
+        unresolved rather than guessing either.)
+      * anything else stays out of the map entirely (unresolved, never
+        guessed).
     """
     alias_map: Dict[str, Set[str]] = {}
     unmatched: Set[str] = set()
@@ -317,22 +409,36 @@ def _build_name_alias_map(raw_ids: Set[str], canonical_ids: Set[str]) -> Dict[st
             alias_map.setdefault(raw_id, set()).add(raw_id)
         else:
             unmatched.add(raw_id)
-    if unmatched and len(canonical_ids) == 1:
-        only_canonical = next(iter(canonical_ids))
-        for raw_id in unmatched:
-            alias_map.setdefault(raw_id, set()).add(only_canonical)
+
+    for raw_id in unmatched:
+        surface_matches = {c for c, s in surface_by_canonical.items() if s == raw_id}
+        if surface_matches:
+            alias_map.setdefault(raw_id, set()).update(surface_matches)
+            continue
+        if len(unmatched) == 1 and len(canonical_ids) == 1:
+            alias_map.setdefault(raw_id, set()).add(next(iter(canonical_ids)))
     return alias_map
 
 
 class CapabilityIndex:
     """One project's capability identity index. Build with
     ``build_capability_index(project_root)``; look up with
-    ``.resolve(raw, namespace)``."""
+    ``.resolve(raw, namespace)``.
+
+    ``state_read_error`` (review finding, IMPORTANT): True iff building this
+    index encountered a present-but-unreadable-or-malformed descriptor set
+    or migration queue file (see ``_load_descriptor_ids`` /
+    ``_load_mechanism_ids``). This does NOT mean the index is empty or
+    unusable -- it means the picture may be INCOMPLETE, so a subsequent
+    ``resolve()`` failure is reported with a "could not verify" message
+    rather than a "does not exist" one (see ``_build_operator_message``)."""
 
     def __init__(self, identities: Dict[str, CapabilityIdentity],
-                 maps: Dict[str, Dict[str, Set[str]]]) -> None:
+                 maps: Dict[str, Dict[str, Set[str]]],
+                 state_read_error: bool = False) -> None:
         self._identities = identities
         self._maps = maps
+        self.state_read_error = state_read_error
 
     def resolve(self, raw: str, namespace: Namespace) -> CapabilityIdentity:
         """Resolve ``raw`` (a value observed under ``namespace`` --
@@ -350,10 +456,13 @@ class CapabilityIndex:
             matched = self._maps.get(namespace, {}).get(raw, set())
 
         if not matched:
-            raise IdentityResolutionError(kind="unresolved", raw=raw, namespace=namespace)
+            raise IdentityResolutionError(
+                kind="unresolved", raw=raw, namespace=namespace,
+                state_read_error=self.state_read_error)
         if len(matched) > 1:
             raise IdentityResolutionError(
-                kind="ambiguous", raw=raw, namespace=namespace, candidates=sorted(matched))
+                kind="ambiguous", raw=raw, namespace=namespace, candidates=sorted(matched),
+                state_read_error=self.state_read_error)
         canonical = next(iter(matched))
         return self._identities[canonical]
 
@@ -372,22 +481,26 @@ def build_capability_index(project_root: str) -> CapabilityIndex:
     input file is individually fail-safe (see the private loaders above);
     a project with no capabilities yet yields an index that resolves
     nothing (every ``resolve`` call fails closed as ``"unresolved"``).
+
+    ``CapabilityIndex.state_read_error`` is True iff the descriptor set or
+    the migration queue file EXISTS but could not be read/parsed (never for
+    an absent file -- see ``_load_descriptor_ids`` / ``_load_mechanism_ids``
+    and the review-finding note on ``CapabilityIndex``).
     """
     root = Path(project_root)
     source_files = _capability_source_files(root)
     canonical_ids: Set[str] = set(source_files)
 
-    descriptor_ids = _load_descriptor_ids(root)
-    mechanism_ids = _load_mechanism_ids(root)
-
-    module_stem_map: Dict[str, Set[str]] = {c: {c} for c in canonical_ids}
-    descriptor_map = _build_name_alias_map(descriptor_ids, canonical_ids)
-    mechanism_map = _build_name_alias_map(mechanism_ids, canonical_ids)
+    descriptor_ids, descriptor_read_error = _load_descriptor_ids(root)
+    mechanism_ids, mechanism_read_error = _load_mechanism_ids(root)
+    state_read_error = descriptor_read_error or mechanism_read_error
 
     # Surface: read directly from each module's own declaration -- never an
-    # elimination/fallback attribution like the name namespaces above (see
+    # elimination/fallback attribution like the name namespaces below (see
     # module docstring). Two modules declaring the same surface value is
-    # exactly the case that must fail closed as ambiguous on lookup.
+    # exactly the case that must fail closed as ambiguous on lookup. Built
+    # BEFORE the name-alias maps because they consult it (avenue (A),
+    # surface-corroboration -- see ``_build_name_alias_map``).
     surface_by_canonical: Dict[str, Optional[str]] = {}
     surface_map: Dict[str, Set[str]] = {}
     for cap_id, path in source_files.items():
@@ -395,6 +508,10 @@ def build_capability_index(project_root: str) -> CapabilityIndex:
         surface_by_canonical[cap_id] = surface
         if surface is not None:
             surface_map.setdefault(surface, set()).add(cap_id)
+
+    module_stem_map: Dict[str, Set[str]] = {c: {c} for c in canonical_ids}
+    descriptor_map = _build_name_alias_map(descriptor_ids, canonical_ids, surface_by_canonical)
+    mechanism_map = _build_name_alias_map(mechanism_ids, canonical_ids, surface_by_canonical)
 
     maps: Dict[str, Dict[str, Set[str]]] = {
         "module_stem": module_stem_map,
@@ -429,4 +546,4 @@ def build_capability_index(project_root: str) -> CapabilityIndex:
             aliases=aliases,
         )
 
-    return CapabilityIndex(identities, maps)
+    return CapabilityIndex(identities, maps, state_read_error=state_read_error)
