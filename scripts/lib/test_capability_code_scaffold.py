@@ -70,7 +70,10 @@ from capability_code_scaffold import (  # noqa: E402
     render_read_facade_module,
     render_capability_module,
     emit_capability_code_scaffold,
+    assert_identity_coherent,
+    canonical_id_from_module_stem,
 )
+from external_write.capability_registration import register_declared_capability  # noqa: E402
 
 
 def _sample_spec(**overrides) -> CapabilityCodeSpec:
@@ -117,6 +120,138 @@ class TestSpecValidation(unittest.TestCase):
 
     def test_read_facade_module_stem(self):
         self.assertEqual(_sample_spec().read_facade_module_stem, "read_facades_acme_crm_sync")
+
+
+class TestAssertIdentityCoherent(unittest.TestCase):
+    """Task A2 / A3.1: the build-time 4-way identity invariant. `surface` is deliberately NOT a
+    parameter -- these tests lock that exclusion as the keystone correction (a capability's
+    external-system surface legitimately differs from its identity; only descriptor_id,
+    capability_id, mechanism_id, and module_stem must all agree)."""
+
+    def test_four_way_match_passes(self):
+        assert_identity_coherent(descriptor_id="acme_crm_sync", capability_id="acme_crm_sync",
+                                 mechanism_id="acme_crm_sync", module_stem="acme_crm_sync")
+
+    def test_surface_differing_from_capability_id_is_allowed(self):
+        # The keystone correction: surface is the external-system id, not the identity.
+        assert_identity_coherent(descriptor_id="acme_crm_sync", capability_id="acme_crm_sync",
+                                 mechanism_id="acme_crm_sync", module_stem="acme_crm_sync")  # no raise
+
+    def test_descriptor_id_set_to_surface_is_rejected(self):
+        # The estate anti-pattern: descriptor id == surface ("inbox-labels") != capability_id ("inbox_management")
+        with self.assertRaises(CapabilityCodeScaffoldError):
+            assert_identity_coherent(descriptor_id="inbox-labels", capability_id="inbox_management",
+                                     mechanism_id="inbox_management", module_stem="inbox_management")
+
+    def test_mechanism_id_mismatch_is_rejected(self):
+        with self.assertRaises(CapabilityCodeScaffoldError):
+            assert_identity_coherent(descriptor_id="acme_crm_sync", capability_id="acme_crm_sync",
+                                     mechanism_id="stale_mechanism_id", module_stem="acme_crm_sync")
+
+    def test_module_stem_mismatch_is_rejected(self):
+        with self.assertRaises(CapabilityCodeScaffoldError):
+            assert_identity_coherent(descriptor_id="acme_crm_sync", capability_id="acme_crm_sync",
+                                     mechanism_id="acme_crm_sync", module_stem="a_different_stem")
+
+    def test_all_four_different_is_rejected(self):
+        with self.assertRaises(CapabilityCodeScaffoldError):
+            assert_identity_coherent(descriptor_id="a", capability_id="b",
+                                     mechanism_id="c", module_stem="d")
+
+    def test_error_message_is_plain_language_not_a_traceback(self):
+        try:
+            assert_identity_coherent(descriptor_id="inbox-labels", capability_id="inbox_management",
+                                     mechanism_id="inbox_management", module_stem="inbox_management")
+            self.fail("expected CapabilityCodeScaffoldError")
+        except CapabilityCodeScaffoldError as e:
+            msg = str(e)
+            self.assertNotIn("Traceback", msg)
+            self.assertIn("inbox-labels", msg)
+            self.assertIn("inbox_management", msg)
+
+    def test_canonical_id_from_module_stem_strips_suffix(self):
+        self.assertEqual(canonical_id_from_module_stem("acme_crm_sync_capability"), "acme_crm_sync")
+
+    def test_canonical_id_from_module_stem_leaves_already_canonical_unchanged(self):
+        self.assertEqual(canonical_id_from_module_stem("acme_crm_sync"), "acme_crm_sync")
+
+    def test_capability_code_spec_canonical_id_matches_capability_id(self):
+        self.assertEqual(_sample_spec().canonical_id, _sample_spec().capability_id)
+
+
+class TestCapabilityRegistrationIdentityCoherence(unittest.TestCase):
+    """A2 / A3.1 integration: capability_registration.register_declared_capability refuses to
+    land a descriptor whose id does not match the canonical id of the capability module it
+    registers -- catching the estate anti-pattern (descriptor id set to the capability's
+    SURFACE) before it ever lands, while never firing on a legitimate surface != capability_id."""
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.project_root = Path(self._td.name)
+        (self.project_root / "security").mkdir(parents=True, exist_ok=True)
+        self.descriptor_set_path = self.project_root / "security" / "capability_descriptors.json"
+        self.descriptor_set_path.write_text("[]\n", encoding="utf-8")
+        self.co_protected_path = self.project_root / "quality" / "co-protected-workflows.md"
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _register(self, cap_id, **overrides):
+        declared = dict(
+            id=cap_id,
+            name=cap_id,
+            action_class="mutate",
+            risk_class="reversible_external",  # non-gated: no co-protected table needed
+            recovery_profile_ref="rp-1",
+            declared_test_target="copy",
+            blast_radius_cap=5,
+            phase_id="phase_01",
+            accepted=False,
+        )
+        declared.update(overrides)
+        return register_declared_capability(
+            declared,
+            descriptor_set_path=str(self.descriptor_set_path),
+            co_protected_path=str(self.co_protected_path),
+        )
+
+    def test_descriptor_id_matching_its_own_emitted_module_registers(self):
+        spec = _sample_spec()  # capability_id="acme_crm_sync", surface="acme_crm"
+        emit_capability_code_scaffold(spec, self.project_root)
+        res = self._register("acme_crm_sync")
+        self.assertTrue(res.registered, res.reason)
+
+    def test_descriptor_id_set_to_a_different_capabilitys_surface_is_refused(self):
+        spec = _sample_spec(capability_id="inbox_management", surface="inbox-labels",
+                            op_kind="inbox.label.apply")
+        emit_capability_code_scaffold(spec, self.project_root)
+        res = self._register("inbox-labels")
+        self.assertFalse(res.registered)
+        self.assertIn("inbox_management", res.reason)
+        # No half-registration: nothing was landed under the bad id.
+        entries = json.loads(self.descriptor_set_path.read_text(encoding="utf-8"))
+        self.assertEqual(entries, [])
+
+    def test_capability_id_differing_from_its_own_surface_is_allowed(self):
+        # The keystone regression: surface != capability_id must never itself trigger a refusal.
+        spec = _sample_spec(capability_id="acme_crm_sync", surface="acme_crm")
+        emit_capability_code_scaffold(spec, self.project_root)
+        res = self._register("acme_crm_sync")
+        self.assertTrue(res.registered, res.reason)
+
+    def test_not_yet_emitted_capability_id_registers_normally(self):
+        # No capability module has been emitted anywhere yet under this id -- a legitimate,
+        # not-yet-built capability (e.g. read-only, which skips the code-scaffold step entirely)
+        # must not be refused merely for having no module on disk yet.
+        res = self._register("status_sync")
+        self.assertTrue(res.registered, res.reason)
+
+    def test_registering_a_surface_shared_by_no_module_is_unaffected(self):
+        # A surface string that doesn't collide with anything is just an ordinary new id.
+        spec = _sample_spec()
+        emit_capability_code_scaffold(spec, self.project_root)
+        res = self._register("some_other_new_capability")
+        self.assertTrue(res.registered, res.reason)
 
 
 class TestGoldenEmitZoneClean(unittest.TestCase):

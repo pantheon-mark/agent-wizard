@@ -25,6 +25,16 @@ Fail-safe / fail-closed properties (every branch defaults to refuse + write noth
     co-protected-registered, not invisible;
   * for a GATED capability the co-protected table MUST be present and locatable; if it is not, the
     descriptor is not landed;
+  * a descriptor id that resolves -- via an already-emitted capability module's own stem OR its
+    declared SURFACE -- to a DIFFERENT capability than the id being registered is refused (Task
+    A2 / A3.1's four-way identity coherence check). This closes the seam where a descriptor id
+    was silently authored to equal a capability's external-system SURFACE instead of its
+    capability_id (the estate finding: descriptor id "inbox-labels" vs. capability_id/module
+    "inbox_management"), which broke migration-close and health downstream. A cap_id that
+    resolves to NOTHING yet (no capability module emitted under this id, and it is not any
+    existing capability's surface either) is a normal not-yet-built capability and is NOT
+    refused — this reuses capability_identity.py's exact-alias-only resolution (no fuzzy
+    matching, no guessing) and never checks a capability's own surface against itself;
   * for a GATED capability the co-protected table is written FIRST, the descriptor set SECOND —
     reversed from the naive order — so a hard crash (SIGKILL / power loss) between the two
     ``os.replace`` calls is fail-SAFE, not fail-open: it leaves at worst a harmless PHANTOM guard
@@ -64,6 +74,7 @@ if __package__ in (None, ""):  # pragma: no cover - only true when run as a scri
     if _pkg_parent not in _bootstrap_sys.path:
         _bootstrap_sys.path.insert(0, _pkg_parent)
 
+from external_write.capability_identity import build_capability_index, IdentityResolutionError
 from external_write.contracts import RISK_CLASSES
 from external_write.write_gate import (
     GATED_RISK_CLASSES,
@@ -338,6 +349,35 @@ def register_declared_capability(
             return _refuse(
                 f"a descriptor with id {cap_id!r} already exists — refusing to register a "
                 "duplicate", cap_id)
+
+    # --- A2 / A3.1: four-way identity coherence -- refuse a descriptor id that resolves (via an
+    # already-emitted capability module's own stem OR its declared SURFACE) to a DIFFERENT
+    # capability than cap_id itself. Catches the estate anti-pattern (descriptor id set to a
+    # capability's SURFACE, e.g. "inbox-labels", instead of its capability_id, e.g.
+    # "inbox_management") BEFORE the mismatched descriptor is ever landed. A cap_id that matches
+    # NOTHING yet (no capability module emitted under this id, and it is not any existing
+    # capability's surface either) is a normal not-yet-built capability (e.g. a read-only one,
+    # which skips the code-scaffold step entirely) and is NOT refused here -- see
+    # capability_identity.py's own module docstring for the exact-alias-only resolution rule this
+    # reuses (no fuzzy matching, no guessing). `surface` is never checked against ITS OWN
+    # capability_id by this reuse -- only against WHICH capability (if any) cap_id corroborates.
+    project_root = Path(descriptor_set_path).resolve().parent.parent
+    try:
+        identity = build_capability_index(str(project_root)).resolve(cap_id, "unknown")
+    except IdentityResolutionError as e:
+        if e.kind == "ambiguous":
+            return _refuse(
+                f"capability id {cap_id!r} cannot be registered: {e.operator_message}", cap_id)
+        # kind == "unresolved" -- nothing on disk claims this id yet; proceed normally.
+    else:
+        if identity.canonical_id != cap_id:
+            return _refuse(
+                f"descriptor id {cap_id!r} does not match this capability's own identity -- it "
+                f"resolves instead to the already-emitted capability {identity.canonical_id!r}. "
+                f"This usually means {cap_id!r} is that other capability's external-system "
+                "SURFACE, not a capability_id -- use the SAME id as the capability_id given "
+                "when this capability's code was generated (not its external-system surface).",
+                cap_id)
 
     new_entry = {
         "id": cap_id,

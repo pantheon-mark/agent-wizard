@@ -220,6 +220,76 @@ class CapabilityCodeSpec:
     def capability_module_stem(self) -> str:
         return f"{self.capability_id}_capability"
 
+    @property
+    def canonical_id(self) -> str:
+        """Alias for ``capability_id`` -- the ONE canonical identity every other
+        identity-bearing name for this capability (descriptor id, mechanism_id, and the module
+        stem with its ``_capability`` suffix stripped) must equal exactly. See
+        ``assert_identity_coherent`` below and ``capability_identity.py``'s own module docstring
+        (Task A1) for the full rationale. Named separately from ``capability_id`` for call sites
+        that reason explicitly in terms of "the canonical id," not "the capability_id field."""
+        return self.capability_id
+
+
+_CAPABILITY_MODULE_SUFFIX = "_capability"
+
+
+def canonical_id_from_module_stem(module_stem: str) -> str:
+    """Strip the ``_capability`` suffix ``CapabilityCodeSpec.capability_module_stem`` appends, so
+    a caller holding a raw module stem (e.g. a filename stem read off disk,
+    ``<capability_id>_capability.py``) can pass the CANONICAL form to
+    ``assert_identity_coherent`` -- passing the raw, suffixed stem there would make even a
+    perfectly coherent capability fail the check. Returns ``module_stem`` UNCHANGED if it does
+    not carry the suffix (already canonical)."""
+    if module_stem.endswith(_CAPABILITY_MODULE_SUFFIX):
+        return module_stem[: -len(_CAPABILITY_MODULE_SUFFIX)]
+    return module_stem
+
+
+def assert_identity_coherent(descriptor_id: str, capability_id: str, mechanism_id: str,
+                              module_stem: str) -> None:
+    """Raise ``CapabilityCodeScaffoldError`` unless ``descriptor_id``, ``capability_id``,
+    ``mechanism_id``, and ``module_stem`` are ALL the exact same string -- the four-way
+    build-time identity invariant (Task A2 / A3.1) that makes a capability's identity split (the
+    estate bug: descriptor id ``"inbox-labels"`` vs. capability_id/module_stem
+    ``"inbox_management"``) impossible to re-create by construction, rather than merely a
+    naming convention add-capability.md asks an agent to follow.
+
+    ``surface`` (the external-system identifier a capability talks to, e.g. ``"acme_crm"`` for
+    capability_id ``"acme_crm_sync"``) is DELIBERATELY NOT a parameter here and is NEVER checked
+    against the other four -- see ``capability_identity.py``'s module docstring, "Surface is
+    excluded from identity": two different capabilities may legitimately declare the same
+    surface, and one capability's own surface legitimately differs from its capability_id.
+    Checking it here would re-introduce exactly the false-positive class this correction exists
+    to rule out (``surface != capability_id`` MUST be allowed).
+
+    ``module_stem`` here means the CANONICAL form -- the module stem with any trailing
+    ``_capability`` suffix already stripped (see ``canonical_id_from_module_stem``); every caller
+    is responsible for canonicalizing before calling, since a raw
+    ``CapabilityCodeSpec.capability_module_stem`` value would otherwise never equal
+    ``capability_id`` and would always (incorrectly) fail this check.
+
+    Fail-closed: raises on ANY inequality among the four, with a plain-language message (no
+    traceback) naming every value and the likely cause, so a non-technical operator's project
+    never lands a capability whose identity is split across these four surfaces.
+    """
+    values = {
+        "descriptor_id": descriptor_id,
+        "capability_id": capability_id,
+        "mechanism_id": mechanism_id,
+        "module_stem": module_stem,
+    }
+    if len(set(values.values())) > 1:
+        detail = "; ".join(f"{k}={v!r}" for k, v in values.items())
+        raise CapabilityCodeScaffoldError(
+            "This capability's identity is not consistent across the system -- its descriptor "
+            "id, capability_id, mechanism_id, and module name must all be the exact SAME "
+            f"identifier, but they are not ({detail}). This is very likely because one of these "
+            "was set to the capability's external-system SURFACE (e.g. the vendor name) instead "
+            "of its capability_id -- surface is a separate field and is allowed to differ; these "
+            "four identity fields are not allowed to differ. Fix: make all four the same value "
+            "as the capability's capability_id.")
+
 
 # ---------------------------------------------------------------------------
 # Adapter module (ADAPTER_PROFILE zone) template
