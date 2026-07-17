@@ -329,6 +329,27 @@ class TestCapabilityRegistrationIdentityCoherence(unittest.TestCase):
         res = self._register("some_other_new_capability")
         self.assertTrue(res.registered, res.reason)
 
+    def test_stale_mechanism_alias_does_not_block_a_correct_registration(self):
+        # Coordinator review fix (2nd pass): capability_id, mechanism_id, and module_stem are
+        # all the CANONICAL id BY CONSTRUCTION at registration time (the scaffold derives module
+        # + mechanism from capability_id) -- the only INDEPENDENT input under test is
+        # descriptor_id. A stale agents/handoffs/pending_migrations.json entry recording a
+        # NON-canonical mechanism_id alias for this capability (e.g. "inbox-labels" for canonical
+        # "inbox_management" -- a real, tolerated A1 alias, not a new violation) must NOT block
+        # re-registering the capability's OWN correct descriptor (descriptor_id ==
+        # capability_id == canonical). Before the fix, identity.mechanism_id (the raw alias) was
+        # fed into assert_identity_coherent verbatim, so a perfectly legitimate, self-consistent
+        # registration was falsely refused.
+        spec = _sample_spec(capability_id="inbox_management", surface="inbox-labels",
+                            op_kind="inbox.label.apply3")
+        emit_capability_code_scaffold(spec, self.project_root)
+        handoffs_dir = self.project_root / "agents" / "handoffs"
+        handoffs_dir.mkdir(parents=True, exist_ok=True)
+        (handoffs_dir / "pending_migrations.json").write_text(
+            json.dumps([{"mechanism_id": "inbox-labels"}]), encoding="utf-8")
+        res = self._register("inbox_management")
+        self.assertTrue(res.registered, res.reason)
+
     def test_new_capability_id_matching_an_unrelated_surface_is_allowed(self):
         # Coordinator review fix (resolve() precedence): registering "foo" must not be refused
         # merely because some OTHER already-emitted capability's own SURFACE happens to equal

@@ -392,14 +392,26 @@ def register_declared_capability(
                 f"capability id {cap_id!r} cannot be registered: {e.operator_message}", cap_id)
         # kind == "unresolved" -- nothing on disk claims this id yet; proceed normally.
     else:
-        module_stem_value = identity.module_stem if identity.module_stem is not None else identity.canonical_id
-        mechanism_id_value = identity.mechanism_id if identity.mechanism_id is not None else identity.canonical_id
+        # Coordinator review fix (2nd pass): capability_id, mechanism_id, and module_stem are
+        # ALL the CANONICAL id BY CONSTRUCTION at registration time -- the scaffold derives the
+        # module (and, when this capability migrates a paused mechanism, the mechanism_id) FROM
+        # capability_id, so all three are the same canonical value, never an independently
+        # observed alias. `identity.mechanism_id` is deliberately NOT used here: it can be a
+        # NON-canonical alias (e.g. a stale pending_migrations.json entry recording
+        # mechanism_id="inbox-labels" for canonical "inbox_management" -- a real, A1-tolerated
+        # historical alias, not a new violation), and feeding that raw alias into
+        # assert_identity_coherent would falsely refuse a legitimate, self-consistent
+        # registration of the capability's OWN correct descriptor. The only INDEPENDENT,
+        # operator-authored input under test here is `descriptor_id` (=cap_id); the check that
+        # matters is "does cap_id equal this capability's canonical id" -- mechanism_id/
+        # module_stem stay in the 4-way call for the invariant's completeness, but as the
+        # canonical value, not an alias.
         try:
             assert_identity_coherent(
                 descriptor_id=cap_id,
                 capability_id=identity.canonical_id,
-                mechanism_id=mechanism_id_value,
-                module_stem=module_stem_value,
+                mechanism_id=identity.canonical_id,
+                module_stem=identity.canonical_id,
             )
         except IdentityCoherenceError as e:
             return _refuse(
