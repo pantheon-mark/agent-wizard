@@ -1068,6 +1068,44 @@ class CompleteMigrationTests(unittest.TestCase):
 
             self.assertTrue(self._write_gate_permits_live(root, cap_id))
 
+    def test_capability_module_path_defaults_to_project_root_not_cwd(self):
+        """(coordinator review fix) `capability_module_path`'s own CWD-relative default is
+        mirrored from `acceptance_ceremony.accept_capability_for_live_use` -- exactly like
+        `descriptor_set_path` / `audit_log_path`, which `complete_migration` already resolves
+        against `root` when omitted. Before this fix, `capability_module_path` was passed through
+        unresolved: a caller whose process cwd differs from `project_root` (the normal case
+        throughout this whole test suite) would silently record `capability_module_hash: null` --
+        and `acceptance_hash_is_stale` treats a null value as ALWAYS stale (fail-safe there), so a
+        capability just resumed through `complete_migration` would be immediately, wrongly,
+        B2b-stale-flagged with no code changed at all. This test drives `complete_migration` from
+        a process cwd that is a DIFFERENT directory than `project_root`, omitting
+        `capability_module_path`, and asserts the acceptance record's `capability_module_hash` is
+        the REAL sha256 of `<root>/agents/capabilities/<cap_id>_capability.py` (never null), and
+        that `acceptance_hash_is_stale` reports False right after."""
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as other_cwd:
+            root = Path(tmp)
+            cap_id = "acme_widget_deleter"
+            module_path = self._prepare_paused_capability(root, cap_id)
+            proof_path, receipt_path = self._write_proof_and_receipt(root, cap_id, module_path)
+
+            prior_cwd = os.getcwd()
+            os.chdir(other_cwd)
+            try:
+                result = lifecycle_state.complete_migration(
+                    str(root), cap_id, str(proof_path), str(receipt_path))
+            finally:
+                os.chdir(prior_cwd)
+
+            self.assertTrue(result.completed, result.reason)
+
+            audit_path = root / lifecycle_state.ACCEPTANCE_LOG_REL
+            log_lines = [ln for ln in audit_path.read_text(encoding="utf-8").splitlines() if ln]
+            record = json.loads(log_lines[-1])
+            self.assertEqual(
+                record.get("capability_module_hash"), _hash_capability_module(root, cap_id))
+
+            self.assertFalse(lifecycle_state.acceptance_hash_is_stale(str(root), cap_id))
+
     # -- (b) crash-safety: a refused attempt leaves no partial state; a corrected retry
     # completes fully with no duplicate audit record. -------------------------------------------
 

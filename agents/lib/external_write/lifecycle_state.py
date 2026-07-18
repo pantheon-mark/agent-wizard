@@ -1114,10 +1114,24 @@ def complete_migration(
         audit_log_path if audit_log_path is not None
         else str(root / ACCEPTANCE_LOG_REL)
     )
+    # (Coordinator review fix) capability_module_path's own default inside the ceremony is ALSO
+    # CWD-relative (<cwd>/agents/capabilities/<capability_id>_capability.py) -- same convention,
+    # same bug class, as the two paths above. Left unresolved, a caller whose process cwd differs
+    # from `root` silently gets capability_module_hash: null recorded in the acceptance record,
+    # and acceptance_hash_is_stale treats a null value as ALWAYS stale -- so a capability just
+    # resumed through this function would be immediately, wrongly, re-flagged stale with no code
+    # changed. Resolve against `root` (using the CANONICAL id, mirroring the same path
+    # construction already used by _resolve_op_kinds / acceptance_hash_is_stale above) exactly
+    # like descriptor_set_path / audit_log_path already are.
+    resolved_capability_module_path = (
+        capability_module_path if capability_module_path is not None
+        else str(root / CAPABILITIES_DIR_REL / f"{identity.canonical_id}{CAPABILITY_FILE_SUFFIX}")
+    )
     acceptance = accept_capability_for_live_use(
         receipt_capability_id, receipt_phase_id, copy_run_proof_ref, operator_receipt_ref,
         descriptor_set_path=resolved_descriptor_set_path, lib_dir=lib_dir,
-        audit_log_path=resolved_audit_log_path, capability_module_path=capability_module_path,
+        audit_log_path=resolved_audit_log_path,
+        capability_module_path=resolved_capability_module_path,
     )
     if not acceptance.accepted:
         return CompleteResult(
