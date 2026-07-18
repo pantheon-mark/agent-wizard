@@ -68,13 +68,14 @@ copy-run-proof recording (Step 5), and the acceptance command (Step 6) all point
 to this lookup rather than repeating it.
 
 Read `security/capability_descriptors.json` yourself, directly, with your own
-file-reading tool -- never by piping it through a shell filter (never `cat ... | jq`,
-`| grep`, or similar). It is a JSON array of capability entries. Find the one entry
-whose `accepted` is still `false` and that matches the phase you identified in Step 2
--- by its `phase_id` where that is already set, or otherwise by matching its
-description to the capability this phase adds. That entry's `id` and `phase_id`
-fields are the two values every step below fills in. You do not need a shell command
-at all to do this -- read the file and reason over it directly.
+file-reading tool -- never by piping it through a shell filter, and never through
+any other shell command (never `cat ... | jq`, `| grep`, or a one-off script of your
+own). It is a JSON array of capability entries. Find the one entry whose `accepted`
+is still `false` and that matches the phase you identified in Step 2 -- by its
+`phase_id` where that is already set, or otherwise by matching its description to
+the capability this phase adds. That entry's `id` and `phase_id` fields are the two
+values every step below fills in. You do not need a shell command at all to do this
+-- read the file and reason over it directly.
 
 If no entry matches -- there is nothing pending for this phase -- do not guess, and
 do not run anything that could fail with a raw error on empty input. Stop and tell
@@ -85,30 +86,23 @@ the operator plainly:
 > add-capability skill for this phase (or check with whoever set up your project if
 > this is unexpected), then come back here.
 
-If you would rather run a fixed command than read the file yourself, this direct,
-pipe-free lookup does the same filtering and never raises an error on the empty
-case -- it prints a plain word instead:
+**If more than one entry has `accepted` still `false`:** do not guess, and never
+silently pick one -- even if one looks like the obvious match. This id feeds
+directly into the step that turns on live use of a real capability later in this
+skill, and picking the wrong one would authorize the wrong thing to go live. Only
+proceed on your own judgment if exactly one of the not-yet-accepted entries clearly
+matches the phase you identified in Step 2 (by its `phase_id` or its description)
+and none of the others plausibly could. If you cannot tell which one this phase
+built -- more than one plausibly matches, or you are not sure -- stop here and ask
+the operator directly, by name, in plain language:
 
-```
-python3 -c "
-import json
-entries = json.load(open('security/capability_descriptors.json'))
-candidates = [e for e in entries if e.get('phase_id') and not e.get('accepted')]
-if not candidates:
-    print('NO_PENDING_CAPABILITY')
-elif len(candidates) == 1:
-    print(candidates[0]['id'], candidates[0]['phase_id'])
-else:
-    for e in candidates:
-        print(e['id'], e['phase_id'])
-"
-```
+> I found more than one capability waiting to be confirmed in your project's safety
+> records: <name each candidate in plain language -- what it does, not its internal
+> id>. Which one is this phase? I don't want to guess, because picking the wrong one
+> would turn on the wrong capability.
 
-This prints `NO_PENDING_CAPABILITY` when nothing is pending (handle that exactly as
-above -- stop and tell the operator plainly), one `id phase_id` pair when there is
-exactly one match, or one pair per line when more than one phase currently has a
-pending capability -- in that last case, match the pair against the phase you
-identified in Step 2 yourself; never pick one arbitrarily.
+Use exactly the one the operator names, and do not continue until they have told
+you. Never proceed past this point on a guess.
 
 ## Step 3: Credential check
 

@@ -72,6 +72,12 @@ def find_fragile_pipes(text: str) -> List[str]:
     (``| Column | Column |``) and `` || `` shell-guard chains (``cmd || true``) do not
     match: the word list only fires on real filter-command names, and the `|`/`|`
     lookaround excludes `||` entirely.
+
+    Known blind spot (accepted, not fixed -- see module docstring): a pipe at the end
+    of one line continuing into a filter command on the next line (a shell
+    line-continued pipe, e.g. ``cat foo.json |\\n  jq '.id'``) is NOT detected, since
+    each line is checked independently. A full shell parser could catch this; that is
+    out of scope for a weakest-sufficient text lint.
     """
     offending: List[str] = []
     for line in text.splitlines():

@@ -123,6 +123,28 @@ class RealSkillFilesAreCleanTests(unittest.TestCase):
         add_capability = REPO_ROOT / "wizard" / "skills" / "add-capability.md"
         self.assertTrue(add_capability.exists(), f"not found: {add_capability}")
 
+    def test_next_phase_has_ambiguity_hard_block(self):
+        """Review finding (Important #2): if more than one not-yet-accepted capability
+        entry is present and the agent can't unambiguously tell which one this phase
+        built, it must STOP and ask the operator by name -- never silently pick one.
+        This id feeds the step that grants live use, so a wrong pick is not a cosmetic
+        error."""
+        next_phase = REPO_ROOT / "wizard" / "skills" / "next-phase.md"
+        text = next_phase.read_text(encoding="utf-8")
+        normalized = " ".join(text.split())
+        self.assertIn(
+            "never silently pick one",
+            normalized,
+            "next-phase.md must instruct the agent to never silently pick a "
+            "capability entry when more than one is pending",
+        )
+        self.assertIn(
+            "ask the operator directly, by name, in plain language",
+            normalized,
+            "next-phase.md must instruct the agent to surface ambiguous candidates "
+            "to the operator by name rather than guessing",
+        )
+
 
 class ScopeExcludesHookScriptsTests(unittest.TestCase):
     """The lint must be scoped to the consent/acceptance skill files ONLY -- the
