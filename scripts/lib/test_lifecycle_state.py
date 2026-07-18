@@ -26,6 +26,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 # Single-home: import from wizard/agents/lib/external_write (canonical location) -- mirrors
 # test_external_write_write_gate.py / test_capability_health.py's own convention.
@@ -34,6 +35,7 @@ sys.path.insert(0, str(_AGENTS_LIB))
 
 from external_write import lifecycle_state  # noqa: E402
 from external_write import acceptance_ceremony  # noqa: E402
+from external_write import capability_health  # noqa: E402
 from external_write.capability_identity import IdentityResolutionError  # noqa: E402
 from external_write.acceptance_ceremony import ACCEPTANCE_RECORD_SCHEMA  # noqa: E402
 from external_write.proof_hash import compute_implementation_hash  # noqa: E402
@@ -1471,6 +1473,8 @@ class CheckCompletionTests(_CheckCompletionFixtureMixin, unittest.TestCase):
             root = Path(tmp)
             self._accept_real_capability(root, self.CAP_ID)
             self._add_unrelated_capability(root)
+            descriptor_path = root / lifecycle_state.DESCRIPTOR_SET_REL
+            before = descriptor_path.read_text(encoding="utf-8")
 
             result = lifecycle_state.check_completion(str(root), self.CAP_ID)
 
@@ -1480,6 +1484,15 @@ class CheckCompletionTests(_CheckCompletionFixtureMixin, unittest.TestCase):
             self.assertEqual(result.failed_conjuncts, [])
             self.assertIn("DONE", result.operator_message)
             self.assertNotIn("Traceback", result.operator_message)
+
+            # Cross-capability isolation: checking CAP_ID is read-only and must never alter (or
+            # depend on) the unrelated OTHER_CAP_ID's own state -- confirmed two ways: the
+            # descriptor set on disk is byte-identical after the call, and a SEPARATE completion
+            # check for OTHER_CAP_ID still correctly reports it as never-accepted.
+            self.assertEqual(descriptor_path.read_text(encoding="utf-8"), before)
+            other_result = lifecycle_state.check_completion(str(root), self.OTHER_CAP_ID)
+            self.assertFalse(other_result.done)
+            self.assertIn("accepted", other_result.failed_conjuncts)
 
     # -- (b) audit-appended is false -------------------------------------------------------------
 
@@ -1503,32 +1516,101 @@ class CheckCompletionTests(_CheckCompletionFixtureMixin, unittest.TestCase):
             self.assertIn("Next:", result.operator_message)
             self.assertNotIn("Traceback", result.operator_message)
 
-    # -- (c) health RED (via a marker-shape anomaly capability_health treats conservatively),
-    #        core + projection OK -- health must NOT gate done ----------------------------------
-
-    def test_health_red_does_not_block_completion(self):
+    # -- (c) CRITICAL regression: an UNREAD (not confirmed-clean) pause/migration state must
+    #        fail-closed, never fail-open ----------------------------------------------------
+    #
+    # A wrongly-shaped pause-marker STATE file (a directory, not a regular file), with no
+    # ".pause" sentinel present. capability_health._is_paused reports this exact shape as
+    # (paused=False, read_error=True) -- the marker state was never actually CONFIRMED clean, it
+    # is genuinely UNREAD. Before the fix this landed here, check_completion derived
+    # projection_ok from paused/pending_migration alone and ignored state_read_error entirely --
+    # projection_ok stayed True and the gate reported done=True for a capability whose
+    # marker/migration state literally could not be verified. That is a fail-OPEN in the one
+    # module whose entire purpose is fail-closed reporting (see this module's own "Fail-closed on
+    # unverifiable state" docstring section -- a present-but-unreadable descriptor/migration file
+    # already refuses to guess "done"; an unreadable per-capability marker file must refuse the
+    # exact same way). This test is the fail-closed regression guard for that: it MUST fail
+    # (done=True) against the code as it stood before the fix, and MUST pass (done=False) after.
+    def test_unreadable_marker_state_is_not_done_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._accept_real_capability(root, self.CAP_ID)
             self._add_unrelated_capability(root)
 
-            # A wrongly-shaped pause-marker STATE file (a directory, not a regular file), with no
-            # ".pause" sentinel present. capability_health._is_paused reports this exact shape as
-            # (paused=False, read_error=True) -- flips this capability's composite health to RED
-            # via state_read_error alone, WITHOUT registering paused=True or
-            # pending_migration=True. This gate's own projection-consistency signal reuses health's
-            # paused/pending_migration booleans (never its state_read_error bit -- see the module's
-            # own "Reuse, not re-derivation" docstring section), so projection stays coherent.
             marker_dir = root / lifecycle_state.PAUSED_MECHANISMS_DIR_REL
             marker_dir.mkdir(parents=True, exist_ok=True)
             (marker_dir / f"{self.CAP_ID}.json").mkdir()
 
+            # Confirm the fixture actually produces the intended capability_health signal before
+            # asserting on check_completion's behavior over it: paused=False (never claims a real
+            # pause) but state_read_error=True (the marker state could not be positively read).
+            records = capability_health.check_capabilities(str(root))
+            record = next(r for r in records if r["capability_id"] == self.CAP_ID)
+            self.assertFalse(record["paused"])
+            self.assertFalse(record["pending_migration"])
+            self.assertTrue(record["state_read_error"])
+
             result = lifecycle_state.check_completion(str(root), self.CAP_ID)
+
+            self.assertFalse(result.done)
+            self.assertTrue(result.core_ok)  # core signals are all genuinely clean here
+            self.assertFalse(result.projection_ok)  # projection is INDETERMINATE, not coherent
+            self.assertTrue(
+                any(
+                    "projection" in c or "unverifiable" in c or "unread" in c
+                    for c in result.failed_conjuncts
+                ),
+                result.failed_conjuncts,
+            )
+            self.assertNotIn("DONE", result.operator_message)
+            self.assertIn("Next:", result.operator_message)
+            self.assertNotIn("Traceback", result.operator_message)
+
+    # -- (c') health-not-gating, asserted STRUCTURALLY -------------------------------------------
+    #
+    # Post-fix, EVERY capability_health RED reason maps to a real core-safety or
+    # projection-consistency signal this gate already reads (import-broken/scanner-red ->
+    # core_ok; paused/pending_migration/state_read_error -> projection_ok; acceptance_stale ->
+    # core_ok) -- so there is no longer a legitimate "health is RED but core+projection are OK for
+    # a REAL reason" scenario to construct honestly. Asserting "health does not gate done" now
+    # means asserting it STRUCTURALLY: force ONLY the composite ``health`` field itself to "red"
+    # (every underlying boolean capability_health also reports, and that this gate actually
+    # consults, stays healthy) and confirm done/core_ok/projection_ok are computed from those
+    # booleans alone, never from ``record["health"]``.
+    def test_health_field_itself_never_gates_done(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._accept_real_capability(root, self.CAP_ID)
+            self._add_unrelated_capability(root)
+
+            real_records = capability_health.check_capabilities(str(root))
+            patched_records = []
+            for r in real_records:
+                r = dict(r)
+                if r["capability_id"] == self.CAP_ID:
+                    # Every signal this gate actually reads is genuinely healthy -- only the
+                    # composite `health` field is forced red (as if some OTHER rule this gate does
+                    # not enumerate had flipped it), to isolate whether `health` itself is ever
+                    # consulted.
+                    self.assertTrue(r["importable"])
+                    self.assertTrue(r["scanner_clean"])
+                    self.assertFalse(r["paused"])
+                    self.assertFalse(r["pending_migration"])
+                    self.assertFalse(r["state_read_error"])
+                    self.assertFalse(r["acceptance_stale"])
+                    r["health"] = "red"
+                patched_records.append(r)
+
+            with mock.patch.object(
+                capability_health, "check_capabilities", return_value=patched_records,
+            ):
+                result = lifecycle_state.check_completion(str(root), self.CAP_ID)
 
             self.assertTrue(result.core_ok)
             self.assertTrue(result.projection_ok)
             self.assertTrue(result.done)
-            self.assertFalse(result.operator_signal_ok)
+            self.assertFalse(result.operator_signal_ok)  # health RED is still reported
+            self.assertEqual(result.done, result.core_ok and result.projection_ok)
             self.assertEqual(result.failed_conjuncts, [])
             self.assertIn("DONE", result.operator_message)
             self.assertNotIn("Traceback", result.operator_message)

@@ -1187,10 +1187,11 @@ def complete_migration(
 #      acceptance-not-stale (B2b: the code has not changed since that record was written).
 #
 #   2. PROJECTION-CONSISTENCY (``projection_ok`` -- ALSO gates ``done``, but tracked separately):
-#      no leftover pause marker and no still-open pending-migration entry for this capability --
-#      the same coherence ``reconcile_state`` exists to establish (see this module's own
-#      docstring), reused here as a DEFINITION, not re-invoked as a WRITE (see "no mutation"
-#      below).
+#      no leftover pause marker, no still-open pending-migration entry, AND no marker/migration
+#      state that exists but could not be positively read (fail-closed on the unverifiable case,
+#      not just the confirmed-bad one) -- the same coherence ``reconcile_state`` exists to
+#      establish (see this module's own docstring), reused here as a DEFINITION, not re-invoked as
+#      a WRITE (see "no mutation" below).
 #
 #   3. OPERATOR-SIGNAL (``operator_signal_ok`` -- REPORTED, NEVER a gate): ``capability_health``'s
 #      composite ``health == "green"`` verdict. This is DELIBERATELY excluded from ``done``/
@@ -1207,15 +1208,20 @@ def complete_migration(
 # ``importable``, ``scanner_clean``, and ``acceptance_stale`` are read DIRECTLY off the matching
 # record from ``capability_health.check_capabilities`` -- never re-run (this module does not
 # re-execute the AST bypass scanner or the isolated-subprocess import attempt a second time; that
-# module already owns that safety-ordered, fail-closed machinery). ``paused`` and
-# ``pending_migration`` (also read from that SAME record) are what THIS gate's
-# projection-consistency layer is built from -- deliberately NOT ``capability_health``'s own
-# ``state_read_error`` bit, which is a strictly MORE conservative signal (folds in unreadable/
-# wrong-shaped marker files that ``capability_health`` treats as "cannot positively verify, so
-# invite-guard to RED" for a DIFFERENT, more paranoid purpose than this gate's). A marker/queue
-# read anomaly that does not itself register as a genuine paused/pending state is exactly the
-# kind of thing this gate surfaces via ``operator_signal_ok`` (health still reports RED for it)
-# without it blocking a capability that IS, by every core-safety and projection signal, done.
+# module already owns that safety-ordered, fail-closed machinery). ``paused``, ``pending_
+# migration``, AND ``state_read_error`` (also read from that SAME record) are what THIS gate's
+# projection-consistency layer is built from: ``paused``/``pending_migration`` are a genuine
+# confirmed-not-coherent signal (``"projection-coherent"``); ``state_read_error`` is a SEPARATE,
+# equally fail-closed signal (``"projection-unverifiable"``) for a marker/migration-queue file
+# that EXISTS but could not be positively read/parsed (e.g. a ``.json`` pause-state path created
+# as a directory) -- genuinely UNVERIFIED, never silently folded into "not paused, not pending".
+# (CRITICAL fix, post-review: an earlier revision of this gate read only ``paused``/
+# ``pending_migration`` and ignored ``state_read_error`` entirely, which fail-OPENED exactly this
+# case -- ``done=True`` for a capability whose marker state literally could not be verified. That
+# contradicted this module's own fail-closed doctrine elsewhere and ``capability_health``'s own
+# documented "existing-but-unreadable must fail-closed to RED, never a silent guess"; the fix
+# folds ``state_read_error`` into ``projection_ok`` so an unverifiable marker/queue state blocks
+# ``done`` exactly like every other unverifiable input in this module does.)
 #
 # Imported LOCALLY (function-scope), not at module import time: ``capability_health`` imports
 # ``acceptance_hash_is_stale`` / ``ReconcileStateError`` FROM this module at ITS OWN top level, so
@@ -1323,6 +1329,14 @@ _CONJUNCT_EXPLANATIONS: Dict[str, Tuple[str, str]] = {
         "Run the migration-completion step again (the sanctioned complete_migration tool), then "
         "run this check again.",
     ),
+    "projection-unverifiable": (
+        "its pause-marker and/or pending-migration state could not be positively read (a file "
+        "exists in an unexpected or unreadable shape), so it could not be confirmed settled -- "
+        "safe state is: not done.",
+        "Inspect .wizard/paused-mechanisms/<capability id>.* and "
+        "agents/handoffs/pending_migrations.json by hand, repair or remove anything malformed or "
+        "wrongly shaped, then run this check again.",
+    ),
     "capability-not-found-in-health-check": (
         "this capability could not be found by the health checker, so its status could not be "
         "verified.",
@@ -1417,13 +1431,18 @@ def check_completion(project_root: str, canonical_id: str) -> CompletionResult:
     if record is None:
         # Fail-closed: a canonical id this gate itself resolved should always be enumerable by
         # capability_health too (same union-of-descriptor-set-and-source-files universe) -- if it
-        # is not, that is itself unverifiable, never a silent pass.
+        # is not, that is itself unverifiable, never a silent pass. Nothing was positively
+        # verified on EITHER axis, so both core_ok and projection_ok must fail here -- leaving
+        # projection_ok=True (as an earlier revision did) was itself a fail-open: "not found" is
+        # not the same as "confirmed coherent".
         core_failed.append("capability-not-found-in-health-check")
+        projection_failed.append("projection-coherent")
         importable = False
         scanner_clean = False
         acceptance_stale = True
         paused = True
         pending_migration = True
+        state_read_error = True
         health_green = False
     else:
         importable = bool(record.get("importable"))
@@ -1431,6 +1450,7 @@ def check_completion(project_root: str, canonical_id: str) -> CompletionResult:
         acceptance_stale = bool(record.get("acceptance_stale"))
         paused = bool(record.get("paused"))
         pending_migration = bool(record.get("pending_migration"))
+        state_read_error = bool(record.get("state_read_error"))
         health_green = record.get("health") == "green"
 
         if not importable:
@@ -1441,6 +1461,15 @@ def check_completion(project_root: str, canonical_id: str) -> CompletionResult:
             core_failed.append("acceptance-not-stale")
         if paused or pending_migration:
             projection_failed.append("projection-coherent")
+        if state_read_error:
+            # (CRITICAL fix, post-review) An existing-but-unreadable/wrong-shaped marker or
+            # migration-queue file (capability_health._is_paused / _is_pending_migration's own
+            # read_error signal) is genuinely UNVERIFIED, not confirmed clean -- it must NOT be
+            # silently folded into "not paused, not pending" the way a plain boolean read would.
+            # This mirrors the SAME fail-closed direction as the project-state-unreadable /
+            # capability-unresolved early returns above, and capability_health's own documented
+            # doctrine ("existing-but-unreadable must fail-closed to RED, never a silent guess").
+            projection_failed.append("projection-unverifiable")
 
     phase_id = entry.get(PHASE_ID_KEY) if entry else None
     raw_capability_id = (
