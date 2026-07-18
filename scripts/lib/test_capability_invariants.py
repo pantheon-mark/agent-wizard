@@ -793,6 +793,113 @@ if __name__ == "__main__":
         )
         self._assert_no_traceback(result)
 
+    def test_pytest_style_zero_unittest_test_suite_gets_actionable_stop_message(self):
+        # (DR-1 required test, gemini#1 false-positive/dead-end fix) A suite written
+        # pytest-style -- a bare `def test_...` FUNCTION, never inside a
+        # unittest.TestCase class -- collects ZERO real tests under `unittest
+        # discover`. The OLD implementation scored a clean (returncode 0) baseline
+        # run as "green" regardless of how many tests actually ran, so this honest,
+        # functionally-correct-but-wrong-style suite fell through to the mutated run,
+        # ALSO collected zero tests there (nothing calls the broken implementation),
+        # and was reported as the generic "still reported all tests passing... these
+        # tests are not actually verifying its behavior" inert-suite dead-end -- wrong
+        # and unhelpful for a competent operator who simply used the wrong test
+        # style. The fix must recognize testsRun == 0 at baseline and STOP with a
+        # plain-language, actionable message (write real unittest.TestCase tests),
+        # BEFORE ever reaching the mutated run -- not scored as "effective" (there is
+        # nothing to be effective) and not the generic inert-suite dead-end message.
+        cap_id = "pytest_style_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Pytest Style Cap", op_kind=VALID_OP_KIND))
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: pytest-style suite -- bare functions, no unittest.TestCase (test fixture)."""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}
+
+
+def test_describe_reports_ready():
+    assert {module_name}.describe() == "Pytest Style Cap ready"
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(result.ok)
+        known_bad_fails_failures = [f for f in result.failures if f.startswith("Known-bad-fails:")]
+        self.assertTrue(
+            known_bad_fails_failures,
+            f"expected a Known-bad-fails failure, got {result.failures!r}",
+        )
+        self.assertTrue(
+            any("unittest.TestCase" in f and "def test_" in f for f in known_bad_fails_failures),
+            f"expected the actionable 'write as unittest.TestCase' STOP message, got "
+            f"{known_bad_fails_failures!r}",
+        )
+        self.assertFalse(
+            any("still reported all tests passing" in f for f in known_bad_fails_failures),
+            f"a pytest-style suite must not be dead-ended with the generic inert-suite "
+            f"message: {known_bad_fails_failures!r}",
+        )
+        self._assert_no_traceback(result)
+
+    def test_module_level_assert_suite_mutation_import_crash_not_scored_effective(self):
+        # (DR-1 required test, gpt#2 false-negative fix) A "suite" made entirely of
+        # MODULE-LEVEL assertions (never inside a unittest.TestCase method) collects
+        # ZERO real tests, exactly like the pytest-style case above -- but its
+        # failure mode under the OLD implementation was worse: at baseline the
+        # module-level assert calls the REAL (working) capability and passes
+        # silently at import time (clean exit, zero tests collected -- scored
+        # "green" by the old bare-returncode check). Once this capability's
+        # implementation is deliberately mutated so every function raises, that SAME
+        # module-level line now raises DURING IMPORT, crashing the whole test file
+        # before a single real test could ever run -- a non-zero exit the OLD
+        # implementation could not distinguish from "a real test caught the break",
+        # so it was scored ok=True (false assurance) even though ZERO real tests
+        # ever ran. The fix must recognize testsRun == 0 at baseline (an import
+        # crash is not a real test) and STOP there -- so this capability is never
+        # scored "effective", and never reaches the mutated run at all.
+        cap_id = "module_level_assert_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Module Level Assert Cap", op_kind=VALID_OP_KIND))
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: module-level assertions, no unittest.TestCase (test fixture)."""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}
+
+# Module-level assertion -- executed at IMPORT time, not inside any
+# unittest.TestCase method. At baseline it calls the real (working)
+# implementation and passes silently. Once this capability's own
+# implementation is mutated so every function raises, this SAME line
+# crashes on import instead -- zero real tests ever run either way.
+assert {module_name}.describe() == "Module Level Assert Cap ready"
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(result.ok)
+        self.assertFalse(
+            result.ok,
+            "an import-time crash (zero real tests ever ran) must NOT be scored as "
+            f"'caught the mutation' -- got ok=True, failures={result.failures!r}",
+        )
+        known_bad_fails_failures = [f for f in result.failures if f.startswith("Known-bad-fails:")]
+        self.assertTrue(
+            known_bad_fails_failures,
+            f"expected a Known-bad-fails failure, got {result.failures!r}",
+        )
+        self._assert_no_traceback(result)
+
     def test_unrelated_crash_that_never_runs_is_not_treated_as_caught(self):
         # Review finding (reproduced): a suite that CANNOT EVEN IMPORT/RUN --
         # for an UNRELATED reason, nothing to do with the deliberate mutation

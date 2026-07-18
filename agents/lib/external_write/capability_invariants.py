@@ -80,7 +80,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, NamedTuple, Optional
 
 # sys.path bootstrap: mirrors every sibling module's own convention (scan.py,
 # capability_health.py, lifecycle_state.py, ...) so the ``external_write.*``
@@ -693,15 +693,80 @@ def _mutate_to_known_bad(source: str) -> Optional[str]:
         return None
 
 
-def _run_discover(python_exe: str, cwd: Path, test_file: Path, env: dict) -> Optional[bool]:
+class _DiscoverOutcome(NamedTuple):
+    """Structured outcome of one ``_run_discover`` subprocess run (DR-1 fix).
+
+    tests_run:     the number unittest itself reports having run, parsed from
+                    its own "Ran N tests" summary line. This INCLUDES a
+                    synthetic collection-failure test unittest fabricates when
+                    a test module cannot even be imported (see
+                    ``import_error`` below) -- so ``tests_run`` alone cannot
+                    distinguish "N real tests ran" from "collection itself
+                    failed and unittest counted its own synthetic failure test
+                    as one".
+    import_error:   True iff the run's own output carries unittest's
+                    collection-failure marker ("Failed to import test module" /
+                    "unittest.loader._FailedTest") -- i.e. ``tests_run`` (if
+                    nonzero) reflects a SYNTHETIC collection failure, not a
+                    real test that exercised the capability's own code.
+    failed:         True iff the subprocess exited non-zero -- a failure or
+                    error was reported, real or synthetic; see
+                    ``real_tests_ran`` / ``real_failure`` below for the
+                    distinction callers actually need.
+    """
+
+    tests_run: int
+    import_error: bool
+    failed: bool
+
+    @property
+    def real_tests_ran(self) -> int:
+        """The number of tests that ACTUALLY EXERCISED the capability's own
+        code -- always 0 when ``import_error`` is True: a collection failure
+        is never a real test, regardless of what ``tests_run`` reports."""
+        return 0 if self.import_error else self.tests_run
+
+    @property
+    def real_failure(self) -> bool:
+        """True iff a REAL test (not a collection failure) actually failed or
+        errored -- what a suite that genuinely caught a deliberate break
+        SHOULD show."""
+        return self.failed and not self.import_error
+
+
+# unittest's own TextTestRunner summary line ("Ran 3 tests in 0.001s") -- present
+# on every completed run, INCLUDING a run whose only "test" is unittest's own
+# synthetic collection-failure stand-in (see _DiscoverOutcome.import_error).
+_TESTS_RUN_RE = re.compile(r"Ran (\d+) tests? in")
+
+# unittest.loader's own marker text for a module that could not even be
+# imported/collected -- stable across CPython versions (unittest.loader._FailedTest
+# is the same synthetic-test class used for an import failure, a load_tests
+# failure, and a few other collection-time errors -- see that module's own
+# _make_failed_import_test). Checked in the run's own combined output rather than
+# by re-implementing unittest's collection machinery in a subprocess-invoked
+# snippet -- cheaper, and just as robust to the actual failure text unittest
+# itself prints.
+_IMPORT_ERROR_MARKERS = ("Failed to import test module", "unittest.loader._FailedTest")
+
+
+def _run_discover(python_exe: str, cwd: Path, test_file: Path, env: dict) -> Optional[_DiscoverOutcome]:
     """Run ONE test file's suite via ``python -m unittest discover``, scoped to
     exactly that file (``-s <its directory>``, ``-p <its exact basename>``) so
-    unrelated tests elsewhere in the (copied) tree are never pulled in. Returns
-    True if the run reported a failure/error (non-zero exit -- what a suite
-    that actually caught the deliberate break SHOULD do), False if it exited
-    clean, or None if the run could not be completed at all (timeout / launch
-    failure) -- the caller folds ``None`` into a fail-closed failure line,
-    never a silent pass."""
+    unrelated tests elsewhere in the (copied) tree are never pulled in.
+
+    Returns a ``_DiscoverOutcome`` describing not just whether the run exited
+    non-zero, but whether any REAL test actually ran (DR-1 fix -- see that
+    NamedTuple's own docstring): a bare exit-code check cannot tell "a real
+    test caught the deliberate break" apart from "this test file could not
+    even be imported/collected, so unittest's own synthetic failure test
+    tripped the same non-zero exit without a single real test ever running".
+    Returns ``None`` if the run could not be completed at all (timeout /
+    launch failure), or if unittest's own summary line could not be found in
+    the run's output at all (an even more fundamental failure than an import
+    error -- the run did not get far enough to report anything unittest
+    itself vouches for) -- the caller folds ``None`` into a fail-closed
+    failure line, never a silent pass, exactly as before."""
     try:
         result = subprocess.run(
             [python_exe, "-m", "unittest", "discover",
@@ -714,7 +779,15 @@ def _run_discover(python_exe: str, cwd: Path, test_file: Path, env: dict) -> Opt
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    return result.returncode != 0
+    combined_output = (result.stdout or "") + (result.stderr or "")
+    match = _TESTS_RUN_RE.search(combined_output)
+    if match is None:
+        return None
+    return _DiscoverOutcome(
+        tests_run=int(match.group(1)),
+        import_error=any(marker in combined_output for marker in _IMPORT_ERROR_MARKERS),
+        failed=result.returncode != 0,
+    )
 
 
 def _purge_pycache(root: Path) -> None:
@@ -754,13 +827,50 @@ def _check_known_bad_fails(root: Path, canonical_id: str, cap_path: Path,
           module (and only this module) is overwritten, in the SAME copy,
           with every function/method body replaced by a raise (see
           ``_RaiseEveryFunctionBody``), and every discovered test file is
-          run again. Every one of them MUST now fail; any that still passes
-          is inert.
+          run again. Every one of them MUST now fail with a REAL test
+          failure/error (not merely a non-zero exit); any that does not is
+          inert.
 
-    The probe passes only when (a) is entirely green AND (b) is entirely
-    red. Returns a plain-language failure line, or ``None`` if the probe
-    passed. Always cleans up the temp directory, even on error -- see module
-    docstring for the full isolation and boundedness contract."""
+    (DR-1 fix) A bare exit-code/boolean signal from ``_run_discover`` is
+    ITSELF not enough to tell a real test failure apart from a suite that
+    collected and ran ZERO real tests -- two distinct failure modes this
+    fix closes:
+      * a pytest-style suite (bare ``def test_...`` functions, never inside a
+        ``unittest.TestCase``) collects ZERO tests under ``unittest
+        discover`` and exits CLEAN (0) both before and after the mutation --
+        the OLD baseline check scored that clean exit as "green" and let it
+        fall through to the mutated run, where it landed on the generic
+        "still reported all tests passing" inert-suite message: unhelpful and
+        dead-ending for an operator who wrote functionally-correct tests in
+        the wrong style.
+      * a suite built entirely of MODULE-LEVEL assertions (never inside a
+        ``unittest.TestCase`` method) also collects ZERO real tests, but
+        passes SILENTLY at baseline (the real, working implementation makes
+        the assertion pass at import time) and then CRASHES ON IMPORT once
+        the implementation is mutated -- unittest folds that import crash
+        into a synthetic one-test failure, which the OLD bare-boolean check
+        could not distinguish from a real test genuinely catching the break,
+        so this was scored ``ok=True`` (false assurance) even though zero
+        real tests ever ran.
+
+    Both failure modes share the same root cause -- ZERO real tests ran at
+    baseline -- and the same fix: if ``real_tests_ran == 0`` at baseline (see
+    ``_DiscoverOutcome.real_tests_ran``), STOP right there with a plain-
+    language, actionable message (write real ``unittest.TestCase`` tests) --
+    this is NEITHER scored "effective" (there is nothing to be effective; the
+    mutated run is never even reached) NOR the generic inert-suite dead-end
+    (which implies the suite ran and just didn't catch anything, which is not
+    what happened here). A baseline run that DOES collect real tests but
+    fails or errors for a real reason (or crashes on an UNRELATED import,
+    e.g. a genuinely missing dependency) still gets the existing "does not
+    pass cleanly" message, unchanged.
+
+    The probe passes only when (a) is entirely green (real tests ran, none
+    failed) AND (b) is entirely red (every file shows a REAL failure/error,
+    never merely an import crash). Returns a plain-language failure line, or
+    ``None`` if the probe passed. Always cleans up the temp directory, even
+    on error -- see module docstring for the full isolation and boundedness
+    contract."""
     try:
         original_source = cap_path.read_text(encoding="utf-8")
     except OSError:
@@ -800,20 +910,39 @@ def _check_known_bad_fails(root: Path, canonical_id: str, cap_path: Path,
         )
 
         # --- (a) Baseline: the UNMUTATED copy must be fully green ------------
+        # Three buckets, checked in this order per file (a collection-time crash
+        # -- import_error or a non-zero exit -- always takes priority over the
+        # zero-real-tests bucket, so an UNRELATED import crash, e.g. a genuinely
+        # missing dependency, still gets the "does not pass cleanly" message, not
+        # the "write as unittest.TestCase" one):
         baseline_not_green: List[str] = []
+        baseline_zero_real_tests: List[str] = []
         baseline_uncertain = False
         for rel_tf in rel_test_files:
             outcome = _run_discover(sys.executable, copy_root, copy_root / rel_tf, env)
             if outcome is None:
                 baseline_uncertain = True
-            elif outcome is True:  # True == "reported a failure" -- bad news at baseline
+            elif outcome.import_error or outcome.failed:
                 baseline_not_green.append(str(rel_tf))
+            elif outcome.tests_run == 0:
+                baseline_zero_real_tests.append(str(rel_tf))
+            # else: real_tests_ran > 0, not failed, not import_error -- green.
 
         if baseline_uncertain:
             return (
                 f'Known-bad-fails: this capability\'s own test suite could not be run to check '
                 "whether it passes cleanly on its own (before any deliberate change), so its "
                 "effectiveness cannot be verified."
+            )
+        if baseline_zero_real_tests:
+            return (
+                f'Known-bad-fails: {", ".join(baseline_zero_real_tests)} did not run as unittest '
+                "tests -- unittest only discovers tests defined as methods inside a "
+                "class MyTest(unittest.TestCase) with def test_... names; bare pytest-style "
+                "functions (or assertions written at module level, outside any test method) are "
+                "never found, so this capability's test suite's effectiveness cannot be "
+                "verified. Write each test as a class MyTest(unittest.TestCase) with def test_... "
+                "methods, then re-run this check."
             )
         if baseline_not_green:
             return (
@@ -842,7 +971,13 @@ def _check_known_bad_fails(root: Path, canonical_id: str, cap_path: Path,
             outcome = _run_discover(sys.executable, copy_root, copy_root / rel_tf, env)
             if outcome is None:
                 uncertain = True
-            elif outcome is False:
+            elif not outcome.real_failure:
+                # Not "effective": either a clean pass (genuinely inert -- the
+                # mutation broke nothing this suite noticed) OR a collection-time
+                # import crash (DR-1 fix -- an import-time crash is NOT evidence a
+                # real test caught the break; see this function's own docstring).
+                # Both get the same treatment here: this file did not prove
+                # anything, so it is not scored effective.
                 inert_files.append(str(rel_tf))
 
         if uncertain:
