@@ -19,7 +19,7 @@ module is the build-time guard that locks it there: it scans the deterministic
 notice source for the exact required caveat substring(s) and fails the build if a
 future edit silently drops or softens one.
 
-Scope (deliberately narrow -- AR-004 weakest-sufficient)
+Scope (deliberately narrow -- weakest-sufficient)
 ----------------------------------------------------------
 This is a cheap structural/text lint (a substring presence check), not a runtime
 guard -- the deterministic layer already OWNS the notice; this only keeps the owning

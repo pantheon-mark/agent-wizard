@@ -141,7 +141,8 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         # standing-automation entrypoint primitive. Its --check/--dry-run path
         # legitimately calls raw `run_operation(..., target="dry_run")` — reusing
         # the SAME code path a live run eventually uses rather than a separate
-        # fake check surface (ADR-0041 Amendment 2026-07-05) — so it needs the
+        # fake check surface (the operator-originated-enhancement flow's
+        # pre-acceptance test-surface amendment) — so it needs the
         # same SEALED_KERNEL exemption from the CAPABILITY-zone-ONLY
         # raw_run_operation_reference rule that run_envelope.py already carries
         # (see that entry's rationale above). It never authorizes or performs a

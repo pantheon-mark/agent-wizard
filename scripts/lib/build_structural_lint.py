@@ -10,7 +10,7 @@ function -- it does NOT reimplement any of their logic -- and flattens their
 results into one category-prefixed violation list, so a single gate catches any
 C-structural regression across all three at once.
 
-Scope (deliberately narrow -- AR-004 weakest-sufficient)
+Scope (deliberately narrow -- weakest-sufficient)
 ----------------------------------------------------------
 This is a BUILD-TIME lint, not a runtime guard. It is meant to be run as part of
 the build/test pipeline (e.g. via `python3 -m wizard.scripts.lib.build_structural_lint`

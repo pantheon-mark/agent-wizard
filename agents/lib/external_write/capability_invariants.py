@@ -389,8 +389,8 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
 # guards anything. During the 2026-07-16 STEP B dogfood, AWB itself produced a
 # false verdict by hand-building an ``Operation`` and driving it through a real
 # gate function instead of the real capability -- a hand-built stand-in proved
-# nothing about the real system (see
-# ``feedback_verify_emitted_consumer_via_producer_entrypoint.md``). An
+# nothing about the real system (the lesson: verify an emitted consumer via the
+# producer's real entrypoint, not a hand-built stand-in). An
 # agent-authored capability test can make the exact same mistake: define its
 # own fake ``Operation``/adapter/plan and drive THAT instead of the real
 # capability module and its real acceptance/gate entrypoint, and the test

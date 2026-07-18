@@ -5,8 +5,8 @@ Ground truth this closes (log-confirmed, estate-tracker v0.11.0): an emitted
 standing-automation runner had no dry-run/check mode, and its own hand-rolled
 argv handling silently ignored an unrecognized flag (a `--checkonly` probe --
 a flag that does not exist) and ran the full live job anyway -- a real,
-unapproved, off-schedule email + digest went out. See
-external_review/estate-tracker_dogfood_finding_B2-safe-standing-automation_2026-07-13.md.
+unapproved, off-schedule email + digest went out. See the estate dogfood
+finding on safe standing-automation.
 
 Test intents:
   1. parse_standing_automation_args -- strict, fail-closed shapes only.

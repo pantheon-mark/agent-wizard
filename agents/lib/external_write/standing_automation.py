@@ -7,8 +7,8 @@ standing-automation runner had no dry-run/check mode at all, and its own
 hand-rolled argv handling SILENTLY IGNORED an unrecognized flag -- a
 ``--checkonly`` probe (a flag that does not exist) -- and ran the full live
 job anyway. That fell through to a real, unapproved, off-schedule external
-send (an email + digest actually went out). See
-``external_review/estate-tracker_dogfood_finding_B2-safe-standing-automation_2026-07-13.md``.
+send (an email + digest actually went out). See the estate dogfood finding on
+safe standing-automation.
 
 R1 (design consult, finding F-R1.5) found that a lib primitive alone is
 bypassable if every generated wrapper is left free to re-implement its own
@@ -36,7 +36,8 @@ The mechanism
    (closes the F-42 defect structurally, not just by adding a recognized
    flag).
 2. `--check` / `--dry-run` reuse the EXISTING isolated `dry_run` test-target
-   surface (ADR-0041 Amendment 2026-07-05) -- not a new fake check path. It
+   surface (the operator-originated-enhancement flow's pre-acceptance
+   test-surface amendment) -- not a new fake check path. It
    builds the same Operation the live run would build, self-mints a receipt
    scoped ONLY to this local preview (`_mint_check_receipt` -- never returned,
    persisted, or usable to authorize anything else), and calls

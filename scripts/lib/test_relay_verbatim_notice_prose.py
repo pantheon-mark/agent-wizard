@@ -89,7 +89,7 @@ class RelayVerbatimNoticeProseTests(unittest.TestCase):
 
     def test_relay_verbatim_convention_no_internal_jargon_or_build_ids(self):
         """Public-boundary clean: no internal build IDs (ADR-NNNN, IDQ-NNN, S2.x,
-        F-65 itself, external_review/ paths) leak into the emitted operator prose."""
+        F-65 itself, private review-transcript path references) leak into the emitted operator prose."""
         pattern = re.compile(
             r'S2\.[0-9]|RW-[0-9]|ADR-[0-9]|IDQ-[0-9]|AR-[0-9]|W-[0-9]|F-65|external_review'
         )

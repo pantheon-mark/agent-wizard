@@ -14,7 +14,7 @@ lookup). This module is the build-time guard that keeps it from drifting back: i
 scans the emitted consent/acceptance skill files for the pipe-into-filter shape and
 fails the build if one reappears.
 
-Scope (deliberately narrow -- AR-004 weakest-sufficient)
+Scope (deliberately narrow -- weakest-sufficient)
 ----------------------------------------------------------
 This lints the OPERATOR-FACING consent/acceptance skill files only:
 `wizard/skills/next-phase.md` and `wizard/skills/add-capability.md`. It must NOT be
@@ -24,7 +24,7 @@ operator-facing command the agent is instructed to type), and flagging them woul
 a false positive against a shape this lint has no business judging.
 
 This is a cheap structural/text lint, not a runtime guard -- quality/UX issues are a
-low-risk rule class (AR-004) and get a build-time check, never a runtime apparatus.
+low-risk rule class (weakest-sufficient) and get a build-time check, never a runtime apparatus.
 
 Stdlib only.
 """
@@ -68,7 +68,7 @@ def find_fragile_pipes(text: str) -> List[str]:
     ``| cat``, ``| xargs``, ``| wc``). Empty list means clean.
 
     Deliberately line-based (not a full shell parser) -- this is a cheap structural
-    lint (AR-004 weakest-sufficient), not a shell AST scanner. Markdown table rows
+    lint (weakest-sufficient), not a shell AST scanner. Markdown table rows
     (``| Column | Column |``) and `` || `` shell-guard chains (``cmd || true``) do not
     match: the word list only fires on real filter-command names, and the `|`/`|`
     lookaround excludes `||` entirely.
