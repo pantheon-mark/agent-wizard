@@ -154,6 +154,17 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # all -- a ModuleNotFoundError at import time, not a caught omission (same regression
     # class this file's own docstring already documents for every prior entry above).
     "lifecycle_state.py",
+    # Task D1-1 (AWB-authored deterministic capability-invariant battery, Phase 3 Cut 1,
+    # D-Layer-1): composes scan.py/write_gate.py/capability_identity.py/contracts.py/
+    # acceptance_ceremony.py into five structural checks the next-phase skill's Step 4 runs
+    # before a capability reaches Step 5's supervised trial. It hard-imports
+    # `external_write.capability_identity`, `external_write.contracts`,
+    # `external_write.acceptance_ceremony`, and `external_write.registered_adapters` at module
+    # scope (see its own docstring), so omitting it here would leave D1-3's wiring with no
+    # module to import at all -- a ModuleNotFoundError at import time, not a caught omission
+    # (same regression class this file's own docstring already documents for every prior entry
+    # above).
+    "capability_invariants.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

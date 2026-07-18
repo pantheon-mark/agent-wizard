@@ -1610,11 +1610,13 @@ class TestS253ContractDelta(unittest.TestCase):
     def test_emit_set_lists_the_taskB1_lifecycle_state_file(self):
         # Task B1 (materialized-view lifecycle reconciler, Phase 3 Cut 1): lifecycle_state.py
         # must be enrolled, or an emitted writes-back system's sanctioned resume/complete tool
-        # (B3) has no `external_write.lifecycle_state` module to import at all -- thirty-two
-        # lib files total.
+        # (B3) has no `external_write.lifecycle_state` module to import at all. (Count updated to
+        # 33 by Task D1-1, which additionally enrolled capability_invariants.py -- see that
+        # file's own enrollment comment in agent_emitter.py.)
         import agent_emitter
         self.assertIn("lifecycle_state.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 32)
+        self.assertIn("capability_invariants.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 33)
 
     def _writes_back_plan(self):
         import copy, json
