@@ -298,6 +298,49 @@ def _append_acceptance_record(audit_path: str, record: Dict[str, Any]) -> None:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def _acceptance_record_exists(audit_log_path: str, capability_id: str, phase_id: str) -> bool:
+    """(Task B4, F-59) Fail-safe presence check: True IFF an acceptance record for THIS EXACT
+    ``(capability_id, phase_id)`` pair is already durably recorded in the JSONL audit log.
+
+    This is the dedup key the B4 idempotent-backfill path uses: an already-``accepted: true``
+    descriptor is legitimately idempotent (no duplicate record) ONLY when a record for its own
+    ``(capability_id, phase_id)`` pair already exists -- never merely because ``accepted is
+    True``, which is the F-59 defect (a descriptor can be ``accepted: true`` with NO audit record
+    at all, e.g. an older pre-B4 build that early-returned here, or a best-effort
+    ``_append_acceptance_record`` that failed after a real flip).
+
+    Fail-safe on every branch, never raises:
+      * Log file does not exist yet -> by construction there are no records at all -> False (the
+        caller correctly proceeds to append).
+      * Log file exists but cannot be opened at all (e.g. a permissions error) -> the question is
+        unanswerable from here; per this module's OVERRIDING fail-safe property (refuse a doubtful
+        state) and this task's binding constraint, prefer the safer outcome for AN AUDIT TRAIL,
+        which is an extra record over a silently missing one -> return False so the caller appends
+        (never raises up into a refusal -- the acceptance itself already happened; only the
+        audit-completeness question is at stake here).
+      * An individual line is malformed (not valid JSON, or not a dict) -> skip that one line and
+        keep scanning the rest of the file; one bad line must never abort the whole scan.
+    """
+    try:
+        with open(audit_log_path, encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        return False
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if (isinstance(rec, dict)
+                and rec.get("capability_id") == capability_id
+                and rec.get("phase_id") == phase_id):
+            return True
+    return False
+
+
 def accept_capability_for_live_use(
     capability_id: str,
     phase_id: str,
@@ -577,13 +620,59 @@ def accept_capability_for_live_use(
             "write-affecting code changed since the proof; refusing",
             capability_id, phase_id)
 
-    # --- All invariants held: perform the atomic flip -------------------------------------
+    # --- Build the durable acceptance record now (used by BOTH the real-flip path below and the
+    # B4 idempotent-backfill path) -- built from the SAME recomputed canon (expected_contract_hash
+    # / expected_impl_hash / op_kind / descriptor_risk / confirmation) regardless of which branch
+    # below actually appends it, so the two paths can never disagree on record shape.
+    # (Task B2b-fix, Critical 1) Resolve + hash the capability's OWN module file. Fail-safe, never
+    # a refusal reason — a missing/unreadable file simply records capability_module_hash: null,
+    # which the detector treats as stale (see _compute_capability_module_hash's own docstring).
+    resolved_capability_module_path = (
+        capability_module_path if capability_module_path is not None
+        else str(Path.cwd() / CAPABILITIES_DIR_REL / f"{capability_id}{CAPABILITY_FILE_SUFFIX}")
+    )
+    capability_module_hash = _compute_capability_module_hash(resolved_capability_module_path)
+    record = {
+        "schema": ACCEPTANCE_RECORD_SCHEMA,
+        "capability_id": capability_id,
+        "phase_id": phase_id,
+        "risk_class": descriptor_risk,
+        "op_kind": op_kind,
+        "copy_run_proof_ref": copy_run_proof_ref,
+        "operator_receipt_ref": operator_receipt_ref,
+        "contract_hash": expected_contract_hash,
+        "implementation_hash": expected_impl_hash,
+        "capability_module_hash": capability_module_hash,
+        "operator_confirmation": confirmation,
+        "receipt_accepted_at": receipt.get("accepted_at"),
+    }
+
+    # --- All invariants held: perform the atomic flip, OR (B4, F-59) backfill a missing audit
+    # record for an already-accepted descriptor -------------------------------------------------
     if target.get("accepted") is True:
-        # Idempotent: already accepted. Nothing to write; report success without a spurious
-        # duplicate audit record.
-        return AcceptanceResult(accepted=True, reason=None, capability_id=capability_id,
-                                phase_id=phase_id, record_ref=None,
-                                warning="descriptor was already accepted; no change written")
+        # Already accepted: nothing to flip. This is EITHER (a) a legitimate idempotent
+        # re-acceptance whose audit record for this exact (capability_id, phase_id) already
+        # exists -- report success, no duplicate -- OR (b) the F-59 residual: the descriptor is
+        # accepted:true but NO record exists for this pair (a pre-B4 early-return that never
+        # audited at all, or a prior best-effort append that failed after the real flip). An
+        # acceptance event must never be silently un-audited, so (b) backfills the record now,
+        # keyed on the pair (not merely on `accepted is True`).
+        if _acceptance_record_exists(audit_log_path, capability_id, phase_id):
+            return AcceptanceResult(accepted=True, reason=None, capability_id=capability_id,
+                                    phase_id=phase_id, record_ref=None,
+                                    warning="descriptor was already accepted; no change written")
+        try:
+            _append_acceptance_record(audit_log_path, record)
+        except Exception as e:
+            return AcceptanceResult(
+                accepted=True, reason=None, capability_id=capability_id, phase_id=phase_id,
+                record_ref=None,
+                warning=("descriptor was already accepted, and the missing acceptance record "
+                          f"could not be backfilled: {e}"))
+        return AcceptanceResult(
+            accepted=True, reason=None, capability_id=capability_id, phase_id=phase_id,
+            record_ref=audit_log_path,
+            warning="descriptor was already accepted; backfilled the missing acceptance record")
 
     # Build the new entry list, flipping ONLY the target entry's `accepted` (its other keys and
     # every other entry stay byte-identical after re-dump).
@@ -607,29 +696,6 @@ def accept_capability_for_live_use(
 
     # Authoritative act succeeded. Append the durable acceptance record (best-effort — a log
     # failure does NOT undo a legitimate acceptance; it is surfaced as a warning).
-    # (Task B2b-fix, Critical 1) Resolve + hash the capability's OWN module file. Fail-safe,
-    # never a refusal reason at this point (the authoritative flip already succeeded) — a
-    # missing/unreadable file simply records capability_module_hash: null, which the detector
-    # treats as stale (see _compute_capability_module_hash's own docstring).
-    resolved_capability_module_path = (
-        capability_module_path if capability_module_path is not None
-        else str(Path.cwd() / CAPABILITIES_DIR_REL / f"{capability_id}{CAPABILITY_FILE_SUFFIX}")
-    )
-    capability_module_hash = _compute_capability_module_hash(resolved_capability_module_path)
-    record = {
-        "schema": ACCEPTANCE_RECORD_SCHEMA,
-        "capability_id": capability_id,
-        "phase_id": phase_id,
-        "risk_class": descriptor_risk,
-        "op_kind": op_kind,
-        "copy_run_proof_ref": copy_run_proof_ref,
-        "operator_receipt_ref": operator_receipt_ref,
-        "contract_hash": expected_contract_hash,
-        "implementation_hash": expected_impl_hash,
-        "capability_module_hash": capability_module_hash,
-        "operator_confirmation": confirmation,
-        "receipt_accepted_at": receipt.get("accepted_at"),
-    }
     try:
         _append_acceptance_record(audit_log_path, record)
     except Exception as e:

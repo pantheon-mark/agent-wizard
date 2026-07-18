@@ -655,6 +655,150 @@ class AcceptanceCeremonyTest(unittest.TestCase):
                                              cap_ledger=InvocationLedger())
         self.assertFalse(other_decision.permitted)
 
+    # -- Task B4 (F-59): audit-append fires on every real re-acceptance ---
+    # The dogfood finding: re-accepting an already-`accepted: true` descriptor could write NO
+    # audit record at all. The fix keys the dedup on (capability_id, phase_id) in the audit log
+    # itself, never merely on `accepted is True` — a missing record for that exact pair is always
+    # backfilled, an existing one is never duplicated.
+
+    def _accepted_records(self, c):
+        if not c.audit_path.exists():
+            return []
+        return [json.loads(line) for line in
+                c.audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def test_real_flip_still_writes_a_single_record(self):
+        # Baseline (unchanged behaviour): a genuine false->true flip audits exactly once. This is
+        # the B1-paused-then-re-accepted case in spirit (a real flip), just exercised directly —
+        # B1's own reconcile-to-paused mechanics are covered elsewhere; here the concern is
+        # narrowly the ceremony's own audit-on-flip behaviour.
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets", accepted=False)])
+        res = c.call()
+        self.assertTrue(res.accepted, res.reason)
+        self.assertEqual(c.accepted_flag("google_sheets"), True)
+        recs = self._accepted_records(c)
+        self.assertEqual(len(recs), 1)
+        self.assertEqual(recs[0]["capability_id"], "google_sheets")
+        self.assertEqual(recs[0]["phase_id"], PHASE)
+        self.assertIn("implementation_hash", recs[0])
+        self.assertIn("capability_module_hash", recs[0])
+
+    def test_paused_then_real_reacceptance_audits(self):
+        # The F-59 scenario end to end: a descriptor that was accepted, then PAUSED (B1 sets
+        # accepted:false on pause -- modelled directly here as a false descriptor since B1's own
+        # pause mechanics live in lifecycle_state, not this module), re-accepted through the
+        # ceremony -- a real false->true flip -- must produce an audit record.
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets", accepted=False)])
+        res = c.call()
+        self.assertTrue(res.accepted, res.reason)
+        self.assertEqual(len(self._accepted_records(c)), 1)
+
+    def test_already_accepted_with_no_audit_record_backfills_it(self):
+        # The F-59 residual this task closes: accepted:true persists but the audit log carries
+        # NO record for this (capability_id, phase_id) pair (e.g. an older pre-B4 build, or a
+        # prior best-effort append that failed after a real flip). An explicit re-acceptance must
+        # not silently no-op -- it appends the missing record now, complete with BOTH hashes.
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets", accepted=True)])
+        self.assertFalse(c.audit_path.exists())
+        res = c.call()
+        self.assertTrue(res.accepted, res.reason)
+        self.assertIn("backfilled", (res.warning or "").lower())
+        recs = self._accepted_records(c)
+        self.assertEqual(len(recs), 1)
+        rec = recs[0]
+        self.assertEqual(rec["capability_id"], "google_sheets")
+        self.assertEqual(rec["phase_id"], PHASE)
+        self.assertEqual(rec["schema"], ac.ACCEPTANCE_RECORD_SCHEMA)
+        # Record completeness: BOTH hashes present, computed from the same recomputed canon a
+        # real flip would use.
+        self.assertEqual(rec["contract_hash"], compute_contract_hash(PROOF_OP_KIND))
+        self.assertEqual(rec["implementation_hash"], compute_implementation_hash(PROOF_OP_KIND))
+        self.assertIn("capability_module_hash", rec)
+        # The descriptor itself is untouched (still accepted:true; no spurious re-flip write).
+        self.assertEqual(c.accepted_flag("google_sheets"), True)
+
+    def test_already_accepted_backfill_is_idempotent_no_duplicate(self):
+        # A second explicit re-acceptance after the record has been backfilled must NOT add a
+        # second record for the same (capability_id, phase_id) pair.
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets", accepted=True)])
+        first = c.call()
+        self.assertTrue(first.accepted, first.reason)
+        self.assertEqual(len(self._accepted_records(c)), 1)
+
+        second = c.call()
+        self.assertTrue(second.accepted, second.reason)
+        self.assertIn("no change written", (second.warning or "").lower())
+        recs = self._accepted_records(c)
+        self.assertEqual(len(recs), 1, f"expected no duplicate, got: {recs}")
+
+    def test_already_accepted_with_existing_record_for_pair_no_duplicate(self):
+        # An existing record for the EXACT (capability_id, phase_id) pair already present in the
+        # log (written by some other path, e.g. a prior real flip) must not be duplicated by a
+        # subsequent explicit re-acceptance call.
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets", accepted=True)])
+        c.security.mkdir(parents=True, exist_ok=True)
+        pre_existing = {
+            "schema": ac.ACCEPTANCE_RECORD_SCHEMA, "capability_id": "google_sheets",
+            "phase_id": PHASE, "risk_class": "irreversible_external", "op_kind": PROOF_OP_KIND,
+            "copy_run_proof_ref": str(c.proof_path), "operator_receipt_ref": str(c.receipt_path),
+            "contract_hash": compute_contract_hash(PROOF_OP_KIND),
+            "implementation_hash": compute_implementation_hash(PROOF_OP_KIND),
+            "capability_module_hash": None, "operator_confirmation": "prior confirmation",
+            "receipt_accepted_at": "2026-01-01T00:00:00Z",
+        }
+        c.audit_path.write_text(json.dumps(pre_existing) + "\n", encoding="utf-8")
+
+        res = c.call()
+        self.assertTrue(res.accepted, res.reason)
+        self.assertIn("no change written", (res.warning or "").lower())
+        recs = self._accepted_records(c)
+        self.assertEqual(len(recs), 1, f"expected no duplicate, got: {recs}")
+        self.assertEqual(recs[0]["operator_confirmation"], "prior confirmation")
+
+    def test_record_exists_check_skips_a_different_phase_pair(self):
+        # A record for the SAME capability_id but a DIFFERENT phase_id must not be treated as
+        # covering this (capability_id, phase_id) pair -- the key is the pair, not just the id.
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets", accepted=True)])
+        other_phase_record = {
+            "schema": ac.ACCEPTANCE_RECORD_SCHEMA, "capability_id": "google_sheets",
+            "phase_id": "phase_99", "risk_class": "irreversible_external",
+            "op_kind": PROOF_OP_KIND, "copy_run_proof_ref": str(c.proof_path),
+            "operator_receipt_ref": str(c.receipt_path),
+            "contract_hash": compute_contract_hash(PROOF_OP_KIND),
+            "implementation_hash": compute_implementation_hash(PROOF_OP_KIND),
+            "capability_module_hash": None, "operator_confirmation": "other phase",
+            "receipt_accepted_at": "2026-01-01T00:00:00Z",
+        }
+        c.audit_path.write_text(json.dumps(other_phase_record) + "\n", encoding="utf-8")
+
+        res = c.call(phase_id=PHASE)
+        self.assertTrue(res.accepted, res.reason)
+        self.assertIn("backfilled", (res.warning or "").lower())
+        recs = self._accepted_records(c)
+        self.assertEqual(len(recs), 2)
+
+    def test_acceptance_record_exists_helper_fail_safe_on_unreadable_log(self):
+        # Unit-level check on the dedup helper's own fail-safe branch: an audit-log PATH that
+        # exists as a directory (not a file) cannot be opened for read -- the helper must not
+        # raise; it returns False (prefer to append -- an extra audit record is safer than a
+        # silently missing one, matching this module's own overriding fail-safe property).
+        unreadable = Path(self.tmp) / "not_a_file_audit_log.jsonl"
+        unreadable.mkdir()
+        self.assertFalse(
+            ac._acceptance_record_exists(str(unreadable), "google_sheets", PHASE))
+
+    def test_acceptance_record_exists_helper_skips_malformed_lines(self):
+        log = Path(self.tmp) / "log.jsonl"
+        log.write_text(
+            "not json at all\n"
+            + json.dumps({"capability_id": "other", "phase_id": PHASE}) + "\n"
+            + json.dumps({"capability_id": "google_sheets", "phase_id": PHASE}) + "\n",
+            encoding="utf-8")
+        self.assertTrue(
+            ac._acceptance_record_exists(str(log), "google_sheets", PHASE))
+        self.assertFalse(
+            ac._acceptance_record_exists(str(log), "nonexistent_capability", PHASE))
+
     # -- Sole-writer property (documents the invariant) -------------------
 
     def test_base_prefix_matches_build_side(self):
