@@ -65,6 +65,8 @@ from external_write.acceptance_ceremony import (
 from external_write.adapter_registry import get_adapter, get_dispatch
 from external_write.capability_identity import (
     build_capability_index,
+    CAPABILITIES_DIR_REL,
+    CAPABILITY_FILE_SUFFIX,
     IdentityResolutionError,
 )
 from external_write.contracts import get_contract
@@ -381,10 +383,15 @@ def record_operator_acceptance(
     pending_migrations_path: Forwarded to close_pending_migration_if_matched on success
                            (default: PENDING_MIGRATIONS_REL). Best-effort only — see that
                            function's docstring.
-    project_root:          Forwarded to close_pending_migration_if_matched on success (default:
-                           ``"."`` — this package's convention of assuming the process runs from
-                           the operator project root). Used to build the capability identity
-                           index for the F-60 canonical-id migration-queue match.
+    project_root:          Default ``"."`` — this package's convention of assuming the process
+                           runs from the operator project root. Used to build the capability
+                           identity index TWICE: (cross-vendor review fix) before the ceremony
+                           call, to resolve `capability_id` to its canonical form ONLY for
+                           deriving the `capability_module_path` the ceremony hashes (never for
+                           the id passed to the ceremony itself — see the comment at that call
+                           site below); and (F-60, unchanged) forwarded to
+                           `close_pending_migration_if_matched` on success for the canonical-id
+                           migration-queue match.
     """
     if not (isinstance(capability_id, str) and capability_id.strip()):
         return _refuse("no target capability_id supplied")
@@ -454,6 +461,42 @@ def record_operator_acceptance(
             f"could not compute the trust hashes for operation kind "
             f"{proof_op_kind!r} -- fix step: {e}; nothing was written")
 
+    # (Cross-vendor review fix) Resolve `capability_id` to its canonical form ONLY to
+    # derive the capability-module hash path the ceremony records — mirrors lifecycle_state.
+    # complete_migration's own fix for this exact bug (lifecycle_state.py, ~1120-1132,
+    # "capability_module_path's own default inside the ceremony is ALSO CWD-relative"). Before
+    # this fix, this function passed NO capability_module_path at all, so the ceremony fell back
+    # to its own default of `<cwd>/agents/capabilities/<capability_id>_capability.py` using the
+    # RAW capability_id — wrong for a SPLIT install (descriptor id != module stem, e.g. the
+    # estate: descriptor id "inbox-labels", module "inbox_management_capability.py"). A wrong
+    # path means `_compute_capability_module_hash` returns None, the acceptance record gets
+    # `capability_module_hash: null`, and `lifecycle_state.acceptance_hash_is_stale` treats null
+    # as ALWAYS stale — an immediate, false re-flag right after a real, successful acceptance.
+    #
+    # CRITICAL: this canonical resolution is used ONLY for the module-hash path below. The
+    # `capability_id` passed to the ceremony (a few lines down) stays the RAW value — the
+    # ceremony finds the descriptor by literal `e.get("id") == capability_id` (acceptance_
+    # ceremony.py), and for a split install the descriptor's own id IS the alias, not the
+    # canonical, so passing the canonical there would break the descriptor lookup itself.
+    #
+    # Reuses `_resolve_or_literal` (already used by `close_pending_migration_if_matched` just
+    # below for the identical F-60 canonical-resolution need) rather than a second resolution
+    # convention: an id the identity index cannot resolve AT ALL (no capability module
+    # scaffolded under this exact alias/surface yet — the pre-A1 / no-capabilities-yet case)
+    # falls back to the literal `capability_id`, preserving this function's prior behavior
+    # exactly. An AMBIGUOUS resolution (the id corroborates two or more DIFFERENT capabilities)
+    # is a genuine identity problem that must not silently guess a module path either way — this
+    # refuses fail-closed with the exception's own plain-language `operator_message`, before
+    # anything (receipt included) is written.
+    identity_root = project_root if project_root is not None else "."
+    identity_index = build_capability_index(identity_root)
+    resolved_module_id, ambiguous_note, _corroborated = _resolve_or_literal(
+        identity_index, capability_id)
+    if ambiguous_note is not None:
+        return _refuse(ambiguous_note)
+    resolved_capability_module_path = os.path.join(
+        identity_root, CAPABILITIES_DIR_REL, f"{resolved_module_id}{CAPABILITY_FILE_SUFFIX}")
+
     if receipt_path is None:
         # A per-capability receipt filename; deterministic so a re-run overwrites its own prior
         # receipt rather than accumulating stale ones.
@@ -478,7 +521,8 @@ def record_operator_acceptance(
     acceptance = accept_capability_for_live_use(
         capability_id, phase_id, copy_run_proof_ref, receipt_path,
         descriptor_set_path=descriptor_set_path, lib_dir=lib_dir,
-        audit_log_path=audit_log_path)
+        audit_log_path=audit_log_path,
+        capability_module_path=resolved_capability_module_path)
 
     if not acceptance.accepted:
         return OperatorAcceptanceResult(

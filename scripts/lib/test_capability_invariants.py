@@ -133,12 +133,19 @@ class CapabilityInvariantsTestBase(unittest.TestCase):
         path.write_text(json.dumps(entries), encoding="utf-8")
 
     def _write_audit_record(self, capability_id, phase_id, **extra):
+        # (R-3, cross-vendor review fix) A real ceremony append always carries a non-empty
+        # `implementation_hash` + `op_kind` (see acceptance_ceremony.is_valid_acceptance_record) --
+        # this fixture defaults to a WELL-FORMED record shape so it exercises this test suite's
+        # own "real, complete audit record" cases; a caller can still override either field via
+        # `**extra` to build a deliberately-junk record for a negative test.
         path = self.project_root / DEFAULT_AUDIT_LOG_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "schema": "capability_acceptance_record-v1",
             "capability_id": capability_id,
             "phase_id": phase_id,
+            "implementation_hash": "test-fixture-implementation-hash",
+            "op_kind": VALID_OP_KIND,
         }
         record.update(extra)
         with open(path, "a", encoding="utf-8") as f:

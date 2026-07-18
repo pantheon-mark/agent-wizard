@@ -788,16 +788,91 @@ class AcceptanceCeremonyTest(unittest.TestCase):
             ac._acceptance_record_exists(str(unreadable), "google_sheets", PHASE))
 
     def test_acceptance_record_exists_helper_skips_malformed_lines(self):
+        # NOTE (R-3 xvendor fix): the matching lines here must be COMPLETE acceptance-record
+        # shapes (carrying implementation_hash + op_kind) -- a bare {capability_id, phase_id}
+        # dict is JUNK under the strict check below and would no longer count as "exists" (see
+        # test_acceptance_record_exists_is_strict_about_junk_records). This test's own concern is
+        # narrower: one malformed (non-JSON) LINE must not abort the scan of the rest of the file.
         log = Path(self.tmp) / "log.jsonl"
+        other = {"capability_id": "other", "phase_id": PHASE,
+                 "implementation_hash": compute_implementation_hash(PROOF_OP_KIND),
+                 "op_kind": PROOF_OP_KIND}
+        matching = {"capability_id": "google_sheets", "phase_id": PHASE,
+                    "implementation_hash": compute_implementation_hash(PROOF_OP_KIND),
+                    "op_kind": PROOF_OP_KIND}
         log.write_text(
             "not json at all\n"
-            + json.dumps({"capability_id": "other", "phase_id": PHASE}) + "\n"
-            + json.dumps({"capability_id": "google_sheets", "phase_id": PHASE}) + "\n",
+            + json.dumps(other) + "\n"
+            + json.dumps(matching) + "\n",
             encoding="utf-8")
         self.assertTrue(
             ac._acceptance_record_exists(str(log), "google_sheets", PHASE))
         self.assertFalse(
             ac._acceptance_record_exists(str(log), "nonexistent_capability", PHASE))
+
+    # -- R-3 (xvendor fix): a junk record must not suppress the B4 backfill guarantee -----
+
+    def test_acceptance_record_exists_is_strict_about_junk_records(self):
+        # A line with a matching (capability_id, phase_id) pair but NONE of the load-bearing
+        # fields a real ceremony append always writes (implementation_hash, op_kind) is junk, not
+        # a real acceptance record -- before this fix it counted as "already recorded" and would
+        # silently suppress the B4 idempotent-backfill path forever.
+        log = Path(self.tmp) / "junk_log.jsonl"
+        log.write_text(
+            json.dumps({"capability_id": "google_sheets", "phase_id": PHASE}) + "\n",
+            encoding="utf-8")
+        self.assertFalse(
+            ac._acceptance_record_exists(str(log), "google_sheets", PHASE))
+
+    def test_acceptance_record_exists_accepts_a_complete_real_record(self):
+        log = Path(self.tmp) / "real_log.jsonl"
+        record = {
+            "schema": ac.ACCEPTANCE_RECORD_SCHEMA, "capability_id": "google_sheets",
+            "phase_id": PHASE, "implementation_hash": compute_implementation_hash(PROOF_OP_KIND),
+            "op_kind": PROOF_OP_KIND,
+        }
+        log.write_text(json.dumps(record) + "\n", encoding="utf-8")
+        self.assertTrue(
+            ac._acceptance_record_exists(str(log), "google_sheets", PHASE))
+
+    def test_is_valid_acceptance_record_helper(self):
+        good = {"capability_id": "google_sheets", "phase_id": PHASE,
+                "implementation_hash": "abc123", "op_kind": PROOF_OP_KIND}
+        self.assertTrue(ac.is_valid_acceptance_record(good, "google_sheets", PHASE))
+        self.assertFalse(ac.is_valid_acceptance_record(good, "other_capability", PHASE))
+        self.assertFalse(ac.is_valid_acceptance_record(good, "google_sheets", "other_phase"))
+        for missing_field in ("implementation_hash", "op_kind"):
+            junk_absent = dict(good)
+            junk_absent.pop(missing_field)
+            self.assertFalse(
+                ac.is_valid_acceptance_record(junk_absent, "google_sheets", PHASE))
+            junk_empty = dict(good)
+            junk_empty[missing_field] = ""
+            self.assertFalse(
+                ac.is_valid_acceptance_record(junk_empty, "google_sheets", PHASE))
+        self.assertFalse(
+            ac.is_valid_acceptance_record(["not", "a", "dict"], "google_sheets", PHASE))
+
+    def test_already_accepted_with_junk_record_for_pair_still_backfills(self):
+        # End-to-end B4 proof: a pre-existing JUNK record for the exact (capability_id, phase_id)
+        # pair must not suppress the backfill -- a real re-acceptance still appends the complete
+        # record (the junk line is left in place; it is never rewritten or removed, only not
+        # trusted as "already recorded").
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets", accepted=True)])
+        c.security.mkdir(parents=True, exist_ok=True)
+        junk = {"capability_id": "google_sheets", "phase_id": PHASE}
+        c.audit_path.write_text(json.dumps(junk) + "\n", encoding="utf-8")
+
+        res = c.call()
+        self.assertTrue(res.accepted, res.reason)
+        self.assertIn("backfilled", (res.warning or "").lower())
+        recs = self._accepted_records(c)
+        self.assertEqual(
+            len(recs), 2, f"expected the junk line PLUS a real backfilled record, got: {recs}")
+        real_records = [r for r in recs if r.get("implementation_hash")]
+        self.assertEqual(len(real_records), 1)
+        self.assertEqual(real_records[0]["schema"], ac.ACCEPTANCE_RECORD_SCHEMA)
+        self.assertEqual(real_records[0]["capability_id"], "google_sheets")
 
     # -- Sole-writer property (documents the invariant) -------------------
 

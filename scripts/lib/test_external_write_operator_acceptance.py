@@ -9,6 +9,7 @@ descriptor, after which the runtime write_gate PERMITS a live write for that sur
 REFUSES an unaccepted one. No mocks of the units under test.
 """
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -35,6 +36,7 @@ from external_write.operator_acceptance import (  # noqa: E402
 )
 from external_write.acceptance_ceremony import OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA  # noqa: E402
 from external_write.copy_run_proof import COPY_RUN_PROOF_SCHEMA  # noqa: E402
+from external_write.lifecycle_state import acceptance_hash_is_stale  # noqa: E402
 from external_write.proof_hash import (  # noqa: E402
     compute_contract_hash,
     compute_implementation_hash,
@@ -221,6 +223,162 @@ class OperatorAcceptanceE2ETest(unittest.TestCase):
 
     def test_default_receipt_dir_constant(self):
         self.assertEqual(DEFAULT_RECEIPT_DIR, "security/acceptance_receipts")
+
+
+class SplitInstallCanonicalModulePathTest(unittest.TestCase):
+    """R-1 (cross-vendor review fix) — the split-install shape: the descriptor's own id differs
+    from its capability module's stem (the estate case: descriptor id "inbox-labels", module
+    "inbox_management_capability.py"). Before this fix, ``record_operator_acceptance`` passed
+    the RAW ``capability_id`` straight through as the ceremony's ``capability_module_path``
+    default, which is WRONG for a split install — the module file at that (wrong) path does not
+    exist, so ``capability_module_hash`` was recorded ``null``, and ``lifecycle_state.
+    acceptance_hash_is_stale`` treats ``null`` as ALWAYS stale — an immediate, false re-flag right
+    after a real, successful acceptance.
+
+    This mirrors ``lifecycle_state.complete_migration``'s own fix for the identical bug
+    (``lifecycle_state.py`` ~1120-1132): resolve the canonical id via ``capability_identity.
+    build_capability_index(...).resolve(...)`` ONLY to derive the module-hash path — the raw
+    ``capability_id`` is still what is passed to the ceremony as the target id (the descriptor
+    lookup keys on the literal id, which for a split install IS the alias, never the canonical)."""
+
+    PHASE = "phase_02"
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+        self.security = self.tmp / "security"
+        self.security.mkdir(parents=True, exist_ok=True)
+        self.set_path = self.security / "capability_descriptors.json"
+        self.proof_path = self.tmp / "proof.json"
+        self.receipt_path = self.security / "acceptance_receipts" / "receipt.json"
+        self.audit_path = self.security / "capability_acceptance_log.jsonl"
+        self.capabilities_dir = self.tmp / "agents" / "capabilities"
+        self.capabilities_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _write_capability_module(self, module_stem, *, surface):
+        source = (
+            f'"""{module_stem} -- test fixture capability."""\n\n'
+            f'SURFACE = "{surface}"\n\n\n'
+            "def describe():\n    return \"ready\"\n"
+        )
+        path = self.capabilities_dir / f"{module_stem}_capability.py"
+        path.write_text(source, encoding="utf-8")
+        return path
+
+    def _write_set(self, descriptors):
+        self.set_path.write_text(json.dumps(descriptors, indent=2, ensure_ascii=False) + "\n",
+                                 encoding="utf-8")
+
+    def _write_proof(self, capability_id):
+        self.proof_path.write_text(json.dumps(_proof(capability_id=capability_id)),
+                                   encoding="utf-8")
+
+    def _accept_split_install(self, descriptor_id, module_stem, *, surface=None):
+        module_path = self._write_capability_module(
+            module_stem, surface=surface if surface is not None else descriptor_id)
+        self._write_set([_descriptor(id=descriptor_id, phase_id=self.PHASE)])
+        self._write_proof(descriptor_id)
+
+        res = record_operator_acceptance(
+            descriptor_id, self.PHASE, str(self.proof_path),
+            "Yes — I accept this capability for live use.",
+            receipt_path=str(self.receipt_path),
+            descriptor_set_path=str(self.set_path),
+            audit_log_path=str(self.audit_path),
+            project_root=str(self.tmp))
+        return res, module_path
+
+    def _latest_record(self):
+        log_lines = [ln for ln in self.audit_path.read_text(encoding="utf-8").splitlines() if ln]
+        return json.loads(log_lines[-1])
+
+    # -- Estate shape #1: descriptor id "inbox-labels" / module "inbox_management" -------------
+
+    def test_split_install_inbox_labels_case_records_real_hash_not_stale(self):
+        res, module_path = self._accept_split_install("inbox-labels", "inbox_management")
+        self.assertTrue(res.accepted, res.reason)
+
+        # The ceremony must still be keyed on the RAW descriptor id (the alias) — never the
+        # canonical — the descriptor lookup is by literal id, not canonical id.
+        self.assertEqual(res.acceptance.capability_id, "inbox-labels")
+
+        record = self._latest_record()
+        self.assertEqual(record["capability_id"], "inbox-labels")
+        expected_hash = hashlib.sha256(module_path.read_bytes()).hexdigest()
+        self.assertEqual(record["capability_module_hash"], expected_hash,
+                         "capability_module_hash must be the REAL module hash, not null")
+
+        self.assertFalse(
+            acceptance_hash_is_stale(str(self.tmp), "inbox_management",
+                                     audit_log_path=str(self.audit_path)),
+            "a real, undisturbed acceptance must not be immediately re-flagged stale")
+
+    # -- Estate shape #2: a second, differently-named split install ----------------------------
+
+    def test_split_install_second_capability_id_records_real_hash_not_stale(self):
+        res, module_path = self._accept_split_install("crm-sync-alias", "acme_crm_connector")
+        self.assertTrue(res.accepted, res.reason)
+        self.assertEqual(res.acceptance.capability_id, "crm-sync-alias")
+
+        record = self._latest_record()
+        expected_hash = hashlib.sha256(module_path.read_bytes()).hexdigest()
+        self.assertEqual(record["capability_module_hash"], expected_hash)
+
+        self.assertFalse(
+            acceptance_hash_is_stale(str(self.tmp), "acme_crm_connector",
+                                     audit_log_path=str(self.audit_path)))
+
+    # -- Negative: a genuinely unresolvable (ambiguous) capability_id fails closed --------------
+
+    def test_genuinely_unresolvable_capability_id_refuses_plain_language(self):
+        # Two DIFFERENT capability modules declare the SAME surface as the capability_id under
+        # test — a genuinely ambiguous identity resolution. This must fail closed with a plain-
+        # language message (never a traceback), not guess a module path either way.
+        self._write_capability_module("cap_alpha", surface="ambiguous_surface")
+        self._write_capability_module("cap_beta", surface="ambiguous_surface")
+        self._write_set([_descriptor(id="ambiguous_surface", phase_id=self.PHASE)])
+        self._write_proof("ambiguous_surface")
+
+        res = record_operator_acceptance(
+            "ambiguous_surface", self.PHASE, str(self.proof_path),
+            "Yes — I accept this capability for live use.",
+            receipt_path=str(self.receipt_path),
+            descriptor_set_path=str(self.set_path),
+            audit_log_path=str(self.audit_path),
+            project_root=str(self.tmp))
+
+        self.assertFalse(res.accepted)
+        self.assertIsNotNone(res.reason)
+        self.assertNotIn("Traceback", res.reason)
+        self.assertIsNone(res.acceptance, "the ceremony must never be invoked on an ambiguous id")
+        self.assertFalse(self.audit_path.exists())
+        self.assertFalse(self.receipt_path.exists(), "nothing should be minted on a refusal")
+
+    # -- Regression: a NON-split (ordinary) install still resolves via literal fallback --------
+
+    def test_no_capabilities_dir_at_all_falls_back_to_literal_unaffected(self):
+        # No capability module scaffolded at all under this project_root: capability_id is
+        # unresolved (not ambiguous) and falls back to the literal id — the SAME behavior as
+        # before this fix (matching accept_capability_for_live_use's own cwd-relative default
+        # convention when nothing else is known).
+        shutil.rmtree(self.capabilities_dir)
+        self._write_set([_descriptor(id="google_sheets", phase_id=self.PHASE)])
+        self._write_proof("google_sheets")
+
+        res = record_operator_acceptance(
+            "google_sheets", self.PHASE, str(self.proof_path),
+            "Yes — I accept this capability for live use.",
+            receipt_path=str(self.receipt_path),
+            descriptor_set_path=str(self.set_path),
+            audit_log_path=str(self.audit_path),
+            project_root=str(self.tmp))
+        self.assertTrue(res.accepted, res.reason)
+        record = self._latest_record()
+        # No module file exists at the (fallback-literal) path — fail-safe null, never a refusal.
+        self.assertIsNone(record["capability_module_hash"])
 
 
 class PendingMigrationAutoCloseTest(unittest.TestCase):

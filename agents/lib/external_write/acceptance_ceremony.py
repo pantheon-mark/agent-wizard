@@ -298,16 +298,45 @@ def _append_acceptance_record(audit_path: str, record: Dict[str, Any]) -> None:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def is_valid_acceptance_record(rec: Any, capability_id: str, phase_id: str) -> bool:
+    """(Strictness fix, cross-vendor review) True IFF ``rec`` is a well-formed acceptance record
+    for THIS EXACT ``(capability_id, phase_id)`` pair: matching ``capability_id`` / ``phase_id`` AND
+    carrying the load-bearing fields a real ceremony append always writes -- a non-empty string
+    ``implementation_hash`` and a non-empty string ``op_kind`` (see the ``record`` dict this
+    module builds just above ``accept_capability_for_live_use``'s flip/backfill branches).
+
+    Without this check, ANY dict with a merely-matching ``capability_id`` / ``phase_id`` -- e.g.
+    a hand-crafted or partially-written junk line -- counted as "already recorded", which could
+    (a) make the B4 idempotent-backfill path skip writing the real missing record, and (b) make
+    ``check_completion``'s audit-appended conjunct read OK against junk. This does not touch
+    ``capability_module_hash`` (legitimately ``None`` on a real record when the module file could
+    not be hashed -- see ``_compute_capability_module_hash``), only the two fields that are never
+    legitimately absent from a real append."""
+    if not isinstance(rec, dict):
+        return False
+    if rec.get("capability_id") != capability_id or rec.get("phase_id") != phase_id:
+        return False
+    impl_hash = rec.get("implementation_hash")
+    if not (isinstance(impl_hash, str) and impl_hash):
+        return False
+    op_kind = rec.get("op_kind")
+    if not (isinstance(op_kind, str) and op_kind):
+        return False
+    return True
+
+
 def _acceptance_record_exists(audit_log_path: str, capability_id: str, phase_id: str) -> bool:
-    """(Task B4, F-59) Fail-safe presence check: True IFF an acceptance record for THIS EXACT
+    """(Task B4, F-59; strictness fix, cross-vendor review) Fail-safe presence check: True IFF a
+    WELL-FORMED acceptance record (``is_valid_acceptance_record``) for THIS EXACT
     ``(capability_id, phase_id)`` pair is already durably recorded in the JSONL audit log.
 
     This is the dedup key the B4 idempotent-backfill path uses: an already-``accepted: true``
-    descriptor is legitimately idempotent (no duplicate record) ONLY when a record for its own
-    ``(capability_id, phase_id)`` pair already exists -- never merely because ``accepted is
-    True``, which is the F-59 defect (a descriptor can be ``accepted: true`` with NO audit record
-    at all, e.g. an older pre-B4 build that early-returned here, or a best-effort
-    ``_append_acceptance_record`` that failed after a real flip).
+    descriptor is legitimately idempotent (no duplicate record) ONLY when a COMPLETE record for
+    its own ``(capability_id, phase_id)`` pair already exists -- never merely because ``accepted
+    is True`` (the F-59 defect: a descriptor can be ``accepted: true`` with NO audit record at
+    all), and never merely because SOME dict with a matching id/phase pair happens to be present
+    (a junk line with no ``implementation_hash`` / ``op_kind`` must not be mistaken for a real
+    record and silently suppress the backfill).
 
     Fail-safe on every branch, never raises:
       * Log file does not exist yet -> by construction there are no records at all -> False (the
@@ -318,8 +347,10 @@ def _acceptance_record_exists(audit_log_path: str, capability_id: str, phase_id:
         which is an extra record over a silently missing one -> return False so the caller appends
         (never raises up into a refusal -- the acceptance itself already happened; only the
         audit-completeness question is at stake here).
-      * An individual line is malformed (not valid JSON, or not a dict) -> skip that one line and
-        keep scanning the rest of the file; one bad line must never abort the whole scan.
+      * An individual line is malformed (not valid JSON, not a dict, or a well-formed-looking
+        dict that is not actually a complete acceptance record) -> skip that one line and keep
+        scanning the rest of the file; one bad or junk line must never abort the whole scan, and
+        must never itself count as "already recorded".
     """
     try:
         with open(audit_log_path, encoding="utf-8") as f:
@@ -334,9 +365,7 @@ def _acceptance_record_exists(audit_log_path: str, capability_id: str, phase_id:
             rec = json.loads(line)
         except Exception:
             continue
-        if (isinstance(rec, dict)
-                and rec.get("capability_id") == capability_id
-                and rec.get("phase_id") == phase_id):
+        if is_valid_acceptance_record(rec, capability_id, phase_id):
             return True
     return False
 
