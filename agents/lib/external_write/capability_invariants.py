@@ -72,7 +72,12 @@ from __future__ import annotations
 
 import ast
 import os
+import re
+import shutil
 import stat
+import subprocess
+import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -371,3 +376,476 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
 
     ok = not failures
     return InvariantResult(ok=ok, failures=failures, operator_message=_build_operator_message(failures))
+
+
+# =============================================================================
+# Task D1-2: deterministic test-quality probes (right-sized)
+# =============================================================================
+#
+# Why this exists (the SB-8 lesson)
+# ----------------------------------
+# D1-1 above proves the capability's OWN code is structurally sound. It says
+# nothing about whether the TEST that is supposed to guard that code actually
+# guards anything. During the 2026-07-16 STEP B dogfood, AWB itself produced a
+# false verdict by hand-building an ``Operation`` and driving it through a real
+# gate function instead of the real capability -- a hand-built stand-in proved
+# nothing about the real system (see
+# ``feedback_verify_emitted_consumer_via_producer_entrypoint.md``). An
+# agent-authored capability test can make the exact same mistake: define its
+# own fake ``Operation``/adapter/plan and drive THAT instead of the real
+# capability module and its real acceptance/gate entrypoint, and the test
+# suite will happily stay green forever no matter what the real code does.
+#
+# ``check_test_quality`` adds two RIGHT-SIZED, deterministic probes on top of
+# D1-1 (per the 2026-07-17 design consult's right-sizing calibration -- full
+# mutation-style per-branch checks are heavier and partly redundant with the
+# D1-1 invariants, and are deliberately deferred, not built here):
+#
+#   1. producer-entrypoint (AST, static) -- does this capability's own test
+#      file actually reference the REAL capability module and the REAL
+#      acceptance/gate entrypoint (``run_enveloped_operation`` /
+#      ``operator_acceptance``), and does it avoid defining its own
+#      hand-built ``Operation``/adapter/plan stand-in?
+#   2. known-bad-fails (dynamic, bounded) -- does running this capability's
+#      own test file(s) against a DELIBERATELY BROKEN copy of its own
+#      implementation actually produce a failure? If the suite stays green
+#      even when the implementation is broken, the suite is inert and proves
+#      nothing -- exactly the SB-8 failure class, just caught mechanically
+#      instead of relying on a reviewer's judgment.
+#
+# Detection heuristic + its limits (producer-entrypoint, AST-only)
+# -------------------------------------------------------------------
+# There is no established naming/location convention anywhere in this project
+# for a capability's own test file (``add-capability.md`` hands test-writing
+# to the builder agent with no fixed path). So this module does not assume
+# one either: ``_discover_capability_test_files`` walks the WHOLE project
+# tree for ``test_*.py`` / ``*_test.py`` files and keeps only the ones whose
+# AST imports reference this capability's own module
+# (``<canonical_id>_capability``) -- the same "search the filesystem, do not
+# assume a fixed path" discipline ``capability_identity._capability_source_files``
+# already uses for capability modules themselves.
+#
+# For each discovered test file, this module then checks, by AST only (never
+# by importing the test file):
+#   * does it reference the real acceptance/gate entrypoint -- an import of
+#     ``run_enveloped_operation`` (the sanctioned live-write entrypoint,
+#     ``external_write.capability_api`` / ``external_write.run_envelope``) or
+#     of ``operator_acceptance`` (the acceptance CLI)?
+#   * does it define its own class whose name IS (exactly, case-insensitive)
+#     an optional fake/stub/mock/dummy affix plus ``Operation``/``Adapter``/
+#     ``Plan`` (e.g. ``Operation``, ``FakeOperation``, ``StubAdapter``,
+#     ``PlanFake``) -- a locally-defined stand-in for the real producer,
+#     exactly the SB-8 shape?
+#
+# LIMITS (stated per this task's instruction to surface heuristic ambiguity):
+#   * This is a NAME-based heuristic, not a data-flow analysis. A test that
+#     imports the real entrypoint but never actually calls it still passes
+#     this probe (probe 2, known-bad-fails, is what would catch that -- an
+#     import-only test cannot make the suite catch a real break either,
+#     which drives it to fail probe 2 instead).
+#   * A legitimately-named test helper class that happens to match the
+#     stand-in name pattern (e.g. a fixture class a project deliberately
+#     calls ``FakeAdapter`` to build a REAL ``Operation`` from, or a subclass
+#     of the real ``Operation`` used only to add test-fixture convenience)
+#     is flagged as a false positive. The pattern is anchored to the WHOLE
+#     class name (not a substring match) specifically to avoid flagging
+#     ordinary test-case class names like ``TestOperationRouting`` -- but it
+#     cannot distinguish "renamed-but-still-real" from "genuinely fake."
+#   * A test file that cannot be read or parsed at all is silently excluded
+#     from discovery (there is no way to check whether an unparsable file
+#     references this capability without parsing it) -- this is a known gap,
+#     not a designed coverage guarantee; a capability with ONLY a broken test
+#     file looks, to this probe, like a capability with NO test file (which
+#     is itself a failure -- see the "no test file found" branch below), so
+#     it is not silently treated as passing.
+#
+# Isolation + boundedness (known-bad-fails)
+# --------------------------------------------
+# The deliberately-broken copy is built and run entirely inside a fresh
+# ``tempfile.mkdtemp()`` directory -- the operator's real project tree is
+# NEVER written to. Exactly ONE mutation is made: every function/method body
+# (module-level or nested, via AST) in THIS capability's own module (and only
+# this module -- not the paired adapter module, not any shared library code)
+# is replaced with ``raise RuntimeError(...)``, preserving every signature and
+# decorator so the module still parses and imports cleanly -- only CALLING
+# into it now fails. This is a single mechanical "blunt break," not
+# per-branch/per-line mutation testing (explicitly deferred -- see the module
+# docstring's cross-reference to the design consult). The capability's own
+# discovered test file(s) are then run, ONE bounded ``unittest discover``
+# subprocess per file (scoped to exactly that file via ``-p <its basename>``),
+# each under a timeout, against the broken copy only. The temp directory is
+# removed in a ``finally`` block regardless of outcome. If EVERY discovered
+# test file reports a failure/error against the broken copy, the probe
+# passes; if ANY of them still reports a clean pass, that test file is
+# treated as inert and the probe fails (fail-closed, plain language, no
+# traceback) -- see ``_check_known_bad_fails``.
+# =============================================================================
+
+_TEST_DISCOVERY_SKIP_DIR_NAMES = {
+    ".git", "__pycache__", "node_modules", ".venv", "venv", ".hg", ".svn", ".tox",
+}
+
+# The two names that mark a REAL producer-entrypoint reference: the sanctioned
+# live-write entrypoint capability code is meant to call, and the acceptance
+# CLI's own module name (imported by name or invoked as a module).
+_ENTRYPOINT_IMPORT_NAMES = frozenset({"run_enveloped_operation"})
+_ACCEPTANCE_CLI_MODULE_NAME = "operator_acceptance"
+
+# Matches a locally-defined class name that IS (whole-string, case-insensitive)
+# an optional fake/stub/mock/dummy affix plus Operation/Adapter/Plan -- e.g.
+# "Operation", "FakeOperation", "StubAdapter", "PlanFake". Anchored to the
+# WHOLE name (not a substring search) so an ordinary test-case class name like
+# "TestOperationRouting" does not match -- see the module docstring's LIMITS
+# note for the false-positive/false-negative this heuristic still carries.
+_STANDIN_CLASS_NAME_RE = re.compile(
+    r"(?i)^(fake|stub|mock|dummy)?(operation|adapter|plan)(fake|stub|mock|dummy)?$"
+)
+
+_KNOWN_BAD_FAILS_TIMEOUT_SECONDS = 90
+_MUTATION_EXCEPTION_MESSAGE = "mutated-for-known-bad-fails-probe"
+_KNOWN_BAD_COPY_IGNORE = shutil.ignore_patterns(
+    ".git", "__pycache__", "*.pyc", ".venv", "venv", "node_modules"
+)
+
+
+def _capability_module_name(canonical_id: str) -> str:
+    """The importable module name for this capability's own source file --
+    ``<canonical_id>_capability`` -- derived from ``CAPABILITY_FILE_SUFFIX``
+    (``"_capability.py"``) rather than re-declared as a separate literal, so
+    the two can never drift apart."""
+    return f"{canonical_id}{CAPABILITY_FILE_SUFFIX[:-3]}"
+
+
+def _iter_candidate_test_files(root: Path):
+    """Yield every ``test_*.py`` / ``*_test.py`` file under ``root``, skipping
+    common non-source noise directories (see ``_TEST_DISCOVERY_SKIP_DIR_NAMES``)
+    and any hidden directory. No assumption about WHERE a capability's test
+    file lives -- see module docstring."""
+    for dirpath, dirnames, filenames in os.walk(str(root)):
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _TEST_DISCOVERY_SKIP_DIR_NAMES and not d.startswith(".")
+        ]
+        for name in filenames:
+            if name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py")):
+                yield Path(dirpath) / name
+
+
+def _ast_references_module(tree: ast.AST, module_name: str) -> bool:
+    """True iff ``tree`` contains an ``import``/``from ... import`` referencing
+    a module whose last dotted segment (for ``import``/``from X import``) or
+    imported name (for ``from X import name`` / ``from . import name``) equals
+    ``module_name`` exactly. Covers every realistic import shape (absolute,
+    dotted-package, relative) without assuming any one of them."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[-1] == module_name:
+                    return True
+        elif isinstance(node, ast.ImportFrom):
+            if node.module and node.module.split(".")[-1] == module_name:
+                return True
+            for alias in node.names:
+                if alias.name == module_name:
+                    return True
+    return False
+
+
+def _ast_references_entrypoint(tree: ast.AST) -> bool:
+    """True iff ``tree`` imports the real acceptance/gate entrypoint --
+    ``run_enveloped_operation`` (by name, from wherever it's re-exported) or
+    the ``operator_acceptance`` module (the acceptance CLI) -- by name or by
+    module path."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module_parts = (node.module or "").split(".")
+            if _ACCEPTANCE_CLI_MODULE_NAME in module_parts:
+                return True
+            for alias in node.names:
+                if alias.name in _ENTRYPOINT_IMPORT_NAMES:
+                    return True
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if _ACCEPTANCE_CLI_MODULE_NAME in alias.name.split("."):
+                    return True
+    return False
+
+
+def _ast_standin_class_names(tree: ast.AST) -> List[str]:
+    """Every locally-defined class name in ``tree`` matching
+    ``_STANDIN_CLASS_NAME_RE`` -- see that pattern's own docstring for exactly
+    what it matches and its known false-positive/false-negative limits."""
+    return sorted({
+        node.name for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef) and _STANDIN_CLASS_NAME_RE.match(node.name)
+    })
+
+
+def _discover_capability_test_files(root: Path, module_name: str) -> List[Path]:
+    """Every test file under ``root`` whose AST imports reference
+    ``module_name`` -- i.e. every test file that is ABOUT this capability, by
+    evidence (an import), never by assumed path/naming convention. A file
+    that cannot be read or parsed is silently excluded (see module docstring
+    LIMITS note) rather than raising."""
+    matches: List[Path] = []
+    for path in _iter_candidate_test_files(root):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        if _ast_references_module(tree, module_name):
+            matches.append(path)
+    return sorted(matches)
+
+
+class _RaiseEveryFunctionBody(ast.NodeTransformer):
+    """AST transformer: replaces every function/method body (module-level or
+    nested) with a single ``raise RuntimeError(<marker>)`` statement, leaving
+    the signature and decorators untouched -- the module still parses and
+    imports cleanly; only CALLING into any of its functions now fails. One
+    blunt, mechanical mutation of the whole module -- not per-branch mutation
+    testing (see module docstring)."""
+
+    def _raise_body(self, node):
+        node.body = [
+            ast.Raise(
+                exc=ast.Call(
+                    func=ast.Name(id="RuntimeError", ctx=ast.Load()),
+                    args=[ast.Constant(value=_MUTATION_EXCEPTION_MESSAGE)],
+                    keywords=[],
+                ),
+                cause=None,
+            )
+        ]
+        return node
+
+    def visit_FunctionDef(self, node):  # noqa: N802 - ast.NodeTransformer visitor naming
+        return self._raise_body(node)
+
+    def visit_AsyncFunctionDef(self, node):  # noqa: N802
+        return self._raise_body(node)
+
+
+def _mutate_to_known_bad(source: str) -> Optional[str]:
+    """Return ``source`` with every function/method body replaced by a raise
+    (see ``_RaiseEveryFunctionBody``), or ``None`` if ``source`` cannot be
+    parsed/unparsed -- fail-closed, never raises."""
+    if not hasattr(ast, "unparse"):  # pragma: no cover - this project requires Python 3.11+
+        return None
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    mutated = _RaiseEveryFunctionBody().visit(tree)
+    ast.fix_missing_locations(mutated)
+    try:
+        return ast.unparse(mutated)
+    except Exception:  # noqa: BLE001 - fail-closed, never let this crash the checker
+        return None
+
+
+def _run_discover(python_exe: str, cwd: Path, test_file: Path, env: dict) -> Optional[bool]:
+    """Run ONE test file's suite via ``python -m unittest discover``, scoped to
+    exactly that file (``-s <its directory>``, ``-p <its exact basename>``) so
+    unrelated tests elsewhere in the (copied) tree are never pulled in. Returns
+    True if the run reported a failure/error (non-zero exit -- what a suite
+    that actually caught the deliberate break SHOULD do), False if it exited
+    clean, or None if the run could not be completed at all (timeout / launch
+    failure) -- the caller folds ``None`` into a fail-closed failure line,
+    never a silent pass."""
+    try:
+        result = subprocess.run(
+            [python_exe, "-m", "unittest", "discover",
+             "-s", str(test_file.parent), "-p", test_file.name],
+            cwd=str(cwd),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=_KNOWN_BAD_FAILS_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.returncode != 0
+
+
+def _check_known_bad_fails(root: Path, canonical_id: str, cap_path: Path,
+                            test_files: List[Path]) -> Optional[str]:
+    """The known-bad-fails probe: copy the project into an ISOLATED temp
+    directory (never touching the operator's real files), deliberately break
+    ONLY this capability's own module inside that copy, then run every
+    discovered test file for this capability against the broken copy and
+    require EVERY one of them to report a failure. Returns a plain-language
+    failure line, or ``None`` if the probe passed. Always cleans up the temp
+    directory, even on error -- see module docstring for the full isolation
+    and boundedness contract."""
+    try:
+        original_source = cap_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return (
+            f'Known-bad-fails: capability "{canonical_id}"\'s source could not be read ({exc}) to '
+            "build a deliberately-broken copy, so its test suite's effectiveness cannot be "
+            "verified."
+        )
+
+    mutated_source = _mutate_to_known_bad(original_source)
+    if mutated_source is None:
+        return (
+            f'Known-bad-fails: capability "{canonical_id}"\'s source could not be parsed to build '
+            "a deliberately-broken copy, so its test suite's effectiveness cannot be verified."
+        )
+
+    tmp_dir = tempfile.mkdtemp(prefix="awb_known_bad_fails_")
+    try:
+        copy_root = Path(tmp_dir) / "copy"
+        try:
+            shutil.copytree(root, copy_root, ignore=_KNOWN_BAD_COPY_IGNORE)
+        except OSError as exc:
+            return (
+                f'Known-bad-fails: could not build an isolated copy of this project to test '
+                f'capability "{canonical_id}"\'s implementation against ({exc}); its test '
+                "suite's effectiveness cannot be verified."
+            )
+
+        rel_cap_path = cap_path.relative_to(root)
+        try:
+            (copy_root / rel_cap_path).write_text(mutated_source, encoding="utf-8")
+        except OSError as exc:
+            return (
+                f'Known-bad-fails: could not write the deliberately-broken copy of capability '
+                f'"{canonical_id}"\'s module ({exc}); its test suite\'s effectiveness cannot be '
+                "verified."
+            )
+
+        env = dict(os.environ)
+        agents_lib = str(copy_root / "agents" / "lib")
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = agents_lib + (
+            os.pathsep + existing_pythonpath if existing_pythonpath else ""
+        )
+
+        inert_files: List[str] = []
+        uncertain = False
+        for tf in test_files:
+            rel_tf = tf.relative_to(root)
+            copy_tf = copy_root / rel_tf
+            outcome = _run_discover(sys.executable, copy_root, copy_tf, env)
+            if outcome is None:
+                uncertain = True
+            elif outcome is False:
+                inert_files.append(str(rel_tf))
+
+        if uncertain:
+            return (
+                f'Known-bad-fails: running capability "{canonical_id}"\'s test suite against a '
+                "deliberately broken copy of its own implementation did not finish, so its "
+                "effectiveness cannot be verified."
+            )
+        if inert_files:
+            return (
+                f'Known-bad-fails: {", ".join(inert_files)} still reported all tests passing even '
+                f'when capability "{canonical_id}"\'s own implementation was deliberately broken -- '
+                "these tests are not actually verifying its behavior. Strengthen them to assert on "
+                "real behavior, then re-run this check."
+            )
+        return None
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _build_test_quality_operator_message(failures: List[str]) -> str:
+    if not failures:
+        return (
+            "This capability's own tests passed both deterministic quality probes: they exercise "
+            "the real capability module and its real acceptance/gate entrypoint (not a hand-built "
+            "stand-in), and they correctly fail when run against a deliberately broken copy of the "
+            "implementation."
+        )
+    lines = [
+        "This capability's tests failed one or more required quality checks and must be fixed "
+        "before this capability proceeds to a live trial:",
+    ]
+    lines.extend(f"  - {f}" for f in failures)
+    lines.append("Fix the issue(s) above, then re-run this check before continuing.")
+    return "\n".join(lines)
+
+
+def check_test_quality(project_root: str, canonical_id: str) -> InvariantResult:
+    """Run the two AWB-authored, deterministic test-quality probes (D1-2) for
+    the capability whose canonical id is ``canonical_id``, in the project
+    rooted at ``project_root``. Never raises -- every input that cannot be
+    positively evaluated is folded into ``failures`` as its own fail-closed
+    line (see module docstring). Reuses ``CAPABILITIES_DIR_REL`` /
+    ``CAPABILITY_FILE_SUFFIX`` / ``_file_state`` from D1-1 for the same
+    capability-module-path derivation and fail-closed file-state
+    classification -- this module does not re-derive either.
+    """
+    root = Path(project_root)
+    failures: List[str] = []
+
+    cap_path = root / CAPABILITIES_DIR_REL / f"{canonical_id}{CAPABILITY_FILE_SUFFIX}"
+    file_state = _file_state(cap_path)
+    if file_state != "present":
+        failures.append(
+            f'Test quality: no readable source file was found for capability "{canonical_id}" at '
+            f"{cap_path} ({file_state}), so its tests cannot be verified. Restore or rebuild this "
+            "capability's source file, then re-run this check."
+        )
+        return InvariantResult(
+            ok=False, failures=failures,
+            operator_message=_build_test_quality_operator_message(failures))
+
+    module_name = _capability_module_name(canonical_id)
+    test_files = _discover_capability_test_files(root, module_name)
+
+    if not test_files:
+        failures.append(
+            f'Producer entrypoint: no test file anywhere in this project imports capability '
+            f'"{canonical_id}"\'s own module ("{module_name}"). Add a test that imports this '
+            "capability's real module and exercises its real acceptance/gate entrypoint "
+            "(run_enveloped_operation / the operator-acceptance CLI), then re-run this check."
+        )
+        return InvariantResult(
+            ok=False, failures=failures,
+            operator_message=_build_test_quality_operator_message(failures))
+
+    # --- Probe 1: producer-entrypoint (AST, static) -------------------------
+    standin_hits: List[str] = []
+    entrypoint_seen = False
+    for tf in test_files:
+        try:
+            tree = ast.parse(tf.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue  # already excluded by discovery; defensive only
+        rel = str(tf.relative_to(root))
+        if _ast_standin_class_names(tree):
+            standin_hits.append(rel)
+        if _ast_references_module(tree, module_name) and _ast_references_entrypoint(tree):
+            entrypoint_seen = True
+
+    if standin_hits:
+        failures.append(
+            f'Producer entrypoint: {", ".join(standin_hits)} defines its own hand-built '
+            f'Operation/adapter/plan stand-in instead of driving capability "{canonical_id}"\'s '
+            "real module through its real run_enveloped_operation / operator-acceptance-CLI "
+            "entrypoint. A test that only exercises a locally-defined fake proves nothing about "
+            "the real capability. Rewrite it to exercise the real capability module and its real "
+            "entrypoint, then re-run this check."
+        )
+    elif not entrypoint_seen:
+        rels = ", ".join(str(t.relative_to(root)) for t in test_files)
+        failures.append(
+            f'Producer entrypoint: none of this capability\'s test file(s) ({rels}) reference both '
+            f'capability "{canonical_id}"\'s own module and its real run_enveloped_operation / '
+            "operator-acceptance-CLI entrypoint. Update the test(s) to import and exercise the "
+            "real capability module and its real entrypoint, then re-run this check."
+        )
+
+    # --- Probe 2: known-bad-fails (dynamic, bounded, isolated) --------------
+    kb_failure = _check_known_bad_fails(root, canonical_id, cap_path, test_files)
+    if kb_failure is not None:
+        failures.append(kb_failure)
+
+    ok = not failures
+    return InvariantResult(
+        ok=ok, failures=failures,
+        operator_message=_build_test_quality_operator_message(failures))

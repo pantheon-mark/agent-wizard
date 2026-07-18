@@ -146,6 +146,21 @@ class CapabilityInvariantsTestBase(unittest.TestCase):
         return capability_invariants.check_capability_invariants(
             str(self.project_root), capability_id)
 
+    def _write_project_file(self, relpath: str, content: str) -> Path:
+        """Write ``content`` at ``relpath`` under ``self.project_root`` -- used
+        by the D1-2 test-quality fixtures to place a capability's test file at
+        a real-shaped relative path (there is no fixed convention for WHERE a
+        capability's test lives -- see capability_invariants.py's D1-2 module
+        docstring -- so discovery must find it, not assume it)."""
+        path = self.project_root / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def _check_quality(self, capability_id):
+        return capability_invariants.check_test_quality(
+            str(self.project_root), capability_id)
+
     def _assert_no_traceback(self, result):
         self.assertNotIn("Traceback", result.operator_message)
 
@@ -367,6 +382,228 @@ class TestAuditCheckPostAcceptanceOnly(CapabilityInvariantsTestBase):
             f"expected no Audit record failure, got {result.failures!r}",
         )
         self.assertTrue(result.ok, f"expected ok, got failures: {result.failures!r}")
+
+
+
+# =============================================================================
+# Task D1-2: deterministic test-quality probes (check_test_quality)
+# =============================================================================
+#
+# ANTI-OVERFIT: every capability module here is written at the real emitted
+# relpath (``agents/capabilities/<capability_id>_capability.py``); each
+# fixture's OWN test file is written at a real-shaped relpath
+# (``agents/capabilities/tests/test_<capability_id>_capability.py``) inside a
+# fresh ``tempfile.TemporaryDirectory()`` -- never a copytree of this dev
+# tree. Five distinct capability_ids are exercised across this section.
+#
+# Because ``check_test_quality`` always runs BOTH probes together, a fixture
+# built to exercise probe 1 (producer-entrypoint, AST-only -- does not
+# execute the test file) is deliberately kept SELF-CONTAINED with respect to
+# probe 2 (known-bad-fails, which DOES actually execute the discovered test
+# file(s) via a real subprocess against a temp copy): the "genuine"/"inert"
+# fixtures below import ONLY their own capability module (never
+# ``external_write``, which is not present in these minimal fixture trees),
+# so that whether they fail when run is driven ENTIRELY by the deliberate
+# mutation this task's own docstring describes -- not by an unrelated import
+# error. This was verified manually before writing these tests: an
+# unmutated capability module's test passes; the exact same test, run
+# against the mutated copy ``check_test_quality`` builds internally, fails
+# with the mutation's own ``RuntimeError`` -- proving the mechanism (not just
+# the assertion) actually works.
+
+
+class TestProducerEntrypointProbe(CapabilityInvariantsTestBase):
+    def test_handrolled_standin_test_is_flagged(self):
+        # Required test (a): a test that builds a hand-rolled Operation stand-in
+        # (drives a fake instead of the real producer) must be FLAGGED.
+        cap_id = "standin_flagged_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Standin Flagged Cap", op_kind=VALID_OP_KIND))
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: hand-rolled Operation stand-in test (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}  # noqa: F401 -- present so discovery finds this file
+
+
+class Operation:
+    """Hand-rolled stand-in -- NOT external_write.operations.Operation."""
+
+    def __init__(self, surface, op_kind):
+        self.surface = surface
+        self.op_kind = op_kind
+
+
+def _fake_run(op):
+    return "fake-ok"
+
+
+class TestStandinFlaggedCap(unittest.TestCase):
+    def test_fake_operation_flow(self):
+        op = Operation(surface="acme", op_kind="set_status")
+        self.assertEqual(_fake_run(op), "fake-ok")
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(f.startswith("Producer entrypoint:") and "stand-in" in f for f in result.failures),
+            f"expected a Producer entrypoint stand-in failure, got {result.failures!r}",
+        )
+        self._assert_no_traceback(result)
+
+    def test_real_producer_entrypoint_reference_passes(self):
+        # Required test (b): a test that references the real producer entrypoint
+        # (the capability module + run_enveloped_operation) must PASS the
+        # producer-entrypoint probe -- no "stand-in" / "none of this
+        # capability's test file(s)" failure line.
+        cap_id = "real_entrypoint_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Real Entrypoint Cap", op_kind=VALID_OP_KIND))
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: real producer-entrypoint reference test (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}
+
+from external_write.capability_api import run_enveloped_operation  # noqa: F401
+
+
+class TestRealEntrypointCap(unittest.TestCase):
+    def test_describe_reports_ready(self):
+        self.assertEqual({module_name}.describe(), "Real Entrypoint Cap ready")
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(
+            any(f.startswith("Producer entrypoint:") for f in result.failures),
+            f"expected no Producer entrypoint failure, got {result.failures!r}",
+        )
+        self._assert_no_traceback(result)
+
+    def test_no_discoverable_test_file_flags_producer_entrypoint(self):
+        cap_id = "no_test_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="No Test Cap", op_kind=VALID_OP_KIND))
+        # Deliberately no test file written anywhere.
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(f.startswith("Producer entrypoint:") and "no test file" in f
+                for f in result.failures),
+            f"expected a 'no test file' Producer entrypoint failure, got {result.failures!r}",
+        )
+        self._assert_no_traceback(result)
+
+
+class TestKnownBadFailsProbe(CapabilityInvariantsTestBase):
+    def test_inert_always_green_suite_is_caught(self):
+        # Required test (c): an inert (always-passes) test suite is caught by
+        # the known-bad-fails probe -- it stays green even against a
+        # deliberately broken copy, so the probe FAILS this capability.
+        cap_id = "inert_suite_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Inert Suite Cap", op_kind=VALID_OP_KIND))
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: inert (always-green) test suite (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}  # noqa: F401 -- imported but never called: inert by design
+
+
+class TestInertSuiteCap(unittest.TestCase):
+    def test_always_true(self):
+        self.assertTrue(True)
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(f.startswith("Known-bad-fails:") for f in result.failures),
+            f"expected a Known-bad-fails failure, got {result.failures!r}",
+        )
+        self._assert_no_traceback(result)
+
+    def test_genuine_suite_that_fails_against_broken_impl_passes(self):
+        # Required test (d): a genuine test suite that DOES fail against a
+        # broken impl passes the known-bad-fails probe.
+        cap_id = "genuine_suite_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Genuine Suite Cap", op_kind=VALID_OP_KIND))
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: genuine test suite that really exercises the capability (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}
+
+
+class TestGenuineSuiteCap(unittest.TestCase):
+    def test_describe_reports_ready(self):
+        self.assertEqual({module_name}.describe(), "Genuine Suite Cap ready")
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(
+            any(f.startswith("Known-bad-fails:") for f in result.failures),
+            f"expected no Known-bad-fails failure, got {result.failures!r}",
+        )
+        self._assert_no_traceback(result)
+
+    def test_missing_capability_source_fails_closed(self):
+        cap_id = "missing_source_quality_cap"
+        # No capability source file written at all.
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(any(f.startswith("Test quality:") for f in result.failures))
+        self._assert_no_traceback(result)
 
 
 if __name__ == "__main__":
