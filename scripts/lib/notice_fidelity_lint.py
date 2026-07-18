@@ -32,6 +32,7 @@ Stdlib only.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 from typing import List, Optional, Sequence
 
@@ -59,6 +60,20 @@ def check_safety_notice_text(
     deterministic notice source file (default: ``upgrade_reconcile.py``). An empty
     list means every required caveat is present verbatim -- clean.
 
+    (DR-3 fix) This is deliberately NOT a raw substring-in-file-text check --
+    that shape would be satisfied by a caveat surviving only in a ``# comment``
+    (or any other non-executed text) after the real notice string was softened
+    or summarized away, which is exactly the failure this lint exists to catch.
+    Instead the source is parsed with ``ast`` and a required substring only
+    counts as present when it appears inside an actual ``ast.Constant`` string
+    literal (this also transparently covers f-string literal segments, which
+    surface as nested ``ast.Constant`` nodes under ``ast.JoinedStr``) --
+    i.e. text the deterministic notice would actually PRINT, not merely text
+    that appears somewhere in the source file. Fail-closed: if the source
+    cannot even be parsed, every required substring is reported MISSING (never
+    silently treated as present) -- a broken/unparsable notice source can
+    never be positively verified to carry the caveat.
+
     Reads the REAL file from disk (anti-overfit: this must assert against the
     actual deterministic source, never a hand-copied snippet). Importable by other
     build-time lint aggregation (Task C4) -- not test-only."""
@@ -68,4 +83,12 @@ def check_safety_notice_text(
     )
     full_path = root / notice_relpath
     text = full_path.read_text(encoding="utf-8")
-    return [substring for substring in substrings if substring not in text]
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return list(substrings)
+    string_literal_text = "\n".join(
+        node.value for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    )
+    return [substring for substring in substrings if substring not in string_literal_text]

@@ -64,6 +64,57 @@ class CheckSafetyNoticeTextTests(unittest.TestCase):
                 "that no longer carries the caveat verbatim",
             )
 
+    def test_flags_caveat_present_only_in_a_comment(self):
+        """(DR-3 fix) A required caveat surviving ONLY in a code comment -- never in
+        an actual string literal the deterministic notice source would print -- must
+        be treated as MISSING. The prior implementation was a raw substring-in-
+        file-text check, so a caveat softened out of the real notice string but left
+        behind in a nearby comment would incorrectly report as present. The fixed
+        check parses the source with ast and requires the caveat text to live inside
+        an actual ast.Constant string literal, not merely somewhere in the file."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            relpath = "wizard/scripts/lib/upgrade_reconcile.py"
+            comment_only_file = tmp_root / relpath
+            comment_only_file.parent.mkdir(parents=True, exist_ok=True)
+            comment_only_file.write_text(
+                "# do not rely on it being blocked until it is rebuilt "
+                "(comment only -- never a real string literal)\n"
+                "lines.append('it has been switched off until it is rebuilt.')\n",
+                encoding="utf-8",
+            )
+            missing = check_safety_notice_text(repo_root=tmp_root, notice_relpath=relpath)
+            self.assertEqual(
+                missing, list(REQUIRED_CAVEAT_SUBSTRINGS),
+                "check_safety_notice_text must NOT be satisfied by a caveat that "
+                f"survives only in a code comment: {missing!r}",
+            )
+
+    def test_real_notice_caveat_lives_in_a_string_literal_not_a_comment(self):
+        """Sanity check on the fix's own positive case: the real caveat in
+        upgrade_reconcile.py must be found INSIDE an actual string literal (not
+        merely present as raw file text, e.g. in a comment) -- proves the ast-based
+        check is not accidentally degenerate (always failing, or still just doing a
+        raw text scan)."""
+        missing = check_safety_notice_text(repo_root=REPO_ROOT)
+        self.assertEqual(missing, [])
+
+    def test_unparsable_source_fails_closed(self):
+        """(DR-3) A source file that cannot even be parsed must never be silently
+        treated as carrying the caveat -- fail-closed, not fail-open."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            relpath = "wizard/scripts/lib/upgrade_reconcile.py"
+            unparsable_file = tmp_root / relpath
+            unparsable_file.parent.mkdir(parents=True, exist_ok=True)
+            unparsable_file.write_text("def broken(:\n    pass\n", encoding="utf-8")
+            missing = check_safety_notice_text(repo_root=tmp_root, notice_relpath=relpath)
+            self.assertEqual(missing, list(REQUIRED_CAVEAT_SUBSTRINGS))
+
     def test_required_caveat_substrings_names_the_exact_text(self):
         """Lock-guard sanity: the module's required substring is the exact ground-
         truth caveat text, not a paraphrase that would let a softened rewrite slip
