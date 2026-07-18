@@ -60,6 +60,56 @@ If, instead, you open `execution_plan.md` and find that the phases, agent names,
 
 Do not attempt to reconcile or re-architect mid-session. The plan is the authority.
 
+### Finding this phase's pending capability entry (used throughout this skill)
+
+Several steps below need this phase's capability `id` and `phase_id` from
+`security/capability_descriptors.json` -- the deterministic self-check (Step 4), the
+copy-run-proof recording (Step 5), and the acceptance command (Step 6) all point back
+to this lookup rather than repeating it.
+
+Read `security/capability_descriptors.json` yourself, directly, with your own
+file-reading tool -- never by piping it through a shell filter (never `cat ... | jq`,
+`| grep`, or similar). It is a JSON array of capability entries. Find the one entry
+whose `accepted` is still `false` and that matches the phase you identified in Step 2
+-- by its `phase_id` where that is already set, or otherwise by matching its
+description to the capability this phase adds. That entry's `id` and `phase_id`
+fields are the two values every step below fills in. You do not need a shell command
+at all to do this -- read the file and reason over it directly.
+
+If no entry matches -- there is nothing pending for this phase -- do not guess, and
+do not run anything that could fail with a raw error on empty input. Stop and tell
+the operator plainly:
+
+> This phase doesn't have a capability recorded yet in your project's safety
+> records. Before I can continue, this needs to be set up properly. Re-run the
+> add-capability skill for this phase (or check with whoever set up your project if
+> this is unexpected), then come back here.
+
+If you would rather run a fixed command than read the file yourself, this direct,
+pipe-free lookup does the same filtering and never raises an error on the empty
+case -- it prints a plain word instead:
+
+```
+python3 -c "
+import json
+entries = json.load(open('security/capability_descriptors.json'))
+candidates = [e for e in entries if e.get('phase_id') and not e.get('accepted')]
+if not candidates:
+    print('NO_PENDING_CAPABILITY')
+elif len(candidates) == 1:
+    print(candidates[0]['id'], candidates[0]['phase_id'])
+else:
+    for e in candidates:
+        print(e['id'], e['phase_id'])
+"
+```
+
+This prints `NO_PENDING_CAPABILITY` when nothing is pending (handle that exactly as
+above -- stop and tell the operator plainly), one `id phase_id` pair when there is
+exactly one match, or one pair per line when more than one phase currently has a
+pending capability -- in that last case, match the pair against the phase you
+identified in Step 2 yourself; never pick one arbitrarily.
+
 ## Step 3: Credential check
 
 Read `security/credentials_registry.md`. If any credential needed by this phase's agents has `Status: Pending`, do not run the phase yet.
@@ -116,7 +166,7 @@ Once this phase's agents are at a runnable state, run this exact check for the p
 python3 agents/lib/external_write/capability_invariants.py . "<the capability's id from security/capability_descriptors.json>"
 ```
 
-Read the capability's id from `security/capability_descriptors.json` (the entry for this phase whose `accepted` is still false) -- the same lookup Step 5's copy-run-proof recording already uses. This command runs a set of plain, deterministic checks against the capability's own code and its own tests: whether it is wired correctly, whether its identity is consistent, and whether its own tests actually prove anything (rather than always passing no matter what the code does). It never asks a model to judge any of this -- it is a fixed check, run the same way every time.
+Get the capability's id using the lookup in "Finding this phase's pending capability entry" above (Step 2). This command runs a set of plain, deterministic checks against the capability's own code and its own tests: whether it is wired correctly, whether its identity is consistent, and whether its own tests actually prove anything (rather than always passing no matter what the code does). It never asks a model to judge any of this -- it is a fixed check, run the same way every time.
 
 This command exits with `0` when every check passes, and a non-zero exit code when any check does not. Do not surface the command, its output, or any technical detail to the operator -- run it silently and act only on the result:
 
@@ -153,7 +203,7 @@ The drill must be unmistakably labelled. Its purpose is to demonstrate the guard
 
 If this phase introduces a capability that writes to external state that is not undoable from git — anything the safety records mark as needing live authorization — the supervised trial is not just narrated, it is recorded, because the operator's acceptance later depends on a real, checked trial having happened.
 
-During the copy run, carry the change all the way through on the copy: make the change, undo it, and independently confirm the copy came back to exactly its starting state (apply → undo → verify-restored). Record that trial as the capability's copy-run proof at `agents/handoffs/<capability_id>.copy_run_proof.json`, and record inside it the id of the exact capability it proves — a proof stands only for the one capability it was run for, never for a similar one. Read the capability's id and its owning phase from `security/capability_descriptors.json` (the entry for this phase whose `accepted` is still false). Do not surface any of this to the operator; it is the evidence the acceptance step checks, not something they read.
+During the copy run, carry the change all the way through on the copy: make the change, undo it, and independently confirm the copy came back to exactly its starting state (apply → undo → verify-restored). Record that trial as the capability's copy-run proof at `agents/handoffs/<capability_id>.copy_run_proof.json`, and record inside it the id of the exact capability it proves — a proof stands only for the one capability it was run for, never for a similar one. Get the capability's id and its owning phase using the lookup in "Finding this phase's pending capability entry" (Step 2). Do not surface any of this to the operator; it is the evidence the acceptance step checks, not something they read.
 
 If the copy run cannot be carried through to a verified restore, do not proceed to acceptance. Tell the operator plainly, in business terms, that the trial did not come back cleanly and the capability is not ready to be turned on, and stop.
 
@@ -169,12 +219,12 @@ Capture the operator's acceptance in their own words, exactly as they gave it �
 
 **Authorize live use (only for a capability that writes to external state).** If this phase introduced a capability that needs live authorization — the one you recorded a copy-run proof for in Step 5 — the operator's acceptance is the moment it becomes allowed to touch the live version of that external state. Until this moment the safety records hold it to its safe trial target only; turning it on for real is a deliberate, separate act, gated on a real trial having passed and on the operator's explicit yes.
 
-Do this through the system's acceptance step rather than by editing any safety record by hand — hand-editing the record that grants live use is never an acceptable shortcut. Run, silently, from the project root:
+Do this through the system's acceptance step rather than by editing any safety record by hand — hand-editing the record that grants live use is never an acceptable shortcut. Get the capability's id and its owning phase using the lookup in "Finding this phase's pending capability entry" (Step 2), then run, silently, from the project root:
 
 ```
 python3 agents/lib/external_write/operator_acceptance.py \
-  --capability-id "<the capability's id from security/capability_descriptors.json>" \
-  --phase-id "<its owning phase from the same file>" \
+  --capability-id "<the capability's id from the Step 2 lookup>" \
+  --phase-id "<its owning phase from the Step 2 lookup>" \
   --copy-run-proof "agents/handoffs/<capability_id>.copy_run_proof.json" \
   --operator-confirmation "<the operator's acceptance, verbatim>"
 ```
