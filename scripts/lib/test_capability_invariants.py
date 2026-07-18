@@ -358,6 +358,76 @@ class TestContractRegisteredCheckIndependent(CapabilityInvariantsTestBase):
         self.assertFalse(any(f.startswith("Contract registered:") for f in result.failures))
 
 
+class TestOpKindLiteralLastAssignmentWins(CapabilityInvariantsTestBase):
+    # (DR-4, mirrors the xvendor R-6 fix already landed for capability_identity's
+    # sibling _extract_surface) A capability module that assigns OP_KIND more than
+    # once at module level must be read by its LAST assignment -- mirroring Python's
+    # own runtime last-assignment-wins semantics. Returning the FIRST assignment (the
+    # prior behavior) decouples this AST-only static read from what the module
+    # actually holds at runtime.
+    _REASSIGNED_OP_KIND_SOURCE = '''"""{name} -- OP_KIND reassigned at module level (test fixture)."""
+
+from typing import Any
+
+OP_KIND = "{first_op_kind}"
+# some code in between
+OP_KIND = "{second_op_kind}"
+
+
+def describe() -> str:
+    return "{name} ready"
+
+
+def propose_operations(facade: Any, batch_id: str):
+    return []
+'''
+
+    def test_last_op_kind_assignment_is_used_when_it_is_registered(self):
+        # FIRST assignment is the unregistered op_kind, LAST is the registered one --
+        # the check must pass (using the last assignment), proving last-wins.
+        cap_id = "reassigned_op_kind_registered_last"
+        self._write_capability(
+            cap_id,
+            self._REASSIGNED_OP_KIND_SOURCE.format(
+                name="Reassigned Op Kind Registered Last",
+                first_op_kind=UNREGISTERED_OP_KIND,
+                second_op_kind=VALID_OP_KIND,
+            ),
+        )
+        self._write_descriptor_set([_base_descriptor_entry(cap_id)])
+
+        result = self._check(cap_id)
+
+        self.assertFalse(
+            any(f.startswith("Contract registered:") for f in result.failures),
+            f"expected the LAST (registered) OP_KIND assignment to be used, got "
+            f"{result.failures!r}",
+        )
+
+    def test_last_op_kind_assignment_is_used_when_it_is_unregistered(self):
+        # FIRST assignment is the registered op_kind, LAST is the unregistered one --
+        # the check must FAIL (still using the last assignment), proving this isn't
+        # merely "whichever one happens to be registered."
+        cap_id = "reassigned_op_kind_unregistered_last"
+        self._write_capability(
+            cap_id,
+            self._REASSIGNED_OP_KIND_SOURCE.format(
+                name="Reassigned Op Kind Unregistered Last",
+                first_op_kind=VALID_OP_KIND,
+                second_op_kind=UNREGISTERED_OP_KIND,
+            ),
+        )
+        self._write_descriptor_set([_base_descriptor_entry(cap_id)])
+
+        result = self._check(cap_id)
+
+        self.assertTrue(
+            any(f.startswith("Contract registered:") for f in result.failures),
+            f"expected the LAST (unregistered) OP_KIND assignment to be used, got "
+            f"{result.failures!r}",
+        )
+
+
 class TestAuditCheckPostAcceptanceOnly(CapabilityInvariantsTestBase):
     PHASE_ID = "phase_d1_1_test"
 

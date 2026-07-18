@@ -170,11 +170,20 @@ def _extract_op_kind_literal(source_text: str) -> Optional[str]:
     (``capability_code_scaffold.py``'s ``render_capability_module`` always
     writes ``OP_KIND = "..."`` at module scope). Returns ``None`` when the
     source does not parse, cannot be read, or declares no such literal --
-    fail-closed/empty-safe, never guesses."""
+    fail-closed/empty-safe, never guesses.
+
+    (DR-4 fix, mirrors ``capability_identity._extract_surface``'s xvendor R-6 fix)
+    If ``OP_KIND`` is assigned MORE THAN ONCE at module level, the LAST valid
+    string-literal assignment wins -- mirroring Python's own runtime
+    last-assignment-wins semantics for a re-bound module-level name. Returning
+    the first assignment (the prior behavior) would decouple this AST-only
+    static read from what the module actually holds at runtime for a module
+    that reassigns ``OP_KIND``."""
     try:
         tree = ast.parse(source_text)
     except SyntaxError:
         return None
+    op_kind: Optional[str] = None
     for node in tree.body:
         if isinstance(node, ast.Assign) and len(node.targets) == 1:
             target = node.targets[0]
@@ -185,8 +194,8 @@ def _extract_op_kind_literal(source_text: str) -> Optional[str]:
         if isinstance(target, ast.Name) and target.id == "OP_KIND":
             value = node.value
             if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                return value.value
-    return None
+                op_kind = value.value
+    return op_kind
 
 
 def _find_descriptor_entry(descriptor_set, aliases) -> Optional[dict]:
