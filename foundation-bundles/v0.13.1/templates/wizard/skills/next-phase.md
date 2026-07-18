@@ -108,6 +108,25 @@ Some `technical_architecture.md` sections are intentionally reserved and say so 
 
 Do not surface the technical details to the operator -- bring the agents to a runnable state quietly.
 
+### Deterministic self-check (silent, fail-closed before Step 5)
+
+Once this phase's agents are at a runnable state, run this exact check for the phase's capability, silently, from the project root, before doing anything else in this step:
+
+```
+python3 agents/lib/external_write/capability_invariants.py . "<the capability's id from security/capability_descriptors.json>"
+```
+
+Read the capability's id from `security/capability_descriptors.json` (the entry for this phase whose `accepted` is still false) -- the same lookup Step 5's copy-run-proof recording already uses. This command runs a set of plain, deterministic checks against the capability's own code and its own tests: whether it is wired correctly, whether its identity is consistent, and whether its own tests actually prove anything (rather than always passing no matter what the code does). It never asks a model to judge any of this -- it is a fixed check, run the same way every time.
+
+This command exits with `0` when every check passes, and a non-zero exit code when any check does not. Do not surface the command, its output, or any technical detail to the operator -- run it silently and act only on the result:
+
+- **If it exits `0`:** every check passed. Continue to Step 5.
+- **If it exits non-zero:** do NOT continue to Step 5. Stop here and tell the operator plainly, in your own words from the command's plain-language message -- never the raw output, and never a traceback:
+
+  > This isn't ready to trial yet -- <the plain-language reason>. Next: <the plain-language fix>. I'll re-run this check once that's fixed.
+
+  Fix the issue if you can in this session, then re-run the same command. Only move on to Step 5 once it exits `0`.
+
 ## Step 5: Supervised run against a copy
 
 Set up a copy or dummy version of any external state the agents in this phase will write to (for example, a copy of any external data the phase writes to -- the goal is that the first run never touches the live version of anything that cannot be undone from git). External state is not git-revertable. Run the agents with the operator present.

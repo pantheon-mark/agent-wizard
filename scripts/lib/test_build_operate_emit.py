@@ -421,6 +421,89 @@ class NextPhaseSkillEmitTests(unittest.TestCase):
         )
 
 
+class NextPhaseSelfQAWiringTests(unittest.TestCase):
+    """Task D1-3: next-phase.md's Step 4 runs the D-Layer-1 deterministic self-QA checks
+    (capability_invariants' structural invariants + test-quality probes) before Step 5's
+    supervised trial, and stops in plain language (never a traceback) on any failure.
+
+    Asserted at the CANONICAL SOURCE-FILE level (the same reason as
+    ControlledVocabularyRuleWiringTests / MaRevBypassScannerWiringTests above: emission for
+    the operator-fill skill templates sources from a frozen/prerelease bundle cut, which does
+    not yet carry this change; the canonical single-home source is
+    ``wizard/skills/next-phase.md``, and a bundle cut is a separate, later step)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.np_path = REPO_ROOT / "wizard" / "skills" / "next-phase.md"
+        cls.np_text = cls.np_path.read_text(encoding="utf-8")
+
+    def test_step4_names_capability_invariants_as_a_run_step(self):
+        """Step 4 names capability_invariants.py as the exact command it runs."""
+        self.assertIn(
+            "capability_invariants.py",
+            self.np_text,
+            "next-phase.md Step 4 must name capability_invariants.py as a run step",
+        )
+
+    def test_step4_command_is_copy_paste_exact(self):
+        """The command is a concrete, copy-paste-ready invocation (exact-prompts rule) --
+        naming the module's real relative path and both required positional arguments."""
+        self.assertIn(
+            "python3 agents/lib/external_write/capability_invariants.py",
+            self.np_text,
+            "next-phase.md Step 4 must give the exact, copy-paste-ready capability_invariants.py "
+            "command",
+        )
+
+    def test_step4_runs_checks_silently(self):
+        """Step 4 states the checks run silently -- consistent with the rest of Step 4's own
+        'do not surface the technical details to the operator' framing."""
+        step4_start = self.np_text.index("## Step 4:")
+        step5_start = self.np_text.index("## Step 5:")
+        step4_text = self.np_text[step4_start:step5_start]
+        self.assertIn(
+            "silently",
+            step4_text.lower(),
+            "next-phase.md Step 4 must state the D-Layer-1 checks run silently",
+        )
+
+    def test_step4_states_fail_closed_stop_before_step5(self):
+        """A D-Layer-1 failure stops the flow, in plain language, before Step 5 -- never a
+        traceback, and never proceeding to the supervised trial."""
+        step4_start = self.np_text.index("## Step 4:")
+        step5_start = self.np_text.index("## Step 5:")
+        step4_text = self.np_text[step4_start:step5_start]
+        lower = step4_text.lower()
+        self.assertIn(
+            "stop",
+            lower,
+            "next-phase.md Step 4 must state that a failed check stops the flow",
+        )
+        self.assertTrue(
+            "not ready" in lower or "isn't ready" in lower or "is not ready" in lower,
+            "next-phase.md Step 4 must state the plain-language 'not ready to trial' stop",
+        )
+        # The instruction itself must forbid ever SHOWING a traceback to the operator -- the
+        # word "traceback" legitimately appears here as part of that "never a traceback"
+        # instruction, so assert the instruction, not the word's absence.
+        self.assertTrue(
+            "never" in lower and "traceback" in lower,
+            "next-phase.md Step 4 must instruct that a raw traceback is never surfaced to the "
+            "operator",
+        )
+
+    def test_step4_precedes_step5_in_document_order(self):
+        """The D-Layer-1 wiring lives in Step 4, textually before Step 5 -- the checks must
+        run, and be able to stop the flow, before the supervised trial begins."""
+        step4_idx = self.np_text.index("## Step 4:")
+        cap_inv_idx = self.np_text.index("capability_invariants.py")
+        step5_idx = self.np_text.index("## Step 5:")
+        self.assertTrue(
+            step4_idx < cap_inv_idx < step5_idx,
+            "capability_invariants.py must be wired into Step 4, before Step 5 begins",
+        )
+
+
 class ProjectInstructionsBuildAndOperateTests(unittest.TestCase):
     """E1: project_instructions.md carries the build-and-operate loop section."""
 

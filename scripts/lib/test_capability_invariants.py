@@ -23,6 +23,7 @@ fully-valid capability is proven to pass all five.
 
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -692,6 +693,108 @@ if __name__ == "__main__":
         self.assertFalse(result.ok)
         self.assertTrue(any(f.startswith("Test quality:") for f in result.failures))
         self._assert_no_traceback(result)
+
+
+# =============================================================================
+# Task D1-3: CLI entrypoint -- runs BOTH D1-1 + D1-2 batteries together
+# =============================================================================
+#
+# This is the exact command next-phase.md's Step 4 runs (see that skill's own
+# "Technical verification" step). Exercised here via a REAL subprocess
+# invocation of the module's own ``__main__`` -- never a simulation of it --
+# mirroring ``CheckCompletionCLITests`` in ``test_lifecycle_state.py``, the
+# same "bypass the LLM for critical I/O" discipline: the command's own exit
+# code is the deterministic gate, not an agent's interpretation of its
+# output.
+
+
+class CapabilityInvariantsCLITests(CapabilityInvariantsTestBase):
+    CLI_SCRIPT = (
+        Path(__file__).resolve().parents[2] / "agents" / "lib" / "external_write"
+        / "capability_invariants.py"
+    )
+
+    def _run_cli(self, root, canonical_id):
+        return subprocess.run(
+            [sys.executable, str(self.CLI_SCRIPT), str(root), canonical_id],
+            capture_output=True, text=True, timeout=90,
+        )
+
+    def test_cli_exits_zero_when_both_batteries_pass(self):
+        cap_id = "cli_all_pass_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Cli All Pass Cap", op_kind=VALID_OP_KIND))
+        self._write_descriptor_set([_base_descriptor_entry(cap_id)])
+        self._stage_real_external_write()
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: real producer-entrypoint reference test (CLI fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}
+
+from external_write.capability_api import run_enveloped_operation  # noqa: F401
+
+
+class TestCliAllPassCap(unittest.TestCase):
+    def test_describe_reports_ready(self):
+        self.assertEqual({module_name}.describe(), "Cli All Pass Cap ready")
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._run_cli(self.project_root, cap_id)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("Traceback", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_cli_exits_one_when_structural_invariants_fail(self):
+        cap_id = "cli_routing_violation_cap"
+        self._write_capability(
+            cap_id,
+            _ROUTING_VIOLATION_SOURCE.format(name="Cli Routing Violation Cap", op_kind=VALID_OP_KIND),
+        )
+        self._write_descriptor_set([_base_descriptor_entry(cap_id)])
+        # No test file at all -- irrelevant here; the routing failure alone must exit 1.
+
+        result = self._run_cli(self.project_root, cap_id)
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Routing:", result.stdout)
+        self.assertNotIn("Traceback", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_cli_exits_one_when_test_quality_fails(self):
+        cap_id = "cli_no_test_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Cli No Test Cap", op_kind=VALID_OP_KIND))
+        self._write_descriptor_set([_base_descriptor_entry(cap_id)])
+        # Structurally valid capability, but no discoverable test file anywhere.
+
+        result = self._run_cli(self.project_root, cap_id)
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Producer entrypoint:", result.stdout)
+        self.assertNotIn("Traceback", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_cli_missing_arguments_exits_nonzero_without_traceback(self):
+        result = subprocess.run(
+            [sys.executable, str(self.CLI_SCRIPT)],
+            capture_output=True, text=True, timeout=30,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Traceback", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
 
 
 if __name__ == "__main__":

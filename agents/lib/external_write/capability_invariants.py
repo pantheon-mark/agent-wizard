@@ -911,3 +911,40 @@ def check_test_quality(project_root: str, canonical_id: str) -> InvariantResult:
     return InvariantResult(
         ok=ok, failures=failures,
         operator_message=_build_test_quality_operator_message(failures))
+
+
+# ---------------------------------------------------------------------------
+# CLI entrypoint (Task D1-3) -- the exact, copy-paste command next-phase.md's Step 4 runs, for
+# ONE capability, silently, after bringing that phase's agents to a runnable state and BEFORE
+# Step 5's supervised trial. Runs BOTH D-Layer-1 batteries -- this module's own D1-1 structural
+# invariants (check_capability_invariants) and D1-2 test-quality probes (check_test_quality) --
+# and prints each battery's own plain-language operator_message, never a Python traceback.
+# Mirrors lifecycle_state.py's own CLI shape exactly: positional
+# ``<project_root> <canonical_id>``, exit 0 only on a full pass across both batteries, exit 1 on
+# any failure in either one, exit 1 (with a plain usage line, never a traceback) when the
+# arguments are missing.
+#
+# Usage:
+#   python3 agents/lib/external_write/capability_invariants.py <project_root> <canonical_id>
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":  # pragma: no cover
+    import sys as _cli_sys
+
+    if len(_cli_sys.argv) < 3:
+        print(
+            "NOT READY -- usage: python3 capability_invariants.py <project_root> <canonical_id>. "
+            "No project_root/canonical_id was given, so nothing was checked."
+        )
+        _cli_sys.exit(1)
+
+    _cli_root, _cli_cap_id = _cli_sys.argv[1], _cli_sys.argv[2]
+    _cli_invariants = check_capability_invariants(_cli_root, _cli_cap_id)
+    _cli_quality = check_test_quality(_cli_root, _cli_cap_id)
+    _cli_ok = _cli_invariants.ok and _cli_quality.ok
+
+    print("ALL CHECKS PASSED" if _cli_ok else "NOT READY")
+    print(_cli_invariants.operator_message)
+    print(_cli_quality.operator_message)
+
+    _cli_sys.exit(0 if _cli_ok else 1)
