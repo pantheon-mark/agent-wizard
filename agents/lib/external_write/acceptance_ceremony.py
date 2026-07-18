@@ -120,6 +120,7 @@ project), so it must be emitted into operator systems. A later step must add it 
 Stdlib only — no third-party dependencies.
 """
 
+import hashlib
 import json
 import os
 import tempfile
@@ -171,6 +172,15 @@ PHASE_ID_KEY = "phase_id"
 # built-in op EXISTS and is unaccepted; it is never a real acceptable capability, so the ceremony
 # refuses it outright (defense-in-depth; the phase / receipt binding would refuse it anyway).
 BASE_DESCRIPTOR_ID_PREFIX = "__builtin__:"
+
+# (Task B2b-fix, Critical 1) Duplicated-by-value from capability_identity.CAPABILITIES_DIR_REL /
+# CAPABILITY_FILE_SUFFIX (same package; duplicated rather than imported to keep this
+# trust-critical module's own dependency surface minimal -- mirrors this module's existing
+# by-value-duplication convention for BASE_DESCRIPTOR_ID_PREFIX above). Used ONLY to derive the
+# DEFAULT capability-module path when the caller does not supply ``capability_module_path``
+# explicitly (see ``accept_capability_for_live_use``'s own parameter docstring).
+CAPABILITIES_DIR_REL = "agents/capabilities"
+CAPABILITY_FILE_SUFFIX = "_capability.py"
 
 # Required operator-receipt fields (fail-safe: any absent field refuses).
 _REQUIRED_RECEIPT_FIELDS = (
@@ -256,6 +266,29 @@ def _atomic_write_json_list(path: str, data: List[Any]) -> None:
         raise
 
 
+def _compute_capability_module_hash(path: str) -> Optional[str]:
+    """(Task B2b-fix, Critical 1) sha256 hex digest of the capability-module SOURCE FILE's
+    bytes -- ``agents/capabilities/<canonical_id>_capability.py``, the capability's OWN
+    ``propose_operations`` / ``plan`` logic. This closes a real gap: ``implementation_hash``
+    (Invariant 2, recomputed via ``proof_hash.compute_implementation_hash``) covers only the
+    contract's declared ``dependency_set`` plus the op_kind's registered ADAPTER module
+    (``effects_manifest.resolve_dependency_files``) — it structurally NEVER covers the
+    capability-zone module itself, so a rewrite of the capability's own guard/logic (the
+    reviewer's motivating case: a ``propose_operations`` age guard edited from ">30 days" to
+    ">7 days", with the adapter and call shape left completely intact) was invisible to the
+    hash this acceptance already recomputes.
+
+    Fail-safe: returns ``None`` (never raises) when the file cannot be read. The caller records
+    that explicitly as a ``null`` field rather than omitting the key, and
+    ``lifecycle_state.acceptance_hash_is_stale`` treats an absent-or-null value as STALE, never
+    as "nothing to compare" — see that function's own docstring."""
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        return None
+    return hashlib.sha256(data).hexdigest()
+
+
 def _append_acceptance_record(audit_path: str, record: Dict[str, Any]) -> None:
     """Append one acceptance record as a single JSONL line (audit trail). Best-effort: the caller
     surfaces a failure as a warning AFTER the authoritative flip has already succeeded."""
@@ -274,6 +307,7 @@ def accept_capability_for_live_use(
     descriptor_set_path: Optional[str] = None,
     lib_dir: Optional[Path] = None,
     audit_log_path: Optional[str] = None,
+    capability_module_path: Optional[str] = None,
 ) -> AcceptanceResult:
     """Accept exactly one capability for live use by flipping its descriptor's ``accepted`` to
     ``true`` — IFF every invariant in the module docstring holds. Fail-safe: on any missing /
@@ -291,6 +325,24 @@ def accept_capability_for_live_use(
     lib_dir:               Directory to resolve write-affecting dependency files for the
                            implementation-hash recomputation (default: proof_hash's own lib dir).
     audit_log_path:        Append-only acceptance-record log (default DEFAULT_AUDIT_LOG_PATH).
+    capability_module_path: (Task B2b-fix) Filesystem path to the capability's OWN module file
+                           (``agents/capabilities/<capability_id>_capability.py``) whose source
+                           bytes are hashed into the acceptance record as ``capability_module_hash``
+                           — the additive signal that lets ``lifecycle_state.acceptance_hash_is_
+                           stale`` detect a capability-zone-only rebuild (e.g. a ``propose_
+                           operations`` guard edit) that ``implementation_hash`` structurally
+                           cannot see (that hash covers only the contract's declared
+                           ``dependency_set`` + the op_kind's registered ADAPTER module — never
+                           this file). Default (``None``): derived as
+                           ``<cwd>/agents/capabilities/<capability_id>_capability.py`` — the SAME
+                           project-root-relative convention ``descriptor_set_path`` already
+                           defaults under (this ceremony runs from the operator project root).
+                           Fail-safe, never a refusal reason: if this file cannot be read (missing,
+                           unreadable, or the caller legitimately has no such file), the record
+                           carries ``capability_module_hash: null`` rather than blocking
+                           acceptance — additive and backward-compatible; the detector treats a
+                           null/absent value as stale (forces one re-trial), never as "nothing to
+                           verify."
     """
     # Basic input sanity — a non-string identifier is ambiguous; refuse.
     if not (isinstance(capability_id, str) and capability_id):
@@ -555,6 +607,15 @@ def accept_capability_for_live_use(
 
     # Authoritative act succeeded. Append the durable acceptance record (best-effort — a log
     # failure does NOT undo a legitimate acceptance; it is surfaced as a warning).
+    # (Task B2b-fix, Critical 1) Resolve + hash the capability's OWN module file. Fail-safe,
+    # never a refusal reason at this point (the authoritative flip already succeeded) — a
+    # missing/unreadable file simply records capability_module_hash: null, which the detector
+    # treats as stale (see _compute_capability_module_hash's own docstring).
+    resolved_capability_module_path = (
+        capability_module_path if capability_module_path is not None
+        else str(Path.cwd() / CAPABILITIES_DIR_REL / f"{capability_id}{CAPABILITY_FILE_SUFFIX}")
+    )
+    capability_module_hash = _compute_capability_module_hash(resolved_capability_module_path)
     record = {
         "schema": ACCEPTANCE_RECORD_SCHEMA,
         "capability_id": capability_id,
@@ -565,6 +626,7 @@ def accept_capability_for_live_use(
         "operator_receipt_ref": operator_receipt_ref,
         "contract_hash": expected_contract_hash,
         "implementation_hash": expected_impl_hash,
+        "capability_module_hash": capability_module_hash,
         "operator_confirmation": confirmation,
         "receipt_accepted_at": receipt.get("accepted_at"),
     }

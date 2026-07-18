@@ -35,12 +35,21 @@ For each capability this module finds, health is RED iff ANY of:
     so "paused"/"pending_migration" could not be POSITIVELY determined
     either way (xvendor Fix B; see ``_is_paused`` / ``_is_pending_migration``
     below). Treated the same as a confirmed-paused/confirmed-pending
-    capability: fail-closed to RED, never a silent "not paused" guess.
+    capability: fail-closed to RED, never a silent "not paused" guess, OR
+  * (Task B2b-fix, Critical 2) ``acceptance_stale`` is True — the capability
+    is currently accepted, but ``lifecycle_state.acceptance_hash_is_stale``
+    reports its code changed since it was approved (a conformant rebuild that
+    stayed scanner-clean, or a legacy record with no verifiable hash at all —
+    see that function's own fail-safe docstring). This module is STRICTLY
+    READ-ONLY about acceptance: it surfaces the SAME verdict
+    ``lifecycle_state``/``upgrade_reconcile`` already compute, it never itself
+    forces ``accepted: false`` — see ``_capability_acceptance_stale`` below.
 Otherwise health is GREEN. There is no third state: a capability this module
-cannot positively verify clean, importable, unpaused, unqueued, AND
-positively-read is RED — fail-closed, mirroring every other disclosed-bound
-convention in this package (``write_gate.load_descriptor_set``'s "any missing
-input ... returns []", not a raise and not a silent permissive default).
+cannot positively verify clean, importable, unpaused, unqueued, acceptance-
+current, AND positively-read is RED — fail-closed, mirroring every other
+disclosed-bound convention in this package (``write_gate.load_descriptor_set``'s
+"any missing input ... returns []", not a raise and not a silent permissive
+default).
 A missing/absent file (nothing yet written) is a NORMAL, non-error input for
 every one of these checks — it is only an EXISTING-but-unreadable/malformed
 file that signals ``state_read_error`` or the descriptor-enumeration sentinel
@@ -131,6 +140,10 @@ from external_write import scan  # noqa: E402
 from external_write.capability_identity import (  # noqa: E402
     build_capability_index,
     IdentityResolutionError,
+)
+from external_write.lifecycle_state import (  # noqa: E402
+    acceptance_hash_is_stale,
+    ReconcileStateError,
 )
 
 
@@ -399,6 +412,32 @@ def _attempt_isolated_import(cap_path: Path, project_root: Path) -> bool:
     return result.returncode == 0
 
 
+def _capability_acceptance_stale(project_root: Path, capability_id: str) -> bool:
+    """(Task B2b-fix, Critical 2) READ-ONLY reporting of
+    ``lifecycle_state.acceptance_hash_is_stale`` for ``capability_id`` — this module NEVER
+    writes ``accepted: false`` itself (that write belongs solely to
+    ``lifecycle_state.revoke_stale_acceptance`` / ``upgrade_reconcile``'s own upgrade-time
+    pass); it only SURFACES the same verdict as a health signal, so an agent's orientation
+    prose (``operating_discipline.md``) and ``add-capability``'s Step A — both of which already
+    refuse to invite the operator into a ``health: "red"`` capability — decline to invite the
+    operator into a capability whose code changed since it was approved, without health itself
+    ever mutating anything on disk.
+
+    Fail-safe: any error resolving/reading the acceptance state
+    (``IdentityResolutionError``, ``ReconcileStateError``, or any other unexpected exception) is
+    treated as True (stale / can't verify) — never a silent "not stale" guess, mirroring every
+    other disclosed-bound convention in this module. Only called for a capability_id that has a
+    real source file on disk (see ``check_capabilities``) — ``acceptance_hash_is_stale`` itself
+    requires a resolvable module-stem identity, which a descriptor-only (no source file)
+    capability_id cannot supply; that capability is already RED for other reasons regardless."""
+    try:
+        return acceptance_hash_is_stale(str(project_root), capability_id)
+    except (IdentityResolutionError, ReconcileStateError):
+        return True
+    except Exception:  # noqa: BLE001 - fail-closed, never let this crash the checker
+        return True
+
+
 def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
     """Return one composite health record per capability found under
     `project_root`, enumerated from the UNION of the descriptor set
@@ -409,10 +448,18 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
     Each record:
       ``{"capability_id": str, "importable": bool, "scanner_clean": bool,
         "violations": List[str], "paused": bool, "pending_migration": bool,
-        "state_read_error": bool, "health": "green" | "red"}``
+        "state_read_error": bool, "acceptance_stale": bool,
+        "health": "green" | "red"}``
 
     ``health == "red"`` iff (NOT importable) OR (NOT scanner_clean) OR paused
-    OR pending_migration OR state_read_error; else ``"green"``.
+    OR pending_migration OR state_read_error OR acceptance_stale; else ``"green"``.
+
+    ``acceptance_stale`` (Task B2b-fix, Critical 2) is True iff the capability is currently
+    ``accepted`` and ``lifecycle_state.acceptance_hash_is_stale`` reports its code changed since
+    approval (see ``_capability_acceptance_stale`` and the module docstring's own bullet on this).
+    READ-ONLY: this function never itself forces ``accepted: false`` — it only surfaces the
+    verdict so orientation prose / add-capability's Step A can decline to invite the operator
+    into a stale capability, the same way they already decline for a scanner-red or paused one.
 
     ``state_read_error`` (xvendor Fix B) is True iff the pause-marker state
     and/or the migration queue EXISTS but could not be positively read for
@@ -495,6 +542,7 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
             "paused": False,
             "pending_migration": False,
             "state_read_error": True,
+            "acceptance_stale": False,
             "health": "red",
         })
 
@@ -509,6 +557,10 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
             importable = False
             scanner_clean = False
             violations: List[str] = []
+            # (Task B2b-fix) Nothing on disk to resolve a module-stem identity against --
+            # already RED for the reasons above regardless; acceptance_hash_is_stale would
+            # only ever raise IdentityResolutionError here, never a meaningful verdict.
+            acceptance_stale = False
         else:
             found = _scan_source(cap_path)
             scanner_clean = not found
@@ -518,11 +570,12 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
             else:
                 # Scanner-RED -- never import (see module docstring).
                 importable = False
+            acceptance_stale = _capability_acceptance_stale(root, cap_id)
 
         health = (
             "red"
             if (not importable) or (not scanner_clean) or paused or pending_migration
-               or state_read_error
+               or state_read_error or acceptance_stale
             else "green"
         )
 
@@ -534,6 +587,7 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
             "paused": paused,
             "pending_migration": pending_migration,
             "state_read_error": state_read_error,
+            "acceptance_stale": acceptance_stale,
             "health": health,
         })
 

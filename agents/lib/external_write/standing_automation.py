@@ -74,6 +74,7 @@ from typing import Any, Callable, Optional, Sequence
 
 from external_write.operations import Operation, Result
 from external_write.adapters import run_operation, describe_auth_failure
+from external_write.lifecycle_state import revoke_stale_acceptance
 
 # The only two recognized flags -- aliases for the same intent (a read + plan +
 # gate-evaluate preview that makes no external call). Exactly one, alone, is
@@ -95,6 +96,11 @@ USAGE = (
 MODE_LIVE = "live"
 MODE_CHECK = "check"
 MODE_REFUSED = "refused_bad_args"
+# (Task B2b-fix, Critical 2) this scheduled job's capability is currently accepted, but its
+# code changed since approval (a conformant rebuild -- see lifecycle_state.acceptance_hash_is_
+# stale) -- refused BEFORE build_operation / run_live / client are ever touched, the SAME
+# ordering the bad-args refusal above already uses. See run_standing_automation's own docstring.
+MODE_ACCEPTANCE_STALE = "refused_acceptance_stale"
 
 # Exit codes. Non-zero on a parse failure is the acceptance bar (never 0, so a
 # caller checking the process exit status can never mistake a refused
@@ -109,13 +115,18 @@ EXIT_BAD_ARGS = 2
 # -- "refused by domain logic" in the same sense EXIT_BAD_ARGS documents
 # above, distinct from a usage error.
 EXIT_LIVE_AUTH_ERROR = 1
+# (Task B2b-fix, Critical 2) refused because this capability's acceptance is stale -- a third,
+# distinct non-zero exit shape so a wrapper/monitor can tell "bad args" (2), "live auth failure"
+# (1), and "blocked pending re-trial/re-approval" (3) apart.
+EXIT_ACCEPTANCE_STALE = 3
 
 
 @dataclass(frozen=True)
 class StandingAutomationOutcome:
     """The outcome of one standing-automation invocation.
 
-    mode:      MODE_REFUSED ("refused_bad_args") | MODE_CHECK ("check") | MODE_LIVE ("live").
+    mode:      MODE_REFUSED ("refused_bad_args") | MODE_ACCEPTANCE_STALE
+               ("refused_acceptance_stale") | MODE_CHECK ("check") | MODE_LIVE ("live").
     exit_code: the process exit code a wrapper's own `if __name__ == "__main__":`
                block should use (`sys.exit(outcome.exit_code)`).
     message:   one plain-language, operator-facing line describing what happened --
@@ -209,6 +220,8 @@ def run_standing_automation(
     descriptor_set: Any = None,
     cap_ledger: Any = None,
     clock: Any = None,
+    project_root: Optional[str] = None,
+    canonical_id: Optional[str] = None,
 ) -> StandingAutomationOutcome:
     """The SOLE dispatcher a standing-automation runner uses to decide between a
     --check preview and a live run.
@@ -226,13 +239,15 @@ def run_standing_automation(
     build_operation: zero-arg callable returning the ``Operation`` this run
                      would perform. Called ONLY for a --check/--dry-run
                      preview or implicitly by the caller's own ``run_live`` for
-                     a live run -- never called for a refused (bad-args)
-                     invocation.
+                     a live run -- never called for a refused (bad-args or
+                     stale-acceptance) invocation.
     run_live:        one-arg callable (given ``client``) that performs the
                      REAL scheduled job, exactly as it always has. Called
-                     ONLY when ``argv`` parses to a live run (empty argv);
-                     never called for --check/--dry-run and never called for
-                     a refused invocation.
+                     ONLY when ``argv`` parses to a live run (empty argv) AND
+                     (when wired -- see ``project_root``/``canonical_id``
+                     below) this capability's acceptance is current; never
+                     called for --check/--dry-run and never called for a
+                     refused invocation.
     client:          the surface client the live job would use. Passed to
                      `run_operation` for the --check path too (proving no
                      external call reaches it there), but never touched
@@ -243,6 +258,36 @@ def run_standing_automation(
                      `run_operation` for the --check path (irrelevant to a
                      dry_run call's outcome, which is unconditional, but kept
                      for API symmetry / deterministic tests).
+    project_root / canonical_id: (Task B2b-fix, Critical 2) OPTIONAL -- when
+                     BOTH are supplied, this function runs
+                     ``lifecycle_state.revoke_stale_acceptance(project_root,
+                     canonical_id)`` ONCE, at the very top of this call
+                     (before ``build_operation``, ``run_live``, or ``client``
+                     are ever touched, for EITHER mode) -- the reconcile/
+                     run-start-granularity check the acute autonomous-write
+                     case needs: an accepted standing/autonomous capability
+                     whose code went stale (a conformant rebuild) must not
+                     perform a live write without a fresh re-trial. If stale,
+                     this call has ALREADY forced the capability's descriptor
+                     back to ``accepted: false`` (the SSOT `write_gate` reads)
+                     and queued a re-trial migration entry BEFORE refusing --
+                     so even if some other path later also reaches
+                     `write_gate`, it independently denies too. DISCLOSED
+                     CEILING: this is a RUN-START check, run once per
+                     invocation of this function (once per scheduled
+                     trigger) -- NOT a per-write runtime guarantee; a
+                     capability that goes stale mid-run is not caught until
+                     the NEXT invocation. Backward-compatible: omitting
+                     EITHER parameter (the default) skips this check
+                     entirely, unchanged prior behavior -- a caller that has
+                     not wired project identity through gets no acceptance-
+                     staleness protection here (disclosed, not silent: see
+                     this parameter's own absence in a caller's invocation).
+                     Fail-safe on any error resolving/checking this state
+                     (an unresolvable canonical_id, a corrupt descriptor/
+                     migration-queue file, or any other unexpected
+                     exception): treated as stale -- refuses the run rather
+                     than silently proceeding on an unverifiable state.
 
     Returns
     -------
@@ -267,6 +312,29 @@ def run_standing_automation(
     if mode is None:
         return StandingAutomationOutcome(
             mode=MODE_REFUSED, exit_code=EXIT_BAD_ARGS, message=error, result=None)
+
+    # (Task B2b-fix, Critical 2) Run-start staleness check -- BEFORE build_operation / run_live /
+    # client are ever touched, for EITHER mode (--check or live). Skipped entirely (unchanged
+    # prior behavior) unless the caller supplies BOTH project_root and canonical_id -- see this
+    # function's own docstring on project_root/canonical_id.
+    if project_root is not None and canonical_id is not None:
+        try:
+            stale = revoke_stale_acceptance(project_root, canonical_id).stale
+        except Exception:
+            # Fail-safe: could not verify this capability's acceptance is current -- refuse
+            # rather than silently proceed on an unverifiable state.
+            stale = True
+        if stale:
+            return StandingAutomationOutcome(
+                mode=MODE_ACCEPTANCE_STALE,
+                exit_code=EXIT_ACCEPTANCE_STALE,
+                message=(
+                    "This job's approval is no longer current -- its code changed since it "
+                    "was last approved, so it has been switched back off until it is tried "
+                    "again and approved again. Nothing was sent, written, or changed this run."
+                ),
+                result=None,
+            )
 
     if mode == MODE_CHECK:
         op = build_operation()

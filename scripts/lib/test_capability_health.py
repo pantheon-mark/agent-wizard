@@ -25,6 +25,7 @@ capability_ids are exercised at that real path (see
 Uses stub/synthetic capability source only; no network, no real vendor SDK.
 """
 
+import hashlib
 import json
 import sys
 import tempfile
@@ -244,6 +245,86 @@ class TestPendingMigrationCapabilityRed(CapabilityHealthTestBase):
         self.assertFalse(record["paused"])
         self.assertTrue(record["pending_migration"])
         self.assertEqual(record["health"], "red")
+
+
+class TestAcceptanceStaleCapabilityRed(CapabilityHealthTestBase):
+    """(Task B2b-fix, Critical 2) health surfaces -- READ-ONLY -- a capability whose acceptance
+    has gone stale (its code changed since it was approved), the same way it already surfaces
+    paused/pending-migration. capability_health NEVER itself forces accepted:false -- it only
+    reports the SAME verdict lifecycle_state.acceptance_hash_is_stale already computes."""
+
+    def _accept(self, capability_id, phase_id="phase-1"):
+        cap_path = self.project_root / CAPABILITIES_DIR_REL / f"{capability_id}_capability.py"
+        module_hash = hashlib.sha256(cap_path.read_bytes()).hexdigest()
+        from external_write.acceptance_ceremony import ACCEPTANCE_RECORD_SCHEMA
+        from external_write.proof_hash import compute_implementation_hash
+
+        log_path = self.project_root / "security" / "capability_acceptance_log.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema": ACCEPTANCE_RECORD_SCHEMA, "capability_id": capability_id,
+            "phase_id": phase_id, "risk_class": "irreversible_external",
+            "op_kind": "delete_record", "copy_run_proof_ref": "proof.json",
+            "operator_receipt_ref": "receipt.json", "contract_hash": "0" * 64,
+            "implementation_hash": compute_implementation_hash("delete_record"),
+            "capability_module_hash": module_hash,
+            "operator_confirmation": "Yes, accept this capability for live use.",
+            "receipt_accepted_at": "2026-01-01T00:00:00Z",
+        }
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+
+    def test_accepted_capability_with_current_hash_stays_green(self):
+        self._write_capability(
+            "accepted_cap", _CLEAN_CAPABILITY_SOURCE.format(display_name="Accepted Cap"))
+        self._write_descriptor_set(
+            [{"id": "accepted_cap", "accepted": True, "phase_id": "phase-1"}])
+        self._accept("accepted_cap")
+
+        records = capability_health.check_capabilities(self.project_root)
+        record = self._record_for(records, "accepted_cap")
+        self.assertFalse(record["acceptance_stale"])
+        self.assertEqual(record["health"], "green")
+
+    def test_accepted_capability_edited_since_approval_is_red(self):
+        cap_path = self._write_capability(
+            "accepted_cap", _CLEAN_CAPABILITY_SOURCE.format(display_name="Accepted Cap"))
+        self._write_descriptor_set(
+            [{"id": "accepted_cap", "accepted": True, "phase_id": "phase-1"}])
+        self._accept("accepted_cap")
+
+        # Rebuild: edit the capability's own code AFTER it was approved. Adapter/call shape and
+        # scanner-cleanliness are both untouched -- only capability_module_hash catches this.
+        cap_path.write_text(
+            _CLEAN_CAPABILITY_SOURCE.format(display_name="Accepted Cap Rebuilt"),
+            encoding="utf-8")
+
+        records = capability_health.check_capabilities(self.project_root)
+        record = self._record_for(records, "accepted_cap")
+
+        # Otherwise-healthy on every OTHER axis -- acceptance staleness alone must flip it red.
+        self.assertTrue(record["importable"])
+        self.assertTrue(record["scanner_clean"])
+        self.assertFalse(record["paused"])
+        self.assertFalse(record["pending_migration"])
+        self.assertTrue(record["acceptance_stale"])
+        self.assertEqual(record["health"], "red")
+
+    def test_health_check_never_writes_the_descriptor_set(self):
+        # READ-ONLY, decisively: health never itself forces accepted:false.
+        cap_path = self._write_capability(
+            "accepted_cap", _CLEAN_CAPABILITY_SOURCE.format(display_name="Accepted Cap"))
+        self._write_descriptor_set(
+            [{"id": "accepted_cap", "accepted": True, "phase_id": "phase-1"}])
+        self._accept("accepted_cap")
+        cap_path.write_text(
+            _CLEAN_CAPABILITY_SOURCE.format(display_name="Accepted Cap Rebuilt"),
+            encoding="utf-8")
+
+        before = (self.project_root / DESCRIPTOR_SET_REL).read_bytes()
+        capability_health.check_capabilities(self.project_root)
+        after = (self.project_root / DESCRIPTOR_SET_REL).read_bytes()
+        self.assertEqual(before, after, "capability_health must never write the descriptor set")
 
 
 class TestDescriptorOnlyCapabilityWithNoSourceFile(CapabilityHealthTestBase):

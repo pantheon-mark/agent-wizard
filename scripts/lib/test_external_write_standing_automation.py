@@ -31,7 +31,10 @@ Test intents:
      raw_run_operation_reference rule.
 """
 
+import hashlib
+import json
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -42,9 +45,11 @@ sys.path.insert(0, str(_AGENTS_LIB))
 
 from external_write.operations import Operation, SCHEMA_V2_ACTION  # noqa: E402
 from external_write.standing_automation import (  # noqa: E402
+    EXIT_ACCEPTANCE_STALE,
     EXIT_BAD_ARGS,
     EXIT_LIVE_AUTH_ERROR,
     EXIT_OK,
+    MODE_ACCEPTANCE_STALE,
     MODE_CHECK,
     MODE_LIVE,
     MODE_REFUSED,
@@ -52,6 +57,8 @@ from external_write.standing_automation import (  # noqa: E402
     parse_standing_automation_args,
     run_standing_automation,
 )
+from external_write.acceptance_ceremony import ACCEPTANCE_RECORD_SCHEMA  # noqa: E402
+from external_write.proof_hash import compute_implementation_hash  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _ADAPTER_DIR = _REPO_ROOT / "wizard" / "agents" / "lib" / "external_write"
@@ -308,6 +315,173 @@ class TestLiveModeRunsExactlyOnce(unittest.TestCase):
         self.assertEqual(run_live.call_count, 1)
         self.assertEqual(run_live.calls[0][0], (client,))
         self.assertEqual(outcome.result, "sent")
+
+
+# ---------------------------------------------------------------------------
+# Task B2b-fix, Critical 2: run-start acceptance-staleness gate. The ACCEPTANCE
+# CRITERION under test: after a conformant rebuild of an accepted autonomous
+# capability, its NEXT autonomous live-write attempt is blocked (accepted:false
+# enforced -> write_gate denies), never silently executed -- checked once per
+# invocation (reconcile/run-start granularity), never per-write.
+# ---------------------------------------------------------------------------
+
+class TestAcceptanceStaleBlocksAutonomousLiveWrite(unittest.TestCase):
+    CANONICAL_ID = "acme_widget_sync"
+    # real, registered, GATED (irreversible_external), no adapter -- stable implementation_hash
+    # across capability-module-only edits, and actually enforced by write_gate's accepted check.
+    OP_KIND = "delete_record"
+    PHASE_ID = "phase-1"
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmpdir.name)
+        self.addCleanup(self._tmpdir.cleanup)
+        self.cap_path = (
+            self.root / "agents" / "capabilities" / f"{self.CANONICAL_ID}_capability.py")
+
+    def _write_capability_module(self, body_suffix=""):
+        self.cap_path.parent.mkdir(parents=True, exist_ok=True)
+        self.cap_path.write_text(
+            "\"\"\"acme_widget_sync capability module (test fixture).\"\"\"\n"
+            "def propose_operations(candidates):\n"
+            "    return [c for c in candidates if c.get('age_days', 0) > 30]\n"
+            + body_suffix,
+            encoding="utf-8")
+
+    def _write_descriptor(self, *, accepted=True):
+        d = self.root / "security"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "capability_descriptors.json").write_text(
+            json.dumps([{
+                "id": self.CANONICAL_ID, "name": self.CANONICAL_ID,
+                "action_class": "delete", "risk_class": "irreversible_external",
+                "recovery_profile_ref": None, "declared_test_target": "copy",
+                "blast_radius_cap": 5, "accepted": accepted, "phase_id": self.PHASE_ID,
+            }]),
+            encoding="utf-8")
+
+    def _write_acceptance_record(self):
+        module_hash = hashlib.sha256(self.cap_path.read_bytes()).hexdigest()
+        log_path = self.root / "security" / "capability_acceptance_log.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema": ACCEPTANCE_RECORD_SCHEMA, "capability_id": self.CANONICAL_ID,
+            "phase_id": self.PHASE_ID, "risk_class": "irreversible_external",
+            "op_kind": self.OP_KIND, "copy_run_proof_ref": "proof.json",
+            "operator_receipt_ref": "receipt.json", "contract_hash": "0" * 64,
+            "implementation_hash": compute_implementation_hash(self.OP_KIND),
+            "capability_module_hash": module_hash,
+            "operator_confirmation": "Yes, accept this capability for live use.",
+            "receipt_accepted_at": "2026-01-01T00:00:00Z",
+        }
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+
+    def _accepted_and_current(self):
+        self._write_capability_module()
+        self._write_descriptor(accepted=True)
+        self._write_acceptance_record()
+
+    def test_matching_hash_still_runs_live_normally(self):
+        self._accepted_and_current()
+        run_live = _CountingCallable(return_value="sent")
+        outcome = run_standing_automation(
+            [], build_operation=_never_call, run_live=run_live, client=object(),
+            project_root=str(self.root), canonical_id=self.CANONICAL_ID)
+        self.assertEqual(outcome.mode, MODE_LIVE)
+        self.assertEqual(run_live.call_count, 1)
+
+    def test_conformant_rebuild_blocks_the_next_autonomous_live_write(self):
+        self._accepted_and_current()
+        # Baseline: currently would run live.
+        pre = run_standing_automation(
+            [], build_operation=_never_call, run_live=_CountingCallable(return_value="sent"),
+            client=object(), project_root=str(self.root), canonical_id=self.CANONICAL_ID)
+        self.assertEqual(pre.mode, MODE_LIVE)
+
+        # The reviewer's rebuild scenario: the capability's own code changes after approval
+        # (adapter/call shape untouched -- this is a capability-zone-only edit).
+        self._write_capability_module(body_suffix="# rebuilt: guard now 7 days, not 30\n")
+
+        run_live = _CountingCallable(return_value="sent")
+        outcome = run_standing_automation(
+            [], build_operation=_never_call, run_live=run_live, client=object(),
+            project_root=str(self.root), canonical_id=self.CANONICAL_ID)
+
+        # ACCEPTANCE CRITERION: the next autonomous live-write attempt is BLOCKED, not
+        # silently executed.
+        self.assertEqual(outcome.mode, MODE_ACCEPTANCE_STALE)
+        self.assertEqual(outcome.exit_code, EXIT_ACCEPTANCE_STALE)
+        self.assertEqual(run_live.call_count, 0, "run_live must NEVER be called when stale")
+        self.assertNotIn("Traceback", outcome.message)
+
+        # accepted:false is now ENFORCED on disk (the SSOT write_gate reads) -- not merely "we
+        # didn't call run_live this time".
+        entries = json.loads(
+            (self.root / "security" / "capability_descriptors.json").read_text(
+                encoding="utf-8"))
+        self.assertFalse(entries[0]["accepted"])
+
+    def test_write_gate_independently_denies_after_the_run_start_revocation(self):
+        self._accepted_and_current()
+        self._write_capability_module(body_suffix="# rebuilt\n")
+        run_standing_automation(
+            [], build_operation=_never_call, run_live=_never_call, client=object(),
+            project_root=str(self.root), canonical_id=self.CANONICAL_ID)
+
+        # No sys.modules purge here (unlike upgrade_reconcile.py's CLI-wiring tests): this
+        # file never builds a synthetic/temporary copy of external_write -- _AGENTS_LIB (the
+        # REAL repo package) is the only copy ever on sys.path here, so a plain import safely
+        # reuses whatever instance this file's own module-level imports already established
+        # (purging here would swap in a SECOND, later-loaded instance and leave it cached for
+        # every other test file that runs afterward in the same `unittest discover` process).
+        from external_write.write_gate import (  # noqa: E402
+            evaluate_write_gate, InvocationLedger, LIVE_TARGET,
+        )
+        from external_write.operations import Operation as _Op  # noqa: E402
+
+        descriptor_set = json.loads(
+            (self.root / "security" / "capability_descriptors.json").read_text(
+                encoding="utf-8"))
+        op = _Op(surface=self.CANONICAL_ID, object_id="obj:1", field="__record__",
+                 new_value=None, op_kind=self.OP_KIND, batch_id="b1")
+        decision = evaluate_write_gate(
+            op, target=LIVE_TARGET, descriptor_set=descriptor_set,
+            cap_ledger=InvocationLedger(),
+            paused_root=str(self.root / ".wizard" / "paused-mechanisms"))
+        self.assertFalse(
+            decision.permitted,
+            "write_gate must independently deny once accepted:false has been enforced")
+
+    def test_omitting_project_identity_skips_the_check_unchanged_prior_behavior(self):
+        # Backward-compatible: no project_root/canonical_id supplied -- exactly the prior
+        # signature/behavior, even though this capability (if checked) would be stale.
+        self._accepted_and_current()
+        self._write_capability_module(body_suffix="# rebuilt\n")
+        run_live = _CountingCallable(return_value="sent")
+        outcome = run_standing_automation(
+            [], build_operation=_never_call, run_live=run_live, client=object())
+        self.assertEqual(outcome.mode, MODE_LIVE)
+        self.assertEqual(run_live.call_count, 1)
+
+    def test_never_accepted_capability_is_not_stale_and_runs_live(self):
+        self._write_capability_module()
+        self._write_descriptor(accepted=False)
+        run_live = _CountingCallable(return_value="sent")
+        outcome = run_standing_automation(
+            [], build_operation=_never_call, run_live=run_live, client=object(),
+            project_root=str(self.root), canonical_id=self.CANONICAL_ID)
+        self.assertEqual(outcome.mode, MODE_LIVE)
+        self.assertEqual(run_live.call_count, 1)
+
+    def test_check_mode_also_blocked_while_stale_never_touches_client(self):
+        self._accepted_and_current()
+        self._write_capability_module(body_suffix="# rebuilt\n")
+        outcome = run_standing_automation(
+            ["--check"], build_operation=_never_call, run_live=_never_call,
+            client=_RaisingClient(), project_root=str(self.root),
+            canonical_id=self.CANONICAL_ID)
+        self.assertEqual(outcome.mode, MODE_ACCEPTANCE_STALE)
 
 
 class TestLiveModeAuthFailureHandling(unittest.TestCase):

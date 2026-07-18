@@ -16,8 +16,10 @@ distinct capability_ids are exercised in every fixture below.
 Uses stub/synthetic capability source only; no network.
 """
 
+import hashlib
 import importlib.util
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -30,12 +32,19 @@ _AGENTS_LIB = Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib"
 sys.path.insert(0, str(_AGENTS_LIB))
 
 from external_write import lifecycle_state  # noqa: E402
+from external_write import acceptance_ceremony  # noqa: E402
 from external_write.capability_identity import IdentityResolutionError  # noqa: E402
 from external_write.acceptance_ceremony import ACCEPTANCE_RECORD_SCHEMA  # noqa: E402
 from external_write.proof_hash import compute_implementation_hash  # noqa: E402
 import external_write.contracts as _contracts  # noqa: E402
 from external_write.contracts import OperationContract  # noqa: E402
 from external_write.adapter_registry import register_adapter, unregister_adapter  # noqa: E402
+
+# Reuse test_external_write_acceptance_ceremony.py's own fixture builders (same directory) for
+# the REAL, full-ceremony flow this file's CapabilityModuleHashCoverageTests needs -- DRY, never
+# a second parallel copy of _proof/_receipt/_descriptor's shapes.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import test_external_write_acceptance_ceremony as _ace_fixtures  # noqa: E402
 
 # The throwaway op_kind + fixture adapter this file's staleness tests mutate to flip a hash --
 # SAME reuse pattern as test_external_write_effects_manifest.py's own fixture (a real,
@@ -88,6 +97,14 @@ def _write_pending_migrations(root, entries):
 
 def _read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _hash_capability_module(root, cap_id):
+    """sha256 hex digest of ``agents/capabilities/<cap_id>_capability.py``'s CURRENT bytes --
+    matches acceptance_ceremony's own ``_compute_capability_module_hash`` algorithm exactly
+    (never reinvented)."""
+    path = Path(root) / "agents" / "capabilities" / f"{cap_id}_capability.py"
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _marker_dir_snapshot(root):
@@ -496,6 +513,18 @@ class _StaleHashFixtureMixin:
             sys.modules.pop(name, None)
         super().tearDown()
 
+    def _two_capability_project(self, tmp, *, phase_id="phase-1"):
+        """(Task B2b-fix, Minor) Moved here from being duplicated verbatim across
+        AcceptanceHashIsStaleTests and RevokeStaleAcceptanceTests -- one shared fixture."""
+        root = Path(tmp)
+        _write_capability(root, "acme_widget_deleter", op_kind=_STALE_FIXTURE_OP_KIND)
+        _write_capability(root, "acme_report_reader", op_kind=_STABLE_FIXTURE_OP_KIND)
+        _write_descriptors(root, [
+            {"id": "acme_widget_deleter", "accepted": True, "phase_id": phase_id},
+            {"id": "acme_report_reader", "accepted": True, "phase_id": phase_id},
+        ])
+        return root
+
     def _register_fixture_adapter(self, adapter_dir, suffix, op_kind=_STALE_FIXTURE_OP_KIND):
         adapter_path = Path(adapter_dir) / f"fixture_adapter_{suffix}.py"
         shutil.copy2(_FIXTURE_ADAPTER_SRC, adapter_path)
@@ -506,9 +535,16 @@ class _StaleHashFixtureMixin:
         return adapter_path
 
     def _write_acceptance_record(self, root, cap_id, phase_id, implementation_hash, op_kind,
-                                 audit_log_rel=None):
+                                 audit_log_rel=None, capability_module_hash="__auto__"):
+        """``capability_module_hash="__auto__"`` (the default) hashes the capability's OWN
+        module file AS IT EXISTS RIGHT NOW at ``agents/capabilities/<cap_id>_capability.py`` --
+        the realistic default (production hashes whatever the file looks like at grant time).
+        Pass ``None`` explicitly to simulate a pre-B2b-fix / legacy record that never recorded
+        this field at all."""
         log_path = Path(root) / (audit_log_rel or lifecycle_state.ACCEPTANCE_LOG_REL)
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        if capability_module_hash == "__auto__":
+            capability_module_hash = _hash_capability_module(root, cap_id)
         record = {
             "schema": ACCEPTANCE_RECORD_SCHEMA,
             "capability_id": cap_id,
@@ -519,6 +555,7 @@ class _StaleHashFixtureMixin:
             "operator_receipt_ref": "receipt.json",
             "contract_hash": "0" * 64,
             "implementation_hash": implementation_hash,
+            "capability_module_hash": capability_module_hash,
             "operator_confirmation": "Yes, accept this capability for live use.",
             "receipt_accepted_at": "2026-01-01T00:00:00Z",
         }
@@ -528,16 +565,6 @@ class _StaleHashFixtureMixin:
 
 
 class AcceptanceHashIsStaleTests(_StaleHashFixtureMixin, unittest.TestCase):
-    def _two_capability_project(self, tmp, *, phase_id="phase-1"):
-        root = Path(tmp)
-        _write_capability(root, "acme_widget_deleter", op_kind=_STALE_FIXTURE_OP_KIND)
-        _write_capability(root, "acme_report_reader", op_kind=_STABLE_FIXTURE_OP_KIND)
-        _write_descriptors(root, [
-            {"id": "acme_widget_deleter", "accepted": True, "phase_id": phase_id},
-            {"id": "acme_report_reader", "accepted": True, "phase_id": phase_id},
-        ])
-        return root
-
     def test_matching_hashes_are_not_stale(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = self._two_capability_project(tmp)
@@ -614,6 +641,10 @@ class AcceptanceHashIsStaleTests(_StaleHashFixtureMixin, unittest.TestCase):
             self.assertTrue(
                 lifecycle_state.acceptance_hash_is_stale(root, "acme_widget_deleter"))
 
+    @unittest.skipIf(
+        hasattr(os, "getuid") and os.getuid() == 0,
+        "running as root ignores file permission bits -- chmod(0o000) would not reproduce "
+        "an unreadable file")
     def test_unreadable_audit_log_fails_safe_to_stale(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = self._two_capability_project(tmp)
@@ -657,16 +688,6 @@ class AcceptanceHashIsStaleTests(_StaleHashFixtureMixin, unittest.TestCase):
 
 
 class RevokeStaleAcceptanceTests(_StaleHashFixtureMixin, unittest.TestCase):
-    def _two_capability_project(self, tmp, *, phase_id="phase-1"):
-        root = Path(tmp)
-        _write_capability(root, "acme_widget_deleter", op_kind=_STALE_FIXTURE_OP_KIND)
-        _write_capability(root, "acme_report_reader", op_kind=_STABLE_FIXTURE_OP_KIND)
-        _write_descriptors(root, [
-            {"id": "acme_widget_deleter", "accepted": True, "phase_id": phase_id},
-            {"id": "acme_report_reader", "accepted": True, "phase_id": phase_id},
-        ])
-        return root
-
     def test_stale_capability_is_revoked_retrial_queued_and_reconciled(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = self._two_capability_project(tmp)
@@ -766,6 +787,142 @@ class RevokeStaleAcceptanceTests(_StaleHashFixtureMixin, unittest.TestCase):
             self.assertNotIn("Error", result.note)
             entries = {e["id"]: e for e in _read_json(root / lifecycle_state.DESCRIPTOR_SET_REL)}
             self.assertFalse(entries["acme_widget_deleter"]["accepted"])
+
+
+# ===================================================================================
+# Task B2b-fix, Critical 1: capability-module coverage. implementation_hash covers ONLY the
+# contract's declared dependency_set + the op_kind's registered ADAPTER module -- it
+# structurally never covers agents/capabilities/<canonical_id>_capability.py, the capability's
+# OWN propose_operations/plan logic. Reproduces the reviewer's exact scenario end-to-end
+# through the REAL acceptance_ceremony flow (not a hand-written record).
+# ===================================================================================
+
+_PROPOSE_OPERATIONS_MODULE_TEMPLATE = '''"""{cap_id} capability module (Task B2b-fix RED-test
+fixture): routes writes through the sanctioned run-envelope entrypoint. Scans clean under the
+AST bypass scanner."""
+from agents.lib.external_write.operations import Operation
+from agents.lib.external_write.capability_api import run_enveloped_operation
+
+OP_KIND = "delete_record"
+
+
+def propose_operations(candidates):
+    # Guard: only ever propose a delete for records older than {threshold} days.
+    return [c for c in candidates if c.get("age_days", 0) > {threshold}]
+
+
+def go(envelope, task_id, client, receipt):
+    op = Operation(
+        kind="delete_record",
+        object_id=task_id,
+        field="__record__",
+        new_value=None,
+    )
+    return run_enveloped_operation(envelope, op, receipt, client)
+'''
+
+
+class CapabilityModuleHashCoverageTests(unittest.TestCase):
+    """implementation_hash alone cannot see a capability-zone-only rewrite. Accept a real
+    delete_record-backed capability (no adapter registered for delete_record -- its
+    implementation_hash is pinned only to the shared, static, never-mutated dependency_set),
+    then edit ONLY the capability module's propose_operations guard (">30 days" -> ">7 days"),
+    leaving the adapter/call shape (run_enveloped_operation) completely intact. BEFORE this
+    fix: acceptance_hash_is_stale reports False (implementation_hash never moved). AFTER: it
+    must report True (the new capability_module_hash signal catches it)."""
+
+    CAP_ID = "acme_widget_deleter"
+    PHASE_ID = _ace_fixtures.PHASE
+
+    def _write_capability_module(self, path, threshold):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            _PROPOSE_OPERATIONS_MODULE_TEMPLATE.format(cap_id=self.CAP_ID, threshold=threshold),
+            encoding="utf-8")
+
+    def _accept_real_capability(self, root):
+        """Runs the REAL, full acceptance_ceremony flow (never a hand-written record) -- a
+        genuine reproduction of what a real accepted capability's audit record looks like."""
+        cap_module_path = root / "agents" / "capabilities" / f"{self.CAP_ID}_capability.py"
+        self._write_capability_module(cap_module_path, threshold=30)
+
+        secdir = root / "security"
+        secdir.mkdir(parents=True, exist_ok=True)
+        descriptor_path = secdir / "capability_descriptors.json"
+        descriptor_path.write_text(
+            json.dumps([_ace_fixtures._descriptor(
+                id=self.CAP_ID, risk_class="irreversible_external", phase_id=self.PHASE_ID,
+                blast_radius_cap=5, accepted=False, declared_test_target="copy")]),
+            encoding="utf-8")
+
+        proof_path = root / "proof.json"
+        proof = _ace_fixtures._proof(
+            op_kind="delete_record", capability_id=self.CAP_ID,
+            module_paths=[str(cap_module_path)])
+        proof_path.write_text(json.dumps(proof), encoding="utf-8")
+
+        receipt_path = root / "receipt.json"
+        receipt = _ace_fixtures._receipt(
+            self.CAP_ID, phase_id=self.PHASE_ID, copy_run_proof_ref=str(proof_path))
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+        audit_path = secdir / "capability_acceptance_log.jsonl"
+
+        result = acceptance_ceremony.accept_capability_for_live_use(
+            self.CAP_ID, self.PHASE_ID, str(proof_path), str(receipt_path),
+            descriptor_set_path=str(descriptor_path), audit_log_path=str(audit_path),
+            capability_module_path=str(cap_module_path))
+        self.assertTrue(result.accepted, result.reason)
+        return cap_module_path
+
+    def test_capability_module_edit_alone_is_detected_as_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cap_module_path = self._accept_real_capability(root)
+
+            # Clean/matching baseline first (nothing edited yet).
+            self.assertFalse(lifecycle_state.acceptance_hash_is_stale(root, self.CAP_ID))
+
+            # The reviewer's exact rebuild: edit ONLY the propose_operations guard, leaving
+            # the adapter/call shape (run_enveloped_operation) completely intact.
+            self._write_capability_module(cap_module_path, threshold=7)
+
+            self.assertTrue(
+                lifecycle_state.acceptance_hash_is_stale(root, self.CAP_ID),
+                "a capability-zone-only rebuild (its OWN propose_operations code, never its "
+                "adapter or the shared dependency_set) must be detected as stale")
+
+    def test_revocation_end_to_end_for_a_capability_module_only_rebuild(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cap_module_path = self._accept_real_capability(root)
+            self._write_capability_module(cap_module_path, threshold=7)
+
+            result = lifecycle_state.revoke_stale_acceptance(root, self.CAP_ID)
+            self.assertTrue(result.revoked)
+            entries = {e["id"]: e for e in _read_json(root / lifecycle_state.DESCRIPTOR_SET_REL)}
+            self.assertFalse(entries[self.CAP_ID]["accepted"])
+
+    def test_old_record_with_no_capability_module_hash_fails_safe_to_stale(self):
+        # A legacy/pre-fix acceptance record recorded no capability_module_hash at all.
+        # Fail-safe: treated as stale even though implementation_hash still matches.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cap_module_path = root / "agents" / "capabilities" / f"{self.CAP_ID}_capability.py"
+            self._write_capability_module(cap_module_path, threshold=30)
+            _write_descriptors(root, [
+                {"id": self.CAP_ID, "accepted": True, "phase_id": self.PHASE_ID}])
+            log_path = root / lifecycle_state.ACCEPTANCE_LOG_REL
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            legacy_record = {
+                "schema": ACCEPTANCE_RECORD_SCHEMA, "capability_id": self.CAP_ID,
+                "phase_id": self.PHASE_ID, "op_kind": "delete_record",
+                "implementation_hash": compute_implementation_hash("delete_record"),
+                # no capability_module_hash key at all -- pre-fix shape
+            }
+            log_path.write_text(json.dumps(legacy_record) + "\n", encoding="utf-8")
+
+            self.assertTrue(lifecycle_state.acceptance_hash_is_stale(root, self.CAP_ID))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ synthetic-build-repo fixture helpers from ``test_upgrade_apply.py``, with the re
 """
 
 import contextlib
+import hashlib
 import io
 import json
 import shutil
@@ -553,6 +554,21 @@ class RenderReconcileResultTests(unittest.TestCase):
             operator_project_path="/tmp/x", from_version="v1", to_version="v2")
         self.assertEqual(render_reconcile_result(result), "")
 
+    def test_stale_acceptance_only_revocation_still_prints_a_plain_language_note(self):
+        # (Task B2b-fix, Important) A conformant-rebuild revocation that never touched
+        # `mechanisms` at all (the scanner never flagged anything -- see
+        # ConformantRebuildStalenessTests above) must NOT be a silent switch-off just
+        # because `mechanisms` is empty.
+        result = ReconcileResult(
+            operator_project_path="/tmp/x", from_version="v1", to_version="v2",
+            stale_acceptance_reset=["acme_widget_sync"],
+        )
+        out = render_reconcile_result(result)
+        self.assertNotEqual(out, "", "a stale-acceptance-only revocation must not print nothing")
+        self.assertIn("acme_widget_sync", out)
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn("Exception", out)
+
     def test_summarizes_paused_mechanism(self):
         result = ReconcileResult(
             operator_project_path="/tmp/x", from_version="v1", to_version="v2",
@@ -1073,6 +1089,13 @@ class RebuildForcesAcceptedFalseTests(_Base):
         from external_write.proof_hash import compute_implementation_hash  # noqa: E402
         from external_write.acceptance_ceremony import ACCEPTANCE_RECORD_SCHEMA  # noqa: E402
 
+        # (Task B2b-fix, Critical 1) A matching capability_module_hash too -- otherwise this
+        # capability's OWN record would fail the new signal-2 check (a record with no/mismatched
+        # capability_module_hash fails safe to stale), reverting the untouched capability
+        # anyway, for reasons unrelated to what THIS suite tests.
+        cap_module_path = proj / "agents" / "capabilities" / f"{capability_id}_capability.py"
+        capability_module_hash = hashlib.sha256(cap_module_path.read_bytes()).hexdigest()
+
         log_path = proj / "security" / "capability_acceptance_log.jsonl"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         record = {
@@ -1085,6 +1108,7 @@ class RebuildForcesAcceptedFalseTests(_Base):
             "operator_receipt_ref": "receipt.json",
             "contract_hash": "0" * 64,
             "implementation_hash": compute_implementation_hash("delete_record"),
+            "capability_module_hash": capability_module_hash,
             "operator_confirmation": "Yes, accept this capability for live use.",
             "receipt_accepted_at": "2026-01-01T00:00:00Z",
         }
@@ -1265,8 +1289,15 @@ class ConformantRebuildStalenessTests(_Base):
         self._register_adapter(self._FIXTURE_OP_KIND, module.FixtureAdapter())
         return adapter_path
 
-    def _write_acceptance_record(self, proj, capability_id, phase_id, implementation_hash):
+    def _write_acceptance_record(self, proj, capability_id, phase_id, implementation_hash,
+                                 capability_module_hash="__auto__"):
+        """``capability_module_hash="__auto__"`` (default) hashes the capability's CURRENT
+        module file on disk -- matches acceptance_ceremony's own algorithm (Task B2b-fix,
+        Critical 1); a record missing/mismatching this field now fails safe to stale too."""
         from external_write.acceptance_ceremony import ACCEPTANCE_RECORD_SCHEMA  # noqa: E402
+        if capability_module_hash == "__auto__":
+            cap_module_path = proj / "agents" / "capabilities" / f"{capability_id}_capability.py"
+            capability_module_hash = hashlib.sha256(cap_module_path.read_bytes()).hexdigest()
         log_path = proj / "security" / "capability_acceptance_log.jsonl"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         record = {
@@ -1275,6 +1306,7 @@ class ConformantRebuildStalenessTests(_Base):
             "op_kind": self._FIXTURE_OP_KIND, "copy_run_proof_ref": "proof.json",
             "operator_receipt_ref": "receipt.json", "contract_hash": "0" * 64,
             "implementation_hash": implementation_hash,
+            "capability_module_hash": capability_module_hash,
             "operator_confirmation": "Yes, accept this capability for live use.",
             "receipt_accepted_at": "2026-01-01T00:00:00Z",
         }
@@ -1424,6 +1456,94 @@ class CliWiringTests(unittest.TestCase):
         self.assertTrue((proj / PAUSED_MECHANISMS_DIR_REL / "estate_upkeep.pause").exists())
         queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
         self.assertEqual(queue[0]["mechanism_id"], "estate_upkeep")
+
+    def test_cmd_apply_prints_plain_language_note_for_a_stale_acceptance_only_revocation(self):
+        # (Task B2b-fix, Important) End-to-end: `wizard upgrade --apply` on a capability
+        # revoked ONLY by hash staleness (never scanner-flagged -- it never enters
+        # `mechanisms`) must still print a plain-language note, not silently switch it off.
+        from test_upgrade_apply import _write_build_repo, _build_operator_project
+        _scripts_dir = str(Path(__file__).resolve().parents[1])  # wizard/scripts
+        if _scripts_dir not in sys.path:
+            sys.path.insert(0, _scripts_dir)
+        import wizard_upgrade as cli  # noqa: E402
+
+        build_root, registry_path = _write_build_repo(self.tmp)
+        real_lib = _REAL_REPO / "wizard" / "agents" / "lib" / "external_write"
+        dest_lib = build_root / "wizard" / "agents" / "lib" / "external_write"
+        dest_lib.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(real_lib, dest_lib)
+
+        proj, manifest_path, _ = _build_operator_project(self.tmp, build_root)
+
+        capability_id = "acme_widget_sync"
+        capdir = proj / "agents" / "capabilities"
+        capdir.mkdir(parents=True, exist_ok=True)
+        cap_path = capdir / f"{capability_id}_capability.py"
+        cap_path.write_text(_CONFORMANT_WRITER, encoding="utf-8")
+
+        secdir = proj / "security"
+        secdir.mkdir(parents=True, exist_ok=True)
+        (secdir / "capability_descriptors.json").write_text(json.dumps([{
+            "id": capability_id, "name": capability_id, "action_class": "sync",
+            "risk_class": "irreversible_external", "recovery_profile_ref": None,
+            "declared_test_target": "copy", "blast_radius_cap": 5,
+            "accepted": True, "phase_id": "phase-1",
+        }]), encoding="utf-8")
+
+        # A REAL, hash-matching acceptance record (delete_record -- registered, no adapter,
+        # so genuinely stable). Purge first so this resolves the REAL repo's own package,
+        # never a stale reference some earlier test in this process cached.
+        for mod_name in list(sys.modules):
+            if mod_name == "external_write" or mod_name.startswith("external_write."):
+                del sys.modules[mod_name]
+        sys.path.insert(0, str(real_lib.parent))
+        from external_write.proof_hash import compute_implementation_hash  # noqa: E402
+        from external_write.acceptance_ceremony import ACCEPTANCE_RECORD_SCHEMA  # noqa: E402
+
+        module_hash = hashlib.sha256(cap_path.read_bytes()).hexdigest()
+        record = {
+            "schema": ACCEPTANCE_RECORD_SCHEMA, "capability_id": capability_id,
+            "phase_id": "phase-1", "risk_class": "irreversible_external",
+            "op_kind": "delete_record", "copy_run_proof_ref": "proof.json",
+            "operator_receipt_ref": "receipt.json", "contract_hash": "0" * 64,
+            "implementation_hash": compute_implementation_hash("delete_record"),
+            "capability_module_hash": module_hash,
+            "operator_confirmation": "Yes, accept this capability for live use.",
+            "receipt_accepted_at": "2026-01-01T00:00:00Z",
+        }
+        (secdir / "capability_acceptance_log.jsonl").write_text(
+            json.dumps(record) + "\n", encoding="utf-8")
+
+        # Rebuild: edit the capability's OWN code after acceptance. Adapter/call shape
+        # (run_enveloped_operation) stays intact -- this capability NEVER enters `by_relpath`.
+        cap_path.write_text(_CONFORMANT_WRITER + "\n# rebuilt\n", encoding="utf-8")
+
+        # Purge again -- the CLI's own reconcile pass must resolve the SYNTHETIC dest_lib
+        # copy, not whatever we just imported above from the real repo path.
+        for mod_name in list(sys.modules):
+            if mod_name == "external_write" or mod_name.startswith("external_write."):
+                del sys.modules[mod_name]
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cli.main([
+                "upgrade", "--to", "v0.5.0", "--apply",
+                "--manifest-path", str(manifest_path),
+                "--registry-path", str(registry_path),
+            ])
+        self.assertEqual(rc, 0)
+        printed = buf.getvalue()
+
+        # Never scanner-flagged -- proves this is genuinely the "stale_acceptance_reset only,
+        # mechanisms empty" path, and the plain-language note still printed.
+        self.assertIn(capability_id, printed)
+        self.assertIn("switched", printed)
+        self.assertNotIn("Traceback", printed)
+        self.assertNotIn("Exception", printed)
+
+        entries = json.loads(
+            (secdir / "capability_descriptors.json").read_text(encoding="utf-8"))
+        self.assertFalse(entries[0]["accepted"])
 
     def test_cmd_reconcile_detects_retired_surface_on_already_upgraded_project(self):
         # F-55 D: the estate already upgraded across the retired-surface boundary

@@ -117,6 +117,7 @@ Stdlib only -- this module ships into the operator's own runtime, ``agents/lib/e
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import tempfile
@@ -585,17 +586,39 @@ def acceptance_hash_is_stale(
     project_root: str, canonical_id: str, *,
     lib_dir: Optional[Path] = None, audit_log_path: Optional[str] = None,
 ) -> bool:
-    """True iff ``canonical_id`` is currently ``accepted`` AND its freshly recomputed
-    ``implementation_hash`` (``proof_hash.compute_implementation_hash``, reused verbatim -- never
-    reinvented) no longer matches the ``implementation_hash`` recorded in its own acceptance audit
-    record. False for a capability that is not accepted at all (nothing to be stale about) or
-    whose hashes still match (a clean, undisturbed acceptance).
+    """True iff ``canonical_id`` is currently ``accepted`` AND EITHER of two independent
+    signals shows its code changed since acceptance:
+
+      1. its freshly recomputed ``implementation_hash`` (``proof_hash.compute_implementation_
+         hash``, reused verbatim -- never reinvented) no longer matches the
+         ``implementation_hash`` recorded in its own acceptance audit record; OR
+      2. (Task B2b-fix, Critical 1) its capability-module SOURCE FILE
+         (``agents/capabilities/<canonical_id>_capability.py`` -- the capability's OWN
+         ``propose_operations`` / ``plan`` logic) no longer hashes to the ``capability_module_
+         hash`` recorded in that same record.
+
+    Signal 2 exists because signal 1 STRUCTURALLY CANNOT see a capability-zone-only rebuild:
+    ``implementation_hash`` covers only the contract's declared ``dependency_set`` plus the
+    op_kind's registered ADAPTER module (``effects_manifest.resolve_dependency_files``) -- never
+    the capability's own module file. A rewrite of the capability's own guard/logic (e.g. a
+    ``propose_operations`` age-guard edited from ">30 days" to ">7 days", with the adapter and
+    call shape left completely intact) moves NEITHER the contract's dependency files NOR any
+    registered adapter, so signal 1 alone would report "not stale" even though the capability's
+    actual behavior changed. Signal 2 closes that gap by hashing the one file signal 1 never
+    reaches.
+
+    False for a capability that is not accepted at all (nothing to be stale about) or whose
+    hashes ALL still match (a clean, undisturbed acceptance).
 
     Fail-safe (never silently keeps ``accepted:true`` unverified as not-stale): reports True
     (stale) when the accepted hash cannot be read at all -- no matching acceptance record, an
     unreadable/malformed audit log, or a record missing/mistyping its own ``implementation_hash``
     / ``op_kind`` -- OR when the current hash cannot be recomputed
-    (``proof_hash.ProofHashError``, e.g. an unregistered op_kind or a missing dependency file).
+    (``proof_hash.ProofHashError``, e.g. an unregistered op_kind or a missing dependency file) --
+    OR when the record carries NO ``capability_module_hash`` at all (a pre-existing/legacy record
+    predating this fix -- deliberately protective: this forces exactly one re-trial for an
+    already-accepted capability, an acceptable one-time cost) -- OR when the capability's current
+    module file cannot be read (deleted, moved, unreadable).
 
     Resolves ``canonical_id`` through A1's canonical-id resolver
     (``capability_identity.build_capability_index``); raises
@@ -605,8 +628,8 @@ def acceptance_hash_is_stale(
     discipline ``reconcile_state`` already applies, reused rather than duplicated with different
     wording.
 
-    CEILING: a single point-in-time check, meant to be called at reconcile/completion-check time
-    (see module docstring) -- never a per-write guarantee.
+    CEILING: a single point-in-time check, meant to be called at reconcile/completion-check/
+    run-start time (see module docstring) -- never a per-write guarantee.
     """
     root = Path(project_root).resolve()
     index = build_capability_index(str(root))
@@ -645,7 +668,22 @@ def acceptance_hash_is_stale(
     except ProofHashError:
         return True
 
-    return current_hash != accepted_hash
+    if current_hash != accepted_hash:
+        return True
+
+    # (Task B2b-fix, Critical 1) Signal 2: the capability-module source file itself. Fail-safe
+    # on a legacy record with no recorded hash at all -- see docstring above.
+    recorded_module_hash = record.get("capability_module_hash")
+    if not (isinstance(recorded_module_hash, str) and recorded_module_hash):
+        return True
+
+    module_path = root / CAPABILITIES_DIR_REL / f"{identity.canonical_id}{CAPABILITY_FILE_SUFFIX}"
+    try:
+        current_module_hash = hashlib.sha256(module_path.read_bytes()).hexdigest()
+    except OSError:
+        return True
+
+    return current_module_hash != recorded_module_hash
 
 
 def _revoke_accepted_entries(

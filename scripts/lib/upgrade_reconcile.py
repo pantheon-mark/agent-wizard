@@ -1419,8 +1419,16 @@ def reconcile_upgrade(
 
 def render_reconcile_result(result: ReconcileResult) -> str:
     """Short CLI-appended summary (plain language) — the full detail lives in the
-    notice file this points at."""
-    if not result.mechanisms:
+    notice file this points at.
+
+    (Task B2b-fix, Important) MUST NOT return "" just because ``result.mechanisms`` is empty:
+    a capability can be revoked ONLY via ``stale_acceptance_reset`` (a conformant rebuild that
+    stayed scanner-clean the whole time -- see ``_reconcile_conformant_rebuild_staleness``),
+    never entering ``mechanisms`` at all. Returning "" in that case would be a SILENT
+    switch-off -- the operator's own approved capability just lost its acceptance and nothing
+    was ever printed about it. Both sections are rendered (whichever are non-empty); returns ""
+    only when NEITHER carries anything to report."""
+    if not result.mechanisms and not result.stale_acceptance_reset:
         return ""
     lines = ["", "Upgrade safety check found something to review:"]
     for m in result.mechanisms:
@@ -1439,6 +1447,11 @@ def render_reconcile_result(result: ReconcileResult) -> str:
         else:
             status = "needs manual review (no schedule found)"
         lines.append(f"  - {m.mechanism_id}: {status}")
+    for canonical_id in result.stale_acceptance_reset:
+        lines.append(
+            f"  - {canonical_id}: its code changed since you approved it, so its approval "
+            "has been switched back off until you try it again and approve it again"
+        )
     if result.notice_path:
         lines.append(f"  See {result.notice_path} for what this means and what happens next.")
     return "\n".join(lines) + "\n"

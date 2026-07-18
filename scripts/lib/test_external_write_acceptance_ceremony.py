@@ -11,6 +11,7 @@ Uses REAL descriptor-set fixtures on disk + REAL copy_run_proof objects with REA
 the units under test.
 """
 
+import hashlib
 import json
 import os
 import sys
@@ -234,6 +235,53 @@ class AcceptanceCeremonyTest(unittest.TestCase):
         self.assertEqual(rec["capability_id"], "google_sheets")
         self.assertEqual(rec["phase_id"], PHASE)
         self.assertEqual(rec["copy_run_proof_ref"], str(c.proof_path))
+
+    # -- Task B2b-fix, Critical 1: capability_module_hash recorded ---------
+
+    def test_capability_module_hash_recorded_when_module_path_supplied(self):
+        # A real, on-disk capability module file -- its bytes must be hashed into the record
+        # verbatim (never the shared/scan-fixture capability_module_paths file, a distinct
+        # concept: capability_module_paths is what Invariant 7 scans for the bypass check;
+        # capability_module_path here is what B2b-fix's own capability_module_hash is over).
+        cap_module_path = Path(self.tmp) / "acme_widget_deleter_capability.py"
+        cap_module_path.write_text("OP_KIND = 'delete_record'\n", encoding="utf-8")
+        expected_hash = hashlib.sha256(cap_module_path.read_bytes()).hexdigest()
+
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets")])
+        res = c.call(capability_module_path=str(cap_module_path))
+        self.assertTrue(res.accepted, res.reason)
+        line = c.audit_path.read_text(encoding="utf-8").strip().splitlines()[-1]
+        rec = json.loads(line)
+        self.assertEqual(rec["capability_module_hash"], expected_hash)
+
+    def test_capability_module_hash_null_when_no_module_file_found_never_refuses(self):
+        # Additive, backward-compatible: no capability_module_path supplied and no file at the
+        # default-derived location either -- the record carries capability_module_hash: null,
+        # and acceptance itself is NOT refused (fail-safe applies to the DETECTOR reading this
+        # record later, never to the ceremony's own grant decision).
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets")])
+        res = c.call()
+        self.assertTrue(res.accepted, res.reason)
+        line = c.audit_path.read_text(encoding="utf-8").strip().splitlines()[-1]
+        rec = json.loads(line)
+        self.assertIn("capability_module_hash", rec)
+        self.assertIsNone(rec["capability_module_hash"])
+
+    def test_capability_module_hash_changes_with_module_bytes(self):
+        cap_module_path = Path(self.tmp) / "acme_widget_deleter_capability.py"
+        cap_module_path.write_text("OP_KIND = 'delete_record'\n", encoding="utf-8")
+
+        c = _Case(self.tmp, descriptors=[_descriptor(id="google_sheets")])
+        res = c.call(capability_module_path=str(cap_module_path))
+        self.assertTrue(res.accepted, res.reason)
+        first_hash = json.loads(
+            c.audit_path.read_text(encoding="utf-8").strip().splitlines()[-1]
+        )["capability_module_hash"]
+
+        cap_module_path.write_text(
+            "OP_KIND = 'delete_record'\n# rebuilt\n", encoding="utf-8")
+        self.assertNotEqual(
+            hashlib.sha256(cap_module_path.read_bytes()).hexdigest(), first_hash)
 
     # -- Invariant 1: descriptor set + target well-formed -----------------
 
