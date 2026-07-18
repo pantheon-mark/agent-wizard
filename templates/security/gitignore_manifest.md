@@ -14,6 +14,10 @@
 | `/security/session_cookies/` | Secrets | Session cookie files written by Playwright | Ephemeral auth tokens — must not be committed |
 | `/logs/` | Privacy | All log files | Logs may contain opaque record IDs; permanently excluded per PII protection rule |
 | `node_modules/` | Dependencies | Installed packages | Regenerated from package.json — not part of the project artifact |
+| `/security/acceptance_receipts/` | Operational (local-only) | Minted receipts recording your acceptance of an external-write action | Local runtime record, not something you decide to commit — regenerated as the system operates |
+| `/security/run_envelopes/` | Operational (local-only) | Persisted per-run consent envelopes for external-write actions | Local runtime record, not something you decide to commit — regenerated as the system operates |
+| `/security/invocation_ledgers/` | Operational (local-only) | Per-run blast-radius invocation ledgers | Local runtime record, not something you decide to commit — regenerated as the system operates |
+| `/security/capability_acceptance_log.jsonl` | Operational (local-only) | Append-only log of capability acceptance decisions | Local runtime record, not something you decide to commit — regenerated as the system operates |
 
 ---
 
@@ -36,6 +40,7 @@
 | Privacy | Data that may identify individuals — permanently excluded |
 | Dependencies | Generated files that can be recreated from a manifest |
 | Cache | Temporary or generated files that should not be versioned |
+| Operational (local-only) | Runtime records the system regenerates as it operates — local by construction, not a commit decision |
 
 ---
 

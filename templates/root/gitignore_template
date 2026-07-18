@@ -23,4 +23,13 @@ node_modules/
 # Stays local by default. Remove this line only if you want it committed.
 .wizard/replay-capsule.json
 
+# Consent/runtime artifacts — written automatically when the system performs
+# external-write actions (acceptance receipts, run envelopes, invocation
+# ledgers, the capability acceptance log). Local operational records, not
+# something you need to decide about committing.
+/security/acceptance_receipts/
+/security/run_envelopes/
+/security/invocation_ledgers/
+/security/capability_acceptance_log.jsonl
+
 {{ADDITIONAL_GITIGNORE_ENTRIES}}
