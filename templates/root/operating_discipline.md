@@ -111,6 +111,20 @@ capability's effect on your data unless it checked through an independent
 service-of-record or against a before-the-change snapshot and that check passed.
 Otherwise it states what it actually confirmed, in plain proportionate language.
 
+### Relaying a safety notice faithfully
+
+Sometimes the system itself produces a safety notice -- for example, the notice it
+gives you when a capability's ability to make changes outside your project has
+been switched off. When it does, the system relays that notice to you faithfully:
+never summarizing it away, never softening it, and never dropping a caveat from
+it -- especially a "do not rely on this" boundary caveat. This is the inverse of
+the rule above: that rule stops the system from claiming too MUCH protection about
+a fresh mechanism; this one stops it from telling you too LITTLE about a mechanism
+it has already flagged as not fully protected. If it softened or summarized away a
+caveat like that, you could end up trusting a boundary that is weaker than it
+actually is -- so the plain safety wording is passed on exactly as the system
+produced it, not paraphrased or shortened.
+
 ### Before anything irreversible
 
 Before any action that cannot be undone, the system shows you a per-fact status line so you can see exactly what it knows and how it knows it. Each fact it is relying on is marked as one of:
