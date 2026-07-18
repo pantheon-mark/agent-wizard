@@ -588,10 +588,105 @@ import {module_name}
 
 from external_write.capability_api import run_enveloped_operation  # noqa: F401
 
+if False:  # AST-only guarded call (DR-2 fix) -- never executed; proves this test
+           # file's entrypoint reference is a genuine ast.Call, not merely an
+           # import, without ever performing a live write when discovered/collected.
+    run_enveloped_operation()
+
 
 class TestRealEntrypointCap(unittest.TestCase):
     def test_describe_reports_ready(self):
         self.assertEqual({module_name}.describe(), "Real Entrypoint Cap ready")
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertTrue(result.ok, f"expected ok, got failures: {result.failures!r}")
+        self.assertEqual(result.failures, [])
+        self._assert_no_traceback(result)
+
+    def test_import_only_no_call_entrypoint_reference_is_flagged(self):
+        # (DR-2 required test) A test file that IMPORTS the real entrypoint but
+        # never actually CALLS it must be FLAGGED -- an import-only reference
+        # proves the test file merely names the entrypoint, not that any test
+        # method actually exercises it.
+        cap_id = "import_only_no_call_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Import Only No Call Cap", op_kind=VALID_OP_KIND))
+        self._stage_real_external_write()
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: imports the real entrypoint but never calls it (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}
+
+from external_write.capability_api import run_enveloped_operation  # noqa: F401 -- imported, never called
+
+
+class TestImportOnlyNoCallCap(unittest.TestCase):
+    def test_describe_reports_ready(self):
+        self.assertEqual({module_name}.describe(), "Import Only No Call Cap ready")
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(f.startswith("Producer entrypoint:") for f in result.failures),
+            f"expected a Producer entrypoint failure for an import-only, never-called "
+            f"entrypoint reference, got {result.failures!r}",
+        )
+        self._assert_no_traceback(result)
+
+    def test_attribute_access_call_to_entrypoint_passes(self):
+        # (DR-2 required test) A legitimate attribute-access call
+        # (``import external_write.capability_api`` ... ``capability_api.
+        # run_enveloped_operation(...)``) must PASS -- the probe must not
+        # require the specific ``from ... import run_enveloped_operation``
+        # then bare-call shape.
+        cap_id = "attr_access_call_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Attr Access Call Cap", op_kind=VALID_OP_KIND))
+        self._stage_real_external_write()
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: module import + attribute-access CALL to the real entrypoint (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}
+
+import external_write.capability_api
+
+
+class TestAttrAccessCallCap(unittest.TestCase):
+    def test_describe_reports_ready(self):
+        self.assertEqual({module_name}.describe(), "Attr Access Call Cap ready")
+
+    def test_attribute_access_call_shape(self):
+        if False:  # AST-only guarded call -- never executed; this test file
+                   # never performs a live write, but the AST still carries a
+                   # genuine ast.Call node reaching the real entrypoint via
+                   # attribute access, exactly the shape DR-2 must accept.
+            external_write.capability_api.run_enveloped_operation()
 
 
 if __name__ == "__main__":
@@ -730,6 +825,12 @@ import {module_name}
 
 from external_write.capability_api import run_enveloped_operation  # noqa: F401 -- never staged
 
+if False:  # AST-only guarded call (DR-2 fix) -- never executed; keeps this
+           # fixture passing probe 1 (producer-entrypoint) on a genuine Call
+           # node, independent of the ModuleNotFoundError this fixture is
+           # deliberately built to hit at subprocess-run time.
+    run_enveloped_operation()
+
 
 class TestNeverRunsCap(unittest.TestCase):
     def test_describe_reports_ready(self):
@@ -814,6 +915,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import {module_name}
 
 from external_write.capability_api import run_enveloped_operation  # noqa: F401
+
+if False:  # AST-only guarded call (DR-2 fix) -- never executed; proves this test
+           # file's entrypoint reference is a genuine ast.Call, not merely an
+           # import, without ever performing a live write when discovered/collected.
+    run_enveloped_operation()
 
 
 class TestCliAllPassCap(unittest.TestCase):

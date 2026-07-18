@@ -436,10 +436,14 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
 #
 # For each discovered test file, this module then checks, by AST only (never
 # by importing the test file):
-#   * does it reference the real acceptance/gate entrypoint -- an import of
+#   * does it reference the real acceptance/gate entrypoint -- a real CALL to
 #     ``run_enveloped_operation`` (the sanctioned live-write entrypoint,
-#     ``external_write.capability_api`` / ``external_write.run_envelope``) or
-#     of ``operator_acceptance`` (the acceptance CLI)?
+#     ``external_write.capability_api`` / ``external_write.run_envelope``),
+#     bare or via attribute access (DR-2 fix: an import alone, never called,
+#     is no longer sufficient -- see ``_ast_references_entrypoint``'s own
+#     docstring), or an import/module-reference of ``operator_acceptance``
+#     (the acceptance CLI -- import-only stays sufficient there; it is invoked
+#     as a subprocess, not called in-process)?
 #   * does it define its own class whose name IS (exactly, case-insensitive)
 #     an optional fake/stub/mock/dummy affix plus ``Operation``/``Adapter``/
 #     ``Plan`` (e.g. ``Operation``, ``FakeOperation``, ``StubAdapter``,
@@ -447,11 +451,14 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
 #     exactly the SB-8 shape?
 #
 # LIMITS (stated per this task's instruction to surface heuristic ambiguity):
-#   * This is a NAME-based heuristic, not a data-flow analysis. A test that
-#     imports the real entrypoint but never actually calls it still passes
-#     this probe (probe 2, known-bad-fails, is what would catch that -- an
-#     import-only test cannot make the suite catch a real break either,
-#     which drives it to fail probe 2 instead).
+#   * This is a NAME-based heuristic, not a data-flow analysis. (DR-2 fix) A
+#     test that only IMPORTS the real entrypoint but never actually calls it
+#     anywhere is now correctly FLAGGED by this probe itself, not left to
+#     probe 2 (known-bad-fails) to catch indirectly. The heuristic still
+#     cannot tell whether a real ``ast.Call`` to the entrypoint is reached at
+#     runtime (a call inside dead/unreachable code, or one whose arguments are
+#     wrong, still satisfies this AST-only check) -- that residual is exactly
+#     what probe 2 remains for.
 #   * A legitimately-named test helper class that happens to match the
 #     stand-in name pattern (e.g. a fixture class a project deliberately
 #     calls ``FakeAdapter`` to build a REAL ``Operation`` from, or a subclass
@@ -561,10 +568,34 @@ def _ast_references_module(tree: ast.AST, module_name: str) -> bool:
 
 
 def _ast_references_entrypoint(tree: ast.AST) -> bool:
-    """True iff ``tree`` imports the real acceptance/gate entrypoint --
-    ``run_enveloped_operation`` (by name, from wherever it's re-exported) or
-    the ``operator_acceptance`` module (the acceptance CLI) -- by name or by
-    module path."""
+    """True iff ``tree`` genuinely CALLS the real live-write entrypoint
+    (``run_enveloped_operation``) or imports/references the ``operator_acceptance``
+    module (the acceptance CLI -- import/module-reference alone stays sufficient
+    there; see the DR-2 decision note below).
+
+    (DR-2 fix) An IMPORT of ``run_enveloped_operation`` alone, never called, used
+    to satisfy this probe -- that only proves the test file NAMES the real
+    entrypoint, not that any test method actually EXERCISES it (probe 2,
+    known-bad-fails, is what would have caught an import-only test's inertness,
+    but a test author should not have to rely on that second probe to get an
+    honest producer-entrypoint verdict). This now requires a real ``ast.Call``
+    reaching the entrypoint, in EITHER shape:
+      * ``from ... import run_enveloped_operation`` (optionally ``as X``) then a
+        bare ``run_enveloped_operation(...)`` / ``X(...)`` call, or
+      * a module import (``import external_write.capability_api`` or similar)
+        then an attribute-access call ending in ``....run_enveloped_operation(...)``
+        (e.g. ``capability_api.run_enveloped_operation(...)`` or
+        ``external_write.capability_api.run_enveloped_operation(...)``) -- matched
+        on the trailing attribute name alone, not on which module it was
+        imported from, mirroring this module's other AST-only, name-based probes.
+
+    DECISION (per this task's own "if unsure" default): the acceptance-CLI path
+    is deliberately left as import/module-reference-only, NOT also requiring a
+    call -- ``operator_acceptance`` is invoked as a CLI subprocess (``python -m
+    operator_acceptance ...``), not called as an in-process Python function, so
+    there is no ``ast.Call`` node to require in the first place; naming the
+    module remains the right-sized evidence for that entrypoint."""
+    call_names = set(_ENTRYPOINT_IMPORT_NAMES)
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             module_parts = (node.module or "").split(".")
@@ -572,11 +603,20 @@ def _ast_references_entrypoint(tree: ast.AST) -> bool:
                 return True
             for alias in node.names:
                 if alias.name in _ENTRYPOINT_IMPORT_NAMES:
-                    return True
+                    call_names.add(alias.asname or alias.name)
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 if _ACCEPTANCE_CLI_MODULE_NAME in alias.name.split("."):
                     return True
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in call_names:
+            return True
+        if isinstance(func, ast.Attribute) and func.attr in _ENTRYPOINT_IMPORT_NAMES:
+            return True
     return False
 
 
