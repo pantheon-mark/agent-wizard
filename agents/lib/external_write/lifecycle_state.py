@@ -22,9 +22,59 @@ migration entry, all three together or none of them -- an ``accepted: true`` des
 still-present pause marker (or a lingering queued migration) is exactly the limbo this function
 exists to close on every call.
 
-``reconcile_state`` NEVER flips ``accepted`` itself -- that is the sanctioned resume/complete
-tool's job (a later task). This module only makes the two materialized views agree with whatever
-``accepted`` (and the migration queue) already say.
+``reconcile_state`` NEVER flips ``accepted`` itself -- that is ``complete_migration``'s job (Task
+B3, below). This module only makes the two materialized views agree with whatever ``accepted``
+(and the migration queue) already say.
+
+The sanctioned resume/complete-migration tool (Task B3, F-63 fix)
+------------------------------------------------------------------------------
+Before ``complete_migration`` existed, there was NO sanctioned way to resume a paused capability:
+``operator_acceptance.record_operator_acceptance`` closes the pending-migration QUEUE entry but
+never touches the pause MARKER ``write_gate._load_paused_op_kinds`` actually reads, so an
+operator/agent in the field had nothing to call except a hand ``rm`` of the marker files -- a
+manual edit of a security-critical artifact, exactly the failure mode this whole package exists
+to rule out elsewhere (see ``acceptance_ceremony``'s own "sole legitimate mechanism" framing).
+
+``complete_migration(project_root, canonical_id, copy_run_proof_ref, operator_receipt_ref)``
+closes that gap with ONE call, fail-safe ordered so a crash at any point never leaves the
+capability live-authorized without also being reachable:
+
+  1. Read the operator-acceptance receipt (already produced by the Step-6 flow this call
+     completes) to route the correct ``capability_id``/``phase_id`` to the ceremony, and confirm
+     the receipt names the SAME canonical capability this call was asked to complete -- a receipt
+     for a different capability must never drive an acceptance (or a marker-clear) here.
+  2. Drive ``acceptance_ceremony.accept_capability_for_live_use`` -- the SOLE writer of
+     ``accepted: true`` -- directly (never ``operator_acceptance.record_operator_acceptance``,
+     which MINTS a fresh receipt from raw operator-confirmation text; this function's caller
+     already has a minted receipt REF, so the ceremony's own receipt-ref signature is the correct
+     reuse point, not a second minting path). The ceremony re-verifies every invariant itself
+     (proof validity, proof/receipt binding, phase match, hash-bound risk canon, wire-verified
+     write path) and appends the durable acceptance-audit record as part of that SAME
+     authoritative write -- this is the LIVENESS-ENABLING write. A crash before it completes
+     leaves ``accepted`` at its PRIOR value (the ceremony's own atomic-write discipline; see that
+     module's docstring) -- OFF, if this was a genuine resume.
+  3. ONLY once acceptance holds: call ``reconcile_state`` (reused, not duplicated) to clear the
+     pause marker and close the migration-queue entry. This is the LAST liveness-ENABLING step --
+     a crash between step 2 and step 3 leaves ``accepted: true`` but the marker still PRESENT, so
+     ``write_gate`` still denies the write (fail-safe OFF, not a half-open capability). Re-running
+     ``complete_migration`` (or a bare ``reconcile_state`` call) against that same, already-
+     accepted capability converges cleanly -- the ceremony's own idempotent
+     already-accepted branch means step 2 performs no duplicate write/audit-append, and
+     ``reconcile_state`` is idempotent by construction (see this module's own docstring above).
+
+A4-FOLD (Task B3, REQUIRED): step 3's marker-clear is EVIDENCE-BOUND, never a blind
+"clear whatever marker resolves to this id". Immediately before handing off to
+``reconcile_state`` (whose own accepted-branch deletes the marker unconditionally once
+``accepted`` is true), this function reads the EXISTING marker's own recorded ``canonical_id`` and
+``paused_op_kinds`` and confirms they are NOT CONTRADICTED by the capability just accepted (its
+resolved canonical id, and its proof's own ``op_kind``). A marker that is absent, or present but
+carrying no contradicting evidence, is handed to ``reconcile_state`` to clear as normal. A marker
+whose own recorded ``canonical_id`` names a DIFFERENT capability, whose recorded
+``paused_op_kinds`` does not include the just-accepted operation, or whose informative state file
+is present but unreadable/malformed, is left IN PLACE -- fail-closed, with a plain-language
+``CompleteResult.reason`` -- rather than risk turning the WRONG capability's write path back on.
+The B1 marker shape already stores ``canonical_id`` for exactly this check (see this module's own
+A4-fold note in its ``_ensure_paused_marker``/``_merge_marker_state`` section above).
 
 Fail-closed on broken state (never guesses over a corrupt file)
 ------------------------------------------------------------------------------
@@ -148,6 +198,14 @@ from external_write.operator_acceptance import (  # noqa: E402
 from external_write.proof_hash import (  # noqa: E402
     compute_implementation_hash,
     ProofHashError,
+)
+# (Task B3) The ceremony is the SOLE writer of accepted:true -- complete_migration drives it
+# directly (never operator_acceptance.record_operator_acceptance, which mints a FRESH receipt
+# from raw operator-confirmation text; complete_migration's caller already has a minted receipt
+# ref). See this module's own "sanctioned resume/complete-migration tool" docstring section above.
+from external_write.acceptance_ceremony import (  # noqa: E402
+    accept_capability_for_live_use,
+    AcceptanceResult,
 )
 
 # ---------------------------------------------------------------------------
@@ -809,4 +867,279 @@ def revoke_stale_acceptance(
     return RevocationResult(
         canonical_id=reconcile.canonical_id, stale=stale, revoked=stale,
         note=note, reconcile=reconcile,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task B3 (F-63 fix): the ONE sanctioned resume/complete-migration tool. See the module
+# docstring's "The sanctioned resume/complete-migration tool" + "A4-FOLD" sections above for the
+# full rationale; this section is the implementation.
+# ---------------------------------------------------------------------------
+
+def _load_receipt_for_routing(operator_receipt_ref: str) -> Optional[Dict[str, Any]]:
+    """Fail-safe JSON load of the operator-acceptance receipt, used ONLY to ROUTE this call (pull
+    out ``capability_id``/``phase_id`` to pass to the ceremony, which then re-validates the
+    receipt itself from scratch and trusts nothing read here). Returns ``None`` on a missing /
+    unreadable / malformed / non-dict file -- never raises."""
+    try:
+        data = json.loads(Path(operator_receipt_ref).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _extract_proof_op_kind(copy_run_proof_ref: str) -> Optional[str]:
+    """Fail-safe JSON load of the copy_run_proof, used ONLY to read its own ``op_kind`` for the
+    A4-fold marker/op_kind cross-check below (the ceremony has already independently validated
+    this same proof by the time this is called). Returns ``None`` on a missing / unreadable /
+    malformed / non-dict file, or a file carrying no string ``op_kind`` -- never raises."""
+    try:
+        data = json.loads(Path(copy_run_proof_ref).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    op_kind = data.get("op_kind")
+    return op_kind if isinstance(op_kind, str) and op_kind else None
+
+
+def _evidence_bound_marker_check(
+    root: Path, canonical_id: str, proof_op_kind: Optional[str],
+) -> Tuple[bool, Optional[str]]:
+    """The A4-fold gate: may the pause marker for ``canonical_id`` be handed to
+    ``reconcile_state`` for clearing? Returns ``(True, None)`` when it is safe to proceed
+    (no marker present at all; only the uninformative ``.pause`` touch-file sentinel is present
+    with no ``.json`` state to check; or a ``.json`` state IS present and carries nothing that
+    contradicts the capability just accepted). Returns ``(False, reason)`` -- fail-closed, never
+    clear -- when a ``.json`` state file is present but unreadable/malformed (it could be hiding a
+    pause for a different capability), or when it IS readable but its own recorded
+    ``canonical_id`` names a DIFFERENT capability, or its recorded ``paused_op_kinds`` is a
+    non-empty list that does NOT include ``proof_op_kind``.
+
+    Deliberately does NOT treat an ABSENT ``canonical_id`` field (a legacy, pre-B1 marker) as
+    contradicting -- there is no evidence to contradict, and refusing every legacy marker forever
+    would defeat this function's entire purpose (replacing the hand-``rm``). Only an ACTUAL
+    mismatch -- a value present and different -- refuses. Same convention for
+    ``paused_op_kinds``: an absent/empty list is not evidence of anything; only a non-empty list
+    that excludes the accepted operation refuses."""
+    state_path = _pause_state_path(root, canonical_id)
+    pause_path = _pause_marker_path(root, canonical_id)
+    if not state_path.exists() and not pause_path.exists():
+        return True, None
+
+    if not state_path.exists():
+        # Only the bare touch-file sentinel is present -- no informative json state carries any
+        # identity claim to contradict.
+        return True, None
+
+    try:
+        raw = state_path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except Exception:
+        return False, (
+            "this capability was accepted, but its pause marker's own state file "
+            f"({PAUSED_MECHANISMS_DIR_REL}/{canonical_id}.json) exists and could not be read or "
+            "parsed. That file could be hiding a pause for a different capability, so it was NOT "
+            "cleared automatically (the capability stays off until this is resolved). Inspect "
+            "that file by hand, repair or remove it once you have confirmed it is safe, then try "
+            "completing this migration again."
+        )
+    if not isinstance(data, dict):
+        return False, (
+            "this capability was accepted, but its pause marker's own state file "
+            f"({PAUSED_MECHANISMS_DIR_REL}/{canonical_id}.json) does not hold the expected "
+            "structure, so it was NOT cleared automatically (the capability stays off until this "
+            "is resolved). Inspect that file by hand, then try completing this migration again."
+        )
+
+    stored_canonical = data.get("canonical_id")
+    if (isinstance(stored_canonical, str) and stored_canonical
+            and stored_canonical != canonical_id):
+        return False, (
+            "this capability was accepted, but its pause marker "
+            f"({PAUSED_MECHANISMS_DIR_REL}/{canonical_id}.json) is stamped for a DIFFERENT "
+            f"capability ({stored_canonical!r}), not this one ({canonical_id!r}). It was NOT "
+            "cleared automatically -- clearing it would risk turning the wrong capability's write "
+            "path back on. Inspect that file by hand, then try completing this migration again."
+        )
+
+    stored_op_kinds = data.get("paused_op_kinds")
+    if (isinstance(stored_op_kinds, list) and stored_op_kinds
+            and all(isinstance(k, str) for k in stored_op_kinds)
+            and proof_op_kind is not None
+            and proof_op_kind not in stored_op_kinds):
+        return False, (
+            "this capability was accepted, but its pause marker "
+            f"({PAUSED_MECHANISMS_DIR_REL}/{canonical_id}.json) lists paused operation(s) "
+            f"{sorted(stored_op_kinds)!r}, which does not include the operation just accepted "
+            f"({proof_op_kind!r}). It was NOT cleared automatically. Inspect that file by hand, "
+            "then try completing this migration again."
+        )
+    return True, None
+
+
+@dataclass(frozen=True)
+class CompleteResult:
+    """Outcome of one ``complete_migration`` call -- the sanctioned resume/complete-migration
+    tool (Task B3, F-63 fix). This REPLACES the operator/agent hand-``rm`` of a pause marker: the
+    only sanctioned way a capability resumes live writes after a migration/rebuild is through this
+    function (or, mid-recovery after a crash between its own steps 2 and 3, a bare
+    ``reconcile_state`` re-run against the same already-accepted capability).
+
+    canonical_id: the resolved canonical capability id this call completed/attempted.
+    completed:    True iff the WHOLE migration is now coherent -- the descriptor is accepted AND
+                  the pause marker is confirmed cleared (``write_gate`` will permit a live write).
+                  False on any refusal: the receipt could not be routed, it named a different
+                  capability, the ceremony itself refused (invalid proof/receipt/phase/hash), or
+                  -- the A4-fold case -- the pause marker's own recorded identity contradicted the
+                  capability just accepted, so this call deliberately left it in place.
+    accepted:     the descriptor's ``accepted`` value for ``canonical_id`` at the end of this
+                  call. Can be True while ``completed`` is False (the A4-fold refusal case): the
+                  capability IS accepted, but its marker is still present, so write_gate still
+                  denies it live -- the deliberate fail-safe state, not a bug.
+    reason:       plain-language reason when not fully completed; None on full success.
+    acceptance:   the underlying ``AcceptanceResult`` from the ceremony (None if this call refused
+                  before ever reaching it -- e.g. an unreadable/misrouted receipt).
+    reconcile:    the ``ReconcileResult`` from the ``reconcile_state`` call this function makes
+                  once acceptance holds AND the A4-fold marker check clears (None if acceptance
+                  was refused, or if the A4-fold check itself refused first).
+    """
+    canonical_id: str
+    completed: bool
+    accepted: bool
+    reason: Optional[str] = None
+    acceptance: Optional[AcceptanceResult] = None
+    reconcile: Optional[ReconcileResult] = None
+
+
+def complete_migration(
+    project_root: str,
+    canonical_id: str,
+    copy_run_proof_ref: str,
+    operator_receipt_ref: str,
+    *,
+    descriptor_set_path: Optional[str] = None,
+    lib_dir: Optional[Path] = None,
+    audit_log_path: Optional[str] = None,
+    capability_module_path: Optional[str] = None,
+) -> CompleteResult:
+    """The sanctioned resume/complete-migration tool (Task B3, F-63 fix): accept a capability for
+    live use AND make its lifecycle views coherent, in ONE fail-safe-ordered call. Replaces the
+    operator/agent hand-``rm`` of ``.wizard/paused-mechanisms/<canonical_id>.{pause,json}`` --
+    after this function exists, a security marker is never deleted by hand.
+
+    Ordering (fail-safe; see module docstring for the full rationale):
+      1. Read ``operator_receipt_ref`` to route ``capability_id``/``phase_id`` to the ceremony,
+         and confirm it names the SAME canonical capability as ``canonical_id`` (never let a
+         receipt for a different capability drive this call).
+      2. Drive ``acceptance_ceremony.accept_capability_for_live_use`` directly -- the SOLE writer
+         of ``accepted: true``, re-verifying every invariant itself and appending the durable
+         acceptance-audit record as part of that same write. THE liveness-ENABLING write.
+      3. Only once acceptance holds: run the A4-fold evidence-bound marker check, then (only if it
+         clears) call ``reconcile_state`` -- clears the pause marker + closes the migration entry.
+         This is the LAST liveness-enabling step; a crash between 2 and 3 leaves ``accepted: true``
+         with the marker still present (write_gate denies -- fail-safe OFF), and a re-run (of this
+         function, or of a bare ``reconcile_state`` call) converges idempotently.
+
+    Raises ``external_write.capability_identity.IdentityResolutionError`` if ``canonical_id`` does
+    not resolve to a real capability module on disk, and ``ReconcileStateError`` if the descriptor
+    set or migration queue exists but could not be read/parsed -- the same fail-closed convention
+    ``reconcile_state`` / ``acceptance_hash_is_stale`` already apply, reused here rather than
+    duplicated with different wording.
+    """
+    root = Path(project_root).resolve()
+    index = build_capability_index(str(root))
+    if index.state_read_error:
+        raise ReconcileStateError(
+            "Could not safely complete this migration because the capability descriptor list "
+            "(security/capability_descriptors.json) or the pending-migrations queue "
+            "(agents/handoffs/pending_migrations.json) exists but could not be read or is "
+            "corrupted. This is NOT confirmation that nothing is wrong -- repair or restore that "
+            "file, then try again."
+        )
+    identity: CapabilityIdentity = index.resolve(canonical_id, "module_stem")
+
+    # --- Step 1: route from the receipt; reuse the ceremony's own validation, never hand-roll a
+    # second hash/shape check here.
+    receipt = _load_receipt_for_routing(operator_receipt_ref)
+    if receipt is None:
+        return CompleteResult(
+            canonical_id=identity.canonical_id, completed=False, accepted=False,
+            reason=(
+                f"could not read the operator-acceptance receipt at {operator_receipt_ref!r} as "
+                "JSON -- nothing was accepted, nothing was cleared."))
+
+    receipt_capability_id = receipt.get("capability_id")
+    receipt_phase_id = receipt.get("phase_id")
+    if not (isinstance(receipt_capability_id, str) and receipt_capability_id):
+        return CompleteResult(
+            canonical_id=identity.canonical_id, completed=False, accepted=False,
+            reason=(
+                "the operator-acceptance receipt carries no capability_id -- nothing was "
+                "accepted, nothing was cleared."))
+    if not (isinstance(receipt_phase_id, str) and receipt_phase_id):
+        return CompleteResult(
+            canonical_id=identity.canonical_id, completed=False, accepted=False,
+            reason=(
+                "the operator-acceptance receipt carries no phase_id -- nothing was accepted, "
+                "nothing was cleared."))
+
+    try:
+        receipt_identity = index.resolve(receipt_capability_id, "unknown")
+    except IdentityResolutionError as e:
+        return CompleteResult(
+            canonical_id=identity.canonical_id, completed=False, accepted=False,
+            reason=e.operator_message)
+    if receipt_identity.canonical_id != identity.canonical_id:
+        return CompleteResult(
+            canonical_id=identity.canonical_id, completed=False, accepted=False,
+            reason=(
+                f"the operator-acceptance receipt names capability {receipt_capability_id!r}, "
+                f"which resolves to a different capability ({receipt_identity.canonical_id!r}) "
+                f"than the one this call was asked to complete ({identity.canonical_id!r}). "
+                "Refusing -- nothing was accepted, nothing was cleared."))
+
+    # --- Step 2: the ceremony -- sole writer of accepted:true, re-verifies everything itself.
+    # (Task B3 correctness note) acceptance_ceremony's OWN descriptor_set_path/audit_log_path
+    # defaults are CWD-relative (it is normally invoked with cwd == project root, per this
+    # package's "agents run from project root" convention) -- but complete_migration explicitly
+    # takes a project_root argument that may legitimately differ from cwd (every test in this
+    # suite does), so a caller-omitted path here is resolved against `root`, never silently left
+    # to fall through to the ceremony's own cwd-relative default.
+    resolved_descriptor_set_path = (
+        descriptor_set_path if descriptor_set_path is not None
+        else str(root / DESCRIPTOR_SET_REL)
+    )
+    resolved_audit_log_path = (
+        audit_log_path if audit_log_path is not None
+        else str(root / ACCEPTANCE_LOG_REL)
+    )
+    acceptance = accept_capability_for_live_use(
+        receipt_capability_id, receipt_phase_id, copy_run_proof_ref, operator_receipt_ref,
+        descriptor_set_path=resolved_descriptor_set_path, lib_dir=lib_dir,
+        audit_log_path=resolved_audit_log_path, capability_module_path=capability_module_path,
+    )
+    if not acceptance.accepted:
+        return CompleteResult(
+            canonical_id=identity.canonical_id, completed=False, accepted=False,
+            reason=acceptance.reason, acceptance=acceptance)
+
+    # --- Step 3: A4-fold evidence-bound marker check, THEN (only if it clears) reconcile_state.
+    proof_op_kind = _extract_proof_op_kind(copy_run_proof_ref)
+    marker_ok, marker_refusal = _evidence_bound_marker_check(
+        root, identity.canonical_id, proof_op_kind)
+    if not marker_ok:
+        return CompleteResult(
+            canonical_id=identity.canonical_id, completed=False, accepted=True,
+            reason=marker_refusal, acceptance=acceptance)
+
+    reconcile = reconcile_state(str(root), identity.canonical_id)
+    completed = not reconcile.marker_present
+    return CompleteResult(
+        canonical_id=reconcile.canonical_id, completed=completed, accepted=True,
+        reason=None if completed else (
+            "this capability was accepted, but its pause marker is still present after "
+            "reconciling. This should not happen -- inspect "
+            f"{PAUSED_MECHANISMS_DIR_REL}/{reconcile.canonical_id}.* by hand."),
+        acceptance=acceptance, reconcile=reconcile,
     )
