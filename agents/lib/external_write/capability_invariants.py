@@ -668,23 +668,57 @@ def _run_discover(python_exe: str, cwd: Path, test_file: Path, env: dict) -> Opt
     return result.returncode != 0
 
 
+def _purge_pycache(root: Path) -> None:
+    """Remove every ``__pycache__`` directory under ``root``. Called between
+    the baseline run and the mutated run so a compiled ``.pyc`` cached from
+    the baseline run can never mask the source change made for the mutated
+    run (belt-and-braces -- CPython's own mtime/hash pyc invalidation should
+    already catch this, but this makes it certain, not merely likely)."""
+    for dirpath, dirnames, _filenames in os.walk(str(root)):
+        if "__pycache__" in dirnames:
+            shutil.rmtree(Path(dirpath) / "__pycache__", ignore_errors=True)
+            dirnames.remove("__pycache__")
+
+
 def _check_known_bad_fails(root: Path, canonical_id: str, cap_path: Path,
                             test_files: List[Path]) -> Optional[str]:
     """The known-bad-fails probe: copy the project into an ISOLATED temp
-    directory (never touching the operator's real files), deliberately break
-    ONLY this capability's own module inside that copy, then run every
-    discovered test file for this capability against the broken copy and
-    require EVERY one of them to report a failure. Returns a plain-language
-    failure line, or ``None`` if the probe passed. Always cleans up the temp
-    directory, even on error -- see module docstring for the full isolation
-    and boundedness contract."""
+    directory (never touching the operator's real files), then run this
+    capability's own discovered test file(s) TWICE against that copy.
+
+    (Review finding fix) A bare ``exit code != 0`` check is NOT evidence a
+    suite "caught" anything -- an UNRELATED crash (a missing import, a suite
+    that never actually runs) also exits non-zero, and would otherwise be
+    scored exactly the same as a real, deliberate failure. So this now runs
+    the suite against the UNMUTATED copy first and requires it to be fully
+    green BEFORE ever looking at the mutated run:
+
+      (a) BASELINE -- every discovered test file MUST pass cleanly (exit 0)
+          against the copy's UNMUTATED implementation. If even one does not
+          -- a genuine failing assertion, an unrelated crash, an import
+          error, or a suite that never actually runs -- this capability's
+          own tests cannot be trusted to catch anything, and the probe
+          fails WITHOUT ever running the mutated copy (a suite that cannot
+          even run cleanly on its own proves nothing about whether it would
+          catch a real break).
+      (b) MUTATED -- only once (a) is fully green, this capability's OWN
+          module (and only this module) is overwritten, in the SAME copy,
+          with every function/method body replaced by a raise (see
+          ``_RaiseEveryFunctionBody``), and every discovered test file is
+          run again. Every one of them MUST now fail; any that still passes
+          is inert.
+
+    The probe passes only when (a) is entirely green AND (b) is entirely
+    red. Returns a plain-language failure line, or ``None`` if the probe
+    passed. Always cleans up the temp directory, even on error -- see module
+    docstring for the full isolation and boundedness contract."""
     try:
         original_source = cap_path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except OSError:
         return (
-            f'Known-bad-fails: capability "{canonical_id}"\'s source could not be read ({exc}) to '
-            "build a deliberately-broken copy, so its test suite's effectiveness cannot be "
-            "verified."
+            f'Known-bad-fails: capability "{canonical_id}"\'s source could not be read, so a '
+            "deliberately-broken copy could not be built and its test suite's effectiveness "
+            "cannot be verified."
         )
 
     mutated_source = _mutate_to_known_bad(original_source)
@@ -699,22 +733,15 @@ def _check_known_bad_fails(root: Path, canonical_id: str, cap_path: Path,
         copy_root = Path(tmp_dir) / "copy"
         try:
             shutil.copytree(root, copy_root, ignore=_KNOWN_BAD_COPY_IGNORE)
-        except OSError as exc:
+        except OSError:
             return (
-                f'Known-bad-fails: could not build an isolated copy of this project to test '
-                f'capability "{canonical_id}"\'s implementation against ({exc}); its test '
-                "suite's effectiveness cannot be verified."
+                f'Known-bad-fails: an isolated copy of this project could not be built to test '
+                f'capability "{canonical_id}"\'s implementation against; its test suite\'s '
+                "effectiveness cannot be verified."
             )
 
         rel_cap_path = cap_path.relative_to(root)
-        try:
-            (copy_root / rel_cap_path).write_text(mutated_source, encoding="utf-8")
-        except OSError as exc:
-            return (
-                f'Known-bad-fails: could not write the deliberately-broken copy of capability '
-                f'"{canonical_id}"\'s module ({exc}); its test suite\'s effectiveness cannot be '
-                "verified."
-            )
+        rel_test_files = [tf.relative_to(root) for tf in test_files]
 
         env = dict(os.environ)
         agents_lib = str(copy_root / "agents" / "lib")
@@ -723,12 +750,47 @@ def _check_known_bad_fails(root: Path, canonical_id: str, cap_path: Path,
             os.pathsep + existing_pythonpath if existing_pythonpath else ""
         )
 
+        # --- (a) Baseline: the UNMUTATED copy must be fully green ------------
+        baseline_not_green: List[str] = []
+        baseline_uncertain = False
+        for rel_tf in rel_test_files:
+            outcome = _run_discover(sys.executable, copy_root, copy_root / rel_tf, env)
+            if outcome is None:
+                baseline_uncertain = True
+            elif outcome is True:  # True == "reported a failure" -- bad news at baseline
+                baseline_not_green.append(str(rel_tf))
+
+        if baseline_uncertain:
+            return (
+                f'Known-bad-fails: this capability\'s own test suite could not be run to check '
+                "whether it passes cleanly on its own (before any deliberate change), so its "
+                "effectiveness cannot be verified."
+            )
+        if baseline_not_green:
+            return (
+                f'Known-bad-fails: {", ".join(baseline_not_green)} does not pass cleanly as '
+                "written, on its own, before any deliberate change -- either it fails, or it "
+                "never actually ran at all (for example, because of a missing import). A test "
+                "suite that does not pass cleanly on its own cannot be trusted to catch a real "
+                "problem. Fix this capability's own tests so they pass cleanly on their own "
+                "first, then re-run this check."
+            )
+
+        # --- (b) Mutated: only reached once the baseline is fully green ------
+        try:
+            (copy_root / rel_cap_path).write_text(mutated_source, encoding="utf-8")
+        except OSError:
+            return (
+                f'Known-bad-fails: the deliberately-broken copy of capability "{canonical_id}"\'s '
+                "module could not be written, so its test suite's effectiveness cannot be "
+                "verified."
+            )
+        _purge_pycache(copy_root)
+
         inert_files: List[str] = []
         uncertain = False
-        for tf in test_files:
-            rel_tf = tf.relative_to(root)
-            copy_tf = copy_root / rel_tf
-            outcome = _run_discover(sys.executable, copy_root, copy_tf, env)
+        for rel_tf in rel_test_files:
+            outcome = _run_discover(sys.executable, copy_root, copy_root / rel_tf, env)
             if outcome is None:
                 uncertain = True
             elif outcome is False:

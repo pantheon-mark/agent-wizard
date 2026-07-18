@@ -22,6 +22,7 @@ fully-valid capability is proven to pass all five.
 """
 
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -160,6 +161,21 @@ class CapabilityInvariantsTestBase(unittest.TestCase):
     def _check_quality(self, capability_id):
         return capability_invariants.check_test_quality(
             str(self.project_root), capability_id)
+
+    def _stage_real_external_write(self) -> None:
+        """Copy the REAL, shipped ``external_write`` package into this fixture
+        project's own ``agents/lib/`` -- this is exactly what a real operator
+        project actually has (``agents/lib/external_write`` ships verbatim
+        into every operator project; see that package's own "Stdlib only --
+        this module ships into the operator's own runtime" docstring notes).
+        Needed so a fixture whose test imports ``run_enveloped_operation`` has
+        something REAL to import at subprocess-run time -- a genuinely
+        runnable baseline, not just an AST-only reference (review finding:
+        the known-bad-fails probe's baseline-green check would otherwise be
+        exercised only by an import that can never actually succeed)."""
+        dest = self.project_root / "agents" / "lib" / "external_write"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(_AGENTS_LIB / "external_write", dest)
 
     def _assert_no_traceback(self, result):
         self.assertNotIn("Traceback", result.operator_message)
@@ -468,9 +484,20 @@ if __name__ == "__main__":
         # (the capability module + run_enveloped_operation) must PASS the
         # producer-entrypoint probe -- no "stand-in" / "none of this
         # capability's test file(s)" failure line.
+        #
+        # (Review finding fix) The real ``external_write`` package is STAGED
+        # into this fixture project so the import actually resolves and the
+        # test genuinely runs at subprocess time -- a fixture whose
+        # ``run_enveloped_operation`` import can never succeed would die with
+        # an unrelated ModuleNotFoundError before ever exercising anything,
+        # which is exactly the never-ran/baseline-not-green gap this task
+        # fixes. With a genuine, runnable baseline, this fixture now proves
+        # BOTH probes pass -- assert full ``result.ok``, not just the
+        # producer-entrypoint line.
         cap_id = "real_entrypoint_cap"
         self._write_capability(
             cap_id, _CLEAN_SOURCE.format(name="Real Entrypoint Cap", op_kind=VALID_OP_KIND))
+        self._stage_real_external_write()
         module_name = f"{cap_id}_capability"
         test_source = f'''"""Fixture: real producer-entrypoint reference test (test fixture)."""
 
@@ -497,10 +524,8 @@ if __name__ == "__main__":
 
         result = self._check_quality(cap_id)
 
-        self.assertFalse(
-            any(f.startswith("Producer entrypoint:") for f in result.failures),
-            f"expected no Producer entrypoint failure, got {result.failures!r}",
-        )
+        self.assertTrue(result.ok, f"expected ok, got failures: {result.failures!r}")
+        self.assertEqual(result.failures, [])
         self._assert_no_traceback(result)
 
     def test_no_discoverable_test_file_flags_producer_entrypoint(self):
@@ -592,6 +617,69 @@ if __name__ == "__main__":
         self.assertFalse(
             any(f.startswith("Known-bad-fails:") for f in result.failures),
             f"expected no Known-bad-fails failure, got {result.failures!r}",
+        )
+        self._assert_no_traceback(result)
+
+    def test_unrelated_crash_that_never_runs_is_not_treated_as_caught(self):
+        # Review finding (reproduced): a suite that CANNOT EVEN IMPORT/RUN --
+        # for an UNRELATED reason, nothing to do with the deliberate mutation
+        # -- still exits non-zero. The OLD implementation reduced every run to
+        # a bare ``returncode != 0`` check, so this counted as "caught the
+        # mutation" and the capability was reported ok=True. A suite that
+        # never actually ran proves NOTHING about whether it would catch a
+        # real break -- this must FAIL closed, the same as an inert suite.
+        # Reproduces the reviewer's exact repro: a test that references the
+        # real producer entrypoint (so it PASSES probe 1, producer-entrypoint,
+        # by static AST alone) but whose ``external_write`` import can never
+        # actually resolve at subprocess-run time because it is deliberately
+        # NOT staged into this fixture (unlike the sibling
+        # ``real_entrypoint_cap`` fixture above) -- so the suite dies with an
+        # unrelated ``ModuleNotFoundError`` before running a single test, for
+        # a reason that has nothing to do with the capability's own
+        # implementation being broken.
+        cap_id = "never_runs_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Never Runs Cap", op_kind=VALID_OP_KIND))
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: test suite that never runs -- unrelated import error (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}
+
+from external_write.capability_api import run_enveloped_operation  # noqa: F401 -- never staged
+
+
+class TestNeverRunsCap(unittest.TestCase):
+    def test_describe_reports_ready(self):
+        self.assertEqual({module_name}.describe(), "Never Runs Cap ready")
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(
+            any(f.startswith("Producer entrypoint:") for f in result.failures),
+            f"this fixture should pass producer-entrypoint (AST-only) so the failure under "
+            f"test is isolated to known-bad-fails: got {result.failures!r}",
+        )
+        self.assertFalse(
+            result.ok,
+            "an unrelated crash (the suite never actually ran) must NOT be treated as "
+            f"'caught the mutation' -- got ok=True, failures={result.failures!r}",
+        )
+        self.assertTrue(
+            any(f.startswith("Known-bad-fails:") for f in result.failures),
+            f"expected a Known-bad-fails failure for a suite that never runs, got "
+            f"{result.failures!r}",
         )
         self._assert_no_traceback(result)
 
