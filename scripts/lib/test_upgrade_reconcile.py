@@ -1019,6 +1019,150 @@ class RealScaffoldFilenameMechanismIdJoinTests(_Base):
 
 
 # ===================================================================================
+# Phase 3 Cut 1, Task B2 -- rebuild/migration forces accepted:false until re-trial
+# (never inherit prior acceptance; F-62 fix). A scanner-red capability-dir writer
+# that was PREVIOUSLY accepted:true must have that flipped back to accepted:false
+# by reconcile_upgrade itself, and lifecycle_state.reconcile_state must then be
+# called so the marker/migration materialized views are coherent with the
+# now-unaccepted state (B1's own merge behavior backfills canonical_id onto the
+# marker this same pass already wrote via _write_paused_live_write_state).
+#
+# Uses the REAL scaffold filename convention (`<capability_id>_capability.py`) --
+# the same shape RealScaffoldFilenameMechanismIdJoinTests above uses -- and TWO
+# distinct capability_ids in the descriptor set: one scanner-red (must be reset)
+# and one conformant/untouched (must NOT be touched).
+# ===================================================================================
+
+class RebuildForcesAcceptedFalseTests(_Base):
+    CAP_SOURCE_WITH_OP_KIND = (
+        '"""Widget-delete capability (scanner-red, rebuilt-onto-a-changed-gate '
+        'fixture, Task B2)."""\n'
+        'from external_write.capability_api import run_operation\n'
+        '\n'
+        'OP_KIND = "acme.widget.delete"\n'
+        '\n'
+        'def go():\n'
+        '    return run_operation(None, None)\n'
+    )
+
+    def setUp(self):
+        super().setUp()
+        # Purge any cached external_write* modules so this test always resolves
+        # against the REAL agents/lib/external_write package, never a stale
+        # reference left over from another test's temporary build_root (see the
+        # identical purge in ScannerRedCapabilityRuntimeBlockTests /
+        # RealScaffoldFilenameMechanismIdJoinTests above).
+        for mod_name in list(sys.modules):
+            if mod_name == "external_write" or mod_name.startswith("external_write."):
+                del sys.modules[mod_name]
+
+    def _project_with_two_capabilities(self):
+        proj = self.tmp / "operator_proj"
+        capdir = proj / "agents" / "capabilities"
+        capdir.mkdir(parents=True)
+
+        # Capability 1: scanner-red, previously accepted:true -- must be reset.
+        rebuilt_relpath = "agents/capabilities/acme_widget_deleter_capability.py"
+        (proj / rebuilt_relpath).write_text(self.CAP_SOURCE_WITH_OP_KIND, encoding="utf-8")
+
+        # Capability 2: conformant (no scan violations), previously accepted:true --
+        # never enters `by_relpath` at all, so it must stay untouched.
+        clean_relpath = "agents/capabilities/acme_report_reader_capability.py"
+        (proj / clean_relpath).write_text(_READ_ONLY_REPORT, encoding="utf-8")
+
+        secdir = proj / "security"
+        secdir.mkdir(parents=True, exist_ok=True)
+        descriptor_set = [
+            {
+                "id": "acme_widget_deleter", "name": "Widget deleter",
+                "action_class": "delete", "risk_class": "irreversible_external",
+                "recovery_profile_ref": None, "declared_test_target": "copy",
+                "blast_radius_cap": 3, "accepted": True, "phase_id": "phase-1",
+            },
+            {
+                "id": "acme_report_reader", "name": "Report reader",
+                "action_class": "read", "risk_class": "read_only_local",
+                "recovery_profile_ref": None, "declared_test_target": "copy",
+                "blast_radius_cap": None, "accepted": True, "phase_id": "phase-1",
+            },
+        ]
+        (secdir / "capability_descriptors.json").write_text(
+            json.dumps(descriptor_set), encoding="utf-8")
+        return proj
+
+    def _read_descriptor_set(self, proj):
+        return json.loads(
+            (proj / CAPABILITY_DESCRIPTOR_SET_REL).read_text(encoding="utf-8"))
+
+    def test_previously_accepted_rebuilt_capability_is_reset_to_unaccepted(self):
+        proj = self._project_with_two_capabilities()
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+
+        self.assertEqual(len(result.mechanisms), 1)
+        self.assertEqual(result.mechanisms[0].mechanism_id, "acme_widget_deleter")
+
+        entries = {e["id"]: e for e in self._read_descriptor_set(proj)}
+        self.assertFalse(
+            entries["acme_widget_deleter"]["accepted"],
+            "a rebuilt/scanner-red capability must never keep a prior accepted:true")
+        # The unrelated, conformant capability's acceptance is never touched.
+        self.assertTrue(entries["acme_report_reader"]["accepted"])
+
+    def test_reconcile_state_runs_and_marker_is_coherent(self):
+        proj = self._project_with_two_capabilities()
+        reconcile_upgrade(proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+
+        # _write_paused_live_write_state (this module, upgrade-time) already wrote a
+        # marker with no `canonical_id` field -- proving lifecycle_state.reconcile_state
+        # (B1) actually ran requires that field to now be present, MERGED onto the
+        # existing marker rather than losing its upgrade-time diagnostics.
+        marker_path = proj / PAUSED_MECHANISMS_DIR_REL / "acme_widget_deleter.json"
+        self.assertTrue(marker_path.is_file())
+        state = json.loads(marker_path.read_text(encoding="utf-8"))
+        self.assertEqual(state["canonical_id"], "acme_widget_deleter")
+        self.assertEqual(state["mechanism_id"], "acme_widget_deleter")
+        self.assertEqual(state["paused_op_kinds"], ["acme.widget.delete"])
+        # Upgrade-time diagnostics this module itself wrote must survive the merge.
+        self.assertEqual(state["from_version"], "0.13.0")
+        self.assertEqual(state["to_version"], "0.13.1")
+
+        # The pending-migration queue carries the entry reconcile_state's own
+        # "not accepted AND migration pending" branch needed to see, to ensure the
+        # marker (rather than treating this as "never accepted, nothing to do").
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        self.assertEqual({e["mechanism_id"] for e in queue}, {"acme_widget_deleter"})
+
+    def test_idempotent_rerun_does_not_flip_accepted_or_duplicate_markers(self):
+        proj = self._project_with_two_capabilities()
+        reconcile_upgrade(proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+        first_entries = self._read_descriptor_set(proj)
+
+        # Purge again -- a second reconcile_upgrade call in the SAME test process
+        # is exactly the "stale external_write module" risk the setUp purge guards.
+        for mod_name in list(sys.modules):
+            if mod_name == "external_write" or mod_name.startswith("external_write."):
+                del sys.modules[mod_name]
+        reconcile_upgrade(proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+        second_entries = self._read_descriptor_set(proj)
+
+        self.assertEqual(first_entries, second_entries)
+        marker_dir = proj / PAUSED_MECHANISMS_DIR_REL
+        self.assertEqual(len(list(marker_dir.glob("acme_widget_deleter.*"))), 2)
+
+    def test_conformant_capability_never_scanned_stays_accepted(self):
+        # A capability that never appears in by_relpath at all (no scan violations)
+        # must never be visited by the B2 reset logic in the first place.
+        proj = self._project_with_two_capabilities()
+        reconcile_upgrade(proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+        entries = {e["id"]: e for e in self._read_descriptor_set(proj)}
+        self.assertTrue(entries["acme_report_reader"]["accepted"])
+        marker_dir = proj / PAUSED_MECHANISMS_DIR_REL
+        self.assertFalse((marker_dir / "acme_report_reader.json").exists())
+        self.assertFalse((marker_dir / "acme_report_reader.pause").exists())
+
+
+# ===================================================================================
 # CLI-wiring test: prove `wizard upgrade --to V --apply` actually invokes reconcile
 # after a real apply_upgrade. Reuses the synthetic-build-repo fixture helpers from
 # test_upgrade_apply.py (same anti-overfit posture), with the real

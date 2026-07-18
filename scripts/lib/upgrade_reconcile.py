@@ -84,6 +84,7 @@ Stdlib only — no third-party dependencies (operator/runtime path).
 from __future__ import annotations
 
 import ast
+import importlib
 import json
 import os
 import sys
@@ -119,6 +120,22 @@ def _scan_module(build_repo_root: Path):
         sys.path.insert(0, lib_dir)
     from external_write import scan as _scan  # type: ignore
     return _scan
+
+
+def _external_write_module(build_repo_root: Path, module_name: str):
+    """(Task B2) Import one of the toolkit's OWN operate-time
+    ``agents/lib/external_write/<module_name>.py`` modules from its single canonical
+    home — the exact same layout-agnostic resolution ``_scan_module`` already uses
+    for the Task-5 scanner, extended to the two other trusted, stdlib-only
+    lifecycle primitives this task needs: ``capability_identity`` (the A1 canonical-
+    id resolver) and ``lifecycle_state`` (B1's marker/migration reconciler). This is
+    NEVER a channel for executing operator-authored capability code — only this
+    package's own trusted infrastructure, the same class of import the module
+    docstring's "Reuse discipline" section already sanctions for the scanner."""
+    lib_dir = str(_external_write_agents_lib_dir(build_repo_root))
+    if lib_dir not in sys.path:
+        sys.path.insert(0, lib_dir)
+    return importlib.import_module(f"external_write.{module_name}")
 
 
 # ===== Where operator-authored mechanism code lives ==========================
@@ -705,6 +722,104 @@ def _write_paused_live_write_state(
     )
 
 
+# ===== Task B2: rebuild/migration forces accepted:false until re-trial =======
+#
+# F-62 root cause (real estate dogfood finding): a previously-ACCEPTED capability
+# was rewritten into a scanner-red shape (rebuilt / migrated / never brought onto
+# the current gate) and its descriptor stayed accepted:true with NO pause marker
+# at all — only a manual expert edit (accepted:true -> false) prevented the
+# un-retrialed, rewritten write path from being live-authorized. B1 made the
+# PAUSED state coherent (accepted:false + marker + queued migration, never
+# "accepted:true but paused" limbo) but never flips accepted itself — that is
+# deliberately this task's job: the ONE place acceptance is REVOKED on a
+# detected code change. The acceptance ceremony remains the sole writer of
+# accepted:true.
+#
+# Fail-safe direction: if a capability's identity cannot be resolved (unknown /
+# ambiguous), nothing is reset here — never a guess at which descriptor entry to
+# touch. This is not a regression: a capability that cannot be resolved to a
+# real, on-disk capability module was never a candidate for the runtime-block
+# marker either (see resolve_paused_op_kinds's own empty-safe convention).
+
+
+def _reset_accepted_for_scanner_red_capability(
+    operator_project_dir: Path,
+    build_repo_root: Path,
+    mechanism_id: str,
+    descriptor_set: List[Dict[str, Any]],
+) -> Optional[str]:
+    """(Task B2) Force ``descriptor.accepted`` back to ``False`` for every
+    descriptor entry that resolves to the SAME capability as ``mechanism_id`` —
+    a capability this reconcile just found scanner-red under
+    ``agents/capabilities/`` (rebuilt, migrated, or never brought onto the
+    current gate). Never inherits a prior ``accepted: true`` onto rewritten,
+    un-retrialed code.
+
+    Keys through the SAME A1 canonical-id identity resolver
+    (``external_write.capability_identity``) every other lifecycle consumer
+    uses — resolving ``mechanism_id`` in its own ``module_stem`` namespace and
+    then matching every alias the resolved capability is known by (never a
+    bare ``entry["id"] == mechanism_id`` string check), so a legacy identity
+    split (a descriptor id that differs from the capability's own module stem
+    — the estate/F-60 shape) still gets its accepted:true entry found and
+    reset, not silently missed.
+
+    Mutates ``descriptor_set`` in place (the caller's own just-loaded
+    snapshot) and, if anything changed, atomically writes it back to
+    ``security/capability_descriptors.json``. Returns the resolved
+    ``canonical_id`` (for the caller to follow up with
+    ``lifecycle_state.reconcile_state``), or ``None`` if this capability's
+    identity could not be resolved — fail-safe: no guess, nothing touched.
+    """
+    try:
+        capability_identity = _external_write_module(build_repo_root, "capability_identity")
+        identity = capability_identity.build_capability_index(
+            str(operator_project_dir)).resolve(mechanism_id, "module_stem")
+    except Exception:
+        return None
+
+    changed = False
+    for entry in descriptor_set:
+        if (isinstance(entry, dict) and entry.get("id") in identity.aliases
+                and entry.get("accepted") is True):
+            entry["accepted"] = False
+            changed = True
+    if changed:
+        _atomic_write(
+            operator_project_dir / CAPABILITY_DESCRIPTOR_SET_REL,
+            json.dumps(descriptor_set, indent=2, ensure_ascii=False) + "\n",
+        )
+    return identity.canonical_id
+
+
+def _reconcile_lifecycle_state_best_effort(
+    operator_project_dir: Path, build_repo_root: Path, canonical_id: str,
+) -> None:
+    """(Task B2) Call B1's ``lifecycle_state.reconcile_state`` so the pause-
+    marker and pending-migration MATERIALIZED VIEWS become coherent with the
+    (possibly just-reset) ``accepted`` SSOT. Reused, not re-implemented: this
+    module already wrote its OWN marker via ``_write_paused_live_write_state``
+    earlier in this same reconcile pass; ``reconcile_state`` MERGES onto that
+    existing marker (adding the ``canonical_id`` field B1 introduced, and
+    refreshing ``paused_op_kinds`` if stale) rather than discarding its
+    upgrade-time diagnostics — see ``lifecycle_state._merge_marker_state``'s
+    own docstring.
+
+    Best-effort by design: a failure here (unresolvable identity, or a
+    present-but-unreadable descriptor/migration-queue file —
+    ``ReconcileStateError``) must not take down this whole upgrade-reconcile
+    pass over every OTHER mechanism. The safety-critical act — forcing
+    ``accepted`` back to ``False`` — has already landed (by
+    ``_reset_accepted_for_scanner_red_capability``, above) regardless of
+    whether this coherence step succeeds.
+    """
+    try:
+        lifecycle_state = _external_write_module(build_repo_root, "lifecycle_state")
+        lifecycle_state.reconcile_state(str(operator_project_dir), canonical_id)
+    except Exception:
+        pass
+
+
 def _pause_marker_path(operator_project_dir: Path, mechanism_id: str) -> Path:
     return Path(operator_project_dir) / PAUSED_MECHANISMS_DIR_REL / f"{mechanism_id}.pause"
 
@@ -1064,6 +1179,12 @@ def reconcile_upgrade(
         entangled_read_outputs: List[str] = []
         orchestrator_routed = False
         paused_op_kinds: List[str] = []
+        # (Phase 3 Cut 1, Task B2) Set below, only for a capability-dir mechanism whose
+        # identity resolves -- the canonical_id to run lifecycle_state.reconcile_state
+        # against AFTER _append_migration_request has queued its migration entry (so
+        # reconcile_state's own migration-queue check sees it and ensures the paused
+        # marker, rather than seeing "nothing queued yet").
+        lifecycle_canonical_id: Optional[str] = None
         if entrypoint:
             _safe_pause_entrypoint(
                 operator_project_dir, mechanism_id, relpath, entrypoint,
@@ -1133,6 +1254,16 @@ def reconcile_upgrade(
                     descriptor_set = _load_capability_descriptor_set(operator_project_dir)
                     resolved_paused_op_kinds = resolve_paused_op_kinds(
                         operator_project_dir, mechanism_id, relpath, descriptor_set)
+                    # (Phase 3 Cut 1, Task B2 -- F-62 fix) This capability's code is
+                    # scanner-red under agents/capabilities/: it was rebuilt, migrated,
+                    # or never brought onto the current gate. A prior accepted:true
+                    # must NEVER be inherited onto that rewritten, un-retrialed write
+                    # path -- force it back to accepted:false now, regardless of
+                    # whether an op_kind could also be resolved for a runtime block.
+                    # The acceptance ceremony remains the sole writer of accepted:true;
+                    # this is the one place acceptance is REVOKED on a code change.
+                    lifecycle_canonical_id = _reset_accepted_for_scanner_red_capability(
+                        operator_project_dir, build_repo_root, mechanism_id, descriptor_set)
                     if resolved_paused_op_kinds:
                         paused_op_kinds = resolved_paused_op_kinds
                         _write_paused_live_write_state(
@@ -1175,6 +1306,14 @@ def reconcile_upgrade(
             operator_project_dir, mechanism_id, relpath, entrypoint, violations,
             from_version, to_version,
         )
+        # (Phase 3 Cut 1, Task B2) Run AFTER _append_migration_request (just above) so
+        # the pending-migration queue already carries this mechanism's entry when
+        # reconcile_state checks it -- otherwise its "not accepted, nothing queued yet"
+        # branch would see no migration open and skip ensuring the paused marker this
+        # same pass just wrote. See _reconcile_lifecycle_state_best_effort's docstring.
+        if lifecycle_canonical_id:
+            _reconcile_lifecycle_state_best_effort(
+                operator_project_dir, build_repo_root, lifecycle_canonical_id)
         mechanisms.append(MechanismReport(
             mechanism_id=mechanism_id,
             writer_relpath=relpath,
