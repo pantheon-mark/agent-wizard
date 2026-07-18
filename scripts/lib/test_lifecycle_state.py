@@ -636,6 +636,25 @@ class AcceptanceHashIsStaleTests(_StaleHashFixtureMixin, unittest.TestCase):
             self.assertFalse(
                 lifecycle_state.acceptance_hash_is_stale(root, "acme_widget_deleter"))
 
+    def test_phase_mismatched_record_never_falls_back_forces_stale(self):
+        """(xvendor R-2 fix) The descriptor's CURRENT phase is phase-2, and the ONLY acceptance
+        record on file is for phase-1 -- with hashes that WOULD match if that record were used.
+        Before the fix, ``_read_latest_acceptance_record`` fell back to this phase-mismatched
+        record (the only one for the capability), so ``acceptance_hash_is_stale`` wrongly
+        reported "not stale". The fix removes the cross-phase fallback entirely: no phase-2
+        record exists, so the read returns ``None``, which ``acceptance_hash_is_stale`` already
+        treats as fail-safe stale -- forcing a re-trial instead of trusting an unrelated phase's
+        record."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._two_capability_project(tmp, phase_id="phase-2")
+            self._register_fixture_adapter(tmp, "a")
+            current_hash = compute_implementation_hash(_STALE_FIXTURE_OP_KIND)
+            self._write_acceptance_record(
+                root, "acme_widget_deleter", "phase-1", current_hash, _STALE_FIXTURE_OP_KIND)
+
+            self.assertTrue(
+                lifecycle_state.acceptance_hash_is_stale(root, "acme_widget_deleter"))
+
     # -- Fail-safe direction: never silently keep accepted:true unverified ----------------
 
     def test_no_acceptance_record_at_all_fails_safe_to_stale(self):
@@ -1363,6 +1382,61 @@ class CompleteMigrationTests(unittest.TestCase):
             descriptors = {e["id"]: e
                           for e in _read_json(Path(root) / lifecycle_state.DESCRIPTOR_SET_REL)}
             self.assertFalse(descriptors[cap_x]["accepted"])
+
+
+class EvidenceBoundMarkerCheckOpKindUnverifiableTests(unittest.TestCase):
+    """(xvendor R-5 fix) Direct, white-box tests of ``lifecycle_state._evidence_bound_marker_
+    check`` -- the op-kind cross-check must refuse fail-closed when ``proof_op_kind`` could not
+    be determined (``None``) AND the marker DOES carry a non-empty ``paused_op_kinds`` list to
+    cross-check against. Before the fix, a ``None`` proof_op_kind skipped the cross-check
+    entirely (the boolean guard required ``proof_op_kind is not None`` before comparing), so the
+    marker was cleared without ever confirming the just-accepted operation was the paused one."""
+
+    def _write_marker_state(self, root, cap_id, paused_op_kinds):
+        marker_dir = Path(root) / lifecycle_state.PAUSED_MECHANISMS_DIR_REL
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        state = {"canonical_id": cap_id}
+        if paused_op_kinds is not None:
+            state["paused_op_kinds"] = paused_op_kinds
+        (marker_dir / f"{cap_id}.json").write_text(json.dumps(state), encoding="utf-8")
+
+    def test_unreadable_proof_op_kind_with_paused_op_kinds_present_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cap_id = "acme_widget_deleter"
+            self._write_marker_state(root, cap_id, ["delete_record"])
+
+            ok, reason = lifecycle_state._evidence_bound_marker_check(root, cap_id, None)
+
+            self.assertFalse(ok)
+            self.assertIsNotNone(reason)
+            self.assertNotIn("Traceback", reason)
+
+    def test_unreadable_proof_op_kind_with_no_paused_op_kinds_still_clears(self):
+        # Control: nothing on record to cross-check against -- a None proof_op_kind must NOT be
+        # over-refused (weakest-sufficient: only refuse when there is real evidence to check).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cap_id = "acme_widget_deleter"
+            self._write_marker_state(root, cap_id, None)  # no paused_op_kinds key at all
+
+            ok, reason = lifecycle_state._evidence_bound_marker_check(root, cap_id, None)
+
+            self.assertTrue(ok)
+            self.assertIsNone(reason)
+
+    def test_matching_proof_op_kind_still_clears(self):
+        # Control: a determinable proof_op_kind that IS in the paused list -- unchanged behavior.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cap_id = "acme_widget_deleter"
+            self._write_marker_state(root, cap_id, ["delete_record"])
+
+            ok, reason = lifecycle_state._evidence_bound_marker_check(
+                root, cap_id, "delete_record")
+
+            self.assertTrue(ok)
+            self.assertIsNone(reason)
 
 
 # A trivial, stdlib-only, scan-clean capability module (mirrors

@@ -605,9 +605,17 @@ def _read_latest_acceptance_record(
 ) -> Tuple[Optional[Dict[str, Any]], bool]:
     """The most recent acceptance-audit record (``acceptance_ceremony``'s append-only JSONL log,
     ``ACCEPTANCE_LOG_REL`` by default) for a capability known by any of ``aliases`` -- "the CURRENT
-    accepted record for a capability's accepted phase" (this task's brief). Preference order: the
-    latest record whose own ``phase_id`` matches the descriptor's CURRENT ``phase_id`` (when one is
-    given), else the latest record for the capability regardless of phase.
+    accepted record for a capability's accepted phase" (this task's brief).
+
+    (xvendor R-2 fix) When ``phase_id`` is given, ONLY a record whose own ``phase_id`` matches it
+    counts -- there is deliberately NO cross-phase fallback to "the latest record for the
+    capability regardless of phase." A capability accepted in phase-2 with no phase-2 acceptance
+    record on file (e.g. only a stale phase-1 record survives) must report "no current record"
+    (``None``), not silently borrow a DIFFERENT phase's record whose hashes might happen to
+    match -- ``acceptance_hash_is_stale`` already treats a ``None`` record as stale (fail-safe),
+    so this correctly forces a re-trial instead of reading a phase-mismatched record as if it
+    were current. Only when NO ``phase_id`` is given at all (the descriptor carries none) does
+    the latest record for the capability, regardless of phase, apply.
 
     Returns ``(record_or_None, read_error)``. ``read_error`` is True ONLY when the log file EXISTS
     but could not be opened at all (a present-but-unreadable file) -- distinct from a normal,
@@ -640,7 +648,12 @@ def _read_latest_acceptance_record(
         latest_any = rec
         if phase_id is not None and rec.get("phase_id") == phase_id:
             latest_phase_matched = rec
-    return (latest_phase_matched if latest_phase_matched is not None else latest_any), False
+    # (xvendor R-2 fix) A phase was specified: ONLY a phase-matched record counts, never a
+    # cross-phase fallback (the caller's phase_id is None here iff the descriptor itself carries
+    # no phase_id, in which case ANY record for the capability is the best available signal).
+    if phase_id is not None:
+        return latest_phase_matched, False
+    return latest_any, False
 
 
 def acceptance_hash_is_stale(
@@ -924,7 +937,14 @@ def _evidence_bound_marker_check(
     would defeat this function's entire purpose (replacing the hand-``rm``). Only an ACTUAL
     mismatch -- a value present and different -- refuses. Same convention for
     ``paused_op_kinds``: an absent/empty list is not evidence of anything; only a non-empty list
-    that excludes the accepted operation refuses."""
+    that excludes the accepted operation refuses.
+
+    (xvendor R-5 fix) A non-empty ``paused_op_kinds`` list is evidence there IS a paused
+    operation to cross-check against, so it also refuses when ``proof_op_kind is None`` (the
+    copy-run proof's own ``op_kind`` could not be determined) -- clearing the marker in that case
+    would skip the cross-check entirely rather than confirm the accepted operation is the paused
+    one. An absent/empty ``paused_op_kinds`` list has nothing to cross-check, so a ``None``
+    ``proof_op_kind`` still clears in that case (no over-refusal)."""
     state_path = _pause_state_path(root, canonical_id)
     pause_path = _pause_marker_path(root, canonical_id)
     if not state_path.exists() and not pause_path.exists():
@@ -967,10 +987,23 @@ def _evidence_bound_marker_check(
         )
 
     stored_op_kinds = data.get("paused_op_kinds")
-    if (isinstance(stored_op_kinds, list) and stored_op_kinds
-            and all(isinstance(k, str) for k in stored_op_kinds)
-            and proof_op_kind is not None
-            and proof_op_kind not in stored_op_kinds):
+    stored_op_kinds_valid = (
+        isinstance(stored_op_kinds, list) and stored_op_kinds
+        and all(isinstance(k, str) for k in stored_op_kinds))
+
+    # (xvendor R-5 fix) There IS a paused operation on record to cross-check against, but the
+    # operation just accepted could not be determined from its own proof -- refuse fail-closed
+    # rather than silently skip the cross-check and clear anyway.
+    if stored_op_kinds_valid and proof_op_kind is None:
+        return False, (
+            "this capability was accepted, but its pause marker "
+            f"({PAUSED_MECHANISMS_DIR_REL}/{canonical_id}.json) lists paused operation(s) "
+            f"{sorted(stored_op_kinds)!r}, and the operation just accepted could not be "
+            "determined from its own proof. It was NOT cleared automatically -- inspect that "
+            "file by hand, then try completing this migration again."
+        )
+
+    if stored_op_kinds_valid and proof_op_kind not in stored_op_kinds:
         return False, (
             "this capability was accepted, but its pause marker "
             f"({PAUSED_MECHANISMS_DIR_REL}/{canonical_id}.json) lists paused operation(s) "

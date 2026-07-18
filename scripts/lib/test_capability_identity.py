@@ -167,6 +167,23 @@ class TestCapabilityIndex(unittest.TestCase):
             got = idx.resolve("legacy_task_sync", "module_stem")
             self.assertIsNone(got.surface)
 
+    def test_reassigned_surface_returns_the_last_assignment_matching_runtime(self):
+        # (xvendor R-6 fix) A module that assigns SURFACE more than once at module level -- the
+        # AST scanner must return the LAST assignment, mirroring Python's own runtime
+        # last-assignment-wins semantics. Before the fix, the scanner returned on the FIRST
+        # match, decoupling static corroboration from what the module actually holds at runtime.
+        ci = _load(MODPATH)
+        with tempfile.TemporaryDirectory() as root:
+            d = Path(root) / "agents/capabilities"
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "acme_reassigned_capability.py").write_text(
+                'SURFACE = "a"\n'
+                '# some code in between\n'
+                'SURFACE = "b"\n',
+                encoding="utf-8")
+            got = ci._extract_surface(d / "acme_reassigned_capability.py")
+            self.assertEqual(got, "b")
+
     def test_unresolved_surface_namespace_also_failcloses(self):
         ci = _load(MODPATH)
         with tempfile.TemporaryDirectory() as root:

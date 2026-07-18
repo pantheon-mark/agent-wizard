@@ -338,7 +338,14 @@ def _extract_surface(path: Path) -> Optional[str]:
     ``SURFACE: str = "..."`` (``ast.AnnAssign``) -- the annotated form isn't
     emitted by anything in this codebase yet, but recognizing it too costs
     nothing and avoids a silent ``surface=None`` if a capability module is
-    ever hand-written or generated with a type annotation on the constant."""
+    ever hand-written or generated with a type annotation on the constant.
+
+    (xvendor R-6 fix) If ``SURFACE`` is assigned MORE THAN ONCE at module
+    level, the LAST valid string-literal assignment wins -- mirroring
+    Python's own runtime last-assignment-wins semantics for a re-bound
+    module-level name. Returning the first assignment (the prior behavior)
+    would decouple this AST-only static read from what the module actually
+    holds at runtime for a module that reassigns ``SURFACE``."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
@@ -347,6 +354,7 @@ def _extract_surface(path: Path) -> Optional[str]:
         tree = ast.parse(text, filename=str(path))
     except SyntaxError:
         return None
+    surface: Optional[str] = None
     for node in tree.body:
         if isinstance(node, ast.Assign):
             if not any(isinstance(t, ast.Name) and t.id == "SURFACE" for t in node.targets):
@@ -360,8 +368,8 @@ def _extract_surface(path: Path) -> Optional[str]:
         else:
             continue
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            return value.value
-    return None
+            surface = value.value
+    return surface
 
 
 def _load_descriptor_ids(project_root: Path) -> Tuple[Set[str], bool]:
