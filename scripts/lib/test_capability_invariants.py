@@ -701,6 +701,145 @@ if __name__ == "__main__":
         self.assertEqual(result.failures, [])
         self._assert_no_traceback(result)
 
+    def test_local_fake_entrypoint_def_and_bare_call_no_import_is_flagged(self):
+        # (Critical fix, task review) A test file that defines its OWN local
+        # `def run_enveloped_operation(): ...` and calls it -- importing the
+        # REAL entrypoint from NOWHERE -- must be FLAGGED. Before the fix,
+        # `_ast_references_entrypoint` seeded `call_names` with the entrypoint
+        # name UNCONDITIONALLY, so this local fake's bare call satisfied the
+        # probe even though the real entrypoint was never imported.
+        cap_id = "local_fake_entrypoint_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Local Fake Entrypoint Cap", op_kind=VALID_OP_KIND))
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: locally-defined fake entrypoint, no real import (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}  # noqa: F401 -- present so discovery finds this file
+
+
+def run_enveloped_operation():
+    """Locally-defined FAKE -- NOT external_write.capability_api's real one."""
+    return "fake-ok"
+
+
+class TestLocalFakeEntrypointCap(unittest.TestCase):
+    def test_fake_entrypoint_flow(self):
+        self.assertEqual(run_enveloped_operation(), "fake-ok")
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(f.startswith("Producer entrypoint:") for f in result.failures),
+            f"expected a Producer entrypoint failure for a local fake entrypoint def+call with "
+            f"no real import, got {result.failures!r}",
+        )
+        self._assert_no_traceback(result)
+
+    def test_fake_object_attribute_call_no_import_is_flagged(self):
+        # (Critical fix, task review) `FakeThing().run_enveloped_operation()` --
+        # an attribute-access CALL on an object that was never imported as the
+        # real entrypoint's module -- must be FLAGGED. Before the fix, the
+        # attribute branch matched on `func.attr in _ENTRYPOINT_IMPORT_NAMES`
+        # alone, accepting ANY object's `.run_enveloped_operation(...)` call
+        # regardless of what (if anything) was actually imported.
+        cap_id = "fake_object_attr_call_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Fake Object Attr Call Cap", op_kind=VALID_OP_KIND))
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: attribute-access call on a never-imported fake object (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}  # noqa: F401 -- present so discovery finds this file
+
+
+class FakeThing:
+    """A locally-defined object with NO relation to the real capability_api module."""
+
+    def run_enveloped_operation(self):
+        return "fake-ok"
+
+
+class TestFakeObjectAttrCallCap(unittest.TestCase):
+    def test_fake_attr_call_flow(self):
+        self.assertEqual(FakeThing().run_enveloped_operation(), "fake-ok")
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(f.startswith("Producer entrypoint:") for f in result.failures),
+            f"expected a Producer entrypoint failure for a fake object's attribute-access call "
+            f"with no real module import, got {result.failures!r}",
+        )
+        self._assert_no_traceback(result)
+
+    def test_acceptance_cli_module_reference_only_passes(self):
+        # (CHEAP closer, task review) A test file that imports the
+        # `operator_acceptance` acceptance-CLI module (import/module-reference
+        # only, no in-process call -- it is invoked as a subprocess, not
+        # called in-process, per _ast_references_entrypoint's own DECISION
+        # note) must PASS the producer-entrypoint probe.
+        cap_id = "acceptance_cli_ref_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Acceptance Cli Ref Cap", op_kind=VALID_OP_KIND))
+        self._stage_real_external_write()
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: import/module-reference of the acceptance CLI, no call (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}
+
+import external_write.operator_acceptance  # noqa: F401 -- reference only, invoked as a CLI subprocess
+
+
+class TestAcceptanceCliRefCap(unittest.TestCase):
+    def test_describe_reports_ready(self):
+        self.assertEqual({module_name}.describe(), "Acceptance Cli Ref Cap ready")
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(
+            any(f.startswith("Producer entrypoint:") for f in result.failures),
+            f"expected no Producer entrypoint failure for an acceptance-CLI module reference, "
+            f"got {result.failures!r}",
+        )
+        self._assert_no_traceback(result)
+
     def test_no_discoverable_test_file_flags_producer_entrypoint(self):
         cap_id = "no_test_cap"
         self._write_capability(

@@ -439,11 +439,16 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
 #   * does it reference the real acceptance/gate entrypoint -- a real CALL to
 #     ``run_enveloped_operation`` (the sanctioned live-write entrypoint,
 #     ``external_write.capability_api`` / ``external_write.run_envelope``),
-#     bare or via attribute access (DR-2 fix: an import alone, never called,
-#     is no longer sufficient -- see ``_ast_references_entrypoint``'s own
-#     docstring), or an import/module-reference of ``operator_acceptance``
-#     (the acceptance CLI -- import-only stays sufficient there; it is invoked
-#     as a subprocess, not called in-process)?
+#     bare or via attribute access, WHOSE TARGET TRACES BACK TO AN IMPORT OF
+#     THE REAL ENTRYPOINT (DR-2 + Critical-fix conjunction: an import alone,
+#     never called, is not sufficient -- neither is a call alone with no
+#     matching import anywhere in the file, e.g. a locally-defined fake
+#     ``run_enveloped_operation`` or an arbitrary object's
+#     ``.run_enveloped_operation(...)`` -- see ``_ast_references_entrypoint``'s
+#     own docstring for the exact import+call conjunction required), or an
+#     import/module-reference of ``operator_acceptance`` (the acceptance CLI
+#     -- import-only stays sufficient there; it is invoked as a subprocess,
+#     not called in-process)?
 #   * does it define its own class whose name IS (exactly, case-insensitive)
 #     an optional fake/stub/mock/dummy affix plus ``Operation``/``Adapter``/
 #     ``Plan`` (e.g. ``Operation``, ``FakeOperation``, ``StubAdapter``,
@@ -453,12 +458,19 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
 # LIMITS (stated per this task's instruction to surface heuristic ambiguity):
 #   * This is a NAME-based heuristic, not a data-flow analysis. (DR-2 fix) A
 #     test that only IMPORTS the real entrypoint but never actually calls it
-#     anywhere is now correctly FLAGGED by this probe itself, not left to
-#     probe 2 (known-bad-fails) to catch indirectly. The heuristic still
-#     cannot tell whether a real ``ast.Call`` to the entrypoint is reached at
-#     runtime (a call inside dead/unreachable code, or one whose arguments are
-#     wrong, still satisfies this AST-only check) -- that residual is exactly
-#     what probe 2 remains for.
+#     anywhere is correctly FLAGGED by this probe itself, not left to probe 2
+#     (known-bad-fails) to catch indirectly. (Critical fix, task review) The
+#     converse is also required and enforced: a CALL alone, with no import of
+#     the real entrypoint anywhere in the file (a locally-defined fake
+#     ``def run_enveloped_operation(): ...`` and a bare call to it, or an
+#     arbitrary ``FakeThing().run_enveloped_operation()``), is correctly
+#     FLAGGED too -- this probe requires the CONJUNCTION of a genuine import
+#     of the real entrypoint (or its hosting module) AND a call whose target
+#     resolves back to that same import, never either alone. The heuristic
+#     still cannot tell whether a real ``ast.Call`` to the entrypoint is
+#     reached at runtime (a call inside dead/unreachable code, or one whose
+#     arguments are wrong, still satisfies this AST-only check) -- that
+#     residual is exactly what probe 2 remains for.
 #   * A legitimately-named test helper class that happens to match the
 #     stand-in name pattern (e.g. a fixture class a project deliberately
 #     calls ``FakeAdapter`` to build a REAL ``Operation`` from, or a subclass
@@ -506,6 +518,12 @@ _TEST_DISCOVERY_SKIP_DIR_NAMES = {
 # CLI's own module name (imported by name or invoked as a module).
 _ENTRYPOINT_IMPORT_NAMES = frozenset({"run_enveloped_operation"})
 _ACCEPTANCE_CLI_MODULE_NAME = "operator_acceptance"
+# The real module that HOSTS run_enveloped_operation (external_write.capability_api) -- its own
+# last dotted segment, used to recognize the module-import + attribute-access-call shape (see
+# _ast_references_entrypoint). Matched the same way _ACCEPTANCE_CLI_MODULE_NAME is: the last
+# dotted segment of an ``import`` statement's dotted name, never the full path (a test may import
+# it as ``external_write.capability_api`` or bare ``capability_api``).
+_ENTRYPOINT_MODULE_NAME = "capability_api"
 
 # Matches a locally-defined class name that IS (whole-string, case-insensitive)
 # an optional fake/stub/mock/dummy affix plus Operation/Adapter/Plan -- e.g.
@@ -567,6 +585,26 @@ def _ast_references_module(tree: ast.AST, module_name: str) -> bool:
     return False
 
 
+def _ast_dotted_name(node: ast.AST) -> Optional[str]:
+    """Reconstruct the dotted name a ``Name``/``Attribute`` chain spells out
+    (e.g. ``external_write.capability_api`` for
+    ``Attribute(attr="capability_api", value=Name(id="external_write"))``), or
+    ``None`` if ``node`` is not a pure name/attribute chain (e.g. it is itself
+    a call result, a subscript, ...) -- used to resolve the OBJECT an
+    attribute-access call's ``.run_enveloped_operation(...)`` is made on back
+    to whatever was actually imported, so that object can be checked against
+    the set of names genuinely bound to the real entrypoint module (see
+    ``_ast_references_entrypoint``)."""
+    parts: List[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return None
+
+
 def _ast_references_entrypoint(tree: ast.AST) -> bool:
     """True iff ``tree`` genuinely CALLS the real live-write entrypoint
     (``run_enveloped_operation``) or imports/references the ``operator_acceptance``
@@ -578,16 +616,37 @@ def _ast_references_entrypoint(tree: ast.AST) -> bool:
     entrypoint, not that any test method actually EXERCISES it (probe 2,
     known-bad-fails, is what would have caught an import-only test's inertness,
     but a test author should not have to rely on that second probe to get an
-    honest producer-entrypoint verdict). This now requires a real ``ast.Call``
-    reaching the entrypoint, in EITHER shape:
+    honest producer-entrypoint verdict).
+
+    (Critical fix, task review) The conjunction below requires BOTH an IMPORT
+    of the real entrypoint AND a CALL whose target traces back to that import
+    -- a call alone (no matching import anywhere in the file) is NEVER
+    sufficient. Before this fix, ``call_names`` was seeded with
+    ``run_enveloped_operation`` UNCONDITIONALLY (before any import was even
+    inspected), and the attribute-call branch matched ``func.attr ==
+    "run_enveloped_operation"`` on ANY object regardless of what it was --
+    together these accepted a test file that defines its OWN local ``def
+    run_enveloped_operation(): ...`` and calls it, or an arbitrary
+    ``FakeThing().run_enveloped_operation()``, with the REAL entrypoint never
+    imported from anywhere. This now requires a real ``ast.Call`` reaching the
+    entrypoint, in EITHER shape:
       * ``from ... import run_enveloped_operation`` (optionally ``as X``) then a
-        bare ``run_enveloped_operation(...)`` / ``X(...)`` call, or
-      * a module import (``import external_write.capability_api`` or similar)
-        then an attribute-access call ending in ``....run_enveloped_operation(...)``
-        (e.g. ``capability_api.run_enveloped_operation(...)`` or
-        ``external_write.capability_api.run_enveloped_operation(...)``) -- matched
-        on the trailing attribute name alone, not on which module it was
-        imported from, mirroring this module's other AST-only, name-based probes.
+        bare ``run_enveloped_operation(...)`` / ``X(...)`` call whose name was
+        bound by exactly that import, or
+      * an ``import`` of the real entrypoint's module -- a dotted path whose
+        LAST segment is ``capability_api`` (``import external_write.capability_api``,
+        ``import external_write.capability_api as cap``, bare ``import
+        capability_api``, ...) -- binding a local name (the alias, or the
+        dotted name/its first component for a plain ``import``), THEN an
+        attribute-access call ``<that bound reference>.run_enveloped_operation(...)``
+        whose object resolves (by dotted name/attribute-chain reconstruction,
+        see ``_ast_dotted_name``) back to exactly what that import bound (e.g.
+        ``capability_api.run_enveloped_operation(...)`` after ``import
+        capability_api``, or ``external_write.capability_api.run_enveloped_operation(...)``
+        after ``import external_write.capability_api``). An attribute call on
+        an object that was never imported as the real entrypoint module (a
+        locally-defined class instance, an unrelated import, ...) is REJECTED
+        even though its trailing attribute name matches.
 
     DECISION (per this task's own "if unsure" default): the acceptance-CLI path
     is deliberately left as import/module-reference-only, NOT also requiring a
@@ -595,7 +654,8 @@ def _ast_references_entrypoint(tree: ast.AST) -> bool:
     operator_acceptance ...``), not called as an in-process Python function, so
     there is no ``ast.Call`` node to require in the first place; naming the
     module remains the right-sized evidence for that entrypoint."""
-    call_names = set(_ENTRYPOINT_IMPORT_NAMES)
+    call_names = set()
+    module_refs = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             module_parts = (node.module or "").split(".")
@@ -606,8 +666,11 @@ def _ast_references_entrypoint(tree: ast.AST) -> bool:
                     call_names.add(alias.asname or alias.name)
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if _ACCEPTANCE_CLI_MODULE_NAME in alias.name.split("."):
+                dotted_parts = alias.name.split(".")
+                if _ACCEPTANCE_CLI_MODULE_NAME in dotted_parts:
                     return True
+                if dotted_parts[-1] == _ENTRYPOINT_MODULE_NAME:
+                    module_refs.add(alias.asname or alias.name)
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -616,7 +679,9 @@ def _ast_references_entrypoint(tree: ast.AST) -> bool:
         if isinstance(func, ast.Name) and func.id in call_names:
             return True
         if isinstance(func, ast.Attribute) and func.attr in _ENTRYPOINT_IMPORT_NAMES:
-            return True
+            base_dotted = _ast_dotted_name(func.value)
+            if base_dotted is not None and base_dotted in module_refs:
+                return True
     return False
 
 
