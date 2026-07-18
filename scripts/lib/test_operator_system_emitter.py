@@ -737,6 +737,57 @@ class ExternalWriteLibRegistryEnrollmentTests(unittest.TestCase):
             "emitted external_write.standing_automation must import cleanly in a fresh "
             f"operator project; stderr:\n{result.stderr}")
 
+    def test_every_enrolled_lib_file_imports_from_a_real_emitted_project(self):
+        # (Coordinator review, B1 must-fix #2) The three tests above each hardcode ONE
+        # enrolled file -- nothing previously drove EVERY entry in
+        # `agent_emitter._EXTERNAL_WRITE_LIB_FILES` through a real emit + import cycle, so a
+        # bad import in any of them (including a never-exercised standalone-script
+        # `__package__ in (None, "")` sys.path bootstrap block, e.g. the one carried by
+        # lifecycle_state.py / capability_identity.py / capability_health.py) could ship
+        # broken with nothing catching it. Generalizes the pattern above to iterate the
+        # whole registry so this class of gap is closed once, not file by file.
+        import agent_emitter
+        import json
+
+        plan = self._plan()
+        fixture_build_repo_root = self._fixture_build_repo_root()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name)
+
+        emit_operator_system(plan, staging, fixture_build_repo_root)
+
+        module_names = [name[:-3] for name in agent_emitter._EXTERNAL_WRITE_LIB_FILES]
+        for stem in module_names:
+            emitted_path = staging / "agents" / "lib" / "external_write" / f"{stem}.py"
+            self.assertTrue(
+                emitted_path.is_file(),
+                f"'{stem}.py' is enrolled in _EXTERNAL_WRITE_LIB_FILES but was not "
+                f"physically emitted at {emitted_path}")
+
+        import_script = (
+            "import sys, json\n"
+            "sys.path.insert(0, 'agents/lib')\n"
+            "failures = {}\n"
+            f"for stem in {module_names!r}:\n"
+            "    try:\n"
+            "        __import__(f'external_write.{stem}')\n"
+            "    except Exception as e:\n"
+            "        failures[stem] = f'{type(e).__name__}: {e}'\n"
+            "print(json.dumps(failures))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", import_script],
+            cwd=str(staging), capture_output=True, text=True)
+        self.assertEqual(
+            result.returncode, 0,
+            f"the import-check subprocess itself failed to run; stderr:\n{result.stderr}")
+        failures = json.loads(result.stdout.strip() or "{}")
+        self.assertEqual(
+            failures, {},
+            "every enrolled external_write lib file must import cleanly from a real "
+            f"emitted operator project; failures:\n{json.dumps(failures, indent=2)}")
+
 
 class ExternalWriteLibEmitFromBundleTests(unittest.TestCase):
     """Task 7 (D): end-to-end assertion that a writes-back plan built from the bundle

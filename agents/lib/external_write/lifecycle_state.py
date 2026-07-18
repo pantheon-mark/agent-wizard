@@ -285,9 +285,61 @@ def _read_existing_marker_state(root: Path, canonical_id: str) -> Optional[Dict[
     return data if isinstance(data, dict) else None
 
 
+def _fresh_marker_state(canonical_id: str, desired_op_kinds: List[str]) -> Dict[str, Any]:
+    """The full marker shape written when NO prior marker exists at all for ``canonical_id``."""
+    return {
+        "mechanism_id": canonical_id,
+        "canonical_id": canonical_id,
+        "writer_relpath": f"{CAPABILITIES_DIR_REL}/{canonical_id}{CAPABILITY_FILE_SUFFIX}",
+        "entrypoint_relpath": None,
+        "state": "paused_live_write",
+        "paused_op_kinds": desired_op_kinds,
+        "paused_at": _utcnow_iso(),
+        "reason": "capability descriptor not accepted; migration pending (reconcile_state)",
+        "credentials_preserved": True,
+        "migration_status": "pending",
+    }
+
+
+def _merge_marker_state(existing: Dict[str, Any], canonical_id: str,
+                         desired_op_kinds: List[str]) -> Dict[str, Any]:
+    """(Coordinator review, must-fix #1) MERGE onto an existing marker -- never replace it
+    wholesale. The COMMON case this exists for: a marker written by
+    ``upgrade_reconcile._write_paused_live_write_state`` at upgrade time carries diagnostic
+    fields this module knows nothing about (``from_version``, ``to_version``, ``violations``,
+    a specific upgrade-time ``reason``) and, being written before this task, carries NO
+    ``canonical_id``. A full-rewrite would silently destroy which-upgrade-introduced-the-
+    violation context the first time ``reconcile_state`` ever touched that marker.
+
+    Every existing key is preserved untouched EXCEPT ``mechanism_id``/``canonical_id`` (set to
+    the resolved canonical id -- back-filling ``canonical_id`` onto a pre-B1 marker is exactly
+    the point) and ``paused_op_kinds`` (refreshed if the capability's own ``OP_KIND`` changed
+    since the marker was written). ``setdefault`` fills in any of this module's own baseline
+    keys a hand-seeded or unusually minimal existing marker happens to be missing -- it never
+    overwrites a key already present."""
+    merged = dict(existing)
+    merged["mechanism_id"] = canonical_id
+    merged["canonical_id"] = canonical_id
+    merged["paused_op_kinds"] = desired_op_kinds
+    merged.setdefault("writer_relpath", f"{CAPABILITIES_DIR_REL}/{canonical_id}{CAPABILITY_FILE_SUFFIX}")
+    merged.setdefault("entrypoint_relpath", None)
+    merged.setdefault("state", "paused_live_write")
+    merged.setdefault("paused_at", _utcnow_iso())
+    merged.setdefault(
+        "reason", "capability descriptor not accepted; migration pending (reconcile_state)")
+    merged.setdefault("credentials_preserved", True)
+    merged.setdefault("migration_status", "pending")
+    return merged
+
+
 def _ensure_paused_marker(root: Path, canonical_id: str, paused_op_kinds: List[str]) -> bool:
     """Ensure a pause marker exists for ``canonical_id`` with the given ``paused_op_kinds`` AND
     the resolved ``canonical_id`` recorded alongside it (Task B1's A4-fold requirement).
+
+    MERGES onto an existing marker rather than replacing it wholesale (see
+    ``_merge_marker_state``'s own docstring) -- a marker this module did not itself write (the
+    common case: one written by the build-side upgrade-reconcile auto-pause at upgrade time)
+    carries diagnostic fields this function must never discard.
 
     Idempotent: computes the desired ``.json`` state and only rewrites when the existing one
     (if any) does not already match -- a second call against the same inputs performs no write
@@ -304,32 +356,24 @@ def _ensure_paused_marker(root: Path, canonical_id: str, paused_op_kinds: List[s
 
     desired_op_kinds = list(paused_op_kinds)
     existing = _read_existing_marker_state(root, canonical_id)
-    already_correct = (
-        existing is not None
-        and existing.get("canonical_id") == canonical_id
-        and existing.get("mechanism_id") == canonical_id
-        and existing.get("paused_op_kinds") == desired_op_kinds
-        and existing.get("state") == "paused_live_write"
-    )
-    if not already_correct:
-        state = {
-            "mechanism_id": canonical_id,
-            "canonical_id": canonical_id,
-            "writer_relpath": f"{CAPABILITIES_DIR_REL}/{canonical_id}{CAPABILITY_FILE_SUFFIX}",
-            "entrypoint_relpath": None,
-            "state": "paused_live_write",
-            "paused_op_kinds": desired_op_kinds,
-            "paused_at": (existing or {}).get("paused_at") or _utcnow_iso(),
-            "reason": "capability descriptor not accepted; migration pending (reconcile_state)",
-            "credentials_preserved": True,
-            "migration_status": "pending",
-        }
-        _atomic_write(
-            _pause_state_path(root, canonical_id),
-            json.dumps(state, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+
+    if existing is None:
+        state = _fresh_marker_state(canonical_id, desired_op_kinds)
+    else:
+        already_correct = (
+            existing.get("canonical_id") == canonical_id
+            and existing.get("mechanism_id") == canonical_id
+            and existing.get("paused_op_kinds") == desired_op_kinds
         )
-        changed = True
-    return changed
+        if already_correct:
+            return changed
+        state = _merge_marker_state(existing, canonical_id, desired_op_kinds)
+
+    _atomic_write(
+        _pause_state_path(root, canonical_id),
+        json.dumps(state, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+    )
+    return True
 
 
 def _clear_paused_marker(root: Path, canonical_id: str) -> bool:

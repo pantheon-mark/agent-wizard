@@ -116,6 +116,109 @@ class ReconcilePausedIsCoherentTests(unittest.TestCase):
                 (marker_dir / "acme_report_reader.pause").exists())
 
 
+class ReconcilePreservesUpgradeDiagnosticsTests(unittest.TestCase):
+    """(Coordinator review, must-fix #1) A capability paused at UPGRADE time by
+    ``upgrade_reconcile._write_paused_live_write_state`` carries diagnostic fields
+    (``from_version``, ``to_version``, ``violations``, a specific ``reason``) that
+    ``lifecycle_state._ensure_paused_marker`` must never discard on a later
+    ``reconcile_state`` call -- it must MERGE (add/repair ``canonical_id`` and
+    ``paused_op_kinds`` if stale) rather than replace the whole record."""
+
+    def test_ensure_marker_merges_not_replaces_upgrade_time_marker(self):
+        with tempfile.TemporaryDirectory() as root:
+            _write_capability(root, "acme_widget_deleter", op_kind="acme.widget.delete")
+            _write_capability(root, "acme_report_reader")
+            _write_descriptors(root, [
+                {"id": "acme_widget_deleter", "accepted": False},
+                {"id": "acme_report_reader", "accepted": True},
+            ])
+            _write_pending_migrations(root, [
+                {"mechanism_id": "acme_widget_deleter", "status": "pending"},
+            ])
+
+            # Seed a marker shaped exactly like upgrade_reconcile._write_paused_live_write_state's
+            # real output -- no `canonical_id` (the pre-B1 shape), plus upgrade-time-only
+            # diagnostic fields this fix must not discard.
+            marker_dir = Path(root) / lifecycle_state.PAUSED_MECHANISMS_DIR_REL
+            marker_dir.mkdir(parents=True, exist_ok=True)
+            (marker_dir / "acme_widget_deleter.pause").write_text("", encoding="utf-8")
+            upgrade_time_state = {
+                "mechanism_id": "acme_widget_deleter",
+                "writer_relpath": "agents/capabilities/acme_widget_deleter.py",
+                "entrypoint_relpath": None,
+                "state": "paused_live_write",
+                "paused_op_kinds": ["acme.widget.delete"],
+                "paused_at": "2026-01-01T00:00:00Z",
+                "from_version": "v0.13.0",
+                "to_version": "v0.13.1",
+                "reason": "external-write gate violation detected on upgrade",
+                "violations": [{"path": "agents/capabilities/acme_widget_deleter.py",
+                                 "line": 12, "kind": "raw_kernel_write"}],
+                "credentials_preserved": True,
+                "migration_status": "pending",
+            }
+            (marker_dir / "acme_widget_deleter.json").write_text(
+                json.dumps(upgrade_time_state, indent=2, sort_keys=True), encoding="utf-8")
+
+            result = lifecycle_state.reconcile_state(root, "acme_widget_deleter")
+            self.assertTrue(result.changed)
+
+            state = _read_json(marker_dir / "acme_widget_deleter.json")
+            # The new field, back-filled.
+            self.assertEqual(state["canonical_id"], "acme_widget_deleter")
+            # Every upgrade-time diagnostic field survives UNCHANGED.
+            self.assertEqual(state["from_version"], "v0.13.0")
+            self.assertEqual(state["to_version"], "v0.13.1")
+            self.assertEqual(state["reason"], "external-write gate violation detected on upgrade")
+            self.assertEqual(state["violations"], upgrade_time_state["violations"])
+            self.assertEqual(state["paused_at"], "2026-01-01T00:00:00Z")
+            self.assertEqual(state["paused_op_kinds"], ["acme.widget.delete"])
+            self.assertEqual(state["mechanism_id"], "acme_widget_deleter")
+
+            # Idempotent: a second call performs no further write.
+            second = lifecycle_state.reconcile_state(root, "acme_widget_deleter")
+            self.assertFalse(second.changed)
+            state_after_second = _read_json(marker_dir / "acme_widget_deleter.json")
+            self.assertEqual(state, state_after_second)
+
+    def test_ensure_marker_merge_updates_stale_op_kinds_without_losing_other_fields(self):
+        with tempfile.TemporaryDirectory() as root:
+            _write_capability(root, "acme_widget_deleter", op_kind="acme.widget.delete")
+            _write_capability(root, "acme_report_reader")
+            _write_descriptors(root, [{"id": "acme_widget_deleter", "accepted": False}])
+            _write_pending_migrations(root, [
+                {"mechanism_id": "acme_widget_deleter", "status": "pending"},
+            ])
+            marker_dir = Path(root) / lifecycle_state.PAUSED_MECHANISMS_DIR_REL
+            marker_dir.mkdir(parents=True, exist_ok=True)
+            (marker_dir / "acme_widget_deleter.pause").write_text("", encoding="utf-8")
+            stale_state = {
+                "mechanism_id": "acme_widget_deleter",
+                "writer_relpath": "agents/capabilities/acme_widget_deleter.py",
+                "entrypoint_relpath": None,
+                "state": "paused_live_write",
+                "paused_op_kinds": ["acme.widget.delete_stale_kind"],
+                "paused_at": "2026-01-01T00:00:00Z",
+                "from_version": "v0.12.0",
+                "to_version": "v0.12.1",
+                "reason": "external-write gate violation detected on upgrade",
+                "violations": [],
+                "credentials_preserved": True,
+                "migration_status": "pending",
+            }
+            (marker_dir / "acme_widget_deleter.json").write_text(
+                json.dumps(stale_state, indent=2, sort_keys=True), encoding="utf-8")
+
+            result = lifecycle_state.reconcile_state(root, "acme_widget_deleter")
+            self.assertTrue(result.changed)
+            state = _read_json(marker_dir / "acme_widget_deleter.json")
+            self.assertEqual(state["paused_op_kinds"], ["acme.widget.delete"])
+            self.assertEqual(state["canonical_id"], "acme_widget_deleter")
+            # Upgrade diagnostics from the ORIGINAL (stale-op-kind) writer still survive.
+            self.assertEqual(state["from_version"], "v0.12.0")
+            self.assertEqual(state["to_version"], "v0.12.1")
+
+
 class ReconcileAcceptedClearsViewsTests(unittest.TestCase):
     def test_reconcile_accepted_clears_views(self):
         with tempfile.TemporaryDirectory() as root:
@@ -197,6 +300,7 @@ class ReconcileIsIdempotentTests(unittest.TestCase):
 
             first = lifecycle_state.reconcile_state(root, "acme_widget_deleter")
             marker_snapshot_1 = _marker_dir_snapshot(root)
+            descriptors_1 = Path(root, lifecycle_state.DESCRIPTOR_SET_REL).read_bytes()
             migrations_1 = Path(root, lifecycle_state.MIGRATION_QUEUE_REL).read_bytes()
 
             second = lifecycle_state.reconcile_state(root, "acme_widget_deleter")
@@ -205,8 +309,10 @@ class ReconcileIsIdempotentTests(unittest.TestCase):
             self.assertEqual(second.migration_open, first.migration_open)
 
             marker_snapshot_2 = _marker_dir_snapshot(root)
+            descriptors_2 = Path(root, lifecycle_state.DESCRIPTOR_SET_REL).read_bytes()
             migrations_2 = Path(root, lifecycle_state.MIGRATION_QUEUE_REL).read_bytes()
             self.assertEqual(marker_snapshot_1, marker_snapshot_2)
+            self.assertEqual(descriptors_1, descriptors_2)
             self.assertEqual(migrations_1, migrations_2)
 
 
@@ -255,6 +361,53 @@ class ReconcileFailClosedTests(unittest.TestCase):
                 lifecycle_state.reconcile_state(root, "acme_widget_deleter")
             self.assertTrue(cm.exception.operator_message)
             self.assertNotIn("Traceback", cm.exception.operator_message)
+
+
+class MarkerShapeParityTests(unittest.TestCase):
+    """(Minor, coordinator review) ``upgrade_reconcile._write_paused_live_write_state``
+    (build-side) and ``lifecycle_state._ensure_paused_marker`` (this module) are two
+    BY-VALUE-DUPLICATED writers of the same on-disk marker shape (see
+    ``lifecycle_state.py``'s own "Reuse, not duplication" docstring section on why this pair
+    is duplicated rather than imported across the build/runtime boundary). Pins the shared
+    key subset present in BOTH real outputs, so a future rename or removal in either writer
+    is caught here rather than silently drifting the two shapes apart."""
+
+    SHARED_KEYS = (
+        "mechanism_id", "paused_op_kinds", "writer_relpath", "entrypoint_relpath",
+        "state", "credentials_preserved", "migration_status",
+    )
+
+    def test_shared_marker_keys_present_in_both_writers(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import upgrade_reconcile  # noqa: E402
+
+        with tempfile.TemporaryDirectory() as ur_root:
+            proj = Path(ur_root)
+            relpath = "agents/capabilities/acme_widget_deleter.py"
+            (proj / "agents" / "capabilities").mkdir(parents=True)
+            (proj / relpath).write_text("OP_KIND = 'acme.widget.delete'\n", encoding="utf-8")
+            upgrade_reconcile._write_paused_live_write_state(
+                proj, "acme_widget_deleter", relpath, violations=[],
+                from_version="v0.13.0", to_version="v0.13.1",
+                paused_op_kinds=["acme.widget.delete"],
+            )
+            ur_state = _read_json(
+                proj / upgrade_reconcile.PAUSED_MECHANISMS_DIR_REL / "acme_widget_deleter.json")
+
+        with tempfile.TemporaryDirectory() as ls_root:
+            _write_capability(ls_root, "acme_widget_deleter", op_kind="acme.widget.delete")
+            _write_capability(ls_root, "acme_report_reader")
+            _write_descriptors(ls_root, [{"id": "acme_widget_deleter", "accepted": False}])
+            _write_pending_migrations(ls_root, [
+                {"mechanism_id": "acme_widget_deleter", "status": "pending"}])
+            lifecycle_state.reconcile_state(ls_root, "acme_widget_deleter")
+            ls_state = _read_json(
+                Path(ls_root) / lifecycle_state.PAUSED_MECHANISMS_DIR_REL /
+                "acme_widget_deleter.json")
+
+        for key in self.SHARED_KEYS:
+            self.assertIn(key, ur_state, f"upgrade_reconcile's writer dropped {key!r}")
+            self.assertIn(key, ls_state, f"lifecycle_state's writer dropped {key!r}")
 
 
 if __name__ == "__main__":
