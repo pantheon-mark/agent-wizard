@@ -125,31 +125,35 @@ class TestCapabilityIndex(unittest.TestCase):
             self.assertEqual(got.canonical_id, "inbox_management")
             self.assertEqual(got.module_stem, "inbox_management")
 
-    def test_mechanism_id_alias_resolves_via_pending_migrations(self):
-        # Three-way link: module/canonical = inbox_management; descriptor id +
-        # surface = inbox-labels; the migration queue carries a THIRD historical
-        # name (mechanism_id) for the same capability.
+    def test_mechanism_id_with_no_corroboration_stays_unresolved(self):
+        # (Coordinator review, round 2, CRITICAL fix) This test previously asserted that a
+        # THIRD, unrelated historical name ("inbox_labels_legacy" -- not the module stem, not
+        # the descriptor id, not the declared SURFACE) resolved to inbox_management purely
+        # because it was the project's only unmatched mechanism_id and its only capability.
+        # That was the sole-candidate cardinality GUESS this review removed: an id with zero
+        # corroborating evidence must stay unresolved no matter how few capabilities exist.
         ci = _load(MODPATH)
         with tempfile.TemporaryDirectory() as root:
             _write_capability(root, "inbox_management", "inbox-labels")
             _write_descriptors(root, [{"id": "inbox-labels"}])
             _write_pending_migrations(root, [{"mechanism_id": "inbox_labels_legacy"}])
             idx = ci.build_capability_index(root)
-            got = idx.resolve("inbox_labels_legacy", "mechanism_id")
-            self.assertEqual(got.canonical_id, "inbox_management")
-            self.assertIn("inbox_labels_legacy", got.aliases)
+            with self.assertRaises(ci.IdentityResolutionError) as cm:
+                idx.resolve("inbox_labels_legacy", "mechanism_id")
+            self.assertEqual(cm.exception.kind, "unresolved")
 
     def test_unknown_namespace_resolves_across_all_namespaces(self):
+        # A mechanism_id that carries genuine corroboration (here: it equals
+        # inbox_management's own declared SURFACE) must resolve via "unknown" even though the
+        # caller doesn't know it came from the mechanism_id namespace specifically -- "unknown"
+        # searches module_stem, then descriptor_id/mechanism_id, then surface, in that order.
         ci = _load(MODPATH)
         with tempfile.TemporaryDirectory() as root:
             _write_capability(root, "inbox_management", "inbox-labels")
             _write_descriptors(root, [{"id": "inbox-labels"}])
-            _write_pending_migrations(root, [{"mechanism_id": "inbox_labels_legacy"}])
+            _write_pending_migrations(root, [{"mechanism_id": "inbox-labels"}])
             idx = ci.build_capability_index(root)
-            # Caller doesn't know which namespace "inbox_labels_legacy" (a
-            # mechanism_id) came from -- "unknown" must still resolve it
-            # unambiguously since it only appears in one namespace's map.
-            got = idx.resolve("inbox_labels_legacy", "unknown")
+            got = idx.resolve("inbox-labels", "unknown")
             self.assertEqual(got.canonical_id, "inbox_management")
 
     def test_capability_without_surface_constant_has_none_surface(self):
@@ -252,6 +256,48 @@ class TestCapabilityIndex(unittest.TestCase):
             idx = ci.build_capability_index(root)
             got = idx.resolve("foo", "unknown")
             self.assertEqual(got.canonical_id, "foo")
+
+    # --- coordinator review round 2: the sole-candidate cardinality fallback itself is an
+    # uncorroborated GUESS and must be removed entirely, not just narrowed. ---
+
+    def test_single_capability_uncorroborated_id_stays_unresolved(self):
+        # CRITICAL regression (round-2 review finding): with exactly ONE capability in the
+        # project and exactly ONE unmatched descriptor id, the (now-removed) sole-candidate
+        # fallback resolved that id to the sole capability purely on cardinality -- "there's
+        # only one capability, so this stray must mean that one" -- with ZERO corroborating
+        # evidence (not the module's own stem, not a declared SURFACE). That is a fuzzy/
+        # heuristic guess, exactly what this module's fail-closed design forbids. An id with
+        # NO corroboration signal must stay unresolved no matter how few (or many) capabilities
+        # exist in the project -- cardinality is not evidence.
+        ci = _load(MODPATH)
+        with tempfile.TemporaryDirectory() as root:
+            _write_capability(root, "solo_cap", "solo_cap_surface")
+            _write_descriptors(root, [{"id": "totally_unrelated_name"}])
+            idx = ci.build_capability_index(root)
+            with self.assertRaises(ci.IdentityResolutionError) as cm:
+                idx.resolve("totally_unrelated_name", "descriptor_id")
+            self.assertEqual(cm.exception.kind, "unresolved")
+
+    def test_single_capability_uncorroborated_mechanism_id_stays_unresolved(self):
+        # Same regression, mechanism_id namespace (the pending_migrations.json shape) --
+        # a lone, uncorroborated mechanism_id must not be swept up either.
+        ci = _load(MODPATH)
+        with tempfile.TemporaryDirectory() as root:
+            _write_capability(root, "solo_cap", "solo_cap_surface")
+            _write_pending_migrations(root, [{"mechanism_id": "some_other_legacy_name"}])
+            idx = ci.build_capability_index(root)
+            with self.assertRaises(ci.IdentityResolutionError) as cm:
+                idx.resolve("some_other_legacy_name", "mechanism_id")
+            self.assertEqual(cm.exception.kind, "unresolved")
+
+    def test_canonical_ids_property_exposes_known_capabilities(self):
+        # Public accessor (added alongside the round-2 fix) so a caller can reason about
+        # project cardinality without reaching into the private _identities map.
+        ci = _load(MODPATH)
+        with tempfile.TemporaryDirectory() as root:
+            _write_capability(root, "inbox_management", "inbox-labels")
+            idx = ci.build_capability_index(root)
+            self.assertEqual(idx.canonical_ids, frozenset({"inbox_management"}))
 
     def test_absent_descriptor_file_is_normal_not_state_read_error(self):
         # Absent is NOT the same as unreadable/malformed -- a project that

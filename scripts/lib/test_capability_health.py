@@ -292,6 +292,49 @@ class TestDescriptorAliasResolvesToOwningModuleGreen(CapabilityHealthTestBase):
         self.assertNotIn("inbox-labels", {r["capability_id"] for r in records})
 
 
+class TestUncorroboratedOrphanDescriptorNotMasked(CapabilityHealthTestBase):
+    """CRITICAL regression (coordinator review round 2): the same-cardinality guess that used
+    to live in ``capability_identity._build_name_alias_map`` (resolve an unmatched id to the
+    sole capability purely because it's the only one around) meant a genuinely-unrelated, stale
+    descriptor entry with ZERO corroboration (not the module's own stem, not a declared
+    SURFACE) was silently swallowed into the one real capability's row and VANISHED from the
+    report entirely -- a real broken/orphaned descriptor entry masked as if it did not exist,
+    the opposite of this module's whole purpose. Re-attribution must require CORROBORATED
+    resolution only; an uncorroborated orphan must stay its OWN row and get the normal
+    no-source-file -> RED treatment, never be folded away."""
+
+    def test_uncorroborated_orphan_descriptor_stays_its_own_red_row(self):
+        # Exactly ONE real capability + exactly ONE uncorroborated descriptor entry (the
+        # precise cardinality shape the removed guess fired on: "only one capability exists,
+        # so this stray must mean that one"). No OTHER descriptor entry is needed for
+        # inbox_management itself to resolve GREEN -- it already has its own source file
+        # directly on disk (see the union enumeration in the module docstring); this fixture
+        # isolates the guess so a 2-unmatched-id fixture (already covered by an earlier,
+        # narrower fix) can't accidentally mask this regression.
+        self._write_capability(
+            "inbox_management",
+            _SPLIT_IDENTITY_CAPABILITY_SOURCE.format(
+                display_name="Inbox Management", surface="inbox-labels"),
+        )
+        self._write_descriptor_set([
+            {"id": "totally_unrelated_orphan", "name": "orphan"},    # zero corroboration
+        ])
+
+        records = capability_health.check_capabilities(self.project_root)
+        ids = {r["capability_id"] for r in records}
+
+        # The orphan must NOT vanish -- it must be its own row, reported RED.
+        self.assertIn("totally_unrelated_orphan", ids)
+        orphan = self._record_for(records, "totally_unrelated_orphan")
+        self.assertEqual(orphan["health"], "red")
+        self.assertFalse(orphan["importable"])
+        self.assertFalse(orphan["scanner_clean"])
+
+        # The genuinely-linked split capability must still resolve and report GREEN.
+        healthy = self._record_for(records, "inbox_management")
+        self.assertEqual(healthy["health"], "green")
+
+
 class TestUnreadablePauseMarkerFailsClosedRed(CapabilityHealthTestBase):
     def test_unreadable_pause_marker_is_red_not_green(self):
         # (xvendor Fix B) An otherwise-clean+importable capability whose

@@ -69,41 +69,40 @@ For each of ``descriptor_id`` and ``mechanism_id``, a raw value that
 EXACTLY EQUALS an existing module stem is trivially that stem's own
 canonical id -- no ambiguity possible. A raw value that does not match any
 module stem (the estate case: descriptor id ``inbox-labels`` vs. module stem
-``inbox_management``) is attributed to a canonical WITHOUT guessing via
-exactly two avenues, checked in this order, both exact string equality:
+``inbox_management``) is attributed to a canonical via exactly ONE
+remaining avenue, exact string equality, and NEVER by any other means:
 
-  (A) SURFACE-CORROBORATED: the raw value exactly equals the ``SURFACE``
-      some canonical module itself declares (the estate case: descriptor id
-      ``inbox-labels`` equals ``inbox_management``'s own declared
-      ``SURFACE``). This directly identifies the ONE SPECIFIC canonical the
-      raw value corroborates -- not "whichever canonical happens to be the
-      only one in the project" -- so it applies regardless of how many
-      OTHER unmatched raw ids or canonicals exist in the same project. If
-      two different canonicals both declare that same surface, the raw
-      value maps to both and ``resolve`` correctly reports it ambiguous
-      (same rule as a direct ``surface`` lookup -- see above).
-  (B) SOLE-CANDIDATE FALLBACK: only when (A) found no corroborating
-      surface, AND this raw value is the ONLY unmatched raw id remaining in
-      this namespace, AND there is exactly one canonical in the whole
-      project -- i.e. there is truly nothing else it could possibly refer
-      to. This is a cardinality fact, not a similarity judgement.
+  SURFACE-CORROBORATED: the raw value exactly equals the ``SURFACE`` some
+  canonical module itself declares (the estate case: descriptor id
+  ``inbox-labels`` equals ``inbox_management``'s own declared ``SURFACE``).
+  This directly identifies the ONE SPECIFIC canonical the raw value
+  corroborates -- not "whichever canonical happens to be the only one in
+  the project" -- so it applies regardless of how many OTHER unmatched raw
+  ids or canonicals exist in the same project. If two different canonicals
+  both declare that same surface, the raw value maps to both and
+  ``resolve`` correctly reports it ambiguous (same rule as a direct
+  ``surface`` lookup -- see above).
 
-      Fixed bug (post-A1-review finding): earlier logic fired (B) for
-      EVERY unmatched raw id whenever the project had exactly one
-      capability, regardless of how many other unmatched, unrelated raw ids
-      existed alongside it -- so a genuinely stale/unrelated descriptor
-      entry (one that doesn't match the module stem OR the module's own
-      surface OR anything else) was silently attributed to the sole
-      capability anyway. Requiring "only ONE unmatched id in this
-      namespace" (not just "only one canonical") closes that hole: a
-      second, uncorroborated stale id sharing the namespace now makes BOTH
-      uncorroborated ids stay unresolved rather than one being guessed.
+(Coordinator review, round 2, CRITICAL fix) There is DELIBERATELY no
+cardinality-based fallback ("this project only has one capability, so an
+otherwise-unmatched id must mean that one"). An earlier revision had exactly
+such a fallback, scoped to fire only when a raw id was the SOLE unmatched id
+in its namespace and the project had exactly one canonical -- narrower than
+the very first version, but still a GUESS with zero corroborating evidence,
+and it produced two real downstream bugs: ``capability_health.py`` folded a
+genuinely-unrelated, stale descriptor entry into the sole capability's row
+(making a real broken/orphaned entry silently vanish from the health report
+instead of reporting red), and ``operator_acceptance.py`` silently deleted an
+unrelated ``pending_migrations.json`` entry the moment the sole capability
+was accepted. Cardinality is not evidence, full stop -- an id with no
+corroboration signal is unresolved regardless of how many capabilities exist
+in the project, one or one hundred.
 
-The moment neither avenue applies, an unmatched descriptor/mechanism id has
-no unambiguous default target and is left unresolved (never silently
-guessed) until something disambiguates it (typically: the descriptor set
-gets corrected to use the real capability_id, per
-``wizard/skills/add-capability.md``'s own convention that
+The moment SURFACE-CORROBORATION does not apply, an unmatched
+descriptor/mechanism id has no unambiguous default target and is left
+unresolved (never silently guessed) until something disambiguates it
+(typically: the descriptor set gets corrected to use the real capability_id,
+per ``wizard/skills/add-capability.md``'s own convention that
 ``mechanism_id == capability_id``).
 
 AST-only extraction, never import (mirrors capability_health.py's own
@@ -438,26 +437,36 @@ def _build_name_alias_map(raw_ids: Set[str], canonical_ids: Set[str],
                            surface_by_canonical: Dict[str, Optional[str]]) -> Dict[str, Set[str]]:
     """Build a ``raw_token -> {canonical_ids}`` map for a name-shaped
     namespace (``descriptor_id`` / ``mechanism_id``). Exact-match only, no
-    fuzzy matching -- see the module docstring's "How aliases are
-    discovered" section for the full rationale. Summary:
+    fuzzy matching, no cardinality guessing -- see the module docstring's
+    "How aliases are discovered" section for the full rationale. Summary:
 
       * a raw id that EXACTLY EQUALS an existing canonical maps to that
         canonical directly -- unambiguous by construction.
-      * an unmatched raw id maps via (A) SURFACE-CORROBORATED: it exactly
+      * an unmatched raw id maps via SURFACE-CORROBORATED: it exactly
         equals some canonical's own declared ``SURFACE`` -- identifies that
-        SPECIFIC canonical regardless of what else is unmatched.
-      * otherwise via (B) SOLE-CANDIDATE FALLBACK, but ONLY when this raw id
-        is the single unmatched id in the whole ``raw_ids`` set AND there is
-        exactly one canonical in the whole project -- i.e. truly nothing
-        else it could refer to. (Post-A1-review fix: previously this fired
-        for EVERY unmatched raw id whenever only one canonical existed,
-        which let a genuinely unrelated/stale raw id silently attach to the
-        sole capability merely because it was the only one around. Scoping
-        this to "only ONE unmatched id total" closes that hole -- a second,
-        uncorroborated stale id sharing the namespace now leaves BOTH
-        unresolved rather than guessing either.)
-      * anything else stays out of the map entirely (unresolved, never
-        guessed).
+        SPECIFIC canonical regardless of what else is unmatched or how many
+        other canonicals exist.
+      * anything else stays out of the map entirely -- unresolved, never
+        guessed.
+
+    (Coordinator review, round 2, CRITICAL) There is DELIBERATELY no third,
+    cardinality-based fallback here anymore. An earlier revision resolved a
+    raw id with NEITHER an exact match NOR a surface match to "the sole
+    capability in the project" whenever there was exactly one unmatched raw
+    id and exactly one canonical -- "there's only one capability, so this
+    stray must mean that one". That is a fuzzy/heuristic GUESS with zero
+    corroborating evidence, exactly the class of resolution this module's
+    fail-closed design forbids (see "Fail-closed, no fuzzy matching" above).
+    It also produced two real, silent-masking bugs downstream: (1)
+    ``capability_health.py`` folded a genuinely-unrelated, stale descriptor
+    entry into the sole capability's row, making the stale/broken entry
+    VANISH from the health report instead of being reported red; (2)
+    ``operator_acceptance.py`` silently deleted an unrelated
+    ``pending_migrations.json`` entry the moment the sole capability was
+    accepted, purely because it was the only entry and the only capability
+    around. Removing the fallback closes both: an id with no corroboration
+    signal is simply ``unresolved``, regardless of how many (or how few)
+    capabilities exist in the project -- cardinality is not evidence.
     """
     alias_map: Dict[str, Set[str]] = {}
     unmatched: Set[str] = set()
@@ -471,9 +480,6 @@ def _build_name_alias_map(raw_ids: Set[str], canonical_ids: Set[str],
         surface_matches = {c for c, s in surface_by_canonical.items() if s == raw_id}
         if surface_matches:
             alias_map.setdefault(raw_id, set()).update(surface_matches)
-            continue
-        if len(unmatched) == 1 and len(canonical_ids) == 1:
-            alias_map.setdefault(raw_id, set()).add(next(iter(canonical_ids)))
     return alias_map
 
 
@@ -496,6 +502,14 @@ class CapabilityIndex:
         self._identities = identities
         self._maps = maps
         self.state_read_error = state_read_error
+
+    @property
+    def canonical_ids(self) -> FrozenSet[str]:
+        """The full set of canonical capability ids known to this index (one per
+        ``agents/capabilities/<id>_capability.py`` module on disk). Public so a caller can
+        reason about project cardinality (e.g. "is this the project's only capability") without
+        reaching into the private ``_identities`` map."""
+        return frozenset(self._identities)
 
     def resolve(self, raw: str, namespace: Namespace) -> CapabilityIdentity:
         """Resolve ``raw`` (a value observed under ``namespace`` --

@@ -190,11 +190,19 @@ def _atomic_write_text(path: str, text: str) -> None:
         raise
 
 
-def _resolve_or_literal(index, raw: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+def _resolve_or_literal(index, raw: Optional[str]) -> Tuple[Optional[str], Optional[str], bool]:
     """Resolve ``raw`` to its canonical capability id via the identity index, falling back to
     the literal string itself when the index has nothing to say about it (e.g. a project with
     no scaffolded capability modules at all yet — the pre-A1 literal-match convention this
-    function preserves for that case). Returns ``(canonical_or_literal, ambiguous_note)``.
+    function preserves for that case). Returns ``(canonical_or_literal, ambiguous_note,
+    corroborated)``.
+
+    ``corroborated`` is True IFF ``index.resolve`` actually succeeded against real evidence
+    (an exact canonical id / module stem, or SURFACE corroboration) — never for a fallback to
+    the bare literal string. A caller that needs to know whether a match is a REAL identity
+    match, as opposed to two literal strings merely being equal by coincidence, checks this flag
+    rather than just comparing the returned values (see ``close_pending_migration_if_matched``'s
+    single-capability near-miss surfacing, coordinator review round 2).
 
     An UNRESOLVED lookup is a completely normal outcome (most raw ids in a queue simply do not
     correspond to the capability being examined) and falls back silently to the literal value —
@@ -203,14 +211,14 @@ def _resolve_or_literal(index, raw: Optional[str]) -> Tuple[Optional[str], Optio
     the returned note, and the canonical slot is left ``None`` so it can never spuriously equal
     anything (F-60 fix — the acceptance path must see this, not swallow it)."""
     if not (isinstance(raw, str) and raw):
-        return None, None
+        return None, None, False
     try:
         identity = index.resolve(raw, "unknown")
     except IdentityResolutionError as e:
         if e.kind == "ambiguous":
-            return None, e.operator_message
-        return raw, None  # unresolved -- normal; fall back to the literal id.
-    return identity.canonical_id, None
+            return None, e.operator_message, False
+        return raw, None, False  # unresolved -- normal; fall back to the literal id.
+    return identity.canonical_id, None, True
 
 
 def close_pending_migration_if_matched(
@@ -247,7 +255,21 @@ def close_pending_migration_if_matched(
     malformed JSON, or a non-list body are all silent no-ops (``MigrationCloseResult(closed=
     False)``, no note — these are not identity problems). But an identity-resolution ambiguity
     encountered while examining actual entries is SURFACED via `unresolved_note` rather than
-    disappearing into a bare `False` (the F-60 silent-no-op this fix closes)."""
+    disappearing into a bare `False` (the F-60 silent-no-op this fix closes).
+
+    Coordinator review, round 2 (CRITICAL fix): a pending entry only ever CLOSES when its
+    `mechanism_id` is CORROBORATED (real index evidence, not a bare literal-string fallback) to
+    the SAME canonical as the accepted capability — see `_resolve_or_literal`'s `corroborated`
+    flag. A raw id that merely happens to equal the accepted id LITERALLY, with neither side
+    corroborated by the index, no longer counts as a match (that path was only ever reachable
+    via `capability_identity`'s now-removed sole-candidate cardinality guess — see that
+    module's docstring). Separately: when this project has EXACTLY ONE known capability and an
+    examined entry's `mechanism_id` fails to resolve to ANY capability at all (not this one, not
+    any other), that is surfaced via `unresolved_note` too — with only one capability in the
+    whole project, an inexplicable leftover queue entry is inherently suspicious (it can't
+    plausibly belong to "some other, not-yet-built capability" the way it could in a
+    multi-capability project), so silence would hide exactly the CRITICAL-2 failure mode this
+    fix closes (an unrelated stray entry the operator can no longer see)."""
     path = pending_migrations_path or PENDING_MIGRATIONS_REL
     try:
         with open(path, encoding="utf-8") as f:
@@ -258,7 +280,9 @@ def close_pending_migration_if_matched(
         return MigrationCloseResult(closed=False)
 
     index = build_capability_index(project_root or ".")
-    accepted_canonical, accepted_note = _resolve_or_literal(index, capability_id)
+    accepted_canonical, accepted_note, accepted_corroborated = _resolve_or_literal(
+        index, capability_id)
+    single_capability_project = len(index.canonical_ids) == 1
 
     notes = []
     if accepted_note:
@@ -271,9 +295,18 @@ def close_pending_migration_if_matched(
             remaining.append(e)
             continue
         raw_mechanism_id = e.get("mechanism_id")
-        entry_canonical, entry_note = _resolve_or_literal(index, raw_mechanism_id)
+        entry_canonical, entry_note, entry_corroborated = _resolve_or_literal(
+            index, raw_mechanism_id)
         if entry_note:
             notes.append(entry_note)
+        # NOTE: matching is plain equality of the resolved-or-literal values, not a
+        # "both sides corroborated" requirement -- a raw mechanism_id that is LITERALLY the
+        # same string as the accepted capability_id is a real, intentional identity (the
+        # documented add-capability convention: a migrating capability is deliberately given
+        # the SAME id as the mechanism it replaces, often before that capability even has a
+        # scaffolded module on disk), not a guess. What must never happen is a DIFFERENT raw
+        # string being misattributed to this canonical -- that hole was `capability_identity`'s
+        # now-removed sole-candidate fallback, not this equality check.
         matched = (
             accepted_canonical is not None
             and entry_canonical is not None
@@ -281,8 +314,25 @@ def close_pending_migration_if_matched(
         )
         if matched:
             closed_raw_ids.append(raw_mechanism_id)
-        else:
-            remaining.append(e)
+            continue
+        remaining.append(e)
+        # Single-capability near-miss (coordinator review round 2): the ACCEPTED capability
+        # itself is a real, corroborated capability, this entry could not be corroborated to
+        # ANY capability (not just "not this one"), and there is exactly one capability in the
+        # whole project (necessarily the one just accepted) -- an inexplicable orphan worth
+        # surfacing rather than a silent non-match, since it can't plausibly belong to some
+        # other capability that simply hasn't been built yet.
+        if (accepted_corroborated and not entry_note and not entry_corroborated
+                and isinstance(raw_mechanism_id, str) and raw_mechanism_id
+                and single_capability_project):
+            (only_canonical,) = index.canonical_ids
+            notes.append(
+                f'the pending-migration entry for mechanism_id "{raw_mechanism_id}" could not '
+                f'be matched to any known capability, even though this project currently has '
+                f'exactly one capability ("{only_canonical}"). This may be a stale or '
+                f"unrelated leftover entry, or it may be this capability's own migration "
+                f"source recorded under a name this project can't recognize -- review "
+                f"{path} by hand if this is unexpected.")
 
     note = "; ".join(notes) if notes else None
     if not closed_raw_ids:
@@ -495,6 +545,16 @@ if __name__ == "__main__":  # pragma: no cover
     if _res.accepted:
         print(f"ACCEPTED: capability {_res.acceptance.capability_id!r} is now live-authorized "
               f"for phase {_res.acceptance.phase_id!r}. Receipt: {_res.receipt_ref}")
+        # IMPORTANT fix (coordinator review round 2): the acceptance itself already succeeded
+        # (this print never gates on it) -- but if the best-effort pending-migration-queue
+        # cleanup hit something it could not confidently resolve (an ambiguous alias, or an
+        # uncorroborated stray in a single-capability project), that must reach whoever is
+        # reading this CLI's output, not stay buried in the Python-only OperatorAcceptanceResult
+        # field. wizard/skills/next-phase.md's Step 6 invokes exactly this CLI and otherwise
+        # sees only ACCEPTED/REFUSED + the exit code. A normal, clean close (or a queue with
+        # nothing to close) stays quiet -- only a genuine surfaced miss prints.
+        if _res.migration_close is not None and _res.migration_close.unresolved_note:
+            print(f"NOTE: {_res.migration_close.unresolved_note}")
         _sys.exit(0)
     else:
         print(f"REFUSED: {_res.reason}", file=_sys.stderr)

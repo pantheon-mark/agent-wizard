@@ -410,6 +410,45 @@ class PendingMigrationAutoCloseTest(unittest.TestCase):
         remaining = json.loads(pm_path.read_text(encoding="utf-8"))
         self.assertEqual(len(remaining), 1, "the ambiguous entry must be left untouched")
 
+    def test_uncorroborated_stray_entry_in_single_capability_project_not_deleted_and_surfaced(self):
+        # CRITICAL regression (coordinator review round 2): the ROOT CAUSE was
+        # capability_identity._build_name_alias_map's sole-candidate cardinality fallback --
+        # with exactly ONE real capability and ONE unrelated, uncorroborated pending-migration
+        # entry, the (removed) guess resolved the stray entry's mechanism_id to the sole
+        # capability's canonical purely because it was the only one around, so accepting that
+        # ONE real capability silently DELETED the totally-unrelated entry. Now: the entry must
+        # NOT be closed, and the miss must be SURFACED (unresolved_note set), not a silent
+        # no-op -- an operator must be able to see that a pending-migration entry exists that
+        # this acceptance could not confidently account for.
+        self._write_capability_module("google_sheets", surface="gs_surface_unused")
+        pm_path = self.tmp / "agents" / "handoffs" / "pending_migrations.json"
+        pm_path.parent.mkdir(parents=True, exist_ok=True)
+        pm_path.write_text(json.dumps([
+            {"mechanism_id": "totally_unrelated_mechanism", "status": "pending"},
+        ], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        self._write_set([_descriptor(id="google_sheets")])
+        self._write_proof()
+
+        res = record_operator_acceptance(
+            "google_sheets", PHASE, str(self.proof_path),
+            "Yes — I accept this capability for live use.",
+            receipt_path=str(self.receipt_path), descriptor_set_path=str(self.set_path),
+            audit_log_path=str(self.audit_path), pending_migrations_path=str(pm_path),
+            project_root=str(self.tmp))
+        self.assertTrue(res.accepted, res.reason)
+
+        self.assertIsNotNone(res.migration_close)
+        self.assertFalse(
+            res.migration_close.closed,
+            "an unrelated, uncorroborated stray entry must never be deleted just because it is "
+            "the only pending entry in a single-capability project")
+        self.assertIsNotNone(
+            res.migration_close.unresolved_note,
+            "an uncorroborated stray migration entry must be surfaced, not a silent no-op")
+        remaining = json.loads(pm_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(remaining), 1, "the unrelated entry must be left untouched")
+        self.assertEqual(remaining[0]["mechanism_id"], "totally_unrelated_mechanism")
+
 
 class ClosePendingMigrationHelperUnitTest(unittest.TestCase):
     """Direct unit coverage of close_pending_migration_if_matched's fail-soft
@@ -693,7 +732,7 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
         self.assertIn("import external_write.adapters_gmail", content)
         self.assertIn(f"import external_write.{self.adapter_path.stem}", content)
 
-    def test_cli_verbatim_as_documented_succeeds_turnkey(self):
+    def _write_descriptor_and_proof(self):
         hashes = _precompute_hashes(self.project_root, self.OP_KIND)
 
         descriptor = {
@@ -733,11 +772,12 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
         }
         self.proof_path.write_text(json.dumps(proof), encoding="utf-8")
 
+    def _run_cli(self):
         # The EXACT documented invocation shape (skills/next-phase.md, Step
         # 6) -- a fresh subprocess, run from the project root, with no
         # PYTHONPATH and no hand-import of any adapter module by this test.
         cli_path = self.external_write_dir / "operator_acceptance.py"
-        result = subprocess.run(
+        return subprocess.run(
             [sys.executable, str(cli_path),
              "--capability-id", self.CAPABILITY_ID,
              "--phase-id", self.PHASE,
@@ -746,6 +786,10 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
              "Yes -- I accept this capability for live use."],
             cwd=str(self.project_root), capture_output=True, text=True,
         )
+
+    def test_cli_verbatim_as_documented_succeeds_turnkey(self):
+        self._write_descriptor_and_proof()
+        result = self._run_cli()
         self.assertEqual(
             result.returncode, 0,
             msg=f"CLI refused turnkey acceptance for a fresh op_kind -- "
@@ -758,6 +802,37 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
 
         entries = json.loads(self.descriptor_set_path.read_text(encoding="utf-8"))
         self.assertTrue(entries[0]["accepted"])
+
+        # IMPORTANT fix (coordinator review round 2): a normal, clean acceptance with nothing
+        # to surface about the pending-migration queue must stay quiet at the CLI -- no spurious
+        # "NOTE:" line.
+        self.assertNotIn("NOTE:", result.stdout)
+
+    def test_cli_prints_surfaced_migration_close_note_on_success(self):
+        # IMPORTANT fix (coordinator review round 2): operator_acceptance.py's __main__
+        # populated OperatorAcceptanceResult.migration_close but never printed it --
+        # wizard/skills/next-phase.md Step 6 invokes exactly this CLI and only sees the
+        # ACCEPTED/REFUSED line + exit code, so a real operator would never see a surfaced
+        # mismatch. A single real capability + an unrelated, uncorroborated stray
+        # pending-migration entry must print a NOTE line on an otherwise-successful acceptance.
+        self._write_descriptor_and_proof()
+        pm_path = self.project_root / "agents" / "handoffs" / "pending_migrations.json"
+        pm_path.parent.mkdir(parents=True, exist_ok=True)
+        pm_path.write_text(json.dumps([
+            {"mechanism_id": "totally_unrelated_mechanism", "status": "pending"},
+        ], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        result = self._run_cli()
+        self.assertEqual(
+            result.returncode, 0,
+            msg=f"stdout={result.stdout!r} stderr={result.stderr!r}")
+        self.assertIn("ACCEPTED", result.stdout)
+        self.assertIn("NOTE:", result.stdout)
+        self.assertIn("totally_unrelated_mechanism", result.stdout)
+
+        # The unrelated entry itself must still not have been deleted.
+        remaining = json.loads(pm_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(remaining), 1)
 
 
 if __name__ == "__main__":
