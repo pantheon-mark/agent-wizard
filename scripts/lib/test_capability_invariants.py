@@ -1108,6 +1108,85 @@ if __name__ == "__main__":
         )
         self._assert_no_traceback(result)
 
+    def test_mixed_suite_mutated_import_crash_branch_scored_not_effective(self):
+        # (Important fix, task review) The branch in `_check_known_bad_fails`
+        # that folds a MUTATED-run import/collection crash into "not
+        # effective" (the `not real_failure` path, reached only once baseline
+        # is green) had ZERO test coverage: the sibling
+        # `module_level_assert_cap` fixture above is intercepted EARLIER, at
+        # the BASELINE `tests_run == 0` gate (it defines no unittest.TestCase
+        # at all, so baseline itself never collects a real test) -- it never
+        # reaches the mutated stage this test targets.
+        #
+        # This fixture is a MIXED suite: a real, passing `unittest.TestCase`
+        # test (so BASELINE runs >0 real tests and is fully green) PLUS
+        # module-level code that CALLS a capability function at import time.
+        # At baseline (the real, unmutated implementation) that call succeeds
+        # silently and the TestCase test runs and passes -- green,
+        # tests_run > 0. Once this capability's own module is mutated (every
+        # function body replaced with a raise), that SAME module-level call
+        # now raises DURING IMPORT, crashing collection of this file before
+        # the TestCase test ever runs -- an import/collection crash, not a
+        # real test failure -- so the probe must NOT score this as
+        # "effective" (caught the break); it must fail closed, plain
+        # language, same as an inert suite.
+        cap_id = "mixed_suite_import_crash_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Mixed Suite Import Crash Cap", op_kind=VALID_OP_KIND))
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: mixed suite -- real TestCase test + module-level call (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}
+
+# Module-level call at IMPORT time -- succeeds silently against the real
+# (baseline) implementation (so baseline collection completes and the
+# TestCase test below runs and passes). Once this capability's own
+# implementation is mutated so every function raises, this SAME line raises
+# DURING IMPORT, crashing this file's collection before the TestCase test
+# below ever runs.
+{module_name}.describe()
+
+
+class TestMixedSuiteImportCrashCap(unittest.TestCase):
+    def test_always_true(self):
+        self.assertTrue(True)
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(result.ok)
+        known_bad_fails_failures = [f for f in result.failures if f.startswith("Known-bad-fails:")]
+        self.assertTrue(
+            known_bad_fails_failures,
+            f"expected a Known-bad-fails failure, got {result.failures!r}",
+        )
+        # Must have reached the MUTATED-run branch (proving baseline was green,
+        # tests_run > 0) -- NOT the baseline zero-real-tests gate, which would
+        # produce the distinct "did not run as unittest tests" message instead.
+        self.assertTrue(
+            any("still reported all tests passing" in f for f in known_bad_fails_failures),
+            f"expected this fixture to reach the mutated-run 'not effective' branch (proving "
+            f"baseline was green with real tests > 0), got {known_bad_fails_failures!r}",
+        )
+        self.assertFalse(
+            any("did not run as unittest tests" in f for f in known_bad_fails_failures),
+            f"this fixture's baseline must be green (real TestCase test, tests_run > 0) -- it "
+            f"must not be intercepted at the baseline zero-real-tests gate: "
+            f"{known_bad_fails_failures!r}",
+        )
+        self._assert_no_traceback(result)
+
     def test_missing_capability_source_fails_closed(self):
         cap_id = "missing_source_quality_cap"
         # No capability source file written at all.
