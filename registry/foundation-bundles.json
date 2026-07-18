@@ -292,6 +292,19 @@
       "safety_class": "safety_fix",
       "source_commit": "01fbba7",
       "status": "prerelease"
+    },
+    {
+      "bundle_manifest_sha256": "sha256:e1514fea6c293e364662667cf6f5fe42e418b3a1fafb07448ad7a99ced95a2cb",
+      "bundle_tree_sha256": "sha256:bc242791d65f7383e37e9260fb2aec45a2777bfa424e252b9f43acacdf594b14",
+      "changelog": "Three additions under the hood, plus a deeper self-check before any new capability goes live. First, your system now checks that a capability's name, its file, and its internal record all agree with each other before it lets you approve, run, or trust it \u2014 so a capability that was accidentally set up under a mismatched name is caught before it can cause confusion, not after. Second, if a capability's own code changes \u2014 through a rebuild, or because an earlier update retired something it depended on \u2014 your system now recognizes that its prior approval no longer applies and asks you to re-approve it before it runs again, instead of quietly trusting an approval that no longer matches what the capability actually does. Third, building a new capability now runs an additional, deterministic self-check before its first live trial, catching a class of test-quality problems (tests that would not actually have caught a real mistake) before you ever see the capability run for real. No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.",
+      "foundation_bundle_version": "v0.14.0",
+      "manifest": "foundation-bundles/v0.14.0/manifest.yaml",
+      "path": "foundation-bundles/v0.14.0/",
+      "recommendation_reason": "If you build new capabilities, or if you rebuild or update one you already have, this update makes sure your approval always matches what the capability currently does, and adds an extra check before a new capability's first live run \u2014 most operators should take it.",
+      "release_date": "2026-07-18",
+      "safety_class": "safety_fix",
+      "source_commit": "PENDING",
+      "status": "prerelease"
     }
   ],
   "registry_schema_version": "v2",

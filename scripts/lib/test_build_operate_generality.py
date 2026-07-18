@@ -833,7 +833,6 @@ class SupervisedCopyTargetSourceGuardTest(unittest.TestCase):
         self._assert_no_generic_placeholder(self.bundle_next_phase_text,
                                             "latest-bundle templates/wizard/skills/next-phase.md")
 
-    @unittest.expectedFailure
     def test_bundle_next_phase_matches_dev_home(self):
         """The emitted bundle next-phase.md is byte-identical to the dev home (single source
         of truth kept in sync by hand convention; no sync script exists).
@@ -842,21 +841,13 @@ class SupervisedCopyTargetSourceGuardTest(unittest.TestCase):
         expectedFailure during B1-7/B2 for the identical reason it is marked again below, and
         was restored to a live assertion once that cut re-synced the bundle.
 
-        KNOWN PENDING DIVERGENCE (Phase 3 Cut 1, Task D1-3). D1-3 added the D-Layer-1
+        RE-SYNCED AGAIN at the v0.14.0 bundle cut (Phase 3 Cut 1). D1-3 added the D-Layer-1
         deterministic self-QA wiring (the "Deterministic self-check" subsection naming
-        capability_invariants.py) to the DEV-HOME wizard/skills/next-phase.md. v0.13.1 is
-        an already-RELEASED, byte-immutable bundle (merged, stamped, delivered to the live
-        estate) — it must never be edited to force this guard green. So the dev home now
-        intentionally LEADS the latest-bundle copy again; byte-identity is re-established
-        only when Cut 1's own bundle cut ships the D-Layer-1 changes (this next-phase.md
-        edit + the capability_invariants.py/check_test_quality lib files + any remaining
-        Cut 1 prose) into a new bundle version. This is marked expectedFailure — not
-        deleted — deliberately: it stays visible as the tracked re-sync obligation, and the
-        moment Cut 1's cut restores dev-home == latest-bundle, unittest reports it as an
-        UNEXPECTED SUCCESS and fails the suite, forcing this marker to be removed. The
-        dev-home content itself (the D-Layer-1 Step 4 wiring) is guarded by
-        test_build_operate_emit.NextPhaseSelfQAWiringTests, which reads the canonical
-        dev-home source directly and is unaffected by this bundle-lag."""
+        capability_invariants.py) to the DEV-HOME wizard/skills/next-phase.md, and v0.13.1 —
+        already-released and byte-immutable at the time — could not be edited to carry it, so
+        this guard was marked expectedFailure until Cut 1 cut its own bundle. The v0.14.0 cut
+        ported the current wizard/skills/next-phase.md into the bundle byte-for-byte, restoring
+        dev-home == latest-bundle; the marker is removed accordingly."""
         self.assertEqual(
             self.bundle_next_phase_text, self.next_phase_text,
             "bundle next-phase.md template diverged from wizard/skills/next-phase.md; "

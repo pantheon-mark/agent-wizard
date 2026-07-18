@@ -12,6 +12,21 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-18 — your approval always matches what a capability currently does, plus a deeper self-check before a new capability's first live run (v0.14.0)
+
+**Public-facing change:** Three additions under the hood, plus a deeper self-check before any new capability goes live.
+
+- **Your system now checks that a capability's name, its file, and its internal record all agree with each other** before it lets you approve, run, or trust it — so a capability that was accidentally set up under a mismatched name is caught before it can cause confusion, not after.
+- **If a capability's own code changes — through a rebuild, or because an earlier update retired something it depended on — your system now recognizes that its prior approval no longer applies** and asks you to re-approve it before it runs again, instead of quietly trusting an approval that no longer matches what the capability actually does.
+- **Building a new capability now runs an additional, deterministic self-check before its first live trial**, catching a class of test-quality problems (tests that would not actually have caught a real mistake) before you ever see the capability run for real.
+- No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
+
+This is a safety fix (`v0.14.0`, minor-additive, operator-explicit as always). Foundation documents are byte-identical to `v0.13.1`.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-07-15 — an upgrade won't invite you back into a capability that can't run, and applying an update always asks you first (v0.13.1)
 
 **Public-facing change:** A safety fix around your own capabilities and around updates themselves.

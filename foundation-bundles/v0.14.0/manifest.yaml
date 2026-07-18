@@ -1,0 +1,78 @@
+# Foundation bundle v0.14.0 manifest
+# Minor-additive release over v0.13.1 (Phase 3 Cut 1 self-QA slice): adds three new modules
+# to the emitted external_write lib (agents/lib/external_write/) — capability_identity.py (a
+# fail-closed CapabilityIdentity resolver enforcing a 4-way build-time identity invariant, wired
+# onto the enforced acceptance/health/migration path), lifecycle_state.py (an idempotent
+# capability lifecycle reconciler: coherent paused state, rebuild/migration forces
+# accepted:false until re-trial, conformant-rebuild staleness detection + revocation, a
+# sanctioned complete_migration with fail-safe ordering, and audit-append on every
+# re-acceptance), and capability_invariants.py (the D-Layer-1 deterministic capability-invariant
+# battery plus test-quality probes — producer-entrypoint and known-bad-fails — run in
+# next-phase Step 4, fail-closed before a live trial). Also extends acceptance_ceremony.py,
+# capability_health.py, capability_registration.py, operator_acceptance.py,
+# standing_automation.py, and zones.py to thread the new identity/lifecycle primitives onto
+# the enforced path, and updates templates/wizard/skills/next-phase.md (D-Layer-1 Step 4
+# wiring), templates/root/operating_discipline.md, templates/root/gitignore_template, and
+# templates/security/gitignore_manifest.md (consent/runtime artifact coverage + UX fixes
+# F-64/F-65/F-67). No breaking changes; all existing capabilities are byte-for-byte unaffected
+# and previously released bundles still replay. Foundation docs byte-identical to v0.13.1
+# (schema unchanged, v0.3). JSON sidecar (manifest.json) is what the engine consumes.
+_note: JSON sidecar for manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing
+  companion. Both files MUST stay in sync.
+agent_contract_version: v0-pre-rebuild
+bundle_manifest_schema_version: v2
+foundation_bundle_version: v0.14.0
+foundation_schema_version: v0.3
+included_templates:
+  foundation_docs:
+  - vision.md
+  - approach.md
+  - technical_architecture.md
+  - execution_plan.md
+  - test_cases.md
+  - audit_framework.md
+managed_files:
+  foundation/approach.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/audit_framework.md:
+    local_modifications: not_recommended
+    managed_by: wizard
+    merge_strategy: warn_on_drift
+  foundation/execution_plan.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/prd.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/technical_architecture.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/test_cases.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/vision.md:
+    local_modifications: expected
+    managed_by: shared
+    merge_strategy: three_way
+min_engine_version: v1.0.0
+public_api:
+  required_files:
+  - foundation/vision.md
+  - foundation/prd.md
+  - foundation/approach.md
+  - foundation/execution_plan.md
+  - foundation/technical_architecture.md
+  - foundation/test_cases.md
+  - foundation/audit_framework.md
+  required_frontmatter_fields_per_file: see the canonical foundation-versioning specification § 1.1
+  required_sections_per_doc_type: see schemas/section-schema.yaml in this bundle
+  section_schema: schemas/section-schema.yaml
+release_date: '2026-07-18'
+source_commit: PENDING
+status: prerelease
