@@ -21,6 +21,7 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -1360,6 +1361,274 @@ class CompleteMigrationTests(unittest.TestCase):
             descriptors = {e["id"]: e
                           for e in _read_json(Path(root) / lifecycle_state.DESCRIPTOR_SET_REL)}
             self.assertFalse(descriptors[cap_x]["accepted"])
+
+
+# A trivial, stdlib-only, scan-clean capability module (mirrors
+# test_capability_health.py's own _CLEAN_CAPABILITY_SOURCE convention). Deliberately NOT the
+# run-envelope _PROPOSE_OPERATIONS_MODULE_TEMPLATE above: that template imports
+# "agents.lib.external_write.*" by absolute dotted path, which only resolves inside the real dev
+# tree -- verified empirically that it does NOT import inside a bare real-emit-path tempdir (no
+# agents/lib/external_write copied into it), which is exactly the fixture shape these tests use.
+# capability_health's own isolated-subprocess import check (which check_completion reuses,
+# never re-implements) needs a module that ACTUALLY imports cleanly with no such tree present;
+# this trivial module (content is otherwise irrelevant -- the acceptance ceremony only hashes its
+# raw bytes and scans it for BANNED patterns, neither of which cares what it contains) satisfies
+# both the ceremony's wire-verification scan and capability_health's AST-scan + import check.
+_TRIVIAL_CAPABILITY_SOURCE = '''"""{cap_id} -- trivial, scan-clean, importable capability module \
+(Task B5 completion-gate test fixture)."""
+
+from typing import Any
+
+
+def describe() -> str:
+    return "{cap_id} ready"
+
+
+def propose_operations(facade: Any, batch_id: str):
+    return []
+'''
+
+
+class _CheckCompletionFixtureMixin:
+    """Shared fixture builders for the Task B5 completion-gate tests below -- real-emit-path
+    fixtures throughout (the descriptor set, capability module, and audit log are all written at
+    their genuine project-root-relative paths inside a fresh tempdir; the ONE real acceptance
+    flow reused here is the SAME ``acceptance_ceremony.accept_capability_for_live_use`` full
+    ceremony ``CapabilityModuleHashCoverageTests`` above already establishes as the sanctioned way
+    to produce a genuine accepted capability + a genuine audit record -- never a hand-authored
+    stand-in for either)."""
+
+    PHASE_ID = _ace_fixtures.PHASE
+
+    def _write_trivial_module(self, root, cap_id):
+        path = Path(root) / "agents" / "capabilities" / f"{cap_id}_capability.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_TRIVIAL_CAPABILITY_SOURCE.format(cap_id=cap_id), encoding="utf-8")
+        return path
+
+    def _merge_descriptor_entry(self, root, entry):
+        path = Path(root) / lifecycle_state.DESCRIPTOR_SET_REL
+        existing = _read_json(path) if path.exists() else []
+        existing.append(entry)
+        _write_descriptors(root, existing)
+
+    def _accept_real_capability(self, root, cap_id):
+        """Runs the REAL, full acceptance_ceremony flow (never a hand-written descriptor/audit
+        record) -- descriptor ends up accepted:true AND a genuine acceptance-audit record is
+        durably appended, exactly what an operator's real accept flow produces."""
+        cap_module_path = self._write_trivial_module(root, cap_id)
+        self._merge_descriptor_entry(root, _ace_fixtures._descriptor(
+            id=cap_id, risk_class="irreversible_external", phase_id=self.PHASE_ID,
+            blast_radius_cap=5, accepted=False, declared_test_target="copy"))
+
+        proof_path = Path(root) / f"proof_{cap_id}.json"
+        proof = _ace_fixtures._proof(
+            op_kind="delete_record", capability_id=cap_id, module_paths=[str(cap_module_path)])
+        proof_path.write_text(json.dumps(proof), encoding="utf-8")
+
+        receipt_path = Path(root) / f"receipt_{cap_id}.json"
+        receipt = _ace_fixtures._receipt(
+            cap_id, phase_id=self.PHASE_ID, copy_run_proof_ref=str(proof_path))
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+        descriptor_path = Path(root) / lifecycle_state.DESCRIPTOR_SET_REL
+        audit_path = Path(root) / lifecycle_state.ACCEPTANCE_LOG_REL
+
+        result = acceptance_ceremony.accept_capability_for_live_use(
+            cap_id, self.PHASE_ID, str(proof_path), str(receipt_path),
+            descriptor_set_path=str(descriptor_path), audit_log_path=str(audit_path),
+            capability_module_path=str(cap_module_path))
+        self.assertTrue(result.accepted, result.reason)
+        return cap_module_path
+
+
+class CheckCompletionTests(_CheckCompletionFixtureMixin, unittest.TestCase):
+    """Tests for the Task B5 layered completion self-check gate
+    (``lifecycle_state.check_completion``) -- the F-59-class capstone: an operator project must
+    NEVER be told "done" when a core-safety or projection-consistency conjunct does not hold, and
+    a health RED must NEVER by itself withhold "done" (the consult's explicit, binding finding --
+    health reads the same stores and depends on the same identity resolution this gate itself
+    uses, so folding it into the gate would be circular/deadlock-prone, an F-61-class risk).
+
+    At least two distinct capability_ids are exercised across this class (CAP_ID plus an
+    unrelated, untouched OTHER_CAP_ID present in every fixture) to prove no cross-capability
+    bleed."""
+
+    CAP_ID = "acme_widget_deleter"
+    OTHER_CAP_ID = "acme_report_reader"
+
+    def _add_unrelated_capability(self, root):
+        """A second, uninvolved, never-accepted capability -- present in every fixture below to
+        prove this gate's verdict for CAP_ID is never influenced by an unrelated capability's own
+        state."""
+        self._write_trivial_module(root, self.OTHER_CAP_ID)
+        self._merge_descriptor_entry(root, {"id": self.OTHER_CAP_ID, "accepted": False})
+
+    # -- (a) all core + projection conjuncts true -----------------------------------------------
+
+    def test_all_core_and_projection_true_is_done(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._accept_real_capability(root, self.CAP_ID)
+            self._add_unrelated_capability(root)
+
+            result = lifecycle_state.check_completion(str(root), self.CAP_ID)
+
+            self.assertTrue(result.done)
+            self.assertTrue(result.core_ok)
+            self.assertTrue(result.projection_ok)
+            self.assertEqual(result.failed_conjuncts, [])
+            self.assertIn("DONE", result.operator_message)
+            self.assertNotIn("Traceback", result.operator_message)
+
+    # -- (b) audit-appended is false -------------------------------------------------------------
+
+    def test_missing_audit_record_fails_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_trivial_module(root, self.CAP_ID)
+            # accepted:true in the descriptor, but NO acceptance-audit log was ever written --
+            # the exact F-59/B4 defect this conjunct exists to catch.
+            _write_descriptors(root, [
+                {"id": self.CAP_ID, "accepted": True, "phase_id": self.PHASE_ID},
+            ])
+            self._add_unrelated_capability(root)
+
+            result = lifecycle_state.check_completion(str(root), self.CAP_ID)
+
+            self.assertFalse(result.done)
+            self.assertTrue(
+                any("audit" in c for c in result.failed_conjuncts), result.failed_conjuncts)
+            self.assertNotIn("DONE", result.operator_message)
+            self.assertIn("Next:", result.operator_message)
+            self.assertNotIn("Traceback", result.operator_message)
+
+    # -- (c) health RED (via a marker-shape anomaly capability_health treats conservatively),
+    #        core + projection OK -- health must NOT gate done ----------------------------------
+
+    def test_health_red_does_not_block_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._accept_real_capability(root, self.CAP_ID)
+            self._add_unrelated_capability(root)
+
+            # A wrongly-shaped pause-marker STATE file (a directory, not a regular file), with no
+            # ".pause" sentinel present. capability_health._is_paused reports this exact shape as
+            # (paused=False, read_error=True) -- flips this capability's composite health to RED
+            # via state_read_error alone, WITHOUT registering paused=True or
+            # pending_migration=True. This gate's own projection-consistency signal reuses health's
+            # paused/pending_migration booleans (never its state_read_error bit -- see the module's
+            # own "Reuse, not re-derivation" docstring section), so projection stays coherent.
+            marker_dir = root / lifecycle_state.PAUSED_MECHANISMS_DIR_REL
+            marker_dir.mkdir(parents=True, exist_ok=True)
+            (marker_dir / f"{self.CAP_ID}.json").mkdir()
+
+            result = lifecycle_state.check_completion(str(root), self.CAP_ID)
+
+            self.assertTrue(result.core_ok)
+            self.assertTrue(result.projection_ok)
+            self.assertTrue(result.done)
+            self.assertFalse(result.operator_signal_ok)
+            self.assertEqual(result.failed_conjuncts, [])
+            self.assertIn("DONE", result.operator_message)
+            self.assertNotIn("Traceback", result.operator_message)
+
+    # -- (d) acceptance-not-stale is false (B2b integration) ------------------------------------
+
+    def test_stale_acceptance_blocks_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cap_module_path = self._accept_real_capability(root, self.CAP_ID)
+            self._add_unrelated_capability(root)
+
+            # Edit the capability module's bytes AFTER acceptance -- capability_module_hash no
+            # longer matches the one recorded in the acceptance-audit record (B2b signal 2), even
+            # though nothing else about acceptance changed.
+            cap_module_path.write_text(
+                _TRIVIAL_CAPABILITY_SOURCE.format(cap_id=self.CAP_ID)
+                + "\n# edited after acceptance -- must be detected as stale\n",
+                encoding="utf-8")
+
+            result = lifecycle_state.check_completion(str(root), self.CAP_ID)
+
+            self.assertFalse(result.done)
+            self.assertTrue(
+                any("stale" in c for c in result.failed_conjuncts), result.failed_conjuncts)
+            self.assertNotIn("DONE", result.operator_message)
+            self.assertNotIn("Traceback", result.operator_message)
+
+    # -- fail-closed: unresolvable capability / unreadable project state ------------------------
+
+    def test_unresolvable_capability_is_not_done_no_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._add_unrelated_capability(root)
+
+            result = lifecycle_state.check_completion(str(root), "does_not_exist_anywhere")
+
+            self.assertFalse(result.done)
+            self.assertFalse(result.core_ok)
+            self.assertFalse(result.projection_ok)
+            self.assertIn("capability-unresolved", result.failed_conjuncts)
+            self.assertNotIn("Traceback", result.operator_message)
+
+    def test_never_accepted_capability_is_not_done(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_trivial_module(root, self.CAP_ID)
+            self._merge_descriptor_entry(root, {"id": self.CAP_ID, "accepted": False})
+            self._add_unrelated_capability(root)
+
+            result = lifecycle_state.check_completion(str(root), self.CAP_ID)
+
+            self.assertFalse(result.done)
+            self.assertIn("accepted", result.failed_conjuncts)
+            self.assertNotIn("Traceback", result.operator_message)
+
+
+class CheckCompletionCLITests(_CheckCompletionFixtureMixin, unittest.TestCase):
+    """CLI-level tests for the Task B5 hard-exit mechanism -- the "bypass the LLM for critical
+    I/O" property is only real if the actual command run from a shell exits 0 only on a genuine
+    pass and reserves the literal token DONE for that outcome; exercised here via a real
+    subprocess invocation of the module's own ``__main__``, never a simulation of it."""
+
+    CAP_ID = "acme_widget_deleter"
+    LIFECYCLE_STATE_SCRIPT = (
+        Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib" / "external_write"
+        / "lifecycle_state.py"
+    )
+
+    def _run_cli(self, root, canonical_id):
+        return subprocess.run(
+            [sys.executable, str(self.LIFECYCLE_STATE_SCRIPT), str(root), canonical_id],
+            capture_output=True, text=True, timeout=60,
+        )
+
+    def test_cli_exits_zero_and_prints_done_on_full_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._accept_real_capability(root, self.CAP_ID)
+
+            result = self._run_cli(root, self.CAP_ID)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("DONE", result.stdout)
+            self.assertNotIn("Traceback", result.stdout)
+            self.assertNotIn("Traceback", result.stderr)
+
+    def test_cli_exits_one_and_never_prints_done_when_not_finished(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_trivial_module(root, self.CAP_ID)
+            self._merge_descriptor_entry(root, {"id": self.CAP_ID, "accepted": False})
+
+            result = self._run_cli(root, self.CAP_ID)
+
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertNotIn("DONE", result.stdout)
+            self.assertIn("NOT FINISHED", result.stdout)
+            self.assertNotIn("Traceback", result.stdout)
+            self.assertNotIn("Traceback", result.stderr)
 
 
 if __name__ == "__main__":

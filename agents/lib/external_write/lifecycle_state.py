@@ -203,9 +203,12 @@ from external_write.proof_hash import (  # noqa: E402
 # directly (never operator_acceptance.record_operator_acceptance, which mints a FRESH receipt
 # from raw operator-confirmation text; complete_migration's caller already has a minted receipt
 # ref). See this module's own "sanctioned resume/complete-migration tool" docstring section above.
+# (Task B5) ``_acceptance_record_exists`` is reused (not reimplemented) for the completion gate's
+# audit-record-exists conjunct -- see the "Task B5" section near the end of this module.
 from external_write.acceptance_ceremony import (  # noqa: E402
     accept_capability_for_live_use,
     AcceptanceResult,
+    _acceptance_record_exists,
 )
 
 # ---------------------------------------------------------------------------
@@ -1157,3 +1160,340 @@ def complete_migration(
             f"{PAUSED_MECHANISMS_DIR_REL}/{reconcile.canonical_id}.* by hand."),
         acceptance=acceptance, reconcile=reconcile,
     )
+
+
+# ---------------------------------------------------------------------------
+# Task B5 (F-59 class, Phase 3 Cut 1 capstone): the layered completion self-check gate.
+# ---------------------------------------------------------------------------
+#
+# Why this exists
+# ------------------------------------------------------------------------------
+# Every mechanism above this point (B1 reconcile, B2b staleness, B3 complete_migration, B4 audit
+# idempotency) makes ONE piece of the lifecycle state trustworthy. Nothing until now answers the
+# single question an operator/agent actually asks after a migration or resume finishes: "is this
+# capability ACTUALLY, SAFELY done?" Answering that wrong in the optimistic direction is the F-59
+# failure class this task closes -- an agent telling the operator "done" when a core invariant
+# (never accepted, code changed since approval, no audit trail, a still-open migration) does not
+# hold. ``check_completion`` is the ONE function that question routes through.
+#
+# THE GATE IS LAYERED (cross-vendor design-consult finding, authoritative, binding)
+# ------------------------------------------------------------------------------
+# Three tiers, never flattened into one boolean:
+#
+#   1. CORE-SAFETY (``core_ok`` -- gates ``done``): SSOT-accepted (the descriptor's own
+#      ``accepted`` field) AND importable AND scanner_clean AND a verified re-acceptance/audit
+#      event exists for this capability's accepted phase (an actual JSONL record, not merely
+#      ``accepted: true`` with nothing behind it -- the exact B4/F-59 defect) AND
+#      acceptance-not-stale (B2b: the code has not changed since that record was written).
+#
+#   2. PROJECTION-CONSISTENCY (``projection_ok`` -- ALSO gates ``done``, but tracked separately):
+#      no leftover pause marker and no still-open pending-migration entry for this capability --
+#      the same coherence ``reconcile_state`` exists to establish (see this module's own
+#      docstring), reused here as a DEFINITION, not re-invoked as a WRITE (see "no mutation"
+#      below).
+#
+#   3. OPERATOR-SIGNAL (``operator_signal_ok`` -- REPORTED, NEVER a gate): ``capability_health``'s
+#      composite ``health == "green"`` verdict. This is DELIBERATELY excluded from ``done``/
+#      ``core_ok``/``projection_ok``. ``capability_health`` reads the SAME descriptor/marker/
+#      migration-queue stores this gate reads, AND depends on the same identity-resolution layer
+#      -- folding it into the gate would make "done" circular on itself (an F-61-class
+#      identity-resolution hiccup, or a health-side false-RED from an overly conservative
+#      marker-shape read, would DEADLOCK acceptance of a capability that is otherwise genuinely
+#      safe and complete). A health RED is surfaced to the operator (``operator_signal_ok=False``
+#      in the result, folded into the printed block) but NEVER withholds ``DONE``.
+#
+# Reuse, not re-derivation, of capability_health's own per-capability signals
+# ------------------------------------------------------------------------------
+# ``importable``, ``scanner_clean``, and ``acceptance_stale`` are read DIRECTLY off the matching
+# record from ``capability_health.check_capabilities`` -- never re-run (this module does not
+# re-execute the AST bypass scanner or the isolated-subprocess import attempt a second time; that
+# module already owns that safety-ordered, fail-closed machinery). ``paused`` and
+# ``pending_migration`` (also read from that SAME record) are what THIS gate's
+# projection-consistency layer is built from -- deliberately NOT ``capability_health``'s own
+# ``state_read_error`` bit, which is a strictly MORE conservative signal (folds in unreadable/
+# wrong-shaped marker files that ``capability_health`` treats as "cannot positively verify, so
+# invite-guard to RED" for a DIFFERENT, more paranoid purpose than this gate's). A marker/queue
+# read anomaly that does not itself register as a genuine paused/pending state is exactly the
+# kind of thing this gate surfaces via ``operator_signal_ok`` (health still reports RED for it)
+# without it blocking a capability that IS, by every core-safety and projection signal, done.
+#
+# Imported LOCALLY (function-scope), not at module import time: ``capability_health`` imports
+# ``acceptance_hash_is_stale`` / ``ReconcileStateError`` FROM this module at ITS OWN top level, so
+# a module-level import here would be a real import cycle (``lifecycle_state`` ->
+# ``capability_health`` -> ``lifecycle_state``). A local import at call time is safe (both modules
+# are already fully loaded by then) and is the established way this codebase breaks this exact
+# class of cycle.
+#
+# No mutation -- a "check" that changes what it is checking is not a check
+# ------------------------------------------------------------------------------
+# ``check_completion`` NEVER writes to disk. Projection-consistency reuses ``reconcile_state``'s
+# own DEFINITION of coherence (no marker present, no migration entry open) via
+# ``capability_health``'s already-computed, read-only ``paused``/``pending_migration`` booleans --
+# it does NOT call ``reconcile_state`` itself, which is a converging WRITER (it clears markers /
+# closes migration entries when it finds ``accepted: true``). Calling a writer from inside a
+# gate whose own binding constraint is "no state change" on any exit would blur exactly the line
+# this task exists to keep bright: the CLI below is a hard, side-effect-free, deterministic
+# report -- never a repair action bundled into a status check.
+#
+# Fail-closed on unverifiable state
+# ------------------------------------------------------------------------------
+# A capability descriptor set or pending-migration queue that EXISTS but could not be read/parsed
+# (``build_capability_index(...).state_read_error``), or a ``canonical_id`` that does not resolve
+# to a real capability (``IdentityResolutionError``), makes the WHOLE picture unverifiable --
+# ``check_completion`` refuses to guess "done" over that and returns ``done=False`` with a
+# plain-language, no-traceback message and a concrete next step (repair the file / confirm the
+# capability id), exactly the same fail-closed direction as every other function in this module.
+#
+# Stdlib only -- this module ships into the operator's own runtime, ``agents/lib/external_write/``.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class CompletionResult:
+    """Outcome of one ``check_completion`` call -- the layered completion self-check gate.
+
+    done:               ``core_ok AND projection_ok`` -- NEVER includes ``operator_signal_ok``
+                         (health is reported, not gating; see module section docstring above).
+    core_ok:             True iff EVERY core-safety conjunct held: SSOT-accepted, importable,
+                         scanner_clean, a verified acceptance/audit record exists for this
+                         capability's currently accepted phase, and acceptance-not-stale (B2b).
+    projection_ok:       True iff the pause-marker / pending-migration views are coherent (no
+                         leftover marker, no still-open migration entry) for this capability.
+    operator_signal_ok:  ``capability_health``'s composite ``health == "green"`` verdict for this
+                         capability -- REPORTED ONLY, never a factor in ``done``/``core_ok``/
+                         ``projection_ok``.
+    failed_conjuncts:    Machine-stable short keys naming every core-safety or
+                         projection-consistency conjunct that did NOT hold this call (empty when
+                         ``done`` is True). Never includes an operator-signal/health entry --
+                         health never fails this gate, so it is never listed as a reason ``done``
+                         is False.
+    operator_message:    The plain-language, no-traceback block a caller relays VERBATIM to the
+                         operator (this is also exactly what the CLI ``__main__`` below prints).
+    """
+    done: bool
+    core_ok: bool
+    projection_ok: bool
+    operator_signal_ok: bool
+    failed_conjuncts: List[str]
+    operator_message: str
+
+
+# Plain-language (detail, next-step) pairs for every conjunct key this gate can report as failed.
+# Keyed by the SAME short strings ``check_completion`` appends to ``failed_conjuncts`` -- an
+# unrecognized key (should never happen; defensive only) falls back to a generic pair rather than
+# raising or omitting the line.
+_CONJUNCT_EXPLANATIONS: Dict[str, Tuple[str, str]] = {
+    "project-state-unreadable": (
+        "this project's capability descriptor list or pending-migrations queue exists but could "
+        "not be read or is corrupted, so nothing here can be safely confirmed.",
+        "Repair or restore security/capability_descriptors.json and/or "
+        "agents/handoffs/pending_migrations.json, then run this check again.",
+    ),
+    "capability-unresolved": (
+        "this capability's name could not be matched to a known capability in this project.",
+        "Confirm the exact capability id/name, then run this check again.",
+    ),
+    "accepted": (
+        "it has not been approved for live use yet (its descriptor is not marked accepted).",
+        "Complete its acceptance/approval step (the copy-run trial plus operator confirmation), "
+        "then run this check again.",
+    ),
+    "importable": (
+        "its code could not be loaded (a broken import).",
+        "Fix the import error reported by this capability's health check "
+        "(python3 agents/lib/external_write/capability_health.py), then run this check again.",
+    ),
+    "scanner-clean": (
+        "its code failed the automated safety scan.",
+        "Fix the flagged code pattern(s) reported by this capability's health check "
+        "(python3 agents/lib/external_write/capability_health.py), then run this check again.",
+    ),
+    "audit-appended": (
+        "no durable audit record could be verified for its approval (the acceptance log carries "
+        "no entry matching its currently accepted phase).",
+        "Re-run its acceptance/approval step so a fresh audit record is recorded, then run this "
+        "check again.",
+    ),
+    "acceptance-not-stale": (
+        "its code changed since it was approved, so that approval is no longer current.",
+        "Re-run its copy-run trial and approve it again, then run this check again.",
+    ),
+    "projection-coherent": (
+        "its internal state is not fully settled yet (a leftover pause marker or an open "
+        "pending-migration entry remains for it).",
+        "Run the migration-completion step again (the sanctioned complete_migration tool), then "
+        "run this check again.",
+    ),
+    "capability-not-found-in-health-check": (
+        "this capability could not be found by the health checker, so its status could not be "
+        "verified.",
+        "Confirm the capability's source file is present at "
+        "agents/capabilities/<capability_id>_capability.py, then run this check again.",
+    ),
+}
+
+_GENERIC_CONJUNCT_EXPLANATION: Tuple[str, str] = (
+    "an internal check did not pass.",
+    "Investigate, then run this check again.",
+)
+
+
+def _completion_not_done_message(canonical_id: str, failed_conjuncts: List[str]) -> str:
+    lines = [
+        f"NOT FINISHED -- {canonical_id!r} is not yet confirmed safe/complete for live use.",
+        "Safe state: treat this capability as NOT authorized for additional live writes based "
+        "on this check alone.",
+    ]
+    for key in failed_conjuncts:
+        detail, next_step = _CONJUNCT_EXPLANATIONS.get(key, _GENERIC_CONJUNCT_EXPLANATION)
+        lines.append(f"- Why: {detail}")
+        lines.append(f"  Next: {next_step}")
+    return "\n".join(lines)
+
+
+def _completion_done_message(canonical_id: str, operator_signal_ok: bool) -> str:
+    lines = [f"DONE -- {canonical_id!r} is fully migrated and confirmed safe for live use."]
+    if not operator_signal_ok:
+        lines.append(
+            "Note: this capability's automated health check currently reports a problem "
+            "(run python3 agents/lib/external_write/capability_health.py for details). This "
+            "does NOT block completion, but you may want to look into it."
+        )
+    return "\n".join(lines)
+
+
+def check_completion(project_root: str, canonical_id: str) -> CompletionResult:
+    """The layered completion self-check gate (Task B5, F-59 class): the ONE function an agent
+    calls after a migration/resume completes to decide whether it is safe to tell the operator
+    "done". See this section's own module-level docstring above for the full layered-predicate
+    rationale (core-safety gates ``done``; projection-consistency also gates ``done``, tracked
+    separately; the operator-signal/health verdict is reported but NEVER gates ``done``).
+
+    Read-only: never writes to disk, never flips ``accepted``, never clears a marker or closes a
+    migration entry -- see the "No mutation" section of the module docstring above. Fail-closed:
+    an unresolvable ``canonical_id`` or an unreadable/corrupted project-state file makes ``done``
+    False with a plain-language, no-traceback ``operator_message`` and a concrete next step,
+    exactly like every other function in this module.
+    """
+    root = Path(project_root).resolve()
+
+    index = build_capability_index(str(root))
+    if index.state_read_error:
+        failed = ["project-state-unreadable"]
+        return CompletionResult(
+            done=False, core_ok=False, projection_ok=False, operator_signal_ok=False,
+            failed_conjuncts=failed,
+            operator_message=_completion_not_done_message(canonical_id, failed),
+        )
+
+    try:
+        identity: CapabilityIdentity = index.resolve(canonical_id, "unknown")
+    except IdentityResolutionError:
+        failed = ["capability-unresolved"]
+        return CompletionResult(
+            done=False, core_ok=False, projection_ok=False, operator_signal_ok=False,
+            failed_conjuncts=failed,
+            operator_message=_completion_not_done_message(canonical_id, failed),
+        )
+
+    cid = identity.canonical_id
+
+    core_failed: List[str] = []
+    projection_failed: List[str] = []
+
+    descriptor_set = _load_descriptor_set(root)
+    entry = _find_descriptor_entry(descriptor_set, identity.aliases)
+    accepted = bool(entry.get("accepted")) if entry else False
+    if not accepted:
+        core_failed.append("accepted")
+
+    # Local import -- breaks the lifecycle_state <-> capability_health import cycle (see module
+    # section docstring's "Reuse, not re-derivation" note). Reused, never re-implemented: the AST
+    # bypass scan and the isolated-subprocess import attempt already live in capability_health.
+    from external_write import capability_health
+
+    records = capability_health.check_capabilities(str(root))
+    record = next((r for r in records if r.get("capability_id") == cid), None)
+
+    if record is None:
+        # Fail-closed: a canonical id this gate itself resolved should always be enumerable by
+        # capability_health too (same union-of-descriptor-set-and-source-files universe) -- if it
+        # is not, that is itself unverifiable, never a silent pass.
+        core_failed.append("capability-not-found-in-health-check")
+        importable = False
+        scanner_clean = False
+        acceptance_stale = True
+        paused = True
+        pending_migration = True
+        health_green = False
+    else:
+        importable = bool(record.get("importable"))
+        scanner_clean = bool(record.get("scanner_clean"))
+        acceptance_stale = bool(record.get("acceptance_stale"))
+        paused = bool(record.get("paused"))
+        pending_migration = bool(record.get("pending_migration"))
+        health_green = record.get("health") == "green"
+
+        if not importable:
+            core_failed.append("importable")
+        if not scanner_clean:
+            core_failed.append("scanner-clean")
+        if acceptance_stale:
+            core_failed.append("acceptance-not-stale")
+        if paused or pending_migration:
+            projection_failed.append("projection-coherent")
+
+    phase_id = entry.get(PHASE_ID_KEY) if entry else None
+    raw_capability_id = (
+        entry.get("id") if entry and isinstance(entry.get("id"), str) else cid
+    )
+    audit_log_path = str(root / ACCEPTANCE_LOG_REL)
+    audit_ok = (
+        accepted
+        and isinstance(phase_id, str) and bool(phase_id)
+        and _acceptance_record_exists(audit_log_path, raw_capability_id, phase_id)
+    )
+    if not audit_ok:
+        core_failed.append("audit-appended")
+
+    core_ok = not core_failed
+    projection_ok = not projection_failed
+    done = core_ok and projection_ok
+    operator_signal_ok = health_green
+
+    failed_conjuncts = core_failed + projection_failed
+    operator_message = (
+        _completion_done_message(cid, operator_signal_ok) if done
+        else _completion_not_done_message(cid, failed_conjuncts)
+    )
+
+    return CompletionResult(
+        done=done, core_ok=core_ok, projection_ok=projection_ok,
+        operator_signal_ok=operator_signal_ok, failed_conjuncts=failed_conjuncts,
+        operator_message=operator_message,
+    )
+
+
+# ---------------------------------------------------------------------------
+# CLI entrypoint -- the deterministic "bypass the LLM for critical I/O" mechanism this task's
+# brief calls for: the STOP/DONE text an agent relays VERBATIM to the operator is produced here,
+# by plain Python, never phrased by a model. Reserves the literal token ``DONE`` for a genuine
+# full pass (``core_ok AND projection_ok`` -- i.e. ``CompletionResult.done``); any other outcome
+# exits 1 with a plain-language "not finished" block and a concrete next step, never a traceback.
+#
+# Usage:
+#   python3 agents/lib/external_write/lifecycle_state.py <project_root> <canonical_id>
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":  # pragma: no cover
+    import sys as _cli_sys
+
+    if len(_cli_sys.argv) < 3:
+        print(
+            "NOT FINISHED -- usage: python3 lifecycle_state.py <project_root> <canonical_id>. "
+            "No project_root/canonical_id was given, so nothing was checked."
+        )
+        _cli_sys.exit(1)
+
+    _cli_result = check_completion(_cli_sys.argv[1], _cli_sys.argv[2])
+    print(_cli_result.operator_message)
+    _cli_sys.exit(0 if (_cli_result.core_ok and _cli_result.projection_ok) else 1)
