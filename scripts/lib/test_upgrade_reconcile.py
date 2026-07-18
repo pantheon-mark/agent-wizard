@@ -1056,6 +1056,41 @@ class RebuildForcesAcceptedFalseTests(_Base):
             if mod_name == "external_write" or mod_name.startswith("external_write."):
                 del sys.modules[mod_name]
 
+    def _write_conformant_acceptance_record(self, proj, capability_id, phase_id):
+        """(Task B2b) A REAL, hash-matching acceptance-audit record for an untouched,
+        still-accepted capability. B2b's staleness pass (``_reconcile_conformant_rebuild_
+        staleness``) now checks EVERY capability-dir capability's acceptance, not only the
+        scanner-flagged ones -- so a capability this suite expects to STAY accepted needs a
+        genuine record on disk (exactly what a REAL ceremony-accepted capability always has),
+        or B2b's own fail-safe posture ("no record -> can't verify -> treat as stale") would
+        revoke it too, for reasons entirely unrelated to what THIS suite (B2, scanner-red-only)
+        is testing. Uses the real, already-registered ``delete_record`` op_kind (no adapter, a
+        static dependency_set) so its ``implementation_hash`` is genuinely stable and never
+        touched by anything these tests do."""
+        agents_lib = _REAL_REPO / "wizard" / "agents" / "lib"
+        if str(agents_lib) not in sys.path:
+            sys.path.insert(0, str(agents_lib))
+        from external_write.proof_hash import compute_implementation_hash  # noqa: E402
+        from external_write.acceptance_ceremony import ACCEPTANCE_RECORD_SCHEMA  # noqa: E402
+
+        log_path = proj / "security" / "capability_acceptance_log.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema": ACCEPTANCE_RECORD_SCHEMA,
+            "capability_id": capability_id,
+            "phase_id": phase_id,
+            "risk_class": "read_only_local",
+            "op_kind": "delete_record",
+            "copy_run_proof_ref": "proof.json",
+            "operator_receipt_ref": "receipt.json",
+            "contract_hash": "0" * 64,
+            "implementation_hash": compute_implementation_hash("delete_record"),
+            "operator_confirmation": "Yes, accept this capability for live use.",
+            "receipt_accepted_at": "2026-01-01T00:00:00Z",
+        }
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+
     def _project_with_two_capabilities(self):
         proj = self.tmp / "operator_proj"
         capdir = proj / "agents" / "capabilities"
@@ -1088,6 +1123,9 @@ class RebuildForcesAcceptedFalseTests(_Base):
         ]
         (secdir / "capability_descriptors.json").write_text(
             json.dumps(descriptor_set), encoding="utf-8")
+        # See _write_conformant_acceptance_record's own docstring for why this is needed now
+        # that B2b's staleness pass checks every accepted capability-dir capability.
+        self._write_conformant_acceptance_record(proj, "acme_report_reader", "phase-1")
         return proj
 
     def _read_descriptor_set(self, proj):
@@ -1160,6 +1198,180 @@ class RebuildForcesAcceptedFalseTests(_Base):
         marker_dir = proj / PAUSED_MECHANISMS_DIR_REL
         self.assertFalse((marker_dir / "acme_report_reader.json").exists())
         self.assertFalse((marker_dir / "acme_report_reader.pause").exists())
+
+
+# ===================================================================================
+# Task B2b (Phase 3 Cut 1): conformant-rebuild acceptance-hash staleness -- the
+# SCANNER-CLEAN half of the F-62 trust gap RebuildForcesAcceptedFalseTests above does NOT
+# cover. A capability that stays conformant (never enters `by_relpath` -- the scanner-red
+# reset above never even looks at it) but whose registered adapter's bytes changed since
+# acceptance must still lose `accepted: true`, because `write_gate` authorizes on
+# `accepted is True` alone and never re-checks `implementation_hash`.
+#
+# Uses a REAL registered throwaway op_kind + a REAL, genuinely-hashed adapter module file on
+# disk (same reuse pattern as test_external_write_effects_manifest.py's own fixture and this
+# task's own test_lifecycle_state.py additions) -- mutating the fixture adapter's actual bytes
+# is what flips proof_hash.compute_implementation_hash, never a mocked/stubbed hash value.
+# ===================================================================================
+
+class ConformantRebuildStalenessTests(_Base):
+    _FIXTURE_OP_KIND = "_upgrade_reconcile_b2b_fixture_op"
+    _FIXTURE_MODULE_NAME = "_upgrade_reconcile_b2b_fixture_adapter_module"
+    _FIXTURE_ADAPTER_SRC = (
+        Path(__file__).resolve().parents[2] / "test_fixtures" / "effects_manifest"
+        / "fixture_adapter.py"
+    )
+
+    def setUp(self):
+        super().setUp()
+        for mod_name in list(sys.modules):
+            if mod_name == "external_write" or mod_name.startswith("external_write."):
+                del sys.modules[mod_name]
+        self._agents_lib = _REAL_REPO / "wizard" / "agents" / "lib"
+        if str(self._agents_lib) not in sys.path:
+            sys.path.insert(0, str(self._agents_lib))
+        import external_write.contracts as _contracts  # noqa: E402
+        from external_write.contracts import OperationContract  # noqa: E402
+        from external_write.adapter_registry import (  # noqa: E402
+            register_adapter, unregister_adapter,
+        )
+        self._contracts = _contracts
+        self._register_adapter = register_adapter
+        self._unregister_adapter = unregister_adapter
+        self._prior_contract = _contracts.OPERATION_CONTRACTS.get(self._FIXTURE_OP_KIND)
+        _contracts.OPERATION_CONTRACTS[self._FIXTURE_OP_KIND] = OperationContract(
+            op_kind=self._FIXTURE_OP_KIND, writes=("__fixture__",), produces=(),
+            dependency_set=(), verifier_set=(), introduces_persistent_binding=False,
+            risk_class="irreversible_external", requires_accepted_phase=True,
+        )
+
+    def tearDown(self):
+        self._unregister_adapter(self._FIXTURE_OP_KIND)
+        if self._prior_contract is None:
+            self._contracts.OPERATION_CONTRACTS.pop(self._FIXTURE_OP_KIND, None)
+        else:
+            self._contracts.OPERATION_CONTRACTS[self._FIXTURE_OP_KIND] = self._prior_contract
+        sys.modules.pop(self._FIXTURE_MODULE_NAME, None)
+        super().tearDown()
+
+    def _register_fixture_adapter(self):
+        import importlib.util
+        adapter_path = self.tmp / "b2b_fixture_adapter.py"
+        shutil.copy2(self._FIXTURE_ADAPTER_SRC, adapter_path)
+        spec = importlib.util.spec_from_file_location(self._FIXTURE_MODULE_NAME, adapter_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[self._FIXTURE_MODULE_NAME] = module
+        spec.loader.exec_module(module)
+        self._register_adapter(self._FIXTURE_OP_KIND, module.FixtureAdapter())
+        return adapter_path
+
+    def _write_acceptance_record(self, proj, capability_id, phase_id, implementation_hash):
+        from external_write.acceptance_ceremony import ACCEPTANCE_RECORD_SCHEMA  # noqa: E402
+        log_path = proj / "security" / "capability_acceptance_log.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema": ACCEPTANCE_RECORD_SCHEMA, "capability_id": capability_id,
+            "phase_id": phase_id, "risk_class": "irreversible_external",
+            "op_kind": self._FIXTURE_OP_KIND, "copy_run_proof_ref": "proof.json",
+            "operator_receipt_ref": "receipt.json", "contract_hash": "0" * 64,
+            "implementation_hash": implementation_hash,
+            "operator_confirmation": "Yes, accept this capability for live use.",
+            "receipt_accepted_at": "2026-01-01T00:00:00Z",
+        }
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+
+    def _project_with_conformant_capability(self, *, capability_id="acme_widget_sync"):
+        proj = self.tmp / "operator_proj"
+        capdir = proj / "agents" / "capabilities"
+        capdir.mkdir(parents=True)
+        relpath = f"agents/capabilities/{capability_id}_capability.py"
+        # _CONFORMANT_WRITER (module-level fixture above) routes through
+        # run_enveloped_operation -- already proven scanner-clean by
+        # DetectTests.test_conformant_writer_triggers_no_detection. Its own embedded op_kind
+        # string ("sheets.status.tidy") is irrelevant here: the B2b detector reads op_kind
+        # from the ACCEPTANCE RECORD, never from the capability's own source.
+        (proj / relpath).write_text(_CONFORMANT_WRITER, encoding="utf-8")
+        secdir = proj / "security"
+        secdir.mkdir(parents=True, exist_ok=True)
+        descriptor_set = [{
+            "id": capability_id, "name": capability_id, "action_class": "sync",
+            "risk_class": "irreversible_external", "recovery_profile_ref": None,
+            "declared_test_target": "copy", "blast_radius_cap": 3,
+            "accepted": True, "phase_id": "phase-1",
+        }]
+        (secdir / "capability_descriptors.json").write_text(
+            json.dumps(descriptor_set), encoding="utf-8")
+        return proj
+
+    def test_conformant_rebuild_never_scanned_still_gets_acceptance_revoked(self):
+        from external_write.proof_hash import compute_implementation_hash  # noqa: E402
+        proj = self._project_with_conformant_capability()
+        adapter_path = self._register_fixture_adapter()
+        accepted_hash = compute_implementation_hash(self._FIXTURE_OP_KIND)
+        self._write_acceptance_record(proj, "acme_widget_sync", "phase-1", accepted_hash)
+
+        # Rebuild: mutate the registered adapter's bytes -- the capability's own file never
+        # changes and never enters the AST scanner's violation set (by_relpath).
+        with adapter_path.open("ab") as f:
+            f.write(b"\n# rebuilt\n")
+
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+
+        # Never scanner-flagged -- proves this is genuinely the scanner-CLEAN path.
+        self.assertEqual(result.mechanisms, [])
+        self.assertEqual(result.stale_acceptance_reset, ["acme_widget_sync"])
+
+        entries = {e["id"]: e for e in json.loads(
+            (proj / CAPABILITY_DESCRIPTOR_SET_REL).read_text(encoding="utf-8"))}
+        self.assertFalse(entries["acme_widget_sync"]["accepted"])
+
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        self.assertEqual({e["mechanism_id"] for e in queue}, {"acme_widget_sync"})
+
+        marker_dir = proj / PAUSED_MECHANISMS_DIR_REL
+        self.assertTrue((marker_dir / "acme_widget_sync.pause").is_file())
+
+    def test_matching_hash_leaves_conformant_capability_accepted(self):
+        from external_write.proof_hash import compute_implementation_hash  # noqa: E402
+        proj = self._project_with_conformant_capability()
+        self._register_fixture_adapter()
+        accepted_hash = compute_implementation_hash(self._FIXTURE_OP_KIND)
+        self._write_acceptance_record(proj, "acme_widget_sync", "phase-1", accepted_hash)
+
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+
+        self.assertEqual(result.stale_acceptance_reset, [])
+        entries = {e["id"]: e for e in json.loads(
+            (proj / CAPABILITY_DESCRIPTOR_SET_REL).read_text(encoding="utf-8"))}
+        self.assertTrue(entries["acme_widget_sync"]["accepted"])
+        marker_dir = proj / PAUSED_MECHANISMS_DIR_REL
+        self.assertFalse((marker_dir / "acme_widget_sync.pause").exists())
+
+    def test_idempotent_rerun_does_not_re_flip_or_duplicate(self):
+        from external_write.proof_hash import compute_implementation_hash  # noqa: E402
+        proj = self._project_with_conformant_capability()
+        adapter_path = self._register_fixture_adapter()
+        accepted_hash = compute_implementation_hash(self._FIXTURE_OP_KIND)
+        self._write_acceptance_record(proj, "acme_widget_sync", "phase-1", accepted_hash)
+        with adapter_path.open("ab") as f:
+            f.write(b"\n# rebuilt\n")
+
+        reconcile_upgrade(proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+        descriptors_1 = (proj / CAPABILITY_DESCRIPTOR_SET_REL).read_bytes()
+        queue_1 = (proj / MIGRATION_QUEUE_REL).read_bytes()
+
+        for mod_name in list(sys.modules):
+            if mod_name == "external_write" or mod_name.startswith("external_write."):
+                del sys.modules[mod_name]
+        reconcile_upgrade(proj, _REAL_REPO, from_version="0.13.0", to_version="0.13.1")
+        descriptors_2 = (proj / CAPABILITY_DESCRIPTOR_SET_REL).read_bytes()
+        queue_2 = (proj / MIGRATION_QUEUE_REL).read_bytes()
+
+        self.assertEqual(descriptors_1, descriptors_2)
+        self.assertEqual(queue_1, queue_2)
 
 
 # ===================================================================================

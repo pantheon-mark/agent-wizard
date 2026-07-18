@@ -74,6 +74,43 @@ is also what makes ``reconcile_state`` safe to re-run after a crash: whichever o
 writes (marker, migration-close) did not complete before the crash is simply retried, and
 whichever one DID complete is left untouched, not rewritten with a new timestamp.
 
+Conformant-rebuild acceptance-hash staleness (Task B2b, Phase 3 Cut 1)
+------------------------------------------------------------------------------
+B2 (``upgrade_reconcile._reset_accepted_for_scanner_red_capability``) closes the F-62 trust gap
+for a rebuilt capability the AST bypass scanner finds RED. It does not close the OTHER half: a
+capability whose code changed since acceptance but KEPT its ``run_operation`` /
+``run_enveloped_operation`` call shape stays scanner-clean forever, so it never enters that
+scanner-driven reset path at all -- yet its descriptor can still carry a now-stale
+``accepted: true``, because ``write_gate`` authorizes on ``accepted is True`` alone and never
+re-checks ``implementation_hash``.
+
+``acceptance_hash_is_stale`` is the detector: True iff a capability is currently accepted AND its
+freshly recomputed ``proof_hash.compute_implementation_hash`` no longer matches the
+``implementation_hash`` recorded in its own acceptance audit record (the durable JSONL log
+``acceptance_ceremony`` appends to on every successful flip -- see that module's own
+``ACCEPTANCE_RECORD_SCHEMA`` / ``DEFAULT_AUDIT_LOG_PATH``). ``revoke_stale_acceptance`` is the
+revoker: when the detector reports stale it forces ``accepted`` back to ``False`` (atomic write,
+same convention as ``upgrade_reconcile``'s own reset), queues a re-trial entry in the
+pending-migration queue, and then calls ``reconcile_state`` (reused, not duplicated) so the pause
+marker/migration-queue materialized views become coherent with the just-revoked SSOT. This is a
+DELIBERATE, DISCLOSED exception to ``reconcile_state``'s own "never flips accepted" contract
+above -- ``reconcile_state`` itself is UNCHANGED (it still never flips accepted); the flip lives
+here, in a separate, explicitly-named function, exactly mirroring how ``upgrade_reconcile.py``'s
+B2 reset is a separate step from its own call into (plain) ``reconcile_state``.
+
+Fail-safe direction (never silently keep accepted:true): if the accepted hash cannot be read (no
+matching acceptance record, an unreadable/malformed audit log, or a malformed record) OR the
+current hash cannot be recomputed (``proof_hash.ProofHashError`` -- an unregistered op_kind or a
+missing dependency file), the capability is treated as STALE and revoked. A capability that was
+never accepted, or whose hashes still match, is left completely undisturbed (idempotent).
+
+CEILING (disclosed, must stay honest in any operator-facing prose): detection runs at
+reconcile/completion-check time -- once per upgrade-reconcile pass or per explicit
+``revoke_stale_acceptance`` call -- NEVER per-write. A stale acceptance stays live (write_gate
+would still authorize it) until the next such check runs. This is the SAME ceiling
+``acceptance_ceremony`` and ``proof_hash`` already disclose (build-time + operator-as-approver,
+not a runtime/OS guarantee), extended to this revocation path.
+
 Stdlib only -- this module ships into the operator's own runtime, ``agents/lib/external_write/``.
 """
 
@@ -86,7 +123,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, FrozenSet, List, Optional
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 # sys.path bootstrap (mirrors operator_acceptance.py / capability_registration.py): make the
 # package parent importable when run as a direct script from the project root, so the sibling
@@ -107,6 +144,10 @@ from external_write.capability_identity import (  # noqa: E402
 from external_write.operator_acceptance import (  # noqa: E402
     close_pending_migration_if_matched,
 )
+from external_write.proof_hash import (  # noqa: E402
+    compute_implementation_hash,
+    ProofHashError,
+)
 
 # ---------------------------------------------------------------------------
 # Project-root-relative locations this module reads/writes. Duplicated-by-value
@@ -117,6 +158,13 @@ from external_write.operator_acceptance import (  # noqa: E402
 
 DESCRIPTOR_SET_REL = "security/capability_descriptors.json"
 MIGRATION_QUEUE_REL = "agents/handoffs/pending_migrations.json"
+# (Task B2b) Duplicated-by-value from acceptance_ceremony.DEFAULT_AUDIT_LOG_PATH -- this module
+# does not import acceptance_ceremony (no need to; it only ever READS this append-only log, never
+# writes to it -- the ceremony remains the sole writer of an acceptance record).
+ACCEPTANCE_LOG_REL = "security/capability_acceptance_log.jsonl"
+# (Task B2b) Duplicated-by-value from acceptance_ceremony.PHASE_ID_KEY -- same "read-only,
+# no import needed" rationale as ACCEPTANCE_LOG_REL above.
+PHASE_ID_KEY = "phase_id"
 PAUSED_MECHANISMS_DIR_REL = ".wizard/paused-mechanisms"
 
 
@@ -467,4 +515,260 @@ def reconcile_state(project_root: str, canonical_id: str) -> ReconcileResult:
     return ReconcileResult(
         canonical_id=identity.canonical_id, accepted=False,
         marker_present=marker_present, migration_open=False, changed=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task B2b: conformant-rebuild acceptance-hash staleness detection + revocation.
+# See the module docstring's "Conformant-rebuild acceptance-hash staleness" section for the
+# full rationale. ``reconcile_state`` above is left completely UNCHANGED (still never flips
+# ``accepted``) -- the flip lives in ``revoke_stale_acceptance`` below, a separate, explicitly
+# fail-safe function.
+# ---------------------------------------------------------------------------
+
+# The plain-language note surfaced to the operator on a revocation -- no jargon, no internal
+# identifiers, no traceback text. Deliberately the SAME wording whether the capability's code was
+# CONFIRMED changed or its acceptance simply could not be VERIFIED current (fail-safe direction,
+# see module docstring) -- the operator does not need to distinguish the two; both mean "off until
+# you re-trial and re-approve it."
+STALE_ACCEPTANCE_NOTE = (
+    "This capability's code changed since you approved it, so its approval has been switched "
+    "back off. It will not run live again until you try it again and approve it again."
+)
+
+
+def _read_latest_acceptance_record(
+    root: Path, aliases: FrozenSet[str], phase_id: Optional[str],
+    audit_log_path: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """The most recent acceptance-audit record (``acceptance_ceremony``'s append-only JSONL log,
+    ``ACCEPTANCE_LOG_REL`` by default) for a capability known by any of ``aliases`` -- "the CURRENT
+    accepted record for a capability's accepted phase" (this task's brief). Preference order: the
+    latest record whose own ``phase_id`` matches the descriptor's CURRENT ``phase_id`` (when one is
+    given), else the latest record for the capability regardless of phase.
+
+    Returns ``(record_or_None, read_error)``. ``read_error`` is True ONLY when the log file EXISTS
+    but could not be opened at all (a present-but-unreadable file) -- distinct from a normal,
+    non-error ABSENT file (``FileNotFoundError`` -> ``(None, False)``, mirroring every other
+    fail-safe loader in this module). A malformed INDIVIDUAL line is skipped, not treated as a
+    whole-file read error -- an append-only log surviving a partial write on one line must not lose
+    every other, otherwise-good, line's evidence.
+
+    Never raises."""
+    path = Path(audit_log_path) if audit_log_path else (root / ACCEPTANCE_LOG_REL)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None, False
+    except OSError:
+        return None, True
+
+    latest_any: Optional[Dict[str, Any]] = None
+    latest_phase_matched: Optional[Dict[str, Any]] = None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(rec, dict) or rec.get("capability_id") not in aliases:
+            continue
+        latest_any = rec
+        if phase_id is not None and rec.get("phase_id") == phase_id:
+            latest_phase_matched = rec
+    return (latest_phase_matched if latest_phase_matched is not None else latest_any), False
+
+
+def acceptance_hash_is_stale(
+    project_root: str, canonical_id: str, *,
+    lib_dir: Optional[Path] = None, audit_log_path: Optional[str] = None,
+) -> bool:
+    """True iff ``canonical_id`` is currently ``accepted`` AND its freshly recomputed
+    ``implementation_hash`` (``proof_hash.compute_implementation_hash``, reused verbatim -- never
+    reinvented) no longer matches the ``implementation_hash`` recorded in its own acceptance audit
+    record. False for a capability that is not accepted at all (nothing to be stale about) or
+    whose hashes still match (a clean, undisturbed acceptance).
+
+    Fail-safe (never silently keeps ``accepted:true`` unverified as not-stale): reports True
+    (stale) when the accepted hash cannot be read at all -- no matching acceptance record, an
+    unreadable/malformed audit log, or a record missing/mistyping its own ``implementation_hash``
+    / ``op_kind`` -- OR when the current hash cannot be recomputed
+    (``proof_hash.ProofHashError``, e.g. an unregistered op_kind or a missing dependency file).
+
+    Resolves ``canonical_id`` through A1's canonical-id resolver
+    (``capability_identity.build_capability_index``); raises
+    ``external_write.capability_identity.IdentityResolutionError`` if it does not resolve, and
+    ``ReconcileStateError`` (mirroring ``reconcile_state``'s own fail-closed convention) if the
+    descriptor set or migration queue exists but could not be read/parsed -- the SAME fail-closed
+    discipline ``reconcile_state`` already applies, reused rather than duplicated with different
+    wording.
+
+    CEILING: a single point-in-time check, meant to be called at reconcile/completion-check time
+    (see module docstring) -- never a per-write guarantee.
+    """
+    root = Path(project_root).resolve()
+    index = build_capability_index(str(root))
+    if index.state_read_error:
+        raise ReconcileStateError(
+            "Could not safely check whether this capability's approval is still current "
+            "because the capability descriptor list (security/capability_descriptors.json) or "
+            "the pending-migrations queue (agents/handoffs/pending_migrations.json) exists but "
+            "could not be read or is corrupted. This is NOT confirmation that nothing is wrong "
+            "-- repair or restore that file, then try again."
+        )
+
+    identity: CapabilityIdentity = index.resolve(canonical_id, "module_stem")
+    descriptor_set = _load_descriptor_set(root)
+    entry = _find_descriptor_entry(descriptor_set, identity.aliases)
+    if not entry or entry.get("accepted") is not True:
+        return False
+
+    phase_id = entry.get(PHASE_ID_KEY)
+    if not isinstance(phase_id, str):
+        phase_id = None
+
+    record, read_error = _read_latest_acceptance_record(
+        root, identity.aliases, phase_id, audit_log_path)
+    if read_error or record is None:
+        return True
+
+    accepted_hash = record.get("implementation_hash")
+    op_kind = record.get("op_kind")
+    if not (isinstance(accepted_hash, str) and accepted_hash
+            and isinstance(op_kind, str) and op_kind):
+        return True
+
+    try:
+        current_hash = compute_implementation_hash(op_kind, lib_dir=lib_dir)
+    except ProofHashError:
+        return True
+
+    return current_hash != accepted_hash
+
+
+def _revoke_accepted_entries(
+    root: Path, descriptor_set: List[Dict[str, Any]], aliases: FrozenSet[str],
+) -> bool:
+    """Force ``accepted`` back to ``False`` for every descriptor entry whose ``id`` is one of
+    ``aliases`` and currently ``True``. Mutates ``descriptor_set`` in place and, if anything
+    changed, atomically writes it back -- SAME formatting convention (``indent=2,
+    ensure_ascii=False``, no key sorting) as ``upgrade_reconcile._reset_accepted_for_scanner_red_
+    capability``'s own descriptor-set writer, so the two revocation paths (scanner-red,
+    hash-stale) leave byte-identical shapes behind. Returns whether anything changed."""
+    changed = False
+    for entry in descriptor_set:
+        if (isinstance(entry, dict) and entry.get("id") in aliases
+                and entry.get("accepted") is True):
+            entry["accepted"] = False
+            changed = True
+    if changed:
+        _atomic_write(
+            root / DESCRIPTOR_SET_REL,
+            json.dumps(descriptor_set, indent=2, ensure_ascii=False) + "\n",
+        )
+    return changed
+
+
+def _queue_staleness_retrial_migration(root: Path, canonical_id: str) -> None:
+    """Land (or refresh) a durable, disk-first re-trial request in the pending-migration queue --
+    the SAME queue ``wizard/skills/add-capability.md`` checks at its Step A, and the SAME
+    idempotent replace-by-``mechanism_id`` convention ``upgrade_reconcile._append_migration_
+    request`` uses (re-running a check for the same capability replaces its existing entry rather
+    than duplicating it)."""
+    path = root / MIGRATION_QUEUE_REL
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        if not isinstance(existing, list):
+            existing = []
+    except (json.JSONDecodeError, OSError):
+        existing = []
+    existing = [
+        e for e in existing
+        if not (isinstance(e, dict) and e.get("mechanism_id") == canonical_id)
+    ]
+    existing.append({
+        "mechanism_id": canonical_id,
+        "requested_at": _utcnow_iso(),
+        "reason": (
+            "this capability's implementation changed since it was approved for live use; "
+            "acceptance was automatically switched off pending a fresh trial"
+        ),
+        "suggested_next_step": (
+            "Re-run this capability's copy-run trial and approve it again through the normal "
+            "accept flow."
+        ),
+        "status": "pending",
+    })
+    _atomic_write(
+        path, json.dumps(existing, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+@dataclass(frozen=True)
+class RevocationResult:
+    """Outcome of one ``revoke_stale_acceptance`` call.
+
+    canonical_id: the resolved canonical capability id this call checked.
+    stale:        the ``acceptance_hash_is_stale`` verdict (True iff a revocation was warranted).
+    revoked:      True iff this call actually forced ``accepted`` back to False this call (always
+                  equal to ``stale`` today -- kept as its own field so a future caller never has to
+                  assume the two can never diverge).
+    note:         the plain-language operator note (``STALE_ACCEPTANCE_NOTE``) when ``revoked`` is
+                  True, else None.
+    reconcile:    the ``ReconcileResult`` from the ``reconcile_state`` call this function always
+                  makes afterward (reused, not duplicated) -- so the pause marker and
+                  pending-migration queue are coherent with the (possibly just-revoked) SSOT
+                  regardless of whether a revocation happened this call.
+    """
+    canonical_id: str
+    stale: bool
+    revoked: bool
+    note: Optional[str]
+    reconcile: ReconcileResult
+
+
+def revoke_stale_acceptance(
+    project_root: str, canonical_id: str, *,
+    lib_dir: Optional[Path] = None, audit_log_path: Optional[str] = None,
+) -> RevocationResult:
+    """The operate-time entry point for the F-62 conformant-rebuild trust gap (Task B2b): checks
+    ``acceptance_hash_is_stale`` for ``canonical_id`` and, if stale, forces its descriptor back to
+    ``accepted: false`` (atomic), queues a re-trial migration entry, and always finishes by calling
+    ``reconcile_state`` (reused) so the pause marker / pending-migration queue stay coherent with
+    the SSOT -- whether or not a revocation happened this call.
+
+    This is the operate-time mirror of ``upgrade_reconcile.py``'s own B2 wiring
+    (``_reset_accepted_for_scanner_red_capability`` + ``_reconcile_lifecycle_state_best_effort``):
+    intended to be called wherever a capability's acceptance is checked/completion-verified
+    OUTSIDE an upgrade (a rebuild the operator made directly, with no upgrade in between) -- "the
+    next reconcile/completion check" per this task's brief. Idempotent and safe to call on every
+    such check: a capability that is not accepted, or whose hashes still match, is left completely
+    undisturbed (``stale=False``, ``revoked=False``) and this call still returns a coherent
+    ``reconcile`` view.
+
+    CEILING (disclosed): a point-in-time check -- NOT a per-write runtime guarantee. See module
+    docstring.
+
+    Raises the same errors ``acceptance_hash_is_stale`` / ``reconcile_state`` raise
+    (``IdentityResolutionError``, ``ReconcileStateError``) -- never guessed over an unverifiable
+    state.
+    """
+    root = Path(project_root).resolve()
+    stale = acceptance_hash_is_stale(
+        str(root), canonical_id, lib_dir=lib_dir, audit_log_path=audit_log_path)
+
+    note: Optional[str] = None
+    if stale:
+        index = build_capability_index(str(root))
+        identity: CapabilityIdentity = index.resolve(canonical_id, "module_stem")
+        descriptor_set = _load_descriptor_set(root)
+        _revoke_accepted_entries(root, descriptor_set, identity.aliases)
+        _queue_staleness_retrial_migration(root, identity.canonical_id)
+        note = STALE_ACCEPTANCE_NOTE
+
+    reconcile = reconcile_state(str(root), canonical_id)
+    return RevocationResult(
+        canonical_id=reconcile.canonical_id, stale=stale, revoked=stale,
+        note=note, reconcile=reconcile,
     )

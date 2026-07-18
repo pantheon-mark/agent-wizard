@@ -323,13 +323,22 @@ class MechanismReport:
 
 @dataclass
 class ReconcileResult:
-    """Outcome of one ``reconcile_upgrade`` call."""
+    """Outcome of one ``reconcile_upgrade`` call.
+
+    stale_acceptance_reset: (Task B2b) canonical ids of capability-dir capabilities that were
+        SCANNER-CLEAN the whole time (never appeared in ``mechanisms`` above -- the AST scanner
+        found nothing wrong with them) but whose acceptance was revoked anyway because their
+        recomputed ``implementation_hash`` no longer matched their acceptance audit record's
+        stored hash -- the "conformant rebuild" half of the F-62 trust gap B2's scanner-red reset
+        does not cover. See ``_reconcile_conformant_rebuild_staleness``.
+    """
     operator_project_path: str
     from_version: str
     to_version: str
     mechanisms: List[MechanismReport] = field(default_factory=list)
     notice_path: Optional[str] = None
     migration_queue_path: Optional[str] = None
+    stale_acceptance_reset: List[str] = field(default_factory=list)
 
     @property
     def any_affected(self) -> bool:
@@ -818,6 +827,59 @@ def _reconcile_lifecycle_state_best_effort(
         lifecycle_state.reconcile_state(str(operator_project_dir), canonical_id)
     except Exception:
         pass
+
+
+# ===== Task B2b: conformant-rebuild acceptance-hash staleness (the SCANNER-CLEAN half) =======
+#
+# B2 above only ever revokes a capability the AST scanner finds RED -- a raw kernel-write / bypass
+# shape. A capability that was rebuilt but kept its `run_operation` / `run_enveloped_operation`
+# call shape stays scanner-clean and NEVER enters `by_relpath` (the loop above never even sees
+# it), so it would otherwise keep `accepted: true` forever: write_gate authorizes on
+# `accepted is True` alone and never re-checks `implementation_hash`. This closes that half by
+# running B2b's detector/revoker (`lifecycle_state.acceptance_hash_is_stale` /
+# `revoke_stale_acceptance`, agents/lib/external_write/lifecycle_state.py) against EVERY
+# capability-dir canonical id known to this project -- not only the scanner-flagged ones.
+
+def _reconcile_conformant_rebuild_staleness(
+    operator_project_dir: Path, build_repo_root: Path,
+) -> List[str]:
+    """(Task B2b) Revoke acceptance for every capability-dir capability whose
+    ``implementation_hash`` no longer matches its acceptance audit record, REGARDLESS of whether
+    the AST scanner flagged it -- the scanner-red ones above are already reset by
+    ``_reset_accepted_for_scanner_red_capability``, and re-checking them here is a harmless no-op
+    (already ``accepted: false``, so ``acceptance_hash_is_stale`` reports "not accepted -> not
+    stale" and nothing further happens to them).
+
+    Best-effort, per capability (mirrors ``_reconcile_lifecycle_state_best_effort``'s own
+    convention): a failure resolving or checking ONE capability must never take down this whole
+    reconcile pass over every other one.
+
+    CEILING (disclosed, per this task's brief): this runs once per upgrade-reconcile pass -- NOT a
+    per-write runtime guarantee. A stale acceptance stays live until the next upgrade/reconcile
+    (or an operate-time ``revoke_stale_acceptance`` call, wired the same way at B2b's own
+    docstring).
+
+    Returns the canonical ids actually revoked this pass (never surfaced to the operator as raw
+    ids directly -- see ``ReconcileResult.stale_acceptance_reset``'s own docstring)."""
+    revoked: List[str] = []
+    try:
+        capability_identity = _external_write_module(build_repo_root, "capability_identity")
+        lifecycle_state = _external_write_module(build_repo_root, "lifecycle_state")
+    except Exception:
+        return revoked
+    try:
+        index = capability_identity.build_capability_index(str(operator_project_dir))
+    except Exception:
+        return revoked
+    for canonical_id in sorted(index.canonical_ids):
+        try:
+            result = lifecycle_state.revoke_stale_acceptance(
+                str(operator_project_dir), canonical_id)
+        except Exception:
+            continue
+        if getattr(result, "revoked", False):
+            revoked.append(result.canonical_id)
+    return revoked
 
 
 def _pause_marker_path(operator_project_dir: Path, mechanism_id: str) -> Path:
@@ -1334,6 +1396,13 @@ def reconcile_upgrade(
         text = render_impact_notice(mechanisms, from_version, to_version)
         notice_path = write_impact_notice(operator_project_dir, upgrade_id, text)
 
+    # (Task B2b) Run AFTER the scanner-driven loop above (and its notice) so this pass's own
+    # revocations never interfere with — or get shadowed by — the scanner-red handling; see
+    # _reconcile_conformant_rebuild_staleness's own docstring for why re-checking an
+    # already-scanner-red-reset capability here is a harmless no-op.
+    stale_acceptance_reset = _reconcile_conformant_rebuild_staleness(
+        operator_project_dir, build_repo_root)
+
     return ReconcileResult(
         operator_project_path=str(operator_project_dir),
         from_version=from_version,
@@ -1341,8 +1410,10 @@ def reconcile_upgrade(
         mechanisms=mechanisms,
         notice_path=str(notice_path) if notice_path else None,
         migration_queue_path=(
-            str(operator_project_dir / MIGRATION_QUEUE_REL) if mechanisms else None
+            str(operator_project_dir / MIGRATION_QUEUE_REL)
+            if (mechanisms or stale_acceptance_reset) else None
         ),
+        stale_acceptance_reset=stale_acceptance_reset,
     )
 
 

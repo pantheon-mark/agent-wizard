@@ -16,7 +16,9 @@ distinct capability_ids are exercised in every fixture below.
 Uses stub/synthetic capability source only; no network.
 """
 
+import importlib.util
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -29,6 +31,33 @@ sys.path.insert(0, str(_AGENTS_LIB))
 
 from external_write import lifecycle_state  # noqa: E402
 from external_write.capability_identity import IdentityResolutionError  # noqa: E402
+from external_write.acceptance_ceremony import ACCEPTANCE_RECORD_SCHEMA  # noqa: E402
+from external_write.proof_hash import compute_implementation_hash  # noqa: E402
+import external_write.contracts as _contracts  # noqa: E402
+from external_write.contracts import OperationContract  # noqa: E402
+from external_write.adapter_registry import register_adapter, unregister_adapter  # noqa: E402
+
+# The throwaway op_kind + fixture adapter this file's staleness tests mutate to flip a hash --
+# SAME reuse pattern as test_external_write_effects_manifest.py's own fixture (a real,
+# genuinely-hashed file on disk; never a mocked/stubbed hash).
+_STALE_FIXTURE_OP_KIND = "_lifecycle_state_fixture_stale_op"
+_STALE_FIXTURE_MODULE_PREFIX = "_lifecycle_state_fixture_adapter_module"
+_FIXTURE_ADAPTER_SRC = (
+    Path(__file__).resolve().parents[2] / "test_fixtures" / "effects_manifest" / "fixture_adapter.py"
+)
+# A SECOND capability's op_kind that carries NO registered adapter and an EMPTY dependency_set --
+# its implementation_hash is therefore stable across every mutation the fixture-adapter tests
+# make to the FIRST (fixture) op_kind's adapter, proving an unrelated accepted capability is never
+# disturbed.
+_STABLE_FIXTURE_OP_KIND = "_lifecycle_state_fixture_stable_op"
+
+
+def _load_adapter_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _write_capability(root, cap_id, op_kind=None, surface=None):
@@ -408,6 +437,335 @@ class MarkerShapeParityTests(unittest.TestCase):
         for key in self.SHARED_KEYS:
             self.assertIn(key, ur_state, f"upgrade_reconcile's writer dropped {key!r}")
             self.assertIn(key, ls_state, f"lifecycle_state's writer dropped {key!r}")
+
+
+# ===================================================================================
+# Task B2b (Phase 3 Cut 1): conformant-rebuild acceptance-hash staleness detection +
+# revocation. The F-62 half B2 does NOT close: a capability whose code changed since
+# acceptance but stayed SCANNER-CLEAN (never enters the AST scanner's violation set at
+# all) must not keep accepted:true forever, because write_gate authorizes on
+# accepted-is-True alone and never re-checks implementation_hash.
+#
+# Uses a REAL registered throwaway op_kind + a REAL, genuinely-hashed adapter module
+# file on disk (the SAME reuse pattern as test_external_write_effects_manifest.py's
+# own fixture) -- mutating the fixture adapter's actual bytes is what flips
+# proof_hash.compute_implementation_hash, never a mocked/stubbed hash value. A SECOND,
+# unrelated capability_id (a stable op_kind with an empty dependency_set and no
+# adapter) proves an unaffected accepted capability is never disturbed.
+# ===================================================================================
+
+class _StaleHashFixtureMixin:
+    def setUp(self):
+        super().setUp()
+        self._prior_stale_contract = _contracts.OPERATION_CONTRACTS.get(_STALE_FIXTURE_OP_KIND)
+        _contracts.OPERATION_CONTRACTS[_STALE_FIXTURE_OP_KIND] = OperationContract(
+            op_kind=_STALE_FIXTURE_OP_KIND,
+            writes=("__fixture__",),
+            produces=(),
+            dependency_set=(),  # only the registered adapter can contribute a dependency file
+            verifier_set=(),
+            introduces_persistent_binding=False,
+            risk_class="irreversible_external",
+            requires_accepted_phase=True,
+        )
+        self._prior_stable_contract = _contracts.OPERATION_CONTRACTS.get(_STABLE_FIXTURE_OP_KIND)
+        _contracts.OPERATION_CONTRACTS[_STABLE_FIXTURE_OP_KIND] = OperationContract(
+            op_kind=_STABLE_FIXTURE_OP_KIND,
+            writes=("__fixture__",),
+            produces=(),
+            dependency_set=(),
+            verifier_set=(),
+            introduces_persistent_binding=False,
+            risk_class="irreversible_external",
+            requires_accepted_phase=True,
+        )
+        self._loaded_modules = []
+
+    def tearDown(self):
+        unregister_adapter(_STALE_FIXTURE_OP_KIND)
+        unregister_adapter(_STABLE_FIXTURE_OP_KIND)
+        for op_kind, prior in (
+            (_STALE_FIXTURE_OP_KIND, self._prior_stale_contract),
+            (_STABLE_FIXTURE_OP_KIND, self._prior_stable_contract),
+        ):
+            if prior is None:
+                _contracts.OPERATION_CONTRACTS.pop(op_kind, None)
+            else:
+                _contracts.OPERATION_CONTRACTS[op_kind] = prior
+        for name in self._loaded_modules:
+            sys.modules.pop(name, None)
+        super().tearDown()
+
+    def _register_fixture_adapter(self, adapter_dir, suffix, op_kind=_STALE_FIXTURE_OP_KIND):
+        adapter_path = Path(adapter_dir) / f"fixture_adapter_{suffix}.py"
+        shutil.copy2(_FIXTURE_ADAPTER_SRC, adapter_path)
+        module_name = f"{_STALE_FIXTURE_MODULE_PREFIX}_{suffix}"
+        module = _load_adapter_module(adapter_path, module_name)
+        self._loaded_modules.append(module_name)
+        register_adapter(op_kind, module.FixtureAdapter())
+        return adapter_path
+
+    def _write_acceptance_record(self, root, cap_id, phase_id, implementation_hash, op_kind,
+                                 audit_log_rel=None):
+        log_path = Path(root) / (audit_log_rel or lifecycle_state.ACCEPTANCE_LOG_REL)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema": ACCEPTANCE_RECORD_SCHEMA,
+            "capability_id": cap_id,
+            "phase_id": phase_id,
+            "risk_class": "irreversible_external",
+            "op_kind": op_kind,
+            "copy_run_proof_ref": "proof.json",
+            "operator_receipt_ref": "receipt.json",
+            "contract_hash": "0" * 64,
+            "implementation_hash": implementation_hash,
+            "operator_confirmation": "Yes, accept this capability for live use.",
+            "receipt_accepted_at": "2026-01-01T00:00:00Z",
+        }
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+        return record
+
+
+class AcceptanceHashIsStaleTests(_StaleHashFixtureMixin, unittest.TestCase):
+    def _two_capability_project(self, tmp, *, phase_id="phase-1"):
+        root = Path(tmp)
+        _write_capability(root, "acme_widget_deleter", op_kind=_STALE_FIXTURE_OP_KIND)
+        _write_capability(root, "acme_report_reader", op_kind=_STABLE_FIXTURE_OP_KIND)
+        _write_descriptors(root, [
+            {"id": "acme_widget_deleter", "accepted": True, "phase_id": phase_id},
+            {"id": "acme_report_reader", "accepted": True, "phase_id": phase_id},
+        ])
+        return root
+
+    def test_matching_hashes_are_not_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._two_capability_project(tmp)
+            self._register_fixture_adapter(tmp, "a")
+            accepted_hash = compute_implementation_hash(_STALE_FIXTURE_OP_KIND)
+            self._write_acceptance_record(
+                root, "acme_widget_deleter", "phase-1", accepted_hash, _STALE_FIXTURE_OP_KIND)
+
+            self.assertFalse(
+                lifecycle_state.acceptance_hash_is_stale(root, "acme_widget_deleter"))
+
+    def test_code_change_via_registered_adapter_is_detected_as_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._two_capability_project(tmp)
+            adapter_path = self._register_fixture_adapter(tmp, "a")
+            accepted_hash = compute_implementation_hash(_STALE_FIXTURE_OP_KIND)
+            self._write_acceptance_record(
+                root, "acme_widget_deleter", "phase-1", accepted_hash, _STALE_FIXTURE_OP_KIND)
+            stable_hash = compute_implementation_hash(_STABLE_FIXTURE_OP_KIND)
+            self._write_acceptance_record(
+                root, "acme_report_reader", "phase-1", stable_hash, _STABLE_FIXTURE_OP_KIND)
+
+            self.assertFalse(
+                lifecycle_state.acceptance_hash_is_stale(root, "acme_widget_deleter"))
+
+            # Simulate a conformant rebuild: the capability's own write-affecting code (its
+            # registered adapter module) changed bytes, while its capability-zone file never
+            # touched anything the AST bypass scanner would flag -- it stays scanner-clean.
+            with adapter_path.open("ab") as f:
+                f.write(b"\n# rebuilt\n")
+
+            self.assertTrue(
+                lifecycle_state.acceptance_hash_is_stale(root, "acme_widget_deleter"))
+            # The unrelated, untouched second capability is unaffected.
+            self.assertFalse(
+                lifecycle_state.acceptance_hash_is_stale(root, "acme_report_reader"))
+
+    def test_not_accepted_is_never_stale_regardless_of_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_capability(root, "acme_widget_deleter", op_kind=_STALE_FIXTURE_OP_KIND)
+            _write_capability(root, "acme_report_reader", op_kind=_STABLE_FIXTURE_OP_KIND)
+            _write_descriptors(root, [
+                {"id": "acme_widget_deleter", "accepted": False, "phase_id": "phase-1"},
+                {"id": "acme_report_reader", "accepted": True, "phase_id": "phase-1"},
+            ])
+            # No acceptance record at all -- would fail-safe to "stale" IF accepted, but this
+            # capability is not accepted, so nothing to be stale about.
+            self.assertFalse(
+                lifecycle_state.acceptance_hash_is_stale(root, "acme_widget_deleter"))
+
+    def test_prefers_the_record_matching_the_current_accepted_phase(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._two_capability_project(tmp, phase_id="phase-2")
+            self._register_fixture_adapter(tmp, "a")
+            current_hash = compute_implementation_hash(_STALE_FIXTURE_OP_KIND)
+            # An OLDER record from a prior phase, deliberately carrying a WRONG hash -- must be
+            # ignored in favor of the record matching the descriptor's CURRENT phase_id.
+            self._write_acceptance_record(
+                root, "acme_widget_deleter", "phase-1", "f" * 64, _STALE_FIXTURE_OP_KIND)
+            self._write_acceptance_record(
+                root, "acme_widget_deleter", "phase-2", current_hash, _STALE_FIXTURE_OP_KIND)
+
+            self.assertFalse(
+                lifecycle_state.acceptance_hash_is_stale(root, "acme_widget_deleter"))
+
+    # -- Fail-safe direction: never silently keep accepted:true unverified ----------------
+
+    def test_no_acceptance_record_at_all_fails_safe_to_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._two_capability_project(tmp)
+            self._register_fixture_adapter(tmp, "a")
+            # Deliberately no acceptance log written at all.
+            self.assertTrue(
+                lifecycle_state.acceptance_hash_is_stale(root, "acme_widget_deleter"))
+
+    def test_unreadable_audit_log_fails_safe_to_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._two_capability_project(tmp)
+            self._register_fixture_adapter(tmp, "a")
+            log_path = root / lifecycle_state.ACCEPTANCE_LOG_REL
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text("", encoding="utf-8")
+            log_path.chmod(0o000)
+            try:
+                self.assertTrue(
+                    lifecycle_state.acceptance_hash_is_stale(root, "acme_widget_deleter"))
+            finally:
+                log_path.chmod(0o644)  # restore so tempdir cleanup can remove it
+
+    def test_record_missing_implementation_hash_fails_safe_to_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._two_capability_project(tmp)
+            self._register_fixture_adapter(tmp, "a")
+            log_path = root / lifecycle_state.ACCEPTANCE_LOG_REL
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            record = {
+                "schema": ACCEPTANCE_RECORD_SCHEMA, "capability_id": "acme_widget_deleter",
+                "phase_id": "phase-1", "op_kind": _STALE_FIXTURE_OP_KIND,
+                # implementation_hash deliberately absent
+            }
+            log_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+            self.assertTrue(
+                lifecycle_state.acceptance_hash_is_stale(root, "acme_widget_deleter"))
+
+    def test_unrecomputable_current_hash_fails_safe_to_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._two_capability_project(tmp)
+            self._register_fixture_adapter(tmp, "a")
+            # An op_kind with no registered contract at all -- compute_implementation_hash
+            # raises ProofHashError.
+            self._write_acceptance_record(
+                root, "acme_widget_deleter", "phase-1", "a" * 64,
+                "_no_such_op_kind_registered_anywhere")
+            self.assertTrue(
+                lifecycle_state.acceptance_hash_is_stale(root, "acme_widget_deleter"))
+
+
+class RevokeStaleAcceptanceTests(_StaleHashFixtureMixin, unittest.TestCase):
+    def _two_capability_project(self, tmp, *, phase_id="phase-1"):
+        root = Path(tmp)
+        _write_capability(root, "acme_widget_deleter", op_kind=_STALE_FIXTURE_OP_KIND)
+        _write_capability(root, "acme_report_reader", op_kind=_STABLE_FIXTURE_OP_KIND)
+        _write_descriptors(root, [
+            {"id": "acme_widget_deleter", "accepted": True, "phase_id": phase_id},
+            {"id": "acme_report_reader", "accepted": True, "phase_id": phase_id},
+        ])
+        return root
+
+    def test_stale_capability_is_revoked_retrial_queued_and_reconciled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._two_capability_project(tmp)
+            adapter_path = self._register_fixture_adapter(tmp, "a")
+            accepted_hash = compute_implementation_hash(_STALE_FIXTURE_OP_KIND)
+            self._write_acceptance_record(
+                root, "acme_widget_deleter", "phase-1", accepted_hash, _STALE_FIXTURE_OP_KIND)
+            stable_hash = compute_implementation_hash(_STABLE_FIXTURE_OP_KIND)
+            self._write_acceptance_record(
+                root, "acme_report_reader", "phase-1", stable_hash, _STABLE_FIXTURE_OP_KIND)
+
+            with adapter_path.open("ab") as f:
+                f.write(b"\n# rebuilt\n")
+
+            result = lifecycle_state.revoke_stale_acceptance(root, "acme_widget_deleter")
+
+            self.assertTrue(result.stale)
+            self.assertTrue(result.revoked)
+            self.assertEqual(result.note, lifecycle_state.STALE_ACCEPTANCE_NOTE)
+            self.assertNotIn("Traceback", result.note)
+            self.assertIn("changed", result.note)
+            self.assertIn("approve", result.note)
+
+            entries = {e["id"]: e for e in _read_json(root / lifecycle_state.DESCRIPTOR_SET_REL)}
+            self.assertFalse(entries["acme_widget_deleter"]["accepted"])
+            # The unrelated, untouched capability keeps its acceptance.
+            self.assertTrue(entries["acme_report_reader"]["accepted"])
+
+            queue = _read_json(root / lifecycle_state.MIGRATION_QUEUE_REL)
+            self.assertEqual({e["mechanism_id"] for e in queue}, {"acme_widget_deleter"})
+
+            # reconcile_state's own effect: coherent pause marker for the now-unaccepted
+            # capability, keyed by canonical_id.
+            marker_dir = root / lifecycle_state.PAUSED_MECHANISMS_DIR_REL
+            self.assertTrue((marker_dir / "acme_widget_deleter.pause").is_file())
+            state = _read_json(marker_dir / "acme_widget_deleter.json")
+            self.assertEqual(state["canonical_id"], "acme_widget_deleter")
+            self.assertFalse((marker_dir / "acme_report_reader.pause").exists())
+
+            self.assertEqual(result.reconcile.canonical_id, "acme_widget_deleter")
+            self.assertFalse(result.reconcile.accepted)
+            self.assertTrue(result.reconcile.migration_open)
+
+    def test_matching_hash_is_idempotent_and_leaves_clean_acceptance_undisturbed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._two_capability_project(tmp)
+            self._register_fixture_adapter(tmp, "a")
+            accepted_hash = compute_implementation_hash(_STALE_FIXTURE_OP_KIND)
+            self._write_acceptance_record(
+                root, "acme_widget_deleter", "phase-1", accepted_hash, _STALE_FIXTURE_OP_KIND)
+
+            before = (root / lifecycle_state.DESCRIPTOR_SET_REL).read_bytes()
+            result = lifecycle_state.revoke_stale_acceptance(root, "acme_widget_deleter")
+            after = (root / lifecycle_state.DESCRIPTOR_SET_REL).read_bytes()
+
+            self.assertFalse(result.stale)
+            self.assertFalse(result.revoked)
+            self.assertIsNone(result.note)
+            self.assertEqual(before, after)
+            # No migration was ever queued for a clean, matching-hash acceptance -- the
+            # queue file is not even created.
+            self.assertFalse((root / lifecycle_state.MIGRATION_QUEUE_REL).exists())
+
+    def test_idempotent_rerun_after_revocation_does_not_re_flip_or_duplicate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._two_capability_project(tmp)
+            adapter_path = self._register_fixture_adapter(tmp, "a")
+            accepted_hash = compute_implementation_hash(_STALE_FIXTURE_OP_KIND)
+            self._write_acceptance_record(
+                root, "acme_widget_deleter", "phase-1", accepted_hash, _STALE_FIXTURE_OP_KIND)
+            with adapter_path.open("ab") as f:
+                f.write(b"\n# rebuilt\n")
+
+            first = lifecycle_state.revoke_stale_acceptance(root, "acme_widget_deleter")
+            self.assertTrue(first.revoked)
+            descriptors_1 = (root / lifecycle_state.DESCRIPTOR_SET_REL).read_bytes()
+            queue_1 = (root / lifecycle_state.MIGRATION_QUEUE_REL).read_bytes()
+
+            second = lifecycle_state.revoke_stale_acceptance(root, "acme_widget_deleter")
+            self.assertFalse(second.stale)
+            self.assertFalse(second.revoked)
+            self.assertIsNone(second.note)
+            descriptors_2 = (root / lifecycle_state.DESCRIPTOR_SET_REL).read_bytes()
+            queue_2 = (root / lifecycle_state.MIGRATION_QUEUE_REL).read_bytes()
+            self.assertEqual(descriptors_1, descriptors_2)
+            self.assertEqual(queue_1, queue_2)
+
+    def test_fail_safe_revocation_has_no_traceback_and_is_plain_language(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._two_capability_project(tmp)
+            self._register_fixture_adapter(tmp, "a")
+            # No acceptance record at all -- fail-safe stale, per acceptance_hash_is_stale's own
+            # tests above.
+            result = lifecycle_state.revoke_stale_acceptance(root, "acme_widget_deleter")
+            self.assertTrue(result.revoked)
+            self.assertNotIn("Traceback", result.note)
+            self.assertNotIn("Error", result.note)
+            entries = {e["id"]: e for e in _read_json(root / lifecycle_state.DESCRIPTOR_SET_REL)}
+            self.assertFalse(entries["acme_widget_deleter"]["accepted"])
 
 
 if __name__ == "__main__":
