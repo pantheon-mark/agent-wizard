@@ -145,6 +145,15 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # ExternalWriteLibRegistryEnrollmentTests, the same regression class this file's own docstring
     # already documents for registered_adapters.py/triage.py/standing_automation.py).
     "capability_identity.py",
+    # Task B1 (materialized-view lifecycle reconciler, Phase 3 Cut 1): the
+    # descriptor.accepted-is-SSOT reconciler that makes the pause marker and the
+    # pending-migration queue agree with it. It hard-imports both
+    # `external_write.capability_identity` and `external_write.operator_acceptance` at module
+    # scope (see its own docstring's "Reuse, not duplication" section), so omitting it here
+    # would leave a later sanctioned resume/complete tool (B3) with no module to import at
+    # all -- a ModuleNotFoundError at import time, not a caught omission (same regression
+    # class this file's own docstring already documents for every prior entry above).
+    "lifecycle_state.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

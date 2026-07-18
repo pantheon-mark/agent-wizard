@@ -1603,11 +1603,18 @@ class TestS253ContractDelta(unittest.TestCase):
         # enrolled, or an emitted writes-back system ships capability_registration.py,
         # operator_acceptance.py, and capability_health.py -- all three of which hard-import
         # `external_write.capability_identity` at module scope -- without the module they
-        # import: a ModuleNotFoundError at import time, not a caught omission. Thirty-one lib
-        # files total.
+        # import: a ModuleNotFoundError at import time, not a caught omission.
         import agent_emitter
         self.assertIn("capability_identity.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 31)
+
+    def test_emit_set_lists_the_taskB1_lifecycle_state_file(self):
+        # Task B1 (materialized-view lifecycle reconciler, Phase 3 Cut 1): lifecycle_state.py
+        # must be enrolled, or an emitted writes-back system's sanctioned resume/complete tool
+        # (B3) has no `external_write.lifecycle_state` module to import at all -- thirty-two
+        # lib files total.
+        import agent_emitter
+        self.assertIn("lifecycle_state.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 32)
 
     def _writes_back_plan(self):
         import copy, json
