@@ -8,9 +8,7 @@ render needs, so the replay-conformance gate refused with:
     'security/capability_descriptors.json' references placeholder(s)
     ['CAPABILITY_DESCRIPTORS_JSON'] that could not be resolved ...
 
-Covers the fix's three parts (see external_review/phase3_cut1_capsule_descriptor_
-persist_consult_2026-07-18.md "REVISED FIX" -- the authoritative adjudication --
-and phase3_cut1_capsule_descriptor_persist_design_2026-07-18.md for root cause):
+Covers the fix's three parts:
 
   (1) upstream hydration -- agent_emitter.ensure_capability_descriptor_emit_field
       fills plan.foundation_doc_inputs[CAPABILITY_DESCRIPTORS_JSON] (idempotent,
@@ -137,7 +135,7 @@ def _simple_writes_back_plan(bundle_version=_SOURCE_VERSION, identity=None, extr
     """A lighter-weight writes-back plan for tests that exercise ONLY
     ensure_capability_descriptor_emit_field's pure dict logic (no template
     rendering) -- bypasses assemble_emission_plan's derived-record `_audit`
-    envelope invariants (DR-9 forbids a blank/stub field value), which would
+    envelope invariants (which forbid a blank/stub field value), which would
     otherwise reject a deliberately-blank probe value before it ever reaches the
     function under test. Mirrors test_capability_descriptor_set_emit._writes_back_plan."""
     deps = [dict(_DECLARED_DEP)] if identity is None else identity
@@ -351,7 +349,7 @@ class ReadSideBackfillTests(unittest.TestCase):
                          "(a migration write is a separate, deliberate flow)")
 
     def test_drifted_derivation_fails_closed_never_silent(self):
-        # Simulate producer/engine drift (consult finding F5): the recorded manifest
+        # Simulate producer/engine drift: the recorded manifest
         # base_hash for the descriptors file no longer matches what re-deriving from
         # the capsule's OWN identity reproduces. The backfill still ATTEMPTS the
         # injection (never silently skips it), but the pre-existing conformance gate
