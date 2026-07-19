@@ -303,7 +303,7 @@
       "recommendation_reason": "If you build new capabilities, or if you rebuild or update one you already have, this update makes sure your approval always matches what the capability currently does, and adds an extra check before a new capability's first live run \u2014 most operators should take it.",
       "release_date": "2026-07-18",
       "safety_class": "safety_fix",
-      "source_commit": "PENDING",
+      "source_commit": "46b27d8",
       "status": "prerelease"
     }
   ],
