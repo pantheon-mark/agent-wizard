@@ -701,6 +701,59 @@ if __name__ == "__main__":
         self.assertEqual(result.failures, [])
         self._assert_no_traceback(result)
 
+    def test_from_package_import_module_then_attribute_call_passes(self):
+        # (selfqa idiom fix) `from external_write import capability_api` (an
+        # ast.ImportFrom importing the MODULE capability_api from the PACKAGE
+        # external_write) followed by `capability_api.run_enveloped_operation(...)`
+        # must PASS -- this is a common, honest idiom distinct from both
+        # `from external_write.capability_api import run_enveloped_operation`
+        # (covered above) and `import external_write.capability_api` (covered
+        # by test_attribute_access_call_to_entrypoint_passes). Before this
+        # fix, the ImportFrom branch only ever added a name to `module_refs`
+        # via the `import`-statement branch, so `capability_api` was never
+        # recognized as an imported real module here and the attribute call's
+        # base never traced back to it -- a reachable honest-code false-block.
+        cap_id = "from_package_import_module_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="From Package Import Module Cap", op_kind=VALID_OP_KIND))
+        self._stage_real_external_write()
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: `from external_write import capability_api` + attribute-access CALL (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}
+
+from external_write import capability_api
+
+
+class TestFromPackageImportModuleCap(unittest.TestCase):
+    def test_describe_reports_ready(self):
+        self.assertEqual({module_name}.describe(), "From Package Import Module Cap ready")
+
+    def test_attribute_access_call_shape(self):
+        if False:  # AST-only guarded call -- never executed; this test file
+                   # never performs a live write, but the AST still carries a
+                   # genuine ast.Call node reaching the real entrypoint via
+                   # attribute access, exactly the shape this fix must accept.
+            capability_api.run_enveloped_operation()
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertTrue(result.ok, f"expected ok, got failures: {result.failures!r}")
+        self.assertEqual(result.failures, [])
+        self._assert_no_traceback(result)
+
     def test_local_fake_entrypoint_def_and_bare_call_no_import_is_flagged(self):
         # (Critical fix, task review) A test file that defines its OWN local
         # `def run_enveloped_operation(): ...` and calls it -- importing the
