@@ -109,7 +109,7 @@
       "path": "templates/agents/lib/external_write/capability_identity.py"
     },
     {
-      "hash": "sha256:8c6360bdee459bfd347ae65e8b9f8deb9f6795dd6819190b58c1bf443225f2e1",
+      "hash": "sha256:2d803c475b832701d9474a50b738ff1553fe009f1dfd7f551c49c4217eeb0bf8",
       "path": "templates/agents/lib/external_write/capability_invariants.py"
     },
     {
@@ -526,12 +526,12 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-07-18T22:21:53Z",
-  "generator_version": "ce55d4f699fb8120cd2afdb4d7c5c6af394524d1",
+  "generated_at": "2026-07-19T11:19:29Z",
+  "generator_version": "ba3b76f7d0fd6a504fc2c799f853164521762d74",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.14.0",
-  "source_registry_entry_hash": "sha256:abb040594b766b8c6e1dfab089d9a9fb812ac3561fb14c04f86cf86992a69310",
+  "source_registry_entry_hash": "sha256:ce07843b2384215502d7d0d5391963ab602dea26ad5cc88f71e90932354e35c4",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
   "template_tree_hash": "sha256:156e799ea78c2f757aae2015722f8558d4ffbbfb1e1c958ec27d4512c912ee00",

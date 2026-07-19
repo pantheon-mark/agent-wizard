@@ -524,6 +524,11 @@ _ACCEPTANCE_CLI_MODULE_NAME = "operator_acceptance"
 # dotted segment of an ``import`` statement's dotted name, never the full path (a test may import
 # it as ``external_write.capability_api`` or bare ``capability_api``).
 _ENTRYPOINT_MODULE_NAME = "capability_api"
+# The package that HOSTS the real entrypoint module above (external_write.capability_api's
+# own PACKAGE) -- used only defensively, to scope the from-package import-module idiom
+# (``from external_write import capability_api``) to the real package, never to accept
+# ``from <anything> import capability_api`` unconditionally.
+_ENTRYPOINT_MODULE_PACKAGE_NAME = "external_write"
 
 # Matches a locally-defined class name that IS (whole-string, case-insensitive)
 # an optional fake/stub/mock/dummy affix plus Operation/Adapter/Plan -- e.g.
@@ -643,10 +648,22 @@ def _ast_references_entrypoint(tree: ast.AST) -> bool:
         see ``_ast_dotted_name``) back to exactly what that import bound (e.g.
         ``capability_api.run_enveloped_operation(...)`` after ``import
         capability_api``, or ``external_write.capability_api.run_enveloped_operation(...)``
-        after ``import external_write.capability_api``). An attribute call on
-        an object that was never imported as the real entrypoint module (a
-        locally-defined class instance, an unrelated import, ...) is REJECTED
-        even though its trailing attribute name matches.
+        after ``import external_write.capability_api``), or
+      * (selfqa idiom fix) an ``ast.ImportFrom`` that imports the real entrypoint
+        MODULE (not the entrypoint NAME) from its own package -- ``from
+        external_write import capability_api`` (optionally ``as X``) -- binding a
+        local name the same way, THEN the same attribute-access call shape
+        (``capability_api.run_enveloped_operation(...)``). Recognized by the
+        imported alias's name matching ``_ENTRYPOINT_MODULE_NAME`` exactly (the
+        same constant the plain-``import`` branch matches against -- never a
+        second hardcoded literal), defensively scoped to a from-module whose
+        last dotted segment is the real entrypoint's own package
+        (``_ENTRYPOINT_MODULE_PACKAGE_NAME``).
+
+      An attribute call on an object that was never imported as the real
+      entrypoint module (a locally-defined class instance, an unrelated
+      import, ...) is REJECTED even though its trailing attribute name
+      matches.
 
     DECISION (per this task's own "if unsure" default): the acceptance-CLI path
     is deliberately left as import/module-reference-only, NOT also requiring a
@@ -664,6 +681,21 @@ def _ast_references_entrypoint(tree: ast.AST) -> bool:
             for alias in node.names:
                 if alias.name in _ENTRYPOINT_IMPORT_NAMES:
                     call_names.add(alias.asname or alias.name)
+                elif (
+                    alias.name == _ENTRYPOINT_MODULE_NAME
+                    and module_parts
+                    and module_parts[-1] == _ENTRYPOINT_MODULE_PACKAGE_NAME
+                ):
+                    # ``from external_write import capability_api`` -- an ImportFrom
+                    # that imports the real entrypoint MODULE (not the entrypoint
+                    # NAME) from its own package. Recognized the same way the
+                    # ``import`` branch below recognizes ``import
+                    # external_write.capability_api`` -- by the real module's own
+                    # name (``_ENTRYPOINT_MODULE_NAME``, reused, never
+                    # re-hardcoded) -- so a later
+                    # ``capability_api.run_enveloped_operation(...)`` attribute
+                    # call resolves back to it via ``module_refs``.
+                    module_refs.add(alias.asname or alias.name)
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 dotted_parts = alias.name.split(".")
