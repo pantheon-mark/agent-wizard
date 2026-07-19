@@ -216,6 +216,46 @@ def _plan_has_writes_back(plan: "EmissionPlan") -> bool:
     return False
 
 
+def ensure_capability_descriptor_emit_field(plan: "EmissionPlan") -> None:
+    """Upstream hydration: idempotently fill `plan.foundation_doc_inputs[CAPABILITY_
+    DESCRIPTORS_JSON]` for a writes-back plan, BEFORE either
+    `_emit_capability_descriptor_set` or `replay_capsule.build_replay_capsule` reads
+    `foundation_doc_inputs` — the seam that closes the upgrade-path gap where a freshly
+    emitted system's replay capsule could not reproduce
+    `security/capability_descriptors.json` on its first `apply_upgrade` (the capsule
+    builder persists `foundation_doc_inputs` verbatim, but nothing had ever computed
+    this key INTO it — only the descriptor emitter computed it inline, and only for
+    its own output, never for the capsule to read back). Completes the "forward-compat
+    with a persisted-field wiring" `_emit_capability_descriptor_set`'s docstring names
+    but that never fully landed (T9b).
+
+    Mutates `plan.foundation_doc_inputs` IN PLACE — a frozen EmissionPlan's referenced
+    dict is still a mutable object; only the attribute binding is frozen. No-op when:
+      - the plan has no writes-back (boundary_output) dependency (mirrors
+        `_plan_has_writes_back` exactly — a plan with no descriptor emission needs no
+        persisted value either), or
+      - a value is already present and non-blank (existing value wins — mirrors the
+        descriptor emitter's own precedence exactly, so this can never diverge from an
+        explicitly-supplied value).
+
+    Deliberately NOT a special case inside `replay_capsule.build_operating_block` (that
+    shape was rejected by cross-vendor review — it would couple the structural capsule
+    serializer to one producer's domain logic). Hydrating the SAME key both consumers
+    already read keeps `replay_capsule` fully generic."""
+    if not _plan_has_writes_back(plan):
+        return
+    import capability_descriptor_registry as cdr  # type: ignore  # sibling under lib/
+    from dependency_projection import IDENTITY_FIELD  # type: ignore
+    fdi = plan.foundation_doc_inputs
+    if fdi is None:
+        return
+    existing = fdi.get(cdr.EMIT_FIELD)
+    if existing is not None and str(existing).strip():
+        return  # existing value wins (idempotent)
+    identity_json = fdi.get(IDENTITY_FIELD) or "[]"
+    fdi[cdr.EMIT_FIELD] = cdr.render_initial_descriptor_set_json(str(identity_json))
+
+
 def external_write_lib_emit_set(plan: "EmissionPlan") -> List[str]:
     """The emitted-tree relpaths of the external_write lib files this plan should emit.
 

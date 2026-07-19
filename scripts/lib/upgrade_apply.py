@@ -454,6 +454,75 @@ def _manifest_managed_relpaths(manifest: Dict[str, Any]) -> set:
     return set(block.keys()) if isinstance(block, dict) else set()
 
 
+def _capability_descriptor_backfill_relpath(
+    current_version: str, build_repo_root: Path, manifest: Dict[str, Any],
+) -> Optional[str]:
+    """The managed relpath of the CURRENT bundle's `render_kind:render` wizard-delivery
+    artifact whose persisted inputs include CAPABILITY_DESCRIPTORS_JSON, if the current
+    bundle's contract declares one AND the manifest already manages it. None if the
+    current bundle predates the descriptor contract (no such contract entry) or the
+    manifest does not (yet) manage that relpath (nothing recorded to conform against)."""
+    contract = _load_target_contract(_bundle_dir(current_version, build_repo_root).resolve())
+    if not contract:
+        return None
+    managed = _manifest_managed_relpaths(manifest)
+    import capability_descriptor_registry as cdr  # type: ignore  # sibling under lib/
+    for entry in contract.get("artifacts", []):
+        if entry.get("delivery") != "wizard" or entry.get("render_kind") != RENDER_KIND_RENDER:
+            continue
+        persisted = (entry.get("inputs") or {}).get("persisted") or []
+        if cdr.EMIT_FIELD not in persisted:
+            continue
+        rel = entry.get("relpath")
+        if rel and rel in managed:
+            return rel
+    return None
+
+
+def _backfill_capsule_capability_descriptors(
+    capsule: Dict[str, Any],
+    capsule_inputs: Dict[str, Any],
+    current_version: str,
+    build_repo_root: Path,
+    manifest: Dict[str, Any],
+) -> None:
+    """Read-side JIT repair for a capsule emitted before the upstream-hydration fix
+    (agent_emitter.ensure_capability_descriptor_emit_field) landed: a v0.10.0..v0.13.1
+    -era v2 capsule's foundation_doc_inputs never carried CAPABILITY_DESCRIPTORS_JSON
+    (nothing had ever computed it INTO the capsule — only the descriptor emitter
+    computed it inline, for its own output only), so its FIRST apply refused at the
+    replay-conformance gate re-rendering security/capability_descriptors.json. This is
+    the durable general fix for the estate of ALREADY-emitted projects; a fresh emit
+    from the fixed engine never needs it (the key is already hydrated at emit time, so
+    the "already present" gate below makes this a true no-op for it).
+
+    Precisely gated (never fires outside its narrow lane): a v2 (operating-replay
+    -capable) capsule, the CURRENT bundle's contract carries a `render_kind:render`
+    wizard artifact whose persisted inputs list the key, the manifest manages that
+    relpath, AND the key is absent/blank in `capsule_inputs`.
+
+    Mutates `capsule_inputs` IN PLACE, IN MEMORY ONLY — this never rewrites the
+    on-disk capsule (a capsule migration write is a separate, deliberate flow; see
+    upgrade_migrate.py). The derived value is NOT trusted blindly: callers run the
+    EXISTING replay-conformance base_hash check immediately after this, so a
+    producer-drifted old capsule (the descriptor producer's engine-side
+    OPERATION_CONTRACTS registry changed since the capsule's original bundle was cut)
+    still fails closed with the gate's own plain-language refusal. This function only
+    makes the attempt — it never itself decides pass/fail."""
+    if not capsule_supports_operating_replay(capsule):
+        return  # v1 capsule: operating-layer replay is never attempted at all (existing behavior)
+    import capability_descriptor_registry as cdr  # type: ignore  # sibling under lib/
+    from dependency_projection import IDENTITY_FIELD  # type: ignore
+    existing = capsule_inputs.get(cdr.EMIT_FIELD)
+    if existing is not None and str(existing).strip():
+        return  # already present (a freshly-hydrated capsule, or a prior backfill) -- no-op
+    rel = _capability_descriptor_backfill_relpath(current_version, build_repo_root, manifest)
+    if rel is None:
+        return  # current bundle predates the descriptor contract, or not (yet) managed
+    identity_json = capsule_inputs.get(IDENTITY_FIELD) or "[]"
+    capsule_inputs[cdr.EMIT_FIELD] = cdr.render_initial_descriptor_set_json(str(identity_json))
+
+
 def compute_merge_surface(
     manifest: Dict[str, Any],
     target_contract: Optional[Dict[str, Any]],
@@ -682,6 +751,14 @@ def compute_target_change_set(
     except UpgradeApplyError:
         # No / malformed capsule -> cannot re-render -> empty change set (fail-soft).
         return []
+    # Read-side JIT backfill (in-memory only): repair an already-emitted legacy capsule
+    # missing CAPABILITY_DESCRIPTORS_JSON before rendering, so the preview surface
+    # matches what apply_upgrade itself will compute. See _backfill_capsule_capability_
+    # descriptors for the precise gating + the fail-closed verification that follows
+    # (this preview path re-renders below; a bad derivation shows up as a render
+    # failure here, same fail-soft handling as any other unresolvable placeholder).
+    _backfill_capsule_capability_descriptors(
+        capsule, capsule_inputs, current_version, build_repo_root, manifest)
 
     target_bundle_dir = _bundle_dir(target_version, build_repo_root).resolve()
 
@@ -1112,6 +1189,15 @@ def apply_upgrade(
 
     capsule = load_replay_capsule(operator_project_dir)
     capsule_inputs = capsule["foundation_doc_inputs"]
+    # --- 1c. Read-side JIT backfill (Cut-1 upgrade-path fix) ------------------
+    # Repair an already-emitted (pre-fix) capsule missing CAPABILITY_DESCRIPTORS_JSON,
+    # IN MEMORY ONLY, before the replay-conformance gate re-renders below. A fresh
+    # (post-fix) capsule already carries the key, so this is a no-op for it. A
+    # derivation that does not actually reproduce the recorded base_hash (producer
+    # drift) still fails closed at the gate immediately below -- this call never
+    # itself decides pass/fail. See _backfill_capsule_capability_descriptors.
+    _backfill_capsule_capability_descriptors(
+        capsule, capsule_inputs, current_version, build_repo_root, manifest)
 
     # --- 2. Determine the foundation-doc merge surface ------------------------
     # Render the current version once to learn which foundation docs the version

@@ -42,7 +42,7 @@ from corpus_loader import load_corpus_pack  # type: ignore
 from scaffold_emitter import emit_scaffold, scaffold_template_placeholders  # type: ignore
 from authority_profile import autonomous_actions_summary  # type: ignore
 from voice_settings import voice_settings_inputs  # type: ignore
-from agent_emitter import emit_agent_layer  # type: ignore
+from agent_emitter import emit_agent_layer, ensure_capability_descriptor_emit_field  # type: ignore
 from foundation_doc_emitter import emit_foundation_docs  # type: ignore
 from operator_fill_emitter import emit_operator_fill_templates  # type: ignore
 from corpus_emitter import (  # type: ignore
@@ -251,6 +251,18 @@ def _full_system_consumed_keys(plan: EmissionPlan, build_repo_root: Path) -> set
              wizard/templates/quality/co-protected-workflows.md. Same canonical-only situation
              as CAPABILITY_DESCRIPTOR_REGISTRY_ROWS above — declared here for the same reason
              (no bundle cut yet at B1; D-B1-a).
+           - CAPABILITY_DESCRIPTORS_JSON (Cut-1 upgrade-path fix, capability_descriptor_
+             registry.EMIT_FIELD): the emitted-JSON-document field for
+             security/capability_descriptors.json. Its template lives under the
+             scaffold's `security/` subdir but is EXCLUDED from the generic scaffold scan
+             (scaffold_emitter.EXCLUDE_RELPATHS) because it is emitted separately, gated
+             on writes-back, by agent_emitter._emit_capability_descriptor_set — so
+             scaffold_template_placeholders() never sees its {{CAPABILITY_DESCRIPTORS_JSON}}
+             placeholder. Since ensure_capability_descriptor_emit_field now hydrates this
+             key into foundation_doc_inputs upstream (so the replay capsule can persist
+             it — see the fix's design note), it would otherwise falsely warn as unused on
+             EVERY fresh writes-back emit; declared here for the same reason as the two
+             entries above.
 
     Source 3 is intentionally a small, named declared set rather than threading a
     consumed-key return through every emitter — see the slice's mechanism note. A
@@ -258,7 +270,9 @@ def _full_system_consumed_keys(plan: EmissionPlan, build_repo_root: Path) -> set
     from capability_projection import INCREMENTS_FIELD  # type: ignore
     from dependency_projection import IDENTITY_FIELD, ANNOTATION_FIELD  # type: ignore
     from corpus_emitter import INSTALLED_DATE_KEY  # type: ignore
-    from capability_descriptor_registry import MARKDOWN_FIELD as DESCRIPTOR_REGISTRY_ROWS_FIELD  # type: ignore
+    from capability_descriptor_registry import (  # type: ignore
+        MARKDOWN_FIELD as DESCRIPTOR_REGISTRY_ROWS_FIELD, EMIT_FIELD as DESCRIPTOR_SET_JSON_FIELD,
+    )
     from co_protected_workflows import MARKDOWN_FIELD as CO_PROTECTED_ROWS_FIELD  # type: ignore
 
     consumed: set = set()
@@ -274,6 +288,7 @@ def _full_system_consumed_keys(plan: EmissionPlan, build_repo_root: Path) -> set
         "PROJECT_NAME",              # plan.project_name + scaffold/agent structural field
         DESCRIPTOR_REGISTRY_ROWS_FIELD,  # CAPABILITY_DESCRIPTOR_REGISTRY_ROWS (B1-2; see above)
         CO_PROTECTED_ROWS_FIELD,     # CO_PROTECTED_CAPABILITY_ROWS (B1-6; see above)
+        DESCRIPTOR_SET_JSON_FIELD,   # CAPABILITY_DESCRIPTORS_JSON (Cut-1 upgrade-path fix; see above)
     }
     return consumed
 
@@ -285,6 +300,15 @@ def emit_operator_system(plan: EmissionPlan, staging_dir: Path,
 
     This is the composer; the GUARDED entry point is generate_operator_system,
     which validates provenance + dependencies before calling this."""
+    # 0. Upstream hydration (Cut-1 upgrade-path fix): fill foundation_doc_inputs[
+    #    CAPABILITY_DESCRIPTORS_JSON] for a writes-back plan BEFORE either the agent
+    #    layer (step 3, which emits security/capability_descriptors.json) or the
+    #    replay capsule (step 6d, which persists foundation_doc_inputs verbatim) read
+    #    it, so BOTH consumers see the SAME persisted value. Idempotent + a no-op for
+    #    a non-writes-back plan or an already-supplied value — see
+    #    agent_emitter.ensure_capability_descriptor_emit_field.
+    ensure_capability_descriptor_emit_field(plan)
+
     records = load_corpus_pack()
     written: List[Path] = []
 
