@@ -55,7 +55,9 @@ from external_write.run_envelope import (  # noqa: E402
     RUN_STATE_PENDING,
     RUN_STATE_EXECUTING,
     RUN_STATE_FINALIZED,
+    ResumeAuthorization,
     append_tranche,
+    authorize_resume,
     compute_reviewed_set_digest,
     derive_ledger_window_id,
     finalize_run,
@@ -510,6 +512,75 @@ class TestRunLevelConsentUtteranceTime(unittest.TestCase):
             rcpt = load_run_consent_receipt("run-u2", receipt_dir=d)
             self.assertEqual(rcpt["approved_at"], utterance_ts)
             self.assertIn("minted_at", rcpt)
+
+
+class TestResumeRequiresFreshConsent(unittest.TestCase):
+    """Task D4 (F-84): a resume is a FRESH operator decision at the process
+    boundary. ``authorize_resume`` refuses fail-closed on a background resume
+    with no fresh consent, a replayed verbatim/timestamp, a re-scope (digest
+    or contract/implementation hash changed), or an expired consent — and
+    authorizes only a genuinely fresh operator consent event over the
+    (possibly-narrowed) remaining work."""
+
+    def setUp(self):
+        _register_field_contract()
+
+    def tearDown(self):
+        _unregister_field_contract()
+
+    def _mint_run(self, d, run_id="run-r"):
+        return mint_run_envelope(
+            run_id=run_id, capability_id="c", op_kind=FIELD_OP,
+            contract_hash="ch", implementation_hash="ih",
+            reviewed_set=_reviewed_set(3), population_count=100,
+            stratification_summary={}, operator_approval_verbatim="yes go ahead",
+            consent_sentence_shown="Apply 3 changes.",
+            approved_at="2026-07-19T22:45:48Z", envelope_dir=d).envelope
+
+    def test_background_resume_without_fresh_consent_refuses(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint_run(d)
+            auth = authorize_resume(
+                "run-r", fresh_operator_approval_verbatim="",   # no fresh operator decision
+                fresh_approved_at="", current_reviewed_set_digest=env.reviewed_set_digest,
+                current_contract_hash="ch", current_implementation_hash="ih",
+                now_iso="2026-07-19T22:50:00Z", envelope_dir=d)
+            self.assertFalse(auth.authorized)
+            self.assertIn("fresh", (auth.reason or "").lower())
+
+    def test_replayed_verbatim_timestamp_refuses(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint_run(d)
+            auth = authorize_resume(
+                "run-r", fresh_operator_approval_verbatim="yes go ahead",
+                fresh_approved_at="2026-07-19T22:45:48Z",       # SAME as stored = replay
+                current_reviewed_set_digest=env.reviewed_set_digest,
+                current_contract_hash="ch", current_implementation_hash="ih",
+                now_iso="2026-07-19T22:50:00Z", envelope_dir=d)
+            self.assertFalse(auth.authorized)
+
+    def test_rescope_refuses_even_with_fresh_consent(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._mint_run(d)
+            auth = authorize_resume(
+                "run-r", fresh_operator_approval_verbatim="yes again",
+                fresh_approved_at="2026-07-19T22:50:00Z",
+                current_reviewed_set_digest="a-different-digest",   # re-scoped
+                current_contract_hash="ch", current_implementation_hash="ih",
+                now_iso="2026-07-19T22:50:05Z", envelope_dir=d)
+            self.assertFalse(auth.authorized)
+
+    def test_fresh_consent_same_scope_authorizes(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint_run(d)
+            auth = authorize_resume(
+                "run-r", fresh_operator_approval_verbatim="yes, continue",
+                fresh_approved_at="2026-07-19T22:50:00Z",
+                current_reviewed_set_digest=env.reviewed_set_digest,
+                current_contract_hash="ch", current_implementation_hash="ih",
+                now_iso="2026-07-19T22:50:05Z", envelope_dir=d)
+            self.assertTrue(auth.authorized, auth.reason)
+            self.assertIsNotNone(auth.envelope)
 
 
 # ===========================================================================

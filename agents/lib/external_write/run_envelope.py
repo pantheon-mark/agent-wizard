@@ -1163,6 +1163,146 @@ def resume_run_envelope(
     return env, tuple(sorted(set(applied)))
 
 
+# Task D4 (F-84): a resume is a FRESH operator decision at the process
+# boundary, never an automatic continuation. A background/unattended process
+# that resumed a paused run and kept mutating without a fresh operator
+# decision is exactly the escaped-consent failure this gate closes.
+DEFAULT_RESUME_MAX_AGE_SECONDS = 3600
+
+
+@dataclass(frozen=True)
+class ResumeAuthorization:
+    """The result of `authorize_resume`. ``authorized`` defaults false-shaped
+    (no envelope, no reason) so a caller that forgets to check the flag still
+    cannot get at a spendable envelope by accident."""
+    authorized: bool
+    reason: Optional[str] = None
+    envelope: Optional[RunEnvelope] = None
+    already_applied_unit_ids: Tuple[str, ...] = ()
+
+
+def _parse_iso_z(ts: str) -> Optional[datetime]:
+    """Parse an ISO-Z timestamp (``YYYY-MM-DDTHH:MM:SSZ``). Returns None on
+    any parse failure — the caller treats that as fail-closed (expired)."""
+    try:
+        return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def authorize_resume(
+    run_id: str,
+    *,
+    fresh_operator_approval_verbatim: str,
+    fresh_approved_at: str,
+    current_reviewed_set_digest: str,
+    current_contract_hash: str,
+    current_implementation_hash: str,
+    now_iso: Optional[str] = None,
+    max_age_seconds: int = DEFAULT_RESUME_MAX_AGE_SECONDS,
+    envelope_dir: Optional[str] = None,
+) -> ResumeAuthorization:
+    """Gate a resume/re-scope at the process boundary (Task D4, F-84), layered
+    OVER `resume_run_envelope` (D2). A resume is a FRESH operator decision —
+    this REFUSES fail-closed (never a traceback; a plain-language reason with
+    a concrete next step) when:
+
+      1. the loaded envelope is not spendable / absent;
+      2. the run is already FINALIZED (closed — start a fresh run, do not
+         resume);
+      3. no fresh operator consent was supplied at all (the F-84 escaped-
+         process case: a background/non-interactive resume with nothing but
+         the prior state to go on);
+      4. the supplied ``fresh_approved_at`` is empty or IDENTICAL to the
+         envelope's stored `consent.approved_at` — a replayed verbatim/
+         timestamp is not a fresh event, it is the same one being echoed
+         back;
+      5. the reviewed-set digest has changed (a re-scope / new-scan needs a
+         fresh MINT, not a resume);
+      6. the contract or implementation hash has changed (a changed command /
+         changed adapter contract version);
+      7. the stored consent is older than ``max_age_seconds`` relative to
+         ``now_iso`` (expiry).
+
+    Authorizes only when every check passes, carrying the loaded envelope and
+    the already-applied unit ids from D2's ``resume_run_envelope`` so the
+    caller continues the SAME run under the SAME envelope, applying only the
+    not-yet-applied remaining work."""
+    env, already_applied = resume_run_envelope(run_id, envelope_dir=envelope_dir)
+
+    if not env.is_spendable():
+        return ResumeAuthorization(
+            authorized=False,
+            reason="This run cannot be found or is not in a resumable state — "
+                   "there is nothing here to continue. Start a fresh run instead.")
+
+    if env.run_state == RUN_STATE_FINALIZED:
+        return ResumeAuthorization(
+            authorized=False,
+            reason="This run has already finished and is closed — it cannot be "
+                   "resumed. If more work is needed, start a fresh run.")
+
+    if not (isinstance(fresh_operator_approval_verbatim, str)
+            and fresh_operator_approval_verbatim.strip()):
+        return ResumeAuthorization(
+            authorized=False,
+            reason="This run cannot resume on its own — resuming a paused run "
+                   "needs a fresh yes from you, not the earlier approval reused. "
+                   "Ask the operator to confirm continuing before this run goes "
+                   "further.")
+
+    stored_approved_at = env.consent.approved_at if env.consent else ""
+    if not (isinstance(fresh_approved_at, str) and fresh_approved_at.strip()):
+        return ResumeAuthorization(
+            authorized=False,
+            reason="This run cannot resume on its own — resuming a paused run "
+                   "needs a fresh yes from you, not the earlier approval reused. "
+                   "Ask the operator to confirm continuing before this run goes "
+                   "further.")
+    if fresh_approved_at == stored_approved_at:
+        return ResumeAuthorization(
+            authorized=False,
+            reason="That confirmation was already used to start this run — it "
+                   "cannot be replayed to continue it. Ask the operator to "
+                   "confirm again, right now, before this run goes further.")
+
+    if current_reviewed_set_digest != env.reviewed_set_digest:
+        return ResumeAuthorization(
+            authorized=False,
+            reason="What this run would apply has changed since it was paused "
+                   "— this is a new scope, not a continuation. Start a fresh "
+                   "run so the operator can review and approve the new set.")
+
+    if (current_contract_hash != env.contract_hash
+            or current_implementation_hash != env.implementation_hash):
+        return ResumeAuthorization(
+            authorized=False,
+            reason="The command or its underlying version has changed since "
+                   "this run was paused — it cannot be resumed as-is. Start a "
+                   "fresh run so the operator can review and approve under the "
+                   "current version.")
+
+    now_dt = _parse_iso_z(now_iso) if now_iso else datetime.now(timezone.utc)
+    stored_dt = _parse_iso_z(stored_approved_at)
+    if now_dt is None or stored_dt is None:
+        return ResumeAuthorization(
+            authorized=False,
+            reason="This run's confirmation time could not be verified, so it "
+                   "is treated as expired. Ask the operator to confirm again "
+                   "before this run goes further.")
+    age_seconds = (now_dt - stored_dt).total_seconds()
+    if age_seconds > max_age_seconds:
+        return ResumeAuthorization(
+            authorized=False,
+            reason="The confirmation that started this run has expired — too "
+                   "much time has passed to resume it automatically. Ask the "
+                   "operator to confirm again before this run goes further.")
+
+    return ResumeAuthorization(
+        authorized=True, reason=None, envelope=env,
+        already_applied_unit_ids=already_applied)
+
+
 def _tranche_from_result(result: Result) -> Tranche:
     """Build a tranche record from a run_operation Result's verification detail.
     Honest: absent/partial verification records ``applied_not_verified``, never
