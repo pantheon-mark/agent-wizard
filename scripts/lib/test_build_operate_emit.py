@@ -1770,7 +1770,10 @@ class TestS253ContractDelta(unittest.TestCase):
         # (Count updated to 34 by Task A3, which additionally enrolled
         # lifecycle_test_fixtures.py -- see that file's own enrollment comment in
         # agent_emitter.py, and test_emit_set_lists_the_taskA3_lifecycle_test_fixtures_file below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 34)
+        # (Count updated to 35 by Task C1, which additionally enrolled command_manifest.py --
+        # see that file's own enrollment comment in agent_emitter.py, and
+        # test_emit_set_lists_the_taskC1_command_manifest_file below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 35)
 
     def test_emit_set_lists_the_taskA3_lifecycle_test_fixtures_file(self):
         # Task A3 (hermetic lifecycle tests + probe, Cut 1.1 / F-71): lifecycle_test_fixtures.py
@@ -1778,6 +1781,13 @@ class TestS253ContractDelta(unittest.TestCase):
         # points a capability author at a fixture helper that was never physically shipped.
         import agent_emitter
         self.assertIn("lifecycle_test_fixtures.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+
+    def test_emit_set_lists_the_taskC1_command_manifest_file(self):
+        # Task C1 (Cut 1.1 Cluster C / F-78): command_manifest.py must be enrolled, or a
+        # freshly-emitted writes-back system has no single-source command classification for
+        # Task C2's settings-allowlist/PreToolUse hook or Task C3's bulk-verify to read.
+        import agent_emitter
+        self.assertIn("command_manifest.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def _writes_back_plan(self):
         import copy, json

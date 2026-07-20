@@ -176,6 +176,16 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # caught omission (same regression class this file's own docstring already documents for
     # every prior entry above).
     "lifecycle_test_fixtures.py",
+    # Task C1 (Cut 1.1 Cluster C / F-78): the operator-invocable command
+    # manifest -- classifies every operator-invocable command (read_only /
+    # read_only_pii / live_write) by role. Nothing else in the lib imports it
+    # at module scope (it is a standalone, read-only classification primitive
+    # a future PreToolUse hook / settings-allowlist build calls directly, Task
+    # C2), but omitting it here means a freshly-emitted writes-back system has
+    # no manifest for Task C2's allowlist/hook or Task C3's bulk-verify to
+    # read against -- the single-source guarantee those tasks depend on would
+    # have nothing to point at.
+    "command_manifest.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
