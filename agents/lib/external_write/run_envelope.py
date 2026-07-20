@@ -61,7 +61,7 @@ import tempfile
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # sys.path bootstrap (mirrors acceptance_ceremony.py): make the package parent
 # importable when run as a direct script from the project root.
@@ -100,6 +100,17 @@ RUN_STATE_PENDING = "pending_run"
 RUN_STATE_EXECUTING = "executing"
 RUN_STATE_FINALIZED = "finalized"
 _RUN_STATES = (RUN_STATE_PENDING, RUN_STATE_EXECUTING, RUN_STATE_FINALIZED)
+
+# ---------------------------------------------------------------------------
+# Honest recoverability reporting (Task D5, Cut 1.1 Cluster D — F-81)
+# ---------------------------------------------------------------------------
+# The estate OVERSTATED recoverability: it implied applied messages were
+# recoverable when 225 had no surviving recovery manifest. `report_run_
+# recoverability` (below) reports from DURABLE records ONLY -- every queried
+# id gets an explicit claim, and any id lacking a durable applied-tranche
+# entry is `not_recoverable_by_system`, never sampled-around or assumed.
+RECOVERABLE_BY_SYSTEM = "recoverable_by_system"
+NOT_RECOVERABLE_BY_SYSTEM = "not_recoverable_by_system"
 
 # Project-root-relative home for persisted run envelopes (disk-first + audit).
 DEFAULT_ENVELOPE_DIR = "security/run_envelopes"
@@ -1554,3 +1565,112 @@ def run_enveloped_operation(
     tranche = _tranche_from_result(result)
     updated = append_tranche(envelope, tranche, envelope_dir=envelope_dir)
     return updated, result
+
+
+# ---------------------------------------------------------------------------
+# Task D5 (F-81): honest recoverability reporting from durable records
+# ---------------------------------------------------------------------------
+
+def _envelope_is_durable(env: RunEnvelope) -> bool:
+    """True iff ``env`` is a genuinely minted, on-disk envelope — never the
+    fail-closed EMPTY sentinel ``load_run_envelope`` returns for an absent /
+    malformed / never-minted ``run_id`` (``_empty_envelope``: no reviewed_set,
+    no consent). Deliberately does NOT check ``is_spendable()`` / ``run_state``
+    — a FINALIZED run's durable records are still reportable (recoverability
+    must not gate on the WAL lifecycle state; only on whether the ceremony
+    actually happened and left durable records on disk)."""
+    if not env.reviewed_set:
+        return False
+    if env.reviewed_set_digest != compute_reviewed_set_digest(env.reviewed_set):
+        return False
+    if env.consent is None:
+        return False
+    if not env.stored_ledger_window_id or env.stored_ledger_window_id != env.ledger_window_id:
+        return False
+    return True
+
+
+def report_run_recoverability(
+    run_id: str,
+    *,
+    candidate_unit_ids: Optional[Sequence[str]] = None,
+    envelope_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Report, from DURABLE records ONLY, which ids from a run are recoverable
+    BY THE SYSTEM (F-81 — the estate overstated recoverability: it implied
+    applied messages were recoverable when 225 had no surviving recovery
+    manifest). READ-ONLY: writes, mutates, and mints nothing.
+
+    An id is ``RECOVERABLE_BY_SYSTEM`` iff ALL of:
+      (a) it is a member of the DURABLE frozen ``reviewed_set`` for a run
+          whose envelope is genuinely on disk (``_envelope_is_durable``) —
+          this is the id's recovery basis, the persisted ``prestate_digest``;
+      (b) it has a durable applied-tranche entry (appears in some
+          ``tranches[].applied_unit_ids``);
+      (c) the op is REVERSIBLE — the envelope's ``ceiling.recovery_tier`` is
+          ``"reversible"`` (restore-from-prestate is possible; an
+          irreversible-tier op's prestate is not a sufficient restore basis).
+    An id missing ANY of (a)/(b)/(c) is ``NOT_RECOVERABLE_BY_SYSTEM`` — never
+    sampled-around, never assumed. A non-durable / absent envelope reports
+    every queried id not-recoverable (fail-closed).
+
+    Recoverability and verification are kept as SEPARATE axes (they are not
+    conflated here): this never gates on ``Tranche.verification_status`` — an
+    applied-but-``applied_not_verified`` unit (the estate's real evidence
+    shape: Gmail Trash + prestate, verified or not) is still reported
+    recoverable when (a)-(c) hold, otherwise honest recoverability reporting
+    would falsely report zero recoverable for a fully-recoverable run.
+
+    Every id in the query set (``candidate_unit_ids`` if given, else the
+    union of reviewed and applied ids) gets an explicit claim in ``per_id``.
+    """
+    env = load_run_envelope(run_id, envelope_dir=envelope_dir)
+
+    reviewed_ids = {
+        e.get("unit_id") for e in env.reviewed_set
+        if isinstance(e, dict) and isinstance(e.get("unit_id"), str)
+    }
+    applied_ids: set = set()
+    verified_ids: set = set()
+    for t in env.tranches:
+        applied_ids.update(t.applied_unit_ids)
+        if t.verification_status == "verified":
+            verified_ids.update(t.applied_unit_ids)
+
+    is_reversible = (
+        _envelope_is_durable(env)
+        and env.ceiling is not None
+        and env.ceiling.recovery_tier == "reversible"
+    )
+    recoverable_ids = (applied_ids & reviewed_ids) if is_reversible else set()
+
+    query_ids = (
+        list(candidate_unit_ids) if candidate_unit_ids is not None
+        else sorted(reviewed_ids | applied_ids)
+    )
+
+    per_id: Dict[str, str] = {}
+    verified_by_id: Dict[str, bool] = {}
+    for uid in query_ids:
+        per_id[uid] = (RECOVERABLE_BY_SYSTEM if uid in recoverable_ids
+                       else NOT_RECOVERABLE_BY_SYSTEM)
+        verified_by_id[uid] = uid in verified_ids
+
+    recoverable_count = sum(1 for v in per_id.values() if v == RECOVERABLE_BY_SYSTEM)
+    return {
+        "run_id": run_id,
+        "run_state": env.run_state,
+        "counts": {
+            "reviewed": len(reviewed_ids),
+            "applied": len(applied_ids),
+            "recoverable_by_system": recoverable_count,
+            "not_recoverable_by_system": len(per_id) - recoverable_count,
+            # Verification is a SEPARATE axis from recoverability (Controller
+            # Q2) — reported alongside, never used to gate the counts above.
+            "verified": sum(1 for v in verified_by_id.values() if v),
+            "applied_not_verified": sum(
+                1 for uid, v in verified_by_id.items() if not v and uid in applied_ids),
+        },
+        "per_id": per_id,
+        "verified_by_id": verified_by_id,
+    }

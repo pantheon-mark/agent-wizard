@@ -55,6 +55,8 @@ from external_write.run_envelope import (  # noqa: E402
     RUN_STATE_PENDING,
     RUN_STATE_EXECUTING,
     RUN_STATE_FINALIZED,
+    RECOVERABLE_BY_SYSTEM,
+    NOT_RECOVERABLE_BY_SYSTEM,
     ResumeAuthorization,
     append_tranche,
     authorize_resume,
@@ -65,6 +67,7 @@ from external_write.run_envelope import (  # noqa: E402
     load_run_envelope,
     mint_run_envelope,
     render_review_artifact,
+    report_run_recoverability,
     resume_run_envelope,
     run_enveloped_operation,
 )
@@ -820,6 +823,166 @@ class TestEnvelopedRunPathRecordsTranches(unittest.TestCase):
             self.assertEqual(write_client.write_calls, [],
                              "nothing may be written for a fabricated envelope")
             self.assertEqual(store["row1"]["value"], "Open")
+
+
+# ===========================================================================
+# D5 — honest recoverability reporting from durable records (F-81): every
+# queried id gets an explicit claim; an id with no durable applied-tranche
+# entry is reported not_recoverable_by_system, never sampled-around.
+# ===========================================================================
+
+class TestHonestRecoverabilityReporting(unittest.TestCase):
+
+    OP_KIND = "_env_recoverability_field_probe"
+
+    def setUp(self):
+        contracts_mod.OPERATION_CONTRACTS[self.OP_KIND] = OperationContract(
+            op_kind=self.OP_KIND, writes=("Status",), produces=(), dependency_set=(),
+            verifier_set=(), introduces_persistent_binding=False,
+            risk_class="reversible_external",  # reversible tier -> recoverable-eligible
+            read_only_scope="fixture.readonly")
+        register_read_facade(self.OP_KIND, _FieldReadFacade)
+        register_adapter(self.OP_KIND, _FieldAdapter())
+
+    def tearDown(self):
+        contracts_mod.OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+        unregister_adapter(self.OP_KIND)
+        unregister_read_facade(self.OP_KIND)
+
+    def _op(self):
+        return Operation(surface="fixture_surface", op_kind=self.OP_KIND,
+                         batch_id="e2e-1",
+                         params={"rows": [{"row_id": "row1", "intended_value": "Complete"}]})
+
+    def _mint(self, d):
+        return mint_run_envelope(
+            run_id="run-e2e", capability_id="cap:test", op_kind=self.OP_KIND,
+            contract_hash="ch", implementation_hash="ih",
+            reviewed_set=[{"unit_id": "row1", "prestate_digest": "d",
+                           "intended_mutation": {"value": "Complete"},
+                           "category": "status", "protected_status": False}],
+            population_count=50, stratification_summary={},
+            operator_approval_verbatim="yes", consent_sentence_shown="Apply 1 change.",
+            approved_at="2026-07-19T22:45:48Z", envelope_dir=d).envelope
+
+    def test_unmanifested_id_reported_not_recoverable(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d)
+            store = {"row1": {"value": "Open"}}
+            op = self._op()
+            run_enveloped_operation(env, op, _receipt(op), _FieldWriteClient(store),
+                                    read_only_client=_FieldReadOnlyClient(store),
+                                    envelope_dir=d, ledger_dir=d)
+            report = report_run_recoverability(
+                "run-e2e", candidate_unit_ids=["row1", "ghost-never-applied"],
+                envelope_dir=d)
+            self.assertEqual(report["per_id"]["row1"], RECOVERABLE_BY_SYSTEM)
+            self.assertEqual(report["per_id"]["ghost-never-applied"],
+                             NOT_RECOVERABLE_BY_SYSTEM)
+            self.assertEqual(report["counts"]["recoverable_by_system"], 1)
+            self.assertEqual(report["counts"]["not_recoverable_by_system"], 1)
+
+    def test_absent_envelope_reports_all_not_recoverable(self):
+        with tempfile.TemporaryDirectory() as d:
+            report = report_run_recoverability(
+                "never-minted", candidate_unit_ids=["a", "b"], envelope_dir=d)
+            self.assertEqual(report["per_id"]["a"], NOT_RECOVERABLE_BY_SYSTEM)
+            self.assertEqual(report["per_id"]["b"], NOT_RECOVERABLE_BY_SYSTEM)
+            self.assertEqual(report["counts"]["recoverable_by_system"], 0)
+
+    def test_recoverability_does_not_gate_on_verification_status(self):
+        # Controller decision Q2: recoverability and verification are separate
+        # axes. Without a read-only client the tranche is honestly recorded
+        # applied_not_verified (never verified) -- but the unit is still
+        # recoverable_by_system (Gmail-Trash-style: prestate is the restore
+        # basis regardless of whether the write was independently verified).
+        # Gating recoverability on verified would report zero recoverable for
+        # the estate's real evidence, which is exactly the F-81 failure mode.
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d)
+            store = {"row1": {"value": "Open"}}
+            op = self._op()
+            updated, result = run_enveloped_operation(
+                env, op, _receipt(op), _FieldWriteClient(store),
+                envelope_dir=d, ledger_dir=d)  # no read-only client
+            self.assertEqual(result.status, "written")
+            self.assertEqual(updated.tranches[0].verification_status,
+                             "applied_not_verified")
+            report = report_run_recoverability(
+                "run-e2e", candidate_unit_ids=["row1"], envelope_dir=d)
+            self.assertEqual(report["per_id"]["row1"], RECOVERABLE_BY_SYSTEM)
+
+    def test_irreversible_op_reports_not_recoverable_even_when_applied(self):
+        # Controller decision Q1(c): recoverability requires the op be
+        # reversible (ceiling.recovery_tier) -- an applied, reviewed id under
+        # an IRREVERSIBLE-tier run must never be reported recoverable_by_system.
+        irr_kind = "_env_recoverability_irreversible_probe"
+        contracts_mod.OPERATION_CONTRACTS[irr_kind] = OperationContract(
+            op_kind=irr_kind, writes=("Status",), produces=(), dependency_set=(),
+            verifier_set=(), introduces_persistent_binding=False,
+            risk_class="irreversible_external",
+            read_only_scope="fixture.readonly")
+        register_read_facade(irr_kind, _FieldReadFacade)
+        register_adapter(irr_kind, _FieldAdapter())
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                mint = mint_run_envelope(
+                    run_id="run-irr", capability_id="cap:test", op_kind=irr_kind,
+                    contract_hash="ch", implementation_hash="ih",
+                    reviewed_set=[{"unit_id": "row1", "prestate_digest": "d",
+                                   "intended_mutation": {"value": "Complete"},
+                                   "category": "status", "protected_status": False}],
+                    population_count=50, stratification_summary={},
+                    operator_approval_verbatim="yes", consent_sentence_shown="Apply 1 change.",
+                    approved_at="2026-07-19T22:45:48Z", envelope_dir=d)
+                self.assertTrue(mint.accepted, mint.reason)
+                self.assertEqual(mint.envelope.ceiling.recovery_tier, "irreversible")
+                store = {"row1": {"value": "Open"}}
+                op = Operation(surface="fixture_surface", op_kind=irr_kind,
+                               batch_id="e2e-1",
+                               params={"rows": [{"row_id": "row1", "intended_value": "Complete"}]})
+                run_enveloped_operation(
+                    mint.envelope, op, _receipt(op), _FieldWriteClient(store),
+                    read_only_client=_FieldReadOnlyClient(store),
+                    envelope_dir=d, ledger_dir=d)
+                report = report_run_recoverability(
+                    "run-irr", candidate_unit_ids=["row1"], envelope_dir=d)
+                self.assertEqual(report["per_id"]["row1"], NOT_RECOVERABLE_BY_SYSTEM)
+                self.assertEqual(report["counts"]["recoverable_by_system"], 0)
+        finally:
+            contracts_mod.OPERATION_CONTRACTS.pop(irr_kind, None)
+            unregister_adapter(irr_kind)
+            unregister_read_facade(irr_kind)
+
+    def test_finalized_run_still_reports_honest_recoverability(self):
+        # Recoverability must not gate on the WAL lifecycle state -- a
+        # FINALIZED run's durable records are still reportable (this is
+        # exactly when an operator would ask "what can still be undone?").
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d)
+            store = {"row1": {"value": "Open"}}
+            op = self._op()
+            run_enveloped_operation(env, op, _receipt(op), _FieldWriteClient(store),
+                                    read_only_client=_FieldReadOnlyClient(store),
+                                    envelope_dir=d, ledger_dir=d)
+            finalize_run("run-e2e", envelope_dir=d)
+            report = report_run_recoverability(
+                "run-e2e", candidate_unit_ids=["row1"], envelope_dir=d)
+            self.assertEqual(report["run_state"], RUN_STATE_FINALIZED)
+            self.assertEqual(report["per_id"]["row1"], RECOVERABLE_BY_SYSTEM)
+
+    def test_default_candidate_set_is_reviewed_union_applied(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d)
+            store = {"row1": {"value": "Open"}}
+            op = self._op()
+            run_enveloped_operation(env, op, _receipt(op), _FieldWriteClient(store),
+                                    read_only_client=_FieldReadOnlyClient(store),
+                                    envelope_dir=d, ledger_dir=d)
+            report = report_run_recoverability("run-e2e", envelope_dir=d)
+            self.assertEqual(report["per_id"], {"row1": RECOVERABLE_BY_SYSTEM})
+            self.assertEqual(report["counts"]["reviewed"], 1)
+            self.assertEqual(report["counts"]["applied"], 1)
 
 
 # ===========================================================================
