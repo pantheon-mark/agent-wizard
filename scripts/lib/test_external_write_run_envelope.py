@@ -582,6 +582,59 @@ class TestResumeRequiresFreshConsent(unittest.TestCase):
             self.assertTrue(auth.authorized, auth.reason)
             self.assertIsNotNone(auth.envelope)
 
+    def test_replayed_verbatim_with_fresh_timestamp_refuses(self):
+        # D4 review Fix 1 (Critical): a caller holding the paused envelope
+        # replays the STORED verbatim but supplies a genuinely fresh clock
+        # timestamp. Before the fix this was authorized (only approved_at was
+        # compared) -- reopening F-84. Must refuse: the verbatim alone
+        # matching the paused run's stored verbatim is a replayed consent
+        # event, even with a new timestamp.
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint_run(d)
+            auth = authorize_resume(
+                "run-r", fresh_operator_approval_verbatim="yes go ahead",  # STORED verbatim replayed
+                fresh_approved_at="2026-07-19T22:50:00Z",                 # fresh timestamp
+                current_reviewed_set_digest=env.reviewed_set_digest,
+                current_contract_hash="ch", current_implementation_hash="ih",
+                now_iso="2026-07-19T22:50:05Z", envelope_dir=d)
+            self.assertFalse(auth.authorized)
+            self.assertIn("reused", (auth.reason or "").lower())
+
+    def test_finalized_run_returns_finalized_specific_message(self):
+        # D4 review Fix 2 (Important): a genuinely FINALIZED run must get the
+        # specific "already finished and is closed" message, not the generic
+        # "cannot be found or is not in a resumable state" message that
+        # is_spendable()'s FINALIZED short-circuit would otherwise always
+        # produce first.
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint_run(d)
+            finalize_run("run-r", envelope_dir=d)
+            auth = authorize_resume(
+                "run-r", fresh_operator_approval_verbatim="yes, continue",
+                fresh_approved_at="2026-07-19T22:50:00Z",
+                current_reviewed_set_digest=env.reviewed_set_digest,
+                current_contract_hash="ch", current_implementation_hash="ih",
+                now_iso="2026-07-19T22:50:05Z", envelope_dir=d)
+            self.assertFalse(auth.authorized)
+            self.assertIn("already finished", (auth.reason or "").lower())
+
+    def test_absent_run_still_returns_cannot_be_found_message(self):
+        # Guard against a naive reorder of the FINALIZED check: an absent /
+        # never-minted run_id loads as the fail-closed EMPTY envelope, which
+        # also defaults run_state to FINALIZED internally (_empty_envelope) as
+        # its own not-resumable signal. That case must NOT be mistaken for a
+        # genuinely finalized real run -- it must keep the "cannot be found"
+        # message, not "already finished".
+        with tempfile.TemporaryDirectory() as d:
+            auth = authorize_resume(
+                "run-never-existed", fresh_operator_approval_verbatim="yes, continue",
+                fresh_approved_at="2026-07-19T22:50:00Z",
+                current_reviewed_set_digest="whatever",
+                current_contract_hash="ch", current_implementation_hash="ih",
+                now_iso="2026-07-19T22:50:05Z", envelope_dir=d)
+            self.assertFalse(auth.authorized)
+            self.assertIn("cannot be found", (auth.reason or "").lower())
+
 
 # ===========================================================================
 # Run path — threads read_only_client + records verification into tranches

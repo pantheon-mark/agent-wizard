@@ -1169,6 +1169,15 @@ def resume_run_envelope(
 # decision is exactly the escaped-consent failure this gate closes.
 DEFAULT_RESUME_MAX_AGE_SECONDS = 3600
 
+# D4 review Fix 3 (Minor): the empty-verbatim and empty-approved_at refusals
+# are the SAME operator-facing situation ("no fresh confirmation was
+# supplied at all") and must say so identically -- a shared constant so the
+# two call sites cannot drift apart wording-wise over time.
+_NO_FRESH_CONSENT_REASON = (
+    "This run cannot resume on its own — resuming a paused run needs a "
+    "fresh yes from you, not the earlier approval reused. Ask the operator "
+    "to confirm continuing before this run goes further.")
+
 
 @dataclass(frozen=True)
 class ResumeAuthorization:
@@ -1213,10 +1222,14 @@ def authorize_resume(
       3. no fresh operator consent was supplied at all (the F-84 escaped-
          process case: a background/non-interactive resume with nothing but
          the prior state to go on);
-      4. the supplied ``fresh_approved_at`` is empty or IDENTICAL to the
-         envelope's stored `consent.approved_at` — a replayed verbatim/
-         timestamp is not a fresh event, it is the same one being echoed
-         back;
+      4. the supplied consent REPLAYS the paused run's stored consent event —
+         EITHER ``fresh_operator_approval_verbatim`` equals the envelope's
+         stored ``consent.operator_approval_verbatim`` OR
+         ``fresh_approved_at`` equals the stored ``consent.approved_at`` (or
+         either is empty). A genuinely fresh consent event must carry BOTH a
+         new verbatim AND a new approved_at — matching on either alone is
+         treated as the same earlier approval being echoed back, not a new
+         one;
       5. the reviewed-set digest has changed (a re-scope / new-scan needs a
          fresh MINT, not a resume);
       6. the contract or implementation hash has changed (a changed command /
@@ -1227,8 +1240,36 @@ def authorize_resume(
     Authorizes only when every check passes, carrying the loaded envelope and
     the already-applied unit ids from D2's ``resume_run_envelope`` so the
     caller continues the SAME run under the SAME envelope, applying only the
-    not-yet-applied remaining work."""
+    not-yet-applied remaining work.
+
+    Enforcement ceiling (disclosed, mirrors ``mint_run_envelope`` /
+    ``acceptance_ceremony``): this detects a REPLAYED consent EVENT at the
+    operator-approval ceiling -- a caller holding the paused envelope who
+    resupplies the stored verbatim and/or the stored timestamp is refused.
+    It is NOT a runtime guarantee against a determined, automated caller that
+    fabricates a plausible-looking NEW verbatim and NEW timestamp; nothing
+    here cryptographically proves a human actually typed the confirmation.
+    That residual is carried by the emitted operator guidance and the
+    operator-as-approver discipline, the same way ``mint_run_envelope``
+    discloses it cannot prove the mint-time "yes" was human-typed either."""
     env, already_applied = resume_run_envelope(run_id, envelope_dir=envelope_dir)
+
+    # D4 review Fix 2 (Important): check the FINALIZED-specific case BEFORE
+    # the general is_spendable()/absent check. is_spendable() already returns
+    # False for any FINALIZED envelope (D2), so without this ordering the
+    # general "not resumable" branch below always wins and the friendlier
+    # FINALIZED-specific message is dead code. Guard on `env.consent is not
+    # None` to tell a REAL finalized run (mint always sets consent; a
+    # finalize_run() call preserves it) apart from the fail-closed EMPTY
+    # envelope returned for an absent/fabricated run_id, which ALSO defaults
+    # run_state to FINALIZED as its own not-resumable signal
+    # (`_empty_envelope`) but carries no consent -- that case must keep
+    # getting the "cannot be found" message, not "already finished".
+    if env.run_state == RUN_STATE_FINALIZED and env.consent is not None:
+        return ResumeAuthorization(
+            authorized=False,
+            reason="This run has already finished and is closed — it cannot be "
+                   "resumed. If more work is needed, start a fresh run.")
 
     if not env.is_spendable():
         return ResumeAuthorization(
@@ -1236,29 +1277,30 @@ def authorize_resume(
             reason="This run cannot be found or is not in a resumable state — "
                    "there is nothing here to continue. Start a fresh run instead.")
 
-    if env.run_state == RUN_STATE_FINALIZED:
-        return ResumeAuthorization(
-            authorized=False,
-            reason="This run has already finished and is closed — it cannot be "
-                   "resumed. If more work is needed, start a fresh run.")
-
     if not (isinstance(fresh_operator_approval_verbatim, str)
             and fresh_operator_approval_verbatim.strip()):
-        return ResumeAuthorization(
-            authorized=False,
-            reason="This run cannot resume on its own — resuming a paused run "
-                   "needs a fresh yes from you, not the earlier approval reused. "
-                   "Ask the operator to confirm continuing before this run goes "
-                   "further.")
+        return ResumeAuthorization(authorized=False, reason=_NO_FRESH_CONSENT_REASON)
 
     stored_approved_at = env.consent.approved_at if env.consent else ""
     if not (isinstance(fresh_approved_at, str) and fresh_approved_at.strip()):
+        return ResumeAuthorization(authorized=False, reason=_NO_FRESH_CONSENT_REASON)
+
+    # D4 review Fix 1 (Critical): refuse a resume consent event that replays
+    # EITHER half of the paused run's stored consent -- the verbatim OR the
+    # approved_at. Previously only approved_at was compared, so a caller
+    # holding the paused envelope could replay the STORED verbatim alongside
+    # a genuinely fresh clock timestamp and be authorized (reopening F-84).
+    # A truly fresh consent event carries BOTH a new verbatim AND a new
+    # approved_at.
+    stored_verbatim = env.consent.operator_approval_verbatim if env.consent else ""
+    if fresh_operator_approval_verbatim == stored_verbatim:
         return ResumeAuthorization(
             authorized=False,
-            reason="This run cannot resume on its own — resuming a paused run "
-                   "needs a fresh yes from you, not the earlier approval reused. "
-                   "Ask the operator to confirm continuing before this run goes "
-                   "further.")
+            reason="This looks like the earlier approval being reused — a "
+                   "resume needs a new confirmation from the operator, not "
+                   "the same words used to start this run. Ask the operator "
+                   "to confirm again, in their own words, before this run "
+                   "goes further.")
     if fresh_approved_at == stored_approved_at:
         return ResumeAuthorization(
             authorized=False,
