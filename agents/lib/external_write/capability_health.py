@@ -70,12 +70,33 @@ whether it normalizes (``capability_identity.normalize_capability_id`` — case/
 reused rather than a second hand-rolled fold) to the SAME identity as some OTHER id that DOES have
 a real source file on disk. If it does not, nothing changes — RED, as always. If it does, the twin
 is classified by whether it carries any recorded STATE of its own (``accepted: true`` on its own
-descriptor entry, a pause marker, a queued migration, an acceptance-audit record, or an
-unreadable/ambiguous read on any of those): no state at all → ``PENDING`` (tombstone-eligible —
-safe to retire, ``"inbox-management"``'s actual estate shape); ANY state → ``IDENTITY_CONFLICT`` (a
-DISTINCT state from RED — this needs a person to look at both entries and merge them, never a
-silent auto-discard). Both carry a plain-language ``operator_message`` describing exactly what to
-do; every other record's ``operator_message`` is ``None``.
+descriptor entry, a pause marker, a queued migration, an acceptance-audit record, a persisted
+blast-radius invocation-ledger run under its own descriptor id/name — see "Ledger-attributed run
+history" below, a never-accepted twin can still have run through the write-gate's LIVE_BOUNDED
+pre-acceptance trial path — or an unreadable/ambiguous read on any of those): no state at all →
+``PENDING`` (tombstone-eligible — safe to retire, ``"inbox-management"``'s actual estate shape);
+ANY state → ``IDENTITY_CONFLICT`` (a DISTINCT state from RED — this needs a person to look at both
+entries and merge them, never a silent auto-discard). Both carry a plain-language
+``operator_message`` describing exactly what to do; every other record's ``operator_message`` is
+``None``.
+
+Ledger-attributed run history (Fix 2, A4 post-merge review)
+------------------------------------------------------------------------------
+``has_state``'s original formula assumed "never accepted" meant "never ran" for a never-accepted
+twin. That is unsound: the write-gate's LIVE_BOUNDED path (``write_gate.py``'s ``_declared_entry``
+/ ``_enforce_live_funnel``) authorizes a REAL bounded-live write for a merely-DECLARED (not yet
+accepted) descriptor entry — the pre-acceptance trial every capability goes through before an
+operator ever approves it. A never-accepted twin can therefore still carry real recorded run
+history of its own via that path, persisted in
+``security/invocation_ledgers/*.ledger.json`` (``write_gate.PersistentInvocationLedger``), keyed by
+``f"{op.surface}::{op.op_kind}"``. Attribution back to a specific capability_id is CLEAN, not
+guessed: every write-gate lookup that can authorize a write against a descriptor entry (
+``_covering_entry``, ``_declared_entry``, ``resolve_effective_cap``) matches ``op.surface`` against
+that SAME entry's own ``id`` or ``name`` field before ever letting the write proceed — so a ledger
+key's surface component, when it matches, names exactly the descriptor entry that authorized it.
+``_ledger_run_history_for_twin`` checks for that match; silently tombstoning a twin that authorized
+real external writes would discard genuine run history, which is exactly the case
+``IDENTITY_CONFLICT`` (never ``PENDING``) exists to catch.
 A missing/absent file (nothing yet written) is a NORMAL, non-error input for
 every one of these checks — it is only an EXISTING-but-unreadable/malformed
 file that signals ``state_read_error`` or the descriptor-enumeration sentinel
@@ -85,9 +106,12 @@ absent marker directory and an inaccessible one).
 
 Descriptor-enumeration degradation (xvendor Fix B)
 ------------------------------------------------------------------------------
-``_load_descriptor_ids`` enumerates capability_ids declared in
-``security/capability_descriptors.json`` (see "Enumeration" below). If that
-file EXISTS but cannot be read or parsed, this module does NOT silently
+``_load_descriptor_entries`` reads and parses
+``security/capability_descriptors.json`` exactly ONCE per ``check_capabilities``
+call (Fix 1, A4 post-merge review — see its own docstring); ``_load_descriptor_ids``
+and ``_load_descriptor_accepted`` are pure derivations over that single parsed
+result, never independent readers of the file (see "Enumeration" below). If
+that file EXISTS but cannot be read or parsed, this module does NOT silently
 resolve to the empty set — doing so would DROP a descriptor-only capability
 (one with no source file, so it is enumerated ONLY via the descriptor set)
 from the result entirely: a false all-clear, not a red flag, for exactly the
@@ -240,6 +264,15 @@ MIGRATION_QUEUE_REL = "agents/handoffs/pending_migrations.json"
 # check above (`_capability_acceptance_stale`), which instead calls into `lifecycle_state` directly.
 ACCEPTANCE_LOG_REL = "security/capability_acceptance_log.jsonl"
 
+# (Fix 2, A4 post-merge review) duplicated-by-value from write_gate.DEFAULT_LEDGER_DIR -- pinned
+# equal by TestPathConstantsAntiDrift.test_ledger_dir_rel_matches_write_gate_default_ledger_dir,
+# the same discipline every other path constant in this section already carries. Used ONLY by
+# `_ledger_run_history_for_twin` (the identity-twin `has_state` soundness fix -- see the module
+# docstring's "Ledger-attributed run history" section): a never-accepted twin can still have real
+# run history via the write-gate's LIVE_BOUNDED pre-acceptance trial path, persisted here by
+# `write_gate.PersistentInvocationLedger`.
+LEDGER_DIR_REL = "security/invocation_ledgers"
+
 # Bounded so a hung/broken capability import can never hang this checker.
 IMPORT_TIMEOUT_SECONDS = 20
 
@@ -252,12 +285,13 @@ SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID = "__capability_health_check_degraded__
 
 
 class _DescriptorEnumerationError(Exception):
-    """Raised internally by `_load_descriptor_ids` when the descriptor set
-    file EXISTS but could not be read/parsed -- the capability_id union this
-    module enumerates from might be missing a descriptor-only capability.
-    Always caught by `check_capabilities`, which converts it into the single
-    RED sentinel record (`SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID`). Never
-    escapes this module."""
+    """Raised internally by `_load_descriptor_entries` (Fix 1, A4 post-merge review -- the single
+    read/parse of the descriptor set; `_load_descriptor_ids` / `_load_descriptor_accepted` are
+    pure derivations over its result and can no longer raise this themselves) when the descriptor
+    set file EXISTS but could not be read/parsed -- the capability_id union this module enumerates
+    from might be missing a descriptor-only capability. Always caught by `check_capabilities`,
+    which converts it into the single RED sentinel record
+    (`SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID`). Never escapes this module."""
 
 # The subprocess program that attempts the import, path-addressed (capability
 # files are not necessarily importable by dotted module name — they live
@@ -276,11 +310,17 @@ _spec.loader.exec_module(_module)
 """
 
 
-def _load_descriptor_ids(project_root: Path) -> Set[str]:
-    """The set of capability_ids declared in the descriptor set.
+def _load_descriptor_entries(project_root: Path) -> List[Dict[str, Any]]:
+    """(Fix 1, A4 post-merge review) The SINGLE read+parse of ``security/capability_descriptors.json``
+    for one ``check_capabilities`` call. Before this fix, ``_load_descriptor_ids`` and
+    ``_load_descriptor_accepted`` each independently opened and parsed the same file -- two reads
+    per call of a file that could, in principle, be mutated BETWEEN them (an inconsistent-snapshot
+    risk). This function reads it exactly once; ``_load_descriptor_ids`` /
+    ``_load_descriptor_accepted`` are now pure derivations over its already-parsed result, never
+    independent readers.
 
     Fail-safe on the genuinely-ABSENT case ONLY: a descriptor set file that
-    does not exist yields the empty set — never raises, never crashes the
+    does not exist yields the empty list — never raises, never crashes the
     checker (mirrors ``write_gate.load_descriptor_set``'s own fail-safe
     discipline, though this module deliberately does not import that runtime
     module — it reads the same file independently so this checker has no
@@ -295,12 +335,14 @@ def _load_descriptor_ids(project_root: Path) -> Set[str]:
     when the file exists but cannot be read (``OSError`` other than
     ``FileNotFoundError``), is not valid JSON, or is not a JSON array;
     ``check_capabilities`` catches that and inserts a RED sentinel record
-    instead of silently under-enumerating."""
+    instead of silently under-enumerating. Non-dict entries in an otherwise-valid list are
+    silently skipped (mirrors both former readers' own per-entry tolerance) -- the returned list
+    contains only dict entries."""
     path = project_root / DESCRIPTOR_SET_REL
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return set()
+        return []
     except OSError as exc:
         raise _DescriptorEnumerationError(
             f"descriptor set {path} exists but could not be read: {exc}") from exc
@@ -312,53 +354,42 @@ def _load_descriptor_ids(project_root: Path) -> Set[str]:
     if not isinstance(data, list):
         raise _DescriptorEnumerationError(
             f"descriptor set {path} exists but is not a JSON array")
+    return [entry for entry in data if isinstance(entry, dict)]
+
+
+def _load_descriptor_ids(entries: List[Dict[str, Any]]) -> Set[str]:
+    """The set of capability_ids declared in the descriptor set -- a pure derivation over
+    ``entries`` (the single already-parsed read from ``_load_descriptor_entries``; see Fix 1, A4
+    post-merge review). This function itself can no longer raise -- by the time it is called,
+    ``check_capabilities`` has already funneled any read/parse failure into the degraded-sentinel
+    record via ``_load_descriptor_entries``."""
     ids: Set[str] = set()
-    for entry in data:
-        if isinstance(entry, dict):
-            cap_id = entry.get("id")
-            if isinstance(cap_id, str) and cap_id:
-                ids.add(cap_id)
+    for entry in entries:
+        cap_id = entry.get("id")
+        if isinstance(cap_id, str) and cap_id:
+            ids.add(cap_id)
     return ids
 
 
-def _load_descriptor_accepted(project_root: Path) -> Dict[str, bool]:
-    """(Task A4 / F-72) capability_id -> accepted (bool), read independently from the descriptor
-    set -- mirrors ``_load_descriptor_ids``'s own read+parse+fail-safe shape exactly (this
-    module's established convention of independent per-purpose readers, e.g. ``_is_paused`` /
-    ``_is_pending_migration`` reading their own files independently rather than sharing state).
-    Used ONLY to classify a descriptor-only identity TWIN (see ``_find_identity_twin`` /
-    ``check_capabilities``) as ``pending`` (no recorded state) vs. ``identity_conflict``
-    (``accepted: true`` is itself state) -- a capability that HAS a source file never consults
-    this; that branch's health formula is unchanged by this task.
+def _load_descriptor_accepted(entries: List[Dict[str, Any]]) -> Dict[str, bool]:
+    """(Task A4 / F-72) capability_id -> accepted (bool) -- a pure derivation over ``entries``
+    (the SAME single already-parsed read ``_load_descriptor_ids`` derives from; see Fix 1, A4
+    post-merge review -- this and ``_load_descriptor_ids`` are no longer two independent readers
+    of the file, just two projections of one parsed list). Used ONLY to classify a descriptor-only
+    identity TWIN (see ``_find_identity_twin`` / ``check_capabilities``) as ``pending`` (no
+    recorded state) vs. ``identity_conflict`` (``accepted: true`` is itself state) -- a capability
+    that HAS a source file never consults this; that branch's health formula is unchanged by this
+    task.
 
-    An ABSENT file is normal: ``{}`` (nothing declared, no accepted flags to report). An
-    EXISTING-but-unreadable-or-malformed file raises ``_DescriptorEnumerationError`` -- the exact
-    same signal ``_load_descriptor_ids`` raises for the same condition; ``check_capabilities``
-    calls both and funnels either raise into the same degraded-sentinel record. Missing/non-bool
-    ``accepted`` resolves to False (fail-safe: an absent/ambiguous flag is never treated as
-    accepted)."""
-    path = project_root / DESCRIPTOR_SET_REL
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return {}
-    except OSError as exc:
-        raise _DescriptorEnumerationError(
-            f"descriptor set {path} exists but could not be read: {exc}") from exc
-    try:
-        data = json.loads(text)
-    except ValueError as exc:
-        raise _DescriptorEnumerationError(
-            f"descriptor set {path} exists but is not valid JSON: {exc}") from exc
-    if not isinstance(data, list):
-        raise _DescriptorEnumerationError(
-            f"descriptor set {path} exists but is not a JSON array")
+    An empty ``entries`` list yields ``{}`` (nothing declared, no accepted flags to report).
+    Missing/non-bool ``accepted`` resolves to False (fail-safe: an absent/ambiguous flag is never
+    treated as accepted). This function itself can no longer raise -- see ``_load_descriptor_ids``
+    above."""
     accepted_by_id: Dict[str, bool] = {}
-    for entry in data:
-        if isinstance(entry, dict):
-            cap_id = entry.get("id")
-            if isinstance(cap_id, str) and cap_id:
-                accepted_by_id[cap_id] = entry.get("accepted") is True
+    for entry in entries:
+        cap_id = entry.get("id")
+        if isinstance(cap_id, str) and cap_id:
+            accepted_by_id[cap_id] = entry.get("accepted") is True
     return accepted_by_id
 
 
@@ -423,6 +454,74 @@ def _has_acceptance_audit_record(project_root: Path, capability_id: str) -> Tupl
     return False, False
 
 
+def _ledger_run_history_for_twin(project_root: Path, capability_id: str,
+                                 declared_name: Any) -> Tuple[bool, bool]:
+    """(Fix 2, A4 post-merge review) Returns ``(has_run, read_error)``: ``has_run`` is True iff
+    ANY persisted blast-radius invocation ledger
+    (``security/invocation_ledgers/*.ledger.json`` — ``write_gate.PersistentInvocationLedger``'s
+    own write target) carries a counts key whose surface component
+    (``write_gate._ledger_key``'s ``f"{op.surface}::{op.op_kind}"``) equals ``capability_id`` or
+    ``declared_name``. Used ONLY to classify a descriptor-only identity TWIN (see
+    ``_find_identity_twin``) as carrying real history (``identity_conflict``) rather than being
+    safely tombstone-eligible (``pending``) -- see the module docstring's "Ledger-attributed run
+    history" section for why a never-accepted twin can still have real run history via the
+    write-gate's LIVE_BOUNDED pre-acceptance trial path.
+
+    Attribution is CLEAN, not guessed: every write-gate lookup that can authorize a write against
+    a descriptor entry (``_covering_entry``, ``_declared_entry``) matches ``op.surface`` against
+    that SAME entry's own ``id`` OR ``name`` field before ever letting the write proceed -- so a
+    ledger key's surface component, when it matches either one, names exactly the descriptor
+    entry that authorized it. Checking both ``capability_id`` and ``declared_name`` (the twin's
+    own descriptor ``name`` field, passed by the caller) mirrors that same two-field join.
+
+    An ABSENT ledger directory is normal: ``(False, False)`` -- nothing has ever run, for this id
+    or any other. An EXISTING-but-unlistable directory, or any EXISTING ledger file that is
+    unreadable, not valid JSON, not a JSON object, or whose ``counts`` is not a JSON object, sets
+    ``read_error=True`` (folded into the twin's ``has_state`` verdict by the caller, exactly like
+    every other state-read failure in this module — never silently "no run history"). A
+    non-string counts key is treated the same way -- unreadable, not absent."""
+    ledger_dir = project_root / LEDGER_DIR_REL
+    try:
+        names = sorted(p.name for p in ledger_dir.iterdir() if p.name.endswith(".ledger.json"))
+    except FileNotFoundError:
+        return False, False
+    except OSError:
+        return False, True
+
+    surfaces = {capability_id}
+    if isinstance(declared_name, str) and declared_name:
+        surfaces.add(declared_name)
+
+    read_error = False
+    for name in names:
+        path = ledger_dir / name
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            read_error = True
+            continue
+        try:
+            data = json.loads(text)
+        except ValueError:
+            read_error = True
+            continue
+        if not isinstance(data, dict):
+            read_error = True
+            continue
+        counts = data.get("counts")
+        if not isinstance(counts, dict):
+            read_error = True
+            continue
+        for key in counts:
+            if not isinstance(key, str):
+                read_error = True
+                continue
+            surface = key.split("::", 1)[0]
+            if surface in surfaces:
+                return True, read_error
+    return False, read_error
+
+
 def _tombstone_eligible_message(cap_id: str, twin_of: str) -> str:
     """(Task A4 / F-72) Plain-language guidance for a ``pending`` identity twin -- safe to retire
     (tombstone), never RED, because it has no recorded history of its own."""
@@ -430,8 +529,9 @@ def _tombstone_eligible_message(cap_id: str, twin_of: str) -> str:
         f'"{cap_id}" is a leftover descriptor entry for the same capability as "{twin_of}" -- '
         "they differ only by letter case or a hyphen/underscore. It was declared but never built "
         "and never accepted, and has no recorded history of its own (no acceptance, no queued "
-        f'migration, no pause). It is safe to retire (tombstone) "{cap_id}"; "{twin_of}" is the '
-        "real, live capability going forward.")
+        "migration, no pause, no recorded run of any kind — including a bounded live-write "
+        f'trial). It is safe to retire (tombstone) "{cap_id}"; "{twin_of}" is the real, live '
+        "capability going forward.")
 
 
 def _identity_conflict_message(cap_id: str, twin_of: str) -> str:
@@ -709,19 +809,26 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
     """
     root = Path(project_root)
     descriptor_enumeration_degraded = False
+    # (Fix 1, A4 post-merge review) ONE read+parse of the descriptor set for this whole call --
+    # `_load_descriptor_ids` and `_load_descriptor_accepted` both derive from this SAME parsed
+    # snapshot below, rather than each opening and parsing the file independently (an
+    # inconsistent-snapshot risk the prior two-reads-per-call shape carried).
     try:
-        descriptor_ids = _load_descriptor_ids(root)
+        descriptor_entries = _load_descriptor_entries(root)
     except _DescriptorEnumerationError:
-        descriptor_ids = set()
+        descriptor_entries = []
         descriptor_enumeration_degraded = True
-    try:
-        descriptor_accepted = _load_descriptor_accepted(root)
-    except _DescriptorEnumerationError:
-        # (Task A4 / F-72) Same file, same failure -- a caller that already hit this above will
-        # hit it again here; defensive symmetry, not a new failure path. Either raise alone is
-        # already enough to set descriptor_enumeration_degraded.
-        descriptor_accepted = {}
-        descriptor_enumeration_degraded = True
+    descriptor_ids = _load_descriptor_ids(descriptor_entries)
+    descriptor_accepted = _load_descriptor_accepted(descriptor_entries)
+    # (Fix 2, A4 post-merge review) capability_id -> declared `name`, for the ledger-attributed
+    # run-history check below (`_ledger_run_history_for_twin`) -- the write-gate's own op->capability
+    # join matches `op.surface` against a descriptor entry's `id` OR `name`, so a twin's ledger
+    # attribution must check both, not just its id.
+    descriptor_name_by_id: Dict[str, Any] = {
+        entry.get("id"): entry.get("name")
+        for entry in descriptor_entries
+        if isinstance(entry.get("id"), str) and entry.get("id")
+    }
     source_files = _capability_source_files(root)
 
     # F-61 (Task A3): resolve each descriptor-only id to its OWNING module via the capability
@@ -794,9 +901,17 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
                 identity_twin_of = twin_of
                 accepted_flag = descriptor_accepted.get(cap_id, False)
                 has_audit_record, audit_read_error = _has_acceptance_audit_record(root, cap_id)
+                # (Fix 2, A4 post-merge review) A never-accepted twin can still have REAL
+                # invocation-ledger run history via the write-gate's LIVE_BOUNDED pre-acceptance
+                # trial path -- see the module docstring's "Ledger-attributed run history"
+                # section. Soundness fix: silently tombstoning that would discard genuine run
+                # history, so it must count as state too, exactly like the other four signals.
+                has_ledger_run, ledger_read_error = _ledger_run_history_for_twin(
+                    root, cap_id, descriptor_name_by_id.get(cap_id))
                 has_state = (
                     accepted_flag or paused or pending_migration or state_read_error
                     or has_audit_record or audit_read_error
+                    or has_ledger_run or ledger_read_error
                 )
                 if has_state:
                     health = "identity_conflict"

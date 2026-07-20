@@ -56,6 +56,7 @@ CAPABILITIES_DIR_REL = capability_health.CAPABILITIES_DIR_REL
 DESCRIPTOR_SET_REL = capability_health.DESCRIPTOR_SET_REL
 PAUSED_MECHANISMS_DIR_REL = capability_health.PAUSED_MECHANISMS_DIR_REL
 MIGRATION_QUEUE_REL = capability_health.MIGRATION_QUEUE_REL
+LEDGER_DIR_REL = capability_health.LEDGER_DIR_REL
 
 _CLEAN_CAPABILITY_SOURCE = '''"""{display_name} -- trivial, gate-clean capability module (test fixture)."""
 
@@ -788,6 +789,23 @@ class IdentityTwinTestBase(CapabilityHealthTestBase):
         with log_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"capability_id": capability_id, "note": "test fixture"}) + "\n")
 
+    def _write_ledger_run(self, surface: str, op_kind: str = "field_write",
+                          window_id: str = "test_window", n: int = 1):
+        """(Fix 2, A4 post-merge review) Write a persisted blast-radius invocation ledger file in
+        the SAME shape ``write_gate.PersistentInvocationLedger`` writes -- a ``counts`` dict keyed
+        by ``f"{surface}::{op_kind}"`` (``write_gate._ledger_key``'s own convention) -- so a test
+        can simulate a real LIVE_BOUNDED pre-acceptance trial run having happened for a
+        capability_id/name without going through the whole write-gate call stack."""
+        ledger_dir = self.project_root / LEDGER_DIR_REL
+        ledger_dir.mkdir(parents=True, exist_ok=True)
+        path = ledger_dir / f"{window_id}.ledger.json"
+        payload = {
+            "schema": "invocation_ledger-v1",
+            "ledger_window_id": window_id,
+            "counts": {f"{surface}::{op_kind}": n},
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
 
 class TestIdentityTwinNeverBuiltNeverAcceptedIsPending(IdentityTwinTestBase):
     def test_never_built_never_accepted_twin_reports_pending_not_red(self):
@@ -877,6 +895,57 @@ class TestIdentityTwinWithStateIsConflict(IdentityTwinTestBase):
         twin = self._record_for(records, "cap-alpha")
         self.assertEqual(twin["health"], "identity_conflict")
 
+    def test_never_accepted_twin_with_ledger_run_history_is_identity_conflict(self):
+        # (Fix 2, A4 post-merge review) has_state soundness: a never-accepted twin can still have
+        # authorized a REAL bounded-live write via the write-gate's LIVE_BOUNDED pre-acceptance
+        # trial path (a DECLARED, not-yet-accepted descriptor entry is enough to authorize that
+        # path -- see write_gate.py's `_declared_entry`). Silently tombstoning that would discard
+        # genuine run history -- this must be identity_conflict, never pending.
+        self._write_capability(
+            "cap_alpha", _CLEAN_CAPABILITY_SOURCE.format(display_name="Cap Alpha"))
+        self._write_descriptor_set([
+            {"id": "cap-alpha", "name": "cap-alpha", "accepted": False},
+        ])
+        self._write_ledger_run(surface="cap-alpha", op_kind="field_write")
+
+        records = capability_health.check_capabilities(self.project_root)
+        twin = self._record_for(records, "cap-alpha")
+        self.assertEqual(twin["health"], "identity_conflict")
+        self.assertIsNotNone(twin["operator_message"])
+
+        # The real, built capability is completely unaffected -- still green.
+        real = self._record_for(records, "cap_alpha")
+        self.assertEqual(real["health"], "green")
+
+    def test_never_accepted_twin_with_ledger_run_attributed_by_name_is_identity_conflict(self):
+        # The write-gate's own op->capability join matches op.surface against a descriptor
+        # entry's `id` OR `name` -- a ledger key attributed via the entry's `name` (rather than
+        # its `id`) must be caught too, not just an exact-id match.
+        self._write_capability(
+            "cap_alpha", _CLEAN_CAPABILITY_SOURCE.format(display_name="Cap Alpha"))
+        self._write_descriptor_set([
+            {"id": "cap-alpha", "name": "cap-alpha-display-name", "accepted": False},
+        ])
+        self._write_ledger_run(surface="cap-alpha-display-name", op_kind="bounded_sample")
+
+        records = capability_health.check_capabilities(self.project_root)
+        twin = self._record_for(records, "cap-alpha")
+        self.assertEqual(twin["health"], "identity_conflict")
+
+    def test_twin_ledger_run_for_a_different_capability_does_not_affect_this_twin(self):
+        # Anti-vacuous contrast: a ledger file with run history for an UNRELATED surface must not
+        # cause a false identity_conflict for this twin.
+        self._write_capability(
+            "cap_alpha", _CLEAN_CAPABILITY_SOURCE.format(display_name="Cap Alpha"))
+        self._write_descriptor_set([
+            {"id": "cap-alpha", "name": "cap-alpha", "accepted": False},
+        ])
+        self._write_ledger_run(surface="totally_unrelated_surface", op_kind="field_write")
+
+        records = capability_health.check_capabilities(self.project_root)
+        twin = self._record_for(records, "cap-alpha")
+        self.assertEqual(twin["health"], "pending")
+
 
 class TestNonTwinDescriptorOnlyEntryUnaffected(IdentityTwinTestBase):
     def test_descriptor_only_entry_with_no_twin_still_reports_red(self):
@@ -941,6 +1010,15 @@ class TestPathConstantsAntiDrift(unittest.TestCase):
         self.assertEqual(
             capability_health.ACCEPTANCE_LOG_REL,
             lifecycle_state.ACCEPTANCE_LOG_REL,
+        )
+
+    def test_ledger_dir_rel_matches_write_gate_default_ledger_dir(self):
+        # (Fix 2, A4 post-merge review) capability_health.LEDGER_DIR_REL is duplicated-by-value
+        # from write_gate.DEFAULT_LEDGER_DIR -- same anti-drift discipline as every other pin in
+        # this class.
+        self.assertEqual(
+            capability_health.LEDGER_DIR_REL,
+            write_gate.DEFAULT_LEDGER_DIR,
         )
 
 
