@@ -549,6 +549,16 @@ def _atomic_write_json(path: str, data: Dict[str, Any]) -> None:
         raise
 
 
+def _exclusive_write_json(path: str, data: Dict[str, Any]) -> None:
+    """Like ``_atomic_write_json`` but FAILS CLOSED if ``path`` already exists —
+    a run_id/receipt is write-once; a re-used id must never clobber a prior
+    run's recovery record (F-79). Callers treat ``FileExistsError`` as a mint
+    refusal."""
+    if os.path.exists(path):
+        raise FileExistsError(path)
+    _atomic_write_json(path, data)
+
+
 def load_run_envelope(run_id: str, *, envelope_dir: Optional[str] = None) -> RunEnvelope:
     """Load the persisted envelope for ``run_id``. FAIL-CLOSED: an absent /
     unreadable / malformed file returns the EMPTY envelope (0 budget) — never a
@@ -633,7 +643,7 @@ def _mint_run_consent_receipt(
         "approved_at": approved_at,
     }
     path = _consent_receipt_path(run_id, receipt_dir)
-    _atomic_write_json(path, receipt)
+    _exclusive_write_json(path, receipt)
     return path
 
 
@@ -831,6 +841,22 @@ def mint_run_envelope(
         if not (isinstance(val, str) and val.strip()):
             return _mint_refuse(f"missing / empty {name}")
 
+    # F-79: a run_id is write-once. Refuse BEFORE anything is minted/written if
+    # either the envelope or the consent receipt already exists on disk for
+    # this run_id — a reused id (a crash-and-retry, a regenerated loop
+    # replaying a prior id) must never clobber a prior run's persisted
+    # recovery record. Defense in depth: `_exclusive_write_json` below
+    # enforces this again at write time.
+    env_path = _envelope_path(run_id, envelope_dir)
+    rcpt_path = _consent_receipt_path(run_id, envelope_dir)
+    if os.path.exists(env_path) or os.path.exists(rcpt_path):
+        return _mint_refuse(
+            f"a run envelope or consent receipt already exists for run_id "
+            f"{run_id!r} — a run id is write-once; refusing to overwrite a "
+            "prior run's recovery record. Use a fresh run id, or the "
+            "sanctioned resume path which validates the frozen reviewed set "
+            "before continuing.")
+
     if not (isinstance(reviewed_set, (list, tuple)) and len(reviewed_set) > 0):
         return _mint_refuse(
             "reviewed_set is empty — a spendable envelope needs a frozen "
@@ -964,7 +990,7 @@ def mint_run_envelope(
 
     path = _envelope_path(run_id, envelope_dir)
     try:
-        _atomic_write_json(path, _to_disk_dict(env))
+        _exclusive_write_json(path, _to_disk_dict(env))
     except Exception as e:
         return _mint_refuse(f"could not persist the run envelope; nothing minted: {e}")
 

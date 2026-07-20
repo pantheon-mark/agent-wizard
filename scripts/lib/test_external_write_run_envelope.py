@@ -26,6 +26,7 @@ Runner: unittest, from wizard/scripts. Stdlib only.
 
 import hashlib
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -199,6 +200,28 @@ class TestI1SoleMinter(unittest.TestCase):
                 stratification_summary={}, operator_approval_verbatim="yes",
                 consent_sentence_shown="x", envelope_dir=d)
             self.assertFalse(res.accepted)
+
+    def test_mint_refuses_to_overwrite_existing_run_id(self):
+        # F-79: a run_id is write-once. A reused run_id (e.g. a crash-and-retry
+        # that reuses the same id, or a generated loop replaying a prior id)
+        # must never clobber a prior run's persisted envelope/receipt — that
+        # would destroy the recovery record for a possibly in-flight run.
+        with tempfile.TemporaryDirectory() as d:
+            kw = dict(
+                run_id="inbox-bulk-1", capability_id="cap:test", op_kind=FIELD_OP,
+                contract_hash="ch", implementation_hash="ih",
+                reviewed_set=_reviewed_set(3), population_count=100,
+                stratification_summary={}, operator_approval_verbatim="yes",
+                consent_sentence_shown="Apply 3 changes.", envelope_dir=d)
+            first = mint_run_envelope(**kw)
+            self.assertTrue(first.accepted, first.reason)
+            second = mint_run_envelope(**kw)  # same run_id, second invocation
+            self.assertFalse(second.accepted)
+            self.assertIn("already exists", (second.reason or ""))
+            # the first run's envelope + receipt are UNTOUCHED
+            self.assertTrue(os.path.exists(os.path.join(d, "inbox-bulk-1.json")))
+            self.assertTrue(os.path.exists(
+                os.path.join(d, "inbox-bulk-1.consent_receipt.json")))
 
     def test_hand_fabricated_envelope_with_fake_budget_is_not_spendable(self):
         # A loop writes its OWN envelope file with a huge budget but a
