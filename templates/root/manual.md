@@ -16,6 +16,10 @@ Start your first session from your project folder:
 
 You build your system capability by capability. The session startup script orients the system and walks you through what comes next. You do not need to plan ahead — just run it.
 
+**The first time you open this project, you'll see a one-time question.** Claude Code will ask something like: *"Do you trust the files in this folder?"* Click **"Yes, I trust this folder."**
+
+This is a convenience, not a safety switch — your system protects you the same way either way. It always stops and asks before spending money, doing anything outside your project, or doing anything that can't be undone, whether or not you click yes here. All that changes is how often you're asked about the safe, look-only checks (the ones that never change anything): accepting means those run quietly in the background; declining just means you'll see a few more of those prompts along the way. Nothing about your safety changes if you skip it — you'll just be asked more often.
+
 ---
 
 ## The build-and-operate loop
