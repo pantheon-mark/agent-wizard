@@ -985,15 +985,18 @@ dropped enrollment is impossible BY CONSTRUCTION (the file that upgrade
 regenerates never held it in the first place), never dependent on a
 text/AST merge that could fail.
 
-Fail-closed, mirroring `zones.py`'s own `_load_extra_adapter_profile_paths`
-exactly: a missing, unreadable, malformed, non-list, or non-string manifest
-entry resolves to "no operator adapters" (never an exception) — a corrupt or
-absent manifest degrades to the baseline-only behavior this module already
-had before Task 7, rather than breaking every OTHER capability's turnkey
-import of this one module. A LISTED module stem whose file has gone missing
-still raises `ModuleNotFoundError` on import, exactly as a stale baseline
-import line always has — no new failure-isolation behavior is introduced for
-that case.
+Fail-ISOLATED and HONEST (hardened by this task's own review round): a
+MISSING manifest is a clean, silent no-op (most systems have none) — but a
+PRESENT, corrupt/unreadable/malformed manifest is surfaced with a
+plain-language stderr WARNING naming the file, never silently swallowed (the
+prior silent-`return ()` behavior made every operator-enrolled capability
+vanish with zero breadcrumb; see `_load_operator_adapter_module_stems`'s own
+docstring). Per-module import isolation goes further than `zones.py`'s own
+`_load_extra_adapter_profile_paths`: EVERY listed module stem is imported
+inside its own try/except (see `_import_operator_adapters`) — a module that
+fails to import for ANY reason (a missing file, a syntax error, a
+module-scope exception, ...) is skipped with its own named warning, never
+taking down baseline Gmail or any OTHER operator adapter with it.
 
 This module's zone classification, and the `adapter_profile_registry.json`
 zone-membership mechanism `zones.py` reads, are UNCHANGED by this task: an
@@ -1021,6 +1024,7 @@ Stdlib only — no third-party dependencies.
 
 import importlib
 import json
+import sys
 from pathlib import Path
 from typing import Tuple
 
@@ -1033,15 +1037,42 @@ import external_write.adapters_gmail  # noqa: F401 -- registers the 4 shipped Gm
 _OPERATOR_ADAPTERS_FILENAME = "operator_adapters.json"
 
 
+def _warn_operator_manifest_problem(manifest_path: Path, detail: str) -> None:
+    """Plain-language stderr warning (Task B3 review fix, F-76): a
+    non-technical operator reading this line can see that something is
+    wrong with a NAMED file, and that some of their enrolled capabilities
+    may be unavailable until it is fixed -- never a raw traceback. Printed,
+    never raised: the caller still degrades to whatever it can salvage (or
+    baseline-only) after this fires."""
+    print(
+        f"WARNING: operator-adapter enrollment file {manifest_path} could "
+        f"not be read ({detail}) -- any capability enrolled only in this "
+        "file will not be available until the file is fixed. Baseline "
+        "adapters (and every OTHER operator adapter) are unaffected.",
+        file=sys.stderr,
+    )
+
+
 def _load_operator_adapter_module_stems(lib_dir: "Path | None" = None) -> Tuple[str, ...]:
-    """Fail-closed loader for operator-enrolled adapter module stems (Task
-    B3, F-76). Reads ``<lib_dir>/operator_adapters.json`` -- a plain JSON
-    array of module stems (e.g. ``"adapters_acme_crm_sync"``), one per
-    capability-code-scaffold-added adapter module. Returns an empty tuple
-    (never raises) when the file is absent, unreadable, not valid JSON, not
-    a JSON array, or contains a non-string/empty entry (that one entry is
-    simply skipped, not fatal to the rest) -- mirrors ``zones.py``'s
-    ``_load_extra_adapter_profile_paths`` exactly.
+    """Loader for operator-enrolled adapter module stems (Task B3, F-76;
+    hardened by that task's own review round). Reads
+    ``<lib_dir>/operator_adapters.json`` -- a plain JSON array of module
+    stems (e.g. ``"adapters_acme_crm_sync"``), one per capability-code-
+    scaffold-added adapter module.
+
+    Two distinct fail paths, never a crash:
+      - FILE ABSENT: a clean, silent no-op -- most systems have no
+        operator-enrolled adapters yet; there is nothing wrong to report.
+      - FILE PRESENT but unreadable / not valid JSON / not a JSON array:
+        surfaced (never silently swallowed) with a plain-language WARNING
+        to stderr naming the file (see `_warn_operator_manifest_problem`)
+        -- a corrupted or malformed manifest used to make every
+        operator-enrolled capability vanish with zero breadcrumb; the
+        operator now sees a named-file warning instead of only a
+        downstream "no registered contract" refusal. Still returns
+        whatever CAN be salvaged (or `()` if wholly unparseable) -- one
+        bad ENTRY in an otherwise-valid list is simply skipped, not fatal
+        to the rest.
 
     `lib_dir` defaults to THIS module's own installed directory when
     omitted (the real package anchor), so production callers get the
@@ -1053,10 +1084,18 @@ def _load_operator_adapter_module_stems(lib_dir: "Path | None" = None) -> Tuple[
     if not manifest_path.is_file():
         return ()
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, ValueError):
+        raw_text = manifest_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        _warn_operator_manifest_problem(manifest_path, f"could not read the file: {e}")
+        return ()
+    try:
+        data = json.loads(raw_text)
+    except ValueError as e:
+        _warn_operator_manifest_problem(manifest_path, f"not valid JSON: {e}")
         return ()
     if not isinstance(data, list):
+        _warn_operator_manifest_problem(
+            manifest_path, "file content is not a JSON array of module names")
         return ()
     return tuple(stem for stem in data if isinstance(stem, str) and stem)
 
@@ -1066,12 +1105,31 @@ def _import_operator_adapters(lib_dir: "Path | None" = None) -> None:
     ``operator_adapters.json`` (see `_load_operator_adapter_module_stems`),
     firing each one's module-scope `register_adapter`/`register_contract`
     call the identical way the baseline `adapters_gmail` import above
-    already does. A listed stem whose module file is missing raises
-    `ModuleNotFoundError` -- the same honest failure a stale baseline import
-    line would already produce; this function performs no failure isolation
-    beyond that (deliberately -- see this module's own docstring)."""
+    already does.
+
+    Per-module import ISOLATION (Task B3 review fix, F-76): each listed
+    module stem is imported inside its OWN try/except. A module that
+    raises ANYTHING on import (a missing file -> `ModuleNotFoundError`, a
+    syntax error, an exception in that module's own module-scope code, ...)
+    is SKIPPED, with a plain-language stderr warning naming the module --
+    it never takes down this module's own import, which would otherwise
+    crash baseline Gmail AND every other operator adapter along with it.
+    Segregation's whole point is isolation: one broken operator adapter
+    must never be able to break anything else. A skipped adapter's op_kind
+    simply never resolves a contract/dispatch afterward -- correct
+    fail-closed behavior downstream (it cannot go live), surfaced here
+    instead of silently."""
     for _stem in _load_operator_adapter_module_stems(lib_dir):
-        importlib.import_module(f"external_write.{_stem}")
+        try:
+            importlib.import_module(f"external_write.{_stem}")
+        except Exception as e:  # noqa: BLE001 -- deliberately broad: isolation, not triage.
+            print(
+                f"WARNING: operator-adapter module 'external_write.{_stem}' "
+                f"could not be imported ({e}) -- this capability will not be "
+                "available until the module is fixed. Baseline adapters (and "
+                "every OTHER operator adapter) are unaffected.",
+                file=sys.stderr,
+            )
 
 
 _import_operator_adapters()

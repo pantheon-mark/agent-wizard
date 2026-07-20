@@ -888,7 +888,7 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
     def tearDown(self):
         self._td.cleanup()
 
-    def test_fresh_op_kind_lands_in_the_generated_registry(self):
+    def test_fresh_op_kind_lands_in_operator_adapters_manifest(self):
         # Spec item 1/3: "ensure it's in the registry" -- the shipped Gmail
         # baseline stays in registered_adapters.py (untouched: Task B3 / F-76
         # means the scaffold never writes to that file at all), and the
@@ -1031,7 +1031,6 @@ class OperatorAdapterSurvivesRegeneratedBaselineTest(unittest.TestCase):
         self.project_root = Path(self._td.name)
         self.external_write_dir = _copy_real_external_write_package(self.project_root)
         self.registered_adapters_path = self.external_write_dir / "registered_adapters.py"
-        self.operator_adapters_path = self.external_write_dir / "operator_adapters.json"
         self.adapter_profile_registry_path = (
             self.external_write_dir / "adapter_profile_registry.json")
 
@@ -1157,6 +1156,154 @@ class OperatorAdapterSurvivesRegeneratedBaselineTest(unittest.TestCase):
             adapter_profile_paths=effective,
         )
         self.assertEqual(violations, [], f"expected zone-clean emit, got: {violations}")
+
+
+_FIXTURE_GOOD_OPERATOR_ADAPTER_PATH = (
+    Path(__file__).resolve().parents[2] / "test_fixtures" / "registered_adapters"
+    / "divergent_fixture_adapter.py"
+)
+
+
+class OperatorManifestCorruptSurfacesWarningTest(unittest.TestCase):
+    """B3 review fix (F-76), Fix 1 -- a PRESENT but corrupt/unreadable/
+    malformed ``operator_adapters.json`` must be SURFACED with a plain-
+    language stderr warning naming the file, never silently swallowed.
+    Before this fix, ``_load_operator_adapter_module_stems``'s bare
+    ``except (...): return ()`` made every operator-enrolled capability
+    vanish with zero breadcrumb -- the operator saw only a downstream "no
+    registered contract" refusal. An ABSENT manifest (the common case: most
+    systems have none) must stay a clean, silent no-op.
+
+    Real subprocess, real corrupt/malformed file, real committed
+    `external_write` package -- never a hand-simulated stand-in for the
+    union loader."""
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.project_root = Path(self._td.name)
+        self.external_write_dir = _copy_real_external_write_package(self.project_root)
+        self.manifest_path = self.external_write_dir / "operator_adapters.json"
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _import_and_check_gmail(self) -> subprocess.CompletedProcess:
+        script = (
+            "import sys\n"
+            "sys.path.insert(0, 'agents/lib')\n"
+            "import external_write.registered_adapters\n"
+            "from external_write.contracts import get_contract\n"
+            "print('GMAIL_RESOLVED=' + str(get_contract('gmail.message.trash') is not None))\n"
+        )
+        return subprocess.run(
+            [sys.executable, "-c", script], cwd=str(self.project_root),
+            capture_output=True, text=True,
+        )
+
+    def test_corrupt_json_manifest_surfaces_warning_and_baseline_still_resolves(self):
+        self.manifest_path.write_text("{ not valid json ][", encoding="utf-8")
+        result = self._import_and_check_gmail()
+        self.assertEqual(
+            result.returncode, 0,
+            msg=f"a corrupt operator manifest must never crash the import -- "
+                f"stdout={result.stdout!r} stderr={result.stderr!r}")
+        self.assertIn(
+            "GMAIL_RESOLVED=True", result.stdout,
+            "baseline Gmail must still resolve when the operator manifest is corrupt")
+        self.assertIn("WARNING", result.stderr)
+        self.assertIn("operator_adapters.json", result.stderr)
+        self.assertNotIn(
+            "Traceback", result.stderr,
+            "the warning must be plain language, never a raw traceback")
+
+    def test_non_list_manifest_surfaces_warning_and_baseline_still_resolves(self):
+        self.manifest_path.write_text(json.dumps({"not": "a list"}), encoding="utf-8")
+        result = self._import_and_check_gmail()
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+        self.assertIn("GMAIL_RESOLVED=True", result.stdout)
+        self.assertIn("WARNING", result.stderr)
+        self.assertIn("operator_adapters.json", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_absent_manifest_is_a_silent_no_op(self):
+        # No operator_adapters.json written at all -- the common case (most
+        # systems have no operator-enrolled adapters). Must stay silent.
+        self.assertFalse(self.manifest_path.exists())
+        result = self._import_and_check_gmail()
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+        self.assertIn("GMAIL_RESOLVED=True", result.stdout)
+        self.assertNotIn(
+            "WARNING", result.stderr,
+            "an ABSENT manifest is the common case -- it must never warn")
+
+
+class OperatorManifestBrokenModuleIsolatedTest(unittest.TestCase):
+    """B3 review fix (F-76), Fix 2 -- ONE operator-enrolled adapter module
+    that raises on import must be SKIPPED with a plain-language stderr
+    warning naming it, never take down baseline Gmail or any OTHER
+    operator adapter's registration with it. Segregation's whole point is
+    isolation.
+
+    Real subprocess, real committed `external_write` package, a real
+    (deliberately broken) module file, and a real fixture adapter module
+    (`divergent_fixture_adapter.py`, already used elsewhere in this suite
+    as a real, non-Gmail-shaped operator adapter) -- never a hand-
+    simulated stand-in for the union loader."""
+
+    GOOD_OP_KIND = "fixture_divergent.record.set_status"
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.project_root = Path(self._td.name)
+        self.external_write_dir = _copy_real_external_write_package(self.project_root)
+
+        shutil.copy2(_FIXTURE_GOOD_OPERATOR_ADAPTER_PATH,
+                     self.external_write_dir / "divergent_fixture_adapter.py")
+        (self.external_write_dir / "broken_operator_adapter.py").write_text(
+            "raise RuntimeError('boom -- deliberately broken fixture module')\n",
+            encoding="utf-8")
+
+        self.manifest_path = self.external_write_dir / "operator_adapters.json"
+        # Broken module listed FIRST so the isolation must actually keep
+        # iterating past it, not merely happen to succeed by ordering luck.
+        self.manifest_path.write_text(
+            json.dumps(["broken_operator_adapter", "divergent_fixture_adapter"]),
+            encoding="utf-8")
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def test_broken_module_is_skipped_baseline_and_good_operator_adapter_both_resolve(self):
+        script = (
+            "import sys, json\n"
+            "sys.path.insert(0, 'agents/lib')\n"
+            "import external_write.registered_adapters\n"
+            "from external_write.contracts import get_contract\n"
+            "print(json.dumps({\n"
+            "    'gmail': get_contract('gmail.message.trash') is not None,\n"
+            f"    'good_operator': get_contract({self.GOOD_OP_KIND!r}) is not None,\n"
+            "}))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script], cwd=str(self.project_root),
+            capture_output=True, text=True,
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            msg=f"one broken operator adapter must never crash the whole import -- "
+                f"stdout={result.stdout!r} stderr={result.stderr!r}")
+        resolved = json.loads(result.stdout.strip().splitlines()[-1])
+        self.assertTrue(resolved["gmail"], "baseline Gmail must still resolve")
+        self.assertTrue(
+            resolved["good_operator"],
+            "a second, GOOD operator adapter must still resolve even though another "
+            "operator module raised on import")
+
+        self.assertIn("WARNING", result.stderr)
+        self.assertIn("broken_operator_adapter", result.stderr)
+        self.assertNotIn(
+            "Traceback", result.stderr,
+            "the warning must be plain language, never a raw traceback")
 
 
 class ReconcileOnAcceptTest(unittest.TestCase):

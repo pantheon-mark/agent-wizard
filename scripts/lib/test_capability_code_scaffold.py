@@ -46,6 +46,7 @@ Groups:
 import ast
 import importlib.util
 import json
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -857,6 +858,31 @@ class TestRegistryIdempotency(unittest.TestCase):
             msg = str(ctx.exception)
             self.assertIn("dup_test.record.archive", msg)
             self.assertIn("adapters_dup_op_kind_cap_a.py", msg)
+
+    def test_new_capability_colliding_with_baseline_gmail_op_kind_refuses(self):
+        """B3 review fix (Fix 3c, F-76): only an operator-vs-operator
+        collision was covered before -- an operator-vs-BASELINE (shipped
+        Gmail) op_kind collision must be caught by
+        `_assert_no_duplicate_op_kind` too. Uses the real, shipped
+        `adapters_gmail.py` copied alongside a fresh project's
+        `external_write_dir` (mirrors what a real project actually has on
+        disk); no `registered_adapters.py` is present locally, so the
+        baseline module list falls back to `_REGISTERED_ADAPTERS_BASELINE`
+        (byte-pinned to the real shipped file elsewhere in this suite)."""
+        with TemporaryDirectory() as td:
+            project_root = Path(td)
+            external_write_dir = project_root / "agents" / "lib" / "external_write"
+            external_write_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_AGENTS_LIB / "external_write" / "adapters_gmail.py",
+                        external_write_dir / "adapters_gmail.py")
+
+            colliding = _sample_spec(capability_id="gmail_collider_cap",
+                                     op_kind="gmail.message.trash")
+            with self.assertRaises(CapabilityCodeScaffoldError) as ctx:
+                emit_capability_code_scaffold(colliding, project_root)
+            msg = str(ctx.exception)
+            self.assertIn("gmail.message.trash", msg)
+            self.assertIn("adapters_gmail.py", msg)
 
 
 class TestRegisteredAdaptersBaselineMatchesShippedFile(unittest.TestCase):
