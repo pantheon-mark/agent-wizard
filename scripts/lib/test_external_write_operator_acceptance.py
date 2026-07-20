@@ -48,6 +48,7 @@ from external_write.write_gate import (  # noqa: E402
     load_descriptor_set,
     evaluate_write_gate,
     LIVE_TARGET,
+    PAUSED_MECHANISMS_DIR,
 )
 
 from capability_code_scaffold import (  # noqa: E402
@@ -991,6 +992,123 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
         # The unrelated entry itself must still not have been deleted.
         remaining = json.loads(pm_path.read_text(encoding="utf-8"))
         self.assertEqual(len(remaining), 1)
+
+
+class ReconcileOnAcceptTest(unittest.TestCase):
+    """Task A1 / F-70 (primary fix). ``lifecycle_state.reconcile_state`` is the ONE function that
+    makes the pause-marker / migration-queue materialized views agree with ``descriptor.
+    accepted`` (the SSOT) -- but it was only ever wired into the SANCTIONED
+    ``lifecycle_state.complete_migration`` path, never into THIS module's own
+    ``record_operator_acceptance`` (the normal accept path). The estate rebuild went through
+    ``record_operator_acceptance`` -- it flipped ``accepted:true`` and closed the migration queue
+    entry, but the ``paused_live_write`` marker was never cleared, so the write gate kept
+    refusing an already-accepted capability's op_kind until an operator hand-invoked reconcile.
+
+    ANTI-OVERFIT: a fresh ``tempfile.TemporaryDirectory()`` per test, with every fixture written
+    at the REAL emitted relpath (``agents/capabilities/<id>_capability.py``,
+    ``security/capability_descriptors.json``, ``.wizard/paused-mechanisms/<id>.{pause,json}``) --
+    never a ``copytree`` of the dev tree. The capability id/op_kind below are generic
+    (``widget_sync`` / the file's own shared ``OP_KIND``) -- this defect is not specific to any
+    one vendor or op_kind."""
+
+    CAP_ID = "widget_sync"
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+        self.security = self.tmp / "security"
+        self.security.mkdir(parents=True, exist_ok=True)
+        self.set_path = self.security / "capability_descriptors.json"
+        self.proof_path = self.tmp / "proof.json"
+        self.receipt_path = self.security / "acceptance_receipts" / f"{self.CAP_ID}.receipt.json"
+        self.audit_path = self.security / "capability_acceptance_log.jsonl"
+        self.capabilities_dir = self.tmp / "agents" / "capabilities"
+        self.capabilities_dir.mkdir(parents=True, exist_ok=True)
+        self.marker_dir = self.tmp / PAUSED_MECHANISMS_DIR
+        self.marker_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _write_capability_module(self):
+        # A real, importable module at the REAL emitted relpath -- this is what lets
+        # `lifecycle_state.reconcile_state`'s own module-stem identity resolution find (and
+        # clear) THIS exact capability's marker, rather than raising an unresolved-identity
+        # refusal.
+        source = (
+            f'"""{self.CAP_ID} -- test fixture capability."""\n\n'
+            f'SURFACE = "{self.CAP_ID}"\n\n\n'
+            "def describe():\n    return \"ready\"\n"
+        )
+        (self.capabilities_dir / f"{self.CAP_ID}_capability.py").write_text(
+            source, encoding="utf-8")
+
+    def _write_paused_marker(self, op_kind):
+        # Mirrors the real on-disk shape a genuine paused-pending-migration marker carries
+        # (see lifecycle_state._fresh_marker_state / upgrade_reconcile) -- the estate's own
+        # orphaned marker looked exactly like this.
+        (self.marker_dir / f"{self.CAP_ID}.pause").write_text("", encoding="utf-8")
+        (self.marker_dir / f"{self.CAP_ID}.json").write_text(json.dumps({
+            "mechanism_id": self.CAP_ID,
+            "canonical_id": self.CAP_ID,
+            "writer_relpath": f"agents/capabilities/{self.CAP_ID}_capability.py",
+            "entrypoint_relpath": None,
+            "state": "paused_live_write",
+            "paused_op_kinds": [op_kind],
+            "paused_at": "2026-01-01T00:00:00Z",
+            "reason": "capability descriptor not accepted; migration pending (reconcile_state)",
+            "credentials_preserved": True,
+            "migration_status": "pending",
+        }, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    def _write_set(self, descriptors):
+        self.set_path.write_text(json.dumps(descriptors, indent=2, ensure_ascii=False) + "\n",
+                                 encoding="utf-8")
+
+    def _write_proof(self):
+        self.proof_path.write_text(
+            json.dumps(_proof(capability_id=self.CAP_ID, op_kind=OP_KIND)), encoding="utf-8")
+
+    def test_normal_accept_path_reconciles_orphaned_pause_marker(self):
+        # Given: a paused, importable capability -- descriptor not yet accepted, a real
+        # `paused_live_write` marker on disk for its op_kind (exactly the estate's shape).
+        self._write_capability_module()
+        self._write_set([_descriptor(id=self.CAP_ID, accepted=False, phase_id=PHASE)])
+        self._write_proof()
+        self._write_paused_marker(OP_KIND)
+
+        # When: the operator accepts through the NORMAL path -- record_operator_acceptance,
+        # NOT lifecycle_state.complete_migration.
+        res = record_operator_acceptance(
+            self.CAP_ID, PHASE, str(self.proof_path),
+            "Yes — I accept this capability for live use.",
+            receipt_path=str(self.receipt_path),
+            descriptor_set_path=str(self.set_path),
+            audit_log_path=str(self.audit_path),
+            project_root=str(self.tmp),
+        )
+
+        # Then: the descriptor SSOT is accepted...
+        self.assertTrue(res.accepted, res.reason)
+        descriptors = json.loads(self.set_path.read_text(encoding="utf-8"))
+        self.assertTrue(
+            any(e["id"] == self.CAP_ID and e["accepted"] is True for e in descriptors))
+
+        # ...AND no residual paused_live_write marker for its op_kinds is left behind (the F-70
+        # defect this fix closes -- previously this marker survived a genuinely successful
+        # acceptance because record_operator_acceptance never called reconcile_state).
+        self.assertFalse((self.marker_dir / f"{self.CAP_ID}.pause").exists())
+        self.assertFalse((self.marker_dir / f"{self.CAP_ID}.json").exists())
+
+        # ...AND the write gate, reading that SAME real marker directory, now PERMITS the
+        # op_kind that a stale marker would otherwise still be blocking.
+        descriptor_set_after = load_descriptor_set(str(self.set_path))
+        op = Operation(surface=self.CAP_ID, object_id="row:1", field="__record__",
+                       new_value="<x>", op_kind=OP_KIND, batch_id="b1")
+        decision = evaluate_write_gate(
+            op, target=LIVE_TARGET, descriptor_set=descriptor_set_after,
+            cap_ledger=InvocationLedger(), paused_root=str(self.marker_dir))
+        self.assertTrue(decision.permitted, decision.refusal)
 
 
 if __name__ == "__main__":

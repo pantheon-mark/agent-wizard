@@ -138,12 +138,19 @@ class OperatorAcceptanceResult:
                      found and closed a matching entry, found nothing (normal), or hit an
                      identity-resolution problem it could not silently resolve — never just a
                      dropped return value.
+    reconcile_note:  None on a clean, successful reconcile (the normal case) or when acceptance
+                     did not reach that point. Otherwise a plain-language note (Task A1 / F-70
+                     fix) describing why the post-acceptance ``lifecycle_state.reconcile_state``
+                     call did not finish cleanly — surfaced rather than silently swallowed, but
+                     NEVER a reason to treat the acceptance itself (already durably recorded by
+                     this point) as failed.
     """
     accepted: bool
     reason: Optional[str] = None
     receipt_ref: Optional[str] = None
     acceptance: Optional[AcceptanceResult] = None
     migration_close: Optional[MigrationCloseResult] = None
+    reconcile_note: Optional[str] = None
 
 
 def _refuse(reason: str, receipt_ref: Optional[str] = None,
@@ -538,9 +545,50 @@ def record_operator_acceptance(
     migration_close = close_pending_migration_if_matched(
         capability_id, pending_migrations_path, project_root=project_root)
 
+    # F-70 fix (Task A1, primary): mirror lifecycle_state.complete_migration's own FINAL step --
+    # now that acceptance genuinely holds, make the pause-marker / migration-queue materialized
+    # views coherent with the just-written SSOT (descriptor.accepted) by calling
+    # lifecycle_state.reconcile_state. Without this, THIS normal accept path can leave a stale
+    # `paused_live_write` marker behind even though the descriptor itself is now accepted --
+    # exactly the estate defect: the rebuild went through record_operator_acceptance (this
+    # function), which closed the migration queue entry and flipped `accepted` but never called
+    # reconcile_state, so the write gate kept refusing an already-accepted capability's op_kind
+    # until an operator hand-invoked reconcile. `complete_migration` was the only sanctioned path
+    # that reconciled; this fix makes reconciliation happen regardless of which accept path a
+    # caller chooses, rather than relying on the caller having picked the right one.
+    #
+    # Ordering / fail-safety: this MUST run LAST, after the trust-critical write above
+    # (`accept_capability_for_live_use`, already durably recorded) has succeeded --
+    # `reconcile_state` only ever CLEARS a marker/queue entry once `accepted` reads true (it
+    # never flips `accepted` itself; see lifecycle_state.py's module docstring), and is
+    # idempotent by construction, so re-running it -- including a second, later call landing here
+    # after a prior partial failure -- never corrupts or undoes the acceptance that already
+    # holds. A failure here (e.g. `IdentityResolutionError` for an id with no capability module
+    # scaffolded on disk yet, or `ReconcileStateError` on an unreadable descriptor/queue file)
+    # must never be allowed to make this call look like the ACCEPTANCE itself failed -- the
+    # descriptor write already holds by this point -- so it is caught and surfaced as a
+    # plain-language note (never silently swallowed, mirroring `migration_close`'s own
+    # `unresolved_note` convention) rather than raised. A marker this call could not reconcile is
+    # still self-healed the next time anything reads capability health (Task A2 / F-70's
+    # crash-safety half -- a separate task, not implemented here).
+    reconcile_note: Optional[str] = None
+    try:
+        # Local import, deliberately deferred to call time: lifecycle_state imports THIS module
+        # at ITS OWN top level (for close_pending_migration_if_matched), so importing
+        # lifecycle_state back at this module's top level would be a circular import. By the
+        # time this function actually runs, both modules have already finished loading.
+        from external_write import lifecycle_state as _lifecycle_state
+        _lifecycle_state.reconcile_state(identity_root, resolved_module_id)
+    except Exception as e:
+        reconcile_note = (
+            f"acceptance for {capability_id!r} succeeded, but reconciling its lifecycle views "
+            f"afterward did not finish cleanly ({e}). If a stale pause marker remains for this "
+            "capability, the next capability-health read will self-heal it, or reconcile it by "
+            "hand.")
+
     return OperatorAcceptanceResult(
         accepted=True, reason=None, receipt_ref=receipt_path, acceptance=acceptance,
-        migration_close=migration_close)
+        migration_close=migration_close, reconcile_note=reconcile_note)
 
 
 # ---------------------------------------------------------------------------
@@ -599,6 +647,10 @@ if __name__ == "__main__":  # pragma: no cover
         # nothing to close) stays quiet -- only a genuine surfaced miss prints.
         if _res.migration_close is not None and _res.migration_close.unresolved_note:
             print(f"NOTE: {_res.migration_close.unresolved_note}")
+        # Task A1 / F-70 fix: same discipline -- a reconcile that did not finish cleanly must
+        # reach this CLI's output, not stay buried in the Python-only result field.
+        if _res.reconcile_note:
+            print(f"NOTE: {_res.reconcile_note}")
         _sys.exit(0)
     else:
         print(f"REFUSED: {_res.reason}", file=_sys.stderr)
