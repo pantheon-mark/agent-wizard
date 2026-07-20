@@ -277,6 +277,22 @@ class ReconcileEndToEndTests(_Base):
         self.assertEqual(queue[0]["mechanism_id"], "estate_upkeep")
         self.assertEqual(queue[0]["status"], "pending")
 
+    def test_migration_queue_entry_routes_to_rebuild_flow_not_add_capability(self):
+        # Task B4 / F-77: a naive operator (or agent) reading this entry must be
+        # routed at the dedicated rebuild-paused-capability flow, never at
+        # add-capability -- add-capability's own scope is new capabilities only
+        # and dead-ends on an existing paused one.
+        proj = _write_project(self.tmp, writer_body=_DIRECT_WRITER)
+
+        reconcile_upgrade(
+            proj, _REAL_REPO, from_version="v0.10.2", to_version="v0.11.0",
+        )
+
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        entry = next(e for e in queue if e["mechanism_id"] == "estate_upkeep")
+        self.assertIn("rebuild-paused-capability", entry["suggested_next_step"])
+        self.assertNotIn("add-capability", entry["suggested_next_step"])
+
     def test_conformant_system_triggers_no_pause(self):
         proj = _write_project(self.tmp, writer_body=_CONFORMANT_WRITER)
         wrapper_path = proj / "agents" / "cron" / "run_estate_upkeep.sh"
@@ -1539,8 +1555,10 @@ register_adapter(OP_KIND, AcmeWidgetTidyAdapter())
         self.assertIn("def verify_apply_landed(self, evidence):\n        return True", new_source)
         self.assertIn("def verify_undo_restored(self, evidence):\n        return True", new_source)
 
-        # (b) a repair task landed in the SAME pending-migrations queue
-        # add-capability.md's Step A already surfaces generically.
+        # (b) a repair task landed in the SAME pending-migrations queue the
+        # rebuild-paused-capability skill reads (Task B4, F-77 -- NOT
+        # add-capability's generic Step A; that skill's scope is new
+        # capabilities only and dead-ends on an existing paused one).
         queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
         entry = next(e for e in queue if e["mechanism_id"] == "acme_widget_tidy")
         self.assertEqual(entry["kind"], "missing_evidence_predicates")
@@ -1548,6 +1566,9 @@ register_adapter(OP_KIND, AcmeWidgetTidyAdapter())
         self.assertEqual(entry["status"], "pending")
         self.assertNotIn("violations", entry)
         self.assertIn("verify_b2_new_predicate_probe", entry["suggested_next_step"])
+        # (c) F-77 routing fix: names the rebuild flow, never add-capability.
+        self.assertIn("rebuild-paused-capability", entry["suggested_next_step"])
+        self.assertNotIn("add-capability", entry["suggested_next_step"])
 
     def test_wired_into_reconcile_upgrade_end_to_end(self):
         # The migrator's own real entrypoint (reconcile_upgrade), not just the

@@ -12,6 +12,16 @@ wizard/skills/add-capability.md:
   3. Step F must instruct emitting the gate-wired-by-construction code scaffold
      (capability_code_scaffold.py) for any capability with an externally-touching
      allowed action, BEFORE landing the typed descriptor / handing off to next-phase.
+  4. Task B4 (F-77, Cut 1.1 Cluster B): a pending-migration entry is a rebuild of an
+     EXISTING capability, not a new one -- this skill's Step A must redirect it (and a
+     health-probe-caught red capability with no matching entry) to the dedicated
+     rebuild-paused-capability skill rather than absorbing it into this skill's own
+     "what should this help with?" interview, which is the exact dead-end F-77 named.
+     This supersedes item 2's id-matching-for-a-new-declaration framing: the id-matching
+     / auto-close mechanic itself is unchanged (still documented here, since Step A is
+     where the operator first learns about it), but it now describes the
+     rebuild-paused-capability skill keeping the SAME id, not this skill's interview
+     producing a redeclared one.
 
 These are content-presence assertions against the live skill source, mirroring the
 established convention in test_task7_design_outbound_message.py.
@@ -96,6 +106,44 @@ class TestPendingMigrationAutoClose(unittest.TestCase):
         text = _text()
         self.assertIn("close itself automatically", text)
         self.assertIn("never edit `pending_migrations.json` by hand", text)
+
+
+class TestRebuildPausedCapabilityRouting(unittest.TestCase):
+    """Task B4 (F-77): add-capability's scope is a genuinely new capability
+    only. A pending-migration entry (or a health-probe-caught red capability
+    with no matching entry) must redirect to the dedicated
+    rebuild-paused-capability skill rather than being absorbed into this
+    skill's own "what should this help with?" interview -- the exact
+    dead-end F-77 named."""
+
+    def test_frontmatter_names_the_rebuild_flow_as_out_of_scope(self):
+        text = _text()
+        frontmatter = text[: text.index("---", 3)]
+        self.assertIn("rebuild-paused-capability", frontmatter)
+
+    def test_does_not_section_excludes_rebuilding_a_paused_capability(self):
+        text = _text()
+        does_not_idx = text.index("**It does not:**")
+        step_a_idx = text.index("## Step A")
+        does_not_section = text[does_not_idx:step_a_idx]
+        self.assertIn("rebuild-paused-capability", does_not_section)
+
+    def test_step_a_hands_off_to_the_rebuild_flow(self):
+        text = _text()
+        step_a_idx = text.index("## Step A")
+        step_b_idx = text.index("## Step B")
+        step_a_text = text[step_a_idx:step_b_idx]
+        self.assertIn("rebuild-paused-capability", step_a_text)
+        # Both the queue-entry path and the health-probe-only path must
+        # redirect the same way -- neither is absorbed into this interview.
+        self.assertEqual(step_a_text.count("rebuild-paused-capability"), 2)
+
+    def test_no_longer_treats_a_pending_migration_as_an_interview_candidate(self):
+        # The exact F-77 bug shape: routing a paused/migration-flagged
+        # capability into this skill's own "what should this help with?"
+        # interview must not reappear.
+        text = _text()
+        self.assertNotIn('live candidate for "what should this help with?"', text)
 
 
 class TestGateWiredScaffoldEmission(unittest.TestCase):

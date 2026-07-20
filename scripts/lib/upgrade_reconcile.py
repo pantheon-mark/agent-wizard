@@ -31,12 +31,16 @@ run by the emitted upgrade-apply flow (``wizard_upgrade.py``'s ``cmd_apply`` /
                the write entrypoint is blocked. This module NEVER edits the
                flagged operator Python file itself (no surgical AST rewrite) — it
                only gates the wrapper script that schedules/invokes it.
-  4. GUIDE MIGRATION — hand the fix to the existing operator-originated-
-               enhancement flow (``add-capability`` / ``next-phase``): an
-               approval-gated migration, never an automatic silent rewrite.
-               This module records a durable, disk-first migration request
+  4. GUIDE MIGRATION — hand the fix to the dedicated ``rebuild-paused-capability``
+               flow (Task B4, F-77): an approval-gated migration, never an
+               automatic silent rewrite. This module records a durable,
+               disk-first migration request
                (``agents/handoffs/pending_migrations.json``) that
-               ``wizard/skills/add-capability.md`` checks at its Step A.
+               ``wizard/skills/rebuild-paused-capability.md`` reads and drives
+               through reconcile -> stub-repair (if needed) -> proof -> accept
+               -> live-readiness. ``add-capability`` is for a genuinely NEW
+               capability only and no longer absorbs this queue (it used to;
+               see F-77 for why that dead-ended a naive operator).
 
 Safe-pause mechanics (the disclosed bound)
 -------------------------------------------
@@ -473,8 +477,9 @@ def _capability_mechanism_id(writer_relpath: str) -> str:
     stem and must not be altered. Making ``mechanism_id == capability_id ==
     descriptor id`` here is what makes the pause-marker filename, the
     migration-queue entry, and ``resolve_paused_op_kinds``'s descriptor
-    lookup all agree with each other and with the id the operator
-    re-declares through add-capability."""
+    lookup all agree with each other and with the id the rebuild-paused-
+    capability flow (Task B4, F-77) rebuilds under -- it keeps the SAME id
+    rather than having the operator re-declare a new one."""
     stem = Path(writer_relpath).stem
     if _is_under_capability_dir(writer_relpath) and stem.endswith(CAPABILITY_MODULE_SUFFIX):
         return stem[: -len(CAPABILITY_MODULE_SUFFIX)]
@@ -768,13 +773,14 @@ def _append_missing_predicate_migration_request(
 ) -> Path:
     """(Task B2, F-75) Land (or refresh) a durable, disk-first repair task in
     the SAME pending-migrations queue `_append_migration_request` writes to --
-    `wizard/skills/add-capability.md` Step A already surfaces ANY entry there
-    generically (names the mechanism_id, why, what changed), so this reuses
-    that existing hand-off (the "standard rebuild loop" this task's own brief
-    points at) rather than inventing a second queue. A dedicated
-    rebuild-paused-capability flow that reads this queue specifically (rather
-    than add-capability's generic Step A) is Task B4's job, deliberately not
-    built here.
+    the dedicated `wizard/skills/rebuild-paused-capability.md` flow reads and
+    drives this queue (Task B4, F-77), so this reuses that existing hand-off
+    (the "standard rebuild loop" this task's own brief points at) rather than
+    inventing a second queue. `wizard/skills/add-capability.md`'s Step A used
+    to surface ANY entry here generically; B4 replaced that with a direct
+    hand-off to `rebuild-paused-capability` instead, since add-capability's
+    own scope is a genuinely new capability only and dead-ended a naive
+    operator trying to rebuild an existing paused one.
 
     Idempotent: re-running an upgrade REPLACES this capability's existing
     entry (keyed on mechanism_id) rather than duplicating it -- mirrors
@@ -814,10 +820,11 @@ def _append_missing_predicate_migration_request(
             "implementation replaces it"
         ),
         "suggested_next_step": (
-            f"Implement the real {missing_joined} predicate method(s) "
-            f"auto-scaffolded in {adapter_relpath} (they currently raise "
-            "NotImplementedError), then re-run this capability's proof and "
-            "acceptance through the normal build-and-accept flow."
+            "Use the rebuild-paused-capability flow: implement the real "
+            f"{missing_joined} predicate method(s) auto-scaffolded in "
+            f"{adapter_relpath} (they currently raise NotImplementedError), "
+            "then let that flow carry this capability through proof and "
+            "acceptance again."
         ),
         "status": "pending",
     })
@@ -1114,8 +1121,8 @@ def _guard_block(mechanism_id: str, writer_relpath: str, marker_from_wrapper: st
         f"{from_version}) because {writer_relpath} was found to change something "
         "outside this project directly, bypassing the external-write safety check.\n"
         "# It stays paused -- and its saved access (credentials) stays untouched -- until\n"
-        "# the fix is reviewed and approved through the add-capability flow. A genuinely\n"
-        "# separate read-only entrypoint is not affected by this guard.\n"
+        "# the fix is reviewed and approved through the rebuild-paused-capability flow.\n"
+        "# A genuinely separate read-only entrypoint is not affected by this guard.\n"
         '_RECONCILE_HERE="$(cd "$(dirname "$0")" && pwd)"\n'
         f'if [ -e "$_RECONCILE_HERE/{marker_from_wrapper}" ]; then\n'
         '  echo "paused pending migration"\n'
@@ -1204,9 +1211,11 @@ def _append_migration_request(
     to_version: str,
 ) -> Path:
     """Land (or refresh) a durable, disk-first migration request in the pending-
-    migrations queue that ``wizard/skills/add-capability.md`` checks at its
-    Step A — this is the hand-off to the operator-originated-enhancement flow:
-    approval-gated migration, never an automatic silent rewrite.
+    migrations queue that ``wizard/skills/rebuild-paused-capability.md`` reads
+    and drives (Task B4, F-77) — this is the hand-off to the dedicated
+    rebuild flow: approval-gated migration, never an automatic silent
+    rewrite. ``add-capability.md`` no longer absorbs this queue; its scope is
+    a genuinely new capability only.
 
     Idempotent: re-running an upgrade (or a later reconcile pass) for the same
     mechanism_id REPLACES its existing entry rather than duplicating it."""
@@ -1235,9 +1244,10 @@ def _append_migration_request(
             for v in violations
         ],
         "suggested_next_step": (
-            "Rebuild this mechanism's write path through add-capability so it routes "
-            "through a registered external-write adapter (run_operation), then approve "
-            "it live again through the normal build-and-accept flow."
+            "Use the rebuild-paused-capability flow to rebuild this mechanism's write "
+            "path so it routes through a registered external-write adapter "
+            "(run_operation), then let that flow carry it through proof and "
+            "acceptance again."
         ),
         "status": "pending",
     })
