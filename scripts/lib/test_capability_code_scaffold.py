@@ -809,13 +809,13 @@ class TestRegistryIdempotency(unittest.TestCase):
             project_root = Path(td)
             spec = _sample_spec(capability_id="idem_test_cap")
             emit_capability_code_scaffold(spec, project_root)
-            _, _, _, registry_path, ra_path = emit_capability_code_scaffold(spec, project_root)
+            _, _, _, registry_path, oa_path = emit_capability_code_scaffold(spec, project_root)
             entries = json.loads(registry_path.read_text(encoding="utf-8"))
             self.assertEqual(entries, ["adapters_idem_test_cap.py"])
-            # registered_adapters.py (Task 7 / F-37): re-emitting the same
-            # capability's own module must not duplicate its import line.
-            ra_content = ra_path.read_text(encoding="utf-8")
-            self.assertEqual(ra_content.count("import external_write.adapters_idem_test_cap"), 1)
+            # operator_adapters.json (Task B3 / F-76): re-emitting the same
+            # capability's own module must not duplicate its manifest entry.
+            oa_entries = json.loads(oa_path.read_text(encoding="utf-8"))
+            self.assertEqual(oa_entries.count("adapters_idem_test_cap"), 1)
 
     def test_reemit_preserves_other_capabilities_already_registered(self):
         with TemporaryDirectory() as td:
@@ -824,23 +824,22 @@ class TestRegistryIdempotency(unittest.TestCase):
             second = _sample_spec(capability_id="second_cap",
                                   op_kind="second_cap.record.archive")
             emit_capability_code_scaffold(first, project_root)
-            _, _, _, registry_path, ra_path = emit_capability_code_scaffold(second, project_root)
+            _, _, _, registry_path, oa_path = emit_capability_code_scaffold(second, project_root)
             entries = set(json.loads(registry_path.read_text(encoding="utf-8")))
             self.assertEqual(entries, {"adapters_first_cap.py", "adapters_second_cap.py"})
-            ra_content = ra_path.read_text(encoding="utf-8")
-            self.assertIn("import external_write.adapters_first_cap", ra_content)
-            self.assertIn("import external_write.adapters_second_cap", ra_content)
+            oa_entries = set(json.loads(oa_path.read_text(encoding="utf-8")))
+            self.assertEqual(oa_entries, {"adapters_first_cap", "adapters_second_cap"})
 
     def test_reemit_never_adds_the_read_facade_module_to_the_registry(self):
         with TemporaryDirectory() as td:
             project_root = Path(td)
             spec = _sample_spec(capability_id="idem_test_cap_rf")
             emit_capability_code_scaffold(spec, project_root)
-            _, _, _, registry_path, ra_path = emit_capability_code_scaffold(spec, project_root)
+            _, _, _, registry_path, oa_path = emit_capability_code_scaffold(spec, project_root)
             entries = json.loads(registry_path.read_text(encoding="utf-8"))
             self.assertEqual(entries, ["adapters_idem_test_cap_rf.py"])
-            ra_content = ra_path.read_text(encoding="utf-8")
-            self.assertNotIn("read_facades_idem_test_cap_rf", ra_content)
+            oa_content = oa_path.read_text(encoding="utf-8")
+            self.assertNotIn("read_facades_idem_test_cap_rf", oa_content)
 
     def test_reemit_two_different_capabilities_with_colliding_op_kind_refuses(self):
         """AC-T7/BI-1: the scaffold generation asserts the registry's import

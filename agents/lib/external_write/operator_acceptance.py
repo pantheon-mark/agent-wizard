@@ -445,11 +445,12 @@ def record_operator_acceptance(
     if contract is None:
         return _refuse(
             f"operation kind {proof_op_kind!r} has no registered contract -- fix "
-            "step: add this capability's adapter module to "
-            "agents/lib/external_write/registered_adapters.py (the add-capability "
+            "step: enroll this capability's adapter module in "
+            "agents/lib/external_write/operator_adapters.json (the add-capability "
             "build cascade does this for you via "
-            "wizard/scripts/lib/capability_code_scaffold.py) so it registers at "
-            "import time, then re-run this command; nothing was written")
+            "wizard/scripts/lib/capability_code_scaffold.py; registered_adapters.py "
+            "imports it from there at process start) so it registers at import "
+            "time, then re-run this command; nothing was written")
     adapter = get_adapter(proof_op_kind)
     if adapter is not None and get_dispatch(proof_op_kind) is None:
         return _refuse(

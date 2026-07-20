@@ -429,9 +429,9 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
         elif get_contract(op_kind) is None:
             failures.append(
                 f'Contract registered: capability "{canonical_id}" declares operation kind '
-                f"{op_kind!r}, which has no registered contract. Fix step: add this capability's "
-                "adapter module to agents/lib/external_write/registered_adapters.py (the "
-                "add-capability build cascade does this for you) so it registers at import "
+                f"{op_kind!r}, which has no registered contract. Fix step: enroll this "
+                "capability's adapter module in agents/lib/external_write/operator_adapters.json "
+                "(the add-capability build cascade does this for you) so it registers at import "
                 "time, then re-run this check."
             )
 

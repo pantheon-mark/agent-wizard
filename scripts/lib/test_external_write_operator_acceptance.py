@@ -36,6 +36,7 @@ from external_write.operator_acceptance import (  # noqa: E402
 )
 from external_write.acceptance_ceremony import OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA  # noqa: E402
 from external_write.copy_run_proof import COPY_RUN_PROOF_SCHEMA  # noqa: E402
+from external_write import zones, scan  # noqa: E402
 from external_write.lifecycle_state import acceptance_hash_is_stale  # noqa: E402
 from external_write.proof_hash import (  # noqa: E402
     compute_contract_hash,
@@ -816,8 +817,11 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
     """Task 7 (A4 / F-37) — the emitted e2e smoke test the task brief's spec
     item 3 calls for: declare a FRESH (non-Gmail, never-before-registered)
     op_kind with a real, capability-code-scaffold-emitted adapter module,
-    confirm it lands in registered_adapters.py, then run the
-    operator-acceptance CLI VERBATIM AS DOCUMENTED in skills/next-phase.md's
+    confirm it lands in operator_adapters.json (Task B3 / F-76 -- the
+    operator-enrollment manifest registered_adapters.py's own real, shipped
+    union-loader reads and imports at process start; never appended into
+    registered_adapters.py itself), then run the operator-acceptance CLI
+    VERBATIM AS DOCUMENTED in skills/next-phase.md's
     Step 6 (a subprocess of agents/lib/external_write/operator_acceptance.py
     from the project root, the exact argument shape that file prescribes) --
     must succeed turnkey and mint a receipt, with NO hand-import of the
@@ -848,7 +852,7 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
         )
         written = emit_capability_code_scaffold(spec, self.project_root)
         (self.adapter_path, self.read_facade_path, self.capability_path,
-         self.registry_path, self.registered_adapters_path) = written
+         self.registry_path, self.operator_adapters_path) = written
 
         # The scaffold's emitted adapter is a structural STUB (plan/apply_one/
         # undo_one/verify_one only -- see capability_code_scaffold.py's own
@@ -885,11 +889,18 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
         self._td.cleanup()
 
     def test_fresh_op_kind_lands_in_the_generated_registry(self):
-        # Spec item 1/3: "ensure it's in the registry" -- both the shipped
-        # Gmail baseline AND the fresh capability's own import are present.
-        content = self.registered_adapters_path.read_text(encoding="utf-8")
+        # Spec item 1/3: "ensure it's in the registry" -- the shipped Gmail
+        # baseline stays in registered_adapters.py (untouched: Task B3 / F-76
+        # means the scaffold never writes to that file at all), and the
+        # fresh capability's own module lands in the SEGREGATED
+        # operator_adapters.json manifest instead.
+        registered_adapters_path = self.external_write_dir / "registered_adapters.py"
+        content = registered_adapters_path.read_text(encoding="utf-8")
         self.assertIn("import external_write.adapters_gmail", content)
-        self.assertIn(f"import external_write.{self.adapter_path.stem}", content)
+        self.assertNotIn(self.adapter_path.stem, content)
+
+        oa_entries = json.loads(self.operator_adapters_path.read_text(encoding="utf-8"))
+        self.assertEqual(oa_entries, [self.adapter_path.stem])
 
     def _write_descriptor_and_proof(self):
         hashes = _precompute_hashes(self.project_root, self.OP_KIND)
@@ -992,6 +1003,160 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
         # The unrelated entry itself must still not have been deleted.
         remaining = json.loads(pm_path.read_text(encoding="utf-8"))
         self.assertEqual(len(remaining), 1)
+
+
+class OperatorAdapterSurvivesRegeneratedBaselineTest(unittest.TestCase):
+    """Task B3 (Cut 1.1 Cluster B / F-76) -- the deterministic RED -> GREEN
+    proof for the fix: a contract-changing upgrade regenerates
+    registered_adapters.py WHOLESALE from the bundle's baseline template
+    (agent_emitter.py's `_EXTERNAL_WRITE_LIB_FILES` re-copy -- simulated here
+    by literally re-copying the pristine, committed file over the project's
+    own copy, exactly what that re-copy does). BEFORE Task B3, this would
+    have destroyed a scaffold-added capability's adapter import line, and
+    `get_dispatch`/`get_contract` would resolve to None afterward (the F-76
+    defect an existing byte-equality pin also flagged).
+
+    Real, on-disk files throughout -- the real committed `external_write`
+    package copied into a fresh temp project (mirrors
+    `_copy_real_external_write_package`), a real
+    `capability_code_scaffold.emit_capability_code_scaffold` call, and a real
+    subprocess import/resolution + a real `scan.scan_paths` pass -- never a
+    hand-simulated stand-in for either the scaffold or the union loader."""
+
+    CAPABILITY_ID = "fixture_upgrade_survival_cap"
+    OP_KIND = "fixture_upgrade_survival.record.set_status"
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.project_root = Path(self._td.name)
+        self.external_write_dir = _copy_real_external_write_package(self.project_root)
+        self.registered_adapters_path = self.external_write_dir / "registered_adapters.py"
+        self.operator_adapters_path = self.external_write_dir / "operator_adapters.json"
+        self.adapter_profile_registry_path = (
+            self.external_write_dir / "adapter_profile_registry.json")
+
+        spec = CapabilityCodeSpec(
+            capability_id=self.CAPABILITY_ID,
+            display_name="Fixture upgrade-survival capability",
+            op_kind=self.OP_KIND,
+            surface="fixture_upgrade_survival_surface",
+            read_only_scope="fixture_upgrade_survival.readonly",
+            blast_radius_cap=10,
+            risk_class="sensitive_data",
+            writes=("Status",),
+            read_methods=("list_items", "get_item"),
+            verifier_set=("prestate_snapshot_diff_v1",),
+        )
+        written = emit_capability_code_scaffold(spec, self.project_root)
+        (self.adapter_path, self.read_facade_path, self.capability_path,
+         self.registry_path, self.operator_adapters_path) = written
+        self.capabilities_dir = self.capability_path.parent
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _resolve_dispatch_in_subprocess(self) -> dict:
+        """Import external_write.registered_adapters fresh, in an unrelated
+        subprocess, then report whether OP_KIND resolves a contract AND a
+        captured dispatch record -- exactly the two lookups the
+        operator-acceptance ceremony needs (see registered_adapters.py's own
+        docstring)."""
+        script = (
+            "import sys, json\n"
+            "sys.path.insert(0, 'agents/lib')\n"
+            "import external_write.registered_adapters\n"
+            "from external_write.contracts import get_contract\n"
+            "from external_write.adapter_registry import get_dispatch\n"
+            f"op_kind = {self.OP_KIND!r}\n"
+            "print(json.dumps({\n"
+            "    'contract_resolved': get_contract(op_kind) is not None,\n"
+            "    'dispatch_resolved': get_dispatch(op_kind) is not None,\n"
+            "}))\n"
+        )
+        result = subprocess.run([sys.executable, "-c", script], cwd=str(self.project_root),
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            raise AssertionError(f"resolution subprocess failed: {result.stderr}")
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
+    def test_operator_adapter_resolves_before_and_survives_regeneration(self):
+        # Precondition: the fresh capability's op_kind resolves BEFORE any
+        # "upgrade" happens at all -- the union loader already works on a
+        # freshly-scaffolded project.
+        before = self._resolve_dispatch_in_subprocess()
+        self.assertTrue(before["contract_resolved"], "op_kind must resolve a contract pre-upgrade")
+        self.assertTrue(before["dispatch_resolved"], "op_kind must resolve a dispatch pre-upgrade")
+
+        # Segregation precondition: the operator's enrollment lives ONLY in
+        # operator_adapters.json -- registered_adapters.py never held it, so
+        # there is nothing for a regeneration to "merge" or "lose".
+        ra_content_before = self.registered_adapters_path.read_text(encoding="utf-8")
+        self.assertNotIn(self.adapter_path.stem, ra_content_before)
+        oa_entries_before = json.loads(self.operator_adapters_path.read_text(encoding="utf-8"))
+        self.assertEqual(oa_entries_before, [self.adapter_path.stem])
+
+        # Simulate a contract-changing upgrade's lib re-copy: wholesale
+        # OVERWRITE registered_adapters.py from the pristine, committed
+        # source -- exactly what agent_emitter.py's _EXTERNAL_WRITE_LIB_FILES
+        # re-copy does on an upgrade, and exactly the step that used to drop
+        # an operator-added import line. operator_adapters.json is
+        # deliberately NOT touched by this step (it is not part of that
+        # copy set) -- the whole point under test.
+        real_registered_adapters = (
+            Path(__file__).resolve().parents[2]
+            / "agents" / "lib" / "external_write" / "registered_adapters.py")
+        shutil.copy2(real_registered_adapters, self.registered_adapters_path)
+
+        # BY CONSTRUCTION: the manifest is byte-identical after the
+        # "upgrade" -- the regeneration step never had a path to it.
+        oa_entries_after = json.loads(self.operator_adapters_path.read_text(encoding="utf-8"))
+        self.assertEqual(oa_entries_after, oa_entries_before)
+        # And the regenerated baseline still never names the operator's
+        # module -- it was never there to begin with, never merged out.
+        ra_content_after = self.registered_adapters_path.read_text(encoding="utf-8")
+        self.assertNotIn(self.adapter_path.stem, ra_content_after)
+        self.assertIn("import external_write.adapters_gmail", ra_content_after)
+
+        # The core B3 property: POST-"upgrade", the operator's adapter is
+        # STILL resolvable via get_contract/get_dispatch -- a fresh
+        # subprocess import of the REGENERATED registered_adapters.py fires
+        # the union loader, which reads the untouched operator_adapters.json
+        # and imports the operator's module exactly as before.
+        after = self._resolve_dispatch_in_subprocess()
+        self.assertTrue(
+            after["contract_resolved"],
+            "operator-added op_kind must still resolve a contract after the baseline "
+            "file is regenerated -- a dropped enrollment must be impossible by construction")
+        self.assertTrue(
+            after["dispatch_resolved"],
+            "operator-added op_kind must still resolve a dispatch after the baseline "
+            "file is regenerated")
+
+    def test_operator_adapter_remains_zoned_and_scans_clean_post_upgrade(self):
+        # Trust note: segregation is about upgrade-survival ONLY -- it must
+        # never exempt an operator adapter from scan.py's adapter-zone
+        # rules. adapter_profile_registry.json (the zone allowlist) is a
+        # SEPARATE mechanism from operator_adapters.json (the import
+        # manifest this task adds) and is untouched by this task; it must
+        # still list the operator's adapter module before AND after the
+        # simulated upgrade, and the emitted trio must still scan clean
+        # under the SAME rules -- no bypass introduced.
+        real_registered_adapters = (
+            Path(__file__).resolve().parents[2]
+            / "agents" / "lib" / "external_write" / "registered_adapters.py")
+        shutil.copy2(real_registered_adapters, self.registered_adapters_path)
+
+        entries = json.loads(self.adapter_profile_registry_path.read_text(encoding="utf-8"))
+        self.assertIn(f"{self.adapter_path.stem}.py", entries)
+
+        effective = zones.effective_adapter_profile_paths(self.external_write_dir)
+        self.assertIn(f"{self.adapter_path.stem}.py", effective)
+        violations = scan.scan_paths(
+            [self.external_write_dir, self.capabilities_dir],
+            allowed_root=self.external_write_dir,
+            adapter_profile_paths=effective,
+        )
+        self.assertEqual(violations, [], f"expected zone-clean emit, got: {violations}")
 
 
 class ReconcileOnAcceptTest(unittest.TestCase):

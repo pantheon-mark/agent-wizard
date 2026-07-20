@@ -846,16 +846,32 @@ ADAPTER_PROFILE_REGISTRY_BASENAME = "adapter_profile_registry.json"
 # Task 7 (A4 / F-37, v0.13.0 Slice 2): the build-emitted static adapter
 # registry `operator_acceptance.py` imports at module scope so the operator-
 # acceptance CLI is turnkey for a freshly-declared capability -- see
-# registered_adapters.py's own module docstring for the full rationale. This
-# emitter regenerates it (idempotently, appending one import line) the same
-# way it already regenerates ADAPTER_PROFILE_REGISTRY_BASENAME above.
+# registered_adapters.py's own module docstring for the full rationale.
+#
+# Task B3 (Cut 1.1 Cluster B / F-76 -- operator-enrollment segregation): this
+# emitter no longer writes to registered_adapters.py AT ALL. Before B3, a
+# capability's adapter import line was appended directly into this file --
+# but registered_adapters.py is one of the static lib files a contract-
+# changing upgrade RE-COPIES wholesale from the new bundle version's
+# template (agent_emitter.py's _EXTERNAL_WRITE_LIB_FILES), so an upgrade
+# silently dropped every capability-added import line with it. Every
+# capability-code-scaffold-added adapter module's enrollment now goes into a
+# SEPARATE sibling manifest, operator_adapters.json (see
+# OPERATOR_ADAPTERS_BASENAME / _update_operator_adapters below) -- never part
+# of the bundle's lib-file copy set, exactly like ADAPTER_PROFILE_REGISTRY_
+# BASENAME below -- so an upgrade's wholesale re-copy of registered_adapters.py
+# can never touch it. registered_adapters.py's own module-scope loader reads
+# that manifest and imports every listed module, UNIONING operator
+# registrations with the hand-maintained baseline import -- see that module's
+# own docstring for the full mechanism.
 REGISTERED_ADAPTERS_BASENAME = "registered_adapters.py"
 
-# The baseline content this emitter creates the file WITH if it is not
-# already present. Only used as a fallback for a project whose lib files
-# were not yet copied in; a real operator project already has this file
-# (lib-emitted) before any capability is ever added, so the normal path is
-# "read existing content, append one import line".
+# The baseline content used ONLY as a fallback source of "what modules does
+# the baseline already register" when checking a new capability's op_kind for
+# collisions (_assert_no_duplicate_op_kind) and registered_adapters.py does
+# not exist locally yet (e.g. a scaffold-only test harness with no copy of
+# the real lib). This emitter never WRITES registered_adapters.py itself
+# (Task B3 above) -- a real operator project's copy is always bundle-emitted.
 #
 # CROSS-REFERENCE (single-source-of-truth discipline): this string is a
 # VERBATIM copy of the real, hand-maintained
@@ -863,11 +879,14 @@ REGISTERED_ADAPTERS_BASENAME = "registered_adapters.py"
 # F-37, v0.13.0 Slice 2) -- duplicated here, not imported, per this module's
 # own boundary discipline (it does not import from the external_write
 # package -- AST/text only, mirroring _extract_registered_op_kinds above).
-# If registered_adapters.py's docstring or import line ever changes, update
-# THIS constant to match in the same commit (registered_adapters.py's own
-# module docstring carries the mirror-image pointer back to here) -- a test
-# in test_capability_code_scaffold.py pins byte-equality between the two so
-# a missed update fails closed rather than silently drifting.
+# If registered_adapters.py's docstring, import line, or operator-manifest
+# loader code ever changes, update THIS constant to match in the same commit
+# (registered_adapters.py's own module docstring carries the mirror-image
+# pointer back to here) -- a test in test_capability_code_scaffold.py pins
+# byte-equality between the two so a missed update fails closed rather than
+# silently drifting. Because registered_adapters.py now carries ONLY
+# baseline content (this emitter's write path never touches it -- Task B3),
+# that pin covers baseline drift alone.
 _REGISTERED_ADAPTERS_BASELINE = '''"""Static adapter-registration import list — the build-emitted static adapter
 registry (Task 7, A4 / F-37 — v0.13.0 Slice 2).
 
@@ -909,46 +928,165 @@ There is deliberately no CLI flag or descriptor field naming an adapter
 module to import (the descriptor's `ENTRY_KEYS` — capability_registration.
 REGISTERED_ENTRY_KEYS — are unchanged by this task; op_kind is read from the
 copy_run_proof, never from the descriptor, and no descriptor field names an
-adapter module either). The import set is entirely build-emitted and static:
-whichever adapter modules are LISTED HERE are the only ones that can ever
-register — a bare-metal allowlist, not a dynamically resolved string an
-operator or a model-authored value could redirect.
+adapter module either). The BASELINE import set below (this file's
+hand-maintained shipped content) is entirely build-emitted and static:
+whichever adapter modules are LISTED HERE are the only baseline-registered
+ones. Operator-enrolled adapters are a SEPARATE, explicitly segregated set —
+see "Operator-enrollment segregation" below — never a dynamically resolved
+string an operator or a model-authored value could redirect; the manifest
+this module reads names only a MODULE, resolved the identical
+`external_write.<stem>` way the baseline import below already does.
 
 GENERATED shape
 ----------------
 For the shipped substrate this is a hand-maintained module enumerating the
 shipped ADAPTER_PROFILE modules (today: `adapters_gmail.py`, the one
-reference adapter). `wizard/scripts/lib/capability_code_scaffold.py`'s
-`emit_capability_code_scaffold` regenerates it (idempotently, appending one
-import line) whenever a capability adapter is added via the add-capability
-build cascade — mirroring exactly how it already regenerates the sibling
-`adapter_profile_registry.json` — and asserts, BEFORE writing, that the
-newly-added module's op_kind does not collide with any op_kind already
-registered by a module already listed here (see
-`capability_code_scaffold._update_registered_adapters` /
-`_extract_registered_op_kinds`).
+reference adapter). This baseline import line is regenerated wholesale
+whenever the emitted/operator project's copy of the `external_write` lib is
+re-copied from a bundle template (fresh build, or a contract-changing
+upgrade) — it is NEVER appended to or edited in place by
+`capability_code_scaffold.py` (see "Operator-enrollment segregation" below
+for why).
 
-Importing this module has side effects (registration at import time) — that
-IS the point; see `adapter_registry.py`'s own module docstring ("populated by
-`register_adapter` at import time").
+Operator-enrollment segregation (Task B3, Cut 1.1 Cluster B / F-76)
+---------------------------------------------------------------------
+Prior to this task, `wizard/scripts/lib/capability_code_scaffold.py`'s
+`emit_capability_code_scaffold` (the add-capability build cascade's own
+emitter) appended `import external_write.<new_module_stem>` directly INTO
+this file, alongside the shipped baseline import above. That worked for a
+freshly-emitted system, but this file is one of the static lib files a
+contract-changing upgrade RE-COPIES wholesale from the new bundle version's
+template (see `wizard/scripts/lib/agent_emitter.py`'s
+`_EXTERNAL_WRITE_LIB_FILES`) — the new bundle's template of this file knows
+only the SHIPPED baseline import, never an individual operator's
+capability-added ones, so an upgrade silently overwrote this file and
+dropped every operator-added adapter's import line with it. The adapter
+module's own `.py` file, and its `adapter_profile_registry.json` zone entry
+(read by `zones.py` — unaffected by this task, and already NOT part of the
+bundle's lib-file copy set), both survived the upgrade untouched; only the
+one line that IMPORTED the module — the thing that actually fires its
+`register_adapter`/`register_contract` calls — was lost.
+
+The fix is segregation, not a smarter merge: `capability_code_scaffold.py`
+no longer writes to THIS file at all. Every capability-code-scaffold-added
+adapter module's enrollment is instead recorded in a SIBLING JSON manifest,
+`operator_adapters.json` (a plain JSON array of module stems, e.g.
+`["adapters_acme_crm_sync"]`), living in this same directory. That manifest
+is — exactly like `adapter_profile_registry.json` before it — never part of
+`agent_emitter.py`'s `_EXTERNAL_WRITE_LIB_FILES` copy set, so a
+contract-changing upgrade's wholesale re-copy of this file can never touch
+it. `_import_operator_adapters` below reads that manifest and imports every
+listed module at THIS module's own import time, UNIONING operator
+registrations with the hand-maintained baseline import above — so importing
+`external_write.registered_adapters` still fires every shipped AND every
+operator-added adapter module's registration, exactly as before, but the
+operator half of that union now lives somewhere an upgrade cannot reach. A
+dropped enrollment is impossible BY CONSTRUCTION (the file that upgrade
+regenerates never held it in the first place), never dependent on a
+text/AST merge that could fail.
+
+Fail-closed, mirroring `zones.py`'s own `_load_extra_adapter_profile_paths`
+exactly: a missing, unreadable, malformed, non-list, or non-string manifest
+entry resolves to "no operator adapters" (never an exception) — a corrupt or
+absent manifest degrades to the baseline-only behavior this module already
+had before Task 7, rather than breaking every OTHER capability's turnkey
+import of this one module. A LISTED module stem whose file has gone missing
+still raises `ModuleNotFoundError` on import, exactly as a stale baseline
+import line always has — no new failure-isolation behavior is introduced for
+that case.
+
+This module's zone classification, and the `adapter_profile_registry.json`
+zone-membership mechanism `zones.py` reads, are UNCHANGED by this task: an
+operator-added adapter module is scanned and zoned by `scan.py` exactly like
+any baseline adapter module — this manifest only affects whether the module
+gets IMPORTED (registration), never whether it is exempt from a bypass
+check.
 
 Cross-reference (single-source-of-truth discipline): `wizard/scripts/lib/
 capability_code_scaffold.py`'s `_REGISTERED_ADAPTERS_BASELINE` duplicates
-this module's ENTIRE source (this docstring + the import line below)
-VERBATIM as its fallback-content constant (used only when a target project's
-copy of this file does not exist yet) -- that module's own boundary
-discipline forbids importing this package to derive it live, so it is text,
-not code. If this docstring or the import line changes, update that constant
-to match in the same commit -- a byte-equality test in
-test_capability_code_scaffold.py pins the two together so a missed update
-fails closed rather than silently drifting.
+this module's ENTIRE source (this docstring + the import line + the loader
+code below) VERBATIM as its fallback-content constant (used only when a
+target project's copy of this file does not exist yet) -- that module's own
+boundary discipline forbids importing this package to derive it live, so it
+is text, not code. If this docstring, the import line, or the loader code
+changes, update that constant to match in the same commit -- a byte-equality
+test in test_capability_code_scaffold.py pins the two together so a missed
+update fails closed rather than silently drifting. Because this file now
+carries ONLY baseline content (no capability_code_scaffold.py write path
+touches it anymore), that pin covers baseline drift alone -- it never
+fires because of an operator's own add-capability enrollment.
 
 Stdlib only — no third-party dependencies.
 """
 
+import importlib
+import json
+from pathlib import Path
+from typing import Tuple
+
 import external_write.adapters_gmail  # noqa: F401 -- registers the 4 shipped Gmail op_kinds.
+
+# The sibling operator-enrollment manifest this module unions in at import
+# time (see "Operator-enrollment segregation" above). Same directory as this
+# file -- never a bundle-copied lib file, so a contract-changing upgrade's
+# wholesale re-copy of THIS module never touches it.
+_OPERATOR_ADAPTERS_FILENAME = "operator_adapters.json"
+
+
+def _load_operator_adapter_module_stems(lib_dir: "Path | None" = None) -> Tuple[str, ...]:
+    """Fail-closed loader for operator-enrolled adapter module stems (Task
+    B3, F-76). Reads ``<lib_dir>/operator_adapters.json`` -- a plain JSON
+    array of module stems (e.g. ``"adapters_acme_crm_sync"``), one per
+    capability-code-scaffold-added adapter module. Returns an empty tuple
+    (never raises) when the file is absent, unreadable, not valid JSON, not
+    a JSON array, or contains a non-string/empty entry (that one entry is
+    simply skipped, not fatal to the rest) -- mirrors ``zones.py``'s
+    ``_load_extra_adapter_profile_paths`` exactly.
+
+    `lib_dir` defaults to THIS module's own installed directory when
+    omitted (the real package anchor), so production callers get the
+    fully-merged operator set with zero code changes; a test passes its own
+    `lib_dir` explicitly instead of relying on the process-wide default.
+    """
+    anchor = Path(lib_dir) if lib_dir is not None else Path(__file__).resolve().parent
+    manifest_path = anchor / _OPERATOR_ADAPTERS_FILENAME
+    if not manifest_path.is_file():
+        return ()
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return ()
+    if not isinstance(data, list):
+        return ()
+    return tuple(stem for stem in data if isinstance(stem, str) and stem)
+
+
+def _import_operator_adapters(lib_dir: "Path | None" = None) -> None:
+    """Import every operator-enrolled adapter module named in
+    ``operator_adapters.json`` (see `_load_operator_adapter_module_stems`),
+    firing each one's module-scope `register_adapter`/`register_contract`
+    call the identical way the baseline `adapters_gmail` import above
+    already does. A listed stem whose module file is missing raises
+    `ModuleNotFoundError` -- the same honest failure a stale baseline import
+    line would already produce; this function performs no failure isolation
+    beyond that (deliberately -- see this module's own docstring)."""
+    for _stem in _load_operator_adapter_module_stems(lib_dir):
+        importlib.import_module(f"external_write.{_stem}")
+
+
+_import_operator_adapters()
 '''
 
+
+# Task B3 (Cut 1.1 Cluster B / F-76): the sibling manifest capability-code-
+# scaffold-added adapter enrollments live in now, instead of being appended
+# into registered_adapters.py. See REGISTERED_ADAPTERS_BASENAME's own comment
+# above, and registered_adapters.py's own "Operator-enrollment segregation"
+# docstring section, for the full rationale -- an upgrade wholesale-recopies
+# registered_adapters.py from the new bundle's baseline template, so anything
+# appended there is not upgrade-durable; this manifest is never part of that
+# copy set (agent_emitter.py's _EXTERNAL_WRITE_LIB_FILES), so it is.
+OPERATOR_ADAPTERS_BASENAME = "operator_adapters.json"
 
 _REGISTERED_ADAPTERS_IMPORT_RE = re.compile(
     r"^import external_write\.(\w+)\s*(?:#.*)?$", re.MULTILINE)
@@ -1001,20 +1139,55 @@ def _extract_registered_op_kinds(source: str, module_label: str) -> List[str]:
     return op_kinds
 
 
+def _existing_registered_module_stems(external_write_dir: Path) -> List[str]:
+    """The full set of module stems `_assert_no_duplicate_op_kind` must check
+    a new capability's op_kind against (Task B3, F-76): the hand-maintained
+    BASELINE import set in ``registered_adapters.py`` (or ``_REGISTERED_
+    ADAPTERS_BASELINE``'s fallback text, if that file is not present locally)
+    UNION every module stem already recorded in the operator-enrollment
+    manifest, ``operator_adapters.json`` (see `_update_operator_adapters`) --
+    the segregated home every scaffold-added adapter's enrollment lives in
+    since Task B3. Order is baseline-first, operator-second, de-duplicated;
+    callers only care about set membership, never order."""
+    registry_path = external_write_dir / REGISTERED_ADAPTERS_BASENAME
+    content = (registry_path.read_text(encoding="utf-8") if registry_path.is_file()
+               else _REGISTERED_ADAPTERS_BASELINE)
+    baseline_modules = _REGISTERED_ADAPTERS_IMPORT_RE.findall(content)
+
+    operator_path = external_write_dir / OPERATOR_ADAPTERS_BASENAME
+    operator_modules: List[str] = []
+    if operator_path.is_file():
+        try:
+            loaded = json.loads(operator_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, list):
+                operator_modules = [m for m in loaded if isinstance(m, str)]
+        except (OSError, ValueError):
+            operator_modules = []
+
+    seen_order: List[str] = []
+    for stem in list(baseline_modules) + operator_modules:
+        if stem not in seen_order:
+            seen_order.append(stem)
+    return seen_order
+
+
 def _assert_no_duplicate_op_kind(external_write_dir: Path, new_module_stem: str,
                                  new_op_kind: str) -> None:
     """Pure validation (no writes) for AC-T7/BI-1: raise a plain-language,
     resumable ``CapabilityCodeScaffoldError`` iff `new_op_kind` collides with
-    an op_kind any adapter module ALREADY listed in
-    ``<external_write_dir>/registered_adapters.py`` registers. Deliberately
-    called BEFORE this emitter writes anything for the new capability (see
+    an op_kind any adapter module ALREADY registered -- the union of the
+    BASELINE import set in ``<external_write_dir>/registered_adapters.py``
+    and the operator-enrollment manifest ``operator_adapters.json`` (Task B3,
+    F-76; see `_existing_registered_module_stems`). Deliberately called
+    BEFORE this emitter writes anything for the new capability (see
     `emit_capability_code_scaffold`), so a collision never leaves a partial
     emit behind (the new capability's own trio of files, and its entry in
     ``adapter_profile_registry.json``, are never written on this path).
 
     Re-emitting the SAME capability's own module (`new_module_stem` already
-    listed) is a no-op here -- never a duplicate-op_kind error against
-    itself; the idempotent re-write is `_update_registered_adapters`'s job.
+    listed, in either set) is a no-op here -- never a duplicate-op_kind error
+    against itself; the idempotent re-write is `_update_operator_adapters`'s
+    job.
 
     A listed import whose module file is not present locally is skipped
     (nothing to statically verify against) rather than treated as an error
@@ -1025,10 +1198,7 @@ def _assert_no_duplicate_op_kind(external_write_dir: Path, new_module_stem: str,
     exercises only THIS emitter in isolation legitimately has no local copy
     of e.g. adapters_gmail.py to check against.
     """
-    registry_path = external_write_dir / REGISTERED_ADAPTERS_BASENAME
-    content = (registry_path.read_text(encoding="utf-8") if registry_path.is_file()
-               else _REGISTERED_ADAPTERS_BASELINE)
-    existing_modules = _REGISTERED_ADAPTERS_IMPORT_RE.findall(content)
+    existing_modules = _existing_registered_module_stems(external_write_dir)
 
     if new_module_stem in existing_modules:
         return
@@ -1056,32 +1226,43 @@ def _assert_no_duplicate_op_kind(external_write_dir: Path, new_module_stem: str,
             f"the new {new_module_stem}.py adapter")
 
 
-def _update_registered_adapters(external_write_dir: Path, new_module_stem: str,
-                                new_op_kind: str) -> Path:
-    """Idempotently add ``import external_write.<new_module_stem>`` to
-    ``<external_write_dir>/registered_adapters.py`` (creating it from the
-    baseline if absent). Assumes `_assert_no_duplicate_op_kind` has ALREADY
-    been called for this exact `(new_module_stem, new_op_kind)` pair (see
+def _update_operator_adapters(external_write_dir: Path, new_module_stem: str,
+                              new_op_kind: str) -> Path:
+    """Idempotently add `new_module_stem` to
+    ``<external_write_dir>/operator_adapters.json`` (creating the file, as an
+    empty JSON array, if absent) -- Task B3 (Cut 1.1 Cluster B / F-76). Never
+    writes to ``registered_adapters.py`` (see that constant's own comment,
+    and ``registered_adapters.py``'s own "Operator-enrollment segregation"
+    docstring section, for why): that file is bundle-emitted BASELINE ONLY,
+    wholesale-regenerated by a contract-changing upgrade, so anything
+    appended there is not upgrade-durable. This manifest is never part of
+    the bundle's lib-file copy set -- mirrors ``_update_adapter_profile_
+    registry``'s already-established survival property exactly -- so an
+    enrollment recorded here cannot be dropped by an upgrade's re-copy of
+    ``registered_adapters.py``, BY CONSTRUCTION.
+
+    Assumes `_assert_no_duplicate_op_kind` has ALREADY been called for this
+    exact `(new_module_stem, new_op_kind)` pair (see
     `emit_capability_code_scaffold`, which validates before writing anything)
     -- re-asserted here too (cheap; the file has not changed in between in
     the normal call path) so this function is safe to call standalone.
     """
     _assert_no_duplicate_op_kind(external_write_dir, new_module_stem, new_op_kind)
 
-    registry_path = external_write_dir / REGISTERED_ADAPTERS_BASENAME
-    content = (registry_path.read_text(encoding="utf-8") if registry_path.is_file()
-               else _REGISTERED_ADAPTERS_BASELINE)
-    existing_modules = _REGISTERED_ADAPTERS_IMPORT_RE.findall(content)
-
-    if new_module_stem in existing_modules:
-        registry_path.parent.mkdir(parents=True, exist_ok=True)
-        if not registry_path.is_file():
-            registry_path.write_text(content, encoding="utf-8")
-        return registry_path
-
-    content = content.rstrip("\n") + "\n" + f"import external_write.{new_module_stem}  # noqa: F401\n"
+    registry_path = external_write_dir / OPERATOR_ADAPTERS_BASENAME
+    entries: List[str] = []
+    if registry_path.is_file():
+        try:
+            loaded = json.loads(registry_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, list):
+                entries = [e for e in loaded if isinstance(e, str)]
+        except (OSError, ValueError):
+            entries = []
+    if new_module_stem not in entries:
+        entries.append(new_module_stem)
     registry_path.parent.mkdir(parents=True, exist_ok=True)
-    registry_path.write_text(content, encoding="utf-8")
+    registry_path.write_text(json.dumps(entries, indent=2, ensure_ascii=False) + "\n",
+                             encoding="utf-8")
     return registry_path
 
 
@@ -1118,23 +1299,25 @@ def emit_capability_code_scaffold(
     """Emit the gate-wired-by-construction adapter + read-facade + capability
     module TRIO for `spec` into `project_root` (three files, not
     two; see this module's docstring for the full rationale), register ONLY
-    the adapter module in the ADAPTER_PROFILE registry, and add the adapter
-    module to the turnkey-acceptance static registry (Task 7 / F-37 --
-    `registered_adapters.py`, asserting no duplicate op_kind first). Returns
-    the list of paths written, in this order: adapter module, read-facade
+    the adapter module in the ADAPTER_PROFILE registry, and enroll it for
+    turnkey acceptance (Task 7 / F-37) in the operator-enrollment manifest,
+    ``operator_adapters.json`` (Task B3 / F-76 -- NEVER in
+    ``registered_adapters.py`` itself; see `_update_operator_adapters`'s own
+    docstring for why), asserting no duplicate op_kind first. Returns the
+    list of paths written, in this order: adapter module, read-facade
     module, capability module, ADAPTER_PROFILE registry file,
-    registered-adapters registry file.
+    operator-adapters manifest file.
 
     The read-facade module (`read_facades_<capability_id>.py`) is written
     alongside the adapter module in `external_write_dir` — same directory as
     the reference `read_facades_gmail.py` — but is deliberately NEVER added
-    to either registry above: it is a SCANNED module (fail-closed default
-    CAPABILITY classification), not an ADAPTER_PROFILE one, and it registers
-    no op_kind of its own.
+    to either registry/manifest above: it is a SCANNED module (fail-closed
+    default CAPABILITY classification), not an ADAPTER_PROFILE one, and it
+    registers no op_kind of its own.
 
     Idempotent for the code files (a re-run overwrites its own prior emit, not
     duplicates it); both registry updates are idempotent by construction (see
-    `_update_adapter_profile_registry` / `_update_registered_adapters`).
+    `_update_adapter_profile_registry` / `_update_operator_adapters`).
     """
     project_root = Path(project_root)
     external_write_dir = project_root / external_write_rel
@@ -1159,11 +1342,11 @@ def emit_capability_code_scaffold(
 
     registry_path = _update_adapter_profile_registry(
         external_write_dir, f"{spec.adapter_module_stem}.py")
-    registered_adapters_path = _update_registered_adapters(
+    operator_adapters_path = _update_operator_adapters(
         external_write_dir, spec.adapter_module_stem, spec.op_kind)
 
     return [adapter_path, read_facade_path, capability_path, registry_path,
-            registered_adapters_path]
+            operator_adapters_path]
 
 
 # ---------------------------------------------------------------------------
