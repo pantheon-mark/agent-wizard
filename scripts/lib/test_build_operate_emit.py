@@ -1773,7 +1773,10 @@ class TestS253ContractDelta(unittest.TestCase):
         # (Count updated to 35 by Task C1, which additionally enrolled command_manifest.py --
         # see that file's own enrollment comment in agent_emitter.py, and
         # test_emit_set_lists_the_taskC1_command_manifest_file below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 35)
+        # (Count updated to 36 by Task C3, which additionally enrolled bulk_verify.py -- see
+        # that file's own enrollment comment in agent_emitter.py, and
+        # test_emit_set_lists_the_taskC3_bulk_verify_file below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 36)
 
     def test_emit_set_lists_the_taskA3_lifecycle_test_fixtures_file(self):
         # Task A3 (hermetic lifecycle tests + probe, Cut 1.1 / F-71): lifecycle_test_fixtures.py
@@ -1788,6 +1791,13 @@ class TestS253ContractDelta(unittest.TestCase):
         # Task C2's settings-allowlist/PreToolUse hook or Task C3's bulk-verify to read.
         import agent_emitter
         self.assertIn("command_manifest.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+
+    def test_emit_set_lists_the_taskC3_bulk_verify_file(self):
+        # Task C3 (Cut 1.1 Cluster C / F-78): bulk_verify.py must be enrolled, or a
+        # freshly-emitted writes-back system allowlists a command prefix (Task C1/C2) that was
+        # never physically shipped -- a ModuleNotFoundError the first time it is actually run.
+        import agent_emitter
+        self.assertIn("bulk_verify.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def _writes_back_plan(self):
         import copy, json

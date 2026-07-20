@@ -186,6 +186,20 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # read against -- the single-source guarantee those tasks depend on would
     # have nothing to point at.
     "command_manifest.py",
+    # Task C3 (Cut 1.1 Cluster C / F-78): the emitted bulk-verify/status
+    # command -- reads reconciled totals + per-id recoverability from
+    # run_envelope.report_run_recoverability (durable records only) and
+    # attempts an honestly-bounded read-only-facade final-state confirmation
+    # (capability_api.build_read_facade). Nothing else in the lib imports it
+    # at module scope (it is a standalone CLI a real operator invokes
+    # directly, at the exact path command_manifest.py's "bulk-verify" entry
+    # reserves), but omitting it here means Task C1/C2's settings-allowlist +
+    # PreToolUse hook allow a command prefix that was never physically
+    # shipped -- a ModuleNotFoundError the first time an operator (or the
+    # allowlisted hook) actually runs it, not a caught omission (same
+    # regression class this file's own docstring already documents for every
+    # prior entry above).
+    "bulk_verify.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
