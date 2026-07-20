@@ -234,6 +234,10 @@ def _build_operator_message(
 ) -> str:
     counts = report["counts"]
     lines = [
+        "This is a read-only check: it makes NO changes to anything. It only "
+        "reads this project's own saved records and, where possible, looks "
+        "up the current state to confirm them.",
+        "",
         f"Run {report['run_id']!r} ({report['run_state']}) -- reconciled from this "
         "project's own durable records:",
         f"  reviewed: {counts['reviewed']} (of {counts['reviewed_total']} total ever "

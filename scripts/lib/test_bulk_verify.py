@@ -206,6 +206,87 @@ class TestConfirmationAmbiguousSurface(unittest.TestCase):
         self.assertEqual(sorted(candidates), ["get_a", "get_b"])
 
 
+class TestConfirmationRealGmailFacadeAmbiguity(unittest.TestCase):
+    """Fix 1 (C3 review, Important): pins the honest-degradation claim
+    against the REAL, shipped ``GmailReadFacade`` (read_facades_gmail.py) --
+    not only the hand-built ``_AmbiguousReadFacade`` look-alike above. The
+    module's own docstring leans on "the real, shipped Gmail facade's
+    surface IS ambiguous: get_message/get_filter both qualify" as its
+    motivating case; until this test, that claim was only exercised against
+    a fixture that merely resembled it. This builds the REAL facade through
+    the SAME sanctioned ``capability_api.build_read_facade`` two-arg path
+    every capability uses (via ``_confirm_via_read_facade``, which calls it
+    internally), against a minimal read-only stub client (no write method of
+    any kind), and asserts it degrades HONESTLY: reports ambiguous /
+    could-not-confirm, never crashes, never guesses. If a future
+    GmailReadFacade surface change ever resolves the ambiguity (or
+    introduces a crash), this test -- not just the fixture-based one above --
+    catches it.
+    """
+
+    OP_KIND = "gmail.message.trash"  # real, contracts.py-declared Gmail op_kind
+
+    class _StubGmailReadOnlyClient:
+        """Minimal read-only stub shaped like a real gmail.readonly-scoped
+        client -- methods only, no write/mutate capability of any kind, and
+        NOT the real Google API client. ``_confirm_via_read_facade`` never
+        actually calls a method on this client in the ambiguous-surface case
+        (candidates != 1), so these method bodies are never exercised; they
+        are still real, plain read-shaped methods rather than an empty
+        placeholder, so this stub is honestly read-only, not merely inert."""
+
+        def list_messages(self, query=None, max_results=None):
+            return []
+
+        def get_message(self, message_id):
+            return {"id": message_id}
+
+        def list_labels(self):
+            return []
+
+        def list_filters(self):
+            return []
+
+        def get_filter(self, filter_id):
+            return {"id": filter_id}
+
+    def test_real_gmail_read_facade_surface_degrades_honestly_not_crash(self):
+        # Import (not just reference) read_facades_gmail so its module-scope
+        # registration loop actually runs and populates the kernel
+        # ReadFacade registry for every real Gmail op_kind -- the SAME
+        # side effect a real capability's import graph triggers. Safe to
+        # import even if another test module already triggered it: repeated
+        # registration is idempotent (last-registered wins, same class).
+        import external_write.read_facades_gmail as real_gmail_facades
+
+        result = _confirm_via_read_facade(
+            self.OP_KIND, self._StubGmailReadOnlyClient(), ("msg-1",))
+
+        self.assertTrue(result["attempted"])
+        self.assertFalse(result["confirmed"])
+        self.assertEqual(result["per_id"], {})
+        self.assertEqual(
+            sorted(result["available_read_methods"]),
+            ["get_filter", "get_message", "list_filters", "list_labels", "list_messages"],
+        )
+        self.assertIn("no single unambiguous", result["note"])
+        self.assertNotIn("Traceback", result["note"])
+
+        # Pin that the facade actually resolved is the REAL GmailReadFacade
+        # class -- not a look-alike -- via the exact capability-facing
+        # two-arg call shape (``capability_api.build_read_facade``), so this
+        # test cannot silently degrade into testing something else if the
+        # registry or import surface ever changes.
+        from external_write.capability_api import build_read_facade as real_build_read_facade
+        facade = real_build_read_facade(self.OP_KIND, self._StubGmailReadOnlyClient())
+        self.assertIsInstance(facade, real_gmail_facades.GmailReadFacade)
+
+        # And the same real facade's own introspected candidates are exactly
+        # the two ambiguous methods the module docstring names.
+        candidates = _single_id_lookup_candidates(facade, facade.read_methods)
+        self.assertEqual(sorted(candidates), ["get_filter", "get_message"])
+
+
 class TestConfirmationUnambiguousSurface(unittest.TestCase):
     OP_KIND = "_bv_unambiguous_op_kind"
 
@@ -326,6 +407,22 @@ class TestVerifyBulkRunDurableRecords(unittest.TestCase):
             self.assertEqual(result.counts["applied"], 0)
             self.assertEqual(result.counts["recoverable_by_system"], 0)
             self.assertFalse(result.facade_confirmation["attempted"])
+            self.assertNotIn("Traceback", result.operator_message)
+
+    def test_operator_message_states_whole_command_is_read_only_up_front(self):
+        # Fix 2 (C3 review, self-describing gap): the plan's Task C3
+        # requires each operator-facing command to be self-describing
+        # (states read-only / blast-radius in plain language). Before this
+        # fix, "read-only" only appeared inside the facade-confirmation
+        # sub-note -- easy to miss, and silent when facade confirmation
+        # isn't attempted at all. This asserts a clear, plain-language
+        # WHOLE-COMMAND read-only statement is the very FIRST line of the
+        # operator_message banner, regardless of facade-confirmation outcome.
+        with tempfile.TemporaryDirectory() as d:
+            result = verify_bulk_run("bv-never-minted-either", envelope_dir=d)
+            first_line = result.operator_message.splitlines()[0]
+            self.assertIn("read-only", first_line.lower())
+            self.assertIn("no changes", first_line.lower())
             self.assertNotIn("Traceback", result.operator_message)
 
     def test_candidate_unit_ids_scopes_the_report(self):
