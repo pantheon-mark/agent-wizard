@@ -326,5 +326,73 @@ class TestCapabilityIndex(unittest.TestCase):
             self.assertFalse(idx.state_read_error)
 
 
+class TestNormalizeCapabilityId(unittest.TestCase):
+    """(Task A4 / F-72) the write-time collision guard's own normalization -- op-kind-agnostic
+    fixtures throughout (generic cap_alpha/cap-alpha ids, never the real inbox names)."""
+
+    def test_hyphen_and_underscore_fold_equal(self):
+        ci = _load(MODPATH)
+        self.assertEqual(
+            ci.normalize_capability_id("cap-alpha"), ci.normalize_capability_id("cap_alpha"))
+
+    def test_case_folds_equal(self):
+        ci = _load(MODPATH)
+        self.assertEqual(
+            ci.normalize_capability_id("Cap_Alpha"), ci.normalize_capability_id("cap_alpha"))
+
+    def test_canonical_underscore_form_normalizes_to_itself(self):
+        ci = _load(MODPATH)
+        self.assertEqual(ci.normalize_capability_id("cap_alpha"), "cap_alpha")
+
+    def test_distinct_ids_do_not_fold_equal(self):
+        ci = _load(MODPATH)
+        self.assertNotEqual(
+            ci.normalize_capability_id("cap_alpha"), ci.normalize_capability_id("cap_beta"))
+
+
+class TestAssertNoNormalizedCollision(unittest.TestCase):
+    """(Task A4 / F-72) direct unit tests on the raising primitive itself -- the write-time
+    collision guard `capability_registration.register_declared_capability` calls and catches (see
+    test_external_write_capability_registration.py for the integration-level refusal behavior)."""
+
+    def test_exact_duplicate_raises(self):
+        ci = _load(MODPATH)
+        with self.assertRaises(ci.CanonicalIdentityError):
+            ci.assert_no_normalized_collision("cap_alpha", ["cap_alpha"])
+
+    def test_hyphen_twin_of_existing_underscore_id_raises(self):
+        # The estate F-72 shape, generically: writing "cap-alpha" (hyphen) when "cap_alpha"
+        # (underscore) already exists.
+        ci = _load(MODPATH)
+        with self.assertRaises(ci.CanonicalIdentityError) as cm:
+            ci.assert_no_normalized_collision("cap-alpha", ["cap_alpha"])
+        msg = str(cm.exception)
+        self.assertNotIn("Traceback", msg)
+        self.assertIn("cap-alpha", msg)
+        self.assertIn("cap_alpha", msg)
+
+    def test_underscore_twin_of_existing_hyphen_id_raises_the_other_direction_too(self):
+        ci = _load(MODPATH)
+        with self.assertRaises(ci.CanonicalIdentityError):
+            ci.assert_no_normalized_collision("cap_alpha", ["cap-alpha"])
+
+    def test_case_twin_raises(self):
+        ci = _load(MODPATH)
+        with self.assertRaises(ci.CanonicalIdentityError):
+            ci.assert_no_normalized_collision("Cap_Alpha", ["cap_alpha"])
+
+    def test_distinct_id_does_not_raise(self):
+        ci = _load(MODPATH)
+        ci.assert_no_normalized_collision("cap_beta", ["cap_alpha"])  # must not raise
+
+    def test_empty_existing_ids_does_not_raise(self):
+        ci = _load(MODPATH)
+        ci.assert_no_normalized_collision("cap_alpha", [])  # must not raise
+
+    def test_non_string_entries_in_existing_ids_are_skipped_not_crashed(self):
+        ci = _load(MODPATH)
+        ci.assert_no_normalized_collision("cap_alpha", [None, 42, "", "cap_beta"])  # no raise
+
+
 if __name__ == "__main__":
     unittest.main()

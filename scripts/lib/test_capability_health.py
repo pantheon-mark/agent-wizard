@@ -41,6 +41,7 @@ sys.path.insert(0, str(_AGENTS_LIB))
 
 from external_write import capability_health  # noqa: E402
 from external_write import write_gate  # noqa: E402
+from external_write import lifecycle_state  # noqa: E402
 
 # Build-side owners of the four values capability_health.py duplicates by
 # value (see TestPathConstantsAntiDrift below) -- both importable here
@@ -774,6 +775,129 @@ class TestReconcileOnReadFailSafeOnReadOnlyFilesystem(ReconcileOnReadTestBase):
         self.assertTrue((marker_dir / f"{cap_id}.pause").exists())
 
 
+class IdentityTwinTestBase(CapabilityHealthTestBase):
+    """(Task A4 / F-72) shared fixtures for the identity-twin classification tests -- generic,
+    op-kind-agnostic ids (cap_alpha / cap-alpha), never the real estate inbox names, per the
+    task's own anti-overfit instruction. ``cap_alpha`` (underscore) is the REAL, built, live
+    canonical capability throughout; ``cap-alpha`` (hyphen) is the never-built descriptor-only
+    twin whose classification is under test."""
+
+    def _write_audit_record(self, capability_id: str):
+        log_path = self.project_root / "security" / "capability_acceptance_log.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"capability_id": capability_id, "note": "test fixture"}) + "\n")
+
+
+class TestIdentityTwinNeverBuiltNeverAcceptedIsPending(IdentityTwinTestBase):
+    def test_never_built_never_accepted_twin_reports_pending_not_red(self):
+        # The estate F-72 shape, generically: a stale hyphenated descriptor entry that was never
+        # built and never accepted, with no state of its own, coexisting with the real,
+        # already-built underscore capability. This must NOT be a RED phantom.
+        self._write_capability(
+            "cap_alpha", _CLEAN_CAPABILITY_SOURCE.format(display_name="Cap Alpha"))
+        self._write_descriptor_set([
+            {"id": "cap-alpha", "name": "cap-alpha", "accepted": False},
+        ])
+
+        records = capability_health.check_capabilities(self.project_root)
+
+        twin = self._record_for(records, "cap-alpha")
+        self.assertEqual(twin["health"], "pending")
+        self.assertEqual(twin["identity_twin_of"], "cap_alpha")
+        self.assertIsNotNone(twin["operator_message"])
+        self.assertIn("cap-alpha", twin["operator_message"])
+        self.assertIn("cap_alpha", twin["operator_message"])
+
+        # The real, built capability is completely unaffected -- still green.
+        real = self._record_for(records, "cap_alpha")
+        self.assertEqual(real["health"], "green")
+
+    def test_twin_with_absent_accepted_field_also_reports_pending(self):
+        # No "accepted" key at all (not even False) -- must resolve fail-safe to "no accepted
+        # state", not crash and not identity_conflict.
+        self._write_capability(
+            "cap_alpha", _CLEAN_CAPABILITY_SOURCE.format(display_name="Cap Alpha"))
+        self._write_descriptor_set([{"id": "cap-alpha", "name": "cap-alpha"}])
+
+        records = capability_health.check_capabilities(self.project_root)
+        twin = self._record_for(records, "cap-alpha")
+        self.assertEqual(twin["health"], "pending")
+
+
+class TestIdentityTwinWithStateIsConflict(IdentityTwinTestBase):
+    def test_twin_marked_accepted_is_identity_conflict_not_pending(self):
+        self._write_capability(
+            "cap_alpha", _CLEAN_CAPABILITY_SOURCE.format(display_name="Cap Alpha"))
+        self._write_descriptor_set([
+            {"id": "cap-alpha", "name": "cap-alpha", "accepted": True},
+        ])
+
+        records = capability_health.check_capabilities(self.project_root)
+        twin = self._record_for(records, "cap-alpha")
+        self.assertEqual(twin["health"], "identity_conflict")
+        self.assertEqual(twin["identity_twin_of"], "cap_alpha")
+        self.assertIsNotNone(twin["operator_message"])
+
+    def test_twin_with_acceptance_audit_record_is_identity_conflict(self):
+        # Never-accepted per its OWN descriptor entry, but a real acceptance-audit record on
+        # file for this exact id -- real recorded history, so it cannot be silently tombstoned.
+        self._write_capability(
+            "cap_alpha", _CLEAN_CAPABILITY_SOURCE.format(display_name="Cap Alpha"))
+        self._write_descriptor_set([
+            {"id": "cap-alpha", "name": "cap-alpha", "accepted": False},
+        ])
+        self._write_audit_record("cap-alpha")
+
+        records = capability_health.check_capabilities(self.project_root)
+        twin = self._record_for(records, "cap-alpha")
+        self.assertEqual(twin["health"], "identity_conflict")
+
+    def test_twin_with_pending_migration_is_identity_conflict(self):
+        self._write_capability(
+            "cap_alpha", _CLEAN_CAPABILITY_SOURCE.format(display_name="Cap Alpha"))
+        self._write_descriptor_set([
+            {"id": "cap-alpha", "name": "cap-alpha", "accepted": False},
+        ])
+        self._write_pending_migration("cap-alpha")
+
+        records = capability_health.check_capabilities(self.project_root)
+        twin = self._record_for(records, "cap-alpha")
+        self.assertEqual(twin["health"], "identity_conflict")
+
+    def test_twin_with_pause_marker_is_identity_conflict(self):
+        self._write_capability(
+            "cap_alpha", _CLEAN_CAPABILITY_SOURCE.format(display_name="Cap Alpha"))
+        self._write_descriptor_set([
+            {"id": "cap-alpha", "name": "cap-alpha", "accepted": False},
+        ])
+        self._write_pause_marker("cap-alpha")
+
+        records = capability_health.check_capabilities(self.project_root)
+        twin = self._record_for(records, "cap-alpha")
+        self.assertEqual(twin["health"], "identity_conflict")
+
+
+class TestNonTwinDescriptorOnlyEntryUnaffected(IdentityTwinTestBase):
+    def test_descriptor_only_entry_with_no_twin_still_reports_red(self):
+        # Anti-vacuous contrast (and a direct re-proof of
+        # TestDescriptorOnlyCapabilityWithNoSourceFile alongside a REAL, unrelated built
+        # capability in the same project): a descriptor-only id that does NOT normalize-collide
+        # with anything built must be completely untouched by this task -- still RED, exactly as
+        # before Task A4.
+        self._write_capability(
+            "cap_alpha", _CLEAN_CAPABILITY_SOURCE.format(display_name="Cap Alpha"))
+        self._write_descriptor_set([
+            {"id": "totally_unrelated_ghost", "name": "totally_unrelated_ghost"},
+        ])
+
+        records = capability_health.check_capabilities(self.project_root)
+        ghost = self._record_for(records, "totally_unrelated_ghost")
+        self.assertEqual(ghost["health"], "red")
+        self.assertIsNone(ghost["identity_twin_of"])
+        self.assertIsNone(ghost["operator_message"])
+
+
 class TestPathConstantsAntiDrift(unittest.TestCase):
     """BUILD<->RUNTIME value contract (FINAL-review Fix 1). capability_health.py
     is emitted runtime code and cannot import its four canonical owners
@@ -809,6 +933,14 @@ class TestPathConstantsAntiDrift(unittest.TestCase):
         self.assertEqual(
             capability_health.MIGRATION_QUEUE_REL,
             upgrade_reconcile.MIGRATION_QUEUE_REL,
+        )
+
+    def test_acceptance_log_rel_matches_lifecycle_state_constant(self):
+        # (Task A4 / F-72) capability_health.ACCEPTANCE_LOG_REL is duplicated-by-value from
+        # lifecycle_state.ACCEPTANCE_LOG_REL -- same anti-drift discipline as the four pins above.
+        self.assertEqual(
+            capability_health.ACCEPTANCE_LOG_REL,
+            lifecycle_state.ACCEPTANCE_LOG_REL,
         )
 
 

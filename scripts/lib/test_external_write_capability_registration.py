@@ -306,6 +306,48 @@ class FailSafeTest(unittest.TestCase):
         # No duplicate appended.
         self.assertEqual(p.set_bytes(), set_after_first)
 
+    def test_normalized_hyphen_twin_of_existing_underscore_id_refuses(self):
+        # (Task A4 / F-72) The write-time collision guard: writing "cap-alpha" (hyphen) when
+        # "cap_alpha" (underscore) already exists must refuse, even though the two strings are
+        # not byte-identical -- op-kind-agnostic generic ids, not the real inbox names.
+        p = _Project(self.tmp, descriptors=_base())
+        p.call(_declared(id="cap_alpha", name="Cap Alpha"))
+        set_after_first = p.set_bytes()
+        res = p.call(_declared(id="cap-alpha", name="Cap Alpha (hyphen)"))
+        self.assertFalse(res.registered)
+        self.assertIn("cap-alpha", res.reason)
+        self.assertIn("cap_alpha", res.reason)
+        # No twin appended -- the descriptor set is byte-identical to before the refused call.
+        self.assertEqual(p.set_bytes(), set_after_first)
+        self.assertNotIn("cap-alpha", {e["id"] for e in p.entries()})
+
+    def test_normalized_underscore_twin_of_existing_hyphen_id_refuses_the_other_direction(self):
+        # Same guard, the other write order: "cap-alpha" registered first, then "cap_alpha".
+        p = _Project(self.tmp, descriptors=_base())
+        p.call(_declared(id="cap-alpha", name="Cap Alpha (hyphen)"))
+        set_after_first = p.set_bytes()
+        res = p.call(_declared(id="cap_alpha", name="Cap Alpha"))
+        self.assertFalse(res.registered)
+        self.assertEqual(p.set_bytes(), set_after_first)
+        self.assertNotIn("cap_alpha", {e["id"] for e in p.entries()})
+
+    def test_case_twin_of_existing_id_refuses(self):
+        p = _Project(self.tmp, descriptors=_base())
+        p.call(_declared(id="cap_alpha", name="Cap Alpha"))
+        set_after_first = p.set_bytes()
+        res = p.call(_declared(id="Cap_Alpha", name="Cap Alpha (recased)"))
+        self.assertFalse(res.registered)
+        self.assertEqual(p.set_bytes(), set_after_first)
+
+    def test_distinct_id_is_not_treated_as_a_twin(self):
+        # Anti-vacuous contrast: a genuinely distinct id must still register normally -- the
+        # guard must not over-fire on every write.
+        p = _Project(self.tmp, descriptors=_base())
+        p.call(_declared(id="cap_alpha", name="Cap Alpha"))
+        res = p.call(_declared(id="cap_beta", name="Cap Beta"))
+        self.assertTrue(res.registered, res.reason)
+        self.assertIn("cap_beta", {e["id"] for e in p.entries()})
+
     def test_gated_with_unlocatable_co_protected_table_refuses_and_does_not_land(self):
         # Mandatory-by-construction: if the guard-visibility table cannot be found/regenerated,
         # a GATED descriptor is NOT landed (no half-registration).

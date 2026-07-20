@@ -127,7 +127,7 @@ import ast
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, FrozenSet, List, Literal, Optional, Set, Tuple
+from typing import Dict, FrozenSet, Iterable, List, Literal, Optional, Set, Tuple
 
 # The four resolvable identity namespaces, plus "unknown" for a caller that
 # does not know which namespace a raw token came from (searches all four).
@@ -158,6 +158,70 @@ class IdentityCoherenceError(Exception):
     """Raised by ``assert_identity_coherent`` (Task A2 / A3.1) when a capability's
     descriptor_id, capability_id, mechanism_id, and module_stem are not ALL the same string.
     Plain-language message, no traceback text."""
+
+
+def normalize_capability_id(raw: str) -> str:
+    """Case/separator-folded normalization of a capability-shaped id string (Task A4 / F-72):
+    stripped of surrounding whitespace, lower-cased, then every hyphen folded to underscore.
+
+    This folds toward the SEPARATOR the scaffold's own canonical ids already use -- a module stem
+    is a Python identifier, always underscore-separated, never hyphenated -- so a genuinely
+    canonical id normalizes to itself, unchanged. It is deliberately NOT the identity resolver
+    above (``CapabilityIndex.resolve``): it never consults ``SURFACE``, module stems, or any
+    project state; it is a pure string fold, used ONLY to catch a case/separator TWIN of an id
+    string before it is ever written (``assert_no_normalized_collision`` below) or to classify one
+    already on disk (``capability_health.py``'s identity-twin classification)."""
+    return raw.strip().lower().replace("-", "_")
+
+
+class CanonicalIdentityError(Exception):
+    """Raised by ``assert_no_normalized_collision`` (Task A4 / F-72) when a candidate descriptor
+    id normalizes (case/separator-folded -- see ``normalize_capability_id``) to the SAME identity
+    as an id that already exists, whether or not the two strings are byte-identical.
+
+    This is the estate finding this check exists to make impossible going forward: a stale
+    descriptor ``"inbox-management"`` (hyphen, never built, never accepted) coexisting with the
+    canonical, live, accepted descriptor ``"inbox_management"`` (underscore) -- two descriptor rows
+    for what is really ONE capability identity, differing only by separator, which broke
+    ``capability_health``'s health classification for the never-built twin (reported RED, a
+    phantom-broken capability, rather than the distinct non-issue it actually was).
+
+    Plain-language message, no traceback text -- read by a non-technical operator's project the
+    same way every other identity error in this module is."""
+
+
+def assert_no_normalized_collision(new_id: str, existing_ids: Iterable[str]) -> None:
+    """Raise ``CanonicalIdentityError`` iff ``new_id`` normalizes (``normalize_capability_id``) to
+    the same identity as any id already present in ``existing_ids`` -- an exact byte-identical
+    match trivially normalizes equal to itself too, so this SUBSUMES a plain duplicate-id check; a
+    caller does not need a separate exact-match check alongside this one.
+
+    This is the WRITE-TIME collision guard (Task A4 / F-72): call it before a new descriptor id is
+    ever landed in ``security/capability_descriptors.json``, so a case/separator twin of an
+    existing descriptor id can never form going forward. It says nothing, by itself, about an
+    EXISTING twin already on disk (one that formed before this guard existed) -- classifying that
+    (tombstone-eligible ``pending`` vs. a distinct ``identity_conflict`` health state) is
+    ``capability_health.py``'s job, not this write-time refusal's.
+
+    Non-string / empty entries in ``existing_ids`` are skipped, never a collision candidate. Never
+    raises for any input shape other than an actual normalized collision."""
+    normalized_new = normalize_capability_id(new_id)
+    for existing in existing_ids:
+        if not isinstance(existing, str) or not existing:
+            continue
+        if normalize_capability_id(existing) == normalized_new:
+            if existing == new_id:
+                raise CanonicalIdentityError(
+                    f'A descriptor with id "{new_id}" already exists -- refusing to register a '
+                    "duplicate.")
+            raise CanonicalIdentityError(
+                f'The id "{new_id}" is not a new identity -- it differs from the existing '
+                f'descriptor id "{existing}" only by letter case or separator style (hyphen vs. '
+                "underscore), which this system treats as the exact SAME capability identity. "
+                "Landing both would silently split one capability into two descriptor rows (the "
+                f'exact problem this check exists to prevent). Use "{existing}" directly instead, '
+                "or retire it first (if it is a stale, never-built entry) before registering a "
+                "new one under this name.")
 
 
 def assert_identity_coherent(descriptor_id: str, capability_id: str, mechanism_id: str,

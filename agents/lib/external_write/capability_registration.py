@@ -19,7 +19,16 @@ Fail-safe / fail-closed properties (every branch defaults to refuse + write noth
     without it — a capability with no phase binding can never be accepted); else refuse;
   * ``accepted`` must be false — this helper is NEVER a path to ``accepted: true`` (the acceptance
     ceremony is the SOLE writer of that field); an accepted:true input is refused;
-  * the id must be free-form and unique, never the reserved ``__builtin__:`` base sentinel;
+  * the id must be free-form and unique, never the reserved ``__builtin__:`` base sentinel --
+    unique INCLUDING after case/separator folding (Task A4 / F-72): an id that normalizes (via
+    ``capability_identity.assert_no_normalized_collision``) to the SAME identity as an id already
+    in the descriptor set is refused, whether the two strings are byte-identical (a plain
+    duplicate) or merely a case/hyphen-vs-underscore twin of one another (the estate finding: a
+    stale ``"inbox-management"`` entry coexisting with the canonical, live ``"inbox_management"``)
+    -- this closes the seam where such a twin could ever form going forward. This check says
+    nothing about a twin that ALREADY exists on disk from before this guard was added; classifying
+    that is ``capability_health.py``'s job (a distinct ``identity_conflict`` / ``pending`` health
+    state), not this write-time refusal's;
   * an absent / out-of-vocabulary ``risk_class`` is resolved FAIL-SAFE to the most-protected class
     (never silently treated as safe), so an unclassified writer lands GATED and
     co-protected-registered, not invisible;
@@ -81,6 +90,8 @@ from external_write.capability_identity import (
     IdentityResolutionError,
     assert_identity_coherent,
     IdentityCoherenceError,
+    assert_no_normalized_collision,
+    CanonicalIdentityError,
 )
 from external_write.contracts import RISK_CLASSES
 from external_write.write_gate import (
@@ -361,11 +372,18 @@ def register_declared_capability(
         return _refuse(
             f"descriptor set is unreadable / malformed / not a JSON array: {e}", cap_id)
 
-    for e in entries:
-        if isinstance(e, dict) and e.get("id") == cap_id:
-            return _refuse(
-                f"a descriptor with id {cap_id!r} already exists — refusing to register a "
-                "duplicate", cap_id)
+    # (Task A4 / F-72) Write-time collision guard: reject a new id that normalizes
+    # (case/separator-folded) to the SAME identity as any id already in the descriptor set --
+    # this SUBSUMES a plain exact-duplicate check (an exact match trivially normalizes equal to
+    # itself), so no separate exact-match loop is needed. Reuses capability_identity's OWN
+    # normalization rather than a second, hand-rolled one.
+    existing_ids = [
+        e.get("id") for e in entries if isinstance(e, dict) and isinstance(e.get("id"), str)
+    ]
+    try:
+        assert_no_normalized_collision(cap_id, existing_ids)
+    except CanonicalIdentityError as e:
+        return _refuse(str(e), cap_id)
 
     # --- A2 / A3.1: four-way identity coherence -- ACTUALLY GATED by assert_identity_coherent
     # (coordinator review fix: this must be a real production caller of that primitive, not a

@@ -44,12 +44,38 @@ For each capability this module finds, health is RED iff ANY of:
     READ-ONLY about acceptance: it surfaces the SAME verdict
     ``lifecycle_state``/``upgrade_reconcile`` already compute, it never itself
     forces ``accepted: false`` — see ``_capability_acceptance_stale`` below.
-Otherwise health is GREEN. There is no third state: a capability this module
-cannot positively verify clean, importable, unpaused, unqueued, acceptance-
-current, AND positively-read is RED — fail-closed, mirroring every other
-disclosed-bound convention in this package (``write_gate.load_descriptor_set``'s
-"any missing input ... returns []", not a raise and not a silent permissive
-default).
+Otherwise health is GREEN. Two additional, narrowly-scoped states exist ONLY for a
+descriptor-only capability_id (no source file on disk) that is an identity TWIN — differs only by
+letter case or hyphen-vs-underscore — of some OTHER, ALREADY-BUILT canonical capability (Task A4,
+F-72; see "Identity-twin classification" below): ``PENDING`` (declared but never built, never
+accepted, no recorded history of its own — safe to retire) and ``IDENTITY_CONFLICT`` (the same
+twin shape, but carrying real recorded history, so it cannot simply be discarded). A
+descriptor-only id with no such twin is entirely unaffected by this and stays RED exactly as
+before — there is still nothing on disk to positively verify it against, and this module still
+never guesses a capability healthy in the absence of evidence (fail-closed, mirroring every other
+disclosed-bound convention in this package, e.g. ``write_gate.load_descriptor_set``'s "any missing
+input ... returns []", not a raise and not a silent permissive default).
+
+Identity-twin classification (Task A4, F-72)
+------------------------------------------------------------------------------
+The estate finding: a stale descriptor ``"inbox-management"`` (hyphen, never built, never
+accepted) coexisted with the canonical, live, accepted ``"inbox_management"`` (underscore) — two
+descriptor rows for one real capability identity, differing only by separator. Before this fix,
+the never-built twin was reported RED (the SAME state as a genuinely broken capability), an
+operator-facing PHANTOM: session-start orientation would refuse to invite the operator into it as
+if something were actually wrong, when the entry was really just a dead identity remnant.
+
+For a descriptor-only capability_id (``cap_path is None`` below), ``_find_identity_twin`` checks
+whether it normalizes (``capability_identity.normalize_capability_id`` — case/separator-folded,
+reused rather than a second hand-rolled fold) to the SAME identity as some OTHER id that DOES have
+a real source file on disk. If it does not, nothing changes — RED, as always. If it does, the twin
+is classified by whether it carries any recorded STATE of its own (``accepted: true`` on its own
+descriptor entry, a pause marker, a queued migration, an acceptance-audit record, or an
+unreadable/ambiguous read on any of those): no state at all → ``PENDING`` (tombstone-eligible —
+safe to retire, ``"inbox-management"``'s actual estate shape); ANY state → ``IDENTITY_CONFLICT`` (a
+DISTINCT state from RED — this needs a person to look at both entries and merge them, never a
+silent auto-discard). Both carry a plain-language ``operator_message`` describing exactly what to
+do; every other record's ``operator_message`` is ``None``.
 A missing/absent file (nothing yet written) is a NORMAL, non-error input for
 every one of these checks — it is only an EXISTING-but-unreadable/malformed
 file that signals ``state_read_error`` or the descriptor-enumeration sentinel
@@ -178,6 +204,7 @@ from external_write import scan  # noqa: E402
 from external_write.capability_identity import (  # noqa: E402
     build_capability_index,
     IdentityResolutionError,
+    normalize_capability_id,
 )
 from external_write.lifecycle_state import (  # noqa: E402
     acceptance_hash_is_stale,
@@ -204,6 +231,14 @@ CAPABILITY_FILE_SUFFIX = "_capability.py"
 DESCRIPTOR_SET_REL = "security/capability_descriptors.json"
 PAUSED_MECHANISMS_DIR_REL = ".wizard/paused-mechanisms"
 MIGRATION_QUEUE_REL = "agents/handoffs/pending_migrations.json"
+
+# (Task A4 / F-72) duplicated-by-value from lifecycle_state.ACCEPTANCE_LOG_REL /
+# acceptance_ceremony.DEFAULT_AUDIT_LOG_PATH -- pinned equal to lifecycle_state's copy by
+# TestPathConstantsAntiDrift.test_acceptance_log_rel_matches_lifecycle_state_constant, the same
+# discipline every other path constant in this section already carries. Used ONLY by
+# `_has_acceptance_audit_record` (identity-twin classification), never by the acceptance-staleness
+# check above (`_capability_acceptance_stale`), which instead calls into `lifecycle_state` directly.
+ACCEPTANCE_LOG_REL = "security/capability_acceptance_log.jsonl"
 
 # Bounded so a hung/broken capability import can never hang this checker.
 IMPORT_TIMEOUT_SECONDS = 20
@@ -284,6 +319,132 @@ def _load_descriptor_ids(project_root: Path) -> Set[str]:
             if isinstance(cap_id, str) and cap_id:
                 ids.add(cap_id)
     return ids
+
+
+def _load_descriptor_accepted(project_root: Path) -> Dict[str, bool]:
+    """(Task A4 / F-72) capability_id -> accepted (bool), read independently from the descriptor
+    set -- mirrors ``_load_descriptor_ids``'s own read+parse+fail-safe shape exactly (this
+    module's established convention of independent per-purpose readers, e.g. ``_is_paused`` /
+    ``_is_pending_migration`` reading their own files independently rather than sharing state).
+    Used ONLY to classify a descriptor-only identity TWIN (see ``_find_identity_twin`` /
+    ``check_capabilities``) as ``pending`` (no recorded state) vs. ``identity_conflict``
+    (``accepted: true`` is itself state) -- a capability that HAS a source file never consults
+    this; that branch's health formula is unchanged by this task.
+
+    An ABSENT file is normal: ``{}`` (nothing declared, no accepted flags to report). An
+    EXISTING-but-unreadable-or-malformed file raises ``_DescriptorEnumerationError`` -- the exact
+    same signal ``_load_descriptor_ids`` raises for the same condition; ``check_capabilities``
+    calls both and funnels either raise into the same degraded-sentinel record. Missing/non-bool
+    ``accepted`` resolves to False (fail-safe: an absent/ambiguous flag is never treated as
+    accepted)."""
+    path = project_root / DESCRIPTOR_SET_REL
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
+        raise _DescriptorEnumerationError(
+            f"descriptor set {path} exists but could not be read: {exc}") from exc
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise _DescriptorEnumerationError(
+            f"descriptor set {path} exists but is not valid JSON: {exc}") from exc
+    if not isinstance(data, list):
+        raise _DescriptorEnumerationError(
+            f"descriptor set {path} exists but is not a JSON array")
+    accepted_by_id: Dict[str, bool] = {}
+    for entry in data:
+        if isinstance(entry, dict):
+            cap_id = entry.get("id")
+            if isinstance(cap_id, str) and cap_id:
+                accepted_by_id[cap_id] = entry.get("accepted") is True
+    return accepted_by_id
+
+
+def _find_identity_twin(cap_id: str, canonical_ids: Any) -> Optional[str]:
+    """(Task A4 / F-72) Return the OTHER, ALREADY-BUILT canonical capability id (a real
+    ``agents/capabilities/<id>_capability.py`` source file exists for it) that ``cap_id``
+    normalizes (case/separator-folded, ``capability_identity.normalize_capability_id`` -- reused,
+    never a second hand-rolled fold) to the SAME identity as -- or ``None`` if there is no such
+    collision. ``cap_id`` itself is excluded from the search (a capability can never be its own
+    twin).
+
+    Called ONLY for a capability_id with no source file of its own (``cap_path is None`` in
+    ``check_capabilities``) -- this is the "dead identity remnant" shape F-72 found: a stale
+    descriptor entry (``"inbox-management"``, hyphen) that was never built, coexisting with the
+    canonical, live, already-BUILT capability (``"inbox_management"``, underscore) under a
+    different exact spelling. A descriptor-only id with NO twin among the REAL built capabilities
+    returns ``None`` and is left completely unchanged by this task -- it stays the existing,
+    unconditional-RED "nothing on disk to verify against" treatment (see
+    ``TestDescriptorOnlyCapabilityWithNoSourceFile``), because there is no live capability it
+    could be merged into or safely retired in favor of."""
+    normalized_cap = normalize_capability_id(cap_id)
+    for other in canonical_ids:
+        if other == cap_id:
+            continue
+        if normalize_capability_id(other) == normalized_cap:
+            return other
+    return None
+
+
+def _has_acceptance_audit_record(project_root: Path, capability_id: str) -> Tuple[bool, bool]:
+    """(Task A4 / F-72) Returns ``(has_record, read_error)``: ``has_record`` is True iff the
+    acceptance-audit log (an append-only JSONL, ``acceptance_ceremony``'s own write target) has
+    ANY line whose ``capability_id`` equals ``capability_id`` exactly. Used ONLY to classify a
+    descriptor-only identity TWIN (see ``_find_identity_twin``) as carrying real history
+    (``identity_conflict``) rather than being safely tombstone-eligible (``pending``).
+
+    An ABSENT log is normal: ``(False, False)`` -- nothing has ever been accepted, for this id or
+    any other. An EXISTING-but-unreadable file sets ``read_error=True`` (folded into the twin's
+    ``has_state`` verdict by the caller, exactly like every other state-read failure in this
+    module -- never silently "no record"). A malformed INDIVIDUAL line is skipped, not treated as
+    a whole-file read error -- mirrors ``lifecycle_state._read_latest_acceptance_record``'s own
+    per-line tolerance (this module reads the file independently rather than importing that
+    private helper -- every emitted-runtime reader here is self-contained, see the module's own
+    "Stdlib only" convention)."""
+    path = project_root / ACCEPTANCE_LOG_REL
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False, False
+    except OSError:
+        return False, True
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict) and rec.get("capability_id") == capability_id:
+            return True, False
+    return False, False
+
+
+def _tombstone_eligible_message(cap_id: str, twin_of: str) -> str:
+    """(Task A4 / F-72) Plain-language guidance for a ``pending`` identity twin -- safe to retire
+    (tombstone), never RED, because it has no recorded history of its own."""
+    return (
+        f'"{cap_id}" is a leftover descriptor entry for the same capability as "{twin_of}" -- '
+        "they differ only by letter case or a hyphen/underscore. It was declared but never built "
+        "and never accepted, and has no recorded history of its own (no acceptance, no queued "
+        f'migration, no pause). It is safe to retire (tombstone) "{cap_id}"; "{twin_of}" is the '
+        "real, live capability going forward.")
+
+
+def _identity_conflict_message(cap_id: str, twin_of: str) -> str:
+    """(Task A4 / F-72) Plain-language guidance for an ``identity_conflict`` identity twin --
+    blocked, never silently discarded, because it carries real recorded history of its own."""
+    return (
+        f'"{cap_id}" and "{twin_of}" are the SAME capability identity, spelled two different '
+        "ways -- a letter-case or hyphen/underscore difference. But unlike a clean, "
+        f'never-touched duplicate, "{cap_id}" carries its own recorded history (an acceptance '
+        "flag, a queued migration, a pause marker, or an acceptance-audit record), so it cannot "
+        f'simply be discarded. This needs a person to look at both "{cap_id}" and "{twin_of}" '
+        "and merge them into one -- decide which spelling is the real one going forward, and "
+        "fold the other one's history into it.")
 
 
 def _capability_source_files(project_root: Path) -> Dict[str, Path]:
@@ -488,10 +649,19 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
       ``{"capability_id": str, "importable": bool, "scanner_clean": bool,
         "violations": List[str], "paused": bool, "pending_migration": bool,
         "state_read_error": bool, "acceptance_stale": bool,
-        "health": "green" | "red"}``
+        "identity_twin_of": Optional[str], "operator_message": Optional[str],
+        "health": "green" | "red" | "pending" | "identity_conflict"}``
 
     ``health == "red"`` iff (NOT importable) OR (NOT scanner_clean) OR paused
-    OR pending_migration OR state_read_error OR acceptance_stale; else ``"green"``.
+    OR pending_migration OR state_read_error OR acceptance_stale; else ``"green"`` -- EXCEPT for a
+    descriptor-only capability_id (no source file) that is an identity TWIN of some OTHER,
+    already-built canonical capability (Task A4 / F-72; see ``_find_identity_twin`` and the module
+    docstring's "Identity-twin classification" section): that shape reports ``"pending"`` (no
+    recorded state of its own -- tombstone-eligible) or ``"identity_conflict"`` (carries real
+    state -- blocked, needs a person to merge) instead of ``"red"``. ``identity_twin_of`` names the
+    OTHER canonical id it collides with (``None`` for every other record); ``operator_message`` is
+    a plain-language explanation of what to do, populated ONLY for those two states (``None``
+    otherwise).
 
     ``acceptance_stale`` (Task B2b-fix, Critical 2) is True iff the capability is currently
     ``accepted`` and ``lifecycle_state.acceptance_hash_is_stale`` reports its code changed since
@@ -544,6 +714,14 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
     except _DescriptorEnumerationError:
         descriptor_ids = set()
         descriptor_enumeration_degraded = True
+    try:
+        descriptor_accepted = _load_descriptor_accepted(root)
+    except _DescriptorEnumerationError:
+        # (Task A4 / F-72) Same file, same failure -- a caller that already hit this above will
+        # hit it again here; defensive symmetry, not a new failure path. Either raise alone is
+        # already enough to set descriptor_enumeration_degraded.
+        descriptor_accepted = {}
+        descriptor_enumeration_degraded = True
     source_files = _capability_source_files(root)
 
     # F-61 (Task A3): resolve each descriptor-only id to its OWNING module via the capability
@@ -582,6 +760,8 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
             "pending_migration": False,
             "state_read_error": True,
             "acceptance_stale": False,
+            "identity_twin_of": None,
+            "operator_message": None,
             "health": "red",
         })
 
@@ -590,6 +770,8 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
         paused, paused_read_error = _is_paused(root, cap_id)
         pending_migration, migration_read_error = _is_pending_migration(root, cap_id)
         state_read_error = paused_read_error or migration_read_error
+        identity_twin_of: Optional[str] = None
+        operator_message: Optional[str] = None
 
         if cap_path is None:
             # Declared but no source file to scan or import against.
@@ -600,6 +782,28 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
             # already RED for the reasons above regardless; acceptance_hash_is_stale would
             # only ever raise IdentityResolutionError here, never a meaningful verdict.
             acceptance_stale = False
+
+            # (Task A4 / F-72) Identity-twin classification -- see the module docstring's
+            # "Identity-twin classification" section. A descriptor-only id with no twin among the
+            # REAL built capabilities is untouched by this and falls straight through to RED
+            # below, exactly as before this task.
+            twin_of = _find_identity_twin(cap_id, source_files.keys())
+            if twin_of is None:
+                health = "red"
+            else:
+                identity_twin_of = twin_of
+                accepted_flag = descriptor_accepted.get(cap_id, False)
+                has_audit_record, audit_read_error = _has_acceptance_audit_record(root, cap_id)
+                has_state = (
+                    accepted_flag or paused or pending_migration or state_read_error
+                    or has_audit_record or audit_read_error
+                )
+                if has_state:
+                    health = "identity_conflict"
+                    operator_message = _identity_conflict_message(cap_id, twin_of)
+                else:
+                    health = "pending"
+                    operator_message = _tombstone_eligible_message(cap_id, twin_of)
         else:
             found = _scan_source(cap_path)
             scanner_clean = not found
@@ -611,12 +815,12 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
                 importable = False
             acceptance_stale = _capability_acceptance_stale(root, cap_id)
 
-        health = (
-            "red"
-            if (not importable) or (not scanner_clean) or paused or pending_migration
-               or state_read_error or acceptance_stale
-            else "green"
-        )
+            health = (
+                "red"
+                if (not importable) or (not scanner_clean) or paused or pending_migration
+                   or state_read_error or acceptance_stale
+                else "green"
+            )
 
         records.append({
             "capability_id": cap_id,
@@ -627,6 +831,8 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
             "pending_migration": pending_migration,
             "state_read_error": state_read_error,
             "acceptance_stale": acceptance_stale,
+            "identity_twin_of": identity_twin_of,
+            "operator_message": operator_message,
             "health": health,
         })
 
