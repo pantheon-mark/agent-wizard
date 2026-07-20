@@ -59,9 +59,10 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from uuid import uuid4
 
 # sys.path bootstrap (mirrors acceptance_ceremony.py): make the package parent
 # importable when run as a direct script from the project root.
@@ -1702,3 +1703,282 @@ def report_run_recoverability(
         "per_id": per_id,
         "verified_by_id": verified_by_id,
     }
+
+
+# ---------------------------------------------------------------------------
+# Task D6a (Cut 1.1 Cluster D — F-79/F-80): the sanctioned bulk-run helper.
+# ---------------------------------------------------------------------------
+# Root cause: the estate hand-rolled a per-batch loop that RE-MINTED a fresh
+# envelope per batch (``run_id = inbox-bulk-<date>-<N>``, N restarting at 1
+# each invocation) -- 225 first-pass manifests were overwritten (F-79) and one
+# "yes go ahead" was fabricated into 11 per-batch consent receipts with
+# machine-paced ``approved_at`` (F-80). The wizard emitted only LOW-LEVEL
+# primitives (mint-once + single-op run) and nothing sanctioned for a MULTI-
+# CHUNK bulk run, so a naive agent invented the broken loop.
+#
+# ``run_sanctioned_bulk`` closes that hole by OWNING the mint: it is the ONE
+# thing an agent calls for a whole bulk run. Internally it mints EXACTLY ONCE
+# (never re-derives ``run_id``, never mints per chunk), loops
+# ``run_enveloped_operation`` per chunk under that ONE run_id (each call
+# appends one tranche against the frozen ``reviewed_set``), and calls
+# ``finalize_run`` only once every chunk has written. A resumed run is loaded
+# by the SAME recorded ``run_id`` -- never re-minted -- and gated by
+# ``authorize_resume`` (D4) so a resume requires a genuinely FRESH operator
+# consent, never an automatic continuation.
+#
+# ONE run-level consent, N mechanical per-chunk receipts (Decision 2): the
+# single operator consent for the whole run is the envelope + its
+# ``run_consent_receipt-v1``, minted ONCE by this helper via
+# ``mint_run_envelope``. ``run_enveloped_operation``'s ``receipt`` argument is
+# a DISTINCT, non-consent artifact -- ``adapters._validate_receipt`` requires
+# ``receipt["approved_operation_digest"] == op.digest()`` for the EXACT op,
+# and every chunk is a distinct ``Operation`` (distinct digest), so this
+# write-gate receipt is necessarily per-chunk. ``_op_receipt`` below issues it
+# INTERNALLY -- a bare ``{approved_operation_digest, expires_at}`` mirroring
+# the reference tests' ``_receipt(op)`` / the broker's self-issued receipt --
+# it NEVER carries an ``operator_confirmation`` field, so it can never be
+# mistaken for (or degrade into) a consent record. There is exactly one
+# consent artifact per run; the op-receipts are mechanical plumbing.
+
+DEFAULT_BULK_CHUNK_SIZE = 25  # arbitrary batch size; configurable -- NEVER a run_id component.
+
+# TTL for the internally self-issued, per-chunk write-gate receipt (Decision 2)
+# -- mirrors the reference tests' ``_receipt(op)`` / the broker's self-issued
+# receipt shape.
+_OP_RECEIPT_TTL_SECONDS = 900
+
+
+def new_bulk_run_id(run_label: str) -> str:
+    """A run-scoped-UNIQUE id for a FRESH bulk run:
+    ``f'{_safe_run_id(run_label)}-{uuid4().hex[:12]}'``. Derived ONCE inside
+    ``run_sanctioned_bulk`` on a fresh run; the helper RETURNS it in the
+    summary so the caller can record it durably and pass it back verbatim as
+    ``resume_run_id``. Never re-derived on resume, and never a per-chunk
+    counter -- a restart-at-1 counter is exactly the F-79 anti-pattern
+    (``run_id = inbox-bulk-<date>-<N>``, N restarting at 1 each invocation)."""
+    return f"{_safe_run_id(run_label)}-{uuid4().hex[:12]}"
+
+
+def _op_receipt(op: Any) -> Dict[str, Any]:
+    """Self-issue the per-chunk write-gate receipt (Decision 2). This is a
+    MECHANICAL integrity binding to the exact ``Operation`` being applied --
+    ``adapters._validate_receipt`` requires ``approved_operation_digest ==
+    op.digest()``, and each chunk is a distinct Operation (distinct
+    ``canonical_repr()`` -> distinct digest), so it cannot be one shared value
+    across chunks. It carries NO ``operator_confirmation`` field and is NOT a
+    consent artifact -- the run's single consent artifact is the run-level
+    ``run_consent_receipt`` minted once by ``mint_run_envelope``. Mirrors the
+    reference tests' ``_receipt(op)`` / the broker's own self-issued receipt
+    shape exactly."""
+    expires_at = (datetime.now(timezone.utc)
+                  + timedelta(seconds=_OP_RECEIPT_TTL_SECONDS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {"approved_operation_digest": op.digest(), "expires_at": expires_at}
+
+
+def _chunked(ids: Sequence[str], size: int) -> List[Tuple[str, ...]]:
+    """Split ``ids`` into fixed-size chunks (the last may be smaller). The
+    chunk INDEX here is a tranche ordinal only -- it is never part of the
+    run_id (the F-79 fix lives in ``new_bulk_run_id``, not here)."""
+    n = size if isinstance(size, int) and size > 0 else DEFAULT_BULK_CHUNK_SIZE
+    return [tuple(ids[i:i + n]) for i in range(0, len(ids), n)]
+
+
+@dataclass(frozen=True)
+class BulkRunSummary:
+    """The outcome of one ``run_sanctioned_bulk`` call (fresh or resume)."""
+    run_id: str
+    completed: bool                       # True iff every planned id applied AND run finalized
+    finalized: bool
+    applied_unit_ids: Tuple[str, ...]
+    skipped_already_applied: Tuple[str, ...]
+    refused: bool
+    refusal_reason: Optional[str] = None   # plain-language; from mint/authorize_resume/chunk refusal
+    recoverability: Dict[str, Any] = None  # report_run_recoverability(run_id) output
+    per_chunk_status: Tuple[str, ...] = ()  # one Result.status per chunk attempted
+
+    def __post_init__(self):
+        if self.recoverability is None:
+            object.__setattr__(self, "recoverability", {})
+
+
+def _bulk_refusal(
+    run_id: str, reason: str, *, envelope_dir: Optional[str],
+    already_applied: Tuple[str, ...] = (), applied: Tuple[str, ...] = (),
+    per_chunk_status: Tuple[str, ...] = (),
+) -> BulkRunSummary:
+    """Build a refused ``BulkRunSummary``, always attaching recoverability
+    (Control-flow step 6: every return path attaches
+    ``report_run_recoverability``, even a refusal that minted nothing)."""
+    recoverability = (
+        report_run_recoverability(run_id, envelope_dir=envelope_dir) if run_id else {})
+    return BulkRunSummary(
+        run_id=run_id, completed=False, finalized=False,
+        applied_unit_ids=applied, skipped_already_applied=already_applied,
+        refused=True, refusal_reason=reason, recoverability=recoverability,
+        per_chunk_status=per_chunk_status)
+
+
+def run_sanctioned_bulk(
+    *,
+    # ---- op-shape + execution (shared by fresh + resume) ----
+    op_builder: Callable[[Tuple[str, ...]], Any],
+    client: Any = None,
+    read_only_client: Any = None,
+    chunk_size: int = DEFAULT_BULK_CHUNK_SIZE,
+    envelope_dir: Optional[str] = None,
+    ledger_dir: Optional[str] = None,
+    receipt_dir: Optional[str] = None,
+    # ---- FRESH run (resume_run_id is None): the helper MINTS ONCE with these ----
+    run_label: Optional[str] = None,
+    capability_id: Optional[str] = None,
+    op_kind: Optional[str] = None,
+    contract_hash: Optional[str] = None,
+    implementation_hash: Optional[str] = None,
+    reviewed_set: Optional[Any] = None,
+    stratification_summary: Optional[Dict[str, Any]] = None,
+    operator_approval_verbatim: Optional[str] = None,
+    consent_sentence_shown: Optional[str] = None,
+    approved_at: Optional[str] = None,
+    reviewed_set_schema: Optional[str] = None,
+    operator_approved_review_artifact: Optional[str] = None,
+    # ---- RESUME (resume_run_id given): the helper does NOT mint; authorize_resume gates ----
+    resume_run_id: Optional[str] = None,
+    fresh_operator_approval_verbatim: Optional[str] = None,
+    fresh_approved_at: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> BulkRunSummary:
+    """The sanctioned bulk-run entry point (Task D6a): one call = one mint =
+    one run_id = one run-level consent = many tranches. Never call
+    ``mint_run_envelope`` yourself for a bulk run and never hand-roll a
+    per-batch loop -- this is the one right thing to call instead (see the
+    module docstring above for the full F-79/F-80 rationale).
+
+    FRESH run (``resume_run_id`` is None): validates the mint inputs are
+    present -- fail-closed refusal (nothing minted, nothing written) if
+    ``approved_at`` / the verbatim / ``reviewed_set`` / any identity field is
+    missing. ``approved_at`` is never defaulted to a machine time (F-80).
+    Derives ``run_id`` via ``new_bulk_run_id(run_label)`` ONCE and mints ONCE.
+
+    RESUME (``resume_run_id`` given): loads the existing envelope by that
+    EXACT id (never re-derives, never re-mints). A genuinely FINALIZED run is
+    an idempotent no-op (no writes, no consent needed). Otherwise
+    ``authorize_resume`` (D4) must authorize a FRESH operator consent before
+    continuing -- a stale / replayed / re-scoped / expired consent refuses.
+
+    Both paths then loop ``run_enveloped_operation`` per chunk of the
+    envelope's own frozen ``reviewed_set`` (minus anything already applied),
+    self-issuing the per-chunk write-gate receipt via ``_op_receipt`` (never a
+    consent artifact -- Decision 2). Any chunk that does not come back
+    ``"written"`` STOPS the run without finalizing (it stays resumable); only
+    once every chunk has written does this call ``finalize_run``. Every
+    return path -- refused or completed -- attaches
+    ``report_run_recoverability`` to the summary."""
+    if resume_run_id is None:
+        # FRESH run: validate every mint input is present BEFORE deriving a
+        # run_id or minting anything (fail-closed; nothing minted, nothing
+        # written on any of these refusals).
+        for name, val in (
+            ("run_label", run_label), ("capability_id", capability_id),
+            ("op_kind", op_kind), ("contract_hash", contract_hash),
+            ("implementation_hash", implementation_hash),
+            ("operator_approval_verbatim", operator_approval_verbatim),
+            ("consent_sentence_shown", consent_sentence_shown),
+        ):
+            if not (isinstance(val, str) and val.strip()):
+                return _bulk_refusal(
+                    "", f"missing / empty {name} -- a fresh bulk run needs this "
+                    "to mint its run envelope", envelope_dir=envelope_dir)
+        if not (isinstance(reviewed_set, (list, tuple)) and len(reviewed_set) > 0):
+            return _bulk_refusal(
+                "", "reviewed_set is empty -- a bulk run needs a frozen "
+                "reviewed candidate set to apply", envelope_dir=envelope_dir)
+        # F-80: approved_at is the REAL operator-utterance time -- never
+        # defaulted to the machine's mint time. mint_run_envelope enforces
+        # this too, but checking here means a fresh run refuses BEFORE a
+        # run_id is even derived.
+        if not (isinstance(approved_at, str) and approved_at.strip()):
+            return _bulk_refusal(
+                "", "approved_at (the operator-utterance timestamp) is "
+                "required -- the moment the operator actually approved this "
+                "run, never a machine time.", envelope_dir=envelope_dir)
+
+        run_id = new_bulk_run_id(run_label)
+        mint = mint_run_envelope(
+            run_id=run_id, capability_id=capability_id, op_kind=op_kind,
+            contract_hash=contract_hash, implementation_hash=implementation_hash,
+            reviewed_set=reviewed_set, population_count=len(reviewed_set),
+            stratification_summary=stratification_summary,
+            operator_approval_verbatim=operator_approval_verbatim,
+            consent_sentence_shown=consent_sentence_shown, approved_at=approved_at,
+            envelope_dir=envelope_dir, reviewed_set_schema=reviewed_set_schema,
+            operator_approved_review_artifact=operator_approved_review_artifact)
+        if not mint.accepted:
+            return _bulk_refusal(run_id, mint.reason or "mint refused", envelope_dir=envelope_dir)
+        env = mint.envelope
+        already_applied: Tuple[str, ...] = ()
+    else:
+        # RESUME: load by the EXACT recorded run_id -- never re-derive, never re-mint.
+        run_id = resume_run_id
+        env, already_applied = resume_run_envelope(run_id, envelope_dir=envelope_dir)
+        # A genuinely FINALIZED run (real consent on record) is an idempotent
+        # no-op: no writes, no fresh consent required. Guard on `env.consent
+        # is not None` so an ABSENT/never-minted run_id (which also defaults
+        # run_state to FINALIZED as its own fail-closed sentinel) is NOT
+        # mistaken for a completed run -- it falls through to
+        # authorize_resume, which reports "cannot be found".
+        if env.run_state == RUN_STATE_FINALIZED and env.consent is not None:
+            return BulkRunSummary(
+                run_id=run_id, completed=True, finalized=True,
+                applied_unit_ids=(), skipped_already_applied=already_applied,
+                refused=False, refusal_reason=None,
+                recoverability=report_run_recoverability(run_id, envelope_dir=envelope_dir),
+                per_chunk_status=())
+        auth = authorize_resume(
+            run_id,
+            fresh_operator_approval_verbatim=fresh_operator_approval_verbatim or "",
+            fresh_approved_at=fresh_approved_at or "",
+            current_reviewed_set_digest=env.reviewed_set_digest,
+            current_contract_hash=env.contract_hash,
+            current_implementation_hash=env.implementation_hash,
+            now_iso=now_iso, envelope_dir=envelope_dir)
+        if not auth.authorized:
+            return _bulk_refusal(
+                run_id, auth.reason or "resume refused",
+                envelope_dir=envelope_dir, already_applied=already_applied)
+        env = auth.envelope
+        already_applied = auth.already_applied_unit_ids
+
+    # Loop (both paths): apply the envelope's OWN frozen reviewed_set, minus
+    # anything already applied, in chunks under this ONE run_id.
+    planned_ids = tuple(
+        e.get("unit_id") for e in env.reviewed_set
+        if isinstance(e, dict) and isinstance(e.get("unit_id"), str)
+        and e.get("unit_id") not in already_applied)
+    chunks = _chunked(planned_ids, chunk_size)
+
+    applied: List[str] = []
+    per_chunk_status: List[str] = []
+    for chunk_ids in chunks:
+        op = op_builder(chunk_ids)
+        receipt = _op_receipt(op)
+        env, result = run_enveloped_operation(
+            env, op, receipt, client, read_only_client=read_only_client,
+            envelope_dir=envelope_dir, ledger_dir=ledger_dir, receipt_dir=receipt_dir)
+        per_chunk_status.append(result.status)
+        if result.status != "written":
+            # STOP without finalizing -- the run stays resumable.
+            reason = (result.detail.get("reason") if isinstance(result.detail, dict) else None)
+            return _bulk_refusal(
+                run_id, reason or f"a chunk was refused (status={result.status!r})",
+                envelope_dir=envelope_dir, already_applied=already_applied,
+                applied=tuple(applied), per_chunk_status=tuple(per_chunk_status))
+        applied.extend(chunk_ids)
+
+    finalized_env = finalize_run(run_id, envelope_dir=envelope_dir)
+    return BulkRunSummary(
+        run_id=run_id, completed=True,
+        finalized=finalized_env.run_state == RUN_STATE_FINALIZED,
+        applied_unit_ids=tuple(applied), skipped_already_applied=already_applied,
+        refused=False, refusal_reason=None,
+        recoverability=report_run_recoverability(run_id, envelope_dir=envelope_dir),
+        per_chunk_status=tuple(per_chunk_status))

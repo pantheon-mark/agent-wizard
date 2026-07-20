@@ -70,6 +70,11 @@ from external_write.run_envelope import (  # noqa: E402
     report_run_recoverability,
     resume_run_envelope,
     run_enveloped_operation,
+    # D6a — the sanctioned bulk-run helper (F-79/F-80).
+    BulkRunSummary,
+    new_bulk_run_id,
+    run_sanctioned_bulk,
+    _op_receipt,
 )
 
 
@@ -1360,6 +1365,209 @@ class TestReviewedSetV2AndArtifactBinding(unittest.TestCase):
             env_path.write_text(json.dumps(raw), encoding="utf-8")
             tampered = load_run_envelope("run-tamper", envelope_dir=d)
             self.assertFalse(tampered.is_spendable())
+
+
+# ===========================================================================
+# Task D6a (Cut 1.1 Cluster D — F-79/F-80) — run_sanctioned_bulk: the helper
+# OWNS the mint so the sanctioned bulk path exposes NO per-batch mint: one
+# call = one mint = one run_id = one run-level consent = many tranches.
+# ===========================================================================
+
+def _bulk_op_builder(chunk_ids, value="Complete"):
+    """The op_builder callback: (chunk_unit_ids) -> Operation. Op-kind-agnostic
+    per Q3 — uses the existing FIELD_OP fixture, never a Gmail op."""
+    return Operation(
+        surface="fixture_surface", op_kind=FIELD_OP, batch_id="bulk-1",
+        params={"rows": [{"row_id": uid, "intended_value": value} for uid in chunk_ids]})
+
+
+class TestRunSanctionedBulk(unittest.TestCase):
+
+    def setUp(self):
+        _register_field_contract()
+        register_read_facade(FIELD_OP, _FieldReadFacade)
+        register_adapter(FIELD_OP, _FieldAdapter())
+
+    def tearDown(self):
+        _unregister_field_contract()
+        unregister_adapter(FIELD_OP)
+        unregister_read_facade(FIELD_OP)
+
+    # -- Step 1 -------------------------------------------------------------
+
+    def test_new_bulk_run_id_is_unique_and_label_prefixed(self):
+        a = new_bulk_run_id("inbox promos sweep")
+        b = new_bulk_run_id("inbox promos sweep")
+        self.assertNotEqual(a, b)
+        self.assertTrue(a.startswith("inbox_promos_sweep-"))
+        self.assertNotIn("/", a)
+
+    # -- Step 2 ---------------------------------------------------------
+
+    def _fresh_kwargs(self, d, n=6, chunk_size=2, run_label="t2",
+                      op_builder=_bulk_op_builder, approved_at="2026-07-19T22:45:48Z"):
+        # ledger_dir is a SEPARATE subdirectory from envelope_dir so a test's
+        # `glob("*.json")` over the envelope directory sees only the envelope
+        # (+ consent-receipt) files, never the persistent ledger's own
+        # `<window>.ledger.json`.
+        return dict(
+            op_builder=op_builder, run_label=run_label, capability_id="cap:test",
+            op_kind=FIELD_OP, contract_hash="ch", implementation_hash="ih",
+            reviewed_set=_reviewed_set(n), operator_approval_verbatim="yes apply these",
+            consent_sentence_shown=f"Apply {n}.", approved_at=approved_at,
+            chunk_size=chunk_size, envelope_dir=d,
+            ledger_dir=os.path.join(d, "ledger"), receipt_dir=d)
+
+    def test_fresh_bulk_mints_once_applies_all_chunks_and_finalizes(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = {f"row{i}": {"value": "Open"} for i in range(6)}
+            summary = run_sanctioned_bulk(
+                **self._fresh_kwargs(d, n=6, chunk_size=2),
+                client=_FieldWriteClient(store), read_only_client=_FieldReadOnlyClient(store))
+            self.assertTrue(summary.completed, summary.refusal_reason)
+            self.assertTrue(summary.finalized)
+            self.assertEqual(set(summary.applied_unit_ids), {f"row{i}" for i in range(6)})
+            # exactly ONE envelope file on disk (glob minus the consent-receipt file).
+            json_files = [p for p in Path(d).glob("*.json")
+                         if not p.name.endswith(".consent_receipt.json")]
+            self.assertEqual(len(json_files), 1)
+            self.assertEqual(json_files[0].stem, summary.run_id)
+            env = load_run_envelope(summary.run_id, envelope_dir=d)
+            self.assertEqual(env.run_state, RUN_STATE_FINALIZED)
+            self.assertEqual(len(env.tranches), 3)   # 6 rows / chunk_size 2
+
+    def test_fresh_bulk_refuses_when_approved_at_absent(self):
+        # F-80/D3 guard survives the helper: never default to a machine time.
+        with tempfile.TemporaryDirectory() as d:
+            kwargs = self._fresh_kwargs(d, n=6, chunk_size=2)
+            kwargs["approved_at"] = None
+            summary = run_sanctioned_bulk(**kwargs)
+            self.assertTrue(summary.refused)
+            self.assertIn("operator-utterance", (summary.refusal_reason or "").lower())
+            self.assertEqual(list(Path(d).glob("*.json")), [])  # nothing minted
+
+    # -- Step 3 -----------------------------------------------------------
+
+    def test_bulk_run_has_exactly_one_consent_receipt_and_no_per_chunk_consent(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = {f"row{i}": {"value": "Open"} for i in range(6)}
+            summary = run_sanctioned_bulk(
+                **self._fresh_kwargs(d, n=6, chunk_size=2),
+                client=_FieldWriteClient(store), read_only_client=_FieldReadOnlyClient(store))
+            self.assertTrue(summary.completed, summary.refusal_reason)
+            # ONE consent artifact for the whole run -- never a per-chunk consent.
+            receipt_files = list(Path(d).glob("*.consent_receipt.json"))
+            self.assertEqual(len(receipt_files), 1)
+
+            op = _bulk_op_builder(("row0", "row1"))
+            receipt = _op_receipt(op)
+            self.assertEqual(set(receipt.keys()), {"approved_operation_digest", "expires_at"})
+            self.assertNotIn("operator_confirmation", receipt)
+            self.assertEqual(receipt["approved_operation_digest"], op.digest())
+
+    # -- Step 4 -------------------------------------------------------------
+
+    def test_resume_without_fresh_consent_refuses_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            n = 30  # > the Knob B floor (25) -> the aggregate ceiling refuses a later chunk.
+            store = {f"row{i}": {"value": "Open"} for i in range(n)}
+            summary = run_sanctioned_bulk(
+                **self._fresh_kwargs(d, n=n, chunk_size=5),
+                client=_FieldWriteClient(store), read_only_client=_FieldReadOnlyClient(store))
+            self.assertTrue(summary.refused)
+            self.assertFalse(summary.finalized)
+            env_before = load_run_envelope(summary.run_id, envelope_dir=d)
+            tranche_count_before = len(env_before.tranches)
+            self.assertGreaterEqual(tranche_count_before, 1)
+
+            resumed = run_sanctioned_bulk(
+                op_builder=_bulk_op_builder, resume_run_id=summary.run_id, chunk_size=5,
+                envelope_dir=d, ledger_dir=os.path.join(d, "ledger"), receipt_dir=d,
+                client=_FieldWriteClient(store), read_only_client=_FieldReadOnlyClient(store))
+            self.assertTrue(resumed.refused)
+            self.assertIn("fresh", (resumed.refusal_reason or "").lower())
+            env_after = load_run_envelope(summary.run_id, envelope_dir=d)
+            self.assertEqual(len(env_after.tranches), tranche_count_before)
+
+    def test_resume_with_fresh_consent_skips_applied_and_completes(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = {f"row{i}": {"value": "Open"} for i in range(4)}
+            calls = {"n": 0}
+
+            def flaky_builder(chunk_ids):
+                # Simulate a crash-like interruption: the SECOND chunk this
+                # process attempts diverges from the frozen reviewed set (as
+                # a killed-and-regenerated loop might), so the first chunk's
+                # tranche lands durably but the run stops without finalizing.
+                calls["n"] += 1
+                if calls["n"] == 2:
+                    return Operation(
+                        surface="fixture_surface", op_kind=FIELD_OP, batch_id="bulk-1",
+                        params={"rows": [{"row_id": "not-a-reviewed-row",
+                                          "intended_value": "Complete"}]})
+                return _bulk_op_builder(chunk_ids)
+
+            first = run_sanctioned_bulk(
+                **self._fresh_kwargs(d, n=4, chunk_size=2, run_label="t4b",
+                                     op_builder=flaky_builder),
+                client=_FieldWriteClient(store), read_only_client=_FieldReadOnlyClient(store))
+            self.assertTrue(first.refused)
+            self.assertFalse(first.finalized)
+            self.assertEqual(set(first.applied_unit_ids), {"row0", "row1"})
+
+            resumed = run_sanctioned_bulk(
+                op_builder=_bulk_op_builder, resume_run_id=first.run_id, chunk_size=2,
+                fresh_operator_approval_verbatim="yes, continue for real",
+                fresh_approved_at="2026-07-19T23:10:00Z", now_iso="2026-07-19T23:10:00Z",
+                envelope_dir=d, ledger_dir=os.path.join(d, "ledger"), receipt_dir=d,
+                client=_FieldWriteClient(store), read_only_client=_FieldReadOnlyClient(store))
+            self.assertTrue(resumed.completed, resumed.refusal_reason)
+            self.assertIn("row0", resumed.skipped_already_applied)
+            self.assertIn("row1", resumed.skipped_already_applied)
+            self.assertEqual(set(resumed.applied_unit_ids), {"row2", "row3"})
+
+    # -- Step 5 -------------------------------------------------------------
+
+    def test_chunk_refusal_stops_and_does_not_finalize(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = {}
+
+            def divergent_builder(chunk_ids):
+                return Operation(
+                    surface="fixture_surface", op_kind=FIELD_OP, batch_id="bulk-1",
+                    params={"rows": [{"row_id": "not-reviewed", "intended_value": "Complete"}]})
+
+            summary = run_sanctioned_bulk(
+                **self._fresh_kwargs(d, n=3, chunk_size=3, run_label="t5a",
+                                     op_builder=divergent_builder),
+                client=_FieldWriteClient(store), read_only_client=_FieldReadOnlyClient(store))
+            self.assertTrue(summary.refused)
+            self.assertFalse(summary.finalized)
+            self.assertFalse(summary.completed)
+            env = load_run_envelope(summary.run_id, envelope_dir=d)
+            self.assertNotEqual(env.run_state, RUN_STATE_FINALIZED)
+            self.assertTrue(summary.recoverability)
+
+    def test_resume_of_finalized_run_is_idempotent_noop(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = {f"row{i}": {"value": "Open"} for i in range(3)}
+            first = run_sanctioned_bulk(
+                **self._fresh_kwargs(d, n=3, chunk_size=3, run_label="t5b"),
+                client=_FieldWriteClient(store), read_only_client=_FieldReadOnlyClient(store))
+            self.assertTrue(first.completed, first.refusal_reason)
+            self.assertTrue(first.finalized)
+            tranche_count = len(load_run_envelope(first.run_id, envelope_dir=d).tranches)
+
+            resumed = run_sanctioned_bulk(
+                op_builder=_bulk_op_builder, resume_run_id=first.run_id, chunk_size=3,
+                envelope_dir=d, ledger_dir=os.path.join(d, "ledger"), receipt_dir=d,
+                client=_FieldWriteClient(store), read_only_client=_FieldReadOnlyClient(store))
+            self.assertTrue(resumed.completed)
+            self.assertTrue(resumed.finalized)
+            self.assertFalse(resumed.refused)
+            self.assertEqual(
+                len(load_run_envelope(first.run_id, envelope_dir=d).tranches), tranche_count)
+            self.assertTrue(resumed.recoverability)
 
 
 if __name__ == "__main__":
