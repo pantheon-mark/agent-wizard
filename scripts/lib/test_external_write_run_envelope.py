@@ -49,13 +49,20 @@ from external_write.run_envelope import (  # noqa: E402
     Ceiling,
     Consent,
     RunEnvelope,
+    Tranche,
     REVIEWED_SET_SCHEMA_V1,
     REVIEWED_SET_SCHEMA_V2,
+    RUN_STATE_PENDING,
+    RUN_STATE_EXECUTING,
+    RUN_STATE_FINALIZED,
+    append_tranche,
     compute_reviewed_set_digest,
     derive_ledger_window_id,
+    finalize_run,
     load_run_envelope,
     mint_run_envelope,
     render_review_artifact,
+    resume_run_envelope,
     run_enveloped_operation,
 )
 
@@ -157,6 +164,53 @@ class TestMintAndLoad(unittest.TestCase):
             self.assertTrue(res.accepted, res.reason)
             self.assertEqual(res.envelope.ceiling.recovery_tier, "reversible")
             self.assertTrue(res.envelope.is_spendable())
+
+    # -- D2: WAL run-state + load-existing resume (F-79/F-84 substrate) -----
+
+    def test_mint_writes_pending_run_state(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d).envelope
+            self.assertEqual(env.run_state, RUN_STATE_PENDING)
+            # persisted + reloadable
+            self.assertEqual(load_run_envelope("run-1", envelope_dir=d).run_state,
+                             RUN_STATE_PENDING)
+
+    def test_append_tranche_advances_to_executing(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d).envelope
+            updated = append_tranche(
+                env, Tranche(applied_unit_ids=("row0",), per_unit_result={},
+                             verification_status="applied_not_verified"),
+                envelope_dir=d)
+            self.assertEqual(updated.run_state, RUN_STATE_EXECUTING)
+            self.assertEqual(load_run_envelope("run-1", envelope_dir=d).run_state,
+                             RUN_STATE_EXECUTING)
+
+    def test_finalize_run_sets_finalized_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._mint(d)
+            f1 = finalize_run("run-1", envelope_dir=d)
+            self.assertEqual(f1.run_state, RUN_STATE_FINALIZED)
+            f2 = finalize_run("run-1", envelope_dir=d)  # idempotent
+            self.assertEqual(f2.run_state, RUN_STATE_FINALIZED)
+
+    def test_resume_loads_existing_and_reports_already_applied(self):
+        # A killed-mid-run envelope resumes by LOADING the same run_id (never
+        # re-minting a colliding id, which D1 refuses) and reports which
+        # unit_ids were already applied so the caller does not re-apply them.
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d).envelope
+            append_tranche(
+                env, Tranche(applied_unit_ids=("row0", "row1"), per_unit_result={},
+                             verification_status="applied_not_verified"),
+                envelope_dir=d)
+            resumed, already = resume_run_envelope("run-1", envelope_dir=d)
+            self.assertEqual(resumed.run_id, "run-1")
+            self.assertEqual(resumed.run_state, RUN_STATE_EXECUTING)
+            self.assertEqual(already, ("row0", "row1"))
+            # resume did NOT create a second envelope / re-mint
+            self.assertEqual(len([p for p in os.listdir(d) if p.endswith(".json")
+                                  and "consent_receipt" not in p]), 1)
 
 
 # ===========================================================================

@@ -58,7 +58,7 @@ import hashlib
 import json
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -85,6 +85,21 @@ from external_write.write_gate import DEFAULT_LEDGER_DIR, PersistentInvocationLe
 
 # Schema tag for the persisted envelope.
 RUN_ENVELOPE_SCHEMA = "run_envelope-v1"
+
+# ---------------------------------------------------------------------------
+# Run-state WAL (Task D2, Cut 1.1 Cluster D — F-79/F-84 substrate)
+# ---------------------------------------------------------------------------
+# The explicit run-lifecycle state, persisted with the envelope. A mint always
+# writes PENDING_RUN (WAL-first: intent + frozen reviewed_set + consent are
+# durable before any mutation is attempted). `append_tranche` — the one place
+# a tranche actually lands — advances the state to EXECUTING. A separate
+# `finalize_run` finalizer (NOT the apply path) sets FINALIZED once the whole
+# run is done; `run_enveloped_operation` applies one op and returns, so it
+# cannot itself know a run is complete.
+RUN_STATE_PENDING = "pending_run"
+RUN_STATE_EXECUTING = "executing"
+RUN_STATE_FINALIZED = "finalized"
+_RUN_STATES = (RUN_STATE_PENDING, RUN_STATE_EXECUTING, RUN_STATE_FINALIZED)
 
 # Project-root-relative home for persisted run envelopes (disk-first + audit).
 DEFAULT_ENVELOPE_DIR = "security/run_envelopes"
@@ -331,6 +346,11 @@ class RunEnvelope:
     # schema versioning" section above `RunEnvelope` for the full rationale.
     reviewed_set_schema: str = REVIEWED_SET_SCHEMA_V1
     review_artifact_digest: str = ""
+    # Task D2 (Cut 1.1 Cluster D): the WAL run-lifecycle state. New field,
+    # appended LAST so every existing positional RunEnvelope(...) construction
+    # (mint, append_tranche rebuild, hand-built test fixtures) keeps working
+    # and gets the safe PENDING default when omitted.
+    run_state: str = RUN_STATE_PENDING
 
     @property
     def ledger_window_id(self) -> str:
@@ -410,7 +430,10 @@ def _empty_envelope(run_id: str) -> RunEnvelope:
         stratification_summary={},
         ceiling=Ceiling(0, 0, 0, FAIL_SAFE_RECOVERY_TIER),
         consent=None, evidence_policy={}, tranches=(), stored_ledger_window_id="",
-        reviewed_set_schema=REVIEWED_SET_SCHEMA_V1, review_artifact_digest="")
+        reviewed_set_schema=REVIEWED_SET_SCHEMA_V1, review_artifact_digest="",
+        # An empty envelope is not spendable regardless (0 budget, no consent);
+        # FINALIZED communicates it plainly as "not a live/resumable run".
+        run_state=RUN_STATE_FINALIZED)
 
 
 def _to_disk_dict(env: RunEnvelope) -> Dict[str, Any]:
@@ -442,6 +465,7 @@ def _to_disk_dict(env: RunEnvelope) -> Dict[str, Any]:
         "ledger_window_id": env.ledger_window_id,
         "reviewed_set_schema": env.reviewed_set_schema,
         "review_artifact_digest": env.review_artifact_digest,
+        "run_state": env.run_state,
         "tranches": [
             {
                 "applied_unit_ids": list(t.applied_unit_ids),
@@ -517,6 +541,9 @@ def _from_disk_dict(raw: Dict[str, Any], run_id: str) -> RunEnvelope:
         stored_ledger_window_id=str(raw.get("ledger_window_id", "")),
         reviewed_set_schema=str(raw.get("reviewed_set_schema") or REVIEWED_SET_SCHEMA_V1),
         review_artifact_digest=str(raw.get("review_artifact_digest", "")),
+        # Safe default: an older envelope written before Task D2 (no run_state
+        # on disk) loads as PENDING rather than raising.
+        run_state=str(raw.get("run_state") or RUN_STATE_PENDING),
     )
 
 
@@ -986,6 +1013,7 @@ def mint_run_envelope(
         stored_ledger_window_id="",  # never trusted; the property derives it
         reviewed_set_schema=schema,
         review_artifact_digest=review_artifact_digest,
+        run_state=RUN_STATE_PENDING,
     )
 
     path = _envelope_path(run_id, envelope_dir)
@@ -1020,9 +1048,45 @@ def append_tranche(env: RunEnvelope, tranche: Tranche, *,
         stored_ledger_window_id=env.stored_ledger_window_id,
         reviewed_set_schema=env.reviewed_set_schema,
         review_artifact_digest=env.review_artifact_digest,
+        # D2: the one place a tranche actually lands is exactly where the
+        # run-state WAL advances from PENDING to EXECUTING.
+        run_state=RUN_STATE_EXECUTING,
     )
     _atomic_write_json(_envelope_path(env.run_id, envelope_dir), _to_disk_dict(updated))
     return updated
+
+
+def finalize_run(run_id: str, *, envelope_dir: Optional[str] = None) -> RunEnvelope:
+    """Mark a run FINALIZED — the run is done, not resumable as a live run.
+    Loads the disk-authoritative envelope (never trusts a passed-in one);
+    fail-closed on a non-spendable/absent envelope: nothing durable to
+    finalize, so nothing is written and the loaded (non-spendable) envelope is
+    returned unchanged. Idempotent: finalizing an already-FINALIZED envelope
+    is a no-op write of the same state."""
+    env = load_run_envelope(run_id, envelope_dir=envelope_dir)
+    if not env.is_spendable():
+        return env
+    updated = replace(env, run_state=RUN_STATE_FINALIZED)
+    _atomic_write_json(_envelope_path(run_id, envelope_dir), _to_disk_dict(updated))
+    return updated
+
+
+def resume_run_envelope(
+    run_id: str, *, envelope_dir: Optional[str] = None,
+) -> Tuple[RunEnvelope, Tuple[str, ...]]:
+    """Resume a run by LOADING the existing envelope — NEVER re-minting (D1
+    already makes a re-used run_id refuse at mint time; this is the sanctioned
+    counterpart: the one-mint-many-tranches model resumes by reading the same
+    run_id's disk-authoritative state). Returns ``(envelope, already_applied_
+    unit_ids)`` where the second is the sorted, de-duplicated union of every
+    persisted tranche's ``applied_unit_ids`` — so a caller resuming a
+    killed-mid-run bulk operation knows exactly which units to skip rather
+    than re-applying them."""
+    env = load_run_envelope(run_id, envelope_dir=envelope_dir)
+    applied: List[str] = []
+    for t in env.tranches:
+        applied.extend(t.applied_unit_ids)
+    return env, tuple(sorted(set(applied)))
 
 
 def _tranche_from_result(result: Result) -> Tranche:
