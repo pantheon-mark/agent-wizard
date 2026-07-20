@@ -351,6 +351,10 @@ class RunEnvelope:
     # (mint, append_tranche rebuild, hand-built test fixtures) keeps working
     # and gets the safe PENDING default when omitted.
     run_state: str = RUN_STATE_PENDING
+    # Task D3 (F-80): the MACHINE mint-time audit field -- distinct from
+    # `consent.approved_at` (the operator-utterance time). Appended LAST for
+    # the same reason as `run_state` above. Never used as a consent time.
+    minted_at: str = ""
 
     @property
     def ledger_window_id(self) -> str:
@@ -473,6 +477,7 @@ def _to_disk_dict(env: RunEnvelope) -> Dict[str, Any]:
         "reviewed_set_schema": env.reviewed_set_schema,
         "review_artifact_digest": env.review_artifact_digest,
         "run_state": env.run_state,
+        "minted_at": env.minted_at,
         "tranches": [
             {
                 "applied_unit_ids": list(t.applied_unit_ids),
@@ -567,6 +572,9 @@ def _from_disk_dict(raw: Dict[str, Any], run_id: str) -> RunEnvelope:
         # is resolved tranche-aware rather than defaulting blindly to
         # PENDING -- see `_resolve_run_state`.
         run_state=_resolve_run_state(raw.get("run_state"), tranches),
+        # Task D3: machine mint-time audit metadata, distinct from
+        # consent.approved_at. Absent on a pre-D3 on-disk envelope -> "".
+        minted_at=str(raw.get("minted_at") or ""),
     )
 
 
@@ -681,16 +689,21 @@ def load_run_consent_receipt(run_id: str, *, receipt_dir: Optional[str] = None) 
 
 def _mint_run_consent_receipt(
     *, run_id: str, reviewed_set_digest: str, operator_confirmation: str,
-    approved_at: str, receipt_dir: Optional[str] = None,
+    approved_at: str, minted_at: str, receipt_dir: Optional[str] = None,
 ) -> str:
     """Persist the run-consent receipt atomically. Raises on any write failure
-    (the caller — `mint_run_envelope` — treats that as a mint refusal)."""
+    (the caller — `mint_run_envelope` — treats that as a mint refusal).
+
+    ``approved_at`` is the operator-utterance consent time; ``minted_at`` is
+    the DISTINCT machine mint-time audit field (Task D3 / F-80) — the receipt
+    carries both so audit can see them without conflating them."""
     receipt = {
         "schema": RUN_CONSENT_RECEIPT_SCHEMA,
         "run_id": run_id,
         "reviewed_set_digest": reviewed_set_digest,
         "operator_confirmation": operator_confirmation,
         "approved_at": approved_at,
+        "minted_at": minted_at,
     }
     path = _consent_receipt_path(run_id, receipt_dir)
     _exclusive_write_json(path, receipt)
@@ -878,6 +891,13 @@ def mint_run_envelope(
     bound to the ``reviewed_set_digest``. (The machine-generated consent SENTENCE
     is Task 6 and apply-by-id enforcement is Task 5 — this mints the manifest.)
 
+    ``approved_at`` is REQUIRED (Task D3 / F-80): it is the operator-utterance
+    consent timestamp — the moment the operator actually approved — and must
+    be supplied by the caller. A missing/empty value refuses; it is never
+    defaulted to the machine's mint time. The separate ``minted_at`` field
+    (stamped by this function via ``_now_iso_z()``) captures the machine mint
+    time as distinct audit metadata.
+
     Task 8 (A3 / F-48) adds two OPTIONAL, backward-compatible parameters:
     ``reviewed_set_schema`` (default "reviewed_set-v1" — every v0.12.0 caller's
     existing call keeps minting exactly as before) and, for
@@ -940,6 +960,15 @@ def mint_run_envelope(
             "operator confirmation is empty — the operator has not confirmed; "
             "nothing minted, nothing spendable")
 
+    # F-80: approved_at (the CONSENT field) must be the real operator-utterance
+    # time -- the moment the operator actually approved -- never silently
+    # defaulted to the machine's mint time. Refuse rather than fabricate it.
+    if not (isinstance(approved_at, str) and approved_at.strip()):
+        return _mint_refuse(
+            "approved_at (the operator-utterance timestamp) is required — the consent "
+            "record must carry the moment the operator actually approved, not the "
+            "machine's mint time. Pass the operator-utterance timestamp explicitly.")
+
     if not (isinstance(population_count, int) and not isinstance(population_count, bool)
             and population_count >= 0):
         return _mint_refuse("population_count must be a non-negative integer")
@@ -967,7 +996,12 @@ def mint_run_envelope(
 
     reviewed_set_tuple: Tuple[Dict[str, Any], ...] = tuple(dict(e) for e in reviewed_set)
     reviewed_set_digest = compute_reviewed_set_digest(reviewed_set_tuple)
-    resolved_approved_at = approved_at if approved_at else _now_iso_z()
+    # Validated non-empty above -- the CONSENT time is exactly the caller's
+    # operator-utterance timestamp, never a machine-minted fallback.
+    resolved_approved_at = approved_at
+    # Separate machine mint-time audit metadata (Task D3 / F-80) -- distinct
+    # from resolved_approved_at, never conflated with it.
+    minted_at = _now_iso_z()
 
     # AC-T8a — the consent-artifact binding (v2 only): recompute the review
     # artifact digest from the FROZEN, schema-validated reviewed_set and
@@ -1013,7 +1047,8 @@ def mint_run_envelope(
         receipt_ref = _mint_run_consent_receipt(
             run_id=run_id, reviewed_set_digest=reviewed_set_digest,
             operator_confirmation=operator_approval_verbatim,
-            approved_at=resolved_approved_at, receipt_dir=envelope_dir)
+            approved_at=resolved_approved_at, minted_at=minted_at,
+            receipt_dir=envelope_dir)
     except Exception as e:
         return _mint_refuse(
             f"could not persist the run-consent receipt; nothing minted: {e}")
@@ -1037,6 +1072,7 @@ def mint_run_envelope(
         reviewed_set_schema=schema,
         review_artifact_digest=review_artifact_digest,
         run_state=RUN_STATE_PENDING,
+        minted_at=minted_at,
     )
 
     path = _envelope_path(run_id, envelope_dir)
@@ -1087,6 +1123,8 @@ def append_tranche(env: RunEnvelope, tranche: Tranche, *,
         # D2: the one place a tranche actually lands is exactly where the
         # run-state WAL advances from PENDING to EXECUTING.
         run_state=RUN_STATE_EXECUTING,
+        # D3: carry the machine mint-time audit field forward unchanged.
+        minted_at=env.minted_at,
     )
     _atomic_write_json(_envelope_path(env.run_id, envelope_dir), _to_disk_dict(updated))
     return updated

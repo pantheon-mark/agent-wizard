@@ -244,7 +244,8 @@ class _ApplyByIdFixtureCase(unittest.TestCase):
             contract_hash="ch", implementation_hash="ih",
             reviewed_set=reviewed_set, population_count=max(len(reviewed_set), 1),
             stratification_summary={}, operator_approval_verbatim="yes, apply these",
-            consent_sentence_shown="Apply the reviewed set.", envelope_dir=d).envelope
+            consent_sentence_shown="Apply the reviewed set.",
+            approved_at="2026-07-19T22:45:48Z", envelope_dir=d).envelope
 
 
 class TestApplyByIdGmailShaped(_ApplyByIdFixtureCase):
@@ -416,7 +417,7 @@ class TestReceiptBinding(_ApplyByIdFixtureCase):
                 contract_hash="ch", implementation_hash="ih",
                 reviewed_set=reviewed, population_count=1, stratification_summary={},
                 operator_approval_verbatim="yes", consent_sentence_shown="Apply 1 change.",
-                envelope_dir=d)
+                approved_at="2026-07-19T22:45:48Z", envelope_dir=d)
             self.assertTrue(res.accepted, res.reason)
             self.assertIsNotNone(res.receipt_ref)
             receipt = load_run_consent_receipt("run-r", receipt_dir=d)

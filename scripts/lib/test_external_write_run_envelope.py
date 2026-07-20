@@ -59,6 +59,7 @@ from external_write.run_envelope import (  # noqa: E402
     compute_reviewed_set_digest,
     derive_ledger_window_id,
     finalize_run,
+    load_run_consent_receipt,
     load_run_envelope,
     mint_run_envelope,
     render_review_artifact,
@@ -119,7 +120,7 @@ class TestMintAndLoad(unittest.TestCase):
             stratification_summary={"status_change": 3},
             operator_approval_verbatim="yes, apply these three changes",
             consent_sentence_shown="Apply 3 reversible status changes.",
-            envelope_dir=d)
+            approved_at="2026-07-19T22:45:48Z", envelope_dir=d)
 
     def test_mint_produces_spendable_envelope_with_budget(self):
         with tempfile.TemporaryDirectory() as d:
@@ -375,7 +376,8 @@ class TestI1SoleMinter(unittest.TestCase):
                 contract_hash="ch", implementation_hash="ih",
                 reviewed_set=_reviewed_set(3), population_count=100,
                 stratification_summary={}, operator_approval_verbatim="yes",
-                consent_sentence_shown="Apply 3 changes.", envelope_dir=d)
+                consent_sentence_shown="Apply 3 changes.",
+                approved_at="2026-07-19T22:45:48Z", envelope_dir=d)
             first = mint_run_envelope(**kw)
             self.assertTrue(first.accepted, first.reason)
             second = mint_run_envelope(**kw)  # same run_id, second invocation
@@ -421,7 +423,8 @@ class TestI1SoleMinter(unittest.TestCase):
                 contract_hash="ch", implementation_hash="ih",
                 reviewed_set=_reviewed_set(3), population_count=100,
                 stratification_summary={}, operator_approval_verbatim="yes",
-                consent_sentence_shown="Apply 3 changes.", envelope_dir=d)
+                consent_sentence_shown="Apply 3 changes.",
+                approved_at="2026-07-19T22:45:48Z", envelope_dir=d)
             p = Path(d) / "run-t.json"
             raw = json.loads(p.read_text())
             raw["ledger_window_id"] = "tampered_window_id"
@@ -462,6 +465,51 @@ class TestI1SoleMinter(unittest.TestCase):
             evidence_policy={}, tranches=(), stored_ledger_window_id="")
         self.assertFalse(env.is_spendable(),
                          "an empty stored ledger_window_id must fail the tamper check (C1)")
+
+
+# ===========================================================================
+# D3 (F-80) — run-level consent bound to the operator utterance time, never
+# a machine-minted default
+# ===========================================================================
+
+class TestRunLevelConsentUtteranceTime(unittest.TestCase):
+
+    def setUp(self):
+        _register_field_contract()
+
+    def tearDown(self):
+        _unregister_field_contract()
+
+    def test_mint_refuses_without_operator_utterance_timestamp(self):
+        with tempfile.TemporaryDirectory() as d:
+            res = mint_run_envelope(
+                run_id="run-u", capability_id="c", op_kind=FIELD_OP,
+                contract_hash="ch", implementation_hash="ih",
+                reviewed_set=_reviewed_set(3), population_count=100,
+                stratification_summary={}, operator_approval_verbatim="yes go ahead",
+                consent_sentence_shown="Apply 3 changes.",
+                approved_at=None, envelope_dir=d)          # NO utterance time
+            self.assertFalse(res.accepted)
+            self.assertIn("approved_at", (res.reason or "").lower())
+
+    def test_consent_records_the_operator_utterance_time_not_mint_time(self):
+        with tempfile.TemporaryDirectory() as d:
+            utterance_ts = "2026-07-19T22:45:48Z"
+            res = mint_run_envelope(
+                run_id="run-u2", capability_id="c", op_kind=FIELD_OP,
+                contract_hash="ch", implementation_hash="ih",
+                reviewed_set=_reviewed_set(3), population_count=100,
+                stratification_summary={}, operator_approval_verbatim="yes go ahead",
+                consent_sentence_shown="Apply 3 changes.",
+                approved_at=utterance_ts, envelope_dir=d)
+            self.assertTrue(res.accepted, res.reason)
+            self.assertEqual(res.envelope.consent.approved_at, utterance_ts)
+            self.assertNotEqual(res.envelope.minted_at, "")        # machine time captured separately
+            self.assertNotEqual(res.envelope.minted_at, utterance_ts)
+            # receipt carries the SAME single utterance time, plus a distinct minted_at
+            rcpt = load_run_consent_receipt("run-u2", receipt_dir=d)
+            self.assertEqual(rcpt["approved_at"], utterance_ts)
+            self.assertIn("minted_at", rcpt)
 
 
 # ===========================================================================
@@ -548,7 +596,7 @@ class TestEnvelopedRunPathRecordsTranches(unittest.TestCase):
                            "category": "status", "protected_status": False}],
             population_count=50, stratification_summary={},
             operator_approval_verbatim="yes", consent_sentence_shown="Apply 1 change.",
-            envelope_dir=d).envelope
+            approved_at="2026-07-19T22:45:48Z", envelope_dir=d).envelope
 
     def test_run_path_records_verification_into_a_tranche(self):
         with tempfile.TemporaryDirectory() as d:
@@ -721,7 +769,7 @@ class TestI3AggregateCeilingComposesWithPerOpCap(unittest.TestCase):
             reviewed_set=reviewed,
             population_count=50, stratification_summary={},
             operator_approval_verbatim="yes", consent_sentence_shown="Apply changes.",
-            envelope_dir=d).envelope
+            approved_at="2026-07-19T22:45:48Z", envelope_dir=d).envelope
 
     def test_aggregate_ceiling_refuses_bulk_that_each_chunk_passes_per_op(self):
         with tempfile.TemporaryDirectory() as d:
@@ -786,7 +834,8 @@ class TestReviewedSetV2AndArtifactBinding(unittest.TestCase):
             contract_hash="ch-abc", implementation_hash="ih-abc",
             reviewed_set=reviewed_set, population_count=len(reviewed_set),
             stratification_summary={}, operator_approval_verbatim="yes, apply these",
-            consent_sentence_shown="Apply the reviewed set.", envelope_dir=d,
+            consent_sentence_shown="Apply the reviewed set.",
+            approved_at="2026-07-19T22:45:48Z", envelope_dir=d,
             reviewed_set_schema=schema, operator_approved_review_artifact=artifact)
 
     # --- AC-T8b: versioning ---------------------------------------------
@@ -801,7 +850,8 @@ class TestReviewedSetV2AndArtifactBinding(unittest.TestCase):
                 contract_hash="ch", implementation_hash="ih",
                 reviewed_set=_reviewed_set(3), population_count=100,
                 stratification_summary={}, operator_approval_verbatim="yes",
-                consent_sentence_shown="Apply 3 changes.", envelope_dir=d)
+                consent_sentence_shown="Apply 3 changes.",
+                approved_at="2026-07-19T22:45:48Z", envelope_dir=d)
             self.assertTrue(res.accepted, res.reason)
             self.assertEqual(res.envelope.reviewed_set_schema, REVIEWED_SET_SCHEMA_V1)
 
@@ -913,7 +963,8 @@ class TestReviewedSetV2AndArtifactBinding(unittest.TestCase):
                 contract_hash="ch", implementation_hash="ih",
                 reviewed_set=reviewed, population_count=100,
                 stratification_summary={}, operator_approval_verbatim="yes",
-                consent_sentence_shown="Apply.", envelope_dir=d,
+                consent_sentence_shown="Apply.",
+                approved_at="2026-07-19T22:45:48Z", envelope_dir=d,
                 reviewed_set_schema=REVIEWED_SET_SCHEMA_V2)
             self.assertFalse(res.accepted)
             self.assertIn("operator_approved_review_artifact", res.reason)
