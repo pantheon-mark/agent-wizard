@@ -24,7 +24,8 @@
 ## `security/audit/` — the one committed exception (redacted, not gitignored)
 
 `security/audit/` is deliberately **not** in `.gitignore` and **is committed**. It holds a
-**redacted audit projection** — a summary record (counts, digests, a consent timestamp, and
+**redacted audit projection** — a summary record (counts, digests (a one-way fingerprint
+that can't be turned back into the original id), a consent timestamp, and
 an overall outcome) of an external-write run, written specifically so the *fact that a run
 happened and what it did* survives even if the working copy is lost or wiped. It is built
 FROM the raw, local-only records above (`run_envelopes/`, `invocation_ledgers/`,

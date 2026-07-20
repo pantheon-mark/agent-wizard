@@ -323,22 +323,89 @@ class CommitHygieneBehaviorTests(unittest.TestCase):
         self.assertNotIn("old_dump.csv", self._tracked(),
                           "F-83: a worktree-only deletion of a sensitive path was not staged/committed")
 
-    def test_f83_staged_sensitive_content_addition_still_reverted_by_backstop(self):
-        # Regression guard (must NOT weaken): a NEW sensitive file staged (via
-        # `git add`, i.e. an "A" record, content genuinely being ADDED) before
-        # the hook runs must still be caught and unstaged by the backstop --
-        # the F-83 fix must key on change TYPE, not blanket-exempt a path just
-        # because it is already staged.
+    def test_f30_already_tracked_intercepts_staged_sensitive_basename_before_backstop_runs(self):
+        # RENAMED (E2 review, Important fix) from
+        # test_f83_staged_sensitive_content_addition_still_reverted_by_backstop, which
+        # claimed to prove the NEW F-83 backstop (_staged_status_records / _is_pure_delete /
+        # status.startswith("D") at commit_hygiene.sh's staged-set check) does not
+        # over-correct. It does not: `id_rsa` is a BUILTIN-sensitive basename
+        # (SENSITIVE_BASENAME_GLOBS), and `git ls-files` lists a path the moment it is
+        # `git add`ed -- even before any commit -- so the PRE-EXISTING F-30 "already-tracked"
+        # pass (_tracked_sensitive, computed from git ls-files at hook-start) intercepts this
+        # file and `git rm --cached`s it BEFORE the new backstop's staged-status check ever
+        # runs. This test proves F-30 already-tracked interception, not the new backstop
+        # logic. See test_f83_backstop_reverts_staged_unsafe_extension_pure_add below for a
+        # test that genuinely isolates the new backstop path (a file F-30 does NOT catch).
         secret = self.repo / "id_rsa"
         secret.write_text("-----BEGIN KEY-----\n", encoding="utf-8")
         _git(self.repo, "add", "id_rsa")
         r = self._run("SessionEnd")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("id_rsa", self._tracked(),
-                          "F-83 fix over-corrected: staged sensitive CONTENT (an add) "
-                          "was committed instead of reverted")
+                          "F-30 already-tracked interception failed: staged sensitive "
+                          "CONTENT (an add) was committed instead of being untracked")
         self.assertIn("id_rsa", r.stdout + r.stderr,
                       "staged sensitive content was neither committed nor surfaced")
+
+    def test_f83_backstop_reverts_staged_unsafe_extension_pure_add(self):
+        # Fix 1(b) (E2 review, Important fix): genuinely isolates the NEW F-83 backstop
+        # (_staged_status_records / _is_pure_delete / status.startswith("D")) from the
+        # PRE-EXISTING F-30 already-tracked pass exercised above. This file is chosen so
+        # F-30 CANNOT intercept it: it is not a builtin-sensitive basename/path
+        # (SENSITIVE_BASENAME_GLOBS / SENSITIVE_PATH_MARKERS do not match "field_export.xyzq"),
+        # and it is not gitignored -- so _tracked_sensitive()/tracked_bad never sees it. It
+        # IS unsafe to auto-commit (".xyzq" is not in SAFE_EXTS). It is staged as a PURE "A"
+        # (add) -- no "D" component at all -- so the ONLY thing that can revert it is the
+        # backstop's change-type check (_is_safe_to_commit against the real staged status
+        # from _staged_status_records). This proves the change-type keying genuinely reverts
+        # a real staged-content add, and that only a pure "D" is exempted -- not "anything
+        # already staged."
+        unsafe = self.repo / "field_export.xyzq"
+        unsafe.write_text("mystery payload\n", encoding="utf-8")
+        _git(self.repo, "add", "field_export.xyzq")
+        status = _git(self.repo, "status", "--porcelain").stdout
+        self.assertIn("A  field_export.xyzq", status,
+                      "precondition: expected a pure staged-add (A) status, not a mixed one")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("field_export.xyzq", self._tracked(),
+                          "the NEW backstop failed to revert a staged unsafe-extension pure "
+                          "add -- change-type keying over-exempted a real content add")
+        self.assertIn("field_export.xyzq", r.stdout + r.stderr,
+                      "the reverted staged unsafe content was neither committed nor surfaced")
+
+    def test_mixed_status_modified_then_deleted_is_not_treated_as_pure_delete(self):
+        # Fix 2 (E2 review, Minor): _is_pure_delete must NOT treat a MIXED status record
+        # -- staged content modification (M) plus an unstaged worktree deletion (D), i.e.
+        # git status "MD" -- as a pure delete. A record with a "D" component that ALSO
+        # carries an "M"/"A" staged-content component must still go through the normal
+        # safety classification: the content side is HANDLED, not exempted. If it were
+        # (wrongly) treated as a pure delete, the guard would `git add` it -- staging a
+        # delete OVER the unvetted modification -- and commit that delete, and the file
+        # would silently vanish from the repo without its staged content ever being
+        # classified safe or unsafe.
+        tracked = self.repo / "tracked_mixed.xyzq"
+        tracked.write_text("hi\n", encoding="utf-8")
+        _git(self.repo, "add", "tracked_mixed.xyzq")
+        _git(self.repo, "commit", "-q", "-m", "baseline mixed-status file")
+        tracked.write_text("modified content\n", encoding="utf-8")
+        _git(self.repo, "add", "tracked_mixed.xyzq")  # stage the modification (M)
+        os.remove(str(tracked))  # then delete from the worktree, unstaged -> status "MD"
+        status = _git(self.repo, "status", "--porcelain").stdout
+        self.assertIn("MD tracked_mixed.xyzq", status,
+                      "precondition: mixed MD status was not reproduced")
+        before = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        after = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
+        self.assertEqual(before, after,
+                          "a mixed MD status was wrongly treated as a pure delete and "
+                          "committed as a deletion without vetting the staged modification")
+        self.assertIn("tracked_mixed.xyzq", self._tracked(),
+                      "a mixed MD status was wrongly exempted as a pure delete -- the file "
+                      "was removed from the repo instead of having its content side handled")
+        self.assertIn("tracked_mixed.xyzq", r.stdout + r.stderr,
+                      "the mixed-status file's unsafe content side was not surfaced")
 
     # ---- Fail-open: not a git repo ----------------------------------------
     def test_fail_open_outside_a_git_repo(self):
