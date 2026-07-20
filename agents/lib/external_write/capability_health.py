@@ -112,6 +112,44 @@ import) is reported RED (not importable, not scanner-clean — there is nothing
 on disk to positively verify either property against), never silently
 skipped.
 
+Reconcile-on-read (Task A2, F-70's crash-safety half)
+------------------------------------------------------------------------------
+Task A1 folded ``lifecycle_state.reconcile_state`` into the NORMAL accept path
+(``operator_acceptance.record_operator_acceptance``), so an accept that
+completes cleanly never leaves a stale ``paused_live_write`` marker behind.
+But a crash BETWEEN that accept write and its own reconcile call (or any
+other drift — a marker hand-restored from a backup, a partially-applied
+upgrade) can still orphan a marker for a capability that is, in the SSOT
+(``descriptor.accepted``), genuinely accepted. Nothing that only ever READS
+health would ever clear that marker, so the capability would report
+paused/red forever until an operator/agent happened to run a hand reconcile.
+
+``check_capabilities_with_self_heal`` is the fix: it is a SEPARATE function
+from ``check_capabilities`` (not a parameter on it) that best-effort
+self-heals every capability with a real source file on disk — via
+``lifecycle_state.reconcile_state``, fail-safe, never raising — BEFORE
+delegating to ``check_capabilities`` for the actual composite read. This is
+deliberately not folded into ``check_capabilities`` itself:
+``lifecycle_state.check_completion`` calls ``check_capabilities`` directly and
+is explicitly documented as READ-ONLY / never-writing (see that function's own
+module-section docstring, "No mutation — a check that changes what it is
+checking is not a check"); giving ``check_capabilities`` itself a write side
+effect, even opt-in, would put that guarantee at risk for every existing and
+future caller. ``check_capabilities_with_self_heal`` is for the ACTUAL read
+path an agent runs before inviting the operator into a capability
+(``operating_discipline.md``'s rule, and this module's own CLI entrypoint
+below) — the one place this fix is intended to act.
+
+FAIL-SAFE ON THE WRITE (design nuance, required): ``reconcile_state`` is
+itself a WRITE — it can clear a marker or close a migration-queue entry. A
+READ must never become a hard error just because the write it attempts along
+the way could not complete (a read-only filesystem, an unresolvable identity,
+a corrupted descriptor/queue file). Every reconcile attempt here is wrapped so
+NOTHING it raises ever propagates — see ``_attempt_self_heal``. On a failed
+attempt, the health read that follows simply reports whatever is ACTUALLY on
+disk afterward (still paused/orphaned, honestly), never a fabricated "healed"
+state that did not actually happen.
+
 Stdlib only — no third-party dependencies (this module ships into the
 operator's own runtime, agents/lib/external_write/).
 """
@@ -143,6 +181,7 @@ from external_write.capability_identity import (  # noqa: E402
 )
 from external_write.lifecycle_state import (  # noqa: E402
     acceptance_hash_is_stale,
+    reconcile_state,
     ReconcileStateError,
 )
 
@@ -594,6 +633,44 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
     return records
 
 
+def _attempt_self_heal(project_root: Path, capability_id: str) -> None:
+    """(Task A2, F-70 crash-safety half) Best-effort, NEVER-RAISING attempt to reconcile
+    ``capability_id``'s lifecycle views via ``lifecycle_state.reconcile_state`` — see
+    ``check_capabilities_with_self_heal``'s own docstring (module docstring's "Reconcile-on-read"
+    section) for the full rationale. ANY exception this raises — ``IdentityResolutionError`` (no
+    resolvable module on disk), ``ReconcileStateError`` (an unreadable descriptor/queue file), or
+    an ``OSError``/``PermissionError`` from a filesystem that refused the write (e.g. read-only) —
+    is swallowed here, never propagated. Returns nothing; the caller always re-reads whatever is
+    ACTUALLY on disk afterward, healed or not — this function exists purely for its (possible)
+    side effect."""
+    try:
+        reconcile_state(str(project_root), capability_id)
+    except Exception:  # noqa: BLE001 - fail-safe; a read must never hard-error over an attempted write
+        pass
+
+
+def check_capabilities_with_self_heal(project_root: Any) -> List[Dict[str, Any]]:
+    """The read-path entrypoint for capability health (Task A2, F-70's crash-safety half): before
+    computing the composite health report, best-effort self-heal every capability that has a real
+    source file on disk (see ``_attempt_self_heal``) — so a pause marker orphaned by a crash
+    between an accept write and its own reconcile step (Task A1 wires the normal case; this covers
+    the crash-between-the-two-writes case), or any other drift, converges BEFORE this read reports
+    it, rather than the capability reporting phantom-broken/red forever until someone happens to
+    run a hand reconcile.
+
+    Deliberately a SEPARATE function from ``check_capabilities`` — see the module docstring's
+    "Reconcile-on-read" section for why this is not instead a parameter/default change to that
+    function (``lifecycle_state.check_completion``'s own explicit READ-ONLY/never-writes
+    contract). Every reconcile attempt is fail-safe (never raises — see ``_attempt_self_heal``);
+    this function itself also never raises. Returns the exact same record shape
+    ``check_capabilities`` returns, computed AFTER every self-heal attempt has already run (or
+    been silently skipped, on a filesystem/state that would not permit it)."""
+    root = Path(project_root)
+    for cap_id in _capability_source_files(root):
+        _attempt_self_heal(root, cap_id)
+    return check_capabilities(root)
+
+
 # ---------------------------------------------------------------------------
 # CLI entrypoint -- an agent's orientation step (T5) reads this composite
 # status to decide whether to invite the operator into a capability; this
@@ -601,10 +678,14 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
 # (this is a REPORT, not a gate the process itself enforces) -- prints one
 # JSON array to stdout.
 #
+# (Task A2) Self-heals first (``check_capabilities_with_self_heal``, see module docstring's
+# "Reconcile-on-read" section) — this IS the read path an agent runs before inviting the operator
+# into a capability, so this is where the self-heal is intended to act.
+#
 # Usage:
 #   python3 agents/lib/external_write/capability_health.py [<project_root>]
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":  # pragma: no cover
     _root = sys.argv[1] if len(sys.argv) > 1 else "."
-    print(json.dumps(check_capabilities(_root), indent=2, sort_keys=True))
+    print(json.dumps(check_capabilities_with_self_heal(_root), indent=2, sort_keys=True))

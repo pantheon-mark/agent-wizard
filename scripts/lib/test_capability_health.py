@@ -27,6 +27,7 @@ Uses stub/synthetic capability source only; no network, no real vendor SDK.
 
 import hashlib
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -579,6 +580,137 @@ class TestEmptyProjectYieldsNoRecords(CapabilityHealthTestBase):
     def test_empty_project_yields_empty_list_no_crash(self):
         records = capability_health.check_capabilities(self.project_root)
         self.assertEqual(records, [])
+
+
+class ReconcileOnReadTestBase(CapabilityHealthTestBase):
+    """Task A2 / F-70 (crash-safety half) shared fixtures. ``reconcile_state`` is only ever
+    invoked from the normal accept path (Task A1) and ``complete_migration`` -- a crash BETWEEN
+    an accept write and its own reconcile call (or any other drift) can leave an accepted
+    capability's ``paused_live_write`` marker orphaned on disk forever, with nothing that only
+    ever READS health ever clearing it. ``check_capabilities_with_self_heal`` is the fix: the
+    read path an agent actually runs before inviting the operator into a capability
+    (``operating_discipline.md``) self-heals first, fail-safe."""
+
+    PHASE_ID = "phase_a2_test"
+
+    def _accept(self, capability_id: str, cap_path: Path) -> None:
+        # Mirrors TestAcceptanceStaleCapabilityRed._accept above -- a real, well-formed
+        # acceptance-audit record whose hashes match the fixture's OWN current source, so
+        # `acceptance_stale` reads False and does not mask the marker-residue signal this test
+        # is actually isolating.
+        from external_write.acceptance_ceremony import ACCEPTANCE_RECORD_SCHEMA
+        from external_write.proof_hash import compute_implementation_hash
+
+        module_hash = hashlib.sha256(cap_path.read_bytes()).hexdigest()
+        log_path = self.project_root / "security" / "capability_acceptance_log.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema": ACCEPTANCE_RECORD_SCHEMA, "capability_id": capability_id,
+            "phase_id": self.PHASE_ID, "risk_class": "irreversible_external",
+            "op_kind": "delete_record", "copy_run_proof_ref": "proof.json",
+            "operator_receipt_ref": "receipt.json", "contract_hash": "0" * 64,
+            "implementation_hash": compute_implementation_hash("delete_record"),
+            "capability_module_hash": module_hash,
+            "operator_confirmation": "Yes, accept this capability for live use.",
+            "receipt_accepted_at": "2026-01-01T00:00:00Z",
+        }
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+
+    def _write_orphaned_marker(self, capability_id: str) -> None:
+        # Mirrors the real on-disk shape a genuine orphaned marker carries (see
+        # lifecycle_state._fresh_marker_state) -- the exact estate/F-70 shape, hand-planted here
+        # to simulate a crash between an accept write and its own reconcile call.
+        d = self.project_root / PAUSED_MECHANISMS_DIR_REL
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{capability_id}.pause").write_text("", encoding="utf-8")
+        (d / f"{capability_id}.json").write_text(json.dumps({
+            "mechanism_id": capability_id,
+            "canonical_id": capability_id,
+            "writer_relpath": f"{CAPABILITIES_DIR_REL}/{capability_id}_capability.py",
+            "entrypoint_relpath": None,
+            "state": "paused_live_write",
+            "paused_op_kinds": ["delete_record"],
+            "paused_at": "2026-01-01T00:00:00Z",
+            "reason": "capability descriptor not accepted; migration pending (reconcile_state)",
+            "credentials_preserved": True,
+            "migration_status": "pending",
+        }), encoding="utf-8")
+
+    def _accept_with_orphaned_marker(self, capability_id: str) -> Path:
+        cap_path = self._write_capability(
+            capability_id, _CLEAN_CAPABILITY_SOURCE.format(display_name=capability_id))
+        self._write_descriptor_set(
+            [{"id": capability_id, "accepted": True, "phase_id": self.PHASE_ID}])
+        self._accept(capability_id, cap_path)
+        self._write_orphaned_marker(capability_id)
+        return cap_path
+
+
+class TestReconcileOnReadSelfHeals(ReconcileOnReadTestBase):
+    def test_accepted_capability_with_orphaned_marker_reports_green_after_read(self):
+        cap_id = "widget_sync"
+        self._accept_with_orphaned_marker(cap_id)
+        marker_dir = self.project_root / PAUSED_MECHANISMS_DIR_REL
+        self.assertTrue((marker_dir / f"{cap_id}.pause").exists())
+        self.assertTrue((marker_dir / f"{cap_id}.json").exists())
+
+        records = capability_health.check_capabilities_with_self_heal(self.project_root)
+        record = self._record_for(records, cap_id)
+
+        # The marker is genuinely gone from disk -- not merely reported clear in-memory -- so a
+        # subsequent write-gate read (which reads these SAME files) observes the healed state.
+        self.assertFalse((marker_dir / f"{cap_id}.pause").exists())
+        self.assertFalse((marker_dir / f"{cap_id}.json").exists())
+        self.assertFalse(record["paused"])
+        self.assertFalse(record["pending_migration"])
+        self.assertFalse(record["acceptance_stale"])
+        self.assertEqual(record["health"], "green")
+
+    def test_plain_check_capabilities_does_not_self_heal(self):
+        # check_capabilities itself stays exactly as it was (no parameter, no side effect) --
+        # the self-heal lives ONLY in check_capabilities_with_self_heal. This is what keeps
+        # lifecycle_state.check_completion's own explicit "never writes to disk" contract intact:
+        # it calls check_capabilities directly, never the self-healing wrapper.
+        cap_id = "widget_sync_plain"
+        self._accept_with_orphaned_marker(cap_id)
+        marker_dir = self.project_root / PAUSED_MECHANISMS_DIR_REL
+
+        records = capability_health.check_capabilities(self.project_root)
+        record = self._record_for(records, cap_id)
+
+        self.assertTrue((marker_dir / f"{cap_id}.pause").exists())
+        self.assertTrue(record["paused"])
+        self.assertEqual(record["health"], "red")
+
+
+class TestReconcileOnReadFailSafeOnReadOnlyFilesystem(ReconcileOnReadTestBase):
+    def test_readonly_paused_mechanisms_dir_reports_orphan_without_crashing(self):
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("running as root -- permission bits do not block the write")
+
+        cap_id = "widget_sync_ro"
+        self._accept_with_orphaned_marker(cap_id)
+        marker_dir = self.project_root / PAUSED_MECHANISMS_DIR_REL
+        original_mode = marker_dir.stat().st_mode
+
+        # Read + execute only, no write -- os.unlink() of an entry INSIDE this directory (what
+        # reconcile_state's own marker-clear does) requires write permission on the directory
+        # itself, not the file, so this reproduces a read-only filesystem's refusal without
+        # needing an actual read-only mount.
+        marker_dir.chmod(0o555)
+        try:
+            records = capability_health.check_capabilities_with_self_heal(
+                self.project_root)  # must not raise
+        finally:
+            marker_dir.chmod(original_mode)
+
+        record = self._record_for(records, cap_id)
+        # The write it attempted could not complete -- the orphan is REPORTED honestly, not
+        # silently healed and not a crash.
+        self.assertTrue(record["paused"])
+        self.assertEqual(record["health"], "red")
+        self.assertTrue((marker_dir / f"{cap_id}.pause").exists())
 
 
 class TestPathConstantsAntiDrift(unittest.TestCase):

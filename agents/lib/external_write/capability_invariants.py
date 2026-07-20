@@ -15,7 +15,7 @@ run in ``next-phase.md``'s Step 4 (technical verification), before Step 5
 (the supervised trial), so a structurally broken capability never reaches a
 live trial. D1-3 wires the stop; this module only computes the verdict.
 
-Every one of the five checks below REUSES an existing, already-trusted
+Every one of the six checks below REUSES an existing, already-trusted
 signal rather than re-implementing it:
 
   1. routing            -- ``external_write.scan``'s own AST bypass scanner
@@ -45,6 +45,21 @@ signal rather than re-implementing it:
                             ceremony's own idempotent-backfill path uses.
                             N/A -- never a failure -- for a capability that is
                             not yet ``accepted: true``.
+  6. marker residue (post-acceptance only, Task A2/F-70) -- a direct disk read
+                            of ``.wizard/paused-mechanisms/<canonical_id>.{pause,
+                            json}`` (the same marker ``capability_health.
+                            check_capabilities_with_self_heal`` self-heals and
+                            ``lifecycle_state.reconcile_state`` clears). N/A --
+                            never a failure -- for a capability that is not yet
+                            ``accepted: true`` (a marker on a not-yet-accepted
+                            capability is the normal paused/pending-migration
+                            state, not a defect). This is the emitted self-QA's
+                            OWN independent catch: if reconcile-on-accept (A1)
+                            or reconcile-on-read (A2) is ever bypassed, an
+                            orphaned marker on an otherwise-accepted capability
+                            still surfaces here as a required-fix failure,
+                            rather than silently letting a structurally
+                            inconsistent capability proceed to a live trial.
 
 Fail-closed, always
 --------------------
@@ -115,6 +130,16 @@ from external_write.acceptance_ceremony import (  # noqa: E402
 # (correctly registered or not) merely because nothing had triggered
 # registration yet in this process -- a false negative, not a true one.
 import external_write.registered_adapters  # noqa: E402,F401
+
+# (Task A2, F-70) Duplicated-by-value from capability_health.py / lifecycle_state.py's own
+# PAUSED_MECHANISMS_DIR_REL and write_gate.py's PAUSED_MECHANISMS_DIR -- the SAME
+# never-import-across-runtime-siblings discipline every one of those modules' own docstrings
+# already documents (this module ships into the operator's own runtime alongside them, not across
+# a build/runtime boundary, but the convention here is "each runtime module declares its own copy
+# so none of them has a load-order dependency on another"). Pinned by value in
+# scripts/lib/test_capability_invariants.py (TestPausedMechanismsDirAntiDrift), mirroring
+# test_capability_health.py's own TestPathConstantsAntiDrift.
+PAUSED_MECHANISMS_DIR_REL = ".wizard/paused-mechanisms"
 
 
 @dataclass(frozen=True)
@@ -214,8 +239,9 @@ def _build_operator_message(failures: List[str]) -> str:
         return (
             "All deterministic structural checks passed for this capability: it routes "
             "through the safe write path, its declared test target is valid, its identity "
-            "is coherent across the descriptor/capability/mechanism/module names, and its "
-            "operation kind is registered."
+            "is coherent across the descriptor/capability/mechanism/module names, its "
+            "operation kind is registered, and (if accepted) it carries no residual pause "
+            "marker."
         )
     lines = [
         "This capability failed one or more required structural checks and must not proceed "
@@ -382,6 +408,36 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
                     "from the audit trail; treat it as unaccepted until the audit trail is "
                     "repaired."
                 )
+
+    # --- Check 6: no residual paused_live_write marker, post-acceptance only ---------------
+    # (Task A2, F-70 crash-safety half) An accepted capability should carry NO pause marker for
+    # its own canonical id. Reconcile-on-accept (Task A1) and reconcile-on-read
+    # (``capability_health.check_capabilities_with_self_heal``, Task A2) both already exist to
+    # clear exactly this -- this check is the emitted self-QA's OWN independent catch, so that a
+    # capability with an orphaned marker still surfaces as a required-fix failure here even if
+    # BOTH of those mechanisms are somehow bypassed, rather than silently letting a structurally
+    # inconsistent capability proceed to a live trial. N/A -- never a failure -- for a capability
+    # that is not yet ``accepted: true`` (a marker on a not-yet-accepted capability is the normal
+    # paused/pending-migration state, not a defect; mirrors check 5's own pre-acceptance N/A).
+    if descriptor_entry is not None and descriptor_entry.get("accepted") is True:
+        marker_paths = (
+            root / PAUSED_MECHANISMS_DIR_REL / f"{canonical_id}.pause",
+            root / PAUSED_MECHANISMS_DIR_REL / f"{canonical_id}.json",
+        )
+        # Fail-closed like every check above: ANY existing path -- a normal marker file, or one
+        # in an unexpected/unreadable shape -- counts as residue; only a genuinely ABSENT path
+        # (``_file_state`` returning "absent") is clean. Mirrors
+        # ``capability_health._is_paused``'s own "any existing .pause path counts, regardless of
+        # shape" convention.
+        if any(_file_state(p) != "absent" for p in marker_paths):
+            failures.append(
+                f'Marker residue: capability "{canonical_id}" is marked accepted, but a pause '
+                f"marker still exists on disk at {PAUSED_MECHANISMS_DIR_REL}/{canonical_id}.* for "
+                "its operation kind(s). An accepted capability must carry no residual pause "
+                "marker. Run this project's capability health check (python3 "
+                "agents/lib/external_write/capability_health.py), which reconciles this "
+                "automatically on read, then re-run this check."
+            )
 
     ok = not failures
     return InvariantResult(ok=ok, failures=failures, operator_message=_build_operator_message(failures))

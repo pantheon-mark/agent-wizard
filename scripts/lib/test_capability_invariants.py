@@ -132,6 +132,15 @@ class CapabilityInvariantsTestBase(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(entries), encoding="utf-8")
 
+    def _write_paused_marker(self, capability_id: str) -> None:
+        # (Task A2, F-70) A hand-planted pause marker -- mirrors
+        # capability_health.py's own test fixture helper of the same name. A bare ``.pause``
+        # touch-file is sufficient evidence of residue for check 6 (see that check's own
+        # "any existing path counts, regardless of shape" fail-closed convention).
+        d = self.project_root / capability_invariants.PAUSED_MECHANISMS_DIR_REL
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{capability_id}.pause").write_text("", encoding="utf-8")
+
     def _write_audit_record(self, capability_id, phase_id, **extra):
         # (R-3, cross-vendor review fix) A real ceremony append always carries a non-empty
         # `implementation_hash` + `op_kind` (see acceptance_ceremony.is_valid_acceptance_record) --
@@ -477,6 +486,101 @@ class TestAuditCheckPostAcceptanceOnly(CapabilityInvariantsTestBase):
         )
         self.assertTrue(result.ok, f"expected ok, got failures: {result.failures!r}")
 
+
+class TestMarkerResidueCheckIndependent(CapabilityInvariantsTestBase):
+    """Task A2 / F-70 (crash-safety half) -- the 6th deterministic check: an ACCEPTED
+    capability must carry no residual ``paused_live_write`` marker. This is the emitted self-QA's
+    own independent catch for exactly the F-70 defect class (reconcile-on-accept / reconcile-on-
+    read both exist to clear this marker; this check fires if either is ever bypassed)."""
+
+    PHASE_ID = "phase_a2_invariants_test"
+
+    def test_accepted_capability_with_residual_marker_fails_marker_residue(self):
+        cap_id = "accepted_with_marker_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Accepted With Marker Cap", op_kind=VALID_OP_KIND))
+        self._write_descriptor_set(
+            [_base_descriptor_entry(cap_id, accepted=True, phase_id=self.PHASE_ID)])
+        self._write_audit_record(cap_id, self.PHASE_ID)
+        self._write_paused_marker(cap_id)
+
+        result = self._check(cap_id)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(f.startswith("Marker residue:") for f in result.failures),
+            f"expected a Marker residue failure, got {result.failures!r}",
+        )
+        # Independent: every OTHER check for this otherwise-valid, accepted capability still
+        # passes -- only the marker-residue check fires.
+        self.assertFalse(any(f.startswith("Routing:") for f in result.failures))
+        self.assertFalse(any(f.startswith("Test target:") for f in result.failures))
+        self.assertFalse(any(f.startswith("Id coherence:") for f in result.failures))
+        self.assertFalse(any(f.startswith("Contract registered:") for f in result.failures))
+        self.assertFalse(any(f.startswith("Audit record:") for f in result.failures))
+        self._assert_no_traceback(result)
+
+    def test_accepted_capability_without_marker_passes_marker_residue(self):
+        cap_id = "accepted_clear_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Accepted Clear Cap", op_kind=VALID_OP_KIND))
+        self._write_descriptor_set(
+            [_base_descriptor_entry(cap_id, accepted=True, phase_id=self.PHASE_ID)])
+        self._write_audit_record(cap_id, self.PHASE_ID)
+        # No marker written at all.
+
+        result = self._check(cap_id)
+
+        self.assertFalse(any(f.startswith("Marker residue:") for f in result.failures))
+        self.assertTrue(result.ok, f"expected ok, got failures: {result.failures!r}")
+
+    def test_not_yet_accepted_capability_with_marker_does_not_fail_marker_residue(self):
+        # A pause marker on a NOT-yet-accepted capability is the NORMAL paused/pending-migration
+        # state, not a defect -- N/A here, mirroring the audit check's own pre-acceptance N/A.
+        cap_id = "not_accepted_with_marker_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Not Accepted With Marker Cap",
+                                          op_kind=VALID_OP_KIND))
+        self._write_descriptor_set([_base_descriptor_entry(cap_id, accepted=False)])
+        self._write_paused_marker(cap_id)
+
+        result = self._check(cap_id)
+
+        self.assertFalse(any(f.startswith("Marker residue:") for f in result.failures))
+
+    def test_marker_present_as_unreadable_json_still_fails_marker_residue(self):
+        # Fail-closed: a ``.json`` marker present in an unexpected/unreadable shape (here, a
+        # directory instead of a regular file) still counts as residue -- mirrors
+        # capability_health's own "unexpected shape is never silently read as absent" doctrine.
+        cap_id = "accepted_weird_marker_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Accepted Weird Marker Cap",
+                                          op_kind=VALID_OP_KIND))
+        self._write_descriptor_set(
+            [_base_descriptor_entry(cap_id, accepted=True, phase_id=self.PHASE_ID)])
+        self._write_audit_record(cap_id, self.PHASE_ID)
+        marker_dir = self.project_root / capability_invariants.PAUSED_MECHANISMS_DIR_REL
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        (marker_dir / f"{cap_id}.json").mkdir()
+
+        result = self._check(cap_id)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(any(f.startswith("Marker residue:") for f in result.failures))
+
+
+class TestPausedMechanismsDirAntiDrift(unittest.TestCase):
+    """(Task A2, F-70) Pins ``capability_invariants.PAUSED_MECHANISMS_DIR_REL`` -- duplicated by
+    value, never imported -- against ``capability_health.py``'s own same-named constant, mirroring
+    ``test_capability_health.py``'s own ``TestPathConstantsAntiDrift`` pattern for that module's
+    four duplicated path constants."""
+
+    def test_paused_mechanisms_dir_rel_matches_capability_health_constant(self):
+        from external_write import capability_health
+        self.assertEqual(
+            capability_invariants.PAUSED_MECHANISMS_DIR_REL,
+            capability_health.PAUSED_MECHANISMS_DIR_REL,
+        )
 
 
 # =============================================================================
