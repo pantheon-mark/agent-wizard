@@ -32,13 +32,14 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 _AGENTS_LIB = Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib"
 sys.path.insert(0, str(_AGENTS_LIB))
 
 from external_write import contracts as contracts_mod  # noqa: E402
 from external_write.contracts import OperationContract  # noqa: E402
-from external_write.operations import Operation, EffectUnit  # noqa: E402
+from external_write.operations import Operation, EffectUnit, Result  # noqa: E402
 from external_write.adapter_registry import (  # noqa: E402
     register_adapter, unregister_adapter,
 )
@@ -1568,6 +1569,59 @@ class TestRunSanctionedBulk(unittest.TestCase):
             self.assertEqual(
                 len(load_run_envelope(first.run_id, envelope_dir=d).tranches), tranche_count)
             self.assertTrue(resumed.recoverability)
+
+    # -- D6a review fixes ----------------------------------------------------
+
+    def test_completed_agrees_with_finalized_even_when_finalize_fails(self):
+        # Fix 1: `completed` must be DERIVED from the run's ACTUAL finalized
+        # state, never hardcoded True on the full-completion path.
+        # `finalize_run` genuinely returns a NON-finalized envelope when the
+        # loaded envelope turns out non-spendable -- simulate exactly that by
+        # patching `finalize_run` to return an EXECUTING (not FINALIZED)
+        # envelope, and assert `completed` never disagrees with `finalized`.
+        with tempfile.TemporaryDirectory() as d:
+            store = {f"row{i}": {"value": "Open"} for i in range(3)}
+            kwargs = self._fresh_kwargs(d, n=3, chunk_size=3, run_label="t6a")
+            non_finalized = RunEnvelope(
+                run_id="placeholder", capability_id="cap:test", op_kind=FIELD_OP,
+                contract_hash="ch", implementation_hash="ih",
+                reviewed_set=(), reviewed_set_digest="", population_count=0,
+                stratification_summary={}, ceiling=None, consent=None,
+                evidence_policy={}, tranches=(), run_state=RUN_STATE_EXECUTING)
+            with mock.patch("external_write.run_envelope.finalize_run",
+                             return_value=non_finalized):
+                summary = run_sanctioned_bulk(
+                    **kwargs, client=_FieldWriteClient(store),
+                    read_only_client=_FieldReadOnlyClient(store))
+            self.assertFalse(summary.finalized)
+            self.assertEqual(summary.completed, summary.finalized)
+            self.assertFalse(summary.completed)
+
+    def test_applied_unit_ids_reflect_tranche_ground_truth_not_requested_ids(self):
+        # Fix 2: `applied_unit_ids` must be read back from the envelope's
+        # DURABLE tranche records (ground truth), never assumed from the
+        # requested chunk_ids -- consistent with D5's "durable-records-only"
+        # principle. Simulate a `run_enveloped_operation` that reports
+        # "written" for the whole chunk but whose durable tranche covers
+        # FEWER ids than were requested -- the summary must report the
+        # ground-truth id, not the full requested chunk.
+        def _partial_landing(env, op, receipt, client, **kw):
+            requested_ids = tuple(r["row_id"] for r in op.params["rows"])
+            landed_id = requested_ids[0]
+            tranche = Tranche(
+                applied_unit_ids=(landed_id,),
+                per_unit_result={landed_id: {"status": "verified"}},
+                verification_status="verified")
+            updated = append_tranche(env, tranche, envelope_dir=kw.get("envelope_dir"))
+            return updated, Result(status="written", detail={})
+
+        with tempfile.TemporaryDirectory() as d:
+            kwargs = self._fresh_kwargs(d, n=2, chunk_size=2, run_label="t6b")
+            with mock.patch("external_write.run_envelope.run_enveloped_operation",
+                             side_effect=_partial_landing):
+                summary = run_sanctioned_bulk(**kwargs)
+            self.assertTrue(summary.completed, summary.refusal_reason)
+            self.assertEqual(set(summary.applied_unit_ids), {"row0"})
 
 
 if __name__ == "__main__":

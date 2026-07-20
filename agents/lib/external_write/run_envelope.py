@@ -1956,7 +1956,20 @@ def run_sanctioned_bulk(
         and e.get("unit_id") not in already_applied)
     chunks = _chunked(planned_ids, chunk_size)
 
-    applied: List[str] = []
+    # D6a review Fix 2: `applied_unit_ids` is read back from the envelope's
+    # OWN durable tranche records (ground truth) rather than assumed from the
+    # requested `chunk_ids` -- consistent with D5's "durable-records-only"
+    # principle. `start_tranche_count` marks where THIS call's tranches begin
+    # (0 for a fresh mint; len(already-persisted tranches) on a resume), so
+    # only tranches appended during this invocation are counted -- never a
+    # prior call's or a resumed run's already-applied tranches.
+    start_tranche_count = len(env.tranches)
+
+    def _applied_since_start(from_env: RunEnvelope) -> Tuple[str, ...]:
+        return tuple(
+            uid for t in from_env.tranches[start_tranche_count:]
+            for uid in t.applied_unit_ids)
+
     per_chunk_status: List[str] = []
     for chunk_ids in chunks:
         op = op_builder(chunk_ids)
@@ -1971,14 +1984,20 @@ def run_sanctioned_bulk(
             return _bulk_refusal(
                 run_id, reason or f"a chunk was refused (status={result.status!r})",
                 envelope_dir=envelope_dir, already_applied=already_applied,
-                applied=tuple(applied), per_chunk_status=tuple(per_chunk_status))
-        applied.extend(chunk_ids)
+                applied=_applied_since_start(env), per_chunk_status=tuple(per_chunk_status))
 
     finalized_env = finalize_run(run_id, envelope_dir=envelope_dir)
+    # D6a review Fix 1: `completed` is DERIVED from the ACTUAL finalized state
+    # -- never hardcoded True here. `finalize_run` returns a NON-finalized
+    # envelope when the loaded envelope turns out non-spendable, and a
+    # hardcoded True would then report `completed=True, finalized=False` -- a
+    # self-contradiction on this honesty-critical summary.
+    is_finalized = finalized_env.run_state == RUN_STATE_FINALIZED
     return BulkRunSummary(
-        run_id=run_id, completed=True,
-        finalized=finalized_env.run_state == RUN_STATE_FINALIZED,
-        applied_unit_ids=tuple(applied), skipped_already_applied=already_applied,
+        run_id=run_id, completed=is_finalized,
+        finalized=is_finalized,
+        applied_unit_ids=_applied_since_start(finalized_env),
+        skipped_already_applied=already_applied,
         refused=False, refusal_reason=None,
         recoverability=report_run_recoverability(run_id, envelope_dir=envelope_dir),
         per_chunk_status=tuple(per_chunk_status))
