@@ -21,6 +21,28 @@
 
 ---
 
+## `security/audit/` — the one committed exception (redacted, not gitignored)
+
+`security/audit/` is deliberately **not** in `.gitignore` and **is committed**. It holds a
+**redacted audit projection** — a summary record (counts, digests, a consent timestamp, and
+an overall outcome) of an external-write run, written specifically so the *fact that a run
+happened and what it did* survives even if the working copy is lost or wiped. It is built
+FROM the raw, local-only records above (`run_envelopes/`, `invocation_ledgers/`,
+`acceptance_receipts/`, `capability_acceptance_log.jsonl`) but never carries what those raw
+records carry: no message-ids, no subjects, no account identifiers, no other per-item
+personal/identifying data. Only aggregate counts and one-way digests over the raw ids ever
+appear in a `security/audit/*.json` file — nothing in it can be reversed back into a raw
+identifier. That is why it is safe to commit while its raw sources are not.
+
+The commit-hygiene guard treats `security/audit/` as a **known-committable path**: a file it
+recognizes there is auto-committed at session close, the same as system config/state at a
+known path. This is narrow — it does **not** make `.json` files generally committable, and
+it does **not** exempt this path from the guard's other checks: a data-shaped file placed
+under `security/audit/` (for example a stray `.csv`) is still refused like anywhere else,
+because the built-in secret/data check always runs first.
+
+---
+
 ## Project-specific entries
 
 *Added during wizard setup and at runtime when new file types requiring protection are identified.*

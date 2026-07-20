@@ -148,6 +148,16 @@ try:
         # security/session_cookies/ etc. must stay non-committed (see
         # SENSITIVE_PATH_MARKERS above, checked first via _matches_builtin).
         "agents/handoffs/",
+        # F-73 durability wiring: the REDACTED, PII-safe audit projection
+        # (audit_projection.py's DEFAULT_AUDIT_PROJECTION_DIR) is a committable
+        # counts/digests-only record, deliberately distinct from the raw,
+        # gitignored security/run_envelopes|invocation_ledgers|acceptance_receipts
+        # + capability_acceptance_log.jsonl it is projected FROM. This is an
+        # AUTO-COMMIT allowlist entry only — _matches_builtin (checked first in
+        # _is_safe_to_commit, below) still refuses a data-shaped file placed
+        # under this same path, so this prefix is never an exemption from the
+        # safety scan itself.
+        "security/audit/",
     )
 
     def _norm(p):
@@ -205,13 +215,16 @@ try:
                 return True
         return False
 
-    def _status_paths():
+    def _status_records():
         # `git status --porcelain -z`: NUL-delimited "XY <path>[NUL<orig>]" records.
+        # Returns (xy, path) tuples so callers can key on CHANGE TYPE (F-83),
+        # not bare path presence -- e.g. a "D" (untracking) is never a content
+        # leak, unlike an "A"/"M" (content genuinely added/modified).
         r = git("status", "--porcelain", "-z")
         if r.returncode != 0:
             return None
         raw = r.stdout
-        paths = []
+        records = []
         i = 0
         fields = raw.split("\x00")
         while i < len(fields):
@@ -224,9 +237,58 @@ try:
             # Renames/copies (R/C) carry an extra NUL-separated original path field.
             if xy and (xy[0] in ("R", "C") or xy[1] in ("R", "C")):
                 i += 1  # skip the original-path field that follows
-            paths.append(path)
+            records.append((xy, path))
             i += 1
-        return paths
+        return records
+
+    def _status_paths():
+        records = _status_records()
+        if records is None:
+            return None
+        return [path for _xy, path in records]
+
+    def _is_pure_delete(xy):
+        # F-83: True only when a status record represents ONLY a removal of
+        # content -- an untracking, never a content leak. A record that ALSO
+        # carries an add/modify/rename signal is NOT a pure delete and must
+        # still go through the normal safety classification (staging sensitive
+        # CONTENT must still be caught, even if the same record's other column
+        # happens to show "D").
+        x = xy[0] if len(xy) > 0 else " "
+        y = xy[1] if len(xy) > 1 else " "
+        if "R" in (x, y) or "C" in (x, y):
+            return False
+        if "A" in (x, y) or "M" in (x, y):
+            return False
+        return "D" in (x, y)
+
+    def _staged_status_records():
+        # `git diff --cached --name-status -z`: NUL-delimited "STATUS\0path\0"
+        # records ("R###\0oldpath\0newpath\0" for renames/copies). Used by the
+        # backstop below to key on change TYPE rather than bare staged-path
+        # presence (F-83).
+        r = git("diff", "--cached", "--name-status", "-z")
+        if r.returncode != 0:
+            return []
+        fields = [f for f in r.stdout.split("\x00") if f != ""]
+        records = []
+        i = 0
+        while i < len(fields):
+            status = fields[i]
+            i += 1
+            if status and status[0] in ("R", "C"):
+                if i + 1 >= len(fields):
+                    break
+                i += 1  # skip the old path
+                path = fields[i]
+                i += 1
+            else:
+                if i >= len(fields):
+                    break
+                path = fields[i]
+                i += 1
+            records.append((status, path))
+        return records
 
     def _tracked_sensitive():
         r = git("ls-files", "-z")
@@ -288,8 +350,8 @@ try:
     # --- Build the add-list (FAIL-SAFE): auto-commit ONLY positively-safe paths.
     # Everything that is neither git-ignored nor positively safe is SURFACED for an
     # explicit operator decision — never committed, never silently dropped. ---
-    paths = _status_paths()
-    if paths is None:
+    records = _status_records()
+    if records is None:
         # status failed — fail-open, but still surface any F-30 scrub note.
         if scrub_note:
             _out(scrub_note + "\n")
@@ -297,12 +359,24 @@ try:
 
     safe = []
     surface = []
-    for p in paths:
+    for xy, p in records:
         p = _norm(p)
         if not p:
             continue
         if _is_gitignored(p):
             continue  # deliberately excluded by the operator's .gitignore — not noise
+        if _is_pure_delete(xy):
+            # F-83: an untracking is never a content leak. If it is already staged
+            # (X == "D", e.g. a prior `git rm --cached`), leave it exactly as staged —
+            # do NOT `git add` this path: `git rm --cached` deliberately leaves the
+            # working file on disk, so a bare `git add <path>` here would re-stage
+            # that still-present file's CONTENT and silently UNDO the untracking.
+            # Only a worktree-only delete (not yet staged) needs staging, and that
+            # is safe: the file no longer exists on disk, so `git add` can only
+            # record its removal.
+            if xy[0] != "D":
+                safe.append(p)
+            continue
         if _is_safe_to_commit(p):
             safe.append(p)
         else:
@@ -312,11 +386,19 @@ try:
         git("add", "--", *safe)
 
     # --- Backstop (also fail-safe): unstage anything staged that is NOT positively safe,
-    # except the F-30 rm --cached deletions we intentionally staged above. Anything
-    # unstaged here is surfaced too, so nothing is ever silently dropped. ---
-    r = git("diff", "--cached", "--name-only", "-z")
-    staged = [f for f in r.stdout.split("\x00") if f] if r.returncode == 0 else []
-    slipped = [f for f in staged if not _is_safe_to_commit(f) and f not in tracked_bad]
+    # except the F-30 rm --cached deletions we intentionally staged above and any staged
+    # DELETION (F-83: removing content is never a leak, so a staged "D" is never reverted
+    # here even if the path also matches a sensitive pattern). Anything unstaged here is
+    # surfaced too, so nothing is ever silently dropped. ---
+    staged_records = _staged_status_records()
+    slipped = []
+    for status, f in staged_records:
+        if f in tracked_bad:
+            continue
+        if status.startswith("D"):
+            continue  # F-83: a staged deletion is never a content leak — never revert it.
+        if not _is_safe_to_commit(f):
+            slipped.append(f)
     if slipped:
         git("reset", "-q", "HEAD", "--", *slipped)
         for f in slipped:

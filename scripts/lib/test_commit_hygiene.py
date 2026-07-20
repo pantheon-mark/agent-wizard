@@ -270,6 +270,76 @@ class CommitHygieneBehaviorTests(unittest.TestCase):
         self.assertIn("master_list_copy.csv", r.stdout + r.stderr)
         self.assertIn("histor", out, "F-30 did not surface a history-scrub prompt")
 
+    # ---- F-83: SAFETY CHECK keys on change TYPE (A/M vs D), not bare path
+    # presence. An untracking (a `D` staged BEFORE this hook ran -- e.g. by a
+    # prior `git rm --cached`, not caught by THIS run's F-30 tracked_bad set
+    # because the path is already gone from `git ls-files` by the time the
+    # hook's F-30 scan runs) must be committed, never reverted. -----------
+    def test_f83_pre_staged_untracking_of_sensitive_path_is_committed_not_reverted(self):
+        # A previously-tracked sensitive (csv) file, exactly the estate's
+        # master_list_copy.csv shape -- but here the untracking already
+        # happened BEFORE this hook invocation (simulating a prior session /
+        # external `git rm --cached`), so THIS run's F-30 tracked_bad set
+        # (computed from `git ls-files` at hook-start) will NOT contain it --
+        # the scenario the old backstop's bare-path check falsely reverted.
+        csv = self.repo / "legacy_export.csv"
+        csv.write_text("name,email\nx,y\n", encoding="utf-8")
+        _git(self.repo, "add", "legacy_export.csv")
+        _git(self.repo, "commit", "-q", "-m", "oops tracked data (pre-existing)")
+        (self.repo / ".gitignore").write_text("*.csv\n", encoding="utf-8")
+        # Untrack it OURSELVES, standing in for "already untracked before the
+        # hook ran" -- by hook time, `git ls-files` no longer lists it.
+        _git(self.repo, "rm", "--cached", "-q", "legacy_export.csv")
+        self.assertNotIn("legacy_export.csv", self._tracked(), "precondition: already untracked")
+        before = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        after = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
+        self.assertNotEqual(before, after, "the untracking + .gitignore were not committed")
+        self.assertNotIn("legacy_export.csv", self._tracked(),
+                          "F-83: a pre-staged untracking of a sensitive path was REVERTED "
+                          "(false-abort) instead of being committed")
+        # the file must not be present in the new commit's TREE (ls-tree, not the
+        # changed-paths list from `git show --name-only`, which lists a deletion too).
+        tree = set(_git(self.repo, "ls-tree", "-r", "--name-only", "HEAD").stdout.split())
+        self.assertNotIn("legacy_export.csv", tree,
+                          "F-83: the reverted content was committed back into HEAD's tree")
+        # the working copy is untouched (rm --cached, never a hard delete).
+        self.assertTrue(csv.exists())
+
+    def test_f83_worktree_only_deletion_of_sensitive_path_is_staged_and_committed(self):
+        # A worktree-only delete (no prior staging at all) of a tracked sensitive
+        # file: `os.remove` (not `git rm --cached`), so there is no leftover
+        # untracked shadow file and no dual "D"/"??" status-record landmine --
+        # the guard must stage this deletion itself and commit it.
+        csv = self.repo / "old_dump.csv"
+        csv.write_text("a,b\n1,2\n", encoding="utf-8")
+        _git(self.repo, "add", "old_dump.csv")
+        _git(self.repo, "commit", "-q", "-m", "oops tracked data 2")
+        (self.repo / ".gitignore").write_text("*.csv\n", encoding="utf-8")
+        os.remove(str(csv))
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("old_dump.csv", self._tracked(),
+                          "F-83: a worktree-only deletion of a sensitive path was not staged/committed")
+
+    def test_f83_staged_sensitive_content_addition_still_reverted_by_backstop(self):
+        # Regression guard (must NOT weaken): a NEW sensitive file staged (via
+        # `git add`, i.e. an "A" record, content genuinely being ADDED) before
+        # the hook runs must still be caught and unstaged by the backstop --
+        # the F-83 fix must key on change TYPE, not blanket-exempt a path just
+        # because it is already staged.
+        secret = self.repo / "id_rsa"
+        secret.write_text("-----BEGIN KEY-----\n", encoding="utf-8")
+        _git(self.repo, "add", "id_rsa")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("id_rsa", self._tracked(),
+                          "F-83 fix over-corrected: staged sensitive CONTENT (an add) "
+                          "was committed instead of reverted")
+        self.assertIn("id_rsa", r.stdout + r.stderr,
+                      "staged sensitive content was neither committed nor surfaced")
+
     # ---- Fail-open: not a git repo ----------------------------------------
     def test_fail_open_outside_a_git_repo(self):
         nongit = tempfile.TemporaryDirectory()
@@ -309,6 +379,97 @@ class CommitHygieneBehaviorTests(unittest.TestCase):
         r = self._run("SessionStart")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "", "SessionStart should be silent on a clean tree")
+
+    # ---- F-73 durability wiring: a redacted audit projection under
+    # security/audit/ IS auto-committed at SessionEnd (a known-committable
+    # prefix), while an unknown .json elsewhere is still surfaced, and the
+    # raw gitignored records are never committed. -------------------------
+    def _seed_security_dir(self):
+        # `git status` collapses a brand-new UNTRACKED directory into a single
+        # "?? security/" entry instead of enumerating files inside it. The wizard
+        # scaffolds `security/` (with a README) at project close, before any audit
+        # projection or handoff file is ever written — seed that same baseline so
+        # new files below are reported by `git status` at file granularity,
+        # matching real topology (mirrors test_system_control_plane_state_paths_are_committed).
+        (self.repo / "security").mkdir(exist_ok=True)
+        (self.repo / "security" / "README.md").write_text("sec\n", encoding="utf-8")
+        _git(self.repo, "add", "security/README.md")
+        _git(self.repo, "commit", "-q", "-m", "seed security/ scaffolding")
+
+    def test_security_audit_redacted_json_is_auto_committed(self):
+        self._seed_security_dir()
+        (self.repo / "security" / "audit").mkdir(parents=True)
+        (self.repo / "security" / "audit" / "run-1.redacted_audit.json").write_text(
+            '{"audit_schema_version": "redacted_audit_projection-v1"}\n', encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("security/audit/run-1.redacted_audit.json", self._tracked(),
+                      "a redacted audit projection under security/audit/ was not auto-committed")
+
+    def test_unknown_json_elsewhere_still_surfaced_not_auto_committed(self):
+        self._seed_security_dir()
+        (self.repo / "security" / "audit").mkdir(parents=True)
+        (self.repo / "security" / "audit" / "run-1.redacted_audit.json").write_text(
+            '{"ok": true}\n', encoding="utf-8")
+        (self.repo / "random_export.json").write_text('[{"pii":"z"}]\n', encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        tracked = self._tracked()
+        self.assertIn("security/audit/run-1.redacted_audit.json", tracked)
+        self.assertNotIn("random_export.json", tracked,
+                          "an unrelated .json elsewhere must NOT be broadly auto-committed "
+                          "just because security/audit/ is now a known-committable prefix")
+        self.assertIn("random_export.json", r.stdout + r.stderr,
+                      "the unknown .json was neither committed nor surfaced")
+
+    def test_security_audit_data_shaped_file_still_blocked_by_safety_check(self):
+        # (iii): the known-committable-prefix classification is about the AUTO-COMMIT
+        # allowlist only, NOT an exemption from the safety scan -- a data-shaped file
+        # dropped under security/audit/ (not a real redacted projection) must still
+        # be refused, proving _matches_builtin is still consulted for this path.
+        self._seed_security_dir()
+        (self.repo / "security" / "audit").mkdir(parents=True)
+        (self.repo / "security" / "audit" / "leak.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("security/audit/leak.csv", self._tracked(),
+                          "the SAFETY CHECK was bypassed for a data-shaped file under the "
+                          "new known-committable security/audit/ prefix")
+
+    def test_raw_gitignored_security_records_never_auto_committed(self):
+        # Regression guard: the new security/audit/ prefix must not widen to swallow
+        # the raw, PII-bearing, gitignored records it is deliberately distinct from.
+        self._seed_security_dir()
+        (self.repo / ".gitignore").write_text(
+            "/security/run_envelopes/\n/security/invocation_ledgers/\n"
+            "/security/acceptance_receipts/\n/security/capability_acceptance_log.jsonl\n",
+            encoding="utf-8")
+        (self.repo / "security" / "run_envelopes").mkdir(parents=True)
+        (self.repo / "security" / "run_envelopes" / "run-1.json").write_text(
+            '{"raw_id": "msg-123-pii"}\n', encoding="utf-8")
+        (self.repo / "security" / "invocation_ledgers").mkdir(parents=True)
+        (self.repo / "security" / "invocation_ledgers" / "run-1.json").write_text(
+            '{"raw_id": "msg-123-pii"}\n', encoding="utf-8")
+        (self.repo / "security" / "acceptance_receipts").mkdir(parents=True)
+        (self.repo / "security" / "acceptance_receipts" / "r.json").write_text(
+            '{}\n', encoding="utf-8")
+        (self.repo / "security" / "capability_acceptance_log.jsonl").write_text(
+            '{}\n', encoding="utf-8")
+        (self.repo / "security" / "audit").mkdir(parents=True)
+        (self.repo / "security" / "audit" / "run-1.redacted_audit.json").write_text(
+            '{"audit_schema_version": "redacted_audit_projection-v1"}\n', encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        tracked = self._tracked()
+        for raw in (
+            "security/run_envelopes/run-1.json",
+            "security/invocation_ledgers/run-1.json",
+            "security/acceptance_receipts/r.json",
+            "security/capability_acceptance_log.jsonl",
+        ):
+            self.assertNotIn(raw, tracked, f"raw gitignored security record was auto-committed: {raw}")
+        self.assertIn("security/audit/run-1.redacted_audit.json", tracked,
+                      "the redacted audit projection alongside the raw records was not committed")
 
     def test_session_start_surfaces_f30_already_tracked(self):
         csv = self.repo / "already.csv"
@@ -436,6 +597,20 @@ class CommitHygieneEmittedProseTests(unittest.TestCase):
         t = self._read("wizard/templates/security/gitignore_manifest.md").lower()
         self.assertTrue("never committed" in t or "never commit" in t)
         self.assertIn("already-tracked", t.replace("already tracked", "already-tracked"))
+
+    def test_manifest_documents_committable_redacted_audit_class(self):
+        # F-73 durability wiring: security/audit/ is a COMMITTED, redacted, PII-safe
+        # audit projection -- plain-language, and distinct from the raw gitignored
+        # records (run_envelopes/ etc.) it is projected from.
+        t = self._read("wizard/templates/security/gitignore_manifest.md")
+        low = t.lower()
+        self.assertIn("security/audit", low,
+                      "gitignore_manifest.md does not document the security/audit/ class")
+        self.assertTrue("redacted" in low, "manifest does not describe the audit projection as redacted")
+        self.assertTrue("committed" in low)
+        self.assertTrue(
+            "run_envelopes" in low or "raw" in low,
+            "manifest does not contrast security/audit/ with the raw gitignored records")
 
 
 if __name__ == "__main__":
