@@ -316,7 +316,7 @@
       "recommendation_reason": "If you run bulk write-back batches, build or rebuild capabilities, or want a durable, privacy-safe record of what a run did, this update makes each of those safer and more honest \u2014 most operators should take it.",
       "release_date": "2026-07-20",
       "safety_class": "safety_fix",
-      "source_commit": "PENDING",
+      "source_commit": "4a6951f",
       "status": "prerelease"
     }
   ],
