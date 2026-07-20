@@ -37,6 +37,7 @@ sys.path.insert(0, str(_AGENTS_LIB))
 import external_write.capability_api as capability_api  # noqa: E402
 from external_write.run_envelope import (  # noqa: E402
     run_enveloped_operation as _kernel_run_enveloped_operation,
+    run_sanctioned_bulk as _kernel_run_sanctioned_bulk,
 )
 from external_write.read_facade import (  # noqa: E402
     build_read_facade as _kernel_build_read_facade,
@@ -45,9 +46,10 @@ from external_write.read_facade import (  # noqa: E402
 
 class TestCapabilityApiSurface(unittest.TestCase):
 
-    def test_all_lists_exactly_run_enveloped_operation_and_build_read_facade(self):
-        self.assertEqual(sorted(capability_api.__all__),
-                         sorted(["run_enveloped_operation", "build_read_facade"]))
+    def test_all_lists_exactly_the_curated_surface(self):
+        self.assertEqual(
+            sorted(capability_api.__all__),
+            sorted(["run_enveloped_operation", "run_sanctioned_bulk", "build_read_facade"]))
 
     def test_run_enveloped_operation_is_the_real_kernel_entrypoint(self):
         self.assertIs(capability_api.run_enveloped_operation,
@@ -56,16 +58,26 @@ class TestCapabilityApiSurface(unittest.TestCase):
     def test_build_read_facade_is_the_real_kernel_build_read_facade(self):
         self.assertIs(capability_api.build_read_facade, _kernel_build_read_facade)
 
+    def test_capability_api_exposes_run_sanctioned_bulk(self):
+        # D6c: the sanctioned bulk-run helper is re-exported through the SAME
+        # curated surface as run_enveloped_operation -- it is the same object
+        # as run_envelope's, not a reimplementation, and scans clean (a
+        # separate scan-clean assertion lives alongside the golden-emit
+        # scaffold tests).
+        self.assertIn("run_sanctioned_bulk", capability_api.__all__)
+        self.assertIs(capability_api.run_sanctioned_bulk, _kernel_run_sanctioned_bulk)
+
     def test_module_exports_nothing_beyond_dunder_names_and_all(self):
         """A curated re-export surface, not a grab-bag: every non-dunder
-        top-level name on the module must be exactly one of __all__'s two
+        top-level name on the module must be exactly one of __all__'s
         entries."""
         public_names = sorted(
             n for n in dir(capability_api)
             if not n.startswith("_")
         )
-        self.assertEqual(public_names,
-                         sorted(["build_read_facade", "run_enveloped_operation"]))
+        self.assertEqual(
+            public_names,
+            sorted(["build_read_facade", "run_enveloped_operation", "run_sanctioned_bulk"]))
 
     def test_raw_run_operation_is_NOT_exported(self):
         # The raw kernel primitive must not be reachable through this surface

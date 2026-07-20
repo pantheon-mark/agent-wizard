@@ -575,11 +575,12 @@ adapters_gmail.py's own "Structural safety" section): this module never
 imports a vendor SDK, never constructs or references a write-capable
 credential, and never calls anything shaped like a raw vendor mutation. Its
 ENTIRE external_write import surface is the curated kernel surface --
-``external_write.capability_api`` (``run_enveloped_operation`` +
-``build_read_facade``)
+``external_write.capability_api`` (``run_enveloped_operation``,
+``run_sanctioned_bulk``, and ``build_read_facade``)
 and ``external_write.operations`` (pure data) -- it never imports
 ${adapter_module_stem}.py, the adapter registry, ``get_adapter``, the raw
-``run_operation`` primitive, or the
+``run_operation`` primitive, the run-envelope MINTING entrypoint (only the
+sanctioned helper mints -- see ``run_bulk_approved`` below), or the
 concrete ${class_prefix}ReadFacade class (see
 ${read_facade_module_stem}.py, which registers that class against the kernel
 read-facade registry at import time; ``build_read_facade`` resolves it from
@@ -605,9 +606,11 @@ this capability propose" logic is domain-specific and is filled in against
 the real design in vision.md / execution_plan.md.
 """
 
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional, Tuple
 
-from external_write.capability_api import build_read_facade, run_enveloped_operation
+from external_write.capability_api import (
+    build_read_facade, run_enveloped_operation, run_sanctioned_bulk,
+)
 from external_write.operations import Operation, SCHEMA_V2_ACTION
 
 
@@ -655,6 +658,47 @@ def run_approved(envelope: Any, op: Operation, receipt: Any, *,
     return run_enveloped_operation(
         envelope, op, receipt, None,
         target=target, descriptor_set=descriptor_set, cap_ledger=cap_ledger,
+    )
+
+
+def run_bulk_approved(*, op_builder: Callable[[Tuple[str, ...]], Operation],
+                      run_label: str, operator_approval_verbatim: str, approved_at: str,
+                      reviewed_set: Any, consent_sentence_shown: str,
+                      contract_hash: str, implementation_hash: str,
+                      reviewed_set_schema: Optional[str] = None,
+                      operator_approved_review_artifact: Optional[str] = None,
+                      read_only_client: Any = None, chunk_size: int = 25,
+                      resume_run_id: Optional[str] = None,
+                      fresh_operator_approval_verbatim: Optional[str] = None,
+                      fresh_approved_at: Optional[str] = None) -> Any:
+    """Apply the WHOLE operator-approved reviewed set as one sanctioned bulk
+    run -- the ONLY sanctioned CAPABILITY bulk-write path (symmetric to
+    ``run_approved`` above, for a multi-item run instead of a single op).
+
+    The helper (``run_sanctioned_bulk``) mints the run envelope ONCE (from
+    the consent inputs gathered upstream, e.g. by the triage-review skill),
+    loops the sanctioned single-op path under that ONE run id across as many
+    tranches as the reviewed set needs, and finalizes. This capability module
+    NEVER mints itself, and NEVER mints or loops per batch -- it cannot even
+    NAME the kernel minting entrypoint (see the module docstring above). To
+    resume an interrupted run, pass ``resume_run_id`` plus a FRESH operator
+    confirmation (``fresh_operator_approval_verbatim`` /
+    ``fresh_approved_at``) -- a reused or echoed approval refuses.
+
+    Passes NO write-credential provider -- this capability zone cannot obtain
+    one (same credential-isolation property as ``run_approved`` above).
+    Returns a ``BulkRunSummary``."""
+    return run_sanctioned_bulk(
+        op_builder=op_builder, client=None, read_only_client=read_only_client,
+        chunk_size=chunk_size, run_label=run_label, capability_id="${capability_id}",
+        op_kind=OP_KIND, contract_hash=contract_hash, implementation_hash=implementation_hash,
+        reviewed_set=reviewed_set, operator_approval_verbatim=operator_approval_verbatim,
+        consent_sentence_shown=consent_sentence_shown, approved_at=approved_at,
+        reviewed_set_schema=reviewed_set_schema,
+        operator_approved_review_artifact=operator_approved_review_artifact,
+        resume_run_id=resume_run_id,
+        fresh_operator_approval_verbatim=fresh_operator_approval_verbatim,
+        fresh_approved_at=fresh_approved_at,
     )
 ''')
 

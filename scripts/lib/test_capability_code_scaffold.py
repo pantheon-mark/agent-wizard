@@ -478,14 +478,14 @@ class TestGoldenEmitZoneClean(unittest.TestCase):
 
     def test_capability_module_import_list_is_EXACTLY_the_curated_surface(self):
         """The single most important golden-emit assertion (R7-T3, updated
-        for v0.12.0 S1): the
-        emitted capability module's `external_write` imports are EXACTLY
-        `capability_api` (run_enveloped_operation, build_read_facade) and
-        `operations`
+        for v0.12.0 S1; extended by D6c for the sanctioned bulk-run helper):
+        the emitted capability module's `external_write` imports are EXACTLY
+        `capability_api` (run_enveloped_operation, run_sanctioned_bulk,
+        build_read_facade) and `operations`
         (whatever symbols it actually uses) -- nothing else. In particular
         it must NOT import adapters_<cap>, adapter_registry, get_adapter,
-        read_facades_<cap>, external_write.read_facade, or the raw
-        run_operation primitive at all."""
+        read_facades_<cap>, external_write.read_facade, mint_run_envelope, or
+        the raw run_operation primitive at all."""
         tree = ast.parse(self.capability_path.read_text(encoding="utf-8"))
         imports_by_module = {}
         for node in ast.walk(tree):
@@ -501,7 +501,7 @@ class TestGoldenEmitZoneClean(unittest.TestCase):
         )
         self.assertEqual(
             imports_by_module["external_write.capability_api"],
-            {"run_enveloped_operation", "build_read_facade"},
+            {"run_enveloped_operation", "run_sanctioned_bulk", "build_read_facade"},
         )
         # The raw kernel primitive must NOT be imported through any module.
         for mod, names in imports_by_module.items():
@@ -601,6 +601,60 @@ class TestGoldenEmitZoneClean(unittest.TestCase):
             adapter_profile_paths=effective,
         )
         self.assertEqual(zone, zones.Zone.ADAPTER_PROFILE)
+
+
+class TestGoldenEmitBulkWrapper(unittest.TestCase):
+    """D6c: the scaffold emits a `run_bulk_approved` wrapper (symmetric to
+    the existing single-op `run_approved`) that delegates to
+    `capability_api.run_sanctioned_bulk` and NEVER mints -- the emitted
+    capability zone must be UNABLE to hand-roll a per-batch mint loop (the
+    F-79/F-80 anti-pattern), by construction, not by convention."""
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.project_root = Path(self._td.name)
+        self.spec = _sample_spec()
+        self.written = emit_capability_code_scaffold(self.spec, self.project_root)
+        (self.adapter_path, self.read_facade_path, self.capability_path,
+         self.registry_path, self.registered_adapters_path) = self.written
+        self.lib_dir = self.project_root / "agents" / "lib" / "external_write"
+        self.cap_dir = self.project_root / "agents" / "capabilities"
+        self.source = self.capability_path.read_text(encoding="utf-8")
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def test_emitted_capability_defines_run_bulk_approved(self):
+        self.assertIn("def run_bulk_approved(", self.source)
+
+    def test_run_bulk_approved_delegates_to_run_sanctioned_bulk(self):
+        self.assertIn("run_sanctioned_bulk(", self.source)
+
+    def test_emitted_capability_never_mints(self):
+        # The whole point of D6c: the emitted CAPABILITY zone cannot even
+        # NAME mint_run_envelope -- the helper owns the mint (Decision 1).
+        self.assertNotIn("mint_run_envelope", self.source)
+
+    def test_run_bulk_approved_is_valid_python_and_never_names_run_operation(self):
+        tree = ast.parse(self.source)
+        offenders = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                offenders += [a.name for a in node.names if a.name == "run_operation"]
+            elif isinstance(node, ast.Name) and node.id == "run_operation":
+                offenders.append(node.id)
+            elif isinstance(node, ast.Attribute) and node.attr == "run_operation":
+                offenders.append(node.attr)
+        self.assertEqual(offenders, [])
+
+    def test_all_three_emitted_files_still_scan_clean(self):
+        effective = zones.effective_adapter_profile_paths(self.lib_dir)
+        violations = scan.scan_paths(
+            [self.lib_dir, self.cap_dir],
+            allowed_root=self.lib_dir,
+            adapter_profile_paths=effective,
+        )
+        self.assertEqual(violations, [], f"expected zone-clean emit, got: {violations}")
 
 
 class TestRuntimeRegistration(unittest.TestCase):

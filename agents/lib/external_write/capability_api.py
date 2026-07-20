@@ -7,14 +7,26 @@ either) that emitted capability code is meant to import. It re-exports
 EXACTLY the two capability-facing entrypoints and NOTHING else:
 
     run_enveloped_operation  (external_write.run_envelope) -- the sanctioned
-                        CAPABILITY live-write entrypoint. Capability code runs
-                        an approved Operation UNDER a ceremony-minted
-                        RunEnvelope, so the run-level trust protections are
-                        enforced by construction: disk-authoritative envelope
+                        CAPABILITY live-write entrypoint for a SINGLE
+                        already-approved op. Capability code runs an approved
+                        Operation UNDER a ceremony-minted RunEnvelope, so the
+                        run-level trust protections are enforced by
+                        construction: disk-authoritative envelope
                         spendability, consent-receipt binding, APPLY-BY-ID
                         against the frozen `reviewed_set`, and the AGGREGATE
                         CEILING. Internally this calls the raw kernel primitive
                         `run_operation` ONCE per approved op.
+    run_sanctioned_bulk  (external_write.run_envelope) -- the sanctioned
+                        CAPABILITY live-write entrypoint for a WHOLE
+                        operator-approved bulk run (Task D6). One call mints
+                        the run envelope ONCE (or, on resume, re-authorizes a
+                        genuinely fresh operator consent), loops
+                        `run_enveloped_operation` per chunk under that ONE
+                        run id, and finalizes. Capability code must call this
+                        for a multi-item bulk run instead of hand-rolling a
+                        per-batch mint/apply loop -- see run_envelope.py's own
+                        module docstring for the F-79/F-80 rationale this
+                        closes.
     build_read_facade  (external_write.read_facade) -- resolves a registered
                         ReadFacade subclass for an op_kind (the capability-
                         facing two-arg call shape: `build_read_facade(op_kind,
@@ -78,6 +90,6 @@ Stdlib only — no third-party dependencies.
 """
 
 from external_write.read_facade import build_read_facade
-from external_write.run_envelope import run_enveloped_operation
+from external_write.run_envelope import run_enveloped_operation, run_sanctioned_bulk
 
-__all__ = ["run_enveloped_operation", "build_read_facade"]
+__all__ = ["run_enveloped_operation", "run_sanctioned_bulk", "build_read_facade"]
