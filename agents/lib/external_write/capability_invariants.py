@@ -15,7 +15,7 @@ run in ``next-phase.md``'s Step 4 (technical verification), before Step 5
 (the supervised trial), so a structurally broken capability never reaches a
 live trial. D1-3 wires the stop; this module only computes the verdict.
 
-Every one of the six checks below REUSES an existing, already-trusted
+Every one of the seven checks below REUSES an existing, already-trusted
 signal rather than re-implementing it:
 
   1. routing            -- ``external_write.scan``'s own AST bypass scanner
@@ -60,6 +60,25 @@ signal rather than re-implementing it:
                             still surfaces here as a required-fix failure,
                             rather than silently letting a structurally
                             inconsistent capability proceed to a live trial.
+  7. adapter evidence predicates (Task B1, F-74) -- ``external_write.evidence.
+                            REQUIRED_EVIDENCE_PREDICATES`` (the SAME canonical
+                            list ``copy_run_proof.validate_copy_run_proof``
+                            reads at proof/run time), checked against the
+                            capability's own ``OP_KIND``'s registered
+                            ``adapter_registry.get_dispatch`` result. Fires
+                            ONLY when that op_kind has a REGISTERED adapter
+                            (the six seeded field op_kinds have none, by
+                            permanent design, and are correctly N/A here,
+                            never a failure -- mirroring
+                            ``copy_run_proof.py``'s identical scope note).
+                            Before this check existed, a capability whose
+                            adapter was missing a required evidence predicate
+                            passed this self-QA and only failed mid-trial in
+                            ``copy_run_proof`` -- two gates, one requirement,
+                            out of sync (F-74). Reading the SAME shared
+                            constant both gates consume means a predicate
+                            added to that list is required by BOTH, never
+                            just one of them.
 
 Fail-closed, always
 --------------------
@@ -70,14 +89,28 @@ raised exception -- the same disclosed-bound discipline every other module in
 this package uses. ``operator_message`` is always plain language with a
 concrete next step; it never contains a Python traceback.
 
-Zone note
----------
-This module is intentionally NOT added to ``zones.SEALED_KERNEL_MODULE_PATHS``
--- like ``capability_health.py`` before it, it needs no exemption from
-anything ``scan.py`` enforces (it never references ``run_operation``, the
-adapter registry's internals, or a write-capable credential), so it is left
-in the default, most-restrictive CAPABILITY zone and simply never trips any
-of that zone's bans. See ``scan.py`` / ``zones.py`` for the full taxonomy.
+Zone note (updated Task B1, F-74 -- Cut 1.1 Cluster B)
+-------------------------------------------------------
+Before Task B1, this module was intentionally NOT added to
+``zones.SEALED_KERNEL_MODULE_PATHS`` -- like ``capability_health.py``, it
+needed no exemption from anything ``scan.py`` enforces (it never referenced
+``run_operation``, the adapter registry's internals, or a write-capable
+credential), so it was left in the default, most-restrictive CAPABILITY
+zone. Task B1's Check 7 changes that: it must READ a capability's registered
+adapter's dispatch record (``adapter_registry.get_dispatch``) to verify the
+adapter declares the REQUIRED evidence predicates
+(``evidence.REQUIRED_EVIDENCE_PREDICATES``) -- the SAME read-only inspection
+``operator_acceptance.py``/``acceptance_ceremony.py`` (both SEALED_KERNEL)
+already perform legitimately for the identical reason. This module is
+therefore now listed in ``zones.SEALED_KERNEL_MODULE_PATHS`` (see that
+frozenset's own entry for the full rationale) -- it is exempt ONLY from the
+four CAPABILITY-zone-ONLY rules (``adapter_module_import`` /
+``adapter_registry_reference`` / ``introspection_escape_hatch`` /
+``raw_run_operation_reference``); it is still held to every OTHER check
+``scan.py`` enforces (SEALED_KERNEL is not a free pass -- see ``zones.py``'s
+module docstring), and it still never imports a vendor SDK,
+constructs/obtains a write-capable credential, or calls ``run_operation``
+itself. See ``scan.py`` / ``zones.py`` for the full taxonomy.
 
 Stdlib only -- this module ships into the operator's own runtime,
 ``agents/lib/external_write/``.
@@ -122,6 +155,13 @@ from external_write.acceptance_ceremony import (  # noqa: E402
     _acceptance_record_exists,
     DEFAULT_AUDIT_LOG_PATH,
 )
+# (Task B1, F-74) The adapter registry's dispatch lookup + the ONE canonical
+# source of the required evidence-predicate NAMES -- see evidence.py's
+# REQUIRED_EVIDENCE_PREDICATES docstring for why this module must reference
+# it via the MODULE (``evidence.REQUIRED_EVIDENCE_PREDICATES``), never a
+# frozen name-import.
+from external_write.adapter_registry import get_dispatch  # noqa: E402
+from external_write import evidence  # noqa: E402
 # Fires every shipped AND capability-added adapter module's module-scope
 # ``register_adapter``/``register_contract`` call, exactly like
 # ``operator_acceptance.py``'s own BI-2 pre-check -- see that module's
@@ -146,8 +186,8 @@ PAUSED_MECHANISMS_DIR_REL = ".wizard/paused-mechanisms"
 class InvariantResult:
     """The outcome of ``check_capability_invariants``.
 
-    ok:               True iff every one of the six checks passed (or was
-                       N/A -- see checks 5 and 6).
+    ok:               True iff every one of the seven checks passed (or was
+                       N/A -- see checks 5, 6, and 7).
     failures:          Plain-language failure lines, one per violated check
                        (a capability can fail more than one at once). Empty
                        iff ``ok`` is True.
@@ -240,7 +280,8 @@ def _build_operator_message(failures: List[str]) -> str:
             "All deterministic structural checks passed for this capability: it routes "
             "through the safe write path, its declared test target is valid, its identity "
             "is coherent across the descriptor/capability/mechanism/module names, its "
-            "operation kind is registered, and (if accepted) it carries no residual pause "
+            "operation kind is registered, its registered adapter (if any) declares every "
+            "required evidence predicate, and (if accepted) it carries no residual pause "
             "marker."
         )
     lines = [
@@ -253,16 +294,16 @@ def _build_operator_message(failures: List[str]) -> str:
 
 
 def check_capability_invariants(project_root: str, canonical_id: str) -> InvariantResult:
-    """Run the six AWB-authored, deterministic invariant checks for the
+    """Run the seven AWB-authored, deterministic invariant checks for the
     capability whose canonical (module-derived) id is ``canonical_id``, in
     the project rooted at ``project_root``. Never raises -- every check that
     cannot be positively evaluated is folded into ``failures`` as its own
     fail-closed line (see the module docstring). Composes existing signals
     only; this function does not re-implement the scanner, the identity
     resolver, the test-target vocabulary, the contract registry, the
-    audit-record dedup check, or the pause-marker read -- see the module
-    docstring's numbered list for exactly which existing primitive backs each
-    of the six checks below.
+    audit-record dedup check, the pause-marker read, or the adapter-dispatch
+    registry -- see the module docstring's numbered list for exactly which
+    existing primitive backs each of the seven checks below.
     """
     root = Path(project_root)
     failures: List[str] = []
@@ -361,6 +402,12 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
             failures.append(f"Id coherence: {exc}")
 
     # --- Check 4: contract registered ---------------------------------------
+    # op_kind is hoisted to the outer scope (default None) so Check 7 below --
+    # a DIFFERENT concern (does the registered ADAPTER declare its required
+    # evidence predicates), independent of whether a CONTRACT is registered --
+    # can reuse whichever op_kind this capability actually declares, without
+    # re-extracting it from source a second time.
+    op_kind: Optional[str] = None
     if file_state != "present":
         failures.append(
             f'Contract registered: capability "{canonical_id}"\'s source file could not be read, '
@@ -387,6 +434,35 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
                 "add-capability build cascade does this for you) so it registers at import "
                 "time, then re-run this check."
             )
+
+    # --- Check 7: adapter evidence predicates (Task B1, F-74) ---------------
+    # Fires ONLY when this capability's op_kind resolves to a REGISTERED
+    # adapter (mirrors copy_run_proof.validate_copy_run_proof's identical
+    # scope note: the six seeded field op_kinds have no registered adapter by
+    # permanent design and are correctly N/A here, never a failure). Also N/A
+    # when op_kind itself could not be resolved -- Check 4 above already
+    # reports that failure on its own; this check adds nothing more for that
+    # case. Reads the required predicate NAMES from the SAME canonical source
+    # (external_write.evidence.REQUIRED_EVIDENCE_PREDICATES) the proof/
+    # run-time gate reads -- see that constant's own docstring for why this
+    # closes F-74 (two gates, one requirement, kept in sync rather than
+    # drifting).
+    if op_kind is not None:
+        dispatch = get_dispatch(op_kind)
+        if dispatch is not None:
+            missing_predicates = [
+                name for name in evidence.REQUIRED_EVIDENCE_PREDICATES
+                if getattr(dispatch, name, None) is None or not callable(getattr(dispatch, name))
+            ]
+            if missing_predicates:
+                failures.append(
+                    f'Adapter evidence predicates: capability "{canonical_id}"\'s registered '
+                    f"adapter for operation kind {op_kind!r} does not define "
+                    f"{'/'.join(missing_predicates)}. This capability's adapter must define how "
+                    "it verifies its write landed / can be undone; it stays paused until it "
+                    "does. Fix step: add the missing predicate method(s) to this capability's "
+                    "adapter module, then re-run this check."
+                )
 
     # --- Check 5: audit record, post-acceptance only ------------------------
     # A capability that is not yet accepted has no acceptance to audit -- N/A, never a failure.

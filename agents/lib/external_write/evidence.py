@@ -58,9 +58,50 @@ Stdlib only — no third-party dependencies.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Tuple
 
 from external_write.contracts import SourceLineage
+
+
+# ------------------------------------------------------------------------------
+# Required evidence-predicate set (Task B1, F-74 — Cut 1.1 Cluster B)
+# ------------------------------------------------------------------------------
+# The evidence-predicate NAMES every registered adapter must declare. This is
+# the ONE canonical source of that requirement — both the proof/run-time gate
+# (`copy_run_proof.validate_copy_run_proof`) and the self-QA/Step-4 gate
+# (`capability_invariants.check_capability_invariants`) read this SAME tuple,
+# rather than each hard-coding its own list.
+#
+# Before this constant existed, the required set was an inline, hard-coded
+# pair check buried inside `copy_run_proof.py`
+# (`dispatch.verify_apply_landed is None or dispatch.verify_undo_restored is
+# None`) — and `capability_invariants.py` (the emitted self-QA / next-phase
+# Step 4) never consumed that requirement at all (grep: 0 refs to
+# `verify_apply_landed`/`verify_undo_restored` in that module). A capability
+# whose adapter was missing a required predicate therefore PASSED self-QA and
+# only failed mid-trial in `copy_run_proof` — two gates, one requirement, out
+# of sync. That is F-74.
+#
+# `verify_durability` is deliberately NOT included here: it stays optional
+# even for a persistent-binding op_kind (`contract.introduces_persistent_
+# binding=True`) — see `copy_run_proof.py`'s own durability-gating comment
+# ("optional even for a binding op_kind") — so it is not part of this
+# REQUIRED set.
+#
+# Consumers MUST reference this via the MODULE (``from external_write import
+# evidence`` then ``evidence.REQUIRED_EVIDENCE_PREDICATES``), never via a
+# frozen ``from external_write.evidence import REQUIRED_EVIDENCE_PREDICATES``
+# name-import: the whole point of a single canonical source is that changing
+# it here is instantly visible to every consumer at call time; a name-import
+# would bind a separate, frozen copy at import time and silently defeat that
+# coupling (see test_capability_invariants.py /
+# test_external_write_copy_run_proof_evidence.py's own coupling test, which
+# patches this exact module attribute and asserts BOTH gates pick up the
+# change).
+REQUIRED_EVIDENCE_PREDICATES: Tuple[str, ...] = (
+    "verify_apply_landed",
+    "verify_undo_restored",
+)
 
 
 @dataclass(frozen=True)

@@ -83,6 +83,7 @@ from external_write.operations import Operation
 from external_write.contracts import get_contract, SourceLineage
 from external_write.verifiers import validate_postwrite_verification
 from external_write.adapter_registry import get_dispatch
+from external_write import evidence
 from external_write.evidence import AdapterEvidence
 
 
@@ -234,10 +235,20 @@ def validate_copy_run_proof(proof: Any) -> ProofResult:
     # EARNED from kernel-loaded, observed evidence, not merely asserted.
     dispatch = get_dispatch(op_kind)
     if dispatch is not None:
-        if dispatch.verify_apply_landed is None or dispatch.verify_undo_restored is None:
+        # (Task B1, F-74) Read the required predicate NAMES from the ONE
+        # canonical source (evidence.REQUIRED_EVIDENCE_PREDICATES) rather than
+        # a hard-coded pair check here -- see that constant's own docstring
+        # for why: capability_invariants.check_capability_invariants (the
+        # self-QA/Step-4 gate) reads this SAME tuple, so a name added here
+        # is required by BOTH gates, never just this one.
+        missing_predicates = [
+            name for name in evidence.REQUIRED_EVIDENCE_PREDICATES
+            if getattr(dispatch, name, None) is None
+        ]
+        if missing_predicates:
             return _fail(
                 f"operation {op_kind!r} has a registered adapter but declares no "
-                "evidence predicate (verify_apply_landed/verify_undo_restored) -- "
+                f"{'/'.join(missing_predicates)} evidence predicate -- "
                 "a 'verified' proof with no checkable evidence cannot be accepted"
             )
 

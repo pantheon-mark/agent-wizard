@@ -28,6 +28,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 # Single-home: import from wizard/agents/lib/external_write (canonical location) -- mirrors
 # test_capability_health.py / test_external_write_acceptance_ceremony.py's own convention.
@@ -36,6 +37,19 @@ sys.path.insert(0, str(_AGENTS_LIB))
 
 from external_write import capability_invariants  # noqa: E402
 from external_write.acceptance_ceremony import DEFAULT_AUDIT_LOG_PATH  # noqa: E402
+# (Task B1, F-74) The shared canonical required-predicate source + the two
+# gates that must both consume it -- see capability_invariants.py's Check 7
+# docstring and evidence.py's REQUIRED_EVIDENCE_PREDICATES docstring.
+from external_write import contracts as contracts_mod  # noqa: E402
+from external_write import evidence  # noqa: E402
+from external_write.contracts import OperationContract  # noqa: E402
+from external_write.adapter_registry import register_adapter, unregister_adapter  # noqa: E402
+from external_write.copy_run_proof import (  # noqa: E402
+    COPY_RUN_PROOF_SCHEMA,
+    validate_copy_run_proof,
+)
+from external_write.proof_hash import SHA256_HEX_LEN  # noqa: E402
+from external_write.verifiers import POSTWRITE_VERIFICATION_SCHEMA  # noqa: E402
 
 
 CAPABILITIES_DIR_REL = "agents/capabilities"
@@ -46,6 +60,130 @@ DESCRIPTOR_SET_REL = "security/capability_descriptors.json"
 VALID_OP_KIND = "set_status"
 # Never registered anywhere -- the deliberate check-4 violation.
 UNREGISTERED_OP_KIND = "_d1_1_unregistered_probe_op"
+
+# (Task B1, F-74) An op_kind with a registered CONTRACT + (per-test) a registered ADAPTER --
+# the deliberate Check-7 fixture. Distinct from VALID_OP_KIND/UNREGISTERED_OP_KIND above:
+# those two are permanent module-level constants seeded before this test file ever runs; this
+# one's adapter is registered/unregistered per test (setUp/tearDown below) since Check 7 is
+# about the ADAPTER's declared predicates, not merely the contract's existence.
+_B1_ADAPTER_OP_KIND = "_b1_evidence_predicate_probe_op"
+
+
+def _register_b1_contract() -> None:
+    """Register a minimal, valid OperationContract for `_B1_ADAPTER_OP_KIND` -- mirrors
+    `contracts._status_contract`'s shape (a single writes field, the already-registered
+    `prestate_snapshot_diff_v1` verifier) so a copy_run_proof built against it can pass
+    Clause A independent verification (`verifiers.validate_postwrite_verification`) exactly
+    like every seeded field op_kind's proof already does."""
+    contracts_mod.register_contract(OperationContract(
+        op_kind=_B1_ADAPTER_OP_KIND,
+        writes=("value",),
+        produces=(),
+        dependency_set=(),
+        verifier_set=("prestate_snapshot_diff_v1",),
+        introduces_persistent_binding=False,
+    ))
+
+
+class _B1FullPredicateAdapter:
+    """Test-fixture adapter (Task B1, F-74) declaring BOTH required evidence
+    predicates (`evidence.REQUIRED_EVIDENCE_PREDICATES`, as of this task:
+    verify_apply_landed + verify_undo_restored) -- the 'clean' case. Defines
+    every member of `adapter_registry.Adapter`'s protocol as a bare no-op so
+    `register_adapter` (which captures the class's methods directly, with no
+    getattr default) has something real to capture."""
+
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, raw_client, unit):
+        return {}
+
+    def verify_apply_landed(self, evidence):
+        return True
+
+    def verify_undo_restored(self, evidence):
+        return True
+
+
+class _B1MissingUndoPredicateAdapter:
+    """Test-fixture adapter (Task B1, F-74) declaring ONLY `verify_apply_landed` --
+    missing the required `verify_undo_restored` -- the deliberate F-74 violation this
+    task's Check 7 exists to catch before a live trial, not merely mid-proof."""
+
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, raw_client, unit):
+        return {}
+
+    def verify_apply_landed(self, evidence):
+        return True
+
+
+def _b1_verification():
+    """A postwrite-verification-v1 record that passes Clause A against the
+    `prestate_snapshot_diff_v1` verifier `_register_b1_contract` registers --
+    mirrors `test_external_write_copy_run_proof_evidence.py`'s own `_verification()`
+    helper exactly (same verifier, same lineage shape)."""
+    return {
+        "schema": POSTWRITE_VERIFICATION_SCHEMA,
+        "verification_mode": "prestate_snapshot_diff",
+        "claim_strength": "verified",
+        "verifier_id": "prestate_snapshot_diff_v1",
+        "source_lineage": {
+            "pre_write_sources": ["prewrite_csv_backup"],
+            "post_write_sources": ["live_surface_read"],
+            "forbidden_sources": [
+                "writer_generated_id_map",
+                "live_id_column_as_truth",
+                "apply_report",
+            ],
+        },
+        "invariant_checked": "b1 probe value stable",
+        "evidence_ref": "agents/handoffs/.b1_probe_ev.txt",
+    }
+
+
+def _b1_copy_run_proof():
+    """A copy_run_proof-v1 artifact for `_B1_ADAPTER_OP_KIND`, complete with
+    apply/undo evidence content -- so `validate_copy_run_proof` reaches the
+    evidence-predicate gate (Task 2, A2 proof-time) rather than failing earlier
+    on a structural/record check unrelated to this task."""
+    return {
+        "schema": COPY_RUN_PROOF_SCHEMA,
+        "operation_id": "b1-op-001",
+        "op_kind": _B1_ADAPTER_OP_KIND,
+        "data_class": "test_rows",
+        "copy_source_ref": "copies/copy.csv",
+        "prestate_snapshot_ref": "copies/copy.prestate.csv",
+        "copy_apply_proof": {
+            "apply_receipt_ref": "agents/handoffs/.apply_receipt.json",
+            "apply_verification": _b1_verification(),
+            "apply_evidence": {"unit_id": "u1", "poststate": {}},
+        },
+        "copy_undo_proof": {
+            "undo_receipt_ref": "agents/handoffs/.undo_receipt.json",
+            "undo_verification": _b1_verification(),
+            "undo_evidence": {"unit_id": "u1", "poststate": {}},
+        },
+        "durability_checks": [],
+        "accepted_for_live_use": True,
+        "implementation_hash": "a" * SHA256_HEX_LEN,
+        "contract_hash": "b" * SHA256_HEX_LEN,
+    }
 
 
 _CLEAN_SOURCE = '''"""{name} -- gate-clean capability module (test fixture)."""
@@ -435,6 +573,153 @@ def propose_operations(facade: Any, batch_id: str):
             f"expected the LAST (unregistered) OP_KIND assignment to be used, got "
             f"{result.failures!r}",
         )
+
+
+class TestAdapterEvidencePredicatesCheckIndependent(CapabilityInvariantsTestBase):
+    """Task B1, F-74: Check 7 -- does this capability's registered adapter declare
+    every REQUIRED evidence predicate (`external_write.evidence.
+    REQUIRED_EVIDENCE_PREDICATES`) -- the SAME canonical list
+    `copy_run_proof.validate_copy_run_proof` reads at proof/run time. Before this
+    check existed, a capability whose adapter was missing a required predicate
+    passed this self-QA and only failed mid-trial in copy_run_proof (see
+    test_external_write_copy_run_proof_evidence.py's
+    TestAdapterWithNoPredicateFailsClosed for that same gap's proof/run-time half)."""
+
+    def setUp(self):
+        super().setUp()
+        _register_b1_contract()
+
+    def tearDown(self):
+        unregister_adapter(_B1_ADAPTER_OP_KIND)
+        super().tearDown()
+
+    def test_missing_required_predicate_fails_only_adapter_evidence_predicates(self):
+        register_adapter(_B1_ADAPTER_OP_KIND, _B1MissingUndoPredicateAdapter())
+        cap_id = "b1_missing_undo_predicate_cap"
+        self._write_capability(
+            cap_id,
+            _CLEAN_SOURCE.format(
+                name="B1 Missing Undo Predicate Cap", op_kind=_B1_ADAPTER_OP_KIND),
+        )
+        self._write_descriptor_set([_base_descriptor_entry(cap_id)])
+
+        result = self._check(cap_id)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(f.startswith("Adapter evidence predicates:") for f in result.failures),
+            f"expected an Adapter evidence predicates failure, got {result.failures!r}",
+        )
+        adapter_failure = next(
+            f for f in result.failures if f.startswith("Adapter evidence predicates:"))
+        self.assertIn("verify_undo_restored", adapter_failure)
+        self.assertNotIn("verify_apply_landed", adapter_failure)
+        # The locked plain-language design (F-74's own wording): "this capability's
+        # adapter must define how it verifies its write landed / can be undone; it
+        # stays paused until it does."
+        self.assertIn("stays paused until it does", adapter_failure)
+        # Independent of every other check -- the fixture is otherwise clean.
+        self.assertFalse(any(f.startswith("Routing:") for f in result.failures))
+        self.assertFalse(any(f.startswith("Test target:") for f in result.failures))
+        self.assertFalse(any(f.startswith("Id coherence:") for f in result.failures))
+        self.assertFalse(any(f.startswith("Contract registered:") for f in result.failures))
+        self._assert_no_traceback(result)
+
+    def test_full_predicates_declared_passes_adapter_evidence_predicates(self):
+        register_adapter(_B1_ADAPTER_OP_KIND, _B1FullPredicateAdapter())
+        cap_id = "b1_full_predicates_cap"
+        self._write_capability(
+            cap_id,
+            _CLEAN_SOURCE.format(name="B1 Full Predicates Cap", op_kind=_B1_ADAPTER_OP_KIND),
+        )
+        self._write_descriptor_set([_base_descriptor_entry(cap_id)])
+
+        result = self._check(cap_id)
+
+        self.assertTrue(result.ok, f"expected ok, got failures: {result.failures!r}")
+        self.assertEqual(result.failures, [])
+        self._assert_no_traceback(result)
+
+    def test_unregistered_adapter_op_kind_is_na_not_a_failure(self):
+        # set_status (VALID_OP_KIND) has NO registered adapter at all, by permanent
+        # design (adapter_registry.py) -- this check must never fire for it, mirroring
+        # copy_run_proof.validate_copy_run_proof's identical scope note.
+        cap_id = "b1_unregistered_adapter_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="B1 Unregistered Adapter Cap", op_kind=VALID_OP_KIND))
+        self._write_descriptor_set([_base_descriptor_entry(cap_id)])
+
+        result = self._check(cap_id)
+
+        self.assertFalse(
+            any(f.startswith("Adapter evidence predicates:") for f in result.failures))
+
+
+class TestAdapterEvidencePredicatesSharedContractCoupling(CapabilityInvariantsTestBase):
+    """Task B1, F-74: proves SINGLE-SOURCE coupling, not two drifting lists --
+    adding a name to `evidence.REQUIRED_EVIDENCE_PREDICATES` makes BOTH the
+    self-QA gate (`capability_invariants.check_capability_invariants`) AND the
+    proof/run-time gate (`copy_run_proof.validate_copy_run_proof`) require it,
+    against the SAME registered adapter/contract fixture, with no code change
+    to either gate."""
+
+    def setUp(self):
+        super().setUp()
+        _register_b1_contract()
+        register_adapter(_B1_ADAPTER_OP_KIND, _B1FullPredicateAdapter())
+
+    def tearDown(self):
+        unregister_adapter(_B1_ADAPTER_OP_KIND)
+        super().tearDown()
+
+    def test_baseline_both_gates_pass_with_current_required_set(self):
+        cap_id = "b1_coupling_baseline_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="B1 Coupling Baseline Cap", op_kind=_B1_ADAPTER_OP_KIND))
+        self._write_descriptor_set([_base_descriptor_entry(cap_id)])
+
+        selfqa_result = self._check(cap_id)
+        proof_result = validate_copy_run_proof(_b1_copy_run_proof())
+
+        self.assertTrue(selfqa_result.ok, selfqa_result.failures)
+        self.assertTrue(proof_result.ok, proof_result.reason)
+
+    def test_adding_required_predicate_to_shared_contract_requires_it_in_both_gates(self):
+        cap_id = "b1_coupling_new_predicate_cap"
+        self._write_capability(
+            cap_id,
+            _CLEAN_SOURCE.format(
+                name="B1 Coupling New Predicate Cap", op_kind=_B1_ADAPTER_OP_KIND),
+        )
+        self._write_descriptor_set([_base_descriptor_entry(cap_id)])
+
+        # `_B1FullPredicateAdapter` declares neither this fictitious predicate nor
+        # anything else beyond the CURRENT required pair -- adding it to the shared
+        # contract, with no other change, must make it required by BOTH gates.
+        new_required = evidence.REQUIRED_EVIDENCE_PREDICATES + ("verify_b1_new_predicate_probe",)
+        with mock.patch.object(evidence, "REQUIRED_EVIDENCE_PREDICATES", new_required):
+            selfqa_result = self._check(cap_id)
+            proof_result = validate_copy_run_proof(_b1_copy_run_proof())
+
+        self.assertFalse(
+            selfqa_result.ok, "expected self-QA to require the newly-added predicate too")
+        self.assertTrue(
+            any("verify_b1_new_predicate_probe" in f for f in selfqa_result.failures),
+            f"expected the new predicate name in the failure, got {selfqa_result.failures!r}",
+        )
+        self.assertFalse(
+            proof_result.ok,
+            "expected the proof/run-time gate to require the newly-added predicate too",
+        )
+        self.assertIn("verify_b1_new_predicate_probe", proof_result.reason)
+
+        # After the patch is undone, the SAME fixture (adapter unchanged) passes again --
+        # proves the failure above was caused by the shared contract, not a permanent
+        # side effect of this test leaking into the next one.
+        selfqa_after = self._check(cap_id)
+        proof_after = validate_copy_run_proof(_b1_copy_run_proof())
+        self.assertTrue(selfqa_after.ok, selfqa_after.failures)
+        self.assertTrue(proof_after.ok, proof_after.reason)
 
 
 class TestAuditCheckPostAcceptanceOnly(CapabilityInvariantsTestBase):

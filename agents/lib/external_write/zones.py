@@ -103,6 +103,28 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         "adapters.py",
         "boundary.py",
         "broker.py",
+        # capability_invariants.py (Task B1, F-74 — Cut 1.1 Cluster B): the
+        # emitted self-QA / next-phase Step-4 battery. Before this task it
+        # needed NO exemption from anything scan.py enforces (see its own
+        # module docstring's now-superseded "Zone note") -- it never
+        # referenced the adapter registry's internals. B1 changes that: Check
+        # 7 must read a capability's registered adapter's dispatch record
+        # (`adapter_registry.get_dispatch`) to verify it declares the
+        # REQUIRED evidence predicates (`evidence.REQUIRED_EVIDENCE_
+        # PREDICATES`) -- the SAME read-only inspection
+        # `operator_acceptance.py`/`acceptance_ceremony.py` (both already
+        # SEALED_KERNEL) already perform legitimately for the identical
+        # reason. This is a READ of the dispatch record only -- this module
+        # still never imports a vendor SDK, constructs/obtains a
+        # write-capable credential, or calls `run_operation` -- so it is held
+        # to the SAME bypass checks as before (see the module docstring above
+        # for what SEALED_KERNEL membership does and does not exempt); it is
+        # exempt ONLY from the four CAPABILITY-zone-ONLY rules
+        # (adapter_module_import / adapter_registry_reference /
+        # introspection_escape_hatch / raw_run_operation_reference), the same
+        # exemption `registered_adapters.py`'s entry below already documents
+        # for the identical reason.
+        "capability_invariants.py",
         "capability_registration.py",
         "contracts.py",
         "copy_run_proof.py",
