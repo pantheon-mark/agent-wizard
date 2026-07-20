@@ -4,7 +4,7 @@ the kernel ReadFacade registry generalization).
 This is the ONLY `external_write` module (besides `operations`, which is
 pure data — Operation/EffectUnit — and carries nothing credential-reachable
 either) that emitted capability code is meant to import. It re-exports
-EXACTLY the two capability-facing entrypoints and NOTHING else:
+EXACTLY the three capability-facing entrypoints and NOTHING else:
 
     run_enveloped_operation  (external_write.run_envelope) -- the sanctioned
                         CAPABILITY live-write entrypoint for a SINGLE

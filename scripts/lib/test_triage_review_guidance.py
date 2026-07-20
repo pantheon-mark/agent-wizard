@@ -22,6 +22,7 @@ the load-bearing invariants).
 Stdlib unittest; pip-install-free.
 """
 
+import re
 import unittest
 from pathlib import Path
 
@@ -95,11 +96,16 @@ class TriageReviewGuidanceTests(unittest.TestCase):
         # negated phrasing ("do not ... per batch") -- the skill is expected
         # to say that explicitly; only a positive instruction to do it would
         # be the regression.
-        self.assertNotRegex(self.text, r"per[- ]batch (loop|mint)")
+        self.assertNotRegex(
+            self.text, re.compile(r"per[- ]batch (loop|mint)", re.IGNORECASE)
+        )
         self.assertNotRegex(
             self.text,
-            r"(?<!not )(?<!never )mint (a|the|one) (new )?(run )?envelope.{0,20}"
-            r"(each|every|per) batch",
+            re.compile(
+                r"(?<!not )(?<!never )mint (a|the|one) (new )?(run )?envelope.{0,20}"
+                r"(each|every|per) batch",
+                re.IGNORECASE,
+            ),
         )
 
 
