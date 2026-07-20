@@ -823,6 +823,27 @@ class TestPausedOpKindDenyBranch(unittest.TestCase):
             self.assertFalse(d.permitted, target)
             self.assertIn("paused", d.refusal.detail["reason"], target)
 
+    def test_paused_op_kind_refusal_routes_to_rebuild_flow_not_add_capability(self):
+        # F-77 completion (Cut 1.1 Cluster B, Task B4): this refusal string is the
+        # LAST remaining F-77 dead-end and the most operator-visible one -- it is
+        # the literal message an operator/agent sees on the sanctioned route
+        # (run_enveloped_operation -> run_operation -> evaluate_write_gate) when a
+        # paused capability's live write is refused. It used to tell the reader to
+        # "rebuild it through add-capability", but add-capability's scope is NEW
+        # capabilities only and dead-ends on an existing paused one. Mirrors
+        # test_operating_discipline_routes_red_capability_to_rebuild_flow in
+        # test_build_operate_emit.py. This is a message-only assertion -- the
+        # deny behavior itself is covered by test_paused_op_kind_refused_all_live_classes
+        # above and must be unaffected by this change.
+        self._write_marker("estate_upkeep.json",
+                           json.dumps({"paused_op_kinds": [self.OP_KIND]}))
+        op = _op(self.OP_KIND, surface="google_sheets", object_id="obj:live")
+        d = evaluate_write_gate(op, target="live", paused_root=str(self.marker_dir))
+        self.assertFalse(d.permitted)
+        reason = d.refusal.detail["reason"]
+        self.assertIn("rebuild-paused-capability", reason)
+        self.assertNotIn("add-capability", reason)
+
     def test_unrelated_op_kind_unaffected_by_marker(self):
         # Anti-overfit: a DIFFERENT op_kind sharing nothing with the paused
         # marker must be completely unaffected -- proves the check is keyed

@@ -844,7 +844,8 @@ def evaluate_write_gate(op: Operation, *, target: Optional[str] = None,
     if op.op_kind in paused_op_kinds:
         return _refuse(
             f"gated operation refused: op_kind {op.op_kind!r} is paused pending migration "
-            "(rebuild it through add-capability before it runs live again)",
+            "(run the rebuild-paused-capability flow to repair and re-accept it before it "
+            "runs live again)",
             op_kind=op.op_kind, paused=True)
 
     # (3) Is this op gated at all?  Unknown/uncovered writer (no contract) is gated;

@@ -58,10 +58,20 @@ class RebuildPausedCapabilitySkillTests(unittest.TestCase):
 
     def test_description_excludes_new_capability_scope(self):
         # Routing signal must be clearly distinguished from add-capability's
-        # scope, so an orchestrator does not pick the wrong skill.
+        # scope, so an orchestrator does not pick the wrong skill. This must
+        # assert the actual EXCLUSION sentence, not just that "add-capability"
+        # appears somewhere in the frontmatter -- a bare mention (e.g. "hands
+        # off here from add-capability") would satisfy assertIn without ever
+        # stating the scope boundary, and this test would then pass even if
+        # the exclusion sentence itself were deleted.
         frontmatter_end = self.text.index("---", 3)
         frontmatter = self.text[: frontmatter_end]
-        self.assertIn("add-capability", frontmatter)
+        self.assertIn(
+            "Not for setting up a capability that never existed before", frontmatter,
+            "frontmatter must explicitly say this flow is NOT for a new capability "
+            "and must direct that case to add-capability instead",
+        )
+        self.assertIn("use add-capability for that", frontmatter)
         self.assertIn("next-phase", frontmatter)
 
     # -- (a) covers reconcile -> stub-repair -> proof -> accept ->
