@@ -1066,6 +1066,29 @@ class ControlledVocabularyRuleWiringTests(unittest.TestCase):
                       "operating_discipline.md must state the system does NOT invite the "
                       "operator into a red/broken capability")
 
+    def test_operating_discipline_routes_red_capability_to_rebuild_flow(self):
+        """F-77 completion: operating_discipline.md's capability_health gate paragraph must
+        route a red/paused/migration-flagged EXISTING capability to the rebuild-a-paused-
+        capability flow (the B4 skill), not to add-a-capability -- add-a-capability's scope is
+        new capabilities only and is a dead end for repairing one that already exists. B4
+        (Cut 1.1 Cluster B) fixed this routing everywhere except this operator-facing doc,
+        which every operator project ships and where the operator actually reads it."""
+        lower = self.od_text.lower()
+        self.assertIn("rebuild-a-paused-capability", lower,
+                      "operating_discipline.md must name the rebuild-a-paused-capability flow "
+                      "as the next step for a red/paused existing capability")
+        self.assertNotIn(
+            "getting that done (through the add-a-capability flow)", lower,
+            "operating_discipline.md must no longer route a red/paused capability's repair "
+            "through add-a-capability -- that is the F-77 dead end (add-a-capability is scoped "
+            "to NEW capabilities and does not rebuild an existing/paused one)",
+        )
+        self.assertTrue(
+            ("something genuinely new" in lower) or ("something new" in lower),
+            "operating_discipline.md must distinguish the rebuild flow (existing, paused "
+            "capability) from add-a-capability (something genuinely new)",
+        )
+
 
 class AddCapabilitySkillHealthProbeTests(unittest.TestCase):
     """Task 5 (F-55 C): wizard/skills/add-capability.md's Step A must name the
