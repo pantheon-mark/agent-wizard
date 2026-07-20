@@ -152,6 +152,35 @@ Some `technical_architecture.md` sections are intentionally reserved and say so 
 
 Do not surface the technical details to the operator -- bring the agents to a runnable state quietly.
 
+### What this capability's own test should (and should not) cover
+
+When you write or update this capability's own test file, keep it scoped to what this
+capability itself is responsible for: its own logic, its own declared operation, its own real
+acceptance/gate entrypoint. Two things are NOT this capability's own test's job:
+
+- **Whether a paused mechanism is refused.** The write gate (the one entrypoint every gated
+  write already routes through) refuses any op_kind that a pause marker names, and that
+  refusal is already proven by the gate's own test suite -- once, for every capability, not
+  once per capability. Do not add a test to this capability that asserts the gate refuses it
+  while paused. If you do, that test's pass/fail will depend on this project's OWN real
+  `.wizard/paused-mechanisms/` state at whatever moment the test happens to run -- green today,
+  silently red tomorrow once the operator re-accepts this very capability and the pause marker
+  is cleared -- even though nothing about the capability's own correctness changed. That is not
+  a real regression signal; it is exactly the kind of test that must not exist.
+- **Any other lifecycle-phase-dependent state that isn't this capability's own.** The same
+  rule holds for anything else that reads the project's real, ambient, changes-over-time state
+  (a pending-migration queue entry, an acceptance record, and so on) rather than something the
+  test itself sets up.
+
+If a test genuinely needs to exercise paused/lifecycle-dependent behavior (rare -- most
+capabilities never need to), it must do so hermetically, never against the real project state:
+import `hermetic_paused_mechanisms` from `external_write.lifecycle_test_fixtures` and pass its
+returned temporary directory as the write gate's `paused_root=` argument. That gives the test
+its own throwaway pause state, so its outcome never depends on this project's real, changing
+lifecycle state. The deterministic self-check below (Step 4's next subsection) will flag, and
+send you back here to fix, any test that skips this and reads or writes the project's own
+pause-marker path directly.
+
 ### Deterministic self-check (silent, fail-closed before Step 5)
 
 Once this phase's agents are at a runnable state, run this exact check for the phase's capability, silently, from the project root, before doing anything else in this step:

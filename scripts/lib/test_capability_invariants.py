@@ -1462,5 +1462,314 @@ if __name__ == "__main__":
         self.assertNotIn("Traceback", result.stderr)
 
 
+class TestLifecycleHermeticityProbeASTUnits(unittest.TestCase):
+    """Direct, fast unit tests of the two AST-only detection functions Task A3's lifecycle-
+    hermeticity probe is built from (``_ast_calls_write_gate_without_paused_root`` and
+    ``_ast_touches_ambient_paused_mechanisms_path``) -- exercised in isolation, without going
+    through a full project fixture + ``check_test_quality`` run, so each detection shape and
+    documented limit from that probe's module-level "Detection shape + its limits" section is
+    pinned precisely."""
+
+    def _calls_without_paused_root(self, source: str):
+        import ast
+        return capability_invariants._ast_calls_write_gate_without_paused_root(ast.parse(source))
+
+    def _touches_ambient_path(self, source: str) -> bool:
+        import ast
+        return capability_invariants._ast_touches_ambient_paused_mechanisms_path(ast.parse(source))
+
+    def test_bare_name_import_call_without_paused_root_is_flagged(self):
+        hits = self._calls_without_paused_root(
+            "from external_write.write_gate import evaluate_write_gate\n"
+            "d = evaluate_write_gate(op, target='live')\n"
+        )
+        self.assertEqual(len(hits), 1)
+
+    def test_bare_name_import_call_with_paused_root_is_not_flagged(self):
+        hits = self._calls_without_paused_root(
+            "from external_write.write_gate import evaluate_write_gate\n"
+            "d = evaluate_write_gate(op, target='live', paused_root=some_temp_dir)\n"
+        )
+        self.assertEqual(hits, [])
+
+    def test_module_attribute_access_call_without_paused_root_is_flagged(self):
+        hits = self._calls_without_paused_root(
+            "from external_write import write_gate\n"
+            "d = write_gate.evaluate_write_gate(op, target='live')\n"
+        )
+        self.assertEqual(len(hits), 1)
+
+    def test_plain_import_module_attribute_call_without_paused_root_is_flagged(self):
+        hits = self._calls_without_paused_root(
+            "import external_write.write_gate\n"
+            "d = external_write.write_gate.evaluate_write_gate(op, target='live')\n"
+        )
+        self.assertEqual(len(hits), 1)
+
+    def test_kwargs_unpack_is_not_flagged_documented_limit(self):
+        # (Documented LIMIT) A call that hides paused_root inside a **mapping unpack is
+        # UNDECIDABLE from source text alone -- must not be flagged.
+        hits = self._calls_without_paused_root(
+            "from external_write.write_gate import evaluate_write_gate\n"
+            "extra = {'paused_root': some_temp_dir}\n"
+            "d = evaluate_write_gate(op, target='live', **extra)\n"
+        )
+        self.assertEqual(hits, [])
+
+    def test_explicit_paused_root_none_is_not_flagged_documented_limit(self):
+        # (Documented LIMIT) paused_root=None is behaviorally identical to omitting the keyword,
+        # but this checks the keyword's PRESENCE, not its value -- not flagged.
+        hits = self._calls_without_paused_root(
+            "from external_write.write_gate import evaluate_write_gate\n"
+            "d = evaluate_write_gate(op, target='live', paused_root=None)\n"
+        )
+        self.assertEqual(hits, [])
+
+    def test_unrelated_call_of_the_same_name_from_no_import_is_not_flagged(self):
+        # A LOCALLY-defined function that happens to share the name, never imported from
+        # write_gate at all, must not be treated as the real entrypoint.
+        hits = self._calls_without_paused_root(
+            "def evaluate_write_gate(op, target=None):\n"
+            "    return 'fake'\n"
+            "d = evaluate_write_gate(op, target='live')\n"
+        )
+        self.assertEqual(hits, [])
+
+    def test_ambient_literal_in_open_call_is_flagged(self):
+        self.assertTrue(self._touches_ambient_path(
+            "open('.wizard/paused-mechanisms/x.json', 'w')\n"
+        ))
+
+    def test_ambient_literal_in_path_construction_is_flagged(self):
+        self.assertTrue(self._touches_ambient_path(
+            "from pathlib import Path\n"
+            "p = Path('.wizard/paused-mechanisms')\n"
+            "p.mkdir()\n"
+        ))
+
+    def test_ambient_literal_nested_in_os_path_join_is_flagged(self):
+        self.assertTrue(self._touches_ambient_path(
+            "import os\n"
+            "p = os.path.join(root, '.wizard/paused-mechanisms', 'x.json')\n"
+        ))
+
+    def test_literal_reference_outside_a_filesystem_call_is_not_flagged(self):
+        # A test that merely pins the CONSTANT's value (no filesystem call in sight) must not
+        # be flagged -- anchored to "argument inside a recognized fs call", not a bare substring.
+        self.assertFalse(self._touches_ambient_path(
+            "from external_write import write_gate\n"
+            "assert write_gate.PAUSED_MECHANISMS_DIR == '.wizard/paused-mechanisms'\n"
+        ))
+
+    def test_unrelated_path_literal_in_a_filesystem_call_is_not_flagged(self):
+        self.assertFalse(self._touches_ambient_path(
+            "open('some/unrelated/path.json', 'w')\n"
+        ))
+
+
+class TestLifecycleHermeticityProbeIntegration(CapabilityInvariantsTestBase):
+    """Integration tests of the lifecycle-hermeticity probe through the real
+    ``check_test_quality`` entrypoint (Task A3, F-71) -- the exact regression class this test
+    suite must guard against: a capability test whose verdict depends on this project's own
+    ambient, changes-over-time pause state."""
+
+    def test_ambient_write_gate_call_without_paused_root_is_flagged(self):
+        # This IS the F-71 shape: a test class asserting paused-refusal by calling
+        # evaluate_write_gate with no paused_root at all, relying on the gate's own ambient
+        # default.
+        cap_id = "ambient_pause_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Ambient Pause Cap", op_kind=VALID_OP_KIND))
+        self._stage_real_external_write()
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: F-71 shape -- ambient-state-dependent paused-refusal test (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}  # noqa: F401
+
+from external_write.write_gate import evaluate_write_gate
+from external_write.operations import Operation
+
+
+class TestWriteGatePausedPendingMigration(unittest.TestCase):
+    def test_gate_live_refused_while_paused(self):
+        op = Operation(surface="test_surface", op_kind="{VALID_OP_KIND}", object_id="obj:1", batch_id="b1")
+        # No paused_root= passed at all -- falls through to the real ambient default.
+        d = evaluate_write_gate(op, target="live")
+        # Outcome deliberately not asserted on further -- the defect is the missing kwarg,
+        # not any particular result.
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(f.startswith("Lifecycle hermeticity:") for f in result.failures),
+            f"expected a Lifecycle hermeticity failure, got {result.failures!r}",
+        )
+        self._assert_no_traceback(result)
+
+    def test_direct_ambient_path_touch_without_write_gate_call_is_flagged(self):
+        # The OTHER shape this probe catches: a test that never calls evaluate_write_gate at
+        # all, but reads/writes the ambient pause-marker path directly.
+        cap_id = "ambient_touch_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Ambient Touch Cap", op_kind=VALID_OP_KIND))
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: direct ambient pause-marker path touch, no write_gate call (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}  # noqa: F401
+
+
+class TestDirectAmbientTouch(unittest.TestCase):
+    def test_reads_ambient_marker_directory(self):
+        p = Path(".wizard/paused-mechanisms")
+        self.assertTrue(True)  # the reference above is the defect, not this assertion
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(f.startswith("Lifecycle hermeticity:") for f in result.failures),
+            f"expected a Lifecycle hermeticity failure, got {result.failures!r}",
+        )
+        self._assert_no_traceback(result)
+
+    def test_hermetic_fixture_rewrite_passes_the_full_battery(self):
+        # The SAME test intent as the F-71 shape above (prove paused-refusal), rewritten to use
+        # the hermetic fixture instead of the ambient default -- must pass ALL THREE probes,
+        # not merely avoid the lifecycle-hermeticity failure.
+        cap_id = "hermetic_pause_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="Hermetic Pause Cap", op_kind=VALID_OP_KIND))
+        self._stage_real_external_write()
+        module_name = f"{cap_id}_capability"
+        test_source = f'''"""Fixture: hermetic paused-refusal test, real entrypoint reference (test fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}
+
+from external_write.capability_api import run_enveloped_operation  # noqa: F401
+from external_write.write_gate import evaluate_write_gate
+from external_write.operations import Operation
+from external_write.lifecycle_test_fixtures import hermetic_paused_mechanisms
+
+if False:  # AST-only guarded call (mirrors the real-entrypoint fixture pattern elsewhere in
+           # this suite) -- proves this file's producer-entrypoint reference is a genuine
+           # ast.Call, never executed here.
+    run_enveloped_operation()
+
+
+class TestRealEntrypointHermeticPauseCap(unittest.TestCase):
+    def test_describe_reports_ready(self):
+        self.assertEqual({module_name}.describe(), "Hermetic Pause Cap ready")
+
+
+class TestPausedRefusalHermetic(unittest.TestCase):
+    def test_gate_live_refused_while_paused(self):
+        op = Operation(surface="test_surface", op_kind="{VALID_OP_KIND}", object_id="obj:1", batch_id="b1")
+        with hermetic_paused_mechanisms(["{VALID_OP_KIND}"]) as paused_root:
+            d = evaluate_write_gate(op, target="live", paused_root=paused_root)
+        self.assertFalse(d.permitted)
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{cap_id}_capability.py", test_source)
+
+        result = self._check_quality(cap_id)
+
+        self.assertTrue(result.ok, f"expected ok, got failures: {result.failures!r}")
+        self.assertEqual(result.failures, [])
+        self._assert_no_traceback(result)
+
+    def test_probe_verdict_identical_regardless_of_real_ambient_marker_state(self):
+        # (Idempotence across accept -> reconcile, the exact F-71 regression property) The
+        # probe's verdict must be IDENTICAL whether or not a real pause marker happens to exist
+        # under this project's own ambient .wizard/paused-mechanisms/ at the moment the check
+        # runs -- unlike the OLD ambient-reading test, which flipped between the two. Exercised
+        # for BOTH the flagged (ambient-reliant) test and the clean (hermetic) test.
+        ambient_cap_id = "ambient_pause_idempotence_cap"
+        self._write_capability(
+            ambient_cap_id,
+            _CLEAN_SOURCE.format(name="Ambient Pause Idempotence Cap", op_kind=VALID_OP_KIND))
+        self._stage_real_external_write()
+        module_name = f"{ambient_cap_id}_capability"
+        ambient_test_source = f'''"""Fixture: ambient-reliant paused test (idempotence probe fixture)."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import {module_name}  # noqa: F401
+
+from external_write.write_gate import evaluate_write_gate
+from external_write.operations import Operation
+
+
+class TestAmbientIdempotence(unittest.TestCase):
+    def test_gate_live_refused_while_paused(self):
+        op = Operation(surface="test_surface", op_kind="{VALID_OP_KIND}", object_id="obj:1", batch_id="b1")
+        d = evaluate_write_gate(op, target="live")
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+        self._write_project_file(
+            f"{CAPABILITIES_DIR_REL}/tests/test_{ambient_cap_id}_capability.py",
+            ambient_test_source)
+
+        def _lifecycle_failure_present(cap_id):
+            result = self._check_quality(cap_id)
+            return any(f.startswith("Lifecycle hermeticity:") for f in result.failures)
+
+        # "Before reconcile": a real pause marker sits under the project's own ambient path.
+        marker_dir = self.project_root / capability_invariants.PAUSED_MECHANISMS_DIR_REL
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        (marker_dir / f"{ambient_cap_id}.json").write_text(
+            json.dumps({"paused_op_kinds": [VALID_OP_KIND]}), encoding="utf-8")
+        before = _lifecycle_failure_present(ambient_cap_id)
+
+        # "After reconcile": the marker is cleared (Task A1/A2's own effect).
+        (marker_dir / f"{ambient_cap_id}.json").unlink()
+        after = _lifecycle_failure_present(ambient_cap_id)
+
+        self.assertTrue(before, "expected the ambient-reliant test to be flagged before reconcile")
+        self.assertTrue(after, "expected the ambient-reliant test to STILL be flagged after "
+                                "reconcile -- the probe is static and must not depend on ambient "
+                                "marker state the way the old runtime test did")
+        self.assertEqual(before, after)
+
+
 if __name__ == "__main__":
     unittest.main()

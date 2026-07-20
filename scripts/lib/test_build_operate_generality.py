@@ -833,6 +833,7 @@ class SupervisedCopyTargetSourceGuardTest(unittest.TestCase):
         self._assert_no_generic_placeholder(self.bundle_next_phase_text,
                                             "latest-bundle templates/wizard/skills/next-phase.md")
 
+    @unittest.expectedFailure
     def test_bundle_next_phase_matches_dev_home(self):
         """The emitted bundle next-phase.md is byte-identical to the dev home (single source
         of truth kept in sync by hand convention; no sync script exists).
@@ -847,7 +848,25 @@ class SupervisedCopyTargetSourceGuardTest(unittest.TestCase):
         already-released and byte-immutable at the time — could not be edited to carry it, so
         this guard was marked expectedFailure until Cut 1 cut its own bundle. The v0.14.0 cut
         ported the current wizard/skills/next-phase.md into the bundle byte-for-byte, restoring
-        dev-home == latest-bundle; the marker is removed accordingly."""
+        dev-home == latest-bundle; the marker was removed accordingly.
+
+        KNOWN PENDING DIVERGENCE AGAIN (Cut 1.1, Task A3, F-71). Task A3 added the "What this
+        capability's own test should (and should not) cover" guidance section to the DEV-HOME
+        wizard/skills/next-phase.md, steering a capability author away from writing an
+        ambient-pause-state-dependent test and toward the new hermetic fixture
+        (external_write.lifecycle_test_fixtures). v0.14.0 is an already-RELEASED,
+        byte-immutable bundle -- it must never be edited to force this guard green (the same
+        rule this test's own history already enforces above). So the dev home again
+        intentionally LEADS the latest-bundle copy; byte-identity is re-established only when
+        Cut 1.1's own bundle cut ships this next-phase.md edit (+ capability_invariants.py's
+        third test-quality probe + lifecycle_test_fixtures.py) into a new bundle version. Marked
+        expectedFailure, not deleted, for the same self-clearing reason the prior instances
+        were: the moment a future cut restores dev-home == latest-bundle, unittest reports this
+        as an UNEXPECTED SUCCESS and fails the suite, forcing the marker's removal. The dev-home
+        content itself is unaffected by this bundle lag -- there is no bundle-independent
+        wiring test for this specific prose section (unlike D1-3's Step 4 wiring, which
+        NextPhaseSelfQAWiringTests reads from the canonical dev-home source directly), so this
+        marker is the ONLY thing tracking the pending re-sync obligation for this change."""
         self.assertEqual(
             self.bundle_next_phase_text, self.next_phase_text,
             "bundle next-phase.md template diverged from wizard/skills/next-phase.md; "

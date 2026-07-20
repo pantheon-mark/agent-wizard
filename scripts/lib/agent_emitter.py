@@ -165,6 +165,17 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # (same regression class this file's own docstring already documents for every prior entry
     # above).
     "capability_invariants.py",
+    # Task A3 (hermetic lifecycle tests + probe, Cut 1.1 / F-71): the hermetic
+    # paused-mechanisms test-fixture helper a capability's own test imports instead of
+    # reading/writing the real project's ambient `.wizard/paused-mechanisms/` directory (the
+    # exact F-71 defect -- see that module's own docstring). Nothing else in the lib imports
+    # it at module scope (a capability's TEST file is the only intended caller), but omitting
+    # it here means an emitted writes-back system's `next-phase.md` rebuild guidance points a
+    # capability author at a fixture helper that was never physically shipped -- a
+    # ModuleNotFoundError the moment a capability's test actually tries to import it, not a
+    # caught omission (same regression class this file's own docstring already documents for
+    # every prior entry above).
+    "lifecycle_test_fixtures.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

@@ -462,10 +462,11 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
 # capability module and its real acceptance/gate entrypoint, and the test
 # suite will happily stay green forever no matter what the real code does.
 #
-# ``check_test_quality`` adds two RIGHT-SIZED, deterministic probes on top of
-# D1-1 (per the 2026-07-17 design consult's right-sizing calibration -- full
+# ``check_test_quality`` adds THREE RIGHT-SIZED, deterministic probes on top of
+# D1-1 (the first two per the 2026-07-17 design consult's right-sizing calibration -- full
 # mutation-style per-branch checks are heavier and partly redundant with the
-# D1-1 invariants, and are deliberately deferred, not built here):
+# D1-1 invariants, and are deliberately deferred, not built here; the third added by Task A3,
+# Cut 1.1, F-71 -- see that probe's own section below for why):
 #
 #   1. producer-entrypoint (AST, static) -- does this capability's own test
 #      file actually reference the REAL capability module and the REAL
@@ -478,6 +479,15 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
 #      even when the implementation is broken, the suite is inert and proves
 #      nothing -- exactly the SB-8 failure class, just caught mechanically
 #      instead of relying on a reviewer's judgment.
+#   3. lifecycle hermeticity (AST, static; Task A3, F-71) -- does this capability's own test
+#      file call the write gate's paused-op-kind check, or otherwise touch the ambient
+#      ``.wizard/paused-mechanisms/`` path, WITHOUT going through the hermetic fixture
+#      (``external_write.lifecycle_test_fixtures.hermetic_paused_mechanisms``)? A test that
+#      relies on the write gate's own ambient default (or reads/writes the real project's
+#      pause-marker path directly) gives a DIFFERENT verdict depending on this project's own
+#      transient pause/rebuild/re-accept lifecycle state at the moment it happens to run --
+#      exactly the F-71 false-RED. See that probe's own section for the full detection shape
+#      and its documented limits.
 #
 # Detection heuristic + its limits (producer-entrypoint, AST-only)
 # -------------------------------------------------------------------
@@ -564,6 +574,50 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
 # passes; if ANY of them still reports a clean pass, that test file is
 # treated as inert and the probe fails (fail-closed, plain language, no
 # traceback) -- see ``_check_known_bad_fails``.
+#
+# Detection shape + its limits (lifecycle hermeticity, Task A3, F-71)
+# --------------------------------------------------------------------
+# The F-71 defect was NOT a bare string literal sitting in a test file -- the real, verified
+# defective test never once wrote the words ``.wizard/paused-mechanisms`` anywhere; it simply
+# called ``write_gate.evaluate_write_gate(...)`` without a ``paused_root`` keyword, which is
+# what let the gate fall through to ITS OWN ambient default. So this probe is not a grep for
+# that path string -- per the design consult, "not a bare string ban" -- it is two STRUCTURAL,
+# AST-only checks against the same discovered test file(s) probes 1/2 already use:
+#
+#   (a) a genuine ``ast.Call`` to the REAL ``write_gate.evaluate_write_gate`` (resolved back to
+#       an actual import, the SAME import-tracking discipline
+#       ``_ast_references_entrypoint`` already uses for ``run_enveloped_operation`` -- never a
+#       same-named local function or an unrelated object's method) whose keyword arguments do
+#       NOT include ``paused_root`` at all -- i.e. a call that necessarily falls through to the
+#       gate's own ambient ``PAUSED_MECHANISMS_DIR`` default. A call that unpacks a bare
+#       ``**mapping`` into its keywords is UNDECIDABLE from source text alone (the mapping's own
+#       keys are not visible to an AST-only pass) and is deliberately NOT flagged -- a known gap,
+#       not a designed pass. Likewise, a call that explicitly passes ``paused_root=None`` (the
+#       same VALUE as the omitted-keyword default) is not flagged either, even though it is
+#       behaviorally identical to omitting the keyword -- this probe checks for the keyword's
+#       PRESENCE, not the value behind it.
+#   (b) a literal string equal to (or path-prefixed by) ``PAUSED_MECHANISMS_DIR_REL`` appearing
+#       as an argument to a recognizable filesystem-operation call (``open``, ``Path``,
+#       ``os.makedirs``/``mkdir``/``listdir``/``remove``/``stat``/``path.join``, ``shutil.*``,
+#       or a ``Path`` method such as ``.write_text``/``.mkdir``/``.exists``) anywhere in the
+#       test file -- the direct-ambient-touch shape, independent of whether the file calls
+#       ``evaluate_write_gate`` at all. Anchored to the literal being an ARGUMENT INSIDE a
+#       recognized filesystem call (never a bare substring match anywhere in the file), so a
+#       test that merely references the constant's VALUE for an unrelated comparison (e.g.
+#       pinning ``write_gate.PAUSED_MECHANISMS_DIR`` against an expected string, with no
+#       filesystem call in sight) is correctly left unflagged.
+#
+# Both checks are scoped to the SAME test file(s) ``_discover_capability_test_files`` already
+# found for this capability -- a test file that never mentions this capability's own module is
+# out of scope for every D1-2 probe, including this one. A file that legitimately uses the
+# hermetic fixture (imports ``lifecycle_test_fixtures.hermetic_paused_mechanisms`` and passes
+# its returned path as ``paused_root=``) never trips either check: it never omits the keyword
+# and it never needs to reference the ambient literal at all -- the fixture module owns its own
+# temp path internally. LIMITS: like every AST-only probe in this file, this cannot tell whether
+# a flagged call is actually REACHED at runtime (dead code still satisfies the shape), and (a)'s
+# ``**mapping`` gap means a test that hides ``paused_root`` inside a dict-unpack defeats
+# detection -- both are documented gaps, not silent false assurance, exactly like probe 1's own
+# documented LIMITS above.
 # =============================================================================
 
 _TEST_DISCOVERY_SKIP_DIR_NAMES = {
@@ -602,6 +656,28 @@ _MUTATION_EXCEPTION_MESSAGE = "mutated-for-known-bad-fails-probe"
 _KNOWN_BAD_COPY_IGNORE = shutil.ignore_patterns(
     ".git", "__pycache__", "*.pyc", ".venv", "venv", "node_modules"
 )
+
+# (Task A3, F-71) The name that marks a genuine call to the write gate's own paused-op-kind
+# check, and the module that hosts it -- matched the SAME way ``_ENTRYPOINT_IMPORT_NAMES`` /
+# ``_ENTRYPOINT_MODULE_NAME`` match the real live-write entrypoint above (import-tracked, never
+# a same-named local function or an unrelated object's method).
+_WRITE_GATE_CALL_NAME = "evaluate_write_gate"
+_WRITE_GATE_MODULE_NAME = "write_gate"
+# The keyword a call to evaluate_write_gate must carry to be hermetic -- see this probe's own
+# "Detection shape + its limits" section above.
+_PAUSED_ROOT_KWARG_NAME = "paused_root"
+# The hermetic fixture helper (external_write.lifecycle_test_fixtures.hermetic_paused_mechanisms)
+# a capability test should import instead -- named here only for the operator-facing failure
+# message text, not matched against by either AST check (a file that genuinely uses it simply
+# never trips either check in the first place -- see the module docstring section above).
+_HERMETIC_FIXTURE_MODULE_NAME = "lifecycle_test_fixtures"
+_HERMETIC_FIXTURE_HELPER_NAME = "hermetic_paused_mechanisms"
+# The recognizable filesystem-operation call names probe 3's check (b) scopes to -- mirrors
+# ``_ENTRYPOINT_IMPORT_NAMES``'s "a fixed, named vocabulary, not an open-ended guess" discipline.
+_FS_OPERATION_CALL_NAMES = frozenset({
+    "open", "Path", "makedirs", "mkdir", "listdir", "remove", "unlink", "rmtree",
+    "stat", "join", "exists", "write_text", "write_bytes", "read_text", "read_bytes",
+})
 
 
 def _capability_module_name(canonical_id: str) -> str:
@@ -771,6 +847,111 @@ def _ast_references_entrypoint(tree: ast.AST) -> bool:
             base_dotted = _ast_dotted_name(func.value)
             if base_dotted is not None and base_dotted in module_refs:
                 return True
+    return False
+
+
+def _ast_calls_write_gate_without_paused_root(tree: ast.AST) -> List[ast.Call]:
+    """(Task A3, F-71) Every ``ast.Call`` in ``tree`` that resolves to the REAL
+    ``write_gate.evaluate_write_gate`` (the SAME import-tracking discipline
+    ``_ast_references_entrypoint`` uses for ``run_enveloped_operation`` above -- a call whose
+    target traces back to an actual import of ``evaluate_write_gate`` itself, or of the
+    ``write_gate`` module followed by a matching attribute-access call) and does NOT pass an
+    explicit ``paused_root`` keyword -- i.e. a call that necessarily falls through to the gate's
+    own ambient default (``write_gate.PAUSED_MECHANISMS_DIR``, the real project's
+    ``.wizard/paused-mechanisms/``), exactly the F-71 shape.
+
+    A call whose keywords include a bare ``**mapping`` unpack (``kw.arg is None``) is
+    UNDECIDABLE from source text alone -- the mapping's own keys are not visible to an AST-only
+    pass -- and is deliberately NOT flagged (see this probe's module-level LIMITS note); a call
+    that explicitly passes ``paused_root=None`` is also not flagged, even though it is
+    behaviorally identical to omitting the keyword (this checks the keyword's PRESENCE, not the
+    value behind it)."""
+    call_names = set()
+    module_refs = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module_parts = (node.module or "").split(".")
+            for alias in node.names:
+                if alias.name == _WRITE_GATE_CALL_NAME:
+                    call_names.add(alias.asname or alias.name)
+                elif (
+                    alias.name == _WRITE_GATE_MODULE_NAME
+                    and module_parts
+                    and module_parts[-1] == _ENTRYPOINT_MODULE_PACKAGE_NAME
+                ):
+                    module_refs.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                dotted_parts = alias.name.split(".")
+                if dotted_parts[-1] == _WRITE_GATE_MODULE_NAME:
+                    module_refs.add(alias.asname or alias.name)
+
+    hits: List[ast.Call] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        is_write_gate_call = False
+        if isinstance(func, ast.Name) and func.id in call_names:
+            is_write_gate_call = True
+        elif isinstance(func, ast.Attribute) and func.attr == _WRITE_GATE_CALL_NAME:
+            base_dotted = _ast_dotted_name(func.value)
+            if base_dotted is not None and base_dotted in module_refs:
+                is_write_gate_call = True
+        if not is_write_gate_call:
+            continue
+        if any(kw.arg is None for kw in node.keywords):
+            continue  # **mapping unpack -- undecidable statically, not flagged (LIMIT)
+        if any(kw.arg == _PAUSED_ROOT_KWARG_NAME for kw in node.keywords):
+            continue  # explicit paused_root passed -- hermetic (or at least intentional)
+        hits.append(node)
+    return hits
+
+
+def _ast_call_name(func: ast.AST) -> Optional[str]:
+    """The plain call-target name for ``func`` -- a bare ``Name`` id, or an ``Attribute``'s own
+    trailing ``.attr`` (so ``os.makedirs(...)`` and a bare ``makedirs(...)`` both resolve to
+    ``"makedirs"``) -- or ``None`` for any other call shape (e.g. a call on a call result).
+    Deliberately name-only, not object-resolved: see ``_ast_touches_ambient_paused_mechanisms_path``
+    for why this is sufficient for that check's purposes."""
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _ast_touches_ambient_paused_mechanisms_path(tree: ast.AST) -> bool:
+    """(Task A3, F-71) True iff a string constant equal to, or path-prefixed by,
+    ``PAUSED_MECHANISMS_DIR_REL`` appears as an argument (positional or keyword) to a
+    recognizable filesystem-operation call (``_FS_OPERATION_CALL_NAMES``) anywhere in ``tree`` --
+    the direct-ambient-touch shape, independent of whether the file calls
+    ``evaluate_write_gate`` at all (see ``_ast_calls_write_gate_without_paused_root`` for that
+    shape). Each argument subtree is walked (not only its top level) so a literal nested inside
+    an ``os.path.join(root, ".wizard/paused-mechanisms", ...)`` call is still caught.
+
+    Anchored to the literal being an ARGUMENT INSIDE a recognized filesystem call -- never a bare
+    substring match anywhere in the file (per the design consult, "not a bare string ban") -- so
+    a test that merely references the constant's VALUE for an unrelated comparison (e.g. pinning
+    ``write_gate.PAUSED_MECHANISMS_DIR`` against an expected string, with no filesystem call in
+    sight) is correctly left unflagged. See this probe's module-level "Detection shape + its
+    limits" section for what this heuristic does not catch."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if _ast_call_name(node.func) not in _FS_OPERATION_CALL_NAMES:
+            continue
+        for arg in list(node.args) + [kw.value for kw in node.keywords]:
+            for sub in ast.walk(arg):
+                if (
+                    isinstance(sub, ast.Constant)
+                    and isinstance(sub.value, str)
+                    and (
+                        sub.value == PAUSED_MECHANISMS_DIR_REL
+                        or sub.value.startswith(PAUSED_MECHANISMS_DIR_REL + "/")
+                    )
+                ):
+                    return True
     return False
 
 
@@ -1155,10 +1336,11 @@ def _check_known_bad_fails(root: Path, canonical_id: str, cap_path: Path,
 def _build_test_quality_operator_message(failures: List[str]) -> str:
     if not failures:
         return (
-            "This capability's own tests passed both deterministic quality probes: they exercise "
-            "the real capability module and its real acceptance/gate entrypoint (not a hand-built "
-            "stand-in), and they correctly fail when run against a deliberately broken copy of the "
-            "implementation."
+            "This capability's own tests passed all three deterministic quality probes: they "
+            "exercise the real capability module and its real acceptance/gate entrypoint (not a "
+            "hand-built stand-in), they never depend on this project's own ambient pause/"
+            "lifecycle state, and they correctly fail when run against a deliberately broken "
+            "copy of the implementation."
         )
     lines = [
         "This capability's tests failed one or more required quality checks and must be fixed "
@@ -1170,7 +1352,7 @@ def _build_test_quality_operator_message(failures: List[str]) -> str:
 
 
 def check_test_quality(project_root: str, canonical_id: str) -> InvariantResult:
-    """Run the two AWB-authored, deterministic test-quality probes (D1-2) for
+    """Run the three AWB-authored, deterministic test-quality probes (D1-2 + Task A3) for
     the capability whose canonical id is ``canonical_id``, in the project
     rooted at ``project_root``. Never raises -- every input that cannot be
     positively evaluated is folded into ``failures`` as its own fail-closed
@@ -1238,6 +1420,39 @@ def check_test_quality(project_root: str, canonical_id: str) -> InvariantResult:
             f'capability "{canonical_id}"\'s own module and its real run_enveloped_operation / '
             "operator-acceptance-CLI entrypoint. Update the test(s) to import and exercise the "
             "real capability module and its real entrypoint, then re-run this check."
+        )
+
+    # --- Probe 3: lifecycle hermeticity (AST, static; Task A3, F-71) --------
+    # Independent of probe 1 above: a capability test can pass probe 1 (it genuinely exercises
+    # the real capability + entrypoint) and still be non-hermetic in a completely separate test
+    # method that touches paused/lifecycle state -- so this probe fires on its own evidence, not
+    # gated on probe 1's outcome. See the module-level "Detection shape + its limits" section
+    # (above ``_TEST_DISCOVERY_SKIP_DIR_NAMES``) for exactly what each check catches and does not.
+    ambient_hits: List[str] = []
+    for tf in test_files:
+        try:
+            tree = ast.parse(tf.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue  # already excluded by discovery; defensive only
+        rel = str(tf.relative_to(root))
+        if _ast_calls_write_gate_without_paused_root(tree) or _ast_touches_ambient_paused_mechanisms_path(tree):
+            ambient_hits.append(rel)
+
+    if ambient_hits:
+        failures.append(
+            f'Lifecycle hermeticity: {", ".join(sorted(ambient_hits))} calls '
+            f"{_WRITE_GATE_CALL_NAME}(...) without an explicit {_PAUSED_ROOT_KWARG_NAME}=... "
+            f"keyword, or otherwise touches the ambient {PAUSED_MECHANISMS_DIR_REL} path "
+            "directly -- so its outcome depends on THIS PROJECT'S OWN real, transient pause "
+            "state at whatever moment the test happens to run, and will silently flip pass/fail "
+            "as that state changes (for example, once this capability is re-accepted and its "
+            "pause marker is cleared). Pause/lifecycle-state enforcement is the write gate's own "
+            "concern, already proven by its own test suite -- a capability's test should not "
+            f"re-test it against ambient state. If a test genuinely needs to exercise paused "
+            f"behavior, import {_HERMETIC_FIXTURE_HELPER_NAME} from "
+            f"external_write.{_HERMETIC_FIXTURE_MODULE_NAME} and pass its returned temp "
+            f"directory as {_PAUSED_ROOT_KWARG_NAME}=..., never the real project's own path. "
+            "Fix the test(s) above, then re-run this check."
         )
 
     # --- Probe 2: known-bad-fails (dynamic, bounded, isolated) --------------

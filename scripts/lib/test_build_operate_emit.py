@@ -504,6 +504,51 @@ class NextPhaseSelfQAWiringTests(unittest.TestCase):
         )
 
 
+class NextPhaseLifecycleHermeticityGuidanceTests(unittest.TestCase):
+    """Task A3 (Cut 1.1, F-71): next-phase.md's Step 4 tells a capability author NOT to write
+    a per-capability paused-refusal test against ambient project state, and points them at the
+    hermetic fixture instead.
+
+    Asserted at the CANONICAL SOURCE-FILE level, the same reason
+    ``NextPhaseSelfQAWiringTests`` above is: emission for the operator-fill skill templates
+    sources from a frozen/prerelease bundle cut, which does not yet carry this change (see
+    ``SupervisedCopyTargetSourceGuardTest.test_bundle_next_phase_matches_dev_home``'s
+    expectedFailure marker for that tracked re-sync obligation) -- the canonical single-home
+    source is ``wizard/skills/next-phase.md``, and a bundle cut is a separate, later step."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.np_path = REPO_ROOT / "wizard" / "skills" / "next-phase.md"
+        cls.np_text = cls.np_path.read_text(encoding="utf-8")
+
+    def test_step4_tells_author_not_to_write_a_paused_refusal_test(self):
+        self.assertIn(
+            "Do not add a test to this capability that asserts the gate refuses it",
+            self.np_text,
+            "next-phase.md Step 4 must explicitly tell a capability author not to write a "
+            "per-capability paused-refusal test",
+        )
+
+    def test_step4_names_the_hermetic_fixture_helper(self):
+        self.assertIn("hermetic_paused_mechanisms", self.np_text)
+        self.assertIn("external_write.lifecycle_test_fixtures", self.np_text)
+
+    def test_step4_names_paused_root_as_the_argument_to_use(self):
+        self.assertIn("paused_root=", self.np_text)
+
+    def test_guidance_precedes_the_deterministic_self_check_in_document_order(self):
+        """The guidance must appear BEFORE the self-check command that would otherwise flag a
+        violation -- an author reading top-to-bottom sees the rule before the tool that
+        enforces it."""
+        guidance_idx = self.np_text.index("hermetic_paused_mechanisms")
+        self_check_idx = self.np_text.index("### Deterministic self-check")
+        self.assertLess(
+            guidance_idx, self_check_idx,
+            "the lifecycle-hermeticity guidance must precede the deterministic self-check "
+            "subsection",
+        )
+
+
 class ProjectInstructionsBuildAndOperateTests(unittest.TestCase):
     """E1: project_instructions.md carries the build-and-operate loop section."""
 
@@ -1699,7 +1744,17 @@ class TestS253ContractDelta(unittest.TestCase):
         import agent_emitter
         self.assertIn("lifecycle_state.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
         self.assertIn("capability_invariants.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 33)
+        # (Count updated to 34 by Task A3, which additionally enrolled
+        # lifecycle_test_fixtures.py -- see that file's own enrollment comment in
+        # agent_emitter.py, and test_emit_set_lists_the_taskA3_lifecycle_test_fixtures_file below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 34)
+
+    def test_emit_set_lists_the_taskA3_lifecycle_test_fixtures_file(self):
+        # Task A3 (hermetic lifecycle tests + probe, Cut 1.1 / F-71): lifecycle_test_fixtures.py
+        # must be enrolled, or an emitted writes-back system's next-phase.md rebuild guidance
+        # points a capability author at a fixture helper that was never physically shipped.
+        import agent_emitter
+        self.assertIn("lifecycle_test_fixtures.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def _writes_back_plan(self):
         import copy, json
