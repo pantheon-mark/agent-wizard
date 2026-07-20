@@ -194,6 +194,59 @@ class TestMintAndLoad(unittest.TestCase):
             f2 = finalize_run("run-1", envelope_dir=d)  # idempotent
             self.assertEqual(f2.run_state, RUN_STATE_FINALIZED)
 
+    def test_finalized_envelope_is_not_spendable(self):
+        # Fix 1 (D2 review): the WAL is one-way PENDING_RUN->EXECUTING->
+        # FINALIZED -- a further run_enveloped_operation/append_tranche must
+        # never write after the run's consent is closed. is_spendable() must
+        # inspect run_state directly, not just budget/consent fields.
+        with tempfile.TemporaryDirectory() as d:
+            self._mint(d)
+            finalize_run("run-1", envelope_dir=d)
+            env = load_run_envelope("run-1", envelope_dir=d)
+            self.assertEqual(env.run_state, RUN_STATE_FINALIZED)
+            self.assertFalse(
+                env.is_spendable(),
+                "a FINALIZED run must not be spendable -- no writes after a "
+                "consent-closed run")
+
+    def test_append_tranche_on_finalized_run_does_not_revert_state(self):
+        # Fix 1 defense-in-depth: append_tranche must not silently revert a
+        # FINALIZED run back to EXECUTING, even if called with a stale
+        # in-memory envelope captured before finalize_run.
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d).envelope
+            finalize_run("run-1", envelope_dir=d)
+            result = append_tranche(
+                env, Tranche(applied_unit_ids=("row0",), per_unit_result={},
+                             verification_status="applied_not_verified"),
+                envelope_dir=d)
+            self.assertEqual(
+                result.run_state, RUN_STATE_FINALIZED,
+                "append_tranche must not revert a FINALIZED run back to EXECUTING")
+            reloaded = load_run_envelope("run-1", envelope_dir=d)
+            self.assertEqual(reloaded.run_state, RUN_STATE_FINALIZED)
+            self.assertEqual(
+                len(reloaded.tranches), 0,
+                "no tranche may be appended to a finalized run")
+
+    def test_finalize_after_append_tranche_is_idempotent(self):
+        # Fix 4: the realistic idempotency case -- EXECUTING -> FINALIZED ->
+        # FINALIZED, after at least one real append_tranche (not just the
+        # PENDING -> FINALIZED -> FINALIZED case already covered above).
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d).envelope
+            updated = append_tranche(
+                env, Tranche(applied_unit_ids=("row0",), per_unit_result={},
+                             verification_status="applied_not_verified"),
+                envelope_dir=d)
+            self.assertEqual(updated.run_state, RUN_STATE_EXECUTING)
+            f1 = finalize_run("run-1", envelope_dir=d)
+            self.assertEqual(f1.run_state, RUN_STATE_FINALIZED)
+            self.assertEqual(len(f1.tranches), 1)
+            f2 = finalize_run("run-1", envelope_dir=d)  # idempotent
+            self.assertEqual(f2.run_state, RUN_STATE_FINALIZED)
+            self.assertEqual(len(f2.tranches), 1)
+
     def test_resume_loads_existing_and_reports_already_applied(self):
         # A killed-mid-run envelope resumes by LOADING the same run_id (never
         # re-minting a colliding id, which D1 refuses) and reports which
@@ -211,6 +264,62 @@ class TestMintAndLoad(unittest.TestCase):
             # resume did NOT create a second envelope / re-mint
             self.assertEqual(len([p for p in os.listdir(d) if p.endswith(".json")
                                   and "consent_receipt" not in p]), 1)
+
+
+# ===========================================================================
+# Fix 2/3 (D2 review) — tranche-aware run_state backfill for a pre-D2
+# on-disk envelope, and fail-safe validation of a corrupt run_state value.
+# ===========================================================================
+
+class TestRunStateBackfillFromDisk(unittest.TestCase):
+
+    def _write_old_shape(self, d, run_id, *, tranches, has_run_state_key=False,
+                         run_state_value=None):
+        raw = {
+            "schema": "run_envelope-v1",
+            "run_id": run_id, "capability_id": "cap:test", "op_kind": "whatever",
+            "contract_hash": "ch", "implementation_hash": "ih",
+            "reviewed_set": _reviewed_set(1), "reviewed_set_digest": "x",
+            "population_count": 1, "stratification_summary": {},
+            "ceiling": None, "consent": None, "evidence_policy": {},
+            "ledger_window_id": "", "tranches": tranches,
+        }
+        if has_run_state_key:
+            raw["run_state"] = run_state_value
+        (Path(d) / f"{run_id}.json").write_text(json.dumps(raw), encoding="utf-8")
+
+    def _tranche_dict(self):
+        return {"applied_unit_ids": ["row0"], "per_unit_result": {},
+                "verification_status": "applied_not_verified",
+                "restore_verified": None}
+
+    def test_old_shape_with_tranches_and_no_run_state_key_loads_executing(self):
+        # F-79 killed-mid-run shape: a genuine pre-D2 envelope with recorded
+        # tranches but no run_state key must load as EXECUTING, not PENDING
+        # -- it contradicts resume_run_envelope's non-empty already-applied
+        # output otherwise.
+        with tempfile.TemporaryDirectory() as d:
+            self._write_old_shape(d, "pre-d2-midrun",
+                                  tranches=[self._tranche_dict()])
+            env = load_run_envelope("pre-d2-midrun", envelope_dir=d)
+            self.assertEqual(env.run_state, RUN_STATE_EXECUTING)
+
+    def test_old_shape_without_tranches_and_no_run_state_key_loads_pending(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._write_old_shape(d, "pre-d2-fresh", tranches=[])
+            env = load_run_envelope("pre-d2-fresh", envelope_dir=d)
+            self.assertEqual(env.run_state, RUN_STATE_PENDING)
+
+    def test_corrupt_run_state_value_falls_back_to_tranche_derived_default(self):
+        # Fix 3: _RUN_STATES validation -- a garbage on-disk run_state value
+        # must never be propagated verbatim; fall back fail-safe to the
+        # Fix-2 tranche-derived default.
+        with tempfile.TemporaryDirectory() as d:
+            self._write_old_shape(d, "bogus-state", tranches=[self._tranche_dict()],
+                                  has_run_state_key=True, run_state_value="bogus")
+            env = load_run_envelope("bogus-state", envelope_dir=d)
+            self.assertEqual(env.run_state, RUN_STATE_EXECUTING)
+            self.assertNotEqual(env.run_state, "bogus")
 
 
 # ===========================================================================

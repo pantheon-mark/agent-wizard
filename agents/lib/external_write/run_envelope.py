@@ -366,6 +366,13 @@ class RunEnvelope:
         approved manifest with a positive budget. Every check defaults to
         refuse — an empty / fabricated / tampered / budgetless envelope is not
         spendable (I1, fail-closed)."""
+        # D2 review Fix 1: the WAL is one-way PENDING_RUN -> EXECUTING ->
+        # FINALIZED. A FINALIZED run's consent is closed -- it must never be
+        # spendable again, so a further run_enveloped_operation is refused by
+        # this pre-check BEFORE any external write (no apply-path body change
+        # needed; see also the append_tranche defense-in-depth below).
+        if self.run_state == RUN_STATE_FINALIZED:
+            return False
         if not self.reviewed_set:
             return False
         if self.reviewed_set_digest != compute_reviewed_set_digest(self.reviewed_set):
@@ -478,6 +485,20 @@ def _to_disk_dict(env: RunEnvelope) -> Dict[str, Any]:
     }
 
 
+def _resolve_run_state(raw_run_state: Any, tranches: Any) -> str:
+    """Resolve the on-disk ``run_state`` for ``_from_disk_dict`` (D2 review,
+    Fixes 2/3). A present, recognized (``_RUN_STATES``-member) value is
+    trusted verbatim. Otherwise -- the key is absent, falsy, or carries a
+    corrupt/garbage value not in ``_RUN_STATES`` -- fall back fail-safe to a
+    TRANCHE-AWARE default: ``RUN_STATE_EXECUTING`` if ``tranches`` is
+    non-empty (a genuine pre-D2 on-disk envelope already mid-execution --
+    the killed-mid-run F-79 shape -- must not misreport as PENDING), else
+    ``RUN_STATE_PENDING``. Never propagates an unrecognized value verbatim."""
+    if isinstance(raw_run_state, str) and raw_run_state in _RUN_STATES:
+        return raw_run_state
+    return RUN_STATE_EXECUTING if tranches else RUN_STATE_PENDING
+
+
 def _from_disk_dict(raw: Dict[str, Any], run_id: str) -> RunEnvelope:
     """Build a RunEnvelope from a parsed disk dict. Tolerant of missing keys —
     a missing/blank field simply leaves the envelope non-spendable via
@@ -541,9 +562,11 @@ def _from_disk_dict(raw: Dict[str, Any], run_id: str) -> RunEnvelope:
         stored_ledger_window_id=str(raw.get("ledger_window_id", "")),
         reviewed_set_schema=str(raw.get("reviewed_set_schema") or REVIEWED_SET_SCHEMA_V1),
         review_artifact_digest=str(raw.get("review_artifact_digest", "")),
-        # Safe default: an older envelope written before Task D2 (no run_state
-        # on disk) loads as PENDING rather than raising.
-        run_state=str(raw.get("run_state") or RUN_STATE_PENDING),
+        # D2 review Fixes 2/3: an older envelope written before Task D2 (no
+        # run_state on disk), or one carrying a corrupt/unrecognized value,
+        # is resolved tranche-aware rather than defaulting blindly to
+        # PENDING -- see `_resolve_run_state`.
+        run_state=_resolve_run_state(raw.get("run_state"), tranches),
     )
 
 
@@ -1035,7 +1058,20 @@ def mint_run_envelope(
 def append_tranche(env: RunEnvelope, tranche: Tranche, *,
                    envelope_dir: Optional[str] = None) -> RunEnvelope:
     """Append a tranche record to the envelope and persist it atomically.
-    Returns the updated envelope."""
+    Returns the updated envelope.
+
+    D2 review Fix 1 (defense-in-depth): reload the DISK-authoritative
+    envelope for ``env.run_id`` first. If it is already FINALIZED, this is
+    the one place a tranche actually lands and the WAL is one-way -- do NOT
+    advance/revert its state (a stale in-memory ``env`` captured before a
+    ``finalize_run`` must never resurrect a closed run back to EXECUTING).
+    Fail closed: no write happens, and the unchanged disk-authoritative
+    (already-FINALIZED) envelope is returned, matching this function's only
+    existing convention for signaling "nothing to append" -- returning a
+    RunEnvelope rather than raising."""
+    disk_env = load_run_envelope(env.run_id, envelope_dir=envelope_dir)
+    if disk_env.run_state == RUN_STATE_FINALIZED:
+        return disk_env
     updated = RunEnvelope(
         run_id=env.run_id, capability_id=env.capability_id, op_kind=env.op_kind,
         contract_hash=env.contract_hash, implementation_hash=env.implementation_hash,
