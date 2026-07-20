@@ -1,5 +1,5 @@
 ---
-description: "Review a batch before a bulk action runs — group flagged items, show what's safe versus what needs a look, and get the operator's approval before anything is queued for a bulk write-back run. Use when a capability has scanned a batch of candidates and needs the operator's judgment before approving them for a bulk action, when the operator asks 'what did you find', 'what's safe to approve', 'show me what needs review', or 'review these before you act', or before minting a run envelope for any multi-item write-back run."
+description: "Review a batch before a bulk action runs — group flagged items, show what's safe versus what needs a look, and get the operator's approval before anything is queued for a bulk write-back run. Use when a capability has scanned a batch of candidates and needs the operator's judgment before approving them for a bulk action, when the operator asks 'what did you find', 'what's safe to approve', 'show me what needs review', or 'review these before you act', or before handing any multi-item write-back run off to the sanctioned bulk-run helper."
 ---
 
 # Triage Review
@@ -42,20 +42,39 @@ Write that rendered artifact to a review file the operator opens on their own �
 
 > Here's the exact list this run would cover. Take a look, and tell me to go ahead if it's right.
 
-## Step 5 — Mint the run envelope
+## Step 5 — Capture the operator's consent
 
-Once approved, call `mint_run_envelope` with `reviewed_set_schema="reviewed_set-v2"`, the approved reviewed set, and `operator_approved_review_artifact` set to the EXACT text the operator just approved (not a summary, not a re-render). If it refuses, do not retry with a different schema or a hand-edited set to make it pass — tell the operator plainly what could not be confirmed, and stop. Nothing is queued for a bulk run without a minted envelope.
+The moment the operator gives their go-ahead, capture two things exactly as they happened — you'll hand both to the run itself in the next step:
 
-## Step 6 — Hand off
+- Their approval, word for word — not a summary, not a paraphrase.
+- The real moment they said it: the actual time of that conversation turn, straight from the operator's own utterance. Never compute or estimate this, and never substitute the current system/machine time — if you don't have the real moment they said it, you don't have consent yet.
 
-With the envelope minted, tell the operator plainly what happens next — the bulk run itself proceeds through the capability's normal run path, applying only the exact set just approved. This skill's job ends here; it does not run the action.
+This skill does not mint anything itself. The run mechanism you hand off to in Step 6 owns that, and it is what actually turns this consent into a spendable run.
+
+## Step 6 — Hand off to the sanctioned bulk run
+
+Call the capability's bulk-run entry point — `run_sanctioned_bulk` (reached through `capability_api`, via the capability's `run_bulk_approved` wrapper) — exactly ONCE for this whole approved set. Pass it:
+
+- the operator's verbatim approval and the real moment they gave it, captured in Step 5 (`operator_approval_verbatim`, `approved_at`);
+- the approved reviewed set, with `reviewed_set_schema="reviewed_set-v2"`;
+- the exact review-artifact text the operator approved (`operator_approved_review_artifact`) — not a summary, not a re-render;
+- the capability's own identity fields (`op_kind`, `contract_hash`, `implementation_hash`);
+- a stable label for this run (`run_label`).
+
+That one call takes it from there: it turns this consent into the run's spendable authorization one time, applies the whole approved set across however many batches it needs under that single run, and closes the run out once every batch has gone through. **Do not mint anything yourself, do not do that once per batch, and do not write your own loop that applies part of the set at a time** — one call is the whole job. Once it returns, record the run id it hands back (work queue / session log) — you need that exact id if this run is ever picked back up.
+
+Tell the operator plainly what happens next — the whole approved set is going through in one run, and you'll let them know when it's done (or if anything needs their attention along the way). This skill's job ends here; it does not run the action itself.
+
+## If a run is interrupted
+
+If a bulk run stops partway through — the process died, the session ended, anything that leaves it incomplete — never pick it back up silently in the background. To resume it, call the same bulk-run entry point again, passing the run id you recorded (`resume_run_id`) plus a genuinely FRESH confirmation you get from the operator right then: a new verbatim yes and the real moment they just gave it (`fresh_operator_approval_verbatim`, `fresh_approved_at`). An old confirmation, or one that's just echoed back from earlier, will not be accepted — resuming is gated on a real, new go-ahead, every time. If the run had actually already finished, the same call is a safe no-op — it tells you so without asking the operator for anything.
 
 ## Edge cases
 
 | Situation | What to do |
 |-----------|------------|
-| No candidates at all | Tell the operator plainly there is nothing to review this time. Nothing to build, nothing to mint. |
-| Every group is protected | Tell the operator plainly nothing in this batch is eligible for a bulk action, and why. Do not mint an empty or protected-only envelope. |
-| Operator approves nothing | Stop. Nothing is built or minted. Tell them plainly they can come back to this batch later. |
-| `mint_run_envelope` refuses | Surface the plain-language reason and stop. Never fall back to a weaker schema or a hand-built envelope to force it through. |
+| No candidates at all | Tell the operator plainly there is nothing to review this time. Nothing to build, nothing to run. |
+| Every group is protected | Tell the operator plainly nothing in this batch is eligible for a bulk action, and why. Do not hand off an empty or protected-only set. |
+| Operator approves nothing | Stop. Nothing is built or run. Tell them plainly they can come back to this batch later. |
+| The bulk-run entry point refuses | Surface the plain-language reason it gives you (for example: today's approval has already been used, or the confirmation needs to be refreshed) and stop there. Never retry with a different schema, a hand-edited set, or a different way of forcing it through — tell the operator plainly what could not be confirmed, and wait for their next decision. |
 | The candidate batch is missing a required field | Malformed items are dropped by `triage_candidates`/`triage_discovery` automatically, not guessed into a bucket — if a large share of the batch is dropped this way, tell the operator plainly that some items could not be classified and were left out, rather than silently under-reporting the batch size. |
