@@ -379,6 +379,38 @@ class CommitHygieneEmittedProseTests(unittest.TestCase):
         for field in ("Last session", "Last agent run"):
             self.assertIn(field, t, f"orchestrator close does not name bootstrap field: {field}")
 
+    def test_orchestrator_close_flags_session_log_divergence(self):
+        # F-82: session-close must check session_log.md against committed-to-disk /
+        # git-history reality and, on a mismatch, surface it in plain language plus a
+        # proposed reconciliation to the operator -- not silently absorb it.
+        t = self._read("wizard/agents/orchestrator_prompt.md").lower()
+        self.assertIn("phantom entry", t,
+                       "orchestrator close does not name the phantom-entry divergence case")
+        self.assertIn("git log", t,
+                       "orchestrator close does not check session_log.md against git log")
+        self.assertTrue("propose" in t or "proposed" in t or "proposes" in t,
+                         "orchestrator close does not propose a reconciliation for a divergence")
+        self.assertIn("plain language", t,
+                       "orchestrator close does not surface a divergence in plain language")
+
+    def test_orchestrator_close_does_not_instruct_silent_reconcile(self):
+        # F-82 (negative half): the fix must forbid the old silent-absorb behavior outright,
+        # not merely add a competing instruction alongside it.
+        t = self._read("wizard/agents/orchestrator_prompt.md").lower()
+        self.assertIn("must not rewrite, delete, merge", t,
+                       "orchestrator close does not forbid silently rewriting session_log.md history")
+        self.assertIn("wait for the operator's explicit decision", t,
+                       "orchestrator close does not gate log-history changes on operator confirmation")
+
+    def test_orchestrator_close_gates_new_entry_on_verified_work(self):
+        # F-82: the NEW entry the orchestrator writes at close must itself be gated on
+        # committed-to-disk verification, not just the pre-existing history check.
+        t = self._read("wizard/agents/orchestrator_prompt.md").lower()
+        self.assertIn("gate this entry", t,
+                       "orchestrator close does not gate the new session_log.md entry on verification")
+        self.assertTrue("only work you have verified" in t or "actually happened" in t,
+                         "orchestrator close does not restrict the new entry to verified work")
+
     def test_next_phase_asserts_clean_baseline_before_build(self):
         # Piece 5
         t = self._read("wizard/skills/next-phase.md").lower()
