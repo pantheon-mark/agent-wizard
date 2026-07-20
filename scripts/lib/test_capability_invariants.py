@@ -655,6 +655,89 @@ class TestAdapterEvidencePredicatesCheckIndependent(CapabilityInvariantsTestBase
             any(f.startswith("Adapter evidence predicates:") for f in result.failures))
 
 
+class _B1RaisingPredicateAdapter:
+    """Task B2, F-75: mirrors `capability_code_scaffold.render_missing_
+    evidence_predicate_stub`'s own auto-scaffolded shape verbatim -- BOTH
+    required predicates are DECLARED (present, callable), but each RAISES
+    `NotImplementedError` rather than doing a real check. This is the
+    anti-trust-theater crux documented here directly: Check 7 only checks
+    structural PRESENCE (`getattr(...) is None or not callable(...)`), so it
+    has no way to know a declared predicate merely raises -- that is
+    `copy_run_proof.validate_copy_run_proof`'s job (see Task B2's own fix
+    there, exercised end-to-end by
+    test_external_write_copy_run_proof_evidence.py's
+    TestAutoScaffoldedStubFailsClosedNotUncaughtTraceback). Check 7 passing
+    here is NOT a gap: it is one deliberate half of a two-gate design where
+    the OTHER gate is the one that actually calls the predicate and can
+    therefore catch a raise."""
+
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, raw_client, unit):
+        return {}
+
+    def verify_apply_landed(self, evidence):
+        raise NotImplementedError(
+            "this adapter must define how it verifies the external write landed; "
+            "the capability stays paused until this is implemented and proved")
+
+    def verify_undo_restored(self, evidence):
+        raise NotImplementedError(
+            "this adapter must define how it verifies the external write can be "
+            "undone; the capability stays paused until this is implemented and proved")
+
+
+class TestAdapterEvidencePredicatesCheck7StructuralOnly(CapabilityInvariantsTestBase):
+    """Task B2, F-75: documents (does not merely assume) exactly what Check 7
+    does and does not catch about an auto-scaffolded `NotImplementedError`
+    stub -- the crux this task's fix relies on. Check 7 is a structural
+    presence/callability check; it does not invoke the predicate, so a stub
+    that raises when called still satisfies it. The capability is NOT thereby
+    live-safe: `copy_run_proof.validate_copy_run_proof` (proof time) DOES
+    call it, and Task B2 fixed that gate to fail closed on the raise (see
+    test_external_write_copy_run_proof_evidence.py). Together, the two gates
+    still guarantee the capability cannot go live on a stub alone."""
+
+    def setUp(self):
+        super().setUp()
+        _register_b1_contract()
+
+    def tearDown(self):
+        unregister_adapter(_B1_ADAPTER_OP_KIND)
+        super().tearDown()
+
+    def test_check_7_passes_a_present_but_raising_stub_by_structural_design(self):
+        register_adapter(_B1_ADAPTER_OP_KIND, _B1RaisingPredicateAdapter())
+        cap_id = "b2_raising_stub_cap"
+        self._write_capability(
+            cap_id, _CLEAN_SOURCE.format(name="B2 Raising Stub Cap", op_kind=_B1_ADAPTER_OP_KIND))
+        self._write_descriptor_set([_base_descriptor_entry(cap_id)])
+
+        result = self._check(cap_id)
+
+        self.assertTrue(
+            result.ok,
+            "Check 7 checks structural presence/callability only -- a stub that "
+            f"raises when called must still satisfy it; got failures: {result.failures!r}")
+        self._assert_no_traceback(result)
+
+        # BUT the same stub still fails the OTHER gate (proof time) that
+        # actually calls it -- the capability cannot go live on Check 7 alone.
+        proof_result = validate_copy_run_proof(_b1_copy_run_proof())
+        self.assertFalse(
+            proof_result.ok,
+            "a present-but-raising predicate must still fail the proof/run-time "
+            "gate -- Check 7 passing must never be read as 'safe to go live'")
+        self.assertIn("verify_apply_landed raised", proof_result.reason)
+
+
 class TestAdapterEvidencePredicatesSharedContractCoupling(CapabilityInvariantsTestBase):
     """Task B1, F-74: proves SINGLE-SOURCE coupling, not two drifting lists --
     adding a name to `evidence.REQUIRED_EVIDENCE_PREDICATES` makes BOTH the

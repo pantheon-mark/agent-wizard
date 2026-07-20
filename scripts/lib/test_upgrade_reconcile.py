@@ -12,6 +12,7 @@ synthetic-build-repo fixture helpers from ``test_upgrade_apply.py``, with the re
 ``agents/lib/external_write`` package copied in so the scanner resolves).
 """
 
+import ast
 import contextlib
 import hashlib
 import io
@@ -23,6 +24,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -31,12 +33,15 @@ from upgrade_reconcile import (  # noqa: E402
     MIGRATION_QUEUE_REL,
     PAUSED_MECHANISMS_DIR_REL,
     MechanismReport,
+    PredicateStubRemediation,
     ReconcileResult,
+    reconcile_missing_evidence_predicates,
     reconcile_upgrade,
     render_impact_notice,
     render_reconcile_result,
     resolve_paused_op_kinds,
     scan_operator_mechanisms,
+    _missing_evidence_predicates_for_adapter,
     _write_paused_live_write_state,
 )
 
@@ -1404,6 +1409,401 @@ class ConformantRebuildStalenessTests(_Base):
 
         self.assertEqual(descriptors_1, descriptors_2)
         self.assertEqual(queue_1, queue_2)
+
+
+# ===================================================================================
+# Task B2 (F-75): migrator auto-scaffolds a FAILING predicate stub for a capability
+# whose adapter does not declare a required evidence predicate. Like B2b's
+# `ConformantRebuildStalenessTests` just above, this is SCANNER-STATUS-INDEPENDENT --
+# a fully gate-conformant capability (never touched by the AST bypass scanner at all)
+# can still fall out of compliance purely because the SHARED CONTRACT
+# (`evidence.REQUIRED_EVIDENCE_PREDICATES`, Task B1/F-74) grew a new required name.
+# ===================================================================================
+
+class ReconcileMissingEvidencePredicatesTests(_Base):
+    _ADAPTER_SOURCE_FULL_CURRENT_PAIR = '''"""Fixture adapter for Task B2 tests -- declares BOTH predicates required by
+the contract AS OF TODAY, simulating a capability correctly built/accepted
+under the OLDER contract, before a later upgrade adds a new one."""
+from external_write.adapter_registry import register_adapter
+from external_write.contracts import OperationContract, WRITE_AFFECTING_MODULES, register_contract
+
+OP_KIND = "acme.widget.tidy"
+
+register_contract(OperationContract(
+    op_kind=OP_KIND, writes=("Status",), produces=(), dependency_set=WRITE_AFFECTING_MODULES,
+    verifier_set=("operator_attested_v1",), introduces_persistent_binding=False,
+    risk_class="reversible_external", requires_accepted_phase=True, blast_radius_cap=5,
+    read_only_scope="acme.readonly",
+))
+
+
+class AcmeWidgetTidyAdapter:
+    def build_write_client(self, op):
+        raise NotImplementedError
+
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, observer, unit):
+        return {}
+
+    def verify_apply_landed(self, evidence):
+        return True
+
+    def verify_undo_restored(self, evidence):
+        return True
+
+
+register_adapter(OP_KIND, AcmeWidgetTidyAdapter())
+'''
+
+    def setUp(self):
+        super().setUp()
+        self._agents_lib = _REAL_REPO / "wizard" / "agents" / "lib"
+        for mod_name in list(sys.modules):
+            if mod_name == "external_write" or mod_name.startswith("external_write."):
+                del sys.modules[mod_name]
+        if str(self._agents_lib) not in sys.path:
+            sys.path.insert(0, str(self._agents_lib))
+        from external_write import evidence  # noqa: E402
+        self._evidence = evidence
+
+    def _write_capability_with_adapter(self, proj, capability_id, adapter_source):
+        capdir = proj / "agents" / "capabilities"
+        capdir.mkdir(parents=True, exist_ok=True)
+        (capdir / f"{capability_id}_capability.py").write_text(
+            '"""fixture capability module (Task B2 test) -- content irrelevant, '
+            'only its presence matters for capability_identity enumeration."""\n',
+            encoding="utf-8",
+        )
+        ext_dir = proj / "agents" / "lib" / "external_write"
+        ext_dir.mkdir(parents=True, exist_ok=True)
+        adapter_path = ext_dir / f"adapters_{capability_id}.py"
+        adapter_path.write_text(adapter_source, encoding="utf-8")
+        return adapter_path
+
+    def test_no_missing_predicates_scaffolds_nothing(self):
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        self._write_capability_with_adapter(
+            proj, "acme_widget_tidy", self._ADAPTER_SOURCE_FULL_CURRENT_PAIR)
+
+        result = reconcile_missing_evidence_predicates(
+            proj, _REAL_REPO, from_version="0.13.1", to_version="0.13.1")
+
+        self.assertEqual(result, [])
+        self.assertFalse((proj / MIGRATION_QUEUE_REL).exists())
+
+    def test_new_required_predicate_gets_failing_stub_and_repair_task(self):
+        # Simulate a contract-changing upgrade: `evidence.
+        # REQUIRED_EVIDENCE_PREDICATES` grows a NEW name this fixture adapter
+        # (built to satisfy only the CURRENT pair) does not declare.
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        adapter_path = self._write_capability_with_adapter(
+            proj, "acme_widget_tidy", self._ADAPTER_SOURCE_FULL_CURRENT_PAIR)
+
+        new_required = self._evidence.REQUIRED_EVIDENCE_PREDICATES + (
+            "verify_b2_new_predicate_probe",)
+        with mock.patch.object(self._evidence, "REQUIRED_EVIDENCE_PREDICATES", new_required):
+            result = reconcile_missing_evidence_predicates(
+                proj, _REAL_REPO, from_version="0.13.1", to_version="0.14.0")
+
+        self.assertEqual(len(result), 1)
+        remediation = result[0]
+        self.assertIsInstance(remediation, PredicateStubRemediation)
+        self.assertEqual(remediation.canonical_id, "acme_widget_tidy")
+        self.assertEqual(remediation.missing_predicates, ["verify_b2_new_predicate_probe"])
+
+        # (a) FAILING NotImplementedError stub scaffolded, with the plain-
+        # language message, and it stays syntactically valid Python.
+        new_source = adapter_path.read_text(encoding="utf-8")
+        tree = ast.parse(new_source)
+        class_node = next(n for n in tree.body if isinstance(n, ast.ClassDef))
+        stub = next(
+            n for n in class_node.body
+            if isinstance(n, ast.FunctionDef) and n.name == "verify_b2_new_predicate_probe")
+        self.assertEqual(len(stub.body), 1, "must be a SINGLE raise -- never a passing stub")
+        self.assertIsInstance(stub.body[0], ast.Raise)
+        self.assertEqual(stub.body[0].exc.func.id, "NotImplementedError")
+        message = stub.body[0].exc.args[0].value
+        self.assertIn("stays paused", message)
+        self.assertIn("implemented and proved", message)
+        # The EXISTING, already-correct predicates are untouched.
+        self.assertIn("def verify_apply_landed(self, evidence):\n        return True", new_source)
+        self.assertIn("def verify_undo_restored(self, evidence):\n        return True", new_source)
+
+        # (b) a repair task landed in the SAME pending-migrations queue
+        # add-capability.md's Step A already surfaces generically.
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        entry = next(e for e in queue if e["mechanism_id"] == "acme_widget_tidy")
+        self.assertEqual(entry["kind"], "missing_evidence_predicates")
+        self.assertEqual(entry["missing_predicates"], ["verify_b2_new_predicate_probe"])
+        self.assertEqual(entry["status"], "pending")
+        self.assertNotIn("violations", entry)
+        self.assertIn("verify_b2_new_predicate_probe", entry["suggested_next_step"])
+
+    def test_wired_into_reconcile_upgrade_end_to_end(self):
+        # The migrator's own real entrypoint (reconcile_upgrade), not just the
+        # standalone helper -- proves this pass is actually WIRED IN, not a
+        # dangling function nothing calls.
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        self._write_capability_with_adapter(
+            proj, "acme_widget_tidy", self._ADAPTER_SOURCE_FULL_CURRENT_PAIR)
+
+        new_required = self._evidence.REQUIRED_EVIDENCE_PREDICATES + (
+            "verify_b2_new_predicate_probe",)
+        with mock.patch.object(self._evidence, "REQUIRED_EVIDENCE_PREDICATES", new_required):
+            result = reconcile_upgrade(
+                proj, _REAL_REPO, from_version="0.13.1", to_version="0.14.0")
+
+        self.assertIsInstance(result, ReconcileResult)
+        self.assertEqual(len(result.predicate_stubs_scaffolded), 1)
+        self.assertEqual(
+            result.predicate_stubs_scaffolded[0].canonical_id, "acme_widget_tidy")
+        # A scanner-conformant capability with no scanner violations at all --
+        # `mechanisms` stays empty, exactly like B2b's conformant-rebuild path --
+        # yet the migration queue still gets created because THIS pass wrote to it.
+        self.assertEqual(result.mechanisms, [])
+        self.assertIsNotNone(result.migration_queue_path)
+
+    def test_idempotent_rerun_replaces_rather_than_duplicates(self):
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        self._write_capability_with_adapter(
+            proj, "acme_widget_tidy", self._ADAPTER_SOURCE_FULL_CURRENT_PAIR)
+        new_required = self._evidence.REQUIRED_EVIDENCE_PREDICATES + (
+            "verify_b2_new_predicate_probe",)
+        with mock.patch.object(self._evidence, "REQUIRED_EVIDENCE_PREDICATES", new_required):
+            reconcile_missing_evidence_predicates(
+                proj, _REAL_REPO, from_version="0.13.1", to_version="0.14.0")
+            # Second call is idempotent: same missing predicate, no longer
+            # missing text to insert TWICE -- but the queue entry must still be
+            # exactly one, replaced not duplicated.
+            reconcile_missing_evidence_predicates(
+                proj, _REAL_REPO, from_version="0.13.1", to_version="0.14.0")
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        matching = [e for e in queue if e["mechanism_id"] == "acme_widget_tidy"]
+        self.assertEqual(len(matching), 1)
+
+    def test_no_adapter_module_on_disk_is_skipped_not_a_failure(self):
+        # A capability whose op_kind has no registered adapter at all (the six
+        # seeded field op_kinds' own permanent shape) has no adapters_<id>.py
+        # file on disk -- this pass must skip it silently, mirroring Check 7 /
+        # copy_run_proof's identical "N/A when no registered adapter" scope note.
+        proj = self.tmp / "operator_proj"
+        capdir = proj / "agents" / "capabilities"
+        capdir.mkdir(parents=True)
+        (capdir / "no_adapter_cap_capability.py").write_text(
+            '"""fixture -- no adapter module for this one."""\n', encoding="utf-8")
+
+        new_required = self._evidence.REQUIRED_EVIDENCE_PREDICATES + (
+            "verify_b2_new_predicate_probe",)
+        with mock.patch.object(self._evidence, "REQUIRED_EVIDENCE_PREDICATES", new_required):
+            result = reconcile_missing_evidence_predicates(
+                proj, _REAL_REPO, from_version="0.13.1", to_version="0.14.0")
+        self.assertEqual(result, [])
+
+    def test_unparseable_adapter_source_is_skipped_never_guessed_at(self):
+        proj = self.tmp / "operator_proj"
+        adapter_path = self._write_capability_with_adapter(
+            proj, "acme_broken_syntax", "def broken(:\n")
+
+        new_required = self._evidence.REQUIRED_EVIDENCE_PREDICATES + (
+            "verify_b2_new_predicate_probe",)
+        with mock.patch.object(self._evidence, "REQUIRED_EVIDENCE_PREDICATES", new_required):
+            result = reconcile_missing_evidence_predicates(
+                proj, _REAL_REPO, from_version="0.13.1", to_version="0.14.0")
+        self.assertEqual(result, [])
+        # Never touched -- a fail-closed skip, not a corrupting edit attempt.
+        self.assertEqual(adapter_path.read_text(encoding="utf-8"), "def broken(:\n")
+
+    def test_missing_predicates_helper_returns_none_when_no_class_present(self):
+        # Direct unit coverage of the never-guess primitive itself.
+        self.assertIsNone(_missing_evidence_predicates_for_adapter(
+            "OP_KIND = 'x'\n", ("verify_apply_landed",)))
+        self.assertIsNone(_missing_evidence_predicates_for_adapter(
+            "def not (:\n", ("verify_apply_landed",)))
+        self.assertEqual(
+            _missing_evidence_predicates_for_adapter(
+                "class X:\n    def verify_apply_landed(self, e):\n        return True\n",
+                ("verify_apply_landed", "verify_undo_restored"),
+            ),
+            ["verify_undo_restored"],
+        )
+
+
+class ReconcileMissingEvidencePredicatesAntiTrustTheaterTests(_Base):
+    """Task B2's own hard requirement, proved end-to-end (not just at the
+    scaffold-string level): a scaffolded FAILING stub must NEVER let a
+    capability's proof/acceptance attempt pass -- only a REAL implementation
+    that replaces the stub can. Exercises the REAL `copy_run_proof.
+    validate_copy_run_proof` gate (Task B2's own fix to it: an adapter
+    predicate that RAISES must fail closed with a plain-language reason,
+    never an uncaught traceback) against the REAL scaffolded stub text."""
+
+    def setUp(self):
+        super().setUp()
+        self._agents_lib = _REAL_REPO / "wizard" / "agents" / "lib"
+        for mod_name in list(sys.modules):
+            if mod_name == "external_write" or mod_name.startswith("external_write."):
+                del sys.modules[mod_name]
+        if str(self._agents_lib) not in sys.path:
+            sys.path.insert(0, str(self._agents_lib))
+        from external_write.contracts import (  # noqa: E402
+            OperationContract, OPERATION_CONTRACTS, register_contract,
+        )
+        from external_write.adapter_registry import (  # noqa: E402
+            register_adapter, unregister_adapter,
+        )
+        from external_write.copy_run_proof import (  # noqa: E402
+            COPY_RUN_PROOF_SCHEMA, validate_copy_run_proof,
+        )
+        from external_write.verifiers import POSTWRITE_VERIFICATION_SCHEMA  # noqa: E402
+        from external_write.proof_hash import SHA256_HEX_LEN  # noqa: E402
+        self._OPERATION_CONTRACTS = OPERATION_CONTRACTS
+        self._register_contract = register_contract
+        self._OperationContract = OperationContract
+        self._register_adapter = register_adapter
+        self._unregister_adapter = unregister_adapter
+        self._validate_copy_run_proof = validate_copy_run_proof
+        self._COPY_RUN_PROOF_SCHEMA = COPY_RUN_PROOF_SCHEMA
+        self._POSTWRITE_VERIFICATION_SCHEMA = POSTWRITE_VERIFICATION_SCHEMA
+        self._SHA256_HEX_LEN = SHA256_HEX_LEN
+
+        self.OP_KIND = "_b2_anti_trust_theater_probe"
+        self._register_contract(self._OperationContract(
+            op_kind=self.OP_KIND, writes=("Status",), produces=(), dependency_set=(),
+            verifier_set=("prestate_snapshot_diff_v1",),
+            introduces_persistent_binding=False, risk_class="reversible_external",
+        ))
+
+    def tearDown(self):
+        self._unregister_adapter(self.OP_KIND)
+        self._OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+        super().tearDown()
+
+    def _verification(self):
+        return {
+            "schema": self._POSTWRITE_VERIFICATION_SCHEMA,
+            "verification_mode": "prestate_snapshot_diff",
+            "claim_strength": "verified",
+            "verifier_id": "prestate_snapshot_diff_v1",
+            "source_lineage": {
+                "pre_write_sources": ["prewrite_csv_backup"],
+                "post_write_sources": ["live_surface_read"],
+                "forbidden_sources": [
+                    "writer_generated_id_map", "live_id_column_as_truth", "apply_report",
+                ],
+            },
+            "invariant_checked": "value stable", "evidence_ref": "agents/handoffs/.ev.txt",
+        }
+
+    def _proof(self):
+        return {
+            "schema": self._COPY_RUN_PROOF_SCHEMA, "operation_id": "op-b2-1",
+            "op_kind": self.OP_KIND, "data_class": "test_rows",
+            "copy_source_ref": "copies/copy.csv",
+            "prestate_snapshot_ref": "copies/copy.prestate.csv",
+            "copy_apply_proof": {
+                "apply_receipt_ref": "agents/handoffs/.apply_receipt.json",
+                "apply_verification": self._verification(),
+                "apply_evidence": {
+                    "unit_id": "row1", "prestate": {"value": "Open"},
+                    "poststate": {"value": "Done", "intended_value": "Done"},
+                },
+            },
+            "copy_undo_proof": {
+                "undo_receipt_ref": "agents/handoffs/.undo_receipt.json",
+                "undo_verification": self._verification(),
+                "undo_evidence": {
+                    "unit_id": "row1", "prestate": {"value": "Open"},
+                    "poststate": {"value": "Open"},
+                },
+            },
+            "durability_checks": [], "accepted_for_live_use": True,
+            "implementation_hash": "a" * self._SHA256_HEX_LEN,
+            "contract_hash": "b" * self._SHA256_HEX_LEN,
+        }
+
+    def _build_and_load_stub_adapter(self, missing_predicates):
+        """Real end-to-end use of the production scaffold helper: base source
+        with NEITHER predicate declared, run through `capability_code_
+        scaffold.insert_missing_evidence_predicate_stubs` for real, then
+        actually imported (not just AST-inspected) so the REAL scaffolded
+        `raise NotImplementedError` executes when copy_run_proof calls it."""
+        import importlib.util
+        import capability_code_scaffold as ccs
+        base_source = (
+            '"""fixture adapter -- stub-scaffold target."""\n'
+            "from external_write.adapter_registry import register_adapter\n\n"
+            f'OP_KIND = "{self.OP_KIND}"\n\n\n'
+            "class _B2AntiTrustTheaterAdapter:\n"
+            "    def plan(self, params):\n        return []\n\n"
+            "    def apply_one(self, raw_client, unit):\n        pass\n\n"
+            "    def undo_one(self, raw_client, unit):\n        pass\n\n"
+            "    def verify_one(self, observer, unit):\n        return {}\n\n\n"
+            "register_adapter(OP_KIND, _B2AntiTrustTheaterAdapter())\n"
+        )
+        new_source = ccs.insert_missing_evidence_predicate_stubs(
+            base_source, missing_predicates)
+        mod_path = self.tmp / "adapters__b2_anti_trust_theater_probe.py"
+        mod_path.write_text(new_source, encoding="utf-8")
+        module_spec = importlib.util.spec_from_file_location(
+            "adapters__b2_anti_trust_theater_probe", mod_path)
+        module = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(module)  # fires register_adapter(OP_KIND, ...)
+        return module
+
+    def test_scaffolded_stub_refuses_the_proof_no_traceback_leaks(self):
+        self._build_and_load_stub_adapter(
+            ["verify_apply_landed", "verify_undo_restored"])
+        result = self._validate_copy_run_proof(self._proof())
+        self.assertFalse(result.ok)
+        self.assertIsNotNone(result.reason)
+        self.assertNotIn("Traceback", result.reason)
+        self.assertIn("verify_apply_landed raised", result.reason)
+        self.assertIn("stays paused", result.reason)
+
+    def test_only_a_real_implementation_replacing_the_stub_can_pass(self):
+        self._build_and_load_stub_adapter(["verify_apply_landed", "verify_undo_restored"])
+        stub_result = self._validate_copy_run_proof(self._proof())
+        self.assertFalse(stub_result.ok)
+
+        # Replace the stub with a REAL implementation for the SAME op_kind --
+        # never editing the adapter file, just re-registering (proves the
+        # refusal above was caused by the stub, not some other fixture bug).
+        class _RealAdapter:
+            def plan(self, params):
+                return []
+
+            def apply_one(self, raw_client, unit):
+                pass
+
+            def undo_one(self, raw_client, unit):
+                pass
+
+            def verify_one(self, observer, unit):
+                return {}
+
+            def verify_apply_landed(self, evidence):
+                return (evidence.poststate.get("value") == "Done"
+                        and evidence.prestate.get("value") != "Done")
+
+            def verify_undo_restored(self, evidence):
+                return evidence.poststate.get("value") == evidence.prestate.get("value")
+
+        self._unregister_adapter(self.OP_KIND)
+        self._register_adapter(self.OP_KIND, _RealAdapter())
+        real_result = self._validate_copy_run_proof(self._proof())
+        self.assertTrue(real_result.ok, real_result.reason)
 
 
 # ===================================================================================

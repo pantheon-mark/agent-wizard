@@ -991,5 +991,139 @@ class TestRunEnvelopeSurfaceIsShapeNeutral(unittest.TestCase):
                         f"zone-clean; got {violations}")
 
 
+class TestMissingEvidencePredicateStubScaffold(unittest.TestCase):
+    """Task B2, F-75: the migrator's auto-scaffold for a required adapter
+    evidence predicate an EXISTING adapter module does not declare (e.g.
+    because a contract-changing upgrade added a NEW name to `evidence.
+    REQUIRED_EVIDENCE_PREDICATES` after this adapter was already built).
+
+    NEVER a passing stub -- the locked, hard anti-trust-theater requirement:
+    the scaffolded method body must be exactly `raise NotImplementedError
+    (...)`, never `return True`/`pass`/anything that could look like a real
+    check. These tests assert that structurally (AST), not just by string
+    search, so a future edit that adds so much as a second statement to the
+    stub body would fail here."""
+
+    def test_render_stub_defines_exactly_one_method(self):
+        src = ccs.render_missing_evidence_predicate_stub("verify_apply_landed")
+        tree = ast.parse(f"class _X:\n{src}")
+        class_node = tree.body[0]
+        self.assertIsInstance(class_node, ast.ClassDef)
+        funcs = [n for n in class_node.body if isinstance(n, ast.FunctionDef)]
+        self.assertEqual([f.name for f in funcs], ["verify_apply_landed"])
+
+    def test_stub_body_is_only_a_raise_not_implemented_error(self):
+        # NEVER a passing stub -- structural proof, not a string search: the
+        # rendered method's body must be exactly ONE statement, and that
+        # statement must be `raise NotImplementedError(...)`.
+        for predicate_name in ("verify_apply_landed", "verify_undo_restored",
+                                "verify_some_future_predicate"):
+            with self.subTest(predicate_name=predicate_name):
+                src = ccs.render_missing_evidence_predicate_stub(predicate_name)
+                tree = ast.parse(f"class _X:\n{src}")
+                func = tree.body[0].body[0]
+                self.assertEqual(func.name, predicate_name)
+                self.assertEqual(len(func.body), 1, "stub must be a SINGLE statement")
+                stmt = func.body[0]
+                self.assertIsInstance(stmt, ast.Raise)
+                self.assertIsInstance(stmt.exc, ast.Call)
+                self.assertEqual(stmt.exc.func.id, "NotImplementedError")
+                message = stmt.exc.args[0].value
+                self.assertIn("stays paused", message)
+                self.assertIn("implemented and proved", message)
+
+    def test_named_predicates_get_their_own_plain_language_wording(self):
+        landed_msg = ccs._MISSING_EVIDENCE_PREDICATE_MESSAGES["verify_apply_landed"]
+        undo_msg = ccs._MISSING_EVIDENCE_PREDICATE_MESSAGES["verify_undo_restored"]
+        self.assertIn("landed", landed_msg)
+        self.assertIn("undone", undo_msg)
+        self.assertNotEqual(landed_msg, undo_msg)
+
+    def test_stub_never_annotates_evidence_as_any(self):
+        # A stub is inserted into an EXISTING adapter module this function never
+        # inspects the imports of -- annotating the parameter `evidence: Any`
+        # would silently assume that module already imports `Any` from typing
+        # and raise NameError at import time for one that does not.
+        src = ccs.render_missing_evidence_predicate_stub("verify_apply_landed")
+        self.assertNotIn(": Any", src)
+        self.assertIn("def verify_apply_landed(self, evidence)", src)
+
+    def test_insert_adds_missing_methods_before_register_adapter(self):
+        spec = _sample_spec()
+        base_source = render_adapter_module(spec)
+        # Sanity on the fixture: a FRESH scaffold declares neither predicate at
+        # all (see render_adapter_module's own turnkey-honesty TODO).
+        self.assertNotIn("def verify_apply_landed", base_source)
+        self.assertNotIn("def verify_undo_restored", base_source)
+
+        new_source = ccs.insert_missing_evidence_predicate_stubs(
+            base_source, ["verify_apply_landed", "verify_undo_restored"])
+        ast.parse(new_source)  # must stay syntactically valid Python
+
+        self.assertIn("def verify_apply_landed(self, evidence)", new_source)
+        self.assertIn("def verify_undo_restored(self, evidence)", new_source)
+        register_idx = new_source.index("register_adapter(OP_KIND")
+        self.assertLess(new_source.index("def verify_apply_landed"), register_idx)
+        self.assertLess(new_source.index("def verify_undo_restored"), register_idx)
+
+        # Both stubs land as METHODS on the adapter class (indented inside it),
+        # never as free module-level functions -- confirm via AST that they are
+        # both members of the SAME class the base module already declares.
+        tree = ast.parse(new_source)
+        class_node = next(n for n in tree.body if isinstance(n, ast.ClassDef))
+        method_names = {n.name for n in class_node.body if isinstance(n, ast.FunctionDef)}
+        self.assertIn("verify_apply_landed", method_names)
+        self.assertIn("verify_undo_restored", method_names)
+
+    def test_insert_is_a_noop_for_an_empty_missing_list(self):
+        base_source = render_adapter_module(_sample_spec())
+        self.assertEqual(
+            ccs.insert_missing_evidence_predicate_stubs(base_source, []), base_source)
+
+    def test_insert_refuses_to_guess_when_no_register_adapter_call_present(self):
+        with self.assertRaises(CapabilityCodeScaffoldError):
+            ccs.insert_missing_evidence_predicate_stubs(
+                "class X:\n    pass\n", ["verify_apply_landed"])
+
+    def test_scaffolded_adapter_is_actually_importable_without_a_typing_import(self):
+        # End-to-end: a hand-written-style adapter module with NO `from typing
+        # import Any` at all must still import cleanly after the stub is
+        # inserted -- this is the real regression this task's own fix guards
+        # (a `: Any`-annotated stub would NameError on import for exactly this
+        # shape of module).
+        source = (
+            '"""fixture adapter -- deliberately no typing import."""\n'
+            "from external_write.adapter_registry import register_adapter\n\n"
+            'OP_KIND = "_ccs_b2_import_probe"\n\n\n'
+            "class _CcsB2ImportProbeAdapter:\n"
+            "    def plan(self, params):\n"
+            "        return []\n\n"
+            "    def apply_one(self, raw_client, unit):\n"
+            "        pass\n\n"
+            "    def undo_one(self, raw_client, unit):\n"
+            "        pass\n\n"
+            "    def verify_one(self, observer, unit):\n"
+            "        return {}\n\n\n"
+            "register_adapter(OP_KIND, _CcsB2ImportProbeAdapter())\n"
+        )
+        new_source = ccs.insert_missing_evidence_predicate_stubs(
+            source, ["verify_apply_landed", "verify_undo_restored"])
+        with TemporaryDirectory() as td:
+            mod_path = Path(td) / "adapters__ccs_b2_import_probe.py"
+            mod_path.write_text(new_source, encoding="utf-8")
+            module_spec = importlib.util.spec_from_file_location(
+                "adapters__ccs_b2_import_probe", mod_path)
+            module = importlib.util.module_from_spec(module_spec)
+            try:
+                module_spec.loader.exec_module(module)
+            finally:
+                unregister_adapter("_ccs_b2_import_probe")
+            instance = module._CcsB2ImportProbeAdapter()
+            with self.assertRaises(NotImplementedError):
+                instance.verify_apply_landed(None)
+            with self.assertRaises(NotImplementedError):
+                instance.verify_undo_restored(None)
+
+
 if __name__ == "__main__":
     unittest.main()

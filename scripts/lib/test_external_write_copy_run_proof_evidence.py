@@ -587,5 +587,107 @@ class TestFieldStyleDurabilityEvidenceCheckedProof(unittest.TestCase):
         self.assertIn("durability_evidence", r.reason)
 
 
+# ---------------------------------------------------------------------------
+# Task B2, F-75 -- the migrator's auto-scaffolded FAILING predicate stub must
+# fail THIS gate closed, honestly, never as an uncaught exception. A DIFFERENT
+# shape than TestAdapterWithNoPredicateFailsClosed above: that adapter declares
+# NO predicate at all (getattr returns None); this one DECLARES the predicate
+# (so capability_invariants Check 7's structural presence check does not fire
+# either) but the predicate RAISES when actually called -- exactly
+# capability_code_scaffold.render_missing_evidence_predicate_stub's own
+# scaffolded shape for a newly-required predicate an existing adapter has not
+# yet been given a real implementation for.
+# ---------------------------------------------------------------------------
+
+class _StubRaisingAdapter:
+    """Mirrors `capability_code_scaffold.render_missing_evidence_predicate_
+    stub`'s OWN scaffolded method shape verbatim (Task B2): present, callable,
+    but raises `NotImplementedError` with the locked plain-language message."""
+
+    def plan(self, params):
+        params = params or {}
+        return [EffectUnit(unit_id=r["row_id"], target_ref=r) for r in params.get("rows", [])]
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, raw_client, unit):
+        return {}
+
+    def verify_apply_landed(self, evidence: AdapterEvidence) -> bool:
+        raise NotImplementedError(
+            "this adapter must define how it verifies the external write landed; "
+            "the capability stays paused until this is implemented and proved")
+
+    def verify_undo_restored(self, evidence: AdapterEvidence) -> bool:
+        raise NotImplementedError(
+            "this adapter must define how it verifies the external write can be "
+            "undone; the capability stays paused until this is implemented and proved")
+
+
+class TestAutoScaffoldedStubFailsClosedNotUncaughtTraceback(unittest.TestCase):
+    """The anti-trust-theater crux: an auto-scaffolded stub must NEVER let a
+    proof pass, and it must fail HONESTLY (a plain-language refusal, not a raw
+    traceback reaching the operator) -- `acceptance_ceremony.py`'s call to
+    `validate_copy_run_proof` (the real caller) has no try/except of its own
+    around it, so if this function let the raise propagate, it would surface
+    as an uncaught exception all the way up to the operator."""
+
+    OP_KIND = "_b2_stub_raises_probe"
+
+    def setUp(self):
+        contracts_mod.OPERATION_CONTRACTS[self.OP_KIND] = OperationContract(
+            op_kind=self.OP_KIND,
+            writes=("Status",),
+            produces=(),
+            dependency_set=(),
+            verifier_set=("prestate_snapshot_diff_v1",),
+            introduces_persistent_binding=False,
+            risk_class="reversible_external",
+        )
+        register_adapter(self.OP_KIND, _StubRaisingAdapter())
+
+    def tearDown(self):
+        contracts_mod.OPERATION_CONTRACTS.pop(self.OP_KIND, None)
+        unregister_adapter(self.OP_KIND)
+
+    def _apply_undo_evidence(self):
+        return dict(
+            apply_evidence={
+                "unit_id": "row1",
+                "prestate": {"value": "Open"},
+                "poststate": {"value": "Complete", "intended_value": "Complete"},
+            },
+            undo_evidence={
+                "unit_id": "row1",
+                "prestate": {"value": "Open"},
+                "poststate": {"value": "Open"},
+            },
+        )
+
+    def test_stub_fails_closed_with_plain_language_reason_never_raises(self):
+        p = _proof(self.OP_KIND, **self._apply_undo_evidence())
+        # Must NOT raise: this call itself proves no exception propagates out.
+        r = validate_copy_run_proof(p)
+        self.assertFalse(r.ok)
+        self.assertIsNotNone(r.reason)
+        self.assertNotIn("Traceback", r.reason)
+        self.assertIn("verify_apply_landed raised", r.reason)
+        self.assertIn("stays paused", r.reason)
+
+    def test_a_real_implementation_replacing_the_stub_then_passes(self):
+        # Swap the SAME op_kind's registered adapter for a REAL implementation
+        # -- proves the refusal above was caused by the stub's raise, not some
+        # other fixture issue, and that ONLY a real implementation can pass.
+        unregister_adapter(self.OP_KIND)
+        register_adapter(self.OP_KIND, _FieldStyleAdapter())
+        p = _proof(self.OP_KIND, **self._apply_undo_evidence())
+        r = validate_copy_run_proof(p)
+        self.assertTrue(r.ok, r.reason)
+
+
 if __name__ == "__main__":
     unittest.main()

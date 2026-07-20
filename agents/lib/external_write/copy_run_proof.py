@@ -261,7 +261,32 @@ def validate_copy_run_proof(proof: Any) -> ProofResult:
                 "(apply_evidence: unit_id + poststate) needed to evaluate the "
                 "adapter's verify_apply_landed predicate"
             )
-        if not dispatch.verify_apply_landed(dispatch.instance, apply_evidence):
+        # (Task B2, F-75) A required predicate CAN be present-but-non-functional: a
+        # contract upgrade that adds a required predicate name gets a FAILING
+        # `raise NotImplementedError(...)` stub auto-scaffolded onto an existing
+        # capability's adapter (capability_code_scaffold.
+        # insert_missing_evidence_predicate_stubs) rather than silently leaving the
+        # gap invisible -- see that module's own anti-trust-theater docstring for
+        # why it is NEVER a passing stub. `getattr(dispatch, name, None) is not None`
+        # (this gate's own missing-predicate check above, and capability_invariants
+        # Check 7's identical one) only proves the METHOD EXISTS and is callable --
+        # it says nothing about whether CALLING it raises. Without this try/except,
+        # that raise would propagate out of this function as an uncaught exception --
+        # a raw traceback reaching the operator, not the plain-language fail-closed
+        # refusal every other branch of this gate produces. Mirrors the SAME
+        # convention `adapters.py`'s run-time evaluation of these identical
+        # predicates already uses (`except Exception as exc: ... {exc!r}`) --
+        # PROOF-time was the one caller that had not yet adopted it.
+        try:
+            apply_landed = dispatch.verify_apply_landed(dispatch.instance, apply_evidence)
+        except Exception as exc:
+            return _fail(
+                f"verify_apply_landed raised evaluating observed evidence for "
+                f"{op_kind!r} ({exc!r}) -- an adapter predicate that cannot run "
+                "cannot certify anything landed; this capability stays paused "
+                "until a real implementation replaces it"
+            )
+        if not apply_landed:
             return _fail(
                 f"observed evidence does not show the apply for {op_kind!r} landed "
                 "(verify_apply_landed returned False) -- a 'verified' claim must be "
@@ -277,7 +302,16 @@ def validate_copy_run_proof(proof: Any) -> ProofResult:
                 "(undo_evidence: unit_id + poststate) needed to evaluate the "
                 "adapter's verify_undo_restored predicate"
             )
-        if not dispatch.verify_undo_restored(dispatch.instance, undo_evidence):
+        try:
+            undo_restored = dispatch.verify_undo_restored(dispatch.instance, undo_evidence)
+        except Exception as exc:
+            return _fail(
+                f"verify_undo_restored raised evaluating observed evidence for "
+                f"{op_kind!r} ({exc!r}) -- an adapter predicate that cannot run "
+                "cannot certify anything restored; this capability stays paused "
+                "until a real implementation replaces it"
+            )
+        if not undo_restored:
             return _fail(
                 f"observed evidence does not show the undo for {op_kind!r} restored "
                 "prestate (verify_undo_restored returned False) -- a 'verified' claim "

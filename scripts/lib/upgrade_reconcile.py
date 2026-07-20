@@ -99,7 +99,12 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from bundle_templates import wizard_subroot  # type: ignore  # noqa: E402
-from capability_code_scaffold import DEFAULT_CAPABILITIES_REL  # type: ignore  # noqa: E402
+from capability_code_scaffold import (  # type: ignore  # noqa: E402
+    DEFAULT_CAPABILITIES_REL,
+    DEFAULT_EXTERNAL_WRITE_REL,
+    CapabilityCodeScaffoldError,
+    insert_missing_evidence_predicate_stubs,
+)
 
 
 # ===== Reused T5 scanner (single-home import; canonical location) ===========
@@ -331,6 +336,11 @@ class ReconcileResult:
         recomputed ``implementation_hash`` no longer matched their acceptance audit record's
         stored hash -- the "conformant rebuild" half of the F-62 trust gap B2's scanner-red reset
         does not cover. See ``_reconcile_conformant_rebuild_staleness``.
+
+    predicate_stubs_scaffolded: (Task B2, F-75) one entry per capability whose adapter was
+        auto-scaffolded with a FAILING evidence-predicate stub this pass -- ALSO scanner-status-
+        independent (a fully gate-conformant capability can still be missing a newly-required
+        predicate). See ``reconcile_missing_evidence_predicates``.
     """
     operator_project_path: str
     from_version: str
@@ -339,6 +349,7 @@ class ReconcileResult:
     notice_path: Optional[str] = None
     migration_queue_path: Optional[str] = None
     stale_acceptance_reset: List[str] = field(default_factory=list)
+    predicate_stubs_scaffolded: List["PredicateStubRemediation"] = field(default_factory=list)
 
     @property
     def any_affected(self) -> bool:
@@ -678,6 +689,211 @@ def resolve_paused_op_kinds(
     except OSError:
         return []
     return _extract_op_kind_literal(source_text)
+
+
+# ===== Task B2 (F-75): missing-adapter-evidence-predicate auto-scaffold =====
+#
+# A DIFFERENT axis than every mechanism above: those are all driven off the AST
+# bypass SCANNER (scan_operator_mechanisms), which only ever flags operator code
+# that writes AROUND the gate. An existing capability that is fully gate-
+# conformant -- its write path was never rewritten, the scanner has nothing to
+# flag -- can STILL fall out of compliance when a contract-changing upgrade adds
+# a NEW name to the shared `evidence.REQUIRED_EVIDENCE_PREDICATES` tuple (Task
+# B1, F-74) that this capability's adapter, built against the OLDER contract,
+# does not declare. Before this task there was no remediation for that gap at
+# all (F-75): the capability would simply start failing self-QA/proof-time with
+# no hint at what to do about it beyond diff-archaeology.
+#
+# Detection here therefore enumerates every capability the project KNOWS about
+# via `capability_identity.build_capability_index` (one canonical_id per
+# `agents/capabilities/<id>_capability.py` on disk) -- not just the
+# scanner-flagged ones -- and, for each with an adapter module on disk
+# (`agents/lib/external_write/adapters_<id>.py`, the exact filename
+# `capability_code_scaffold.py`'s `CapabilityCodeSpec.adapter_module_stem`
+# always emits), statically checks that module's own source (AST-parsed only,
+# NEVER imported/executed -- same discipline as `_extract_op_kind_literal`
+# above) for which required predicate names its Adapter class does not define.
+
+@dataclass
+class PredicateStubRemediation:
+    """(Task B2, F-75) One capability whose adapter was auto-scaffolded with a
+    FAILING `NotImplementedError` stub for a required evidence predicate a
+    contract upgrade added that this capability's adapter -- built under an
+    earlier contract -- did not declare. NEVER a passing stub (see
+    `capability_code_scaffold.render_missing_evidence_predicate_stub`'s own
+    anti-trust-theater docstring). The capability's proof/acceptance stays
+    refused until a real implementation replaces the stub -- `capability_
+    invariants` Check 7 and `copy_run_proof.validate_copy_run_proof` both
+    still gate on the predicate actually WORKING, not merely existing (see
+    those modules' own fixes for this same task)."""
+    canonical_id: str
+    adapter_relpath: str
+    missing_predicates: List[str]
+
+
+def _missing_evidence_predicates_for_adapter(
+    source_text: str, required_predicates: Sequence[str],
+) -> Optional[List[str]]:
+    """AST-parse an adapter module's OWN on-disk source (never imported/
+    executed) and return the subset of `required_predicates` NOT defined as a
+    method on its first top-level class -- the Adapter class every
+    `capability_code_scaffold`-emitted adapter module declares exactly one of
+    (see `render_adapter_module`'s `${class_prefix}Adapter`). Returns `None`
+    (deliberately distinct from `[]`) when the source does not parse or
+    declares no top-level class at all -- ambiguous, never guessed at; the
+    caller skips this capability for this pass rather than risk a false
+    negative or a corrupting edit, mirroring `_extract_op_kind_literal`'s own
+    fail-closed/never-guess discipline."""
+    try:
+        tree = ast.parse(source_text)
+    except SyntaxError:
+        return None
+    class_node = next((n for n in tree.body if isinstance(n, ast.ClassDef)), None)
+    if class_node is None:
+        return None
+    defined = {
+        n.name for n in class_node.body
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    return [name for name in required_predicates if name not in defined]
+
+
+def _append_missing_predicate_migration_request(
+    operator_project_dir: Path,
+    canonical_id: str,
+    adapter_relpath: str,
+    missing_predicates: Sequence[str],
+    from_version: str,
+    to_version: str,
+) -> Path:
+    """(Task B2, F-75) Land (or refresh) a durable, disk-first repair task in
+    the SAME pending-migrations queue `_append_migration_request` writes to --
+    `wizard/skills/add-capability.md` Step A already surfaces ANY entry there
+    generically (names the mechanism_id, why, what changed), so this reuses
+    that existing hand-off (the "standard rebuild loop" this task's own brief
+    points at) rather than inventing a second queue. A dedicated
+    rebuild-paused-capability flow that reads this queue specifically (rather
+    than add-capability's generic Step A) is Task B4's job, deliberately not
+    built here.
+
+    Idempotent: re-running an upgrade REPLACES this capability's existing
+    entry (keyed on mechanism_id) rather than duplicating it -- mirrors
+    `_append_migration_request`'s own convention exactly.
+
+    Distinguished from a scanner-violation entry by `"kind":
+    "missing_evidence_predicates"` and a `missing_predicates` field; no
+    `violations` list (there is no bypass violation here -- this capability's
+    write path is unchanged and still gate-conformant; it is simply missing a
+    NEWLY required adapter method)."""
+    path = Path(operator_project_dir) / MIGRATION_QUEUE_REL
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        if not isinstance(existing, list):
+            existing = []
+    except (json.JSONDecodeError, OSError):
+        existing = []
+    existing = [
+        e for e in existing
+        if not (isinstance(e, dict) and e.get("mechanism_id") == canonical_id)
+    ]
+    missing_joined = "/".join(missing_predicates)
+    existing.append({
+        "mechanism_id": canonical_id,
+        "writer_relpath": adapter_relpath,
+        "entrypoint_relpath": None,
+        "requested_at": _utcnow_iso(),
+        "from_version": from_version,
+        "to_version": to_version,
+        "kind": "missing_evidence_predicates",
+        "missing_predicates": list(missing_predicates),
+        "reason": (
+            "a contract upgrade added a required adapter evidence predicate "
+            f"({missing_joined}) this capability's adapter did not declare -- a "
+            "FAILING stub has been auto-scaffolded so the gap is visible instead "
+            "of hidden; the capability stays paused/refused until a real "
+            "implementation replaces it"
+        ),
+        "suggested_next_step": (
+            f"Implement the real {missing_joined} predicate method(s) "
+            f"auto-scaffolded in {adapter_relpath} (they currently raise "
+            "NotImplementedError), then re-run this capability's proof and "
+            "acceptance through the normal build-and-accept flow."
+        ),
+        "status": "pending",
+    })
+    _atomic_write(path, json.dumps(existing, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
+    return path
+
+
+def reconcile_missing_evidence_predicates(
+    operator_project_dir: Path,
+    build_repo_root: Path,
+    *,
+    from_version: str,
+    to_version: str,
+) -> List[PredicateStubRemediation]:
+    """(Task B2, F-75) The migrator's auto-scaffold pass: for every capability
+    this project KNOWS about (via `capability_identity.build_capability_index`
+    -- REGARDLESS of scanner status, unlike every mechanism above), check its
+    adapter module (when one exists on disk) against the SAME canonical
+    required-predicate tuple (`evidence.REQUIRED_EVIDENCE_PREDICATES`, read via
+    MODULE attribute access -- never a frozen name-import, so a test that
+    patches this attribute on the imported module object is honored) Task B1's
+    self-QA gate and the proof/run-time gate both already read. For each
+    missing predicate found, scaffolds a FAILING stub onto the adapter module
+    IN PLACE and queues a repair task -- never a passing stub, and never a
+    silent gap.
+
+    Best-effort, project-wide and per-capability (mirrors `_reconcile_
+    conformant_rebuild_staleness`'s own convention): a failure importing the
+    toolkit's own trusted `capability_identity`/`evidence` modules, or building
+    the capability index, degrades to an empty result (nothing scaffolded) --
+    never half-corrupts a project. A failure resolving ONE capability's
+    missing predicates or insertion point (unparseable/malformed adapter
+    source) skips just that capability, never the whole pass -- see
+    `_missing_evidence_predicates_for_adapter`'s and `insert_missing_evidence_
+    predicate_stubs`'s own never-guess docstrings for why."""
+    operator_project_dir = Path(operator_project_dir)
+    remediated: List[PredicateStubRemediation] = []
+    try:
+        capability_identity = _external_write_module(build_repo_root, "capability_identity")
+        evidence = _external_write_module(build_repo_root, "evidence")
+    except Exception:
+        return remediated
+    required = tuple(getattr(evidence, "REQUIRED_EVIDENCE_PREDICATES", ()) or ())
+    if not required:
+        return remediated
+    try:
+        index = capability_identity.build_capability_index(str(operator_project_dir))
+    except Exception:
+        return remediated
+
+    for canonical_id in sorted(index.canonical_ids):
+        adapter_relpath = (
+            DEFAULT_EXTERNAL_WRITE_REL / f"adapters_{canonical_id}.py"
+        ).as_posix()
+        adapter_path = operator_project_dir / adapter_relpath
+        try:
+            source_text = adapter_path.read_text(encoding="utf-8")
+        except OSError:
+            continue  # no adapter module for this capability -- not adapter-backed, N/A
+        missing = _missing_evidence_predicates_for_adapter(source_text, required)
+        if not missing:
+            continue
+        try:
+            new_source = insert_missing_evidence_predicate_stubs(source_text, missing)
+        except CapabilityCodeScaffoldError:
+            continue  # could not find a safe insertion point -- never guess, skip
+        _atomic_write(adapter_path, new_source)
+        _append_missing_predicate_migration_request(
+            operator_project_dir, canonical_id, adapter_relpath, missing,
+            from_version, to_version,
+        )
+        remediated.append(PredicateStubRemediation(
+            canonical_id=canonical_id, adapter_relpath=adapter_relpath,
+            missing_predicates=list(missing),
+        ))
+    return remediated
 
 
 def _write_paused_live_write_state(
@@ -1403,6 +1619,14 @@ def reconcile_upgrade(
     stale_acceptance_reset = _reconcile_conformant_rebuild_staleness(
         operator_project_dir, build_repo_root)
 
+    # (Task B2, F-75) ALSO scanner-status-independent, same reasoning as the pass just
+    # above: a fully gate-conformant capability (never scanner-flagged, nothing in
+    # `mechanisms`) can still be missing a newly-required adapter evidence predicate.
+    predicate_stubs_scaffolded = reconcile_missing_evidence_predicates(
+        operator_project_dir, build_repo_root,
+        from_version=from_version, to_version=to_version,
+    )
+
     return ReconcileResult(
         operator_project_path=str(operator_project_dir),
         from_version=from_version,
@@ -1411,9 +1635,10 @@ def reconcile_upgrade(
         notice_path=str(notice_path) if notice_path else None,
         migration_queue_path=(
             str(operator_project_dir / MIGRATION_QUEUE_REL)
-            if (mechanisms or stale_acceptance_reset) else None
+            if (mechanisms or stale_acceptance_reset or predicate_stubs_scaffolded) else None
         ),
         stale_acceptance_reset=stale_acceptance_reset,
+        predicate_stubs_scaffolded=predicate_stubs_scaffolded,
     )
 
 

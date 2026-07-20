@@ -106,7 +106,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from string import Template
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 
 _VALID_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -473,6 +473,123 @@ def render_adapter_module(spec: CapabilityCodeSpec) -> str:
         read_only_scope=repr(spec.read_only_scope),
         read_facade_module_stem=spec.read_facade_module_stem,
     )
+
+
+# ---------------------------------------------------------------------------
+# Missing evidence-predicate stub scaffold (Task B2, F-75 -- Cut 1.1 Cluster B)
+# ---------------------------------------------------------------------------
+#
+# Companion to `render_adapter_module` above, but for an EXISTING, already-
+# emitted adapter module rather than a fresh one: `upgrade_reconcile.py`'s
+# `reconcile_missing_evidence_predicates` calls this when a contract-changing
+# upgrade adds a NEW name to `evidence.REQUIRED_EVIDENCE_PREDICATES` that some
+# already-built capability's adapter -- built against the OLDER contract --
+# does not declare. Before this task, the operator (or a naive agent) was left
+# to diff-archaeology to even discover a required method was now missing;
+# there was no remediation at all (F-75).
+#
+# ANTI-TRUST-THEATER PROPERTY (the locked design's own hard requirement): the
+# scaffolded method body is ALWAYS exactly `raise NotImplementedError(...)`,
+# NEVER `return True`/`pass`/anything that could look like a passing check. A
+# passing stub would be a green predicate that verifies nothing -- worse than
+# no predicate at all, because it would look done. A raising stub is a valid,
+# honest STALL: `capability_invariants` Check 7 (Task B1) sees the method is
+# PRESENT and callable and does not fail on that alone (Check 7 checks
+# declaration, not behavior) -- but `copy_run_proof.validate_copy_run_proof`
+# actually CALLS the predicate at proof time, and this task also wraps that
+# call in try/except (see copy_run_proof.py) so the raise degrades to a
+# plain-language proof refusal instead of an uncaught traceback -- the
+# capability's live writes stay paused/refused either way, and only a REAL
+# implementation that replaces this stub can ever pass.
+
+_MISSING_EVIDENCE_PREDICATE_MESSAGES: Dict[str, str] = {
+    "verify_apply_landed": (
+        "this adapter must define how it verifies the external write landed; "
+        "the capability stays paused until this is implemented and proved"
+    ),
+    "verify_undo_restored": (
+        "this adapter must define how it verifies the external write can be "
+        "undone; the capability stays paused until this is implemented and proved"
+    ),
+}
+_DEFAULT_MISSING_EVIDENCE_PREDICATE_MESSAGE = (
+    "this adapter must define how it verifies the external write landed / can "
+    "be undone; the capability stays paused until this is implemented and proved"
+)
+
+_REGISTER_ADAPTER_CALL_RE = re.compile(r"^register_adapter\(", re.MULTILINE)
+
+
+def render_missing_evidence_predicate_stub(predicate_name: str) -> str:
+    """Render ONE class-body-indented (4-space) method definition for
+    `predicate_name` whose body is exactly a `raise NotImplementedError(...)`
+    carrying the locked plain-language message -- never a passing stub. Pure
+    string rendering -- no filesystem I/O.
+
+    `predicate_name` is not restricted to the two predicates named today
+    (`verify_apply_landed`/`verify_undo_restored`): any FUTURE name added to
+    `evidence.REQUIRED_EVIDENCE_PREDICATES` renders here too, falling back to
+    a generic-but-still-honest message (`_DEFAULT_MISSING_EVIDENCE_PREDICATE_
+    MESSAGE`) when it is not one of the two named messages above -- this
+    function never needs to change again when that shared tuple grows.
+
+    Deliberately UNANNOTATED (`evidence`, not `evidence: Any`): this stub is
+    inserted into an EXISTING, already-on-disk adapter module this function
+    never inspects the imports of -- annotating with `Any` would silently
+    assume that module already carries `from typing import Any` and raise
+    `NameError` at import time for one that does not (annotations are
+    evaluated eagerly unless the target module itself opts into `from
+    __future__ import annotations`, which this function cannot assume
+    either). `-> bool` is safe to keep: `bool` is a builtin, needing no
+    import in any module."""
+    message = _MISSING_EVIDENCE_PREDICATE_MESSAGES.get(
+        predicate_name, _DEFAULT_MISSING_EVIDENCE_PREDICATE_MESSAGE)
+    return (
+        "\n"
+        f"    def {predicate_name}(self, evidence) -> bool:\n"
+        "        # AUTO-SCAFFOLDED (upgrade_reconcile, Task B2 -- F-75): a contract\n"
+        "        # upgrade added this required evidence predicate; this capability's\n"
+        "        # adapter, built earlier, did not declare it. NEVER a passing stub --\n"
+        "        # raises so this capability's live writes stay paused/refused until a\n"
+        "        # real implementation replaces this (see copy_run_proof.py /\n"
+        "        # capability_invariants.py Check 7 for how each gate treats this).\n"
+        "        raise NotImplementedError(\n"
+        f"            {message!r})\n"
+    )
+
+
+def insert_missing_evidence_predicate_stubs(
+    adapter_source: str, missing_predicates: Sequence[str],
+) -> str:
+    """Insert a FAILING `NotImplementedError` stub method for each name in
+    `missing_predicates` into `adapter_source` (an EXISTING adapter module's
+    own on-disk text), anchored immediately before its module-level
+    `register_adapter(...)` call -- the point every `capability_code_scaffold`
+    -emitted adapter module's Adapter class body ends at (see
+    `_ADAPTER_MODULE_TEMPLATE`). Pure string operation -- no filesystem I/O,
+    no parsing/executing `adapter_source` as code beyond this module's own
+    caller having already determined `missing_predicates` (this function
+    trusts that list, it does not recompute it).
+
+    Returns `adapter_source` UNCHANGED when `missing_predicates` is empty
+    (no-op, not an error). Raises `CapabilityCodeScaffoldError` -- never
+    guesses an insertion point -- if no module-level `register_adapter(`
+    call can be found; this is the SAME fail-closed discipline every other
+    "cannot determine X, refuse rather than guess" primitive in this module
+    already follows."""
+    missing = list(missing_predicates)
+    if not missing:
+        return adapter_source
+    match = _REGISTER_ADAPTER_CALL_RE.search(adapter_source)
+    if match is None:
+        raise CapabilityCodeScaffoldError(
+            "cannot auto-scaffold a failing evidence-predicate stub -- this "
+            "adapter module's source has no module-level register_adapter(...) "
+            "call to anchor the insertion point before; refusing to guess where "
+            "the stub method(s) belong.")
+    stubs = "".join(render_missing_evidence_predicate_stub(name) for name in missing)
+    insertion_point = match.start()
+    return adapter_source[:insertion_point] + stubs + "\n\n" + adapter_source[insertion_point:]
 
 
 # ---------------------------------------------------------------------------
