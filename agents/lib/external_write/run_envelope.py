@@ -1623,6 +1623,21 @@ def report_run_recoverability(
 
     Every id in the query set (``candidate_unit_ids`` if given, else the
     union of reviewed and applied ids) gets an explicit claim in ``per_id``.
+
+    ``counts`` — INTERNAL CONSISTENCY (D5 review Fix 1): every count in
+    ``{reviewed, applied, recoverable_by_system, not_recoverable_by_system,
+    verified, applied_not_verified}`` is computed over the SAME set — the
+    QUERY set (``per_id``'s keys), never a mix of the whole envelope and the
+    query. This guarantees ``recoverable_by_system + not_recoverable_by_system
+    == len(per_id)`` (the number of candidate ids actually classified) for
+    ANY ``candidate_unit_ids``, including a PARTIAL one over a larger
+    reviewed/applied set. The whole-envelope figures are still reported as
+    useful run-level context, but under the visibly-DISTINCT names
+    ``reviewed_total`` / ``applied_total`` — so a consumer can never assume
+    the query-scoped and whole-envelope families sum together. When
+    ``candidate_unit_ids`` is ``None``, the query set IS the whole reviewed
+    union applied set, so ``reviewed``/``applied`` and
+    ``reviewed_total``/``applied_total`` naturally coincide.
     """
     env = load_run_envelope(run_id, envelope_dir=envelope_dir)
 
@@ -1657,12 +1672,25 @@ def report_run_recoverability(
         verified_by_id[uid] = uid in verified_ids
 
     recoverable_count = sum(1 for v in per_id.values() if v == RECOVERABLE_BY_SYSTEM)
+    # D5 review Fix 1: `reviewed`/`applied` are scoped to the SAME query set
+    # (per_id's keys — de-duplicated) as the recoverable/not_recoverable and
+    # verified/applied_not_verified families below, so every count in this
+    # object is internally consistent for ANY candidate_unit_ids, including a
+    # PARTIAL one over a larger reviewed/applied set.
+    queried_ids = per_id.keys()
+    reviewed_in_query = sum(1 for uid in queried_ids if uid in reviewed_ids)
+    applied_in_query = sum(1 for uid in queried_ids if uid in applied_ids)
     return {
         "run_id": run_id,
         "run_state": env.run_state,
         "counts": {
-            "reviewed": len(reviewed_ids),
-            "applied": len(applied_ids),
+            "reviewed": reviewed_in_query,
+            "applied": applied_in_query,
+            # Whole-envelope figures, kept as run-level context under
+            # visibly-distinct names — never summed with the query-scoped
+            # family above by any consumer.
+            "reviewed_total": len(reviewed_ids),
+            "applied_total": len(applied_ids),
             "recoverable_by_system": recoverable_count,
             "not_recoverable_by_system": len(per_id) - recoverable_count,
             # Verification is a SEPARATE axis from recoverability (Controller

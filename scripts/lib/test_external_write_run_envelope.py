@@ -984,6 +984,88 @@ class TestHonestRecoverabilityReporting(unittest.TestCase):
             self.assertEqual(report["counts"]["reviewed"], 1)
             self.assertEqual(report["counts"]["applied"], 1)
 
+    def test_partial_candidate_set_keeps_count_families_internally_consistent(self):
+        # D5 review Fix 1 (Important): recoverable_by_system/
+        # not_recoverable_by_system (and verified/applied_not_verified) must
+        # be counted over the SAME query set as reviewed/applied -- never
+        # over the whole envelope. Before the fix, `reviewed`/`applied` were
+        # whole-envelope counts while the recoverability/verification counts
+        # were query-scoped, so a partial `candidate_unit_ids` query produced
+        # an internally-inconsistent counts object (e.g. reviewed=5 alongside
+        # recoverable=1/not_recoverable=1 for a 2-id query) -- misleading for
+        # a feature whose whole purpose is trustworthy reporting.
+        with tempfile.TemporaryDirectory() as d:
+            reviewed = [
+                {"unit_id": f"row{i}", "prestate_digest": f"d{i}",
+                 "intended_mutation": {"value": "Complete"},
+                 "category": "status", "protected_status": False}
+                for i in range(5)
+            ]
+            mint = mint_run_envelope(
+                run_id="run-partial", capability_id="cap:test", op_kind=self.OP_KIND,
+                contract_hash="ch", implementation_hash="ih",
+                reviewed_set=reviewed, population_count=50, stratification_summary={},
+                operator_approval_verbatim="yes", consent_sentence_shown="Apply changes.",
+                approved_at="2026-07-19T22:45:48Z", envelope_dir=d)
+            self.assertTrue(mint.accepted, mint.reason)
+            env = mint.envelope
+            store = {f"row{i}": {"value": "Open"} for i in range(5)}
+            # Apply only 3 of the 5 reviewed rows (row0, row1, row2).
+            op = Operation(
+                surface="fixture_surface", op_kind=self.OP_KIND, batch_id="e2e-1",
+                params={"rows": [{"row_id": f"row{i}", "intended_value": "Complete"}
+                                 for i in range(3)]})
+            run_enveloped_operation(env, op, _receipt(op), _FieldWriteClient(store),
+                                    read_only_client=_FieldReadOnlyClient(store),
+                                    envelope_dir=d, ledger_dir=d)
+
+            # Query a PARTIAL candidate set of 2 ids: row0 (reviewed + applied)
+            # and row3 (reviewed but never applied) -- out of a whole envelope
+            # that reviewed 5 and applied 3.
+            report = report_run_recoverability(
+                "run-partial", candidate_unit_ids=["row0", "row3"], envelope_dir=d)
+            counts = report["counts"]
+            # Invariant: recoverable + not_recoverable == the number of ids
+            # actually classified in THIS query, regardless of the larger
+            # whole-envelope sets.
+            self.assertEqual(
+                counts["recoverable_by_system"] + counts["not_recoverable_by_system"], 2)
+            self.assertEqual(counts["recoverable_by_system"], 1)      # row0 only
+            self.assertEqual(counts["not_recoverable_by_system"], 1)  # row3 never applied
+            # reviewed/applied are now scoped to the SAME query set as the
+            # recoverable/not_recoverable family above.
+            self.assertEqual(counts["reviewed"], 2)   # row0 + row3 both reviewed
+            self.assertEqual(counts["applied"], 1)    # only row0 was applied
+            # Whole-envelope figures remain available as run-level context,
+            # under visibly-distinct *_total names so no consumer can assume
+            # cross-family summation.
+            self.assertEqual(counts["reviewed_total"], 5)
+            self.assertEqual(counts["applied_total"], 3)
+
+    def test_tampered_envelope_reviewed_set_digest_reports_not_recoverable(self):
+        # D5 review Fix 2 (Minor, cheap): _envelope_is_durable must treat a
+        # mismatched reviewed_set_digest as non-durable, the same way
+        # is_spendable() does -- a run whose on-disk envelope was tampered (or
+        # corrupted) must never report its applied ids recoverable, even
+        # though a tranche recorded a real apply.
+        with tempfile.TemporaryDirectory() as d:
+            env = self._mint(d)
+            store = {"row1": {"value": "Open"}}
+            op = self._op()
+            run_enveloped_operation(env, op, _receipt(op), _FieldWriteClient(store),
+                                    read_only_client=_FieldReadOnlyClient(store),
+                                    envelope_dir=d, ledger_dir=d)
+            env_path = Path(d) / "run-e2e.json"
+            raw = json.loads(env_path.read_text())
+            raw["reviewed_set_digest"] = "deadbeef_not_the_real_digest"
+            env_path.write_text(json.dumps(raw), encoding="utf-8")
+
+            report = report_run_recoverability(
+                "run-e2e", candidate_unit_ids=["row1"], envelope_dir=d)
+            self.assertEqual(report["per_id"]["row1"], NOT_RECOVERABLE_BY_SYSTEM)
+            self.assertEqual(report["counts"]["recoverable_by_system"], 0)
+            self.assertEqual(report["counts"]["not_recoverable_by_system"], 1)
+
 
 # ===========================================================================
 # I-3 — aggregate Knob B ceiling enforced in the run path, composing with the
