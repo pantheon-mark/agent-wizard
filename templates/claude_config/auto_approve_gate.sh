@@ -4,11 +4,11 @@
 # commands WITHOUT hitting Claude Code's auto-mode permission prompt, while a
 # live-write command still always prompts.
 #
-# WHY THIS EXISTS: during the estate dogfood run, capability_invariants.py
-# (self-QA) and scan.py (the read-only bypass scanner, the estate's
-# "runner.py bulk-review") were blocked by the auto-mode classifier the same
-# way any Bash command is — nothing distinguished "this only reads and prints
-# a report" from "this could mutate something". `permissions.allow` in
+# WHY THIS EXISTS: a self-QA / read-only-scan command (e.g. a capability's
+# invariant check, or its read-only bulk-review scanner) is blocked by the
+# auto-mode classifier the same way any Bash command is — nothing
+# distinguished "this only reads and prints a report" from "this could
+# mutate something". `permissions.allow` in
 # settings.json (a static, coarse allowlist keyed to the SAME command manifest
 # this hook reads) is the primary fix; this hook is the dynamic, belt-and-
 # suspenders backstop that re-derives eligibility at the moment of the call,
@@ -51,6 +51,28 @@
 #      even though it starts with an eligible prefix textually — a command
 #      that CHAINS anything after/around the eligible invocation is refused,
 #      because this hook cannot verify the appended part is safe.
+#   4. SAFE-CHARACTER ALLOWLIST on the RAW command string (an adversarial
+#      review proved this invariant necessary, Cut 1.1 C2 review, Critical):
+#      a denylist of shell metacharacters is non-exhaustive by construction,
+#      and shlex tokenization is not a safety boundary on its own -- shlex
+#      treats a newline as ordinary whitespace (so "<eligible prefix>\n<any
+#      command>" tokenizes as if the second command were just more args) and
+#      a backtick is not a shlex-special char at all (so `` `cmd` `` command
+#      substitution is invisible to a chaining check built only on shlex
+#      tokens). Both let a live write ride through with NO operator prompt.
+#      So this hook checks the ENTIRE raw command string, before/independent
+#      of shlex, against a conservative safe-character allowlist (ASCII
+#      letters, digits, space/tab, and `_ . / = : - ,`) and DEFERS the moment
+#      any other character is present -- newline, CR, backtick, `$`, `|`,
+#      `&`, `;`, redirects, parens/braces/brackets, quotes, `\`, `*`, `?`,
+#      `~`, `!`, `#`, or anything else not on the safe list. An unusual but
+#      legitimate read-only command that needs a character outside this set
+#      simply defers to a normal operator prompt -- that is an acceptable
+#      false-negative (the operator sees one extra prompt); a false-positive
+#      "allow" on a smuggled live write is not acceptable at any rate, so
+#      this list is kept deliberately narrow and is not to be widened to
+#      accommodate a specific command without equal scrutiny of what else it
+#      would newly permit.
 #
 # Hook contract (Claude Code PreToolUse): reads a JSON event on stdin carrying
 # tool_name and tool_input; may print a decision JSON
@@ -98,6 +120,21 @@ def _is_operator_token(tok):
     return bool(tok) and all(c in ";|&<>()" for c in tok)
 
 
+# Conservative SAFE-CHARACTER allowlist (invariant #4 above). Anything not in
+# this set defers -- this is checked against the RAW command string, before
+# and independent of shlex, precisely because shlex tokenization is not
+# itself a safety boundary (see invariant #4). Kept deliberately narrow;
+# widen only with the same scrutiny as adding a new eligible command.
+_SAFE_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    " \t_./=:-,"
+)
+
+
+def _is_safe_char_only(s):
+    return all(c in _SAFE_CHARS for c in s)
+
+
 # --- 1. parse the hook event -----------------------------------------------
 try:
     event = json.loads(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1] else {}
@@ -119,7 +156,18 @@ command = tool_input.get("command")
 if not isinstance(command, str) or not command.strip():
     defer()
 
-# --- 3. load the command manifest from THIS project's own runtime copy ----
+# --- 3. SAFE-CHARACTER ALLOWLIST on the raw command string (invariant #4) --
+# Checked on the untouched raw string, before/independent of shlex tokenizing,
+# so nothing that shlex would treat as inert (a newline) or wouldn't even see
+# as an operator (a backtick) can ride onto an eligible prefix. Any character
+# outside the conservative safe set -> cannot positively verify the whole
+# string is a single clean invocation -> defer. This check runs regardless of
+# whether the command textually resembles an eligible prefix, because the
+# smuggled part is exactly what makes a textual-prefix-only check insufficient.
+if not _is_safe_char_only(command):
+    defer()
+
+# --- 4. load the command manifest from THIS project's own runtime copy ----
 # The manifest is the single source of truth for eligibility (command_manifest.py
 # docstring); this hook re-derives eligibility fresh on every call instead of
 # holding any list of its own. Any failure to locate/import/read it is treated
@@ -144,7 +192,7 @@ except Exception:
 if not eligible_prefixes:
     defer()
 
-# --- 4. the command must be a SINGLE shell segment (no chaining) -----------
+# --- 5. the command must be a SINGLE shell segment (no chaining) -----------
 try:
     lex = shlex.shlex(command, posix=True, punctuation_chars=";|&<>()")
     lex.whitespace_split = True
@@ -158,7 +206,7 @@ if not tokens:
 if any(_is_operator_token(t) for t in tokens):
     defer()  # command chaining/redirection present -> refuse to approve
 
-# --- 5. the WHOLE command's leading tokens must equal an eligible prefix ---
+# --- 6. the WHOLE command's leading tokens must equal an eligible prefix ---
 for prefix in eligible_prefixes:
     prefix_tokens = prefix.split()
     if not prefix_tokens:

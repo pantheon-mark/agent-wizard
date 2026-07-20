@@ -354,6 +354,218 @@ class AutoApproveGateBehaviorTests(unittest.TestCase):
         self.assertIsNone(decision, "command substitution must not be approved")
         self.assertEqual(out, "")
 
+    # --- smuggling regression: allowlist posture (opus review, Critical) ---
+    #
+    # The prior denylist (`;|&<>()` token check via shlex) proved
+    # non-exhaustive: shlex treats a newline as ordinary whitespace (so a
+    # trailing "\n<live command>" tokenizes as if it were just more args of
+    # the eligible prefix) and a backtick is not in the denylist at all, so
+    # backtick command substitution rode straight through. Both let a live
+    # write command run with NO operator prompt. The fix inverts the guard
+    # to a conservative safe-char ALLOWLIST checked on the RAW command
+    # string, independent of shlex tokenization, so neither vector -- nor
+    # any other character outside the safe set -- can slip through.
+    #
+    # These two are the EXACT payloads the review proved end-to-end.
+
+    def test_SMUGGLE_newline_appended_live_command_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py\nrm -rf /HOME"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(
+            decision,
+            "CRITICAL REGRESSION: newline-smuggled live command was auto-approved",
+        )
+        self.assertEqual(out, "")
+
+    def test_SMUGGLE_backtick_command_substitution_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py `rm -rf /tmp/x`"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(
+            decision,
+            "CRITICAL REGRESSION: backtick-smuggled live command was auto-approved",
+        )
+        self.assertEqual(out, "")
+
+    # --- allowlist posture: every other unsafe character must also defer --
+
+    def test_carriage_return_appended_command_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py\rrm -rf /HOME"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(decision, "carriage-return-smuggled command must not be approved")
+        self.assertEqual(out, "")
+
+    def test_dollar_paren_substitution_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py $(id)"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(decision, "$() substitution must not be approved")
+        self.assertEqual(out, "")
+
+    def test_bare_dollar_variable_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py $HOME"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(decision, "bare $VAR expansion must not be approved")
+        self.assertEqual(out, "")
+
+    def test_pipe_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py | rm -rf /"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(decision, "piped command must not be approved")
+        self.assertEqual(out, "")
+
+    def test_background_ampersand_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py & rm -rf /"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(decision, "backgrounded/chained command must not be approved")
+        self.assertEqual(out, "")
+
+    def test_double_ampersand_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py && rm -rf /"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(decision, "&&-chained command must not be approved")
+        self.assertEqual(out, "")
+
+    def test_double_pipe_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py || rm -rf /"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(decision, "||-chained command must not be approved")
+        self.assertEqual(out, "")
+
+    def test_semicolon_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py ; rm -rf /"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(decision, "semicolon-chained command must not be approved")
+        self.assertEqual(out, "")
+
+    def test_redirect_out_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py > /etc/passwd"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(decision, "output redirection must not be approved")
+        self.assertEqual(out, "")
+
+    def test_redirect_append_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py >> /etc/passwd"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(decision, "append redirection must not be approved")
+        self.assertEqual(out, "")
+
+    def test_redirect_in_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py < /etc/shadow"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(decision, "input redirection must not be approved")
+        self.assertEqual(out, "")
+
+    def test_backslash_is_not_allowed(self):
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 agents/lib/external_write/scan.py \\\nrm -rf /"
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertIsNone(decision, "backslash-continuation-smuggled command must not be approved")
+        self.assertEqual(out, "")
+
+    # --- happy path must survive the tightened allowlist -------------------
+
+    def test_clean_eligible_command_with_normal_args_still_allowed(self):
+        # Confirms the allowlist posture does not over-defer: a genuinely
+        # clean read-only invocation with ordinary argument shapes (spaces,
+        # '/', '.', '-', '=', ':', '_', digits) must still auto-approve.
+        self._install_real_manifest()
+        code, decision, out = self._run({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    "python3 agents/lib/external_write/scan.py "
+                    "--capability gmail_v2 --since=2026-07-01 --limit 10"
+                )
+            },
+        })
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            decision, "allow",
+            "a clean eligible command with ordinary args was over-deferred",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
