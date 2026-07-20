@@ -1,0 +1,91 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/statusline.sh\""
+  },
+  "permissions": {
+    "deny": ["Edit(.claude/**)", "Write(.claude/**)", "Edit(.wizard/update-source.json)", "Write(.wizard/update-source.json)", "Edit(.wizard/update-resolution.json)", "Write(.wizard/update-resolution.json)"],
+    "allow": [
+      "Bash(python3 agents/lib/external_write/capability_invariants.py *)",
+      "Bash(python3 agents/lib/external_write/capability_health.py *)",
+      "Bash(python3 agents/lib/external_write/scan.py *)",
+      "Bash(python3 agents/lib/external_write/bulk_verify.py *)"
+    ],
+    "ask": [
+      "Bash(python3 agents/*.py bulk-apply *)"
+    ],
+    "disableBypassPermissionsMode": "disable"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/upgrade_notice.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/upgrade_notice.sh\" || true",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/commit_hygiene.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/commit_hygiene.sh\" || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/commit_hygiene.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/commit_hygiene.sh\" || true",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/receipt_gate.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/receipt_gate.sh\" || true"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/auto_approve_gate.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/auto_approve_gate.sh\" || true"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/context_monitor.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/context_monitor.sh\" || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PROJECT_DIR}/.claude/context_monitor.sh\" ] && \"${CLAUDE_PROJECT_DIR}/.claude/context_monitor.sh\" || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+# Python dependencies for this system's write-back components
+# (agents/lib/external_write/ and any capability code built on top of it).
+#
+# Installed automatically into this project's own .venv/ the first time you run
+# ./start-session.sh — see the "Python venv bootstrap" section of that script.
+# You never need to run pip yourself.
+#
+# Currently: none. Every write-back adapter in this build uses only Python's
+# standard library. If a future capability needs a third-party package, add it
+# here — one per line, pinned to an exact version (e.g. requests==2.32.3) —
+# then run ./start-session.sh once to install it into .venv/.
+#
+# This file's mere presence is what tells the wizard this system has a Python
+# component at all: a system with none does not carry this file, and its
+# session startup script skips the whole venv/interpreter-pin sequence.

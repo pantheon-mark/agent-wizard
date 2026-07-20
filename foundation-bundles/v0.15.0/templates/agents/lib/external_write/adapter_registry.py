@@ -1,0 +1,545 @@
+"""Static per-op_kind adapter registry.
+
+`run_operation` (adapters.py) is the single external-write chokepoint. Originally
+it knew exactly one write shape: a spreadsheet-style field write
+(client.write(object_id, field, value)). This module lets a named op_kind declare a
+richer, verb-shaped write instead — a registered Adapter that plans a list of
+discrete EffectUnits (operations.py) and applies them one at a time.
+
+The registry is a plain module-level dict, populated by `register_adapter` at import
+time (a future adapter module calls register_adapter(op_kind, MyAdapter()) at module
+scope). It performs NO validation of op_kind against contracts.py — that join
+happens in adapters.py, which resolves the op's contract/risk-class/cap independently
+of whether an adapter is registered.
+
+Scope note (resolved): this registry deliberately does NOT include the
+six seeded field op_kinds (set_status, complete_tasks, update_due_date,
+add_note, set_priority, delete_record).
+
+A later evaluation considered registering those six op_kinds as a single
+"field adapter" and DECIDED AGAINST IT: `_run_adapter_operation` (adapters.py)
+— the registered-adapter execution path — does not perform the field-write
+path's Steps 2-4 (native-API fail-fast ValueError -> needs_operator_choice,
+read-back verification, postwrite_verification/Clause A handling). Those are
+cross-cutting over the whole Operation, not per-EffectUnit, so folding the six
+field op_kinds into this registry would require either duplicating that logic
+inside apply_one (violating the "apply_one performs exactly one mutation"
+protocol above) or generalizing run_operation's adapter-dispatch path itself —
+a change touching every registered adapter, including the Gmail reference
+adapter, for zero behavioral benefit given the existing fallback
+already passes every field-op test. See
+test_external_write_replay_conformance.py for the resulting backward-
+compatibility guarantee (golden v1-field digests + full-pipeline replay for
+all six op_kinds) and its
+TestFieldOpKindsUseUnregisteredFallbackPath, which fails loudly if a future
+change registers one of these op_kinds without redoing this analysis.
+
+The registry therefore stays empty for every seeded field op_kind
+indefinitely, and run_operation's field-write path
+(unchanged) continues to handle them exactly as before.
+
+Stdlib only — no third-party dependencies.
+"""
+
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, runtime_checkable
+
+from external_write.operations import EffectUnit
+
+
+@runtime_checkable
+class Adapter(Protocol):
+    """The contract a registered op_kind handler must satisfy.
+
+    plan       — pure planning: given the Operation's `params`, return the list of
+                 discrete EffectUnits this operation will perform. Must NOT touch
+                 the surface (no writes, no reads) — run_operation counts
+                 len(units) against the blast-radius cap BEFORE calling apply_one
+                 even once, so a plan() that has side effects would defeat that
+                 ordering guarantee.
+    apply_one  — perform exactly ONE EffectUnit's mutation against raw_client.
+                 Adapters must not fan out inside apply_one (one call = one
+                 mutation) — enforcing that per-adapter is a later concern; this
+                 registry only counts units from plan().
+    undo_one   — reverse exactly one previously-applied EffectUnit, if the unit is
+                 reversible (undo_ref is not None). Not invoked by this
+                 module's dispatch path; reserved for a later rollback/undo task.
+    verify_one — READ-ONLY OBSERVER (Task 3, A2 run-time — v0.12.0 Slice 1):
+                 given a READ-ONLY facade/client (never the write-capable
+                 `raw_client` handed to apply_one/undo_one), observe exactly
+                 one applied EffectUnit's current state on the real surface
+                 and return an opaque poststate mapping. WIRED into
+                 `adapters._run_adapter_operation` (see that module's
+                 docstring): post-apply, the kernel builds a `read_facade.
+                 ReadFacade` for this op_kind from a read-only-scoped client
+                 (`AdapterDispatch.provision_read_only_client`, if the class
+                 self-provisions one, else the caller-supplied
+                 `read_only_client`) and calls `verify_one(self, facade,
+                 unit)` — the SAME credential-isolation seam `build_write_
+                 client` provides for writes, mirrored for reads. Never
+                 invoke a mutating method against what `verify_one` is
+                 handed; it must observe only.
+
+    build_write_client (OPTIONAL — the credential-isolation keystone) —
+                 an adapter MAY additionally define
+                 ``build_write_client(self, op) -> raw_write_client``: the ONE
+                 place this op_kind's write-capable credential/client is
+                 constructed or obtained. When present, ``run_operation``'s
+                 adapter execution path (``adapters._run_adapter_operation``)
+                 calls it INTERNALLY — keyed by the registered adapter, never
+                 by any caller of run_operation and never by capability/
+                 proposal-side code — to obtain the raw client handed to
+                 ``apply_one``. This is why capability-zone code no longer holds
+                 a credential provider: the provider lives on the adapter,
+                 inside the trusted ADAPTER_PROFILE zone. scan.py's
+                 credential_provider_reference rule guards BOTH reach paths in
+                 the capability zone — the retired ``write_credential_provider``
+                 name AND a ``build_write_client`` reference (e.g.
+                 ``get_adapter(op_kind).build_write_client(op)``) — so a
+                 capability-zone hand-edit that names either is flagged by the
+                 deterministic scanner. Disclosed bound (unchanged): resolving
+                 the method by a string literal —
+                 ``getattr(adapter, "build_write_client", None)``, as this
+                 module's own kernel execution path does — hides the name in a
+                 Constant node the symbol check cannot see; that aliased/dynamic
+                 reach is the same known deterministic-scanner limitation as the
+                 module's other curated-symbol surfaces, NOT closed here. It is
+                 deliberately NOT a required Protocol member: an adapter whose
+                 write client is supplied by its trusted caller (e.g. the Gmail
+                 reference adapter, exercised with a hand-provided
+                 ``raw_client``) simply omits it and falls back to
+                 run_operation's ``client`` argument, unchanged.
+
+    build_read_only_client (OPTIONAL — Task 3, A2 run-time, v0.12.0 Slice 1 —
+                 the READ-side mirror of ``build_write_client`` above) —
+                 an adapter MAY additionally define
+                 ``build_read_only_client(self, op) -> raw_read_only_client``:
+                 the ONE place this op_kind's READ-ONLY-scoped client is
+                 constructed or obtained, for ``_run_adapter_operation`` to
+                 wrap in a ``read_facade.ReadFacade`` and hand to
+                 ``verify_one`` after apply. When present, it is called
+                 INTERNALLY by the kernel, exactly like
+                 ``build_write_client`` — never by a caller of
+                 ``run_operation`` and never by capability/proposal-side
+                 code. When ABSENT (the common case for an adapter, like the
+                 Gmail reference adapter, whose write client is also
+                 caller-supplied), ``_run_adapter_operation`` falls back to
+                 ``run_operation``'s own ``read_only_client`` keyword
+                 argument, unchanged — mirroring the ``client``/
+                 ``build_write_client`` fallback exactly. If NEITHER a
+                 self-provisioned nor a caller-supplied read-only client is
+                 available, run-time verification cannot query the real
+                 surface at all: every applied unit is reported
+                 ``applied_not_verified`` (honest fail-safe), never
+                 ``verified``. Deliberately NOT a required ``Adapter``
+                 Protocol member, for the same back-compat reason as
+                 ``build_write_client``.
+
+    verify_apply_landed / verify_undo_restored / verify_durability
+                 (OPTIONAL — Task 1, B4/T1, v0.12.0 Slice 1's per-op_kind
+                 EVIDENCE PREDICATE) — an adapter MAY additionally define
+                 ``verify_apply_landed(self, evidence) -> bool``,
+                 ``verify_undo_restored(self, evidence) -> bool``, and/or
+                 ``verify_durability(self, evidence) -> bool`` (the latter
+                 only meaningful for an op_kind whose contract declares
+                 ``introduces_persistent_binding=True``). ``evidence`` is a
+                 kernel-constructed ``evidence.AdapterEvidence`` — an
+                 already-materialized, lineage-typed record (see
+                 ``evidence.py``); the predicate signature takes NO path/ref
+                 argument, so a predicate is structurally incapable of
+                 reading outside what it was handed (the anti-tautology
+                 property this closes; extends ``verifiers.py``'s lineage
+                 lock). Like ``build_write_client``, these are auto-captured
+                 OFF THE CLASS by ``register_adapter`` (see
+                 ``AdapterDispatch``'s docstring) — deliberately NOT required
+                 Protocol members, so every adapter registered before this
+                 task keeps working unchanged (all three simply resolve to
+                 None). Nothing in THIS module's dispatch path invokes them
+                 yet: proof-time evaluation (`copy_run_proof.
+                 validate_copy_run_proof`) and run-time evaluation
+                 (`adapters._run_adapter_operation`) are separate, later
+                 tasks that consume the captured predicate — this task only
+                 builds the capture + the evidence type + proves the
+                 predicate signature is sound against ≥2 divergent op_kinds.
+
+    grant_preflight (OPTIONAL — Task 11, B3 / F-52,F-47 — v0.13.0 Slice 2, the
+                 OFFLINE SCOPE-PREFLIGHT primitive) — an adapter MAY additionally
+                 define ``grant_preflight(self, token_info) -> bool``: a SAFE,
+                 read-only OAuth tokeninfo-class introspection of an
+                 ALREADY-OBTAINED token-introspection response (e.g. Google's
+                 tokeninfo endpoint shape, ``{"scope": "<space-delimited
+                 granted scopes>"}``), answering "does the current token
+                 already carry the op_kind's declared read-only scope" —
+                 NEVER a destructive write, and NEVER an operation this method
+                 performs itself (obtaining `token_info` — the one safe network
+                 call to the provider's introspection endpoint — is the
+                 CALLER's job; this method only interprets a response it was
+                 handed, exactly like `verify_one` only observes a facade it
+                 was handed rather than building one itself). Ground truth this
+                 closes (F-52/F-47): a live dogfood recorded a Gmail credential
+                 "read-verified" from a check against the broader
+                 `gmail.modify` scope, while the DECLARED read-only scope
+                 (`gmail.readonly`) had never actually been checked or
+                 exercised — the mismatch surfaced only at live-trial time, as
+                 an `unauthorized_client` failure, with no offline signal ahead
+                 of it. `grant_preflight` is that offline signal. Each vendor
+                 adapter interprets its OWN introspection response shape
+                 (Google's tokeninfo differs from another provider's OAuth
+                 introspection shape) — the kernel (this module's
+                 `check_scope_grant`, below) does not parse `token_info`
+                 itself; it only decides WHETHER a grant-check applies at all
+                 (deferring entirely to whether the adapter defines this
+                 method) and dispatches to it. Like `build_write_client` and
+                 the evidence predicates above, this is auto-captured OFF THE
+                 CLASS by `register_adapter` — deliberately NOT a required
+                 Protocol member, so every adapter registered before this task
+                 keeps working unchanged (the field simply resolves to None).
+                 ABSENT (None) means this op_kind's auth type has no
+                 OAuth-scope concept to check at all (an API key, HTTP basic
+                 auth, or a session cookie) — callers MUST treat that as N/A,
+                 never as a false "not granted" failure (see
+                 `check_scope_grant`'s ``GRANT_STATUS_NA`` below).
+    """
+
+    def plan(self, params: Optional[dict]) -> List[EffectUnit]:
+        ...
+
+    def apply_one(self, raw_client: Any, unit: EffectUnit) -> None:
+        ...
+
+    def undo_one(self, raw_client: Any, unit: EffectUnit) -> None:
+        ...
+
+    def verify_one(self, raw_client: Any, unit: EffectUnit) -> Any:
+        ...
+
+
+# The registry itself: op_kind -> Adapter. Static and module-level by design (see
+# module docstring) — populated by import of adapter modules, not built dynamically
+# at request time.
+_REGISTRY: Dict[str, Adapter] = {}
+
+
+@dataclass(frozen=True)
+class AdapterDispatch:
+    """A frozen, CLASS-BOUND dispatch record captured once, at registration
+    time (a defense-in-depth fix).
+
+    Why this exists: `run_operation` (adapters.py) used to call the
+    registered adapter's INSTANCE methods directly (`adapter.plan(...)`,
+    `adapter.apply_one(...)`). A capability that obtained the adapter
+    instance (e.g. via `get_adapter(op_kind)`) could reassign
+    `adapter.apply_one` (or `adapter.build_write_client`) to a function of
+    its own choosing — an ordinary Python instance-attribute shadow, nothing
+    exotic — and the kernel would then hand the reassigned "adapter" the
+    real write-capable client, because instance-method dispatch always
+    re-resolves the CURRENT attribute at call time. That is the whole class
+    of the vulnerability this record closes.
+
+    `register_adapter` captures `plan`/`apply_one`/`undo_one`/`verify_one`
+    (and `build_write_client`, if the class defines it) OFF THE CLASS
+    (`type(adapter)`) at registration, not off the instance, and freezes them
+    into this immutable record. `run_operation` then calls the captured
+    UNBOUND class functions directly (`dispatch.apply_one(dispatch.instance,
+    raw_client, unit)`), passing `dispatch.instance` explicitly as `self`.
+    Reassigning `instance.apply_one` after registration only shadows the
+    instance's own attribute lookup (`instance.apply_one` would return the
+    thief) — it does not and cannot touch `AdapterDispatch.apply_one`, a
+    plain reference to the function object that lived on the class at
+    registration time. The captured callables always run instead.
+
+    Fields
+    ------
+    instance:  The registered Adapter instance — passed explicitly as `self`
+               to every captured callable below (they are unbound functions,
+               not bound methods).
+    plan / apply_one / undo_one / verify_one:
+               `type(adapter).plan` etc. — the class's function objects,
+               captured at registration time. Never re-read from the
+               instance at call time.
+    provision_write_client:
+               `getattr(type(adapter), "build_write_client", None)` —
+               auto-captured so an adapter that self-provisions its own
+               write client keeps working with NO emitter
+               change; None if the class does not define the method (the
+               back-compat fallback path in adapters.py then uses
+               run_operation's own `client` argument, unchanged). Deliberately
+               NOT named `build_write_client` on this record: scan.py's
+               credential_provider_reference rule flags ANY `ast.Name` or
+               `ast.Attribute` node whose identifier is exactly
+               "build_write_client" (or "write_credential_provider"),
+               including a dataclass field declaration or a plain attribute
+               read/write — this module is SEALED_KERNEL (scanned, not
+               exempt; see the Adapter protocol docstring's parallel note
+               above), so the field itself must not carry that literal name.
+               The captured value is still resolved via the SAME
+               scanner-invisible `getattr(cls, "build_write_client", None)`
+               string-literal call the rest of this module already relies on.
+    provision_read_only_client:
+               `getattr(type(adapter), "build_read_only_client", None)` —
+               the READ-side mirror of `provision_write_client` (Task 3, A2
+               run-time — v0.12.0 Slice 1), captured the same way and for
+               the same reason: an adapter that self-provisions its own
+               read-only-scoped client keeps working with no emitter change;
+               None if the class does not define `build_read_only_client`
+               (the fallback path in `adapters._run_adapter_operation` then
+               uses `run_operation`'s own `read_only_client` argument,
+               unchanged). Not a scan.py-curated symbol (unlike
+               `build_write_client`/`write_credential_provider`): this hook
+               only ever yields a READ-ONLY-scoped client, never a
+               write-capable credential, so it is not part of the
+               credential_provider_reference threat class that rule
+               polices.
+    verify_apply_landed / verify_undo_restored / verify_durability
+               (Task 1, B4/T1 — v0.12.0 Slice 1, the per-op_kind EVIDENCE
+               PREDICATE): `getattr(type(adapter), "verify_apply_landed",
+               None)` etc. — auto-captured OFF THE CLASS at registration
+               time, same rationale and same mechanism as
+               `provision_write_client` immediately above: an adapter class
+               MAY optionally define
+               ``verify_apply_landed(self, evidence) -> bool``,
+               ``verify_undo_restored(self, evidence) -> bool``, and/or
+               ``verify_durability(self, evidence) -> bool`` (durability is
+               the narrow, optional check for ops whose contract declares
+               `introduces_persistent_binding=True`). Each is None when the
+               class does not define it — back-compat: every adapter
+               registered before this task keeps working unchanged, with
+               these three fields simply None; nothing dispatches through
+               them yet (that is Task 2/Task 3's job — proof-time
+               `validate_copy_run_proof` and run-time `_run_adapter_operation`
+               wiring, respectively). `evidence` is a kernel-constructed,
+               already-materialized `evidence.AdapterEvidence` record — the
+               predicate's signature takes NO path/ref argument, so it is
+               structurally incapable of reading outside what it was handed
+               (the anti-tautology property; see `evidence.py`'s module
+               docstring). Capturing these off the class rather than the
+               instance closes the exact same monkey-patch-hijack class this
+               whole record exists to close: a capability that obtained the
+               adapter instance and reassigned `instance.verify_apply_landed`
+               to a function that always returns True could otherwise forge
+               a "verified" claim.
+    grant_preflight
+               (Task 11, B3 / F-52,F-47 — v0.13.0 Slice 2): `getattr(type(adapter),
+               "grant_preflight", None)` — captured off the class for the same
+               monkey-patch-inert reason as every other optional hook above.
+               None when the class does not define it (the common case for an
+               op_kind whose auth type has no OAuth-scope concept — API key /
+               basic / cookie — or for any adapter registered before this task);
+               `check_scope_grant` (below) treats a None here as GRANT_STATUS_NA,
+               never as a false "not granted".
+    """
+
+    instance: Any
+    plan: Callable
+    apply_one: Callable
+    undo_one: Callable
+    verify_one: Callable
+    provision_write_client: Optional[Callable]
+    provision_read_only_client: Optional[Callable]
+    verify_apply_landed: Optional[Callable]
+    verify_undo_restored: Optional[Callable]
+    verify_durability: Optional[Callable]
+    grant_preflight: Optional[Callable]
+
+
+# op_kind -> AdapterDispatch. Populated alongside _REGISTRY by register_adapter;
+# this is what run_operation dispatches through (get_dispatch), never _REGISTRY/
+# get_adapter directly — see AdapterDispatch's docstring for why.
+_DISPATCH_REGISTRY: Dict[str, "AdapterDispatch"] = {}
+
+
+def register_adapter(op_kind: str, adapter: Adapter) -> None:
+    """Register `adapter` as the handler for `op_kind`. Re-registering the same
+    op_kind overwrites the prior entry (last-registered wins) — callers own
+    ordering; this function does not raise on a duplicate op_kind.
+
+    Call signature is UNCHANGED from before this hardening — callers (e.g.
+    adapters_gmail.py's module-scope `register_adapter(OP_KIND, Adapter())`
+    calls) need no update. In addition to the existing instance registration,
+    this now also captures an AdapterDispatch record OFF `type(adapter)` (see
+    AdapterDispatch's docstring) and stores it in `_DISPATCH_REGISTRY`, keyed
+    by the same op_kind. Also auto-captures the Task 1 (B4/T1) optional
+    evidence predicates (`verify_apply_landed`/`verify_undo_restored`/
+    `verify_durability`) off the class, same as `provision_write_client`, and
+    the Task 3 (A2 run-time) `provision_read_only_client` (from
+    `build_read_only_client`, if the class defines it) the same way. Also
+    auto-captures the Task 11 (B3 / F-52,F-47) `grant_preflight` off the
+    class the identical way."""
+    _REGISTRY[op_kind] = adapter
+    cls = type(adapter)
+    _DISPATCH_REGISTRY[op_kind] = AdapterDispatch(
+        instance=adapter,
+        plan=cls.plan,
+        apply_one=cls.apply_one,
+        undo_one=cls.undo_one,
+        verify_one=cls.verify_one,
+        provision_write_client=getattr(cls, "build_write_client", None),
+        provision_read_only_client=getattr(cls, "build_read_only_client", None),
+        verify_apply_landed=getattr(cls, "verify_apply_landed", None),
+        verify_undo_restored=getattr(cls, "verify_undo_restored", None),
+        verify_durability=getattr(cls, "verify_durability", None),
+        grant_preflight=getattr(cls, "grant_preflight", None),
+    )
+
+
+def get_adapter(op_kind: str) -> Optional[Adapter]:
+    """Return the registered Adapter INSTANCE for op_kind, or None if nothing
+    is registered.
+
+    run_operation treats None as "fall through to the existing field-write path" —
+    the registry itself makes no claim about whether an unregistered op_kind is
+    valid; that is contracts.py's concern.
+
+    Unchanged by this hardening (kept for back-compat with callers that only need
+    the instance for module-resolution purposes, e.g. effects_manifest.py's
+    `_adapter_module_file`/`_adapter_effect_unit_path`, which read
+    `type(adapter).__module__` — those never invoke a method on the instance
+    they get back, so they are not part of the dispatch-hijack surface this
+    task closes). `run_operation` itself no longer calls this function — it
+    calls `get_dispatch` instead."""
+    return _REGISTRY.get(op_kind)
+
+
+def get_dispatch(op_kind: str) -> Optional[AdapterDispatch]:
+    """Return the captured AdapterDispatch for op_kind, or None if nothing is
+    registered. This is what `run_operation` (adapters.py) dispatches
+    through — never `get_adapter`/the raw instance — so that an
+    instance-level reassignment of `apply_one` or `build_write_client`
+    (obtained via `get_adapter`, or any other reference to the same
+    instance) cannot hijack execution. See AdapterDispatch's docstring for
+    the full threat model."""
+    return _DISPATCH_REGISTRY.get(op_kind)
+
+
+def unregister_adapter(op_kind: str) -> None:
+    """Remove a registration, if present. Test-only convenience for isolating
+    adapter-registry test cases from one another; production adapter modules
+    register once at import time and never unregister. Removes BOTH the
+    instance registry entry and the captured dispatch record."""
+    _REGISTRY.pop(op_kind, None)
+    _DISPATCH_REGISTRY.pop(op_kind, None)
+
+
+# ---------------------------------------------------------------------------
+# Offline scope grant-check + exercise-record vocabulary (Task 11, B3 /
+# F-52,F-47 — v0.13.0 Slice 2 — "scope provisioning at the non-technical
+# bar").
+#
+# Ground truth: a live dogfood recorded a Gmail credential "read-verified"
+# from a check against the broader `gmail.modify` scope, while the op_kind's
+# actually-DECLARED read-only scope (`gmail.readonly`) had never been checked
+# or exercised at all. At live-trial time, a read using that narrower scope
+# failed `unauthorized_client ... not authorized for any of the scopes
+# requested` — with no offline signal ahead of it, and the emitted flow then
+# routed the unassisted operator into an org-admin edit mid-trial, right
+# after a raw traceback.
+#
+# Two DISTINCT, deliberately separate questions this section answers, never
+# conflated:
+#   1. check_scope_grant  — "is the declared scope CURRENTLY GRANTED on the
+#      token" (offline, safe, tokeninfo-class introspection of an
+#      already-obtained response — never a destructive write, never a live
+#      read/write of real data).
+#   2. resolve_scope_status — "has that granted scope actually been
+#      EXERCISED" (a real call using EXACTLY that scope has succeeded) — the
+#      deny-by-default rule that a scope is `verified` ONLY with a recorded
+#      exercise, never merely because it was found granted. A readonly scope
+#      may be exercised by a benign read at preflight; a WRITE scope's
+#      exercise is the first bounded gated live apply (already trust-core-
+#      bounded elsewhere in this package) — never a preflight write. This
+#      module does not perform either kind of exercise itself; it only
+#      defines the honest vocabulary a caller's exercise-record resolves
+#      into.
+# ---------------------------------------------------------------------------
+
+# check_scope_grant's three possible answers.
+GRANT_STATUS_GRANTED = "granted"
+GRANT_STATUS_NOT_GRANTED = "not_granted"
+# N/A: the auth type has no OAuth-scope concept (API key / basic / cookie),
+# OR the op_kind declares no read_only_scope, OR the op_kind's registered
+# adapter (if any) does not define grant_preflight. Never treated as a
+# failure — there is nothing to compare.
+GRANT_STATUS_NA = "n/a"
+
+
+def check_scope_grant(op_kind: str, declared_scope: Optional[str],
+                       token_info: Mapping[str, Any]) -> str:
+    """Offline, SAFE grant-check: does `token_info` (an already-obtained
+    OAuth tokeninfo-class introspection response) already grant
+    `declared_scope` for `op_kind`?
+
+    Returns one of GRANT_STATUS_GRANTED / GRANT_STATUS_NOT_GRANTED /
+    GRANT_STATUS_NA. NEVER raises — a `grant_preflight` call that itself
+    raises (a malformed `token_info`, an adapter bug) resolves to
+    GRANT_STATUS_NOT_GRANTED, the fail-safe direction (never silently treated
+    as granted).
+
+    N/A (GRANT_STATUS_NA) — deliberately NOT a failure — whenever any of:
+      * `declared_scope` is falsy (None/""): the op_kind's contract declares
+        no read-only scope at all, e.g. a non-OAuth auth type (API key,
+        HTTP basic, a session cookie) has no scope concept to compare.
+      * `op_kind` has no registered adapter, or its registered adapter's
+        class does not define `grant_preflight` — there is no grant-check
+        support for it, offline or otherwise.
+
+    This function deliberately does NOT import `contracts.py` (this module's
+    own long-standing division of concerns — see the module docstring: "It
+    performs NO validation of op_kind against contracts.py"); the caller
+    resolves `declared_scope` (typically `contracts.get_contract(op_kind).
+    read_only_scope`) and passes it in. See `adapters.scope_preflight` for
+    the join.
+
+    This function does not know or care what SHAPE `token_info` is — that is
+    entirely delegated to the adapter's own `grant_preflight`, which is why
+    this is integration-agnostic: a Gmail adapter's tokeninfo shape (a
+    space-delimited `"scope"` string) and a differently-shaped vendor's
+    OAuth introspection response are both just whatever `token_info` the
+    caller obtained and handed in, unexamined here.
+    """
+    if not declared_scope:
+        return GRANT_STATUS_NA
+    dispatch = get_dispatch(op_kind)
+    if dispatch is None or dispatch.grant_preflight is None:
+        return GRANT_STATUS_NA
+    try:
+        granted = bool(dispatch.grant_preflight(dispatch.instance, token_info))
+    except Exception:
+        return GRANT_STATUS_NOT_GRANTED
+    return GRANT_STATUS_GRANTED if granted else GRANT_STATUS_NOT_GRANTED
+
+
+# resolve_scope_status's four possible answers — the credentials_registry.md
+# "Scope status" column vocabulary (see that template + credential-setup.md).
+SCOPE_STATUS_NA = "n/a"
+SCOPE_STATUS_NOT_GRANTED = "not_granted"
+# Honest intermediate state: the offline grant-check found the scope
+# granted, but no real call using it has succeeded yet. NEVER reported as
+# "verified" — that would be exactly the F-52/F-47 failure this task closes.
+SCOPE_STATUS_GRANTED_NOT_EXERCISED = "granted_not_exercised"
+# The ONLY status meaning "verified": granted AND a recorded exercise exists.
+SCOPE_STATUS_VERIFIED = "verified"
+
+
+def resolve_scope_status(grant_status: str, *, exercised: bool) -> str:
+    """Deny-by-default resolution of a scope's exercise-record status (item 2,
+    F-52/F-47): SCOPE_STATUS_VERIFIED is returned ONLY when `grant_status` is
+    GRANT_STATUS_GRANTED **and** `exercised` is True. There is no other path
+    to "verified" in this function — a scope found merely granted, with no
+    recorded exercise, resolves to the honest SCOPE_STATUS_GRANTED_NOT_EXERCISED,
+    never SCOPE_STATUS_VERIFIED. `exercised=True` passed alongside anything
+    other than GRANT_STATUS_GRANTED (e.g. a caller bug that marks something
+    exercised despite the grant-check finding it not granted, or N/A) is
+    likewise NEVER promoted to "verified" — deny-by-default, not merely
+    "verified iff the last thing you told me was good news".
+
+    `exercised` is the caller's own already-established fact (a benign
+    preflight read for a readonly scope, or the first bounded gated live
+    apply for a write scope actually having succeeded) — this function does
+    not perform or observe an exercise itself, it only refuses to call
+    anything "verified" without one.
+    """
+    if grant_status == GRANT_STATUS_NA:
+        return SCOPE_STATUS_NA
+    if grant_status != GRANT_STATUS_GRANTED:
+        return SCOPE_STATUS_NOT_GRANTED
+    return SCOPE_STATUS_VERIFIED if exercised else SCOPE_STATUS_GRANTED_NOT_EXERCISED

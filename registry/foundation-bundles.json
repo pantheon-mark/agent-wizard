@@ -305,6 +305,19 @@
       "safety_class": "safety_fix",
       "source_commit": "46b27d8",
       "status": "prerelease"
+    },
+    {
+      "bundle_manifest_sha256": "sha256:4312109e665697ee0a05ad15dd7b86773bed757a9918f71ca19995462ccaf29e",
+      "bundle_tree_sha256": "sha256:a29c51869a992172cf28c96f2fa0644293f03fb419cff72dc1f3c2dc8ee7b53d",
+      "changelog": "Five improvements to how your system handles a large batch of changes, tests a new capability, and keeps a record of what it did. If a big batch of writes gets interrupted, it now safely picks back up from exactly where it stopped, using the one approval you already gave \u2014 it will never restart from scratch, silently skip pieces, or ask you to approve the same batch again. Building a new capability now proves, as a standard check, that its own tests would actually catch a real mistake and do not depend on unrelated leftover state from an earlier run; approving a capability also tidies up any leftover internal marker, and a naming mix-up between something you've only described and something you've actually built is now caught and reported plainly. Finishing an approval that had a related pending task now also completes that task, and a capability an update safely paused can be brought back through the same guided build-and-approve flow used for a new one. You can now ask your system at any time exactly what a bulk run wrote and what is recoverable, and a short list of routine, read-only checks no longer interrupts you for permission every time (anything that writes anywhere still always asks first). Finally, a privacy-safe, saved summary of each bulk run \u2014 with no raw personal data in it \u2014 now proves what happened and that you approved it, and a run's outcome is always described from exactly what happened, never rounded up to \"done\" if it wasn't. No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.",
+      "foundation_bundle_version": "v0.15.0",
+      "manifest": "foundation-bundles/v0.15.0/manifest.yaml",
+      "path": "foundation-bundles/v0.15.0/",
+      "recommendation_reason": "If you run bulk write-back batches, build or rebuild capabilities, or want a durable, privacy-safe record of what a run did, this update makes each of those safer and more honest \u2014 most operators should take it.",
+      "release_date": "2026-07-20",
+      "safety_class": "safety_fix",
+      "source_commit": "PENDING",
+      "status": "prerelease"
     }
   ],
   "registry_schema_version": "v2",

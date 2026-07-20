@@ -12,6 +12,23 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-20 — safer bulk-run resume, honest capability-test proof, and a privacy-safe audit record (v0.15.0)
+
+**Public-facing change:** Five improvements to how your system handles a large batch of changes, tests a new capability, and keeps a record of what it did.
+
+- **If a big batch of writes gets interrupted, it now safely picks back up from exactly where it stopped**, using the one approval you already gave — it will never restart from scratch, silently skip pieces, or ask you to approve the same batch again.
+- **Building a new capability now proves, as a standard check, that its own tests would actually catch a real mistake** and do not depend on unrelated leftover state from an earlier run; approving a capability also tidies up any leftover internal marker, and a naming mix-up between something you've only described and something you've actually built is now caught and reported plainly.
+- **Finishing an approval that had a related pending task now also completes that task**, and a capability an update safely paused can be brought back through the same guided build-and-approve flow used for a new one.
+- **You can now ask your system at any time exactly what a bulk run wrote and what is recoverable**, and a short list of routine, read-only checks no longer interrupts you for permission every time (anything that writes anywhere still always asks first).
+- **A privacy-safe, saved summary of each bulk run — with no raw personal data in it — now proves what happened and that you approved it**, and a run's outcome is always described from exactly what happened, never rounded up to "done" if it wasn't.
+- No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
+
+This is a safety fix (`v0.15.0`, minor-additive, operator-explicit as always). Foundation documents are byte-identical to `v0.14.0`.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-07-18 — your approval always matches what a capability currently does, plus a deeper self-check before a new capability's first live run (v0.14.0)
 
 **Public-facing change:** Three additions under the hood, plus a deeper self-check before any new capability goes live.

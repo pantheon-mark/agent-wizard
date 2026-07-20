@@ -1,0 +1,86 @@
+# Foundation bundle v0.15.0 manifest
+# Minor-additive release over v0.14.0 (Cut 1.1 — findings F-70..F-85 across five clusters:
+# D mutation-ledger/WAL durability, A hermetic lifecycle isolation, B contract-kernel +
+# upgrade-carries-forward, C operator-runnable verify/scan, E audit durability + narration
+# honesty). Adds five new modules to the emitted external_write lib
+# (agents/lib/external_write/): lifecycle_test_fixtures.py (a hermetic paused-mechanisms test
+# fixture so a capability's own test no longer depends on the ambient project's
+# .wizard/paused-mechanisms/ state), command_manifest.py (the single-source classification of
+# every operator-invocable command by role — read_only / read_only_pii / live_write — that
+# backs the new PreToolUse auto-approve allowlist), bulk_verify.py (a read-only bulk-verify/
+# status command reading durable reconciled totals + recoverability, with an honestly-bounded
+# best-effort live confirmation via the sanctioned read facade), audit_projection.py (a
+# redacted, committable audit projection — zero raw PII by construction — proving run scale
+# and consent from a durable, git-committable artifact alone), and run_narration.py (an honest
+# bulk-run-outcome narration helper that renders exclusively from the typed BulkRunSummary, so
+# a non-success run cannot be narrated as a success). Also extends copy_run_proof.py,
+# evidence.py, zones.py, capability_invariants.py (moved into the sealed kernel),
+# capability_api.py, capability_health.py, capability_identity.py, capability_registration.py,
+# operator_acceptance.py, registered_adapters.py, run_envelope.py, and write_gate.py; and
+# updates templates/agents/orchestrator_prompt.md (session-close disk/state divergence flag),
+# templates/wizard/skills/next-phase.md, add-capability.md, triage-review.md, the new
+# rebuild-paused-capability.md skill, templates/root/manual.md, operating_discipline.md,
+# templates/claude_config/settings.json, commit_hygiene.sh, the new auto_approve_gate.sh, and
+# templates/security/gitignore_manifest.md. No breaking changes; all existing capabilities are
+# byte-for-byte unaffected and previously released bundles still replay. Foundation docs
+# byte-identical to v0.14.0 (schema unchanged, v0.3). JSON sidecar (manifest.json) is what the
+# engine consumes.
+_note: JSON sidecar for manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing
+  companion. Both files MUST stay in sync.
+agent_contract_version: v0-pre-rebuild
+bundle_manifest_schema_version: v2
+foundation_bundle_version: v0.15.0
+foundation_schema_version: v0.3
+included_templates:
+  foundation_docs:
+  - vision.md
+  - approach.md
+  - technical_architecture.md
+  - execution_plan.md
+  - test_cases.md
+  - audit_framework.md
+managed_files:
+  foundation/approach.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/audit_framework.md:
+    local_modifications: not_recommended
+    managed_by: wizard
+    merge_strategy: warn_on_drift
+  foundation/execution_plan.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/prd.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/technical_architecture.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/test_cases.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/vision.md:
+    local_modifications: expected
+    managed_by: shared
+    merge_strategy: three_way
+min_engine_version: v1.0.0
+public_api:
+  required_files:
+  - foundation/vision.md
+  - foundation/prd.md
+  - foundation/approach.md
+  - foundation/execution_plan.md
+  - foundation/technical_architecture.md
+  - foundation/test_cases.md
+  - foundation/audit_framework.md
+  required_frontmatter_fields_per_file: see the canonical foundation-versioning specification § 1.1
+  required_sections_per_doc_type: see schemas/section-schema.yaml in this bundle
+  section_schema: schemas/section-schema.yaml
+release_date: '2026-07-20'
+source_commit: PENDING
+status: prerelease
