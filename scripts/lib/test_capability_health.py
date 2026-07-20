@@ -684,6 +684,67 @@ class TestReconcileOnReadSelfHeals(ReconcileOnReadTestBase):
         self.assertEqual(record["health"], "red")
 
 
+class TestReconcileOnReadNeverUnpausesUnaccepted(ReconcileOnReadTestBase):
+    """(A2 review, Important) Pins the safety property at the WRAPPER call site
+    (``check_capabilities_with_self_heal``), not just at ``reconcile_state`` (already tested
+    directly elsewhere): self-heal-on-read must NEVER unpause a genuinely non-accepted
+    capability. A legitimately-paused, NOT-accepted capability -- ``descriptor.accepted`` is
+    False AND a migration is queued for it, the real pending-migration/not-yet-rebuilt shape
+    ``reconcile_state``'s own not-accepted-and-migration-open branch ensures/preserves a marker
+    for -- must still report the marker present and the capability paused AFTER a read through
+    the self-healing wrapper. Unpausing it would be a safety regression: a broken/unaccepted
+    capability silently unblocked. This test exists so a future edit to ``_attempt_self_heal`` or
+    to ``reconcile_state``'s own branching cannot silently reopen that window without a
+    wrapper-level test noticing."""
+
+    def _not_accepted_paused_with_pending_migration(self, capability_id: str) -> Path:
+        # Same real on-disk shape as `_accept_with_orphaned_marker` above, EXCEPT the descriptor
+        # entry is accepted:False (never accepted) and a real migration is queued for it -- this
+        # is the LEGITIMATE not-accepted-and-paused state `reconcile_state`'s own
+        # not-accepted-and-migration-open branch is meant to preserve, not the crash-orphan case.
+        cap_path = self._write_capability(
+            capability_id, _CLEAN_CAPABILITY_SOURCE.format(display_name=capability_id))
+        self._write_descriptor_set(
+            [{"id": capability_id, "accepted": False, "phase_id": self.PHASE_ID}])
+        self._write_pending_migration(capability_id)
+        self._write_orphaned_marker(capability_id)
+        return cap_path
+
+    def test_not_accepted_paused_capability_stays_paused_after_self_heal_read(self):
+        cap_id = "widget_sync_pending"
+        cap_path = self._not_accepted_paused_with_pending_migration(cap_id)
+        marker_dir = self.project_root / PAUSED_MECHANISMS_DIR_REL
+        self.assertTrue((marker_dir / f"{cap_id}.pause").exists())
+        self.assertTrue((marker_dir / f"{cap_id}.json").exists())
+
+        records = capability_health.check_capabilities_with_self_heal(self.project_root)
+        record = self._record_for(records, cap_id)
+
+        # The decisive assertion: self-heal-on-read must NEVER clear a legitimately-paused,
+        # not-accepted capability's marker -- it must still be on disk, and the read must still
+        # report it paused/red, exactly as it was before the read.
+        self.assertTrue((marker_dir / f"{cap_id}.pause").exists())
+        self.assertTrue((marker_dir / f"{cap_id}.json").exists())
+        self.assertTrue(record["paused"])
+        self.assertEqual(record["health"], "red")
+
+        # ANTI-VACUOUS CONTRAST: flip this SAME capability's descriptor to accepted:True (with a
+        # matching real acceptance record) -- NOW reconcile-on-read WOULD clear the very same
+        # marker. This proves the prior assertions are actually exercising the not-accepted
+        # branch's PRESERVE behavior, not merely a checker that never clears any marker at all
+        # (which would trivially pass the assertions above for the wrong reason).
+        self._write_descriptor_set(
+            [{"id": cap_id, "accepted": True, "phase_id": self.PHASE_ID}])
+        self._accept(cap_id, cap_path)
+
+        records_after_accept = capability_health.check_capabilities_with_self_heal(
+            self.project_root)
+        record_after_accept = self._record_for(records_after_accept, cap_id)
+        self.assertFalse((marker_dir / f"{cap_id}.pause").exists())
+        self.assertFalse((marker_dir / f"{cap_id}.json").exists())
+        self.assertFalse(record_after_accept["paused"])
+
+
 class TestReconcileOnReadFailSafeOnReadOnlyFilesystem(ReconcileOnReadTestBase):
     def test_readonly_paused_mechanisms_dir_reports_orphan_without_crashing(self):
         if hasattr(os, "geteuid") and os.geteuid() == 0:

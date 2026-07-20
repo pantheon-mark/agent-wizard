@@ -146,8 +146,8 @@ PAUSED_MECHANISMS_DIR_REL = ".wizard/paused-mechanisms"
 class InvariantResult:
     """The outcome of ``check_capability_invariants``.
 
-    ok:               True iff every one of the five checks passed (or was
-                       N/A -- see check 5).
+    ok:               True iff every one of the six checks passed (or was
+                       N/A -- see checks 5 and 6).
     failures:          Plain-language failure lines, one per violated check
                        (a capability can fail more than one at once). Empty
                        iff ``ok`` is True.
@@ -253,15 +253,16 @@ def _build_operator_message(failures: List[str]) -> str:
 
 
 def check_capability_invariants(project_root: str, canonical_id: str) -> InvariantResult:
-    """Run the five AWB-authored, deterministic invariant checks for the
+    """Run the six AWB-authored, deterministic invariant checks for the
     capability whose canonical (module-derived) id is ``canonical_id``, in
     the project rooted at ``project_root``. Never raises -- every check that
     cannot be positively evaluated is folded into ``failures`` as its own
     fail-closed line (see the module docstring). Composes existing signals
     only; this function does not re-implement the scanner, the identity
-    resolver, the test-target vocabulary, the contract registry, or the
-    audit-record dedup check -- see the module docstring's numbered list for
-    exactly which existing primitive backs each of the five checks below.
+    resolver, the test-target vocabulary, the contract registry, the
+    audit-record dedup check, or the pause-marker read -- see the module
+    docstring's numbered list for exactly which existing primitive backs each
+    of the six checks below.
     """
     root = Path(project_root)
     failures: List[str] = []
