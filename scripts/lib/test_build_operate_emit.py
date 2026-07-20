@@ -1779,7 +1779,10 @@ class TestS253ContractDelta(unittest.TestCase):
         # (Count updated to 37 by Task E1 (Cut 1.1 Cluster E / F-73), which additionally
         # enrolled audit_projection.py -- see that file's own enrollment comment in
         # agent_emitter.py, and test_emit_set_lists_the_taskE1_audit_projection_file below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 37)
+        # (Count updated to 38 by Task E3 (Cut 1.1 Cluster E / F-85), which additionally
+        # enrolled run_narration.py -- see that file's own enrollment comment in
+        # agent_emitter.py, and test_emit_set_lists_the_taskE3_run_narration_file below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 38)
 
     def test_emit_set_lists_the_taskA3_lifecycle_test_fixtures_file(self):
         # Task A3 (hermetic lifecycle tests + probe, Cut 1.1 / F-71): lifecycle_test_fixtures.py
@@ -1809,6 +1812,15 @@ class TestS253ContractDelta(unittest.TestCase):
         # local-working-tree-only and git-clean-destroyable.
         import agent_emitter
         self.assertIn("audit_projection.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+
+    def test_emit_set_lists_the_taskE3_run_narration_file(self):
+        # Task E3 (Cut 1.1 Cluster E / F-85): run_narration.py must be enrolled, or a
+        # freshly-emitted writes-back system's triage-review handoff has no sanctioned way to
+        # render a bulk run's outcome from the typed BulkRunSummary -- the exact gap that let
+        # the estate's "Applied"/"493 recoverable" narration go hand-authored instead of
+        # derived from a typed result.
+        import agent_emitter
+        self.assertIn("run_narration.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def _writes_back_plan(self):
         import copy, json

@@ -64,6 +64,20 @@ class TriageReviewGuidanceTests(unittest.TestCase):
     def test_has_an_interrupted_run_subsection(self):
         self.assertRegex(self.text, r"[Ii]f a run is interrupted")
 
+    # -- (a2) outcome narration renders from the typed status (F-85), never
+    # a hand-authored success sentence -----------------------------------
+
+    def test_references_run_narration_helper(self):
+        self.assertIn("run_narration", self.text)
+        self.assertIn("render_bulk_run_outcome", self.text)
+
+    def test_instructs_not_to_hand_author_the_outcome_sentence(self):
+        self.assertRegex(
+            self.text,
+            r"[Nn]ever (write|compose) (that sentence|your own)|"
+            r"[Dd]o not (write|compose) your own",
+        )
+
     # -- (b) NO per-batch-mint anti-pattern ---------------------------------
 
     def test_never_names_the_mint_entrypoint(self):

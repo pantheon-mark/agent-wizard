@@ -210,6 +210,17 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # (same regression class this file's own docstring already documents for
     # every prior entry above).
     "audit_projection.py",
+    # Task E3 (Cut 1.1 Cluster E / F-85): the honest bulk-run outcome
+    # narration helper. It imports `external_write.audit_projection` at
+    # module scope (reuses its `_claim_level` classification rather than
+    # duplicating it), so omitting it here means an emitted writes-back
+    # system's triage-review handoff has no sanctioned way to render a bulk
+    # run's outcome from the typed `BulkRunSummary` at all -- the exact
+    # gap that let the estate's "Applied"/"493 recoverable" narration go
+    # hand-authored instead of derived from a typed result (F-85) -- not a
+    # caught omission (same regression class this file's own docstring
+    # already documents for every prior entry above).
+    "run_narration.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
