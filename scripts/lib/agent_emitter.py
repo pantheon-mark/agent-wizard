@@ -200,6 +200,16 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # regression class this file's own docstring already documents for every
     # prior entry above).
     "bulk_verify.py",
+    # Task E1 (Cut 1.1 Cluster E / F-73): the redacted, committable audit
+    # projection. Nothing else in the lib imports it at module scope (it is a
+    # standalone primitive a session-close flow calls directly), but omitting
+    # it here means an emitted writes-back system has no way to produce a
+    # durable, privacy-safe, COMMITTABLE record of a live run at all -- the
+    # audit trail stays local-working-tree-only and git-clean-destroyable,
+    # exactly the F-73 defect this task closes -- not a caught omission
+    # (same regression class this file's own docstring already documents for
+    # every prior entry above).
+    "audit_projection.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

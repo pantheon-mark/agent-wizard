@@ -1776,7 +1776,10 @@ class TestS253ContractDelta(unittest.TestCase):
         # (Count updated to 36 by Task C3, which additionally enrolled bulk_verify.py -- see
         # that file's own enrollment comment in agent_emitter.py, and
         # test_emit_set_lists_the_taskC3_bulk_verify_file below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 36)
+        # (Count updated to 37 by Task E1 (Cut 1.1 Cluster E / F-73), which additionally
+        # enrolled audit_projection.py -- see that file's own enrollment comment in
+        # agent_emitter.py, and test_emit_set_lists_the_taskE1_audit_projection_file below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 37)
 
     def test_emit_set_lists_the_taskA3_lifecycle_test_fixtures_file(self):
         # Task A3 (hermetic lifecycle tests + probe, Cut 1.1 / F-71): lifecycle_test_fixtures.py
@@ -1798,6 +1801,14 @@ class TestS253ContractDelta(unittest.TestCase):
         # never physically shipped -- a ModuleNotFoundError the first time it is actually run.
         import agent_emitter
         self.assertIn("bulk_verify.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+
+    def test_emit_set_lists_the_taskE1_audit_projection_file(self):
+        # Task E1 (Cut 1.1 Cluster E / F-73): audit_projection.py must be enrolled, or a
+        # freshly-emitted writes-back system has no way to produce a durable, privacy-safe,
+        # COMMITTABLE audit record of a live run -- the audit trail stays
+        # local-working-tree-only and git-clean-destroyable.
+        import agent_emitter
+        self.assertIn("audit_projection.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def _writes_back_plan(self):
         import copy, json
