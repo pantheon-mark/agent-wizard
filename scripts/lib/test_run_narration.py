@@ -45,7 +45,12 @@ from external_write.read_facade import (  # noqa: E402
 from external_write.operations import Operation, EffectUnit  # noqa: E402
 from external_write.run_envelope import (  # noqa: E402
     NOT_RECOVERABLE_BY_SYSTEM,
+    RECOVERABLE_BY_SYSTEM,
     run_sanctioned_bulk,
+)
+from external_write.audit_projection import (  # noqa: E402
+    RECOVERABLE_ALL,
+    RECOVERABLE_PARTIAL,
 )
 from external_write.scan import scan_paths  # noqa: E402
 
@@ -286,6 +291,93 @@ class TestRenderRealFixtures(_RealFixturesMixin, unittest.TestCase):
             text = render_bulk_run_outcome(summary)
             self.assertIn("Recoverable by this system: 0", text)
             self.assertIn(f"Overall recoverability: {NOT_RECOVERABLE_BY_SYSTEM}", text)
+
+    def test_partial_run_recoverability_is_applied_scoped_not_reviewed_scoped(self):
+        # Cluster-E isolation-net Finding 1 fix: the aggregate-ceiling
+        # partial run reviews 30 ids but only applies 25 -- the raw
+        # ``summary.recoverability["counts"]`` dict (queried with no
+        # candidate ids, i.e. over the reviewed-union-applied set) reports
+        # 25 recoverable / 5 not-recoverable, folding the 5 never-applied
+        # ids in as "not recoverable". The rendered narration must NOT use
+        # that wider figure -- it must report 25 recoverable / 0 not, and
+        # claim RECOVERABLE_ALL, exactly the applied-only scope
+        # ``audit_projection.project_redacted_audit`` uses for the same run
+        # (this is the coherence fix; see test_audit_narration_isolation.py
+        # for the direct cross-module proof against the real committed
+        # artifact).
+        with tempfile.TemporaryDirectory() as d:
+            summary = self._partial_summary(d)
+            raw_counts = summary.recoverability["counts"]
+            self.assertEqual(raw_counts["recoverable_by_system"], 25)
+            self.assertEqual(raw_counts["not_recoverable_by_system"], 5)
+
+            text = render_bulk_run_outcome(summary)
+            self.assertIn("Recoverable by this system: 25", text)
+            self.assertIn("NOT recoverable by this system: 0", text)
+            self.assertIn(f"Overall recoverability: {RECOVERABLE_ALL}", text)
+
+
+class TestAppliedScopedRecoverabilityMatrix(unittest.TestCase):
+    """Cluster-E isolation-net Finding 1 fix, synthetic-matrix half: proves
+    the applied-scoped recoverability claim stays honest for every shape a
+    real run's ``per_id`` claims could take, not just the all-reversible
+    fixture above -- a MIX of applied ids where some are NOT recoverable
+    (``recoverable_partial`` OF THE APPLIED), and an all-not-recoverable
+    applied set (``not_recoverable``) -- using ``_FakeSummary`` so a
+    same-tier-only real fixture is not the only case exercised."""
+
+    def _summary(self, *, applied, skipped=(), per_id):
+        return _FakeSummary(
+            completed=False, finalized=False, refused=True,
+            applied_unit_ids=applied, skipped_already_applied=skipped,
+            recoverability={"per_id": per_id})
+
+    def test_mix_of_applied_ids_yields_recoverable_partial_of_the_applied(self):
+        # 2 of the 3 applied ids are recoverable, one is not -- a real mix.
+        # A FOURTH id is reviewed-but-never-applied and marked NOT
+        # recoverable in per_id (as report_run_recoverability's default,
+        # unscoped query would do) -- it must be IGNORED by the applied
+        # scope, never dilute the claim about what was actually applied.
+        summary = self._summary(
+            applied=("a", "b", "c"),
+            per_id={
+                "a": RECOVERABLE_BY_SYSTEM, "b": RECOVERABLE_BY_SYSTEM,
+                "c": NOT_RECOVERABLE_BY_SYSTEM,
+                "never-applied-reviewed-id": NOT_RECOVERABLE_BY_SYSTEM,
+            })
+        text = render_bulk_run_outcome(summary)
+        self.assertIn("Recoverable by this system: 2", text)
+        self.assertIn("NOT recoverable by this system: 1", text)
+        self.assertIn(f"Overall recoverability: {RECOVERABLE_PARTIAL}", text)
+
+    def test_all_irreversible_applied_yields_not_recoverable(self):
+        summary = self._summary(
+            applied=("a", "b"),
+            per_id={"a": NOT_RECOVERABLE_BY_SYSTEM, "b": NOT_RECOVERABLE_BY_SYSTEM})
+        text = render_bulk_run_outcome(summary)
+        self.assertIn("Recoverable by this system: 0", text)
+        self.assertIn("NOT recoverable by this system: 2", text)
+        self.assertIn(f"Overall recoverability: {NOT_RECOVERABLE_BY_SYSTEM}", text)
+
+    def test_all_applied_recoverable_yields_recoverable_all(self):
+        summary = self._summary(
+            applied=("a",), skipped=("b",),
+            per_id={"a": RECOVERABLE_BY_SYSTEM, "b": RECOVERABLE_BY_SYSTEM,
+                    "never-applied": NOT_RECOVERABLE_BY_SYSTEM})
+        text = render_bulk_run_outcome(summary)
+        self.assertIn("Recoverable by this system: 2", text)
+        self.assertIn("NOT recoverable by this system: 0", text)
+        self.assertIn(f"Overall recoverability: {RECOVERABLE_ALL}", text)
+
+    def test_applied_id_missing_from_per_id_fails_safe_to_not_recoverable(self):
+        # An applied id with no attached claim at all (should not happen in
+        # practice -- report_run_recoverability's default query always
+        # includes every applied id -- but never assumed recoverable if it
+        # somehow were missing).
+        summary = self._summary(applied=("a", "b"), per_id={"a": RECOVERABLE_BY_SYSTEM})
+        text = render_bulk_run_outcome(summary)
+        self.assertIn("Recoverable by this system: 1", text)
+        self.assertIn("NOT recoverable by this system: 1", text)
 
 
 # ---------------------------------------------------------------------------

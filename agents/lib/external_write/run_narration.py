@@ -36,16 +36,30 @@ Two sources, kept honestly separate (mirrors ``bulk_verify.py``'s own
    ``summary.refused`` / ``summary.applied_unit_ids`` /
    ``summary.skipped_already_applied`` -- ``run_sanctioned_bulk``'s own
    record of what THIS call did.
-2. **Recoverability** -- ``summary.recoverability``, the SAME
-   ``run_envelope.report_run_recoverability`` (D5) dict every other
-   consumer of a run (``bulk_verify.py``, ``audit_projection.py``) reads
-   verbatim. "Recoverable" is asserted here ONLY for the counts that dict
-   reports -- never a per-id claim invented by this module, and the
-   three-way claim level (``recoverable_all`` / ``recoverable_partial`` /
-   ``not_recoverable_by_system``) is the SAME classification
-   ``audit_projection._claim_level`` already computes (imported, not
+2. **Recoverability** -- derived from ``summary.recoverability["per_id"]``,
+   the SAME ``run_envelope.report_run_recoverability`` (D5) claims every
+   other consumer of a run reads, but queried at the SAME SCOPE
+   ``audit_projection.project_redacted_audit`` uses: exactly the ids this
+   run has APPLIED (``summary.applied_unit_ids`` union
+   ``summary.skipped_already_applied`` -- see ``_applied_ids`` below),
+   never the wider reviewed-union-applied set ``report_run_recoverability``
+   defaults to when queried with no candidate ids. This module previously
+   read the wider, unscoped ``summary.recoverability["counts"]`` directly,
+   which folded never-applied-but-reviewed ids in as "not recoverable" --
+   conflating "we didn't finish" (a COMPLETENESS fact, already reported
+   honestly by ``classify_bulk_run_status``'s PARTIAL branch) with "what we
+   did apply cannot be undone" (a RECOVERABILITY fact). Scoping to applied
+   ids fixes that conflation and makes this module's claim COHERENT with
+   ``audit_projection``'s own applied-scoped claim for the same run: same
+   scope, same underlying per-id claims, same classifier
+   (``audit_projection._claim_level``, imported here rather than
    duplicated -- mirrors ``consent_narration.py``'s own precedent of
    importing a sibling module's private helper rather than re-deriving it).
+   Still zero I/O: every claim consulted here is already attached to the
+   in-memory summary by ``report_run_recoverability``'s own default
+   (reviewed-union-applied) query, which always includes every applied id
+   -- this module only narrows WHICH of those already-attached claims it
+   reads, it never issues a fresh query.
 
 Op-kind-agnostic / shape-neutral: this module's own text (docstrings,
 rendered lines) never names a vendor, an op_kind, or a concrete field
@@ -82,6 +96,7 @@ if __package__ in (None, ""):  # pragma: no cover - only true when run as a scri
         _bootstrap_sys.path.insert(0, _pkg_parent)
 
 from external_write.audit_projection import _claim_level  # noqa: E402
+from external_write.run_envelope import RECOVERABLE_BY_SYSTEM  # noqa: E402
 
 # The three-way bulk-run outcome vocabulary this module renders. Deliberately
 # distinct from run_envelope's RUN_STATE_* vocabulary (pending_run/executing/
@@ -96,6 +111,39 @@ def _recoverability_counts(summary: Any) -> Dict[str, int]:
     rec = getattr(summary, "recoverability", None)
     counts = rec.get("counts") if isinstance(rec, dict) else None
     return counts if isinstance(counts, dict) else {}
+
+
+def _applied_ids(summary: Any) -> Any:
+    """The full set of ids APPLIED for this run as of ``summary`` -- this
+    call's own ``applied_unit_ids`` UNION any earlier attempt's
+    ``skipped_already_applied`` (the durable running total to date across
+    every tranche this run has persisted). This is the SAME scope
+    ``audit_projection.project_redacted_audit`` uses for its own
+    ``applied_ids`` (there: the union of every persisted tranche's
+    ``applied_unit_ids`` read fresh from disk) -- coherent with it by
+    construction, never independently re-derived from a different source."""
+    ids = set(getattr(summary, "applied_unit_ids", ()) or ())
+    ids |= set(getattr(summary, "skipped_already_applied", ()) or ())
+    return tuple(sorted(ids))
+
+
+def _applied_scoped_recoverability_counts(summary: Any) -> Dict[str, int]:
+    """Recoverable / not-recoverable counts scoped to exactly the APPLIED
+    ids (``_applied_ids``, above) -- never the wider reviewed-union-applied
+    set ``summary.recoverability["counts"]`` reports. Reads ONLY the
+    ``per_id`` claims ``report_run_recoverability`` already attached to
+    ``summary.recoverability`` -- no extra query, no I/O. An applied id
+    that (for whatever reason) has no claim attached is treated fail-safe
+    as NOT recoverable, never assumed recoverable."""
+    rec = getattr(summary, "recoverability", None)
+    per_id = rec.get("per_id") if isinstance(rec, dict) else None
+    per_id = per_id if isinstance(per_id, dict) else {}
+    applied = _applied_ids(summary)
+    recoverable = sum(1 for uid in applied if per_id.get(uid) == RECOVERABLE_BY_SYSTEM)
+    return {
+        "recoverable_by_system": recoverable,
+        "not_recoverable_by_system": len(applied) - recoverable,
+    }
 
 
 def classify_bulk_run_status(summary: Any) -> str:
@@ -146,13 +194,21 @@ def render_bulk_run_outcome(summary: Any) -> str:
     parameter through which a caller could override the rendered verb; the
     headline (COMPLETED / PARTIAL / REFUSED) is derived solely from
     ``classify_bulk_run_status``, and recoverability is asserted ONLY from
-    the counts ``summary.recoverability`` (the durable D5 report) already
-    carries -- never invented here.
+    the per-id claims ``summary.recoverability`` (the durable D5 report)
+    already carries, scoped to exactly the ids this run has APPLIED (see
+    ``_applied_scoped_recoverability_counts``) -- never invented here, and
+    never widened to a never-applied-but-reviewed id. This keeps the
+    rendered "Overall recoverability" claim COHERENT with
+    ``audit_projection.project_redacted_audit``'s own ``claim_level`` for
+    the same run: completeness ("this run has NOT finished" / the applied
+    vs. reviewed counts in the headline sentence below) and recoverability
+    ("can what WAS applied be undone") are reported as two separate, both
+    honest, sentences -- never conflated into one claim.
     """
     status = classify_bulk_run_status(summary)
-    counts = _recoverability_counts(summary)
-    recoverable = counts.get("recoverable_by_system", 0) or 0
-    not_recoverable = counts.get("not_recoverable_by_system", 0) or 0
+    counts = _applied_scoped_recoverability_counts(summary)
+    recoverable = counts["recoverable_by_system"]
+    not_recoverable = counts["not_recoverable_by_system"]
     claim = _claim_level(recoverable, not_recoverable)
 
     applied_this_call = len(tuple(getattr(summary, "applied_unit_ids", ()) or ()))

@@ -109,7 +109,24 @@ try:
         "*.jsonl", "*.ndjson", "*.pkl", "*.pickle", "*.npy", "*.npz",
         "*.dat", "*.feather", "*.arrow", "*.avro", "*.h5", "*.hdf5",
     ]
-    SENSITIVE_PATH_MARKERS = ("logs/", "security/session_cookies/")
+    SENSITIVE_PATH_MARKERS = (
+        "logs/", "security/session_cookies/",
+        # Cluster-E isolation-net finding: `git check-ignore` never reports an
+        # already-tracked path as ignored (a documented git limitation), so a raw
+        # per-item PII record committed BEFORE its ignore rule existed would
+        # otherwise have NO independent detection path once tracked (unlike the
+        # `.csv`/`.jsonl`/etc. data extensions above, matched on extension alone
+        # regardless of directory). These three are the raw, un-redacted record
+        # dirs run_envelope.py / write_gate.py / operator_acceptance.py write to —
+        # DEFAULT_ENVELOPE_DIR, DEFAULT_LEDGER_DIR, DEFAULT_RECEIPT_DIR — always
+        # gitignored by the wizard's own emitted .gitignore in the normal flow, so
+        # this marker only ever fires for the abnormal case (a pre-tracked file),
+        # exactly mirroring how "logs/" / "session_cookies/" are already handled.
+        # Deliberately distinct from "security/audit/" (the REDACTED, committable
+        # projection) — that path is NOT listed here and must keep auto-committing.
+        "security/run_envelopes/", "security/invocation_ledgers/",
+        "security/acceptance_receipts/",
+    )
 
     # (A) Positively-safe allowlist. A data format NEVER appears here.
     #   - source / doc / config-SOURCE extensions (human-authored, not data);

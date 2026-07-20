@@ -538,6 +538,120 @@ class CommitHygieneBehaviorTests(unittest.TestCase):
         self.assertIn("security/audit/run-1.redacted_audit.json", tracked,
                       "the redacted audit projection alongside the raw records was not committed")
 
+    # ---- Cluster-E isolation-net Finding 2: a raw PII record pre-tracked
+    # BEFORE its ignore rule existed is CAUGHT (untracked via F-30), even
+    # though `git check-ignore` never reports an already-tracked path as
+    # ignored and a bare run-envelope/ledger/receipt `.json` has no
+    # extension-based signal (unlike `.jsonl`/`.csv`). SENSITIVE_PATH_MARKERS
+    # now includes the three raw-record directory prefixes so this raw-record
+    # family has the SAME independent, git-ignore-state-agnostic detection the
+    # `.jsonl` acceptance log already had. ------------------------------------
+    def test_f30_pretracked_raw_record_dirs_are_caught_and_untracked(self):
+        self._seed_security_dir()
+        raw_paths = (
+            "security/run_envelopes/run-1.json",
+            "security/invocation_ledgers/run-1.json",
+            "security/acceptance_receipts/r.json",
+        )
+        for rel in raw_paths:
+            p = self.repo / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text('{"raw_id": "msg-123-pii"}\n', encoding="utf-8")
+        _git(self.repo, "add", *raw_paths)
+        _git(self.repo, "commit", "-q", "-m", "raw records tracked before an ignore rule existed")
+        for rel in raw_paths:
+            self.assertIn(rel, self._tracked(), f"precondition: {rel} not pre-tracked")
+
+        # The ignore rule arrives LATER (the F-30 illusory-protection shape).
+        (self.repo / ".gitignore").write_text(
+            "/security/run_envelopes/\n/security/invocation_ledgers/\n"
+            "/security/acceptance_receipts/\n", encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)  # never aborts
+
+        tracked = self._tracked()
+        out = (r.stdout + r.stderr)
+        for rel in raw_paths:
+            self.assertNotIn(rel, tracked,
+                              f"F-30: pre-tracked raw record was left tracked: {rel}")
+            self.assertTrue((self.repo / rel).exists(),
+                             f"F-30 must not delete the operator's working file: {rel}")
+            self.assertIn(rel, out, f"pre-tracked raw record was not surfaced: {rel}")
+        self.assertIn("histor", out.lower(), "F-30 did not surface a history-scrub prompt")
+
+    def test_f30_pretracked_raw_record_untracking_does_not_block_security_audit_commit(self):
+        # (a)/(c)/(d): untracking a pre-tracked raw record must not abort the
+        # whole close, must not weaken the security/audit/ auto-commit, and a
+        # REDACTED audit projection dropped in the SAME session must still land.
+        self._seed_security_dir()
+        raw = self.repo / "security" / "run_envelopes" / "run-1.json"
+        raw.parent.mkdir(parents=True)
+        raw.write_text('{"raw_id": "msg-123-pii"}\n', encoding="utf-8")
+        _git(self.repo, "add", "security/run_envelopes/run-1.json")
+        _git(self.repo, "commit", "-q", "-m", "raw envelope tracked before an ignore rule existed")
+        (self.repo / ".gitignore").write_text("/security/run_envelopes/\n", encoding="utf-8")
+
+        (self.repo / "security" / "audit").mkdir(parents=True)
+        (self.repo / "security" / "audit" / "run-1.redacted_audit.json").write_text(
+            '{"audit_schema_version": "redacted_audit_projection-v1"}\n', encoding="utf-8")
+
+        before = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)  # (a) never aborts the close
+        after = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
+        self.assertNotEqual(before, after, "the untracking + audit commit did not land")
+
+        tracked = self._tracked()
+        self.assertNotIn("security/run_envelopes/run-1.json", tracked)
+        self.assertIn("security/audit/run-1.redacted_audit.json", tracked,
+                      "(c)/(d): the security/audit/ auto-commit was weakened by the "
+                      "pre-tracked raw record's untracking")
+
+    def test_raw_record_dirs_gitignored_and_never_staged_are_unaffected(self):
+        # (b): the normal flow -- raw records gitignored from before they ever
+        # existed on disk, never tracked -- must be completely unaffected by
+        # the new markers: they never even reach `git status`, so the guard
+        # neither commits nor surfaces them (identical to the pre-fix behavior;
+        # already exercised end-to-end by test_raw_gitignored_security_records_
+        # never_auto_committed above -- this test isolates just the marker
+        # addition's non-effect on that flow with a minimal fixture).
+        self._seed_security_dir()
+        (self.repo / ".gitignore").write_text(
+            "/security/run_envelopes/\n/security/invocation_ledgers/\n"
+            "/security/acceptance_receipts/\n", encoding="utf-8")
+        for rel in (
+            "security/run_envelopes/run-1.json",
+            "security/invocation_ledgers/run-1.json",
+            "security/acceptance_receipts/r.json",
+        ):
+            p = self.repo / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text('{"raw_id": "msg-123-pii"}\n', encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        tracked = self._tracked()
+        out = r.stdout + r.stderr
+        for rel in (
+            "security/run_envelopes/run-1.json",
+            "security/invocation_ledgers/run-1.json",
+            "security/acceptance_receipts/r.json",
+        ):
+            self.assertNotIn(rel, tracked, f"never-tracked gitignored raw record was committed: {rel}")
+            self.assertNotIn(rel, out, f"never-tracked gitignored raw record was surfaced unnecessarily: {rel}")
+
+    def test_session_start_surfaces_pretracked_raw_record(self):
+        self._seed_security_dir()
+        raw = self.repo / "security" / "invocation_ledgers" / "run-1.json"
+        raw.parent.mkdir(parents=True)
+        raw.write_text('{"raw_id": "msg-123-pii"}\n', encoding="utf-8")
+        _git(self.repo, "add", "security/invocation_ledgers/run-1.json")
+        _git(self.repo, "commit", "-q", "-m", "raw ledger tracked before an ignore rule existed")
+        (self.repo / ".gitignore").write_text("/security/invocation_ledgers/\n", encoding="utf-8")
+        r = self._run("SessionStart")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("security/invocation_ledgers/run-1.json", r.stdout,
+                      "SessionStart did not surface the pre-tracked raw record")
+
     def test_session_start_surfaces_f30_already_tracked(self):
         csv = self.repo / "already.csv"
         csv.write_text("a,b\n", encoding="utf-8")

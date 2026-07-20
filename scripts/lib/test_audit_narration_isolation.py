@@ -22,16 +22,29 @@ This file composes three already-landed, independently-tested behaviors:
 Each piece already has its own dedicated, exhaustive test file; this file
 does NOT re-test their individual edge cases. It proves the THREE compose
 correctly over one shared, realistic PII-shaped fixture, and pins two
-genuine cross-module findings surfaced while composing them rather than
-papering over them:
-  * ``test_committed_claim_and_narrated_claim_use_different_scopes`` --
-    the committed audit's overall claim and the narration's overall claim
-    can read differently for the same run because each queries a
-    differently-scoped slice of the durable recoverability report.
-  * ``test_json_shaped_raw_record_pre_tracked_before_ignore_rule_is_not_caught``
-    -- a raw record already tracked before its ignore rule existed is not
-    reliably caught by the guard's already-tracked detection unless its
-    extension is on the guard's built-in sensitive-pattern list.
+genuine cross-module findings this file's own isolation run surfaced --
+both now FIXED, and the tests below converted from documenting the gap to
+asserting the fix:
+  * ``test_committed_claim_and_narrated_claim_are_coherent`` -- the
+    committed audit's overall claim and the narration's overall claim used
+    to read differently for the same run because each queried a
+    differently-scoped slice of the durable recoverability report (the
+    narration read the wider reviewed-union-applied slice; the audit
+    projection read the narrower applied-only slice). Fixed by scoping
+    ``run_narration.render_bulk_run_outcome``'s recoverability claim to the
+    APPLIED ids too -- the same scope, the same classifier
+    (``audit_projection._claim_level``) -- so both surfaces now AGREE. The
+    run's separate COMPLETENESS fact (25 of 30 approved items applied
+    before the run stopped) stays a distinct, honest sentence, unchanged.
+  * ``test_json_shaped_raw_record_pre_tracked_before_ignore_rule_is_caught``
+    -- a raw record already tracked before its ignore rule existed used to
+    not be caught by the guard's already-tracked detection unless its
+    extension was on the guard's built-in sensitive-pattern list. Fixed by
+    adding the raw-record directory prefixes (``security/run_envelopes/``,
+    ``security/invocation_ledgers/``, ``security/acceptance_receipts/``) to
+    ``commit_hygiene.sh``'s ``SENSITIVE_PATH_MARKERS``, checked
+    independently of git-ignore state -- the same mechanism the `.jsonl`
+    acceptance-log sibling test already relied on.
 
 Stdlib unittest; pip-install-free.
 """
@@ -63,6 +76,7 @@ from external_write.read_facade import (  # noqa: E402
 from external_write.operations import Operation, EffectUnit  # noqa: E402
 from external_write.run_envelope import (  # noqa: E402
     DEFAULT_ENVELOPE_DIR,
+    RECOVERABLE_BY_SYSTEM,
     RUN_STATE_EXECUTING,
     run_sanctioned_bulk,
 )
@@ -445,22 +459,20 @@ class ClusterCloseIsolationTests(unittest.TestCase):
         self.assertIn("histor", out.lower())
 
     @unittest.skipUnless(_HAVE_GIT_TOOLS, "bash / git / python3 unavailable")
-    def test_json_shaped_raw_record_pre_tracked_before_ignore_rule_is_not_caught(self):
-        """Composition finding, pinned rather than silently papered over: a
-        raw run-envelope record (a plain ``.json`` file, extension-neutral)
-        that somehow got committed BEFORE its ignore rule existed is NOT
-        caught by the guard's already-tracked detection. ``git check-ignore``
-        never reports an already-tracked path as ignored regardless of the
-        ignore rule (a documented git limitation, not a scanning bug), and a
-        bare run-envelope/ledger/acceptance-receipt ``.json`` is not on the
-        guard's BUILT-IN sensitive-pattern list either (unlike the
-        ``.jsonl`` acceptance log, see the sibling test above) -- so this
-        specific raw-record family has no independent detection path once
-        already tracked. In the wizard's real operational order (the
-        ignore rule is scaffolded before any run ever happens) this gap is
-        not reached; it only matters for a repo whose ignore rule postdates
-        an existing tracked raw record. Flagged for follow-up; no
-        production code is changed by this test-only net.
+    def test_json_shaped_raw_record_pre_tracked_before_ignore_rule_is_caught(self):
+        """Fixed composition finding: a raw run-envelope record (a plain
+        ``.json`` file, extension-neutral) that somehow got committed BEFORE
+        its ignore rule existed IS now caught by the guard's already-tracked
+        detection. ``git check-ignore`` still never reports an already-tracked
+        path as ignored regardless of the ignore rule (a documented git
+        limitation, unchanged) -- but ``commit_hygiene.sh``'s
+        ``SENSITIVE_PATH_MARKERS`` now includes the raw-record directory
+        prefixes (``security/run_envelopes/`` among them), checked
+        INDEPENDENTLY of git-ignore state, the same mechanism the ``.jsonl``
+        acceptance-log sibling test above already relied on. This closes the
+        gap for exactly this raw-record family: untracked (``git rm
+        --cached``) and surfaced with a history-scrub prompt, never left
+        silently tracked.
         """
         self._git("init", "-q")
         self._git("config", "user.email", "t@t.test")
@@ -476,13 +488,26 @@ class ClusterCloseIsolationTests(unittest.TestCase):
         self.assertIn(envelope_path, self._tracked())
 
         (self.repo / ".gitignore").write_text(f"/{DEFAULT_ENVELOPE_DIR}/\n", encoding="utf-8")
+        before = self._head()
         r = self._run_hook("SessionEnd")
-        self.assertEqual(r.returncode, 0, r.stderr)  # still never aborts
+        self.assertEqual(r.returncode, 0, r.stderr)  # never aborts
+        after = self._head()
+        self.assertNotEqual(before, after, "the untracking + commit did not land")
 
-        # Pinning the OBSERVED gap: the pre-tracked raw record remains
-        # tracked and in the commit tree even after the guard runs.
-        self.assertIn(envelope_path, self._tracked())
-        self.assertIn(envelope_path, self._tree_at_head())
+        # The fix: the pre-tracked raw record is now untracked and out of
+        # the commit tree, never left silently tracked.
+        tracked = self._tracked()
+        tree = self._tree_at_head()
+        self.assertNotIn(envelope_path, tracked,
+                          "the pre-tracked raw envelope was left tracked")
+        self.assertNotIn(envelope_path, tree,
+                          "the untracked envelope's content is still in the commit tree")
+        # Working file is preserved (untracked via rm --cached, never deleted).
+        self.assertTrue((self.repo / envelope_path).exists())
+        # Surfaced, never silent.
+        out = r.stdout + r.stderr
+        self.assertIn(envelope_path, out)
+        self.assertIn("histor", out.lower())
 
     # -----------------------------------------------------------------------
     # 3. Honest narration of the same partial run.
@@ -502,49 +527,54 @@ class ClusterCloseIsolationTests(unittest.TestCase):
         self.assertEqual(len(summary.applied_unit_ids), 25)
         self.assertIn("25 item(s) applied this call", text)
 
-        # "Recoverable" is asserted ONLY per the durable recoverability
-        # report already attached to the summary -- never invented here.
-        counts = summary.recoverability["counts"]
-        self.assertIn(
-            f"Recoverable by this system: {counts['recoverable_by_system']}", text)
-        self.assertIn(
-            f"NOT recoverable by this system: {counts['not_recoverable_by_system']}", text)
+        # "Recoverable" is asserted per the durable recoverability report
+        # already attached to the summary -- never invented here -- but
+        # scoped to exactly the ids APPLIED (25), never the wider
+        # reviewed-union-applied set (30) the raw
+        # ``summary.recoverability["counts"]`` dict reports: the 5
+        # never-applied, ceiling-refused ids are a COMPLETENESS fact
+        # ("has NOT finished", asserted above), never a recoverability one.
+        per_id = summary.recoverability["per_id"]
+        applied_ids = set(summary.applied_unit_ids) | set(summary.skipped_already_applied)
+        recoverable = sum(1 for uid in applied_ids if per_id[uid] == RECOVERABLE_BY_SYSTEM)
+        not_recoverable = len(applied_ids) - recoverable
+        self.assertEqual(recoverable, 25)
+        self.assertEqual(not_recoverable, 0)
+        self.assertIn(f"Recoverable by this system: {recoverable}", text)
+        self.assertIn(f"NOT recoverable by this system: {not_recoverable}", text)
 
     # -----------------------------------------------------------------------
     # 4. Coherence: the committed audit's claim vs. the narration's claim,
     #    for the SAME run.
     # -----------------------------------------------------------------------
 
-    def test_committed_claim_and_narrated_claim_use_different_scopes(self):
+    def test_committed_claim_and_narrated_claim_are_coherent(self):
         """Both the committed audit projection's ``claim_level`` and the
         narration's rendered "Overall recoverability" line use the exact
         same three-way vocabulary, computed by the exact same underlying
         classification helper (the narration module imports it from the
-        audit-projection module rather than re-deriving it) over the exact
-        same durable recoverability report for this run -- but each reads a
-        DIFFERENTLY SCOPED query into that report:
+        audit-projection module rather than re-deriving it), over the exact
+        same APPLIED-scoped query into the durable recoverability report for
+        this run -- so they now AGREE:
 
-          * the audit projection deliberately narrows its query to only the
-            ids this run actually applied (25) -- by its own documented
-            design, so a never-applied, still-reviewed id never dilutes the
-            claim about what was actually mutated;
-          * the narration reads the run's own attached recoverability
-            report, which is queried over the full reviewed-union-applied
-            set (30) -- folding the 5 never-applied, ceiling-refused ids in
-            as "not recoverable".
+          * the audit projection narrows its query to only the ids this run
+            actually applied (25) -- by its own documented design, so a
+            never-applied, still-reviewed id never dilutes the claim about
+            what was actually mutated;
+          * the narration (fixed by this change) narrows to the SAME applied
+            scope -- ``summary.applied_unit_ids`` union
+            ``summary.skipped_already_applied`` -- rather than the wider
+            reviewed-union-applied set it previously queried, which folded
+            the 5 never-applied, ceiling-refused ids in as "not recoverable"
+            and disagreed with the committed artifact's claim for the same
+            run.
 
-        For THIS run those two scopes disagree on the headline claim: the
-        committed, durable artifact reads "every applied item is
-        recoverable" while the narration reads "part of the whole plan is
-        recoverable" -- both individually honest against their own stated
-        scope, but presenting differently to a reader who sees only one of
-        the two. This test pins that observed disagreement precisely (rather
-        than asserting a false agreement) as a genuine composition finding
-        for this close to resolve -- it is not a defect in either module
-        read alone, and no production code is changed here.
-
-        What DOES agree, because both figures trace back to the SAME durable
-        tranche records: the raw count of ids provably recoverable.
+        The run's separate COMPLETENESS fact -- only 25 of the 30 reviewed
+        items were actually applied before the run stopped -- is still
+        reported, honestly, as its own distinct sentence (the PARTIAL
+        headline / "has NOT finished"), never folded into the recoverability
+        claim itself: "we didn't finish" and "what we did apply cannot be
+        undone" stay two separate, both-honest facts.
         """
         summary = _run_partial_bulk()
         result = project_redacted_audit(summary.run_id)
@@ -554,14 +584,18 @@ class ClusterCloseIsolationTests(unittest.TestCase):
         committed_claim = result.projection["claim_level"]
 
         self.assertEqual(committed_claim, RECOVERABLE_ALL)
-        self.assertEqual(narrated_claim, RECOVERABLE_PARTIAL)
-        self.assertNotEqual(
+        self.assertEqual(narrated_claim, RECOVERABLE_ALL)
+        self.assertEqual(
             committed_claim, narrated_claim,
-            "the committed-audit claim and the narrated claim now AGREE for a "
-            "partial run where they previously diverged by scope -- if this is "
-            "an intentional fix to align the two scopes, update this test to "
-            "pin the new (agreeing) behavior; if it is accidental, investigate "
-            "before treating it as a passing coherence check")
+            "the committed-audit claim and the narrated claim disagree for "
+            "the same run -- both must query the SAME (applied-scoped) slice "
+            "of the durable recoverability report")
+
+        # The completeness fact stays separate, honest, and unaffected.
+        self.assertEqual(classify_bulk_run_status(summary), BULK_RUN_PARTIAL)
+        self.assertIn("PARTIAL", text)
+        self.assertIn("has NOT finished", text)
+        self.assertIn("25 item(s) applied this call", text)
 
         self.assertEqual(
             result.projection["counts_by_status"]["recoverable_by_system"],
