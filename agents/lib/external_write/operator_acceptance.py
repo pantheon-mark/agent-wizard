@@ -91,6 +91,14 @@ import external_write.registered_adapters  # noqa: E402,F401
 # Default on-disk home for the minted receipt (project-root-relative; disk-first + audit).
 DEFAULT_RECEIPT_DIR = "security/acceptance_receipts"
 
+# Default on-disk home for the copy-run proof (project-root-relative; V15-2 fix). The proof's
+# location is deterministic from capability_id (convention: next-phase.md's Step 5), so the
+# operator-acceptance CLI can default the path instead of requiring it as a raw argument --
+# collapsing the documented command toward a single paste-safe line without weakening the
+# operator-authority requirement itself (the proof file at this path must still exist and
+# validate; see the default block in record_operator_acceptance below).
+DEFAULT_COPY_RUN_PROOF_DIR = "agents/handoffs"
+
 # Duplicated from wizard/scripts/lib/upgrade_reconcile.MIGRATION_QUEUE_REL (D-B1-a boundary:
 # this module lives in the operator-emitted external_write package and must not import the
 # build-side tree -- same duplication discipline as BASE_DESCRIPTOR_ID_PREFIX and
@@ -358,7 +366,15 @@ def close_pending_migration_if_matched(
 def record_operator_acceptance(
     capability_id: str,
     phase_id: str,
-    copy_run_proof_ref: str,
+    # NOTE: no literal `= None` here -- `operator_confirmation` (next positional
+    # parameter) has no default and must never get one (its emptiness is refused,
+    # never fabricated -- see the docstring below), so a default on this parameter
+    # would be a SyntaxError ("non-default argument follows default argument").
+    # `None` is still a fully supported value: every caller (the CLI wrapper below,
+    # and every other caller in this codebase) always passes this position
+    # explicitly, so the type stays `Optional[str]` and the None-handling default
+    # block below covers the CLI's omitted-argument case.
+    copy_run_proof_ref: Optional[str],
     operator_confirmation: str,
     *,
     receipt_path: Optional[str] = None,
@@ -378,7 +394,14 @@ def record_operator_acceptance(
     capability_id:         The target descriptor id being accepted.
     phase_id:              The accepted phase id (must match the descriptor's owning phase).
     copy_run_proof_ref:    Path to the capability's validated ``copy_run_proof-v1`` artifact
-                           (produced by the supervised copy-run in Step 5).
+                           (produced by the supervised copy-run in Step 5). ``None`` defaults
+                           (V15-2) to the deterministic per-capability convention
+                           ``<DEFAULT_COPY_RUN_PROOF_DIR>/<capability_id>.copy_run_proof.json``
+                           -- a convenience for the operator-facing CLI only; this is a PATH
+                           default, not a trust shortcut: the file at that path must still
+                           exist and validate (an explicit empty string still refuses below,
+                           and a defaulted path that does not exist still refuses at the
+                           pre-check a few lines down).
     operator_confirmation: The operator's VERBATIM confirmation text. Captured honestly; an
                            empty / whitespace-only value refuses (never fabricated or defaulted).
     receipt_path:          Where to write the minted receipt (default:
@@ -406,6 +429,18 @@ def record_operator_acceptance(
     if not (isinstance(phase_id, str) and phase_id.strip()):
         return _refuse("no accepted phase_id supplied")
     phase_id = phase_id.strip()
+
+    # V15-2: default the copy-run-proof path from capability_id (deterministic per-capability
+    # convention -- mirrors the receipt_path default below) so the operator-facing CLI can drop
+    # the raw --copy-run-proof argument from the documented command. This is a PATH default
+    # only -- an explicit empty/whitespace string below still refuses, and a defaulted path
+    # that does not exist still refuses at the pre-check a few lines down (nothing here weakens
+    # the operator-authority requirement: the proof file must still exist and validate).
+    if copy_run_proof_ref is None:
+        safe_id = capability_id.replace("/", "_").replace(os.sep, "_")
+        copy_run_proof_ref = os.path.join(
+            DEFAULT_COPY_RUN_PROOF_DIR, f"{safe_id}.copy_run_proof.json")
+
     if not (isinstance(copy_run_proof_ref, str) and copy_run_proof_ref.strip()):
         return _refuse("no copy_run_proof reference supplied")
     copy_run_proof_ref = copy_run_proof_ref.strip()
@@ -609,8 +644,11 @@ if __name__ == "__main__":  # pragma: no cover
         "--descriptor-set": None, "--audit-log": None,
     }
     _usage = ("Usage: operator_acceptance.py --capability-id <id> --phase-id <id> "
-              "--copy-run-proof <path> --operator-confirmation <verbatim text> "
-              "[--receipt-out <path>] [--descriptor-set <path>] [--audit-log <path>]")
+              "--operator-confirmation <verbatim text> "
+              "[--copy-run-proof <path>] [--receipt-out <path>] [--descriptor-set <path>] "
+              "[--audit-log <path>]\n"
+              "(V15-2: --copy-run-proof may be omitted -- it then defaults to "
+              "agents/handoffs/<capability-id>.copy_run_proof.json)")
     _i = 0
     while _i < len(_args):
         _a = _args[_i]
@@ -624,7 +662,10 @@ if __name__ == "__main__":  # pragma: no cover
             print(f"unknown argument {_a!r}\n{_usage}", file=_sys.stderr)
             _sys.exit(2)
 
-    for _req in ("--capability-id", "--phase-id", "--copy-run-proof", "--operator-confirmation"):
+    # V15-2: --copy-run-proof is NOT in this required list -- its path is deterministic from
+    # --capability-id (see DEFAULT_COPY_RUN_PROOF_DIR / record_operator_acceptance's default
+    # block), so omitting it is a valid, paste-safe-collapsing invocation, not a usage error.
+    for _req in ("--capability-id", "--phase-id", "--operator-confirmation"):
         if _opts[_req] is None:
             print(f"missing required {_req}\n{_usage}", file=_sys.stderr)
             _sys.exit(2)

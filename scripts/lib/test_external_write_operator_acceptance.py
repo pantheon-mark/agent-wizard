@@ -31,6 +31,7 @@ from external_write.operator_acceptance import (  # noqa: E402
     record_operator_acceptance,
     OperatorAcceptanceResult,
     DEFAULT_RECEIPT_DIR,
+    DEFAULT_COPY_RUN_PROOF_DIR,
     PENDING_MIGRATIONS_REL,
     close_pending_migration_if_matched,
 )
@@ -225,6 +226,9 @@ class OperatorAcceptanceE2ETest(unittest.TestCase):
 
     def test_default_receipt_dir_constant(self):
         self.assertEqual(DEFAULT_RECEIPT_DIR, "security/acceptance_receipts")
+
+    def test_default_copy_run_proof_dir_constant(self):
+        self.assertEqual(DEFAULT_COPY_RUN_PROOF_DIR, "agents/handoffs")
 
 
 class SplitInstallCanonicalModulePathTest(unittest.TestCase):
@@ -1003,6 +1007,26 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
         # The unrelated entry itself must still not have been deleted.
         remaining = json.loads(pm_path.read_text(encoding="utf-8"))
         self.assertEqual(len(remaining), 1)
+
+    def test_cli_accepts_with_proof_path_omitted(self):
+        # V15-2: the proof path is deterministic from capability_id
+        # (agents/handoffs/<capability_id>.copy_run_proof.json), so a non-technical
+        # operator must be able to omit --copy-run-proof entirely and still have the
+        # CLI find and validate the proof at its default location -- collapsing the
+        # documented invocation toward a single paste-safe line without weakening the
+        # operator-authority requirement (the proof file must still exist and validate).
+        self._write_descriptor_and_proof()  # writes proof at agents/handoffs/<id>.copy_run_proof.json
+        cli_path = self.external_write_dir / "operator_acceptance.py"
+        result = subprocess.run(
+            [sys.executable, str(cli_path),
+             "--capability-id", self.CAPABILITY_ID,
+             "--phase-id", self.PHASE,
+             "--operator-confirmation",
+             "Yes -- I accept this capability for live use."],
+            cwd=str(self.project_root), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0,
+                         msg=f"stdout={result.stdout!r} stderr={result.stderr!r}")
+        self.assertIn("ACCEPTED", result.stdout)
 
 
 class OperatorAdapterSurvivesRegeneratedBaselineTest(unittest.TestCase):
