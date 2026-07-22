@@ -647,6 +647,67 @@ def load_run_envelope(run_id: str, *, envelope_dir: Optional[str] = None) -> Run
 
 
 # ---------------------------------------------------------------------------
+# Orphaned-run enumerator (Cut 1.3, V15-3c) — a read-only survey over every
+# run-envelope file on disk, feeding a later aggregate health-status object
+# and a future cleanup feature. Purely additive; does not alter the WAL.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class RunEnvelopeSummary:
+    run_id: str
+    run_state: str
+    raw_had_run_state: bool
+    capability_id: str
+    minted_at: str
+    tranche_count: int
+
+
+def enumerate_run_envelopes(project_root=".", *, envelope_dir=None):
+    """Best-effort survey of every run-envelope record on disk.
+
+    Reads the RAW json per file (not load_run_envelope) so an old-format
+    record with no ``run_state`` key is distinguishable (raw_had_run_state).
+    Fail-soft: an unreadable/malformed file is skipped, never raised.
+    """
+    base = envelope_dir if envelope_dir is not None else os.path.join(
+        str(project_root), DEFAULT_ENVELOPE_DIR)
+    out = []
+    try:
+        names = sorted(os.listdir(base))
+    except (FileNotFoundError, NotADirectoryError, PermissionError):
+        return out
+    for name in names:
+        if not name.endswith(".json") or name.endswith(".consent_receipt.json"):
+            continue
+        path = os.path.join(base, name)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        raw_had = isinstance(raw.get("run_state"), str) and bool(raw.get("run_state"))
+        tranches = raw.get("tranches") or []
+        run_id = raw.get("run_id") or name[:-len(".json")]
+        out.append(RunEnvelopeSummary(
+            run_id=str(run_id),
+            run_state=_resolve_run_state(raw.get("run_state"), tranches),
+            raw_had_run_state=raw_had,
+            capability_id=str(raw.get("capability_id") or ""),
+            minted_at=str(raw.get("minted_at") or ""),
+            tranche_count=len(tranches) if isinstance(tranches, list) else 0,
+        ))
+    return out
+
+
+def nonfinalized_runs(project_root=".", *, envelope_dir=None):
+    """Run summaries whose run_state is not FINALIZED (executing/pending/old-format)."""
+    return [s for s in enumerate_run_envelopes(project_root, envelope_dir=envelope_dir)
+            if s.run_state != RUN_STATE_FINALIZED]
+
+
+# ---------------------------------------------------------------------------
 # Receipt binding (Task 5, A1/T5 — v0.12.0 Slice 1, design §4; closes F-40's
 # consent-fidelity half)
 # ---------------------------------------------------------------------------

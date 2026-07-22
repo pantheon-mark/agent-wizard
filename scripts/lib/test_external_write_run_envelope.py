@@ -38,6 +38,7 @@ _AGENTS_LIB = Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib"
 sys.path.insert(0, str(_AGENTS_LIB))
 
 from external_write import contracts as contracts_mod  # noqa: E402
+from external_write import run_envelope  # noqa: E402
 from external_write.contracts import OperationContract  # noqa: E402
 from external_write.operations import Operation, EffectUnit, Result  # noqa: E402
 from external_write.adapter_registry import (  # noqa: E402
@@ -1622,6 +1623,51 @@ class TestRunSanctionedBulk(unittest.TestCase):
                 summary = run_sanctioned_bulk(**kwargs)
             self.assertTrue(summary.completed, summary.refusal_reason)
             self.assertEqual(set(summary.applied_unit_ids), {"row0"})
+
+
+# ===========================================================================
+# Orphaned-run enumerator (V15-3c) — read-only survey of run-envelope files
+# on disk, feeding a later aggregate health-status object + a future cleanup
+# feature. Purely additive.
+# ===========================================================================
+
+class TestEnumerateRunEnvelopes(unittest.TestCase):
+    def test_enumerator_lists_nonfinalized_and_flags_old_format(self):
+        with tempfile.TemporaryDirectory() as d:
+            env_dir = os.path.join(d, "security", "run_envelopes")
+            os.makedirs(env_dir)
+            # a finalized run (must be excluded from nonfinalized_runs)
+            self._write_raw(env_dir, "run-final", {
+                "schema": "run_envelope-v1", "run_id": "run-final",
+                "capability_id": "cap_a", "run_state": "finalized",
+                "minted_at": "2026-07-20T00:00:00Z", "tranches": []})
+            # an executing run (nonfinalized)
+            self._write_raw(env_dir, "run-exec", {
+                "schema": "run_envelope-v1", "run_id": "run-exec",
+                "capability_id": "cap_a", "run_state": "executing",
+                "minted_at": "2026-07-21T00:00:00Z",
+                "tranches": [{"tranche_id": 1}]})
+            # an old-format run: no run_state key, has tranches -> resolves executing
+            self._write_raw(env_dir, "run-old", {
+                "schema": "run_envelope-v1", "run_id": "run-old",
+                "capability_id": "cap_b",
+                "minted_at": "2026-07-19T00:00:00Z",
+                "tranches": [{"tranche_id": 1}]})
+            # a consent receipt sharing the dir MUST be ignored
+            self._write_raw(env_dir, "run-exec.consent_receipt", {"any": "thing"})
+
+            summaries = run_envelope.nonfinalized_runs(d)
+            by_id = {s.run_id: s for s in summaries}
+            self.assertEqual(set(by_id), {"run-exec", "run-old"})
+            self.assertEqual(by_id["run-exec"].run_state, "executing")
+            self.assertTrue(by_id["run-exec"].raw_had_run_state)
+            self.assertEqual(by_id["run-old"].run_state, "executing")
+            self.assertFalse(by_id["run-old"].raw_had_run_state)
+            self.assertEqual(by_id["run-old"].capability_id, "cap_b")
+
+    def _write_raw(self, env_dir, safe_id, obj):
+        with open(os.path.join(env_dir, f"{safe_id}.json"), "w", encoding="utf-8") as fh:
+            json.dump(obj, fh)
 
 
 if __name__ == "__main__":
