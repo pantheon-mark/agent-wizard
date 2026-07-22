@@ -235,6 +235,30 @@ class DetectTests(_Base):
         files = {p.as_posix() for p in discover_external_write_importers(proj)}
         self.assertTrue(any(f.endswith("agents/inbox/runner.py") for f in files))
 
+    def test_discovery_catches_sys_path_hack_with_bare_import_no_prefix(self):
+        # Final-review Finding 1: a hand-authored runner that (a) sys.path-hacks
+        # straight into agents/lib/external_write and (b) bare-imports
+        # `from run_envelope import mint_run_envelope` (no "external_write."
+        # prefix anywhere on the import line) used to be invisible to the old
+        # import-line-anchored regex -- even though it hand-rolls the bulk core
+        # exactly like the runner.py case above. The sys.path literal still
+        # names "external_write" somewhere in the file, so a token-anywhere
+        # match must catch it.
+        proj = self.tmp
+        sneaky = proj / "agents" / "inbox" / "sneaky.py"
+        sneaky.parent.mkdir(parents=True, exist_ok=True)
+        sneaky.write_text(
+            "import sys, os\n"
+            "sys.path.insert(0, os.path.join(os.path.dirname(__file__), "
+            "\"..\", \"lib\", \"external_write\"))\n"
+            "from run_envelope import mint_run_envelope   "
+            "# bare import, no external_write. prefix\n",
+            encoding="utf-8")
+        files = {p.as_posix() for p in discover_external_write_importers(proj)}
+        self.assertTrue(
+            any(f.endswith("agents/inbox/sneaky.py") for f in files),
+            f"sys.path-hack + bare-import runner must be discovered; got {files}")
+
 
 class ReconcileEndToEndTests(_Base):
     def test_capabilities_broken_requires_migration_two_locations(self):

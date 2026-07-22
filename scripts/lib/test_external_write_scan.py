@@ -1287,6 +1287,22 @@ class TestCapabilityImportBoundary(unittest.TestCase):
             "from external_write.run_envelope import mint_run_envelope\n")
         self.assertNotIn("sealed_kernel_import", kinds)
 
+    def test_sealed_kernel_membership_does_not_grant_capability_zone_import(self):
+        # Final-review Finding 3: SEALED_KERNEL membership (zones.py) and the
+        # CAPABILITY-zone import allowlist (_CAPABILITY_ALLOWED_EXTERNAL_WRITE_
+        # SUBMODULES) are two INDEPENDENT sets. capability_health.py is a real
+        # SEALED_KERNEL entry (zones.SEALED_KERNEL_MODULE_PATHS) -- it is exempt
+        # from the rule when SCANNED AS a sealed-kernel file -- but it is NOT in
+        # the small operator-facing allowlist, so a CAPABILITY-zone file that
+        # imports it directly must still be flagged.
+        src = "from external_write.capability_health import check_capability_health\n"
+        kinds = self._scan_capability_source(src)
+        self.assertIn(
+            "sealed_kernel_import", kinds,
+            "a SEALED_KERNEL submodule (capability_health.py) is not "
+            "automatically CAPABILITY-zone importable; sealed membership and "
+            "the allowlist are independent")
+
     def test_scaffold_emitted_imports_are_all_allowlisted(self):
         # Guards the allowlist against the scaffold's real emitted CAPABILITY-zone
         # imports: if the scaffold starts importing a new external_write submodule

@@ -161,7 +161,7 @@ OPERATOR_CODE_DIRS: Tuple[str, ...] = (
     "agents/cron", "agents/scripts", DEFAULT_CAPABILITIES_REL.as_posix(),
 )
 
-_EXTERNAL_WRITE_IMPORT_RE = re.compile(r'^\s*(?:from|import)\s+.*\bexternal_write\b', re.M)
+_EXTERNAL_WRITE_IMPORT_RE = re.compile(r'\bexternal_write\b')
 _DISCOVERY_EXCLUDE_DIR_NAMES = frozenset(
     {".venv", "venv", "__pycache__", ".git", ".wizard", "node_modules"})
 
@@ -171,22 +171,30 @@ def discover_external_write_importers(
     *,
     exclude_dir_names: "frozenset[str]" = _DISCOVERY_EXCLUDE_DIR_NAMES,
 ) -> List[Path]:
-    """B-opt2 (V15-3a): every .py file under the operator project that imports
-    the ``external_write`` package, EXCEPT the sealed lib itself
+    """B-opt2 (V15-3a): every .py file under the operator project that
+    references the ``external_write`` package, EXCEPT the sealed lib itself
     (``agents/lib/external_write``) and excluded dirs. Deriving the reconcile's
     scan target from the real import graph -- not a fixed directory list -- is
     what makes a hand-rolled bulk runner visible wherever it lives (the estate's
     ``agents/inbox/runner.py`` was outside the old fixed OPERATOR_CODE_DIRS).
 
     Over-inclusion is SAFE (an extra clean file yields no violation);
-    under-inclusion re-opens V15-3, so the import match is deliberately broad
-    (a text scan of import lines, not a full AST parse -- a comment/string false
-    positive only costs one wasted clean scan), and matches ``external_write``
-    anywhere on the import statement -- not just as the first name -- so a
-    comma-list import (``import os, external_write`` / ``import json,
-    external_write as ew``) is caught regardless of ordering. Static import
-    graph only; dynamic/string imports are a disclosed residual (near-zero for
-    emitted, non-technical-operator code)."""
+    under-inclusion re-opens V15-3, so the match is deliberately broad: a
+    token-anywhere text search for ``external_write`` (word-boundary-scoped,
+    so ``external_write_helper`` does not match), not just an import-line
+    parse. This is what makes a hand-authored runner visible even when it
+    never puts ``external_write`` on an import line at all -- e.g. one that
+    ``sys.path``-hacks straight into ``agents/lib/external_write`` and then
+    bare-imports ``from run_envelope import mint_run_envelope`` -- because the
+    ``external_write`` path literal still has to appear somewhere in the file
+    (the ``sys.path.insert`` line) for that hack to work. It also still
+    catches a comma-list import (``import os, external_write`` / ``import
+    json, external_write as ew``) regardless of ordering, since token-anywhere
+    is a superset of the import-line match. Static/textual scan only;
+    dynamic or string-obfuscated references (e.g. building the
+    ``external_write`` path from concatenated pieces so the literal token
+    never appears) are the sole disclosed residual (near-zero for emitted,
+    non-technical-operator code)."""
     root = Path(operator_project_dir).resolve()
     sealed = (root / "agents" / "lib" / "external_write").resolve()
     hits: List[Path] = []
@@ -340,10 +348,20 @@ class MechanismReport:
                                         ever sees is scanner-red (the AST scanner
                                         only returns violating files), and a writer
                                         in this shape has no structural entrypoint
-                                        to safe-pause -- it is import-broken and
-                                        cannot run at all. Honest state, not a
-                                        continuity claim: nothing was "paused"
-                                        because nothing could run.
+                                        to safe-pause. This covers TWO distinct
+                                        runtime shapes, not just one: the writer may
+                                        be import-broken (cannot run at all), OR it
+                                        may be scanner-red but perfectly IMPORTABLE
+                                        and RUNNABLE (e.g. a hand-rolled runner that
+                                        imports the real, existing
+                                        ``mint_run_envelope`` -- the file runs fine;
+                                        that it bypasses the sanctioned surface is
+                                        exactly the danger this state exists to
+                                        surface). Honest state, not a continuity
+                                        claim: it means "physically must migrate,"
+                                        never "necessarily runtime-blocked" -- do
+                                        not read "nothing was paused" as "nothing
+                                        could run."
                                     "paused_live_write"       -- (F-55 B2, this
                                         task) a still-RUNNABLE capability (import
                                         clean AND scan clean) under the
