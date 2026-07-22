@@ -39,6 +39,7 @@ from external_write.consent_narration import (  # noqa: E402
     FORBIDDEN_INTERNAL_TERMS,
     build_consent_sentence,
     build_ceiling_checkin_prose,
+    build_multi_approval_notice,
     build_run_envelope_checkin_prose,
     build_run_envelope_consent_sentence,
     build_standing_automation_notice,
@@ -572,6 +573,34 @@ class TestReversibilityPhrase(unittest.TestCase):
         self.assertEqual(
             reversibility_phrase("reversible", "garbage"),
             reversibility_phrase("reversible", "plain"))
+
+
+class TestMultiApprovalNotice(unittest.TestCase):
+    """M2 (V15-2/E): build_multi_approval_notice states the real per-approval
+    ceiling + the run's population and the fresh-approval requirement, on >= 2
+    divergent op_kinds, and leaks no internal term. Callers gate this on
+    population_count > granted_this_approval; the notice is only meaningful in
+    that regime."""
+
+    def _assert_common(self, text, *, granted, population):
+        self.assertIn(str(granted), text)
+        self.assertIn(str(population), text)
+        # states that the remainder needs a FRESH approval, never "automatic"
+        self.assertIn("separate", text.lower())
+        self.assertNotIn("automatic", text.lower())
+        for term in FORBIDDEN_INTERNAL_TERMS:
+            self.assertNotIn(term, text)
+
+    def test_gmail_op_states_ceiling_population_and_fresh_approval(self):
+        text = build_multi_approval_notice(
+            op_kind=GMAIL_OP, population_count=250, granted_this_approval=40)
+        self._assert_common(text, granted=40, population=250)
+
+    def test_divergent_field_op(self):
+        _register_field_contract()
+        text = build_multi_approval_notice(
+            op_kind=FIELD_OP, population_count=120, granted_this_approval=5)
+        self._assert_common(text, granted=5, population=120)
 
 
 if __name__ == "__main__":

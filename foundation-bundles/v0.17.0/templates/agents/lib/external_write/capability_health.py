@@ -1,0 +1,1047 @@
+"""Emitted capability health-check module (F-55 C — session_2026-07-14 estate finding).
+
+Why this exists
+----------------
+The estate dogfood found the session-start orientation inviting the operator
+into a capability whose source file was import-broken (F-55 A/estate finding):
+nothing DETERMINISTIC stood between "a capability exists on disk" and "an
+agent tells the operator it is available to use". This module is that missing
+composite health signal: a typed, deterministic, per-capability record an
+agent's orientation prose (T5) reads BEFORE ever inviting the operator into a
+capability, so it can refuse to invite the operator into one that is broken
+(import-broken or scanner-red) or paused/pending-migration.
+
+The typed status this module produces lives BELOW the LLM — pure, disk-read,
+deterministic Python, no model judgment involved in computing it. What
+happens with that status ("don't invite the operator into a red capability")
+is agent-followed prose consuming this status, not a runtime/OS-level gate —
+the same build-time + operator-as-approver enforcement ceiling every other
+module in this package discloses, not a stronger claim.
+
+What "health" means here
+-------------------------
+For each capability this module finds, health is RED iff ANY of:
+  * the capability's source is not statically scanner-clean (an
+    external_write.scan violation was found in it), OR
+  * the capability could not be imported at all (a broken dependency, a
+    syntax the AST scanner missed catching some other way, or a plain
+    ImportError), OR
+  * the capability is paused (an upgrade-reconcile safe-pause marker exists
+    for it under ``.wizard/paused-mechanisms/``), OR
+  * the capability has a pending migration request queued in
+    ``agents/handoffs/pending_migrations.json``, OR
+  * ``state_read_error`` is True — the pause-marker state and/or the
+    migration queue EXISTS but could not be read/parsed for this capability,
+    so "paused"/"pending_migration" could not be POSITIVELY determined
+    either way (xvendor Fix B; see ``_is_paused`` / ``_is_pending_migration``
+    below). Treated the same as a confirmed-paused/confirmed-pending
+    capability: fail-closed to RED, never a silent "not paused" guess, OR
+  * (Task B2b-fix, Critical 2) ``acceptance_stale`` is True — the capability
+    is currently accepted, but ``lifecycle_state.acceptance_hash_is_stale``
+    reports its code changed since it was approved (a conformant rebuild that
+    stayed scanner-clean, or a legacy record with no verifiable hash at all —
+    see that function's own fail-safe docstring). This module is STRICTLY
+    READ-ONLY about acceptance: it surfaces the SAME verdict
+    ``lifecycle_state``/``upgrade_reconcile`` already compute, it never itself
+    forces ``accepted: false`` — see ``_capability_acceptance_stale`` below.
+Otherwise health is GREEN. Two additional, narrowly-scoped states exist ONLY for a
+descriptor-only capability_id (no source file on disk) that is an identity TWIN — differs only by
+letter case or hyphen-vs-underscore — of some OTHER, ALREADY-BUILT canonical capability (Task A4,
+F-72; see "Identity-twin classification" below): ``PENDING`` (declared but never built, never
+accepted, no recorded history of its own — safe to retire) and ``IDENTITY_CONFLICT`` (the same
+twin shape, but carrying real recorded history, so it cannot simply be discarded). A
+descriptor-only id with no such twin is entirely unaffected by this and stays RED exactly as
+before — there is still nothing on disk to positively verify it against, and this module still
+never guesses a capability healthy in the absence of evidence (fail-closed, mirroring every other
+disclosed-bound convention in this package, e.g. ``write_gate.load_descriptor_set``'s "any missing
+input ... returns []", not a raise and not a silent permissive default).
+
+Identity-twin classification (Task A4, F-72)
+------------------------------------------------------------------------------
+The estate finding: a stale descriptor ``"inbox-management"`` (hyphen, never built, never
+accepted) coexisted with the canonical, live, accepted ``"inbox_management"`` (underscore) — two
+descriptor rows for one real capability identity, differing only by separator. Before this fix,
+the never-built twin was reported RED (the SAME state as a genuinely broken capability), an
+operator-facing PHANTOM: session-start orientation would refuse to invite the operator into it as
+if something were actually wrong, when the entry was really just a dead identity remnant.
+
+For a descriptor-only capability_id (``cap_path is None`` below), ``_find_identity_twin`` checks
+whether it normalizes (``capability_identity.normalize_capability_id`` — case/separator-folded,
+reused rather than a second hand-rolled fold) to the SAME identity as some OTHER id that DOES have
+a real source file on disk. If it does not, nothing changes — RED, as always. If it does, the twin
+is classified by whether it carries any recorded STATE of its own (``accepted: true`` on its own
+descriptor entry, a pause marker, a queued migration, an acceptance-audit record, a persisted
+blast-radius invocation-ledger run under its own descriptor id/name — see "Ledger-attributed run
+history" below, a never-accepted twin can still have run through the write-gate's LIVE_BOUNDED
+pre-acceptance trial path — or an unreadable/ambiguous read on any of those): no state at all →
+``PENDING`` (tombstone-eligible — safe to retire, ``"inbox-management"``'s actual estate shape);
+ANY state → ``IDENTITY_CONFLICT`` (a DISTINCT state from RED — this needs a person to look at both
+entries and merge them, never a silent auto-discard). Both carry a plain-language
+``operator_message`` describing exactly what to do; every other record's ``operator_message`` is
+``None``.
+
+Ledger-attributed run history (Fix 2, A4 post-merge review)
+------------------------------------------------------------------------------
+``has_state``'s original formula assumed "never accepted" meant "never ran" for a never-accepted
+twin. That is unsound: the write-gate's LIVE_BOUNDED path (``write_gate.py``'s ``_declared_entry``
+/ ``_enforce_live_funnel``) authorizes a REAL bounded-live write for a merely-DECLARED (not yet
+accepted) descriptor entry — the pre-acceptance trial every capability goes through before an
+operator ever approves it. A never-accepted twin can therefore still carry real recorded run
+history of its own via that path, persisted in
+``security/invocation_ledgers/*.ledger.json`` (``write_gate.PersistentInvocationLedger``), keyed by
+``f"{op.surface}::{op.op_kind}"``. Attribution back to a specific capability_id is CLEAN, not
+guessed: every write-gate lookup that can authorize a write against a descriptor entry (
+``_covering_entry``, ``_declared_entry``, ``resolve_effective_cap``) matches ``op.surface`` against
+that SAME entry's own ``id`` or ``name`` field before ever letting the write proceed — so a ledger
+key's surface component, when it matches, names exactly the descriptor entry that authorized it.
+``_ledger_run_history_for_twin`` checks for that match; silently tombstoning a twin that authorized
+real external writes would discard genuine run history, which is exactly the case
+``IDENTITY_CONFLICT`` (never ``PENDING``) exists to catch.
+A missing/absent file (nothing yet written) is a NORMAL, non-error input for
+every one of these checks — it is only an EXISTING-but-unreadable/malformed
+file that signals ``state_read_error`` or the descriptor-enumeration sentinel
+below; "absent" and "unreadable" are deliberately never conflated (the same
+distinction ``write_gate._load_paused_op_kinds`` draws between a genuinely
+absent marker directory and an inaccessible one).
+
+Descriptor-enumeration degradation (xvendor Fix B)
+------------------------------------------------------------------------------
+``_load_descriptor_entries`` reads and parses
+``security/capability_descriptors.json`` exactly ONCE per ``check_capabilities``
+call (Fix 1, A4 post-merge review — see its own docstring); ``_load_descriptor_ids``
+and ``_load_descriptor_accepted`` are pure derivations over that single parsed
+result, never independent readers of the file (see "Enumeration" below). If
+that file EXISTS but cannot be read or parsed, this module does NOT silently
+resolve to the empty set — doing so would DROP a descriptor-only capability
+(one with no source file, so it is enumerated ONLY via the descriptor set)
+from the result entirely: a false all-clear, not a red flag, for exactly the
+capability this checker exists to protect against inviting the operator into.
+Instead ``check_capabilities`` inserts one additional sentinel record, keyed
+``SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID``, with ``health: "red"`` — so an
+agent reading this module's output sees the health check ITSELF is degraded,
+never a false all-clear for the capabilities it could still enumerate from
+disk.
+
+AST-first, import-second (the side-effect-safety ordering this module exists
+to get right)
+------------------------------------------------------------------------------
+A retired-surface capability that references the raw kernel write primitive
+(``run_operation``) trips ``external_write.scan``'s
+``raw_run_operation_reference`` rule (CAPABILITY zone) even though the SAME
+file might raise an ImportError if actually imported (e.g. a stale relative
+import, a renamed dependency). Importing a module runs its module-scope code
+— including any side effect a retired/compromised capability's top level
+might perform. So this module NEVER imports a capability whose source is
+already scanner-RED: the deterministic AST scan runs first, and an import is
+attempted ONLY for a capability that scanned clean. This is not a performance
+optimization; it is a safety ordering (see ``check_capabilities`` below).
+
+The import itself then runs in an ISOLATED SUBPROCESS (``sys.executable -c``),
+never in this process — a broken OR merely unexpected capability module must
+never be able to crash, hang, or otherwise disturb the process running this
+health check. The subprocess is given a bounded timeout, a controlled ``cwd``
+(the project root — capability modules are written assuming they run from
+there) and a controlled ``PYTHONPATH`` (the project's own
+``agents/lib``, since a capability module imports ``external_write.*``
+relative to that directory), and its stderr is captured (discarded here, but
+never allowed to propagate as a crash in THIS process).
+
+Enumeration — the union, not either set alone
+------------------------------------------------------------------------------
+A capability can exist in the machine-readable descriptor set
+(``security/capability_descriptors.json`` — every DECLARED capability,
+`accepted` flag varying, mirroring ``write_gate.load_descriptor_set``'s own
+"holds the FULL set" discipline) without a source file (e.g. removed on disk
+but never un-declared), or as a source file
+(``agents/capabilities/<capability_id>_capability.py``) without a descriptor
+entry (e.g. add-capability wrote the code before the descriptor step ran).
+Checking only one side would silently miss the other half of a real broken
+state, so this module enumerates the UNION of both, keyed by capability_id —
+a capability_id present in ONLY the descriptor set (no source file to scan or
+import) is reported RED (not importable, not scanner-clean — there is nothing
+on disk to positively verify either property against), never silently
+skipped.
+
+Reconcile-on-read (Task A2, F-70's crash-safety half)
+------------------------------------------------------------------------------
+Task A1 folded ``lifecycle_state.reconcile_state`` into the NORMAL accept path
+(``operator_acceptance.record_operator_acceptance``), so an accept that
+completes cleanly never leaves a stale ``paused_live_write`` marker behind.
+But a crash BETWEEN that accept write and its own reconcile call (or any
+other drift — a marker hand-restored from a backup, a partially-applied
+upgrade) can still orphan a marker for a capability that is, in the SSOT
+(``descriptor.accepted``), genuinely accepted. Nothing that only ever READS
+health would ever clear that marker, so the capability would report
+paused/red forever until an operator/agent happened to run a hand reconcile.
+
+``check_capabilities_with_self_heal`` is the fix: it is a SEPARATE function
+from ``check_capabilities`` (not a parameter on it) that best-effort
+self-heals every capability with a real source file on disk — via
+``lifecycle_state.reconcile_state``, fail-safe, never raising — BEFORE
+delegating to ``check_capabilities`` for the actual composite read. This is
+deliberately not folded into ``check_capabilities`` itself:
+``lifecycle_state.check_completion`` calls ``check_capabilities`` directly and
+is explicitly documented as READ-ONLY / never-writing (see that function's own
+module-section docstring, "No mutation — a check that changes what it is
+checking is not a check"); giving ``check_capabilities`` itself a write side
+effect, even opt-in, would put that guarantee at risk for every existing and
+future caller. ``check_capabilities_with_self_heal`` is for the ACTUAL read
+path an agent runs before inviting the operator into a capability
+(``operating_discipline.md``'s rule, and this module's own CLI entrypoint
+below) — the one place this fix is intended to act.
+
+FAIL-SAFE ON THE WRITE (design nuance, required): ``reconcile_state`` is
+itself a WRITE — it can clear a marker or close a migration-queue entry. A
+READ must never become a hard error just because the write it attempts along
+the way could not complete (a read-only filesystem, an unresolvable identity,
+a corrupted descriptor/queue file). Every reconcile attempt here is wrapped so
+NOTHING it raises ever propagates — see ``_attempt_self_heal``. On a failed
+attempt, the health read that follows simply reports whatever is ACTUALLY on
+disk afterward (still paused/orphaned, honestly), never a fabricated "healed"
+state that did not actually happen.
+
+Stdlib only — no third-party dependencies (this module ships into the
+operator's own runtime, agents/lib/external_write/).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import stat
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+# sys.path bootstrap: mirrors scan.py's own convention so this module also
+# works if ever run/imported in a context where the ``external_write``
+# package's parent (``agents/lib``) is not already on sys.path (e.g. invoked
+# as a standalone script rather than imported as part of the package).
+if __package__ in (None, ""):  # pragma: no cover - only true when run as a script
+    import sys as _bootstrap_sys
+    _pkg_parent = str(Path(__file__).resolve().parent.parent)
+    if _pkg_parent not in _bootstrap_sys.path:
+        _bootstrap_sys.path.insert(0, _pkg_parent)
+
+from external_write import scan  # noqa: E402
+from external_write import run_envelope  # noqa: E402
+from external_write.capability_identity import (  # noqa: E402
+    build_capability_index,
+    IdentityResolutionError,
+    normalize_capability_id,
+)
+from external_write.lifecycle_state import (  # noqa: E402
+    acceptance_hash_is_stale,
+    reconcile_state,
+    ReconcileStateError,
+)
+
+
+# ---------------------------------------------------------------------------
+# Project-root-relative locations this module reads. Every one of these is
+# duplicated-by-value from its own canonical owner (never imported across the
+# build/runtime boundary — this module is emitted runtime code, the owners
+# below are build-side or sibling-runtime modules) and pinned equal to that
+# owner BY VALUE in a build-side cross-test in
+# scripts/lib/test_capability_health.py (TestPathConstantsAntiDrift) — same
+# discipline write_gate.py's PAUSED_MECHANISMS_DIR uses against
+# upgrade_reconcile.py's PAUSED_MECHANISMS_DIR_REL, pinned in
+# scripts/lib/test_external_write_write_gate.py
+# (TestPausedMechanismsDirAntiDrift).
+# ---------------------------------------------------------------------------
+
+CAPABILITIES_DIR_REL = "agents/capabilities"
+CAPABILITY_FILE_SUFFIX = "_capability.py"
+DESCRIPTOR_SET_REL = "security/capability_descriptors.json"
+PAUSED_MECHANISMS_DIR_REL = ".wizard/paused-mechanisms"
+MIGRATION_QUEUE_REL = "agents/handoffs/pending_migrations.json"
+
+# (Task A4 / F-72) duplicated-by-value from lifecycle_state.ACCEPTANCE_LOG_REL /
+# acceptance_ceremony.DEFAULT_AUDIT_LOG_PATH -- pinned equal to lifecycle_state's copy by
+# TestPathConstantsAntiDrift.test_acceptance_log_rel_matches_lifecycle_state_constant, the same
+# discipline every other path constant in this section already carries. Used ONLY by
+# `_has_acceptance_audit_record` (identity-twin classification), never by the acceptance-staleness
+# check above (`_capability_acceptance_stale`), which instead calls into `lifecycle_state` directly.
+ACCEPTANCE_LOG_REL = "security/capability_acceptance_log.jsonl"
+
+# (Fix 2, A4 post-merge review) duplicated-by-value from write_gate.DEFAULT_LEDGER_DIR -- pinned
+# equal by TestPathConstantsAntiDrift.test_ledger_dir_rel_matches_write_gate_default_ledger_dir,
+# the same discipline every other path constant in this section already carries. Used ONLY by
+# `_ledger_run_history_for_twin` (the identity-twin `has_state` soundness fix -- see the module
+# docstring's "Ledger-attributed run history" section): a never-accepted twin can still have real
+# run history via the write-gate's LIVE_BOUNDED pre-acceptance trial path, persisted here by
+# `write_gate.PersistentInvocationLedger`.
+LEDGER_DIR_REL = "security/invocation_ledgers"
+
+# Bounded so a hung/broken capability import can never hang this checker.
+IMPORT_TIMEOUT_SECONDS = 20
+
+# (xvendor Fix B) The sentinel capability_id `check_capabilities` inserts, with
+# health "red", when the descriptor set file EXISTS but could not be read or
+# parsed -- signaling the health CHECK ITSELF is degraded (enumeration may be
+# missing a descriptor-only capability_id) rather than silently reporting a
+# false all-clear. See `_load_descriptor_ids` / `_DescriptorEnumerationError`.
+SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID = "__capability_health_check_degraded__"
+
+
+class _DescriptorEnumerationError(Exception):
+    """Raised internally by `_load_descriptor_entries` (Fix 1, A4 post-merge review -- the single
+    read/parse of the descriptor set; `_load_descriptor_ids` / `_load_descriptor_accepted` are
+    pure derivations over its result and can no longer raise this themselves) when the descriptor
+    set file EXISTS but could not be read/parsed -- the capability_id union this module enumerates
+    from might be missing a descriptor-only capability. Always caught by `check_capabilities`,
+    which converts it into the single RED sentinel record
+    (`SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID`). Never escapes this module."""
+
+# The subprocess program that attempts the import, path-addressed (capability
+# files are not necessarily importable by dotted module name — they live
+# under agents/capabilities/, not inside a package this process has already
+# imported), via importlib.util rather than a bare ``import`` statement.
+_IMPORT_HARNESS = """
+import importlib.util
+import sys
+
+_spec = importlib.util.spec_from_file_location("_capability_health_probe", {path!r})
+if _spec is None or _spec.loader is None:
+    sys.exit(1)
+_module = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = _module
+_spec.loader.exec_module(_module)
+"""
+
+
+def _load_descriptor_entries(project_root: Path) -> List[Dict[str, Any]]:
+    """(Fix 1, A4 post-merge review) The SINGLE read+parse of ``security/capability_descriptors.json``
+    for one ``check_capabilities`` call. Before this fix, ``_load_descriptor_ids`` and
+    ``_load_descriptor_accepted`` each independently opened and parsed the same file -- two reads
+    per call of a file that could, in principle, be mutated BETWEEN them (an inconsistent-snapshot
+    risk). This function reads it exactly once; ``_load_descriptor_ids`` /
+    ``_load_descriptor_accepted`` are now pure derivations over its already-parsed result, never
+    independent readers.
+
+    Fail-safe on the genuinely-ABSENT case ONLY: a descriptor set file that
+    does not exist yields the empty list — never raises, never crashes the
+    checker (mirrors ``write_gate.load_descriptor_set``'s own fail-safe
+    discipline, though this module deliberately does not import that runtime
+    module — it reads the same file independently so this checker has no
+    dependency on the write-gate's own import surface).
+
+    (xvendor Fix B) EXISTING-but-unreadable/malformed is NOT the same as
+    absent, and must not silently collapse to the empty set: doing so would
+    DROP a descriptor-only capability_id (one enumerated ONLY via this file,
+    with no source file on disk) from ``check_capabilities``'s result
+    entirely — a false all-clear for exactly the capability this checker
+    exists to catch. So this function RAISES ``_DescriptorEnumerationError``
+    when the file exists but cannot be read (``OSError`` other than
+    ``FileNotFoundError``), is not valid JSON, or is not a JSON array;
+    ``check_capabilities`` catches that and inserts a RED sentinel record
+    instead of silently under-enumerating. Non-dict entries in an otherwise-valid list are
+    silently skipped (mirrors both former readers' own per-entry tolerance) -- the returned list
+    contains only dict entries."""
+    path = project_root / DESCRIPTOR_SET_REL
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise _DescriptorEnumerationError(
+            f"descriptor set {path} exists but could not be read: {exc}") from exc
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise _DescriptorEnumerationError(
+            f"descriptor set {path} exists but is not valid JSON: {exc}") from exc
+    if not isinstance(data, list):
+        raise _DescriptorEnumerationError(
+            f"descriptor set {path} exists but is not a JSON array")
+    return [entry for entry in data if isinstance(entry, dict)]
+
+
+def _load_descriptor_ids(entries: List[Dict[str, Any]]) -> Set[str]:
+    """The set of capability_ids declared in the descriptor set -- a pure derivation over
+    ``entries`` (the single already-parsed read from ``_load_descriptor_entries``; see Fix 1, A4
+    post-merge review). This function itself can no longer raise -- by the time it is called,
+    ``check_capabilities`` has already funneled any read/parse failure into the degraded-sentinel
+    record via ``_load_descriptor_entries``."""
+    ids: Set[str] = set()
+    for entry in entries:
+        cap_id = entry.get("id")
+        if isinstance(cap_id, str) and cap_id:
+            ids.add(cap_id)
+    return ids
+
+
+def _load_descriptor_accepted(entries: List[Dict[str, Any]]) -> Dict[str, bool]:
+    """(Task A4 / F-72) capability_id -> accepted (bool) -- a pure derivation over ``entries``
+    (the SAME single already-parsed read ``_load_descriptor_ids`` derives from; see Fix 1, A4
+    post-merge review -- this and ``_load_descriptor_ids`` are no longer two independent readers
+    of the file, just two projections of one parsed list). Used ONLY to classify a descriptor-only
+    identity TWIN (see ``_find_identity_twin`` / ``check_capabilities``) as ``pending`` (no
+    recorded state) vs. ``identity_conflict`` (``accepted: true`` is itself state) -- a capability
+    that HAS a source file never consults this; that branch's health formula is unchanged by this
+    task.
+
+    An empty ``entries`` list yields ``{}`` (nothing declared, no accepted flags to report).
+    Missing/non-bool ``accepted`` resolves to False (fail-safe: an absent/ambiguous flag is never
+    treated as accepted). This function itself can no longer raise -- see ``_load_descriptor_ids``
+    above."""
+    accepted_by_id: Dict[str, bool] = {}
+    for entry in entries:
+        cap_id = entry.get("id")
+        if isinstance(cap_id, str) and cap_id:
+            accepted_by_id[cap_id] = entry.get("accepted") is True
+    return accepted_by_id
+
+
+def _find_identity_twin(cap_id: str, canonical_ids: Any) -> Optional[str]:
+    """(Task A4 / F-72) Return the OTHER, ALREADY-BUILT canonical capability id (a real
+    ``agents/capabilities/<id>_capability.py`` source file exists for it) that ``cap_id``
+    normalizes (case/separator-folded, ``capability_identity.normalize_capability_id`` -- reused,
+    never a second hand-rolled fold) to the SAME identity as -- or ``None`` if there is no such
+    collision. ``cap_id`` itself is excluded from the search (a capability can never be its own
+    twin).
+
+    Called ONLY for a capability_id with no source file of its own (``cap_path is None`` in
+    ``check_capabilities``) -- this is the "dead identity remnant" shape F-72 found: a stale
+    descriptor entry (``"inbox-management"``, hyphen) that was never built, coexisting with the
+    canonical, live, already-BUILT capability (``"inbox_management"``, underscore) under a
+    different exact spelling. A descriptor-only id with NO twin among the REAL built capabilities
+    returns ``None`` and is left completely unchanged by this task -- it stays the existing,
+    unconditional-RED "nothing on disk to verify against" treatment (see
+    ``TestDescriptorOnlyCapabilityWithNoSourceFile``), because there is no live capability it
+    could be merged into or safely retired in favor of."""
+    normalized_cap = normalize_capability_id(cap_id)
+    for other in canonical_ids:
+        if other == cap_id:
+            continue
+        if normalize_capability_id(other) == normalized_cap:
+            return other
+    return None
+
+
+def _has_acceptance_audit_record(project_root: Path, capability_id: str) -> Tuple[bool, bool]:
+    """(Task A4 / F-72) Returns ``(has_record, read_error)``: ``has_record`` is True iff the
+    acceptance-audit log (an append-only JSONL, ``acceptance_ceremony``'s own write target) has
+    ANY line whose ``capability_id`` equals ``capability_id`` exactly. Used ONLY to classify a
+    descriptor-only identity TWIN (see ``_find_identity_twin``) as carrying real history
+    (``identity_conflict``) rather than being safely tombstone-eligible (``pending``).
+
+    An ABSENT log is normal: ``(False, False)`` -- nothing has ever been accepted, for this id or
+    any other. An EXISTING-but-unreadable file sets ``read_error=True`` (folded into the twin's
+    ``has_state`` verdict by the caller, exactly like every other state-read failure in this
+    module -- never silently "no record"). A malformed INDIVIDUAL line is skipped, not treated as
+    a whole-file read error -- mirrors ``lifecycle_state._read_latest_acceptance_record``'s own
+    per-line tolerance (this module reads the file independently rather than importing that
+    private helper -- every emitted-runtime reader here is self-contained, see the module's own
+    "Stdlib only" convention)."""
+    path = project_root / ACCEPTANCE_LOG_REL
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False, False
+    except OSError:
+        return False, True
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict) and rec.get("capability_id") == capability_id:
+            return True, False
+    return False, False
+
+
+def _ledger_run_history_for_twin(project_root: Path, capability_id: str,
+                                 declared_name: Any) -> Tuple[bool, bool]:
+    """(Fix 2, A4 post-merge review) Returns ``(has_run, read_error)``: ``has_run`` is True iff
+    ANY persisted blast-radius invocation ledger
+    (``security/invocation_ledgers/*.ledger.json`` — ``write_gate.PersistentInvocationLedger``'s
+    own write target) carries a counts key whose surface component
+    (``write_gate._ledger_key``'s ``f"{op.surface}::{op.op_kind}"``) equals ``capability_id`` or
+    ``declared_name``. Used ONLY to classify a descriptor-only identity TWIN (see
+    ``_find_identity_twin``) as carrying real history (``identity_conflict``) rather than being
+    safely tombstone-eligible (``pending``) -- see the module docstring's "Ledger-attributed run
+    history" section for why a never-accepted twin can still have real run history via the
+    write-gate's LIVE_BOUNDED pre-acceptance trial path.
+
+    Attribution is CLEAN, not guessed: every write-gate lookup that can authorize a write against
+    a descriptor entry (``_covering_entry``, ``_declared_entry``) matches ``op.surface`` against
+    that SAME entry's own ``id`` OR ``name`` field before ever letting the write proceed -- so a
+    ledger key's surface component, when it matches either one, names exactly the descriptor
+    entry that authorized it. Checking both ``capability_id`` and ``declared_name`` (the twin's
+    own descriptor ``name`` field, passed by the caller) mirrors that same two-field join.
+
+    An ABSENT ledger directory is normal: ``(False, False)`` -- nothing has ever run, for this id
+    or any other. An EXISTING-but-unlistable directory, or any EXISTING ledger file that is
+    unreadable, not valid JSON, not a JSON object, or whose ``counts`` is not a JSON object, sets
+    ``read_error=True`` (folded into the twin's ``has_state`` verdict by the caller, exactly like
+    every other state-read failure in this module — never silently "no run history"). A
+    non-string counts key is treated the same way -- unreadable, not absent."""
+    ledger_dir = project_root / LEDGER_DIR_REL
+    try:
+        names = sorted(p.name for p in ledger_dir.iterdir() if p.name.endswith(".ledger.json"))
+    except FileNotFoundError:
+        return False, False
+    except OSError:
+        return False, True
+
+    surfaces = {capability_id}
+    if isinstance(declared_name, str) and declared_name:
+        surfaces.add(declared_name)
+
+    read_error = False
+    for name in names:
+        path = ledger_dir / name
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            read_error = True
+            continue
+        try:
+            data = json.loads(text)
+        except ValueError:
+            read_error = True
+            continue
+        if not isinstance(data, dict):
+            read_error = True
+            continue
+        counts = data.get("counts")
+        if not isinstance(counts, dict):
+            read_error = True
+            continue
+        for key in counts:
+            if not isinstance(key, str):
+                read_error = True
+                continue
+            surface = key.split("::", 1)[0]
+            if surface in surfaces:
+                return True, read_error
+    return False, read_error
+
+
+def _tombstone_eligible_message(cap_id: str, twin_of: str) -> str:
+    """(Task A4 / F-72) Plain-language guidance for a ``pending`` identity twin -- safe to retire
+    (tombstone), never RED, because it has no recorded history of its own."""
+    return (
+        f'"{cap_id}" is a leftover descriptor entry for the same capability as "{twin_of}" -- '
+        "they differ only by letter case or a hyphen/underscore. It was declared but never built "
+        "and never accepted, and has no recorded history of its own (no acceptance, no queued "
+        "migration, no pause, no recorded run of any kind — including a bounded live-write "
+        f'trial). It is safe to retire (tombstone) "{cap_id}"; "{twin_of}" is the real, live '
+        "capability going forward.")
+
+
+def _identity_conflict_message(cap_id: str, twin_of: str) -> str:
+    """(Task A4 / F-72) Plain-language guidance for an ``identity_conflict`` identity twin --
+    blocked, never silently discarded, because it carries real recorded history of its own."""
+    return (
+        f'"{cap_id}" and "{twin_of}" are the SAME capability identity, spelled two different '
+        "ways -- a letter-case or hyphen/underscore difference. But unlike a clean, "
+        f'never-touched duplicate, "{cap_id}" carries its own recorded history (an acceptance '
+        "flag, a queued migration, a pause marker, or an acceptance-audit record), so it cannot "
+        f'simply be discarded. This needs a person to look at both "{cap_id}" and "{twin_of}" '
+        "and merge them into one -- decide which spelling is the real one going forward, and "
+        "fold the other one's history into it.")
+
+
+def _capability_source_files(project_root: Path) -> Dict[str, Path]:
+    """capability_id -> source file path, for every
+    ``agents/capabilities/<capability_id>_capability.py`` on disk. Fail-safe:
+    an absent capabilities directory yields the empty dict."""
+    cap_dir = project_root / CAPABILITIES_DIR_REL
+    found: Dict[str, Path] = {}
+    if not cap_dir.is_dir():
+        return found
+    for path in sorted(cap_dir.glob(f"*{CAPABILITY_FILE_SUFFIX}")):
+        if not path.is_file():
+            continue
+        cap_id = path.name[: -len(CAPABILITY_FILE_SUFFIX)]
+        if cap_id:
+            found[cap_id] = path
+    return found
+
+
+def _is_paused(project_root: Path, capability_id: str) -> Tuple[bool, bool]:
+    """Returns ``(paused, read_error)``. ``paused`` is True iff an
+    upgrade-reconcile safe-pause marker exists for ``capability_id`` —
+    either the bare ``.pause`` sentinel or the ``.json`` pause-state record
+    (either one existing is sufficient; this module does not need to parse
+    the JSON to know the mechanism is paused). ``read_error`` is True iff a
+    marker path EXISTS but could not be positively verified as a normal
+    paused/absent signal (e.g. permission-denied, or a ``.json`` path of the
+    wrong shape) — a case that must NOT be silently treated as "not paused":
+
+    (xvendor Fix B) the prior implementation used ``Path.is_file()``, which
+    INTERNALLY SWALLOWS ``PermissionError``/``OSError`` and returns ``False``
+    on any stat failure — indistinguishable from a genuinely-absent marker,
+    so an existing-but-unreadable pause marker silently read as "not paused"
+    (fail-OPEN). This stat-based check distinguishes the two:
+    ``FileNotFoundError`` is the only genuinely-absent signal (fine, not an
+    error); any other ``OSError`` sets ``read_error`` and the caller
+    (``check_capabilities``) folds it into the RED verdict rather than
+    guessing "not paused".
+
+    (xvendor round-2, R2-3) SHAPE handling differs by suffix, and is itself
+    fail-closed:
+      * ``.pause`` — this module's own writer (``upgrade_reconcile.
+        _safe_pause_entrypoint`` / ``_write_paused_live_write_state``) always
+        creates it as an empty REGULAR file, but the entrypoint wrapper this
+        marker gates checks for it with a plain shell ``[ -e ... ]`` test —
+        which pauses on ANY existing path, regardless of shape. So ANY
+        existing ``.pause`` path — regular file, directory, or anything
+        else — is treated as a positive pause signal here too, matching the
+        wrapper's own check exactly. The prior ``stat.S_ISREG``-only gate
+        silently read a ``.pause`` marker that existed as a directory (the
+        wrong shape — never legitimately written that way) as "not paused":
+        a false green for a capability the wrapper itself would refuse to
+        run.
+      * ``.json`` — this is a STATE RECORD this module (and write_gate's
+        runtime deny-branch) actually parses; an existing path of the wrong
+        shape (not a regular file) is not a genuine pause-state record and
+        not a genuinely-absent marker either — it is unreadable/malformed
+        state, so it is folded into ``read_error`` (forces RED) rather than
+        silently treated as absent."""
+    paused_dir = project_root / PAUSED_MECHANISMS_DIR_REL
+    read_error = False
+    for suffix in (".pause", ".json"):
+        marker = paused_dir / f"{capability_id}{suffix}"
+        try:
+            st = os.stat(str(marker))
+        except FileNotFoundError:
+            continue
+        except OSError:
+            read_error = True
+            continue
+        if suffix == ".pause":
+            # Any EXISTING path counts as paused, regardless of shape (see
+            # docstring) — mirrors the wrapper's own `[ -e ]` check.
+            return True, read_error
+        if stat.S_ISREG(st.st_mode):
+            return True, read_error
+        # ".json" of the wrong shape: existing but not a genuine state
+        # record — force red via read_error, never silently "not paused".
+        read_error = True
+    return False, read_error
+
+
+def _is_pending_migration(project_root: Path, capability_id: str) -> Tuple[bool, bool]:
+    """Returns ``(pending, read_error)``. ``pending`` is True iff
+    ``agents/handoffs/pending_migrations.json`` carries an entry whose
+    ``mechanism_id`` (or, defensively, ``capability_id``) equals
+    ``capability_id``. An ABSENT queue file is a normal, non-error input:
+    reads as ``(False, False)`` — nothing has ever been queued.
+
+    (xvendor Fix B) an EXISTING queue file that is unreadable or malformed
+    is NOT the same as absent, and must not silently collapse to "not
+    pending" (fail-OPEN — the prior implementation folded both cases into a
+    bare ``False``, and this field feeds directly into the RED/GREEN
+    verdict). Such a file returns ``read_error=True``; the caller
+    (``check_capabilities``) folds that into the RED verdict rather than
+    guessing "no pending migration". This is best-effort enrichment on top
+    of the entrypoint-level safe-pause (``_is_paused``), not the sole gate,
+    but a read failure here must never present as a clean bill of health."""
+    path = project_root / MIGRATION_QUEUE_REL
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False, False
+    except OSError:
+        return False, True
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return False, True
+    if not isinstance(data, list):
+        return False, True
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("mechanism_id") == capability_id or entry.get("capability_id") == capability_id:
+            return True, False
+    return False, False
+
+
+def _scan_source(cap_path: Path) -> List[scan.Violation]:
+    """Run the Task-5 AST bypass scanner against exactly this one capability
+    file. Fail-safe: any unexpected exception from the scanner itself (not
+    expected in normal operation — ``scan_paths`` already handles unparseable
+    / unreadable source internally) is treated as a violation, not a crash
+    and not a silent clean pass."""
+    try:
+        return scan.scan_paths([cap_path])
+    except Exception as exc:  # noqa: BLE001 - fail-closed, never let this crash the checker
+        return [scan.Violation(path=str(cap_path), lineno=0, kind=f"scan_error:{exc}")]
+
+
+def _attempt_isolated_import(cap_path: Path, project_root: Path) -> bool:
+    """Attempt to import ``cap_path`` in an ISOLATED SUBPROCESS. Returns True
+    iff the import completed with no error. Never called for a capability
+    whose static scan was not clean — see ``check_capabilities``.
+
+    Isolation: a fresh ``sys.executable -c`` process, never this one — a
+    broken or merely unexpected capability module can raise, exit, hang, or
+    otherwise misbehave without ever touching this process's own state.
+    Bounded by ``IMPORT_TIMEOUT_SECONDS`` so a hang cannot hang this checker
+    either. ``cwd`` is the project root (capability modules are written
+    assuming they run from there) and ``PYTHONPATH`` is set to the project's
+    own ``agents/lib`` (capability modules import ``external_write.*``,
+    which lives at ``agents/lib/external_write/``)."""
+    agents_lib = str((project_root / "agents" / "lib").resolve())
+    env = dict(os.environ)
+    existing_path = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        agents_lib + os.pathsep + existing_path if existing_path else agents_lib
+    )
+    program = _IMPORT_HARNESS.format(path=str(cap_path.resolve()))
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", program],
+            cwd=str(project_root),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=IMPORT_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # Could not even launch/finish the probe (missing interpreter, a
+        # timeout, ...) -- fail-safe: not importable, never a crash.
+        return False
+    return result.returncode == 0
+
+
+def _capability_acceptance_stale(project_root: Path, capability_id: str) -> bool:
+    """(Task B2b-fix, Critical 2) READ-ONLY reporting of
+    ``lifecycle_state.acceptance_hash_is_stale`` for ``capability_id`` — this module NEVER
+    writes ``accepted: false`` itself (that write belongs solely to
+    ``lifecycle_state.revoke_stale_acceptance`` / ``upgrade_reconcile``'s own upgrade-time
+    pass); it only SURFACES the same verdict as a health signal, so an agent's orientation
+    prose (``operating_discipline.md``) and ``add-capability``'s Step A — both of which already
+    refuse to invite the operator into a ``health: "red"`` capability — decline to invite the
+    operator into a capability whose code changed since it was approved, without health itself
+    ever mutating anything on disk.
+
+    Fail-safe: any error resolving/reading the acceptance state
+    (``IdentityResolutionError``, ``ReconcileStateError``, or any other unexpected exception) is
+    treated as True (stale / can't verify) — never a silent "not stale" guess, mirroring every
+    other disclosed-bound convention in this module. Only called for a capability_id that has a
+    real source file on disk (see ``check_capabilities``) — ``acceptance_hash_is_stale`` itself
+    requires a resolvable module-stem identity, which a descriptor-only (no source file)
+    capability_id cannot supply; that capability is already RED for other reasons regardless."""
+    try:
+        return acceptance_hash_is_stale(str(project_root), capability_id)
+    except (IdentityResolutionError, ReconcileStateError):
+        return True
+    except Exception:  # noqa: BLE001 - fail-closed, never let this crash the checker
+        return True
+
+
+def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
+    """Return one composite health record per capability found under
+    `project_root`, enumerated from the UNION of the descriptor set
+    (``security/capability_descriptors.json``) and the source files on disk
+    (``agents/capabilities/*_capability.py``) — see the module docstring's
+    "Enumeration" section.
+
+    Each record:
+      ``{"capability_id": str, "importable": bool, "scanner_clean": bool,
+        "violations": List[str], "paused": bool, "pending_migration": bool,
+        "state_read_error": bool, "acceptance_stale": bool,
+        "identity_twin_of": Optional[str], "operator_message": Optional[str],
+        "health": "green" | "red" | "pending" | "identity_conflict"}``
+
+    ``health == "red"`` iff (NOT importable) OR (NOT scanner_clean) OR paused
+    OR pending_migration OR state_read_error OR acceptance_stale; else ``"green"`` -- EXCEPT for a
+    descriptor-only capability_id (no source file) that is an identity TWIN of some OTHER,
+    already-built canonical capability (Task A4 / F-72; see ``_find_identity_twin`` and the module
+    docstring's "Identity-twin classification" section): that shape reports ``"pending"`` (no
+    recorded state of its own -- tombstone-eligible) or ``"identity_conflict"`` (carries real
+    state -- blocked, needs a person to merge) instead of ``"red"``. ``identity_twin_of`` names the
+    OTHER canonical id it collides with (``None`` for every other record); ``operator_message`` is
+    a plain-language explanation of what to do, populated ONLY for those two states (``None``
+    otherwise).
+
+    ``acceptance_stale`` (Task B2b-fix, Critical 2) is True iff the capability is currently
+    ``accepted`` and ``lifecycle_state.acceptance_hash_is_stale`` reports its code changed since
+    approval (see ``_capability_acceptance_stale`` and the module docstring's own bullet on this).
+    READ-ONLY: this function never itself forces ``accepted: false`` — it only surfaces the
+    verdict so orientation prose / add-capability's Step A can decline to invite the operator
+    into a stale capability, the same way they already decline for a scanner-red or paused one.
+
+    ``state_read_error`` (xvendor Fix B) is True iff the pause-marker state
+    and/or the migration queue EXISTS but could not be positively read for
+    this capability (see ``_is_paused`` / ``_is_pending_migration``) — an
+    unreadable state is never silently treated as "not paused"/"not
+    pending"; it forces RED exactly like a confirmed pause would.
+
+    AST-FIRST, IMPORT-SECOND (safety ordering, not an optimization): a
+    capability is only ever handed to the isolated-subprocess import attempt
+    if its static scan came back clean. A scanner-RED capability is marked
+    red immediately, with `importable` fixed at False, and is NEVER imported
+    -- see the module docstring's "AST-first, import-second" section for why.
+
+    A capability_id present ONLY in the descriptor set (no matching source
+    file on disk) is reported red -- there is nothing on disk to positively
+    verify `importable`/`scanner_clean` against, and this module never
+    guesses a capability healthy in the absence of evidence (fail-closed,
+    same direction as every other disclosed-bound convention in this
+    package).
+
+    DESCRIPTOR-ENUMERATION DEGRADATION (xvendor Fix B): if the descriptor set
+    file itself exists but could not be read/parsed, this function does NOT
+    silently enumerate only the capabilities it could still find on disk --
+    that would drop a descriptor-only capability_id from the result with no
+    signal at all (a false all-clear). Instead it inserts ONE additional
+    sentinel record, keyed ``SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID``, with
+    ``health: "red"``, alongside every capability_id it could still enumerate
+    from source files on disk.
+
+    Deterministic, ordered by capability_id (the sentinel record, when
+    present, is inserted first). Never raises: every disk read this function
+    performs is individually fail-safe or funneled through the sentinel
+    above (see the private helpers above); a missing project_root, missing
+    descriptor set, missing capabilities directory, and missing
+    paused/migration files are all ordinary, silently-tolerated inputs, not
+    error conditions -- only an EXISTING-but-unreadable/malformed file
+    triggers ``state_read_error`` or the sentinel record.
+    """
+    root = Path(project_root)
+    descriptor_enumeration_degraded = False
+    # (Fix 1, A4 post-merge review) ONE read+parse of the descriptor set for this whole call --
+    # `_load_descriptor_ids` and `_load_descriptor_accepted` both derive from this SAME parsed
+    # snapshot below, rather than each opening and parsing the file independently (an
+    # inconsistent-snapshot risk the prior two-reads-per-call shape carried).
+    try:
+        descriptor_entries = _load_descriptor_entries(root)
+    except _DescriptorEnumerationError:
+        descriptor_entries = []
+        descriptor_enumeration_degraded = True
+    descriptor_ids = _load_descriptor_ids(descriptor_entries)
+    descriptor_accepted = _load_descriptor_accepted(descriptor_entries)
+    # (Fix 2, A4 post-merge review) capability_id -> declared `name`, for the ledger-attributed
+    # run-history check below (`_ledger_run_history_for_twin`) -- the write-gate's own op->capability
+    # join matches `op.surface` against a descriptor entry's `id` OR `name`, so a twin's ledger
+    # attribution must check both, not just its id.
+    descriptor_name_by_id: Dict[str, Any] = {
+        entry.get("id"): entry.get("name")
+        for entry in descriptor_entries
+        if isinstance(entry.get("id"), str) and entry.get("id")
+    }
+    source_files = _capability_source_files(root)
+
+    # F-61 (Task A3): resolve each descriptor-only id to its OWNING module via the capability
+    # identity index BEFORE the same-named-file check below. A capability whose module stem
+    # differs from its descriptor id (the estate split: descriptor id "inbox-labels", module
+    # stem "inbox_management") previously had no source file under its own exact name and was
+    # reported red for "no source file to scan or import against" -- even though a healthy,
+    # importable module for it exists on disk under a different name. A descriptor id that
+    # already matches a module stem directly is left alone; one that cannot be resolved to
+    # exactly one canonical (unresolved -- a genuinely orphaned descriptor entry -- or
+    # ambiguous) is also left as its own raw id, unchanged fail-closed behavior (see
+    # TestDescriptorOnlyCapabilityWithNoSourceFile / TestPathConstantsAntiDrift below).
+    identity_index = build_capability_index(str(root))
+    resolved_descriptor_ids: Set[str] = set()
+    for d_id in descriptor_ids:
+        if d_id in source_files:
+            resolved_descriptor_ids.add(d_id)
+            continue
+        try:
+            identity = identity_index.resolve(d_id, "descriptor_id")
+        except IdentityResolutionError:
+            resolved_descriptor_ids.add(d_id)
+            continue
+        resolved_descriptor_ids.add(identity.canonical_id)
+
+    all_ids = sorted(resolved_descriptor_ids | set(source_files))
+
+    records: List[Dict[str, Any]] = []
+    if descriptor_enumeration_degraded:
+        records.append({
+            "capability_id": SENTINEL_DESCRIPTOR_ENUMERATION_ERROR_ID,
+            "importable": False,
+            "scanner_clean": False,
+            "violations": [],
+            "paused": False,
+            "pending_migration": False,
+            "state_read_error": True,
+            "acceptance_stale": False,
+            "identity_twin_of": None,
+            "operator_message": None,
+            "health": "red",
+        })
+
+    for cap_id in all_ids:
+        cap_path = source_files.get(cap_id)
+        paused, paused_read_error = _is_paused(root, cap_id)
+        pending_migration, migration_read_error = _is_pending_migration(root, cap_id)
+        state_read_error = paused_read_error or migration_read_error
+        identity_twin_of: Optional[str] = None
+        operator_message: Optional[str] = None
+
+        if cap_path is None:
+            # Declared but no source file to scan or import against.
+            importable = False
+            scanner_clean = False
+            violations: List[str] = []
+            # (Task B2b-fix) Nothing on disk to resolve a module-stem identity against --
+            # already RED for the reasons above regardless; acceptance_hash_is_stale would
+            # only ever raise IdentityResolutionError here, never a meaningful verdict.
+            acceptance_stale = False
+
+            # (Task A4 / F-72) Identity-twin classification -- see the module docstring's
+            # "Identity-twin classification" section. A descriptor-only id with no twin among the
+            # REAL built capabilities is untouched by this and falls straight through to RED
+            # below, exactly as before this task.
+            twin_of = _find_identity_twin(cap_id, source_files.keys())
+            if twin_of is None:
+                health = "red"
+            else:
+                identity_twin_of = twin_of
+                accepted_flag = descriptor_accepted.get(cap_id, False)
+                has_audit_record, audit_read_error = _has_acceptance_audit_record(root, cap_id)
+                # (Fix 2, A4 post-merge review) A never-accepted twin can still have REAL
+                # invocation-ledger run history via the write-gate's LIVE_BOUNDED pre-acceptance
+                # trial path -- see the module docstring's "Ledger-attributed run history"
+                # section. Soundness fix: silently tombstoning that would discard genuine run
+                # history, so it must count as state too, exactly like the other four signals.
+                has_ledger_run, ledger_read_error = _ledger_run_history_for_twin(
+                    root, cap_id, descriptor_name_by_id.get(cap_id))
+                has_state = (
+                    accepted_flag or paused or pending_migration or state_read_error
+                    or has_audit_record or audit_read_error
+                    or has_ledger_run or ledger_read_error
+                )
+                if has_state:
+                    health = "identity_conflict"
+                    operator_message = _identity_conflict_message(cap_id, twin_of)
+                else:
+                    health = "pending"
+                    operator_message = _tombstone_eligible_message(cap_id, twin_of)
+        else:
+            found = _scan_source(cap_path)
+            scanner_clean = not found
+            violations = [f"{v.kind}:{v.lineno}" for v in found]
+            if scanner_clean:
+                importable = _attempt_isolated_import(cap_path, root)
+            else:
+                # Scanner-RED -- never import (see module docstring).
+                importable = False
+            acceptance_stale = _capability_acceptance_stale(root, cap_id)
+
+            health = (
+                "red"
+                if (not importable) or (not scanner_clean) or paused or pending_migration
+                   or state_read_error or acceptance_stale
+                else "green"
+            )
+
+        records.append({
+            "capability_id": cap_id,
+            "importable": importable,
+            "scanner_clean": scanner_clean,
+            "violations": violations,
+            "paused": paused,
+            "pending_migration": pending_migration,
+            "state_read_error": state_read_error,
+            "acceptance_stale": acceptance_stale,
+            "identity_twin_of": identity_twin_of,
+            "operator_message": operator_message,
+            "health": health,
+        })
+
+    return records
+
+
+def _attempt_self_heal(project_root: Path, capability_id: str) -> None:
+    """(Task A2, F-70 crash-safety half) Best-effort, NEVER-RAISING attempt to reconcile
+    ``capability_id``'s lifecycle views via ``lifecycle_state.reconcile_state`` — see
+    ``check_capabilities_with_self_heal``'s own docstring (module docstring's "Reconcile-on-read"
+    section) for the full rationale. ANY exception this raises — ``IdentityResolutionError`` (no
+    resolvable module on disk), ``ReconcileStateError`` (an unreadable descriptor/queue file), or
+    an ``OSError``/``PermissionError`` from a filesystem that refused the write (e.g. read-only) —
+    is swallowed here, never propagated. Returns nothing; the caller always re-reads whatever is
+    ACTUALLY on disk afterward, healed or not — this function exists purely for its (possible)
+    side effect."""
+    try:
+        reconcile_state(str(project_root), capability_id)
+    except Exception:  # noqa: BLE001 - fail-safe; a read must never hard-error over an attempted write
+        pass
+
+
+def check_capabilities_with_self_heal(project_root: Any) -> List[Dict[str, Any]]:
+    """The read-path entrypoint for capability health (Task A2, F-70's crash-safety half): before
+    computing the composite health report, best-effort self-heal every capability that has a real
+    source file on disk (see ``_attempt_self_heal``) — so a pause marker orphaned by a crash
+    between an accept write and its own reconcile step (Task A1 wires the normal case; this covers
+    the crash-between-the-two-writes case), or any other drift, converges BEFORE this read reports
+    it, rather than the capability reporting phantom-broken/red forever until someone happens to
+    run a hand reconcile.
+
+    Deliberately a SEPARATE function from ``check_capabilities`` — see the module docstring's
+    "Reconcile-on-read" section for why this is not instead a parameter/default change to that
+    function (``lifecycle_state.check_completion``'s own explicit READ-ONLY/never-writes
+    contract). Every reconcile attempt is fail-safe (never raises — see ``_attempt_self_heal``);
+    this function itself also never raises. Returns the exact same record shape
+    ``check_capabilities`` returns, computed AFTER every self-heal attempt has already run (or
+    been silently skipped, on a filesystem/state that would not permit it)."""
+    root = Path(project_root)
+    for cap_id in _capability_source_files(root):
+        _attempt_self_heal(root, cap_id)
+    return check_capabilities(root)
+
+
+def overall_status(project_root: Any = ".") -> Dict[str, Any]:
+    """A typed, below-the-LLM honest-status object for session-start.
+
+    ``normal_status_allowed`` is True ONLY when every capability is green AND
+    no run envelope is non-finalized. The agent may not report "everything is
+    running normally" unless this is True (relay-verbatim convention).
+    """
+    caps = check_capabilities_with_self_heal(project_root)
+    red = sorted({c["capability_id"] for c in caps if c.get("health") != "green"})
+    paused = sorted({c["capability_id"] for c in caps if c.get("paused")})
+    runs = run_envelope.nonfinalized_runs(project_root)
+    orphaned = [{
+        "run_id": s.run_id,
+        "run_state": s.run_state,
+        "capability_id": s.capability_id,
+        # legacy old-format runs have no WAL/authorize_resume affordance
+        "resumable": s.raw_had_run_state,
+    } for s in runs]
+    normal_ok = (not red) and (not orphaned)
+    return {
+        "overall": "green" if normal_ok else "red",
+        "normal_status_allowed": normal_ok,
+        "red_capabilities": red,
+        "paused_capabilities": paused,
+        "orphaned_runs": orphaned,
+    }
+
+
+# ---------------------------------------------------------------------------
+# CLI entrypoint -- an agent's orientation step (T5) reads this composite
+# status to decide whether to invite the operator into a capability; this
+# lets it be checked ad hoc from a shell too. Exits 0 regardless of findings
+# (this is a REPORT, not a gate the process itself enforces) -- prints one
+# JSON array to stdout.
+#
+# (Task A2) Self-heals first (``check_capabilities_with_self_heal``, see module docstring's
+# "Reconcile-on-read" section) — this IS the read path an agent runs before inviting the operator
+# into a capability, so this is where the self-heal is intended to act.
+#
+# Usage:
+#   python3 agents/lib/external_write/capability_health.py [<project_root>]
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":  # pragma: no cover
+    _argv = sys.argv[1:]
+    if _argv and _argv[0] == "--overall":
+        _root = _argv[1] if len(_argv) > 1 else "."
+        print(json.dumps(overall_status(_root), indent=2, sort_keys=True))
+    else:
+        _root = _argv[0] if _argv else "."
+        print(json.dumps(check_capabilities_with_self_heal(_root),
+                         indent=2, sort_keys=True))

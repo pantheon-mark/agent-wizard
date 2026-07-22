@@ -331,6 +331,19 @@
       "safety_class": "safety_fix",
       "source_commit": "e662542",
       "status": "prerelease"
+    },
+    {
+      "bundle_manifest_sha256": "sha256:14879ace92cffb2907a92aa72fb7231ca08366935af353d412a60329edd107df",
+      "bundle_tree_sha256": "sha256:289490ffccc8923dde86ad5d61375824e8bfdfcd5fa7e3626456e7f663919f51",
+      "changelog": "Your system now checks each capability's health at the start of every session and tells you plainly if one is switched off or a bulk job was interrupted \u2014 it will not say everything is running normally when it isn't. Turning on a capability you have built or rebuilt is now a single short command instead of a long one that could break when pasted.",
+      "foundation_bundle_version": "v0.17.0",
+      "manifest": "foundation-bundles/v0.17.0/manifest.yaml",
+      "path": "foundation-bundles/v0.17.0/",
+      "recommendation_reason": "If your system has (or will have) a capability that writes in bulk, this makes the start-of-session status honest about anything switched off or interrupted, and turns switching a capability on into a single reliable step \u2014 most operators should take it.",
+      "release_date": "2026-07-22",
+      "safety_class": "reliability_fix",
+      "source_commit": "PENDING",
+      "status": "prerelease"
     }
   ],
   "registry_schema_version": "v2",

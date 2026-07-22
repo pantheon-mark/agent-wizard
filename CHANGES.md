@@ -12,6 +12,21 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-22 — honest capability health at the start of every session, and turning a capability on is now a single reliable command (v0.17.0)
+
+**Public-facing change:** Improvements to how your system reports its own status and how you switch a capability on.
+
+- **Your system now checks each capability's health at the start of every session and tells you plainly if one is switched off or a bulk job was interrupted.** It will not tell you everything is running normally when it isn't — the "all normal" message appears only when every capability is genuinely healthy.
+- **Turning on a capability you've built or rebuilt is now a single short command**, instead of a longer, multi-line one that could break when pasted into the terminal.
+- **When a batch of changes is larger than a single approval covers, your system now says so accurately** — it tells you up front that the work will take more than one approval, based on the real limit for that kind of change, rather than implying one approval covers all of it.
+- No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
+
+This is a reliability fix (`v0.17.0`, minor-additive, operator-explicit as always). Foundation documents are byte-identical to `v0.16.0`.
+
+`Source-Meta-Commit:` `PENDING` (private build repo) · public repo commit `PENDING`
+
+---
+
 ## 2026-07-22 — capability code can no longer reach the bulk-write engine's internals directly, and upgrades now catch more pre-existing custom code that needs migrating (v0.16.0)
 
 **Public-facing change:** A structural safety tightening under the hood, plus a broader upgrade-time check.

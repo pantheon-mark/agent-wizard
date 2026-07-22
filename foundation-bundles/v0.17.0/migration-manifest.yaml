@@ -1,0 +1,157 @@
+_note: JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing companion. Both files MUST stay in sync.
+artifact_notes:
+  agents/lib/external_write/run_envelope.py: Adds a read-only survey of interrupted or unfinished bulk runs so the session-start health check can surface them.
+  agents/lib/external_write/capability_health.py: Adds an overall honest-status summary (a switched-off capability or an unfinished bulk run forces a not-normal status) plus a report the session-start reads.
+  agents/lib/external_write/operator_acceptance.py: Turning on a built or rebuilt capability now works from a single short command; the proof file and phase are filled in for you, and your approval is still required.
+  agents/lib/external_write/command_manifest.py: Records the turn-on command as an action that always asks for your approval and is never auto-approved.
+  agents/lib/external_write/consent_narration.py: When a job is larger than one approval covers, the approval message now says the rest will need a separate approval.
+  CLAUDE.md: Session start now runs the capability health check and will not report all-normal while a capability is off or a bulk job is unfinished.
+  start-session.sh: The session greeting now honors the capability health check when telling you whether anything needs your attention.
+  wizard/skills/next-phase.md: The turn-on step now hands you the single short command.
+  wizard/skills/orientation.md: Orientation now reads the capability health check and only says the system is ready when it truly is.
+  wizard/skills/rebuild-paused-capability.md: The turn-on step now hands you the single short command.
+migrations:
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.16.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.15.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.14.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.13.1
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.13.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.12.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.11.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.10.2
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.10.1
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.10.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.9.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.8.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.7.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.6.9
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.17.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.17.0. Two operator-experience improvements for any system that has a capability which writes in bulk: (1) at the start of every session the system now checks each capability''s health and tells you plainly if one is switched off or a bulk job was interrupted, and it will not report that everything is running normally when it isn''t; (2) turning on a capability you have just built or rebuilt is now a single short command instead of a long multi-line one that could break when pasted, and the system fills in the details while still requiring your approval. It also explains up front, when a job is larger than one approval covers, that the rest will need a separate approval. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.17.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+release_classification: minor_additive_prerelease
+release_date: '2026-07-22'
+schema_version: v1
+target_version: v0.17.0
