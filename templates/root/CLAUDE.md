@@ -16,13 +16,14 @@ This system starts via `./start-session.sh`. Three modes:
 | `./start-session.sh --resume` | Resuming after a planned pause or `/clear` |
 | `./start-session.sh --resume --alert` | Responding to a system alert |
 
-**At every session start, read these five files in order before acting:**
+**At every session start, read these five files in order, then run the capability health check, before acting:**
 
 1. `session_bootstrap.md` — current state, last completed step, open items
 2. `/logs/notification_log.md` — any alerts requiring attention
 3. `pending_decisions.md` — decisions awaiting advisor input
 4. `/work/work_queue.md` — current work queue
 5. `/quality/human_review_queue.md` — items flagged for user judgment
+6. Run `python3 agents/lib/external_write/capability_health.py --overall` and read its JSON. If `normal_status_allowed` is `false`, you MUST raise it: a capability in `paused_capabilities`/`red_capabilities` is a pending operator action (it is switched off until rebuilt + re-accepted), and any entry in `orphaned_runs` is an interrupted bulk run to resume or discard. You may NOT tell the operator "everything is running normally" (or any equivalent) unless `normal_status_allowed` is `true`.
 
 **Alert-response sessions (`--resume --alert`):** Read the notification log first. Identify what triggered the alert and confirm the correct response before acting on anything else. Critical alerts are adjudicated before all other work.
 

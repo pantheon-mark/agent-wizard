@@ -14,6 +14,7 @@ Read these files from disk, fresh, every time. Do not answer from a remembered o
 - `build_progress.md` -- which phases have been built and accepted, and which is next.
 - `pending_decisions.md` -- anything the system is waiting on the operator to decide.
 - The current loop state from disk (whatever file tracks where an in-progress run or phase left off).
+- The capability health check: run `python3 agents/lib/external_write/capability_health.py --overall` and read its JSON `normal_status_allowed` flag.
 
 If the operator is resuming or picking up where they left off, read the "Resume here" note in `session_bootstrap.md` first -- the pause skill wrote it precisely so this skill can find it.
 
@@ -31,4 +32,4 @@ After reading, tell the operator in one short paragraph -- plain language, no ja
 
 Never present a bare menu of options. If there genuinely is more than one reasonable next step, pick the one you recommend, say why in a few words, and mention the others are available if they prefer -- but lead with the single recommendation.
 
-If nothing is blocked and the system is simply ready for the next thing, say so plainly and give them the one next step (for example, building the next phase).
+If — and only if — the health check's `normal_status_allowed` is `true` and nothing else is blocked, say plainly that the system is ready and give the one next step. If `normal_status_allowed` is `false`, lead with the pending action it names (a paused/red capability to rebuild, or an interrupted run to resume) in plain language — never report all-clear over a switched-off capability.
