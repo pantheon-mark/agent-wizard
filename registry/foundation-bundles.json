@@ -329,7 +329,7 @@
       "recommendation_reason": "If your system has any capabilities that write in bulk, or you plan to add or rebuild one, this closes an internal path a capability could otherwise use to bypass the approved way of reaching the bulk-write engine, and it makes an upgrade more thorough about recognizing your own older custom code that needs to come along safely \u2014 most operators should take it.",
       "release_date": "2026-07-22",
       "safety_class": "safety_fix",
-      "source_commit": "PENDING",
+      "source_commit": "e662542",
       "status": "prerelease"
     }
   ],
