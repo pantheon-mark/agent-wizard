@@ -1665,6 +1665,12 @@ class TestEnumerateRunEnvelopes(unittest.TestCase):
             self.assertFalse(by_id["run-old"].raw_had_run_state)
             self.assertEqual(by_id["run-old"].capability_id, "cap_b")
 
+    def test_missing_envelope_dir_returns_empty(self):
+        # Common fresh-project case: no security/run_envelopes subdir has
+        # ever been created. Must fail-soft to [] rather than raise.
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(run_envelope.nonfinalized_runs(d), [])
+
     def _write_raw(self, env_dir, safe_id, obj):
         with open(os.path.join(env_dir, f"{safe_id}.json"), "w", encoding="utf-8") as fh:
             json.dump(obj, fh)

@@ -674,7 +674,7 @@ def enumerate_run_envelopes(project_root=".", *, envelope_dir=None):
     out = []
     try:
         names = sorted(os.listdir(base))
-    except (FileNotFoundError, NotADirectoryError, PermissionError):
+    except OSError:
         return out
     for name in names:
         if not name.endswith(".json") or name.endswith(".consent_receipt.json"):
