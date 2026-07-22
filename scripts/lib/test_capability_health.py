@@ -1022,5 +1022,41 @@ class TestPathConstantsAntiDrift(unittest.TestCase):
         )
 
 
+class TestOverallStatus(CapabilityHealthTestBase):
+    def test_normal_allowed_only_when_green_and_no_orphans(self):
+        # one clean capability, no runs -> normal allowed
+        self._write_capability(
+            "clean_cap", _CLEAN_CAPABILITY_SOURCE.format(display_name="Clean"))
+        status = capability_health.overall_status(self.project_root)
+        self.assertEqual(status["overall"], "green")
+        self.assertTrue(status["normal_status_allowed"])
+        self.assertEqual(status["red_capabilities"], [])
+        self.assertEqual(status["orphaned_runs"], [])
+
+    def test_paused_capability_blocks_normal(self):
+        self._write_capability(
+            "paused_cap", _CLEAN_CAPABILITY_SOURCE.format(display_name="Paused"))
+        self._write_pause_marker("paused_cap")
+        status = capability_health.overall_status(self.project_root)
+        self.assertEqual(status["overall"], "red")
+        self.assertFalse(status["normal_status_allowed"])
+        self.assertIn("paused_cap", status["red_capabilities"])
+        self.assertIn("paused_cap", status["paused_capabilities"])
+
+    def test_orphaned_run_blocks_normal_even_when_caps_green(self):
+        self._write_capability(
+            "clean_cap", _CLEAN_CAPABILITY_SOURCE.format(display_name="Clean"))
+        env_dir = os.path.join(self.project_root, "security", "run_envelopes")
+        os.makedirs(env_dir)
+        with open(os.path.join(env_dir, "r1.json"), "w", encoding="utf-8") as fh:
+            json.dump({"schema": "run_envelope-v1", "run_id": "r1",
+                       "capability_id": "clean_cap", "run_state": "executing",
+                       "minted_at": "2026-07-21T00:00:00Z",
+                       "tranches": [{"tranche_id": 1}]}, fh)
+        status = capability_health.overall_status(self.project_root)
+        self.assertFalse(status["normal_status_allowed"])
+        self.assertEqual([r["run_id"] for r in status["orphaned_runs"]], ["r1"])
+
+
 if __name__ == "__main__":
     unittest.main()

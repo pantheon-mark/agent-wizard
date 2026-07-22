@@ -225,6 +225,7 @@ if __package__ in (None, ""):  # pragma: no cover - only true when run as a scri
         _bootstrap_sys.path.insert(0, _pkg_parent)
 
 from external_write import scan  # noqa: E402
+from external_write import run_envelope  # noqa: E402
 from external_write.capability_identity import (  # noqa: E402
     build_capability_index,
     IdentityResolutionError,
@@ -992,6 +993,34 @@ def check_capabilities_with_self_heal(project_root: Any) -> List[Dict[str, Any]]
     return check_capabilities(root)
 
 
+def overall_status(project_root: Any = ".") -> Dict[str, Any]:
+    """A typed, below-the-LLM honest-status object for session-start.
+
+    ``normal_status_allowed`` is True ONLY when every capability is green AND
+    no run envelope is non-finalized. The agent may not report "everything is
+    running normally" unless this is True (relay-verbatim convention).
+    """
+    caps = check_capabilities_with_self_heal(project_root)
+    red = sorted({c["capability_id"] for c in caps if c.get("health") != "green"})
+    paused = sorted({c["capability_id"] for c in caps if c.get("paused")})
+    runs = run_envelope.nonfinalized_runs(project_root)
+    orphaned = [{
+        "run_id": s.run_id,
+        "run_state": s.run_state,
+        "capability_id": s.capability_id,
+        # legacy old-format runs have no WAL/authorize_resume affordance
+        "resumable": s.raw_had_run_state,
+    } for s in runs]
+    normal_ok = (not red) and (not orphaned)
+    return {
+        "overall": "green" if normal_ok else "red",
+        "normal_status_allowed": normal_ok,
+        "red_capabilities": red,
+        "paused_capabilities": paused,
+        "orphaned_runs": orphaned,
+    }
+
+
 # ---------------------------------------------------------------------------
 # CLI entrypoint -- an agent's orientation step (T5) reads this composite
 # status to decide whether to invite the operator into a capability; this
@@ -1008,5 +1037,11 @@ def check_capabilities_with_self_heal(project_root: Any) -> List[Dict[str, Any]]
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":  # pragma: no cover
-    _root = sys.argv[1] if len(sys.argv) > 1 else "."
-    print(json.dumps(check_capabilities_with_self_heal(_root), indent=2, sort_keys=True))
+    _argv = sys.argv[1:]
+    if _argv and _argv[0] == "--overall":
+        _root = _argv[1] if len(_argv) > 1 else "."
+        print(json.dumps(overall_status(_root), indent=2, sort_keys=True))
+    else:
+        _root = _argv[0] if _argv else "."
+        print(json.dumps(check_capabilities_with_self_heal(_root),
+                         indent=2, sort_keys=True))
