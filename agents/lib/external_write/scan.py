@@ -632,7 +632,7 @@ class Violation(NamedTuple):
               'credential_construction', 'credential_provider_reference',
               'adapter_module_import', 'adapter_registry_reference',
               'introspection_escape_hatch', 'raw_run_operation_reference',
-              'unparseable'.
+              'sealed_kernel_import', 'unparseable'.
             Specific enough that a build-failure message tells the operator or
             agent WHAT to fix.
     """
@@ -903,6 +903,47 @@ _INTROSPECTION_BARE_NAMES = frozenset({"__import__", "globals", "vars"})
 # identical disclosed residual as ``build_write_client`` / the registry symbols).
 _RAW_RUN_OPERATION_SYMBOL = "run_operation"
 
+# v0.16.0 Cut 1.2 (A' / V15-3b) — CAPABILITY-zone import boundary. The sanctioned
+# external_write surface a capability/operator module may import is this small
+# allowlist; ANY other external_write submodule import (e.g.
+# `from external_write.run_envelope import mint_run_envelope`) is a
+# `sealed_kernel_import` bypass. This is the STRUCTURAL closure of the routing-
+# invariant class (V15-3): the estate hand-rolled a per-batch bulk loop by
+# importing mint_run_envelope directly from run_envelope. A symbol-by-symbol ban
+# only closes the symbols we remember; the module allowlist closes the class.
+# DERIVED from what the scaffold emits into CAPABILITY-zone files (capability
+# module: capability_api + operations; read-facade module: read_facade) and
+# pinned to that set by test_scaffold_emitted_imports_are_all_allowlisted.
+_CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES: FrozenSet[str] = frozenset(
+    {"capability_api", "operations", "read_facade"}
+)
+
+# The raw bulk-run mint primitives (v0.15.0 trust core), banned by NAME in the
+# CAPABILITY zone exactly like _RAW_RUN_OPERATION_SYMBOL — so a bare/relative
+# reach (`from run_envelope import mint_run_envelope`; `x = mint_run_envelope`)
+# is caught even though it carries no `external_write.` prefix for the module
+# boundary rule to match. These live in run_envelope.py (SEALED_KERNEL), which
+# stays exempt (CAPABILITY-zone-only). Exact-name match.
+_RAW_BULK_MINT_SYMBOLS: FrozenSet[str] = frozenset(
+    {"mint_run_envelope", "new_bulk_run_id"}
+)
+
+
+def _external_write_submodule(dotted: str) -> Optional[str]:
+    """If ``dotted`` names an external_write SUBMODULE
+    (``external_write.<submod>`` or ``<pkg>.external_write.<submod>``), return
+    ``<submod>`` (the first component AFTER ``external_write``); else None.
+    Anchored on the ``external_write`` component, same spoof-resistant
+    convention as ``_module_is_external_write_package`` (which handles the
+    package-level ``external_write`` form with no submodule component)."""
+    parts = dotted.split(".")
+    if "external_write" in parts:
+        i = parts.index("external_write")
+        if i + 1 < len(parts):
+            return parts[i + 1]
+    return None
+
+
 # Function/method-object internals — attribute names banned by NAME alone,
 # any base. ``run_operation`` is
 # the real function object defined in the sealed kernel module, so its
@@ -1167,6 +1208,14 @@ class _Scanner(ast.NodeVisitor):
                 # root-matched, mirroring _FORBIDDEN_IMPORT_ROOTS's convention.
                 if root == "importlib":
                     self._add(node.lineno, "introspection_escape_hatch")
+                # A' module boundary, plain-import form: `import
+                # external_write.run_envelope`.
+                _submod = _external_write_submodule(alias.name)
+                if (
+                    _submod is not None
+                    and _submod not in _CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES
+                ):
+                    self._add(node.lineno, "sealed_kernel_import")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
@@ -1232,6 +1281,16 @@ class _Scanner(ast.NodeVisitor):
         # non-adapter zone is itself the bypass: the emitted capability
         # must be UNABLE to name the provider.
         is_package_level = bool(node.module) and _module_is_external_write_package(node.module)
+        # A' module boundary: CAPABILITY code may import from external_write ONLY
+        # the sanctioned allowlist; `from external_write.run_envelope import ...`
+        # (submod not allowlisted) is the estate's exact bypass shape.
+        if self._capability_zone and node.module:
+            _submod = _external_write_submodule(node.module)
+            if (
+                _submod is not None
+                and _submod not in _CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES
+            ):
+                self._add(node.lineno, "sealed_kernel_import")
         # The RELATIVE bare-import
         # form -- ``from . import adapters_gmail`` / ``from . import
         # adapter_registry`` -- has ``node.level > 0`` AND ``node.module is
@@ -1254,6 +1313,10 @@ class _Scanner(ast.NodeVisitor):
             # a relative/bare adapters import, or any re-export) — v0.12.0 S1.
             if self._capability_zone and alias.name == _RAW_RUN_OPERATION_SYMBOL:
                 self._add(node.lineno, "raw_run_operation_reference")
+            # Raw bulk-run mint primitives banned by NAME in CAPABILITY zone,
+            # regardless of source module — v0.16.0 Cut 1.2 (A' / V15-3b).
+            if self._capability_zone and alias.name in _RAW_BULK_MINT_SYMBOLS:
+                self._add(node.lineno, "sealed_kernel_import")
             # The PACKAGE-LEVEL import
             # form -- ``from external_write import adapters_gmail`` /
             # ``from external_write import adapter_registry`` -- puts the
@@ -1305,6 +1368,10 @@ class _Scanner(ast.NodeVisitor):
             # run_operation`) — naming it at all is the bypass. v0.12.0 S1.
             if node.id == _RAW_RUN_OPERATION_SYMBOL:
                 self._add(node.lineno, "raw_run_operation_reference")
+            # Bare-name reference to a raw bulk-run mint primitive — v0.16.0
+            # Cut 1.2 (A' / V15-3b).
+            if node.id in _RAW_BULK_MINT_SYMBOLS:
+                self._add(node.lineno, "sealed_kernel_import")
         self.generic_visit(node)
 
     # --- calls -------------------------------------------------------------
@@ -1336,6 +1403,10 @@ class _Scanner(ast.NodeVisitor):
             # `mod.run_operation` — regardless of the base expression. v0.12.0 S1.
             if node.attr == _RAW_RUN_OPERATION_SYMBOL:
                 self._add(node.lineno, "raw_run_operation_reference")
+            # Attribute reach to a raw bulk-run mint primitive — v0.16.0 Cut 1.2
+            # (A' / V15-3b).
+            if node.attr in _RAW_BULK_MINT_SYMBOLS:
+                self._add(node.lineno, "sealed_kernel_import")
         self.generic_visit(node)
 
     def _check_adapter_registry_attribute(self, node: ast.Attribute) -> None:

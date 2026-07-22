@@ -172,6 +172,52 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         # `run_live`, never `run_operation`), so it does not need — and does not
         # get — the ADAPTER_PROFILE exemption.
         "standing_automation.py",
+        # The following eight files (v0.16.0 Cut 1.2 — A' / V15-3b) are
+        # deterministic, non-vendor, non-credential kernel support modules
+        # added to the package over time without ever being added to this
+        # registry — harmless under the OLD CAPABILITY-zone-only rules
+        # (adapter_module_import / adapter_registry_reference /
+        # introspection_escape_hatch / raw_run_operation_reference) because
+        # none of them happens to trip those narrow, symbol-specific checks.
+        # The NEW `sealed_kernel_import` module-boundary rule this task adds
+        # is broader BY DESIGN (any external_write submodule import outside
+        # the small operator-facing allowlist, not just a few named symbols),
+        # so it is the first rule to expose this pre-existing registry gap:
+        # each of these files legitimately imports from OTHER kernel
+        # submodules (contracts, run_envelope, broker, capability_identity,
+        # lifecycle_state, operator_acceptance, proof_hash,
+        # acceptance_ceremony, audit_projection, ...) as ordinary internal
+        # kernel wiring, which is exactly the SEALED_KERNEL exemption
+        # this registry exists to grant by explicit, reviewable listing —
+        # none imports a vendor SDK, constructs/obtains a write-capable
+        # credential, or performs a raw vendor mutation.
+        #   capability_api.py — the curated capability-facing re-export shim
+        #     (see its own module docstring); internally imports
+        #     run_enveloped_operation/run_sanctioned_bulk from run_envelope.py
+        #     to build that re-export. This SEALED_KERNEL entry newly exempts
+        #     it from every CAPABILITY-zone-ONLY check (adapter_module_import
+        #     / adapter_registry_reference / introspection_escape_hatch /
+        #     raw_run_operation_reference / sealed_kernel_import), same as
+        #     any other SEALED_KERNEL member -- it already passed all of
+        #     those on its own merits before this entry existed (it is
+        #     deliberately thin: two imports, one re-export list, no logic),
+        #     so nothing it was previously relying on the CAPABILITY-zone
+        #     checks to enforce changes here.
+        #   audit_projection.py, bulk_verify.py, capability_health.py,
+        #     consent_narration.py, evidence.py, lifecycle_state.py,
+        #     run_narration.py — mechanism-only kernel support modules (audit
+        #     projection, bulk-verify tooling, capability health checks,
+        #     consent narration, evidence predicates, capability lifecycle
+        #     state, and run-outcome narration, respectively); see each
+        #     file's own "Why this exists" docstring section.
+        "audit_projection.py",
+        "bulk_verify.py",
+        "capability_api.py",
+        "capability_health.py",
+        "consent_narration.py",
+        "evidence.py",
+        "lifecycle_state.py",
+        "run_narration.py",
     }
 )
 

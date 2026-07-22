@@ -32,6 +32,7 @@ from tempfile import TemporaryDirectory
 _AGENTS_LIB = Path(__file__).resolve().parents[3] / "wizard" / "agents" / "lib"
 sys.path.insert(0, str(_AGENTS_LIB))
 
+from external_write import scan  # noqa: E402
 from external_write.scan import scan_paths, Violation  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -819,14 +820,38 @@ class TestAdapterRegistryNegativeGuards(unittest.TestCase):
         )
         self.assertEqual(v, [])
 
-    def test_nested_bare_adapters_kernel_submodule_not_flagged(self):
+    def test_nested_bare_adapters_kernel_submodule_not_flagged_by_adapter_module_import(self):
         # Task R11-T1, F2 negative guard: `from external_write.adapters.utils
         # import helper` -- "adapters" (not "adapters_...") immediately
         # follows external_write, regardless of the further nesting after it.
+        # This guard is scoped to the OLD adapter_module_import rule (the
+        # narrow "adapters_ prefix / adapter_registry name" check) -- it does
+        # NOT claim the import is clean overall. v0.16.0 Cut 1.2 (A' /
+        # V15-3b) adds a broader module-boundary rule (sealed_kernel_import)
+        # that DOES flag this: "adapters" is the bare kernel dispatch module,
+        # not in the CAPABILITY-sanctioned allowlist, so reaching a
+        # (hypothetical) nested submodule under it is exactly the kind of
+        # reach A' closes. See test_nested_bare_adapters_kernel_submodule_is_
+        # sealed_kernel_import below for that positive assertion.
         v = scan_paths(
             [_FIXTURES / "capability_nested_bare_adapters_kernel_allowed.py"]
         )
-        self.assertEqual(v, [])
+        self.assertNotIn(
+            "adapter_module_import", _kinds(v),
+            f"'adapters' (not 'adapters_...') must not trip the OLD narrow "
+            f"adapter_module_import rule; got {v}")
+
+    def test_nested_bare_adapters_kernel_submodule_is_sealed_kernel_import(self):
+        # v0.16.0 Cut 1.2 (A' / V15-3b): the SAME fixture as above IS now
+        # flagged by the new, broader module-boundary rule -- "adapters" is
+        # not in the CAPABILITY-sanctioned external_write allowlist.
+        v = scan_paths(
+            [_FIXTURES / "capability_nested_bare_adapters_kernel_allowed.py"]
+        )
+        self.assertIn(
+            "sealed_kernel_import", _kinds(v),
+            f"a nested reach under the bare 'adapters' kernel dispatch module "
+            f"must now be an A' module-boundary bypass; got {v}")
 
 
 class TestAdapterRegistryKernelStaysClean(unittest.TestCase):
@@ -872,10 +897,10 @@ class TestAdapterRegistryKernelStaysClean(unittest.TestCase):
         self.assertEqual(v, [])
 
     def test_capability_api_module_scans_clean(self):
-        # capability_api.py is UNLISTED in either zone allowlist (fail-closed
-        # CAPABILITY default), yet imports nothing but run_operation (from the
-        # bare adapters module) and build_read_facade (from read_facade) --
-        # neither a banned module nor a banned symbol.
+        # capability_api.py is SEALED_KERNEL (v0.16.0 Cut 1.2 -- A' / V15-3b --
+        # see zones.py's registry entry) and imports only
+        # run_enveloped_operation/run_sanctioned_bulk (from run_envelope) and
+        # build_read_facade (from read_facade) -- no banned symbol either way.
         v = scan_paths([_ADAPTER_DIR / "capability_api.py"])
         self.assertEqual(v, [])
 
@@ -1137,13 +1162,30 @@ class TestRawRunOperationNegativeGuards(unittest.TestCase):
         )
         self.assertEqual(v, [], f"sanctioned enveloped entrypoint must be clean; got {v}")
 
-    def test_run_enveloped_operation_from_run_envelope_is_clean(self):
+    def test_run_enveloped_operation_from_run_envelope_is_now_a_module_boundary_bypass(self):
+        # v0.16.0 Cut 1.2 (A' / V15-3b) tightens the sanctioned CAPABILITY
+        # surface to ONLY capability_api / operations / read_facade (see
+        # TestCapabilityImportBoundary below). Before A', reaching
+        # run_enveloped_operation directly from run_envelope (bypassing
+        # capability_api's curated re-export) scanned clean because the
+        # SYMBOL itself is legitimate. A' supersedes that: the SUBMODULE
+        # itself is now out of bounds for CAPABILITY code regardless of
+        # which symbol is named, closing the exact reach path
+        # capability_api.py exists to curate. run_enveloped_operation must
+        # still not be mistaken for raw run_operation (exact-name match
+        # preserved).
         v = _scan_source(
             "from external_write.run_envelope import run_enveloped_operation\n\n"
             "def go(envelope, op, receipt, client):\n"
             "    return run_enveloped_operation(envelope, op, receipt, client)\n"
         )
-        self.assertEqual(v, [], f"run_enveloped_operation is not run_operation; got {v}")
+        kinds = _kinds(v)
+        self.assertNotIn(
+            "raw_run_operation_reference", kinds,
+            f"run_enveloped_operation must still not be mistaken for run_operation; got {v}")
+        self.assertIn(
+            "sealed_kernel_import", kinds,
+            f"direct run_envelope import must now be the A' module-boundary bypass; got {v}")
 
 
 class TestRawRunOperationKernelExempt(unittest.TestCase):
@@ -1172,10 +1214,97 @@ class TestRawRunOperationKernelExempt(unittest.TestCase):
         self.assertEqual(v, [], f"real run_envelope.py must scan clean; got {v}")
 
     def test_real_capability_api_module_scans_clean(self):
-        # After the surface change capability_api.py imports run_enveloped_operation
-        # (not run_operation), so it must scan clean even though it is CAPABILITY.
+        # capability_api.py imports run_enveloped_operation/run_sanctioned_bulk
+        # (not run_operation), so it was already clean under this rule; it is
+        # now SEALED_KERNEL (v0.16.0 Cut 1.2 -- A' / V15-3b) so it is also
+        # exempt from the new sealed_kernel_import module-boundary rule for
+        # its own legitimate internal reach into run_envelope.
         v = scan_paths([_ADAPTER_DIR / "capability_api.py"])
         self.assertEqual(v, [], f"real capability_api.py must scan clean; got {v}")
+
+
+# ---------------------------------------------------------------------------
+# v0.16.0 Cut 1.2 (A' / V15-3b) — CAPABILITY-zone import-boundary rule.
+#
+# The estate's exact bypass shape: a CAPABILITY-zone module hand-rolling a
+# per-batch bulk loop by importing mint_run_envelope/new_bulk_run_id directly
+# from run_envelope.py (SEALED_KERNEL), instead of going through the
+# sanctioned capability_api surface. This closes the CLASS (any external_write
+# submodule import outside the small sanctioned allowlist), not just the two
+# named symbols.
+# ---------------------------------------------------------------------------
+
+
+class TestCapabilityImportBoundary(unittest.TestCase):
+    """A' — CAPABILITY-zone code may import from external_write ONLY the
+    sanctioned allowlist (capability_api / operations / read_facade); any
+    other external_write submodule import, or a bare/attribute reach to the
+    raw bulk-mint primitives by name, is a `sealed_kernel_import` bypass.
+    SEALED_KERNEL modules (run_envelope.py itself) stay exempt."""
+
+    def _scan_capability_source(self, src):
+        """Scan `src` as a CAPABILITY-zone file (fail-closed default zone —
+        neither sealed nor adapter-profile)."""
+        return _kinds(_scan_source(src))
+
+    def _scan_sealed_kernel_source(self, src):
+        """Scan `src` as a SEALED_KERNEL file, mirroring the
+        run_envelope_like.py idiom already used in
+        TestRawRunOperationKernelExempt."""
+        return _kinds(_scan_source(
+            src, filename="run_envelope_like.py",
+            sealed=frozenset({"run_envelope_like.py"}),
+        ))
+
+    def test_capability_importing_mint_run_envelope_is_sealed_kernel_import(self):
+        # The estate's exact shape: a CAPABILITY-zone module hand-rolling bulk by
+        # importing the mint primitive directly from run_envelope.
+        src = "from external_write.run_envelope import mint_run_envelope, new_bulk_run_id\n"
+        kinds = self._scan_capability_source(src)
+        self.assertIn("sealed_kernel_import", kinds)
+
+    def test_capability_bare_name_mint_symbol_is_flagged(self):
+        src = "import external_write.run_envelope as re\nx = re.mint_run_envelope\n"
+        self.assertIn("sealed_kernel_import", self._scan_capability_source(src))
+
+    def test_capability_plain_import_of_sealed_submodule_is_flagged(self):
+        src = "import external_write.run_envelope\n"
+        self.assertIn("sealed_kernel_import", self._scan_capability_source(src))
+
+    def test_sanctioned_surface_imports_are_clean(self):
+        # Exactly what the scaffold emits — must NOT trip the rule.
+        src = (
+            "from external_write.capability_api import run_enveloped_operation, run_sanctioned_bulk, build_read_facade\n"
+            "from external_write.operations import Operation, SCHEMA_V2_ACTION\n"
+            "from external_write.read_facade import ReadFacade, register_read_facade\n"
+        )
+        self.assertNotIn("sealed_kernel_import", self._scan_capability_source(src))
+
+    def test_sealed_kernel_module_may_import_run_envelope(self):
+        # run_envelope.py (SEALED_KERNEL) legitimately uses mint_run_envelope; the
+        # CAPABILITY-only rule must not fire on a SEALED_KERNEL file.
+        kinds = self._scan_sealed_kernel_source(
+            "from external_write.run_envelope import mint_run_envelope\n")
+        self.assertNotIn("sealed_kernel_import", kinds)
+
+    def test_scaffold_emitted_imports_are_all_allowlisted(self):
+        # Guards the allowlist against the scaffold's real emitted CAPABILITY-zone
+        # imports: if the scaffold starts importing a new external_write submodule
+        # into capability/read-facade code, either the allowlist grows WITH it or
+        # this fails — so the rule can never silently start rejecting valid output.
+        import capability_code_scaffold as ccs
+        spec = ccs.CapabilityCodeSpec(
+            capability_id="probe_cap", display_name="Probe", op_kind="probe.op",
+            surface="probe", read_only_scope="probe.readonly", blast_radius_cap=10)
+        cap_src = ccs.render_capability_module(spec)
+        rf_src = ccs.render_read_facade_module(spec)
+        import re as _re
+        submods = set(_re.findall(r'from external_write\.(\w+)', cap_src + rf_src))
+        self.assertTrue(submods)  # sanity: the scaffold does import external_write
+        self.assertTrue(
+            submods <= scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES,
+            f"scaffold emits external_write submodules not in the A' allowlist: "
+            f"{submods - scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES}")
 
 
 if __name__ == "__main__":
