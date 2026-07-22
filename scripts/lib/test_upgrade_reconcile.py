@@ -126,6 +126,21 @@ def _write_project(tmp: Path, *, writer_body: str, writer_name: str = "estate_up
     return proj
 
 
+def _iter_queue(queue):
+    """Flatten whatever shape ``pending_migrations.json`` uses into individual
+    entries. The real shape today (see ``_append_migration_request``) is a flat
+    JSON list of dicts, but this stays defensive against a dict-wrapped or
+    nested shape so the test doesn't silently pass by iterating over the wrong
+    thing if that shape ever changes."""
+    if isinstance(queue, dict):
+        queue = queue.get("entries") or queue.get("migrations") or list(queue.values())
+    for entry in (queue or []):
+        if isinstance(entry, list):
+            yield from entry
+        else:
+            yield entry
+
+
 class _Base(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -381,6 +396,37 @@ class ReconcileEndToEndTests(_Base):
         self.assertEqual(first_wrapper.count("paused pending migration"), 1)
         queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
         self.assertEqual(len(queue), 1)
+
+    def test_full_reconcile_queues_migration_for_hand_rolled_bulk_runner(self):
+        # V15-3 end-to-end: the estate's hand-rolled bulk runner lived at
+        # agents/inbox/runner.py -- OUTSIDE the operator-capability directory,
+        # with no run_<stem>.sh wrapper and not Orchestrator-scheduled. Tasks 1+2
+        # made it DISCOVERABLE (import-graph-scoped scan) and scanner-red
+        # (sealed_kernel_import). This proves the full reconcile_upgrade also
+        # classifies it as a real migration case -- not the "no schedule found,
+        # review by hand" fallback -- and durably queues it for the operator's
+        # rebuild flow, same as any other scanner-red mechanism.
+        proj = self.tmp
+        runner = proj / "agents" / "inbox" / "runner.py"
+        runner.parent.mkdir(parents=True, exist_ok=True)
+        runner.write_text(
+            "from external_write.run_envelope import mint_run_envelope, new_bulk_run_id\n"
+            "def run_batches(batches):\n"
+            "    for b in batches:\n"
+            "        mint_run_envelope(run_id=new_bulk_run_id('x'))\n",
+            encoding="utf-8")
+        (proj / ".wizard").mkdir(parents=True, exist_ok=True)
+        reports = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="v0.15.0", to_version="v0.16.0",
+        ).mechanisms
+        runner_reports = [r for r in reports if r.writer_relpath == "agents/inbox/runner.py"]
+        self.assertTrue(runner_reports, "the hand-rolled bulk runner was not reconciled")
+        r = runner_reports[0]
+        self.assertIn(r.state, {"broken_requires_migration", "paused_live_write"})
+        self.assertNotEqual(r.state, "manual_review")
+        # migration was queued for the operator to act on
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        self.assertTrue(any("runner.py" in str(entry) for entry in _iter_queue(queue)))
 
     def test_entangled_read_and_write_in_one_file_still_pauses_the_whole_mechanism(self):
         # Disclosed bound: a mechanism that entangles read + write in one script

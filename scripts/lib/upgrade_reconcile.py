@@ -313,16 +313,32 @@ class MechanismReport:
                                         the Orchestrator; no per-mechanism file to
                                         gate (existing path).
                                     "manual_review"           -- no wrapper, not
-                                        orchestrator-routed, and the writer is NOT
-                                        under the operator-capability directory --
-                                        the pre-existing "no schedule found"
-                                        fallback.
-                                    "broken_requires_migration" -- (B1, this task)
-                                        no wrapper, not orchestrator-routed, and the
-                                        writer IS under the operator-capability
-                                        directory. Every mechanism this module ever
-                                        sees is scanner-red (the AST scanner only
-                                        returns violating files), and a capability
+                                        orchestrator-routed, and (fail-safe
+                                        scaffolding only, V15-3) no violation was
+                                        present for the writer either -- the
+                                        pre-existing "no schedule found" fallback.
+                                        Unreachable through the real scanner-driven
+                                        flow today (see "broken_requires_migration",
+                                        below): this module's only detection
+                                        channel is the AST scanner, which returns
+                                        ONLY scanner-red files, so every relpath
+                                        that reaches this classification already
+                                        has a non-empty `violations` list and takes
+                                        that branch instead. Retained so a
+                                        hypothetical future zero-violation writer
+                                        still has a real, tested primitive to land
+                                        on rather than this module inventing one.
+                                    "broken_requires_migration" -- (B1, this task;
+                                        generalized V15-3) no wrapper, not
+                                        orchestrator-routed, and the writer IS
+                                        scanner-red (any violation present, of any
+                                        kind -- NOT gated on the writer's directory:
+                                        the estate's hand-rolled bulk runner at
+                                        agents/inbox/runner.py, outside the
+                                        operator-capability directory, is exactly
+                                        this shape). Every mechanism this module
+                                        ever sees is scanner-red (the AST scanner
+                                        only returns violating files), and a writer
                                         in this shape has no structural entrypoint
                                         to safe-pause -- it is import-broken and
                                         cannot run at all. Honest state, not a
@@ -1558,14 +1574,28 @@ def reconcile_upgrade(
                 )
             else:
                 orchestrator_routed = False
-                # (F-55 B1) No wrapper, not orchestrator-routed. If the writer
-                # lives under the operator-capability directory, it has no
-                # structural entrypoint to safe-pause at all (no run_<stem>.sh
-                # convention applies there) and -- because this module only ever
-                # sees scanner-red files -- it is import-broken and cannot run.
-                # That is a stronger, more honest claim than "review by hand":
-                # the fix is queued, not merely recommended.
-                if _is_under_capability_dir(relpath):
+                # (F-55 B1; V15-3 generalization) No wrapper, not orchestrator-
+                # routed. This module's ONLY detection channel is the AST
+                # scanner (scan_operator_mechanisms above), which returns ONLY
+                # scanner-red files -- so `violations` is NEVER empty for a
+                # relpath that reached this loop through the real scanner-
+                # driven path. A scanner-red writer with no structural
+                # entrypoint to safe-pause has no honest "keeps running as
+                # before" story -- it is queued for migration regardless of
+                # WHICH directory it happens to live under (the estate's
+                # hand-rolled bulk runner at agents/inbox/runner.py, well
+                # outside the operator-capability directory, is exactly this
+                # shape). Routes generically on "any violation present" -- not
+                # on the specific violation `kind` (e.g. sealed_kernel_import)
+                # and not on `_is_under_capability_dir` -- so every future
+                # scanner-red kind and every writer location inherits the
+                # same honest handling automatically. The `else` branch below
+                # (`manual_review`) is retained as fail-safe scaffolding for a
+                # hypothetical writer that reaches this loop with NO
+                # violations at all -- unreachable through the real scanner-
+                # driven flow today (mirrors the existing `scan_clean=True`
+                # scaffolding just below), never a live path in practice.
+                if violations:
                     # (F-55 B2 general primitive; xvendor Finding-1 fix) A
                     # scan_clean=True capability classifies as
                     # paused_live_write (still runnable; deny writes at
