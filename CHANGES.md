@@ -12,6 +12,20 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-22 — capability code can no longer reach the bulk-write engine's internals directly, and upgrades now catch more pre-existing custom code that needs migrating (v0.16.0)
+
+**Public-facing change:** A structural safety tightening under the hood, plus a broader upgrade-time check.
+
+- **Your system now prevents capability code from reaching the bulk-write engine's internal parts directly — it must go through the approved interface.** Any other internal import is refused rather than silently allowed, closing off a way a capability could have bypassed the safe, approved path for writing in bulk.
+- **Upgrades now detect a wider range of pre-existing custom code that needs migrating to stay safe**, so code that legitimately relies on internal wiring — added before this check existed — is recognized correctly instead of being mistaken for a new violation.
+- No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
+
+This is a safety fix (`v0.16.0`, minor-additive, emitted-lib-only, operator-explicit as always). Foundation documents are byte-identical to `v0.15.0`.
+
+`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+
+---
+
 ## 2026-07-20 — safer bulk-run resume, honest capability-test proof, and a privacy-safe audit record (v0.15.0)
 
 **Public-facing change:** Five improvements to how your system handles a large batch of changes, tests a new capability, and keeps a record of what it did.

@@ -318,6 +318,19 @@
       "safety_class": "safety_fix",
       "source_commit": "4a6951f",
       "status": "prerelease"
+    },
+    {
+      "bundle_manifest_sha256": "sha256:6b95f65e4f18dccbbd2f3716f1c81aa2b647b72ec78cf565de951cf43781b204",
+      "bundle_tree_sha256": "sha256:0174994188b38feced1bf555216bf662cb7587d3571d0b57e54dc1d918eecf65",
+      "changelog": "Your system now prevents capability code from reaching the bulk-write engine's internal parts directly \u2014 it must go through the approved interface \u2014 and upgrades now detect a wider range of pre-existing custom code that needs migrating to stay safe.",
+      "foundation_bundle_version": "v0.16.0",
+      "manifest": "foundation-bundles/v0.16.0/manifest.yaml",
+      "path": "foundation-bundles/v0.16.0/",
+      "recommendation_reason": "If your system has any capabilities that write in bulk, or you plan to add or rebuild one, this closes an internal path a capability could otherwise use to bypass the approved way of reaching the bulk-write engine, and it makes an upgrade more thorough about recognizing your own older custom code that needs to come along safely \u2014 most operators should take it.",
+      "release_date": "2026-07-22",
+      "safety_class": "safety_fix",
+      "source_commit": "PENDING",
+      "status": "prerelease"
     }
   ],
   "registry_schema_version": "v2",
