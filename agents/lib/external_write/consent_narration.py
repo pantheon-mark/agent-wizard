@@ -470,19 +470,6 @@ def build_ceiling_checkin_prose(
         "— nothing more happens until you say go."
     )
 
-    # V15-2/E — multi-ceremony framing: when there's more left than this run
-    # covers, say so up front rather than let the operator discover partway
-    # through that a larger cleanup spans several sessions. Derived entirely
-    # from this call's own count_now/remaining_count — never a hardcoded cap
-    # or population figure.
-    if remaining_count > 0:
-        population_count = count_now + remaining_count
-        lines.append(
-            f"This run covers up to {count_now} of the {population_count}; "
-            "the rest is handled the same way over more than one session, "
-            "not all at once."
-        )
-
     text = " ".join(lines)
     _assert_no_internal_leak(text, op_kind=op_kind)
     assert str(count_now) in text
@@ -496,6 +483,34 @@ def build_ceiling_checkin_prose(
 # prior-tranche check-in) — duck-typed so a real RunEnvelope/Ceiling/Tranche
 # or a plain test double both work.
 # ---------------------------------------------------------------------------
+
+def build_multi_approval_notice(
+    *, op_kind: str, population_count: int, granted_this_approval: int,
+) -> str:
+    """V15-2/E — multi-ceremony framing, at the ONLY place it can be stated
+    accurately: run-level consent, where the real per-run ceiling
+    (``ceiling.granted_this_approval``, Knob B / ``bounds.knob_b_ceiling``)
+    and the real population count are both in hand together.
+
+    States the real mechanism: one approval authorizes tranches that
+    auto-escalate (10 -> 20 -> 40 ...) up to this run's aggregate ceiling with
+    NO further consent in between (``run_sanctioned_bulk``); exhausting that
+    ceiling always requires a FRESH operator approval for what's left — never
+    "the rest happens automatically" and never a hardcoded population/cap
+    figure (a prior version of this narration wrongly claimed a per-tranche
+    boundary was a session boundary; see V15-2/E finding).
+
+    Callers gate this on ``population_count > granted_this_approval`` — when
+    the whole job fits inside one approval, this notice has nothing true to
+    add and should not be called."""
+    noun = _noun(op_kind, population_count)
+    text = (
+        f"This approval covers up to {granted_this_approval} of the "
+        f"{population_count} {noun} — the rest will need a separate "
+        "approval from you before it happens."
+    )
+    return _assert_no_internal_leak(text, op_kind=op_kind)
+
 
 def build_run_envelope_consent_sentence(
     *,
@@ -511,7 +526,13 @@ def build_run_envelope_consent_sentence(
     ``bounds.knob_b_ceiling`` — for the cap + recovery tier) — and build the
     sentence to show the operator BEFORE minting (its text becomes
     ``consent_sentence_shown``; the operator's own reply becomes
-    ``operator_approval_verbatim`` — two distinct fields, never conflated)."""
+    ``operator_approval_verbatim`` — two distinct fields, never conflated).
+
+    V15-2/E: when the population exceeds what THIS approval covers
+    (``count > session_cap``), appends ``build_multi_approval_notice`` so the
+    operator learns up front that a large whittle spans more than one
+    approval/ceremony — using only this call's own real inputs, never a
+    hardcoded population or cap figure."""
     count = len(reviewed_set)
     session_cap = getattr(ceiling, "granted_this_approval", None)
     if session_cap is None and isinstance(ceiling, dict):
@@ -523,10 +544,18 @@ def build_run_envelope_consent_sentence(
     risk_class = getattr(contract, "risk_class", None) if contract is not None else None
     is_standing_automation = risk_class == "standing_automation"
 
-    return build_consent_sentence(
+    text = build_consent_sentence(
         count=count, op_kind=op_kind, recovery_tier=recovery_tier,
         session_cap=session_cap, contract=contract,
         is_standing_automation=is_standing_automation, voice=voice)
+
+    if (isinstance(session_cap, int) and not isinstance(session_cap, bool)
+            and session_cap > 0 and count > session_cap):
+        text = text + " " + build_multi_approval_notice(
+            op_kind=op_kind, population_count=count,
+            granted_this_approval=session_cap)
+
+    return _assert_no_internal_leak(text, op_kind=op_kind)
 
 
 def build_run_envelope_checkin_prose(

@@ -272,6 +272,40 @@ class TestStandingAutomationNarration(unittest.TestCase):
             contract=contract)
         self.assertNotIn("on its own in the background", text.lower())
 
+    def test_run_envelope_consent_sentence_flags_multiple_approvals_when_population_exceeds_ceiling(self):
+        # V15-2/E: population (reviewed_set) well above what THIS approval
+        # covers (ceiling.granted_this_approval) -> must say a fresh/separate
+        # approval is needed for the rest, using the real per-approval cap.
+        contract = contracts_mod.get_contract(GMAIL_OP)
+        reviewed_set = [{"unit_id": f"m{i}"} for i in range(50)]
+
+        class _Ceiling:
+            granted_this_approval = 25
+            recovery_tier = "reversible"
+
+        text = build_run_envelope_consent_sentence(
+            reviewed_set=reviewed_set, op_kind=GMAIL_OP, ceiling=_Ceiling(),
+            contract=contract)
+        self.assertIn("25", text)
+        self.assertIn("50", text)
+        self.assertRegex(
+            text.lower(), r"(another|separate|more than one) approval")
+
+    def test_run_envelope_consent_sentence_quiet_when_population_within_ceiling(self):
+        # The whole job fits inside one approval -> no multi-approval framing.
+        contract = contracts_mod.get_contract(GMAIL_OP)
+        reviewed_set = [{"unit_id": f"m{i}"} for i in range(10)]
+
+        class _Ceiling:
+            granted_this_approval = 25
+            recovery_tier = "reversible"
+
+        text = build_run_envelope_consent_sentence(
+            reviewed_set=reviewed_set, op_kind=GMAIL_OP, ceiling=_Ceiling(),
+            contract=contract)
+        self.assertNotRegex(
+            text.lower(), r"(another|separate|more than one) approval")
+
 
 # ===========================================================================
 # Ceiling check-in / re-confirm prose
@@ -366,25 +400,6 @@ class TestCeilingCheckinProse(unittest.TestCase):
             prior_tranche=_Tranche())
         self.assertIn("checked it actually landed", text)
         self.assertIn("confirmed working", text)
-
-    def test_checkin_prose_flags_multiple_ceremonies_when_population_exceeds_cap(self):
-        # population (count_now + remaining_count) well above what this run
-        # covers (count_now) -> prose must say it takes more than one session.
-        text = build_ceiling_checkin_prose(
-            op_kind=GMAIL_OP, count_now=25, remaining_count=183,
-            prior_tranche_status="verified")
-        self.assertRegex(
-            text.lower(), r"(more than one|several|multiple).*(session|time|round)")
-        self.assertIn("25", text)
-        self.assertIn("208", text)
-
-    def test_checkin_prose_quiet_when_population_within_cap(self):
-        # Nothing remains after this run -> no multi-session framing needed.
-        text = build_ceiling_checkin_prose(
-            op_kind=GMAIL_OP, count_now=10, remaining_count=0,
-            prior_tranche_status="verified")
-        self.assertNotRegex(
-            text.lower(), r"(more than one|several|multiple).*(session|time|round)")
 
     def test_wired_via_run_envelope_checkin_prose_with_no_prior_tranche(self):
         text = build_run_envelope_checkin_prose(
