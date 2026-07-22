@@ -42,5 +42,30 @@ class TestSessionStartHealthWiring(unittest.TestCase):
         self.assertIn("capability_health.py --overall", text)
 
 
+class TestAcceptanceHandoffIsSingleLine(unittest.TestCase):
+    """Task 6 (V15-2): the acceptance hand-off must be one paste-safe line --
+    no backslash line-continuations and no path args (--phase-id /
+    --copy-run-proof) for the operator to mistype. Pinned in both emitted
+    skill docs that carry this command."""
+
+    _FILES = ("skills/next-phase.md", "skills/rebuild-paused-capability.md")
+
+    def _read(self, rel):
+        return (_REPO / "wizard" / rel).read_text(encoding="utf-8")
+
+    def test_acceptance_command_is_single_line_in_both_files(self):
+        for rel in self._FILES:
+            text = self._read(rel)
+            with self.subTest(file=rel):
+                self.assertIn("operator_acceptance.py --capability-id", text)
+                self.assertNotIn("--copy-run-proof \"agents/handoffs", text)
+                for line in text.splitlines():
+                    if "operator_acceptance.py" in line:
+                        self.assertFalse(
+                            line.rstrip().endswith("\\"),
+                            f"{rel}: acceptance command must be one line: {line!r}",
+                        )
+
+
 if __name__ == "__main__":
     unittest.main()

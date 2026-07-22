@@ -242,15 +242,13 @@ Capture the operator's acceptance in their own words, exactly as they gave it �
 
 **Authorize live use (only for a capability that writes to external state).** If this phase introduced a capability that needs live authorization — the one you recorded a copy-run proof for in Step 5 — the operator's acceptance is the moment it becomes allowed to touch the live version of that external state. Until this moment the safety records hold it to its safe trial target only; turning it on for real is a deliberate, separate act, gated on a real trial having passed and on the operator's explicit yes.
 
-Do this through the system's acceptance step rather than by editing any safety record by hand — hand-editing the record that grants live use is never an acceptable shortcut. Get the capability's id and its owning phase using the lookup in "Finding this phase's pending capability entry" (Step 2), then run, silently, from the project root:
+Do this through the system's acceptance step rather than by editing any safety record by hand — hand-editing the record that grants live use is never an acceptable shortcut. Get the capability's id using the lookup in "Finding this phase's pending capability entry" (Step 2), then run, silently, from the project root. The command derives the phase and the copy-run proof path from the capability id, so it is a single line with no file paths for the operator to mistype:
 
 ```
-python3 agents/lib/external_write/operator_acceptance.py \
-  --capability-id "<the capability's id from the Step 2 lookup>" \
-  --phase-id "<its owning phase from the Step 2 lookup>" \
-  --copy-run-proof "agents/handoffs/<capability_id>.copy_run_proof.json" \
-  --operator-confirmation "<the operator's acceptance, verbatim>"
+python3 agents/lib/external_write/operator_acceptance.py --capability-id "<the capability's id from the Step 2 lookup>" --operator-confirmation "<the operator's acceptance, verbatim>"
 ```
+
+If it reports it could not determine the phase (more than one capability is pending), re-run adding `--phase-id "<its owning phase from the Step 2 lookup>"`.
 
 This mints the acceptance record from the operator's exact words and runs the one deterministic step that grants live use, but only if every safety condition still holds — the trial proof is valid and belongs to this exact capability, the risk level has not been quietly lowered since the trial, and the phase matches. If it declines, do not claim the capability is live. Tell the operator plainly, in business terms, what is not yet satisfied (for example, the safe trial needs to be re-run), and treat the phase as not accepted until it succeeds. Never present a capability as turned on when the acceptance step refused.
 

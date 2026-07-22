@@ -51,15 +51,13 @@ Tell the operator plainly what was wrong, what was fixed, and that it has been p
 
 > Here's what needed fixing, and I've proven it works on a copy. Shall I turn it back on?
 
-Capture their answer in their own words — never supply it for them. Once they say yes, run the same acceptance step next-phase's Step 6 uses:
+Capture their answer in their own words — never supply it for them. Once they say yes, run the same acceptance step next-phase's Step 6 uses. The command derives the phase and the copy-run proof path from the capability id, so it is a single line with no file paths to mistype:
 
 ```
-python3 agents/lib/external_write/operator_acceptance.py \
-  --capability-id "<the capability's id>" \
-  --phase-id "<its owning phase>" \
-  --copy-run-proof "agents/handoffs/<capability_id>.copy_run_proof.json" \
-  --operator-confirmation "<the operator's go-ahead, verbatim>"
+python3 agents/lib/external_write/operator_acceptance.py --capability-id "<the capability's id>" --operator-confirmation "<the operator's go-ahead, verbatim>"
 ```
+
+If it reports it could not determine the phase (more than one capability is pending), re-run adding `--phase-id "<its owning phase>"`.
 
 Because this capability keeps the SAME id as the pending entry's `mechanism_id` — this is a rebuild, not a redeclaration — a successful acceptance here closes that entry on its own. You never edit `pending_migrations.json` by hand, and you never need to remember to remove the entry yourself.
 
