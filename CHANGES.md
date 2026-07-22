@@ -22,7 +22,7 @@ Entries appear newest-first.
 
 This is a safety fix (`v0.16.0`, minor-additive, emitted-lib-only, operator-explicit as always). Foundation documents are byte-identical to `v0.15.0`.
 
-`Source-Meta-Commit:` `pending` (private build repo) · public repo commit `pending`
+`Source-Meta-Commit:` `e662542` (private build repo) · public repo commit `d34c42a`
 
 ---
 
