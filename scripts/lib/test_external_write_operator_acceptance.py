@@ -906,14 +906,17 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
         oa_entries = json.loads(self.operator_adapters_path.read_text(encoding="utf-8"))
         self.assertEqual(oa_entries, [self.adapter_path.stem])
 
-    def _write_descriptor_and_proof(self):
+    def _write_descriptor_and_proof(self, *, accepted=False):
+        # Task 5 (V15-2 phase-id derivation): `accepted` is a kwarg so the resolver's
+        # already-accepted / fail-closed tests can write the SAME descriptor shape with
+        # `accepted=True` -- no separate fixture-builder needed.
         hashes = _precompute_hashes(self.project_root, self.OP_KIND)
 
         descriptor = {
             "id": self.CAPABILITY_ID, "name": self.CAPABILITY_ID,
             "action_class": "update", "risk_class": "sensitive_data",
             "recovery_profile_ref": None, "declared_test_target": "copy",
-            "blast_radius_cap": 10, "accepted": False, "phase_id": self.PHASE,
+            "blast_radius_cap": 10, "accepted": accepted, "phase_id": self.PHASE,
         }
         self.descriptor_set_path.write_text(
             json.dumps([descriptor], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -1027,6 +1030,58 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
         self.assertEqual(result.returncode, 0,
                          msg=f"stdout={result.stdout!r} stderr={result.stderr!r}")
         self.assertIn("ACCEPTED", result.stdout)
+
+    def test_resolve_pending_phase_single(self):
+        # Task 5 (V15-2): --phase-id is also deterministic, exactly like --copy-run-proof
+        # already is -- a project with exactly one PENDING (not-yet-accepted) descriptor
+        # matching capability_id has an unambiguous phase to derive.
+        from external_write.operator_acceptance import resolve_pending_phase
+        self._write_descriptor_and_proof()  # one entry, accepted=False, phase_id=self.PHASE
+        self.assertEqual(
+            resolve_pending_phase(self.CAPABILITY_ID,
+                                  project_root=str(self.project_root)),
+            self.PHASE)
+
+    def test_resolve_pending_phase_already_accepted_returns_none(self):
+        # Fail-closed: an already-accepted descriptor is not "pending" -- deriving a phase
+        # from it would be nonsensical (it's already live), so the resolver refuses to guess.
+        from external_write.operator_acceptance import resolve_pending_phase
+        self._write_descriptor_and_proof(accepted=True)
+        self.assertIsNone(
+            resolve_pending_phase(self.CAPABILITY_ID,
+                                  project_root=str(self.project_root)))
+
+    def test_cli_derives_phase_when_omitted(self):
+        # V15-2 / V15-2 CLI collapse: the fully paste-safe single-line command --
+        # --capability-id + --operator-confirmation only, no --phase-id, no
+        # --copy-run-proof -- must still succeed when exactly one pending descriptor
+        # matches.
+        self._write_descriptor_and_proof()
+        cli_path = self.external_write_dir / "operator_acceptance.py"
+        result = subprocess.run(
+            [sys.executable, str(cli_path),
+             "--capability-id", self.CAPABILITY_ID,
+             "--operator-confirmation",
+             "Yes -- I accept this capability for live use."],
+            cwd=str(self.project_root), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0,
+                         msg=f"stdout={result.stdout!r} stderr={result.stderr!r}")
+        self.assertIn("ACCEPTED", result.stdout)
+
+    def test_cli_fails_closed_when_phase_unresolvable(self):
+        # Fail-closed CLI path: nothing pending (descriptor already accepted) means the
+        # phase cannot be derived -- the CLI must refuse with a clear, actionable message
+        # (naming --phase-id so the operator knows exactly what to re-run with), never
+        # guess or silently proceed with a stale/wrong phase.
+        self._write_descriptor_and_proof(accepted=True)  # nothing pending
+        cli_path = self.external_write_dir / "operator_acceptance.py"
+        result = subprocess.run(
+            [sys.executable, str(cli_path),
+             "--capability-id", self.CAPABILITY_ID,
+             "--operator-confirmation", "yes"],
+            cwd=str(self.project_root), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--phase-id", result.stderr)  # tells operator to pass it explicitly
 
 
 class OperatorAdapterSurvivesRegeneratedBaselineTest(unittest.TestCase):

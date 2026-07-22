@@ -76,6 +76,7 @@ from external_write.proof_hash import (
     compute_implementation_hash,
     ProofHashError,
 )
+from external_write.write_gate import load_descriptor_set
 
 # Task 7 (A4 / F-37, v0.13.0 Slice 2): importing this ONE module fires every
 # shipped AND every capability-added adapter module's module-scope
@@ -185,6 +186,64 @@ def _load_json_for_precheck(path: str) -> Optional[dict]:
     except Exception:
         return None
     return data if isinstance(data, dict) else None
+
+
+def _load_descriptor_entries(*, descriptor_set_path: Optional[str] = None,
+                              project_root: Optional[str] = None) -> list:
+    """Load the full descriptor set (Task 5 / V15-2 phase-id derivation), reusing
+    ``write_gate.load_descriptor_set`` -- the SAME fail-safe loader the runtime gate and the
+    ceremony both read through -- rather than hand-rolling a second JSON-read convention here.
+
+    ``load_descriptor_set`` itself only resolves its path against the process cwd (the
+    project-root-relative convention documented on ``write_gate.DESCRIPTOR_SET_PATH``); this
+    helper additionally composes an explicit ``project_root`` (as ``resolve_pending_phase``'s
+    tests pass, since the resolver is called in-process rather than via a subprocess run from
+    the operator project root), mirroring how other helpers in this module (e.g.
+    ``close_pending_migration_if_matched``) accept ``project_root`` for the identical reason.
+    Fail-safe by construction (matches ``load_descriptor_set``): a missing/unreadable/malformed
+    set is never distinguished from "no descriptors" here -- returns ``[]``."""
+    from external_write.write_gate import DESCRIPTOR_SET_PATH
+    rel_path = descriptor_set_path if descriptor_set_path else DESCRIPTOR_SET_PATH
+    if not rel_path:
+        return []
+    root = project_root if project_root is not None else "."
+    full_path = rel_path if os.path.isabs(rel_path) else os.path.join(root, rel_path)
+    return load_descriptor_set(full_path)
+
+
+def resolve_pending_phase(capability_id: str, *, descriptor_set_path: Optional[str] = None,
+                          project_root: Optional[str] = None) -> Optional[str]:
+    """Derive the ``phase_id`` for ``capability_id`` from its descriptor entry (Task 5 / V15-2):
+    the CLI-facing convenience that lets the operator's paste-safe acceptance command drop
+    ``--phase-id`` the same way V15-2 already dropped ``--copy-run-proof`` (both defaults are
+    convenience over a deterministic, already-recorded value -- never a second authority; the
+    acceptance ceremony re-validates the phase against the descriptor regardless of how it got
+    here).
+
+    Fail-closed on any ambiguity, by design (never guess a phase at a trust surface):
+      * zero or MORE THAN ONE descriptor entry with ``id == capability_id`` -> ``None``
+      * the single match is already ``accepted`` (truthy) -> ``None`` (nothing left pending to
+        derive a phase FOR -- re-accepting an already-accepted capability is not this helper's
+        job, and guessing its now-stale ``phase_id`` would be worse than refusing)
+      * the single match's ``phase_id`` is missing / not a string / blank -> ``None``
+
+    Fail-soft on the READ side only (mirrors ``close_pending_migration_if_matched``'s own
+    read-side fail-soft convention): any load/parse error surfaces as ``None`` here, never a
+    traceback -- the CLI turns a ``None`` into a clear, actionable operator-facing message
+    (exit 2), it never silently proceeds with a guessed phase."""
+    try:
+        entries = _load_descriptor_entries(
+            descriptor_set_path=descriptor_set_path, project_root=project_root)
+    except Exception:
+        return None
+    matches = [e for e in entries if isinstance(e, dict) and e.get("id") == capability_id]
+    if len(matches) != 1:
+        return None
+    entry = matches[0]
+    if entry.get("accepted"):
+        return None
+    phase = entry.get("phase_id")
+    return phase if isinstance(phase, str) and phase.strip() else None
 
 
 def _atomic_write_text(path: str, text: str) -> None:
@@ -643,12 +702,15 @@ if __name__ == "__main__":  # pragma: no cover
         "--operator-confirmation": None, "--receipt-out": None,
         "--descriptor-set": None, "--audit-log": None,
     }
-    _usage = ("Usage: operator_acceptance.py --capability-id <id> --phase-id <id> "
+    _usage = ("Usage: operator_acceptance.py --capability-id <id> "
               "--operator-confirmation <verbatim text> "
-              "[--copy-run-proof <path>] [--receipt-out <path>] [--descriptor-set <path>] "
-              "[--audit-log <path>]\n"
+              "[--phase-id <id>] [--copy-run-proof <path>] [--receipt-out <path>] "
+              "[--descriptor-set <path>] [--audit-log <path>]\n"
               "(V15-2: --copy-run-proof may be omitted -- it then defaults to "
-              "agents/handoffs/<capability-id>.copy_run_proof.json)")
+              "agents/handoffs/<capability-id>.copy_run_proof.json)\n"
+              "(V15-2 Task 5: --phase-id may also be omitted -- it is then derived from the "
+              "single pending descriptor matching --capability-id; if it cannot be uniquely "
+              "determined, re-run passing --phase-id <id> explicitly)")
     _i = 0
     while _i < len(_args):
         _a = _args[_i]
@@ -665,13 +727,28 @@ if __name__ == "__main__":  # pragma: no cover
     # V15-2: --copy-run-proof is NOT in this required list -- its path is deterministic from
     # --capability-id (see DEFAULT_COPY_RUN_PROOF_DIR / record_operator_acceptance's default
     # block), so omitting it is a valid, paste-safe-collapsing invocation, not a usage error.
-    for _req in ("--capability-id", "--phase-id", "--operator-confirmation"):
+    # Task 5: --phase-id joins it -- it is derived below when omitted, fail-closed.
+    for _req in ("--capability-id", "--operator-confirmation"):
         if _opts[_req] is None:
             print(f"missing required {_req}\n{_usage}", file=_sys.stderr)
             _sys.exit(2)
 
+    # Task 5 (V15-2): when --phase-id is omitted, derive it from the single pending descriptor
+    # matching --capability-id. Fail-closed -- this is a convenience over an already-recorded
+    # value, never a second authority, so any ambiguity (zero or multiple pending matches) must
+    # refuse rather than guess. The message names --phase-id explicitly so a non-technical
+    # operator knows exactly what to re-run with.
+    _phase = _opts["--phase-id"]
+    if _phase is None:
+        _phase = resolve_pending_phase(_opts["--capability-id"], project_root=".")
+        if _phase is None:
+            print(
+                "could not uniquely determine the phase for this capability -- "
+                "re-run with --phase-id <id>", file=_sys.stderr)
+            _sys.exit(2)
+
     _res = record_operator_acceptance(
-        _opts["--capability-id"], _opts["--phase-id"], _opts["--copy-run-proof"],
+        _opts["--capability-id"], _phase, _opts["--copy-run-proof"],
         _opts["--operator-confirmation"],
         receipt_path=_opts["--receipt-out"],
         descriptor_set_path=_opts["--descriptor-set"],
