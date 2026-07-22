@@ -35,6 +35,7 @@ from upgrade_reconcile import (  # noqa: E402
     MechanismReport,
     PredicateStubRemediation,
     ReconcileResult,
+    discover_external_write_importers,
     reconcile_missing_evidence_predicates,
     reconcile_upgrade,
     render_impact_notice,
@@ -174,6 +175,38 @@ class DetectTests(_Base):
             "def go():\n    return run_operation(None, None)\n", encoding="utf-8")
         by_relpath = scan_operator_mechanisms(proj, _REAL_REPO)
         self.assertIn("agents/capabilities/inbox_management_capability.py", by_relpath)
+
+    def test_reconcile_detects_bulk_runner_outside_capability_dirs(self):
+        # V15-3a: the estate's runner lived at agents/inbox/runner.py -- OUTSIDE
+        # the fixed OPERATOR_CODE_DIRS. It must now be discovered via the import
+        # graph (B-opt2), not just the fixed dir list.
+        proj = self.tmp
+        runner = proj / "agents" / "inbox" / "runner.py"
+        runner.parent.mkdir(parents=True, exist_ok=True)
+        runner.write_text(
+            "from external_write.run_envelope import mint_run_envelope, new_bulk_run_id\n"
+            "def run_batches(batches):\n"
+            "    for b in batches:\n"
+            "        rid = new_bulk_run_id('x')\n"
+            "        mint_run_envelope(run_id=rid)  # hand-rolled per-batch loop\n",
+            encoding="utf-8")
+        found = scan_operator_mechanisms(proj, _REAL_REPO)
+        self.assertIn("agents/inbox/runner.py", found)
+        kinds = {v.kind for v in found["agents/inbox/runner.py"]}
+        self.assertIn("sealed_kernel_import", kinds)
+
+    def test_discovery_excludes_the_sealed_lib_and_venv(self):
+        proj = self.tmp
+        sealed = proj / "agents" / "lib" / "external_write"
+        sealed.mkdir(parents=True, exist_ok=True)
+        (sealed / "x_probe.py").write_text(
+            "from external_write.run_envelope import mint_run_envelope\n", encoding="utf-8")
+        venv_pkg = proj / ".venv" / "lib" / "pkg.py"
+        venv_pkg.parent.mkdir(parents=True, exist_ok=True)
+        venv_pkg.write_text("import external_write\n", encoding="utf-8")
+        files = {p.as_posix() for p in discover_external_write_importers(proj)}
+        self.assertFalse(any("agents/lib/external_write" in f for f in files))
+        self.assertFalse(any(".venv" in f for f in files))
 
 
 class ReconcileEndToEndTests(_Base):

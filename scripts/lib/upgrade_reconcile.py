@@ -91,6 +91,7 @@ import ast
 import importlib
 import json
 import os
+import re
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -159,6 +160,51 @@ def _external_write_module(build_repo_root: Path, module_name: str):
 OPERATOR_CODE_DIRS: Tuple[str, ...] = (
     "agents/cron", "agents/scripts", DEFAULT_CAPABILITIES_REL.as_posix(),
 )
+
+_EXTERNAL_WRITE_IMPORT_RE = re.compile(r'^\s*(?:from|import)\s+[\w.]*\bexternal_write\b', re.M)
+_DISCOVERY_EXCLUDE_DIR_NAMES = frozenset(
+    {".venv", "venv", "__pycache__", ".git", ".wizard", "node_modules"})
+
+
+def discover_external_write_importers(
+    operator_project_dir: Path,
+    *,
+    exclude_dir_names: "frozenset[str]" = _DISCOVERY_EXCLUDE_DIR_NAMES,
+) -> List[Path]:
+    """B-opt2 (V15-3a): every .py file under the operator project that imports
+    the ``external_write`` package, EXCEPT the sealed lib itself
+    (``agents/lib/external_write``) and excluded dirs. Deriving the reconcile's
+    scan target from the real import graph -- not a fixed directory list -- is
+    what makes a hand-rolled bulk runner visible wherever it lives (the estate's
+    ``agents/inbox/runner.py`` was outside the old fixed OPERATOR_CODE_DIRS).
+
+    Over-inclusion is SAFE (an extra clean file yields no violation);
+    under-inclusion re-opens V15-3, so the import match is deliberately broad
+    (a text scan of import lines, not a full AST parse -- a comment/string false
+    positive only costs one wasted clean scan). Static import graph only;
+    dynamic/string imports are a disclosed residual (near-zero for emitted,
+    non-technical-operator code)."""
+    root = Path(operator_project_dir).resolve()
+    sealed = (root / "agents" / "lib" / "external_write").resolve()
+    hits: List[Path] = []
+    for p in root.rglob("*.py"):
+        rp = p.resolve()
+        try:
+            rel_parts = rp.relative_to(root).parts
+        except ValueError:  # pragma: no cover - defensive
+            continue
+        if any(part in exclude_dir_names for part in rel_parts):
+            continue
+        if str(rp) == str(sealed) or str(rp).startswith(str(sealed) + os.sep):
+            continue
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError:  # pragma: no cover - unreadable file
+            continue
+        if _EXTERNAL_WRITE_IMPORT_RE.search(text):
+            hits.append(p)
+    return hits
+
 
 PAUSED_MECHANISMS_DIR_REL = ".wizard/paused-mechanisms"
 
@@ -416,16 +462,26 @@ def scan_operator_mechanisms(
     operator_project_dir = Path(operator_project_dir).resolve()
     scan = _scan_module(Path(build_repo_root))
     by_relpath: Dict[str, List[Any]] = {}
-    for d in operator_code_dirs:
-        target = operator_project_dir / d
-        if not target.is_dir():
+
+    # B-opt2: fixed canonical dirs ∪ import-graph-discovered importers, deduped.
+    targets: List[Path] = [
+        operator_project_dir / d for d in operator_code_dirs
+        if (operator_project_dir / d).is_dir()
+    ]
+    targets += discover_external_write_importers(operator_project_dir)
+
+    seen: set = set()   # (resolved path, lineno, kind) -- a file under a canonical
+                        # dir AND discovered as an importer is scanned once.
+    for v in scan.scan_paths(targets):
+        key = (Path(v.path).resolve().as_posix(), v.lineno, v.kind)
+        if key in seen:
             continue
-        for v in scan.scan_paths([target]):
-            try:
-                rel = Path(v.path).resolve().relative_to(operator_project_dir).as_posix()
-            except ValueError:  # pragma: no cover - defensive; scan_paths only sees `target`
-                rel = v.path
-            by_relpath.setdefault(rel, []).append(v)
+        seen.add(key)
+        try:
+            rel = Path(v.path).resolve().relative_to(operator_project_dir).as_posix()
+        except ValueError:  # pragma: no cover - defensive
+            rel = v.path
+        by_relpath.setdefault(rel, []).append(v)
     return by_relpath
 
 
