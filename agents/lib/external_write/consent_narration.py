@@ -470,6 +470,19 @@ def build_ceiling_checkin_prose(
         "— nothing more happens until you say go."
     )
 
+    # V15-2/E — multi-ceremony framing: when there's more left than this run
+    # covers, say so up front rather than let the operator discover partway
+    # through that a larger cleanup spans several sessions. Derived entirely
+    # from this call's own count_now/remaining_count — never a hardcoded cap
+    # or population figure.
+    if remaining_count > 0:
+        population_count = count_now + remaining_count
+        lines.append(
+            f"This run covers up to {count_now} of the {population_count}; "
+            "the rest is handled the same way over more than one session, "
+            "not all at once."
+        )
+
     text = " ".join(lines)
     _assert_no_internal_leak(text, op_kind=op_kind)
     assert str(count_now) in text

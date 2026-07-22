@@ -367,6 +367,25 @@ class TestCeilingCheckinProse(unittest.TestCase):
         self.assertIn("checked it actually landed", text)
         self.assertIn("confirmed working", text)
 
+    def test_checkin_prose_flags_multiple_ceremonies_when_population_exceeds_cap(self):
+        # population (count_now + remaining_count) well above what this run
+        # covers (count_now) -> prose must say it takes more than one session.
+        text = build_ceiling_checkin_prose(
+            op_kind=GMAIL_OP, count_now=25, remaining_count=183,
+            prior_tranche_status="verified")
+        self.assertRegex(
+            text.lower(), r"(more than one|several|multiple).*(session|time|round)")
+        self.assertIn("25", text)
+        self.assertIn("208", text)
+
+    def test_checkin_prose_quiet_when_population_within_cap(self):
+        # Nothing remains after this run -> no multi-session framing needed.
+        text = build_ceiling_checkin_prose(
+            op_kind=GMAIL_OP, count_now=10, remaining_count=0,
+            prior_tranche_status="verified")
+        self.assertNotRegex(
+            text.lower(), r"(more than one|several|multiple).*(session|time|round)")
+
     def test_wired_via_run_envelope_checkin_prose_with_no_prior_tranche(self):
         text = build_run_envelope_checkin_prose(
             op_kind=GMAIL_OP, count_now=10, remaining_count=32,
