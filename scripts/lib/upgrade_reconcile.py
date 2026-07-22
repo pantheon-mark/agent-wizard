@@ -161,7 +161,7 @@ OPERATOR_CODE_DIRS: Tuple[str, ...] = (
     "agents/cron", "agents/scripts", DEFAULT_CAPABILITIES_REL.as_posix(),
 )
 
-_EXTERNAL_WRITE_IMPORT_RE = re.compile(r'^\s*(?:from|import)\s+[\w.]*\bexternal_write\b', re.M)
+_EXTERNAL_WRITE_IMPORT_RE = re.compile(r'^\s*(?:from|import)\s+.*\bexternal_write\b', re.M)
 _DISCOVERY_EXCLUDE_DIR_NAMES = frozenset(
     {".venv", "venv", "__pycache__", ".git", ".wizard", "node_modules"})
 
@@ -181,9 +181,12 @@ def discover_external_write_importers(
     Over-inclusion is SAFE (an extra clean file yields no violation);
     under-inclusion re-opens V15-3, so the import match is deliberately broad
     (a text scan of import lines, not a full AST parse -- a comment/string false
-    positive only costs one wasted clean scan). Static import graph only;
-    dynamic/string imports are a disclosed residual (near-zero for emitted,
-    non-technical-operator code)."""
+    positive only costs one wasted clean scan), and matches ``external_write``
+    anywhere on the import statement -- not just as the first name -- so a
+    comma-list import (``import os, external_write`` / ``import json,
+    external_write as ew``) is caught regardless of ordering. Static import
+    graph only; dynamic/string imports are a disclosed residual (near-zero for
+    emitted, non-technical-operator code)."""
     root = Path(operator_project_dir).resolve()
     sealed = (root / "agents" / "lib" / "external_write").resolve()
     hits: List[Path] = []

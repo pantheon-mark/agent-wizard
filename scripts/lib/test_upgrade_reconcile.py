@@ -208,6 +208,18 @@ class DetectTests(_Base):
         self.assertFalse(any("agents/lib/external_write" in f for f in files))
         self.assertFalse(any(".venv" in f for f in files))
 
+    def test_discovery_catches_comma_list_import_regardless_of_ordering(self):
+        # B' finding: external_write named SECOND (or later) in a comma-list
+        # import must still be discovered -- under-inclusion here re-opens
+        # V15-3 (a hand-rolled bulk runner written as `import os, external_write`
+        # would otherwise go unscanned).
+        proj = self.tmp
+        runner = proj / "agents" / "inbox" / "runner.py"
+        runner.parent.mkdir(parents=True, exist_ok=True)
+        runner.write_text("import os, external_write\n", encoding="utf-8")
+        files = {p.as_posix() for p in discover_external_write_importers(proj)}
+        self.assertTrue(any(f.endswith("agents/inbox/runner.py") for f in files))
+
 
 class ReconcileEndToEndTests(_Base):
     def test_capabilities_broken_requires_migration_two_locations(self):
