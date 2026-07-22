@@ -225,6 +225,13 @@ BASELINE_COMMANDS: Tuple[CommandEntry, ...] = (
         writes_external=True,
         allowed_outputs=(),
     ),
+    CommandEntry(
+        name="operator-acceptance",
+        command_prefix="python3 agents/lib/external_write/operator_acceptance.py",
+        command_class=LIVE_WRITE,
+        writes_external=True,
+        allowed_outputs=(),
+    ),
 )
 
 

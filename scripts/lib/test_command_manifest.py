@@ -178,6 +178,12 @@ class TestBaselineManifestClassification(unittest.TestCase):
     def test_unknown_command_name_returns_none(self):
         self.assertIsNone(find_command("this-command-does-not-exist"))
 
+    def test_operator_acceptance_is_live_write_and_never_eligible(self):
+        entry = next(e for e in BASELINE_COMMANDS
+                     if "operator_acceptance.py" in e.command_prefix)
+        self.assertEqual(entry.command_class, LIVE_WRITE)
+        self.assertFalse(is_allowlist_eligible(entry))
+
     def test_no_duplicate_names_in_baseline(self):
         names = [entry.name for entry in BASELINE_COMMANDS]
         self.assertEqual(len(names), len(set(names)), f"duplicate names in {names!r}")
