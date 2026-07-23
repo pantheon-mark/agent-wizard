@@ -594,11 +594,56 @@ rule — see ``zones.py`` for the full rationale and the canonical taxonomy)
   This task closes a second, more subtle version of the same failure mode:
   even WITHIN the anchor, a directory alone was never meant to be sufficient
   for exemption.)
+
+------------------------------------------------------------------------------
+Hash-bound migration quarantine (F-3B, anti-deadlock)
+------------------------------------------------------------------------------
+upgrade_reconcile.py's safe-pause/migration-queue step gates a scanner-red
+writer's ENTRYPOINT (or installs a runtime block) but deliberately never
+touches the flagged ``.py`` file itself, then records it in
+``agents/handoffs/pending_migrations.json`` for the operator's rebuild flow.
+Left unaddressed, the NEXT real build-time run of this scanner
+(``python3 agents/lib/external_write/scan.py agents/``, recursively) would
+re-flag that SAME still-unmigrated file and fail the build — a hard deadlock
+for a non-technical operator, since the fix genuinely requires a future
+rebuild, not an immediate edit.
+
+This is closed by a narrow, DENY-BY-DEFAULT quarantine, consulted per file
+after its violations are computed: a violation is exempted ONLY when ALL of
+the following hold —
+
+  (a) the scanned file is listed in ``pending_migrations.json`` (relative to
+      ``project_root``) with a matching ``writer_relpath`` and
+      ``status: "pending"``;
+  (b) the file's CURRENT sha256 equals that entry's recorded
+      ``paused_content_sha256`` (an edit since pause-time voids the
+      quarantine — the file is no longer the known-inert artifact that was
+      paused);
+  (c) the specific violation (path/line/kind) is itself present in that
+      entry's recorded ``violations`` list (a NEW violation, not seen at
+      pause-time, is never silently swallowed).
+
+Any other case — the file is not listed, ``pending_migrations.json`` is
+absent/unreadable/malformed, the hash does not match, or a violation was not
+among those recorded — is NOT exempt and reports normally; see
+``_quarantined_violations`` below. This is a build-time anti-drift narrowing
+of what a *known, already-detected, already-queued* violation reports as; it
+grants no new runtime capability and is not a substitute for the runtime
+sandbox this scanner has never claimed to be.
+
+This quarantine applies ONLY in the paused/not-yet-accepted window — it is
+independent of, and must never weaken,
+``capability_invariants.py``'s separate Check 6 (marker residue), which
+fails an ACCEPTED capability that still carries a pause marker on disk. The
+two checks share no code path; they are simply consistent about the same
+underlying paused state.
 """
 
 import ast
+import hashlib
+import json
 from pathlib import Path
-from typing import FrozenSet, List, NamedTuple, Optional, Sequence, Union
+from typing import Any, Dict, FrozenSet, List, NamedTuple, Optional, Sequence, Union
 
 # sys.path bootstrap: scan.py is designed to also be run directly as a script
 # (see the CLI entrypoint at the bottom of this file), in which case Python
@@ -1580,6 +1625,101 @@ class _Scanner(ast.NodeVisitor):
 
 
 # ---------------------------------------------------------------------------
+# F-3B — hash-bound migration quarantine (anti-deadlock; see module docstring
+# "Hash-bound migration quarantine" section above for the full contract).
+# ---------------------------------------------------------------------------
+
+_PENDING_MIGRATIONS_REL = "agents/handoffs/pending_migrations.json"
+
+
+def _load_pending_migrations(project_root: Path) -> Optional[List[Dict[str, Any]]]:
+    """Load ``agents/handoffs/pending_migrations.json`` relative to
+    ``project_root``. Returns ``None`` — deliberately distinct from ``[]`` —
+    on ANY failure to positively load a well-formed list (absent, unreadable,
+    invalid JSON, or a non-list JSON value): the caller treats ``None`` as
+    "no quarantine record available at all" and exempts nothing, per this
+    quarantine's fail-closed contract. Never raises."""
+    path = Path(project_root) / _PENDING_MIGRATIONS_REL
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, list) else None
+
+
+def _pending_entry_for_writer(
+    entries: List[Dict[str, Any]], writer_relpath: str,
+) -> Optional[Dict[str, Any]]:
+    """The pending-migrations entry for ``writer_relpath``, only if its
+    ``status`` is still ``"pending"`` — an entry some other status (e.g. a
+    future ``"resolved"``/``"rebuilt"`` value written back by the rebuild
+    flow) is not a live quarantine candidate. Returns ``None`` (no match) on
+    anything else, including a malformed entry."""
+    for entry in entries:
+        if (
+            isinstance(entry, dict)
+            and entry.get("writer_relpath") == writer_relpath
+            and entry.get("status") == "pending"
+        ):
+            return entry
+    return None
+
+
+def _quarantined_violations(
+    file_path: Path,
+    project_root: Optional[Path],
+    violations: List[Violation],
+) -> List[Violation]:
+    """Filter OUT of ``violations`` any that are hash-bound-quarantined per
+    ``pending_migrations.json`` — see the module docstring's "Hash-bound
+    migration quarantine" section for the full (a)/(b)/(c) contract. Deny-by-
+    default throughout: any step that cannot be positively verified leaves
+    the ORIGINAL ``violations`` list untouched (reported in full), never a
+    partial or best-guess exemption.
+    """
+    if not violations or project_root is None:
+        return violations
+    root = Path(project_root)
+    try:
+        writer_relpath = file_path.resolve().relative_to(root.resolve()).as_posix()
+    except (OSError, ValueError):
+        # Not resolvable under project_root at all -- cannot key a relpath,
+        # so there is nothing to look up. No exemption.
+        return violations
+    entries = _load_pending_migrations(root)
+    if entries is None:
+        return violations  # absent/unreadable/malformed -- fail-closed.
+    entry = _pending_entry_for_writer(entries, writer_relpath)
+    if entry is None:
+        return violations  # this file is not a listed, queued quarantine candidate.
+    recorded_hash = entry.get("paused_content_sha256")
+    if not isinstance(recorded_hash, str) or not recorded_hash:
+        return violations  # no hash recorded -- never guess, no exemption.
+    try:
+        current_bytes = file_path.read_bytes()
+    except OSError:
+        return violations
+    if hashlib.sha256(current_bytes).hexdigest() != recorded_hash:
+        return violations  # edited since pause-time -- no longer inert.
+    recorded_raw = entry.get("violations")
+    if not isinstance(recorded_raw, list):
+        return violations
+    recorded_set = {
+        (r.get("path"), r.get("line"), r.get("kind"))
+        for r in recorded_raw
+        if isinstance(r, dict) and r.get("path") == writer_relpath
+    }
+    return [
+        v for v in violations
+        if (writer_relpath, v.lineno, v.kind) not in recorded_set
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -1588,6 +1728,7 @@ def _scan_file(
     kernel_anchor: Path,
     sealed_kernel_paths: FrozenSet[str],
     adapter_profile_paths: FrozenSet[str],
+    project_root: Optional[Path] = None,
 ) -> List[Violation]:
     if file_path.suffix != ".py":
         return []
@@ -1616,7 +1757,7 @@ def _scan_file(
         return [Violation(path=str(file_path), lineno=1, kind="unparseable")]
     scanner = _Scanner(str(file_path), zone)
     scanner.visit(tree)
-    return scanner.violations
+    return _quarantined_violations(file_path, project_root, scanner.violations)
 
 
 def _iter_py_files(path: Path):
@@ -1632,6 +1773,7 @@ def scan_paths(
     allowed_root: Optional[Union[str, Path]] = None,
     adapter_profile_paths: Optional[FrozenSet[str]] = None,
     sealed_kernel_paths: Optional[FrozenSet[str]] = None,
+    project_root: Optional[Union[str, Path]] = None,
 ) -> List[Violation]:
     """Scan ``paths`` (files and/or directories) for external-write bypasses.
 
@@ -1660,6 +1802,26 @@ def scan_paths(
         by its location; build wiring / tests that need a different explicit
         set pass it here rather than the caller relying on directory
         placement alone.
+      * ``project_root`` (F-3B) anchors the hash-bound migration quarantine —
+        see the module docstring's "Hash-bound migration quarantine" section.
+        ``agents/handoffs/pending_migrations.json`` is read relative to this
+        path. Deliberately EXPLICIT OPT-IN, default ``None`` — when omitted,
+        the quarantine plays NO part in this scan at all (every violation
+        reports exactly as it did before this feature existed). This matters
+        because `scan_paths` is also called internally as a SUB-CHECK by
+        other gates (``capability_invariants.py``'s routing check,
+        ``capability_health.py``, ``acceptance_ceremony.py``,
+        ``coverage_gate.py``) that must keep their existing strict,
+        unconditional behavior — the anti-deadlock quarantine is narrowly
+        scoped to THIS module's own standalone build-time gate (the CLI
+        entrypoint below, invoked as ``python3
+        agents/lib/external_write/scan.py agents/`` from the operator
+        project root), not silently inherited by every other consumer of
+        this function merely because their own cwd happens to be the
+        project root too. Distinct from ``allowed_root``: that anchors ZONE
+        classification (this package's own installed location); this
+        anchors the SCANNED PROJECT's own root, which is a different
+        directory in every real deployment.
 
     ``allowed_module`` is the dotted name used for human-facing messaging only;
     it is deliberately NOT the exemption credential (keying on the name was
@@ -1682,6 +1844,9 @@ def scan_paths(
         adapter_profile_paths if adapter_profile_paths is not None
         else ADAPTER_PROFILE_MODULE_PATHS
     )
+    resolved_project_root = (
+        Path(project_root) if project_root is not None else None
+    )
     violations: List[Violation] = []
     for raw in paths:
         p = Path(raw)
@@ -1691,6 +1856,7 @@ def scan_paths(
                     f, anchor,
                     resolved_sealed_kernel_paths,
                     resolved_adapter_profile_paths,
+                    resolved_project_root,
                 )
             )
     violations.sort(key=lambda v: (v.path, v.lineno, v.kind))
@@ -1717,7 +1883,16 @@ if __name__ == "__main__":  # pragma: no cover
         print("Usage: python3 scan.py <path> [<path> ...]", file=_sys.stderr)
         _sys.exit(2)
 
-    _violations = scan_paths(_paths)
+    # (F-3B) This standalone CLI invocation IS the anti-deadlock target the
+    # hash-bound migration quarantine exists for -- the operator's real
+    # rebuild-time gate, conventionally run FROM the project root
+    # (``python3 agents/lib/external_write/scan.py agents/``). Opts in
+    # explicitly by passing the real cwd as project_root; every OTHER
+    # scan_paths() caller in this package (capability_invariants.py,
+    # capability_health.py, acceptance_ceremony.py, coverage_gate.py) omits
+    # project_root and keeps its existing strict, unconditional behavior --
+    # see scan_paths's own docstring for why that is deliberate.
+    _violations = scan_paths(_paths, project_root=Path.cwd())
     if _violations:
         for _v in _violations:
             print(f"{_v.path}:{_v.lineno}: {_v.kind}")

@@ -342,6 +342,15 @@ class ReconcileEndToEndTests(_Base):
         self.assertEqual(state_data["from_version"], "v0.10.2")
         self.assertEqual(state_data["to_version"], "v0.11.0")
 
+        # (F-3B, anti-deadlock) The pause marker records a content hash of the
+        # paused file -- scan.py's hash-bound quarantine (the coupled fix that
+        # keeps the NEXT rebuild's real scan gate from deadlocking on a file
+        # this same pass just safe-paused) reads this to verify the file has
+        # not been edited since pause-time.
+        expected_hash = hashlib.sha256(
+            writer_path.read_bytes()).hexdigest()
+        self.assertEqual(state_data["paused_content_sha256"], expected_hash)
+
         # 4. The read-only entrypoint + its wrapper are completely untouched.
         self.assertEqual(report_wrapper.read_text(encoding="utf-8"), original_report_wrapper)
         self.assertNotIn("paused pending migration", original_report_wrapper)
@@ -372,6 +381,12 @@ class ReconcileEndToEndTests(_Base):
         self.assertEqual(queue[0]["mechanism_id"], "estate_upkeep")
         self.assertEqual(queue[0]["writer_relpath"], "agents/cron/estate_upkeep.py")
         self.assertEqual(queue[0]["status"], "pending")
+
+        # (F-3B, anti-deadlock) The migration-queue entry ALSO carries the same
+        # content hash as the pause marker -- both records must agree so
+        # scan.py's quarantine (keyed off the queue entry) matches what the
+        # marker itself recorded.
+        self.assertEqual(queue[0]["paused_content_sha256"], expected_hash)
 
     def test_migration_queue_entry_routes_to_rebuild_flow_not_add_capability(self):
         # Task B4 / F-77: a naive operator (or agent) reading this entry must be
@@ -1292,6 +1307,14 @@ class WritePausedLiveWriteStateTests(_Base):
         # the same shape the runtime loader expects.
         self.assertIsInstance(state["paused_op_kinds"], list)
         self.assertTrue(all(isinstance(k, str) for k in state["paused_op_kinds"]))
+
+        # (F-3B, anti-deadlock) The paused_live_write state ALSO records a
+        # content hash of the paused writer file -- scan.py's hash-bound
+        # quarantine reads this the same way it reads the entrypoint-pause
+        # marker's hash.
+        expected_hash = hashlib.sha256(
+            (proj / relpath).read_bytes()).hexdigest()
+        self.assertEqual(state["paused_content_sha256"], expected_hash)
 
     def test_idempotent_rerun_does_not_duplicate_marker(self):
         proj = self.tmp / "operator_proj"

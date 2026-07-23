@@ -23,6 +23,9 @@ Test intents:
       adapter-profile requires EXPLICIT registration (not directory location)
 """
 
+import hashlib
+import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -1321,6 +1324,332 @@ class TestCapabilityImportBoundary(unittest.TestCase):
             submods <= scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES,
             f"scaffold emits external_write submodules not in the A' allowlist: "
             f"{submods - scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES}")
+
+
+# ---------------------------------------------------------------------------
+# F-3B (anti-deadlock; COUPLED to F-3A/Task 1) -- hash-bound migration
+# quarantine.
+#
+# upgrade_reconcile.py safe-pauses a scanner-red bespoke writer (its wrapper
+# is gated, but the flagged .py file itself is NEVER touched -- see that
+# module's own "never touches writer_relpath" docstrings) and queues it in
+# agents/handoffs/pending_migrations.json for the operator's rebuild flow.
+# Without this quarantine, the very NEXT time the real build-time gate runs
+# (the operator project's own `python3 agents/lib/external_write/scan.py
+# agents/`, run recursively over the whole tree) it re-flags that SAME
+# still-unmigrated file and FAILS the build -- a hard deadlock for a
+# non-technical operator with no code-reading path forward.
+#
+# The exemption is narrow and deny-by-default: a violation is quarantined
+# ONLY when ALL of (a) the file is listed paused+queued in
+# pending_migrations.json for that exact writer_relpath, (b) the file's
+# CURRENT sha256 matches the recorded paused_content_sha256 (an edit voids
+# the quarantine), and (c) the specific violation itself was recorded at
+# pause-time. Any other case -- unlisted, edited, a genuinely NEW violation,
+# or an absent/unreadable pending_migrations.json -- reports normally.
+# ---------------------------------------------------------------------------
+
+_RAW_MINT_RUNNER_SOURCE = (
+    "from external_write.run_envelope import mint_run_envelope, new_bulk_run_id\n"
+    "def run_batches(batches):\n"
+    "    for b in batches:\n"
+    "        mint_run_envelope(run_id=new_bulk_run_id('x'))\n"
+)
+
+
+class TestHashBoundMigrationQuarantine(unittest.TestCase):
+    _WRITER_RELPATH = "agents/inbox/runner.py"
+
+    def _project(self, td, *, runner_source=_RAW_MINT_RUNNER_SOURCE):
+        proj = Path(td)
+        runner = proj / self._WRITER_RELPATH
+        runner.parent.mkdir(parents=True, exist_ok=True)
+        runner.write_text(runner_source, encoding="utf-8")
+        return proj, runner
+
+    def _real_violation_dicts(self, proj, runner):
+        # The ACTUAL violations scan_paths finds for this file today, in the
+        # same {path, line, kind} shape upgrade_reconcile.py's own pause-time
+        # records use -- mirrors production reality (the recorded set is
+        # whatever the real scan pass actually found at pause-time), rather
+        # than a hand-picked line/kind that could silently drift out of sync
+        # with the scanner's real behavior. No project_root here, so the
+        # quarantine itself plays no part in this baseline read.
+        found = scan_paths([runner], allowed_root=proj)
+        return [
+            {"path": self._WRITER_RELPATH, "line": v.lineno, "kind": v.kind}
+            for v in found
+        ]
+
+    def _write_pending_migrations(self, proj, entries):
+        path = proj / "agents" / "handoffs" / "pending_migrations.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(entries), encoding="utf-8")
+
+    def _entry(self, runner_bytes, violations, *, writer_relpath=None):
+        return {
+            "mechanism_id": "inbox_runner",
+            "writer_relpath": writer_relpath or self._WRITER_RELPATH,
+            "paused_content_sha256": hashlib.sha256(runner_bytes).hexdigest(),
+            "violations": violations,
+            "status": "pending",
+        }
+
+    def _scan_runner(self, proj, runner):
+        return scan_paths([runner], allowed_root=proj, project_root=proj)
+
+    def test_paused_queued_hash_and_violation_matched_is_quarantined_clean(self):
+        with TemporaryDirectory() as td:
+            proj, runner = self._project(td)
+            raw = runner.read_bytes()
+            all_violations = self._real_violation_dicts(proj, runner)
+            self.assertTrue(all_violations, "fixture sanity: source must actually violate")
+            self._write_pending_migrations(proj, [self._entry(raw, all_violations)])
+            v = self._scan_runner(proj, runner)
+            self.assertEqual(v, [], f"expected quarantined-clean, got {v}")
+
+    def test_file_not_listed_in_pending_migrations_is_not_exempt(self):
+        with TemporaryDirectory() as td:
+            proj, runner = self._project(td)
+            raw = runner.read_bytes()
+            all_violations = self._real_violation_dicts(proj, runner)
+            self._write_pending_migrations(
+                proj, [self._entry(raw, all_violations,
+                                    writer_relpath="agents/upkeep/runner.py")])
+            v = self._scan_runner(proj, runner)
+            self.assertIn("sealed_kernel_import", _kinds(v))
+
+    def test_edited_file_hash_mismatch_is_not_exempt(self):
+        with TemporaryDirectory() as td:
+            proj, runner = self._project(td)
+            raw = runner.read_bytes()
+            all_violations = self._real_violation_dicts(proj, runner)
+            self._write_pending_migrations(proj, [self._entry(raw, all_violations)])
+            # Edited AFTER the pause-time hash was recorded -- no longer inert.
+            runner.write_text(_RAW_MINT_RUNNER_SOURCE + "# edited\n", encoding="utf-8")
+            v = self._scan_runner(proj, runner)
+            self.assertIn("sealed_kernel_import", _kinds(v))
+
+    def test_new_violation_not_in_recorded_set_is_not_exempt(self):
+        with TemporaryDirectory() as td:
+            proj, runner = self._project(td)
+            raw = runner.read_bytes()
+            all_violations = self._real_violation_dicts(proj, runner)
+            # Record only a strict SUBSET of the real violations -- simulates a
+            # violation that pause-time never recorded (e.g. one the scanner
+            # finds today but did not yet find at the earlier pause). Drop
+            # every recorded entry at one whole LINE (not just one dict) --
+            # several real violations can share an identical (line, kind), so
+            # dropping only one dict would leave the set membership for that
+            # (line, kind) pair intact and this fixture would not actually
+            # exercise the "new violation" case at all.
+            lines_present = sorted({d["line"] for d in all_violations})
+            self.assertGreaterEqual(
+                len(lines_present), 2, "fixture sanity: need violations at 2+ lines")
+            drop_line = lines_present[-1]
+            partial = [d for d in all_violations if d["line"] != drop_line]
+            self.assertLess(len(partial), len(all_violations),
+                             "fixture sanity: must be a strict subset")
+            self._write_pending_migrations(proj, [self._entry(raw, partial)])
+            v = self._scan_runner(proj, runner)
+            self.assertIn("sealed_kernel_import", _kinds(v))
+            self.assertGreater(
+                len(v), 0,
+                "the un-recorded violation must still be reported, not silently dropped")
+
+    def test_pending_migrations_unreadable_is_not_exempt(self):
+        with TemporaryDirectory() as td:
+            proj, runner = self._project(td)
+            path = proj / "agents" / "handoffs" / "pending_migrations.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{not valid json", encoding="utf-8")
+            v = self._scan_runner(proj, runner)
+            self.assertIn("sealed_kernel_import", _kinds(v))
+
+    def test_pending_migrations_absent_is_not_exempt(self):
+        with TemporaryDirectory() as td:
+            proj, runner = self._project(td)
+            v = self._scan_runner(proj, runner)
+            self.assertIn("sealed_kernel_import", _kinds(v))
+
+    def test_default_project_root_does_not_break_existing_callers(self):
+        # Backward compatibility: scan_paths must still work with no
+        # project_root argument at all (every pre-existing call site in this
+        # file and in production code) -- the new parameter is additive/
+        # optional, defaulting to a fail-closed "no exemption" outcome when
+        # omitted.
+        with TemporaryDirectory() as td:
+            proj, runner = self._project(td)
+            v = scan_paths([runner], allowed_root=proj)
+            self.assertIn("sealed_kernel_import", _kinds(v))
+
+
+class TestQuarantineComposesWithMarkerResidueCheck(unittest.TestCase):
+    """Step 6 (F-3B brief): this quarantine must apply ONLY in the paused/
+    not-yet-accepted window and must never weaken capability_invariants.py's
+    INDEPENDENT Check 6 (marker residue), which fails an ACCEPTED capability
+    that still carries a pause marker on disk. The two checks share no code
+    path -- this proves they coexist consistently for the SAME underlying
+    paused-marker state, not that one implies the other."""
+
+    _PHASE_ID = "phase_f3b_compose_probe"
+    _OP_KIND = "set_status"  # permanently seeded contract; no adapter needed
+
+    def _write_capability(self, proj, cap_id):
+        d = proj / "agents" / "capabilities"
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / f"{cap_id}_capability.py"
+        path.write_text(
+            f'"""{cap_id} -- gate-clean capability (compose-test fixture)."""\n\n'
+            f'OP_KIND = "{self._OP_KIND}"\n\n\n'
+            "def describe():\n    return \"ready\"\n\n\n"
+            "def propose_operations(facade, batch_id):\n    return []\n",
+            encoding="utf-8",
+        )
+
+    def _write_descriptor_set(self, proj, entry):
+        path = proj / "security" / "capability_descriptors.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps([entry]), encoding="utf-8")
+
+    def _write_audit_record(self, proj, cap_id):
+        from external_write.acceptance_ceremony import DEFAULT_AUDIT_LOG_PATH
+        path = proj / DEFAULT_AUDIT_LOG_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema": "capability_acceptance_record-v1",
+            "capability_id": cap_id,
+            "phase_id": self._PHASE_ID,
+            "implementation_hash": "compose-test-hash",
+            "op_kind": self._OP_KIND,
+        }
+        path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+    def _write_marker(self, proj, cap_id):
+        from external_write.capability_invariants import PAUSED_MECHANISMS_DIR_REL
+        d = proj / PAUSED_MECHANISMS_DIR_REL
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{cap_id}.pause").write_text("", encoding="utf-8")
+
+    def test_accepted_capability_with_residual_marker_still_fails_marker_residue(self):
+        from external_write import capability_invariants
+        with TemporaryDirectory() as td:
+            proj = Path(td)
+            cap_id = "compose_probe_accepted"
+            self._write_capability(proj, cap_id)
+            self._write_descriptor_set(proj, {
+                "id": cap_id, "name": cap_id, "action_class": "in_place_edit",
+                "risk_class": "reversible_external", "recovery_profile_ref": None,
+                "declared_test_target": "copy", "blast_radius_cap": 5,
+                "accepted": True, "phase_id": self._PHASE_ID,
+            })
+            self._write_audit_record(proj, cap_id)
+            self._write_marker(proj, cap_id)
+
+            result = capability_invariants.check_capability_invariants(str(proj), cap_id)
+
+            self.assertFalse(result.ok)
+            self.assertTrue(
+                any(f.startswith("Marker residue:") for f in result.failures),
+                f"quarantine must not weaken the ACCEPTED marker-residue check; "
+                f"got {result.failures!r}",
+            )
+
+    def test_paused_not_yet_accepted_writer_is_quarantined_by_scan(self):
+        # The SAME kind of on-disk pause state, but pre-acceptance: scan.py's
+        # quarantine (this task) exempts the paused writer's own recorded
+        # violation; capability_invariants' marker-residue check is separately
+        # N/A for a not-yet-accepted capability (see Check 6's own docstring).
+        # Both checks are consistent about the same paused-and-not-yet-
+        # accepted window.
+        with TemporaryDirectory() as td:
+            proj = Path(td)
+            runner = proj / "agents" / "inbox" / "runner.py"
+            runner.parent.mkdir(parents=True, exist_ok=True)
+            runner.write_text(_RAW_MINT_RUNNER_SOURCE, encoding="utf-8")
+            raw = runner.read_bytes()
+            all_violations = [
+                {"path": "agents/inbox/runner.py", "line": v.lineno, "kind": v.kind}
+                for v in scan_paths([runner], allowed_root=proj)
+            ]
+            self.assertTrue(all_violations, "fixture sanity: source must actually violate")
+            pending = proj / "agents" / "handoffs" / "pending_migrations.json"
+            pending.parent.mkdir(parents=True, exist_ok=True)
+            pending.write_text(json.dumps([{
+                "mechanism_id": "inbox_runner",
+                "writer_relpath": "agents/inbox/runner.py",
+                "paused_content_sha256": hashlib.sha256(raw).hexdigest(),
+                "violations": all_violations,
+                "status": "pending",
+            }]), encoding="utf-8")
+
+            v = scan_paths([runner], allowed_root=proj, project_root=proj)
+            self.assertEqual(v, [], f"paused/queued writer must be quarantined; got {v}")
+
+    def test_capability_invariants_routing_check_is_unaffected_by_quarantine(self):
+        # Scope-containment guard: capability_invariants.py's OWN routing
+        # check (Check 1) reuses scan.scan_paths as a SUB-CHECK, but never
+        # passes project_root -- so the F-3B quarantine must play NO part in
+        # it, even when a matching, hash-correct pending_migrations.json
+        # entry exists at the project root (including when cwd IS that
+        # project root). Without this containment, this task would silently
+        # widen a pre-trial self-QA gate it was never scoped to touch --
+        # letting a capability that still bypasses run_operation report
+        # "routing ok" merely because it happens to also be migration-queued.
+        from external_write import capability_invariants
+        with TemporaryDirectory() as td:
+            proj = Path(td)
+            cap_id = "quarantine_scope_probe"
+            relpath = f"agents/capabilities/{cap_id}_capability.py"
+            cap_path = proj / relpath
+            cap_path.parent.mkdir(parents=True, exist_ok=True)
+            cap_path.write_text(
+                f'"""{cap_id} -- raw run_operation bypass (compose-test fixture)."""\n\n'
+                'OP_KIND = "set_status"\n\n'
+                "from external_write.adapters import run_operation\n\n"
+                "def propose_operations(facade, batch_id):\n    return []\n\n"
+                "def run():\n    return run_operation\n",
+                encoding="utf-8",
+            )
+            raw = cap_path.read_bytes()
+            real_violations = [
+                {"path": relpath, "line": v.lineno, "kind": v.kind}
+                for v in scan_paths([cap_path], allowed_root=proj)
+            ]
+            self.assertTrue(
+                any(d["kind"] == "raw_run_operation_reference" for d in real_violations),
+                "fixture sanity: must actually trip the routing violation",
+            )
+            pending = proj / "agents" / "handoffs" / "pending_migrations.json"
+            pending.parent.mkdir(parents=True, exist_ok=True)
+            pending.write_text(json.dumps([{
+                "mechanism_id": cap_id,
+                "writer_relpath": relpath,
+                "paused_content_sha256": hashlib.sha256(raw).hexdigest(),
+                "violations": real_violations,
+                "status": "pending",
+            }]), encoding="utf-8")
+            descriptors = proj / "security" / "capability_descriptors.json"
+            descriptors.parent.mkdir(parents=True, exist_ok=True)
+            descriptors.write_text(json.dumps([{
+                "id": cap_id, "name": cap_id, "action_class": "in_place_edit",
+                "risk_class": "reversible_external", "recovery_profile_ref": None,
+                "declared_test_target": "copy", "blast_radius_cap": 5,
+                "accepted": False,
+            }]), encoding="utf-8")
+
+            original_cwd = os.getcwd()
+            os.chdir(proj)  # cwd IS the project root -- the worst case for a leak
+            try:
+                result = capability_invariants.check_capability_invariants(str(proj), cap_id)
+            finally:
+                os.chdir(original_cwd)
+
+            self.assertTrue(
+                any(f.startswith("Routing:") for f in result.failures),
+                f"capability_invariants' routing check must NOT be exempted by "
+                f"the F-3B quarantine; got {result.failures!r}",
+            )
 
 
 if __name__ == "__main__":

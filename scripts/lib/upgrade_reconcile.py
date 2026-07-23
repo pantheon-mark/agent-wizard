@@ -1228,6 +1228,38 @@ def reconcile_missing_evidence_predicates(
     return remediated
 
 
+# ===== F-3B: hash-bound content record for scan.py's migration quarantine ====
+#
+# Anti-deadlock coupling with F-3A (relpath-keyed migration identity, Task 1):
+# `_safe_pause_entrypoint`/`_write_paused_live_write_state` gate a writer's
+# wrapper (or install a runtime block) WITHOUT ever touching the flagged
+# `writer_relpath` file itself, and `_append_migration_request` queues it for
+# the operator's rebuild flow -- but the file stays exactly as scanner-red as
+# it was before. Left alone, the NEXT time the real build-time gate runs
+# (`python3 agents/lib/external_write/scan.py agents/`, recursively) it
+# re-flags that SAME still-unmigrated file and fails the build: a hard
+# deadlock, since a non-technical operator has no way to "fix" a violation
+# that is, by design, awaiting a future rebuild rather than an immediate
+# repair. `scan.py`'s hash-bound quarantine (F-3B) closes that gap by
+# exempting a violation ONLY when it is provably the SAME pause-time
+# violation on the SAME unedited file -- this helper records the content hash
+# that quarantine hinges on.
+def _content_sha256(operator_project_dir: Path, writer_relpath: str) -> Optional[str]:
+    """sha256 hex digest of ``writer_relpath``'s CURRENT on-disk bytes, read at
+    pause/queue-time. Becomes ``paused_content_sha256`` in both the pause
+    marker and the pending-migrations queue entry. Returns ``None`` -- never
+    fabricates a hash -- if the file cannot be read; a caller storing
+    ``None`` simply means the quarantine can never match it later (fail-
+    closed), the same "cannot resolve, do not guess" discipline every other
+    helper in this module follows (see `_extract_op_kind_literal`'s own
+    docstring)."""
+    try:
+        content = (Path(operator_project_dir) / writer_relpath).read_bytes()
+    except OSError:
+        return None
+    return hashlib.sha256(content).hexdigest()
+
+
 def _write_paused_live_write_state(
     operator_project_dir: Path,
     mechanism_id: str,
@@ -1270,6 +1302,7 @@ def _write_paused_live_write_state(
         ],
         "credentials_preserved": True,
         "migration_status": "pending",
+        "paused_content_sha256": _content_sha256(operator_project_dir, writer_relpath),
     }
     _pause_state_path(operator_project_dir, mechanism_id).parent.mkdir(
         parents=True, exist_ok=True)
@@ -1587,6 +1620,7 @@ def _safe_pause_entrypoint(
         ],
         "credentials_preserved": True,
         "migration_status": "pending",
+        "paused_content_sha256": _content_sha256(operator_project_dir, writer_relpath),
     }
     _pause_state_path(operator_project_dir, mechanism_id).parent.mkdir(
         parents=True, exist_ok=True)
@@ -1640,6 +1674,10 @@ def _append_migration_request(
              "kind": getattr(v, "kind", "")}
             for v in violations
         ],
+        # (F-3B, anti-deadlock) scan.py's hash-bound migration quarantine keys
+        # on this exact field to verify the paused file has not been edited
+        # since pause-time -- see `_content_sha256`'s own docstring.
+        "paused_content_sha256": _content_sha256(operator_project_dir, writer_relpath),
         "suggested_next_step": (
             "Use the rebuild-paused-capability flow to rebuild this mechanism's write "
             "path so it routes through a registered external-write adapter "
