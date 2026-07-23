@@ -110,6 +110,7 @@ from capability_code_scaffold import (  # type: ignore  # noqa: E402
     DEFAULT_EXTERNAL_WRITE_REL,
     CapabilityCodeScaffoldError,
     insert_missing_evidence_predicate_stubs,
+    resolve_registered_adapter_classes,
 )
 
 
@@ -1065,27 +1066,63 @@ def _missing_evidence_predicates_for_adapter(
     source_text: str, required_predicates: Sequence[str],
 ) -> Optional[List[str]]:
     """AST-parse an adapter module's OWN on-disk source (never imported/
-    executed) and return the subset of `required_predicates` NOT defined as a
-    method on its first top-level class -- the Adapter class every
-    `capability_code_scaffold`-emitted adapter module declares exactly one of
-    (see `render_adapter_module`'s `${class_prefix}Adapter`). Returns `None`
-    (deliberately distinct from `[]`) when the source does not parse or
-    declares no top-level class at all -- ambiguous, never guessed at; the
-    caller skips this capability for this pass rather than risk a false
-    negative or a corrupting edit, mirroring `_extract_op_kind_literal`'s own
-    fail-closed/never-guess discipline."""
+    executed) and return the (deduplicated, `required_predicates`-ordered)
+    UNION of names that are missing from AT LEAST ONE class actually
+    REGISTERED via a module-level `register_adapter(...)` call -- resolved
+    via `capability_code_scaffold.resolve_registered_adapter_classes`, the
+    SAME AST registration-aware resolution `insert_missing_evidence_
+    predicate_stubs` uses, so detection and insertion can never again
+    disagree about which class they mean (the exact defect F-1 fixes: this
+    function used to inspect only the FIRST top-level class, so a
+    multi-adapter module like `adapters_gmail.py` -- four classes, four
+    `register_adapter(...)` calls -- could have a predicate genuinely
+    missing on its second/third/fourth registered class and this function
+    would still report "nothing missing" because the FIRST class happened
+    to already have it).
+
+    This is deliberately NOT a "present anywhere in the module" check
+    (REJECTED by the locked design): a predicate correctly implemented on
+    one registered class does not hide that a DIFFERENT registered class in
+    the same module still lacks it -- both facts are independently true and
+    this function's union return surfaces the latter regardless of the
+    former. Per-class dedup of what actually needs a stub happens in
+    `insert_missing_evidence_predicate_stubs` (which re-resolves the same
+    per-class detail this function only reports in aggregate).
+
+    Returns `None` (deliberately distinct from `[]`) when the source does
+    not parse, or when it resolves to NO registered class at all (no
+    top-level class; or -- the narrower shape this function's own direct
+    unit tests exercise -- more than one top-level class with no
+    `register_adapter(...)` call present to disambiguate) -- ambiguous,
+    never guessed at; the caller skips this capability for this pass rather
+    than risk a false negative or a corrupting edit, mirroring
+    `_extract_op_kind_literal`'s own fail-closed/never-guess discipline.
+    An INDIVIDUAL ambiguous registration (when at least one OTHER
+    registration in the same module resolves cleanly) is silently excluded
+    from this union rather than turning the whole result into `None` --
+    `reconcile_missing_evidence_predicates` calls
+    `resolve_registered_adapter_classes` itself to learn about those and
+    queue a manual-repair task for them; that is out of scope for this
+    narrower "what needs a stub, in aggregate" helper."""
     try:
         tree = ast.parse(source_text)
     except SyntaxError:
         return None
-    class_node = next((n for n in tree.body if isinstance(n, ast.ClassDef)), None)
-    if class_node is None:
+    resolved, _ambiguous_count = resolve_registered_adapter_classes(tree)
+    if not resolved:
         return None
-    defined = {
-        n.name for n in class_node.body
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
-    return [name for name in required_predicates if name not in defined]
+    missing: List[str] = []
+    seen = set()
+    for class_node in resolved.values():
+        defined = {
+            n.name for n in class_node.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        for name in required_predicates:
+            if name not in defined and name not in seen:
+                missing.append(name)
+                seen.add(name)
+    return missing
 
 
 def _append_missing_predicate_migration_request(
@@ -1157,6 +1194,71 @@ def _append_missing_predicate_migration_request(
     return path
 
 
+def _append_ambiguous_adapter_registration_manual_repair_request(
+    operator_project_dir: Path,
+    canonical_id: str,
+    adapter_relpath: str,
+    from_version: str,
+    to_version: str,
+) -> Path:
+    """(F-1) Land (or refresh) a manual-repair task in the SAME
+    pending-migrations queue `_append_missing_predicate_migration_request`
+    writes to, for a capability whose adapter module has AT LEAST ONE
+    module-level `register_adapter(...)` call this pass could not uniquely
+    resolve to a single class (0 or >1 same-named candidates, or a
+    non-constructor-call argument -- see `capability_code_scaffold.
+    resolve_registered_adapter_classes`'s own docstring). Never guessed at:
+    this pass scaffolds NOTHING for that registration -- a human (or a
+    human-in-the-loop agent) must resolve the ambiguity by hand before any
+    evidence-predicate stub can be safely targeted at it.
+
+    Distinguished from a `missing_evidence_predicates` entry by `"kind":
+    "ambiguous_adapter_registration"` -- keyed on BOTH `mechanism_id` and
+    `kind` (not `mechanism_id` alone) so this entry and a co-existing
+    `missing_evidence_predicates` entry for the SAME capability (e.g. one
+    registration in a multi-adapter module is ambiguous while another
+    resolves cleanly and genuinely needs a stub) never clobber each other.
+    Idempotent: re-running an upgrade REPLACES this capability's existing
+    entry of this SAME kind rather than duplicating it."""
+    path = Path(operator_project_dir) / MIGRATION_QUEUE_REL
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        if not isinstance(existing, list):
+            existing = []
+    except (json.JSONDecodeError, OSError):
+        existing = []
+    existing = [
+        e for e in existing
+        if not (isinstance(e, dict) and e.get("mechanism_id") == canonical_id
+                and e.get("kind") == "ambiguous_adapter_registration")
+    ]
+    existing.append({
+        "mechanism_id": canonical_id,
+        "writer_relpath": adapter_relpath,
+        "entrypoint_relpath": None,
+        "requested_at": _utcnow_iso(),
+        "from_version": from_version,
+        "to_version": to_version,
+        "kind": "ambiguous_adapter_registration",
+        "reason": (
+            "this adapter module has a register_adapter(...) call whose "
+            "target class could not be uniquely identified by static "
+            "analysis -- the evidence-predicate migrator refuses to guess "
+            "which class to check or repair"
+        ),
+        "suggested_next_step": (
+            f"Open {adapter_relpath} and confirm which class each "
+            "register_adapter(...) call registers (it must be a direct "
+            "ClassName() constructor call naming exactly one class defined "
+            "in this module), then check that class by hand against the "
+            "required evidence predicates."
+        ),
+        "status": "pending",
+    })
+    _atomic_write(path, json.dumps(existing, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
+    return path
+
+
 def reconcile_missing_evidence_predicates(
     operator_project_dir: Path,
     build_repo_root: Path,
@@ -1209,6 +1311,25 @@ def reconcile_missing_evidence_predicates(
             source_text = adapter_path.read_text(encoding="utf-8")
         except OSError:
             continue  # no adapter module for this capability -- not adapter-backed, N/A
+
+        try:
+            tree = ast.parse(source_text)
+        except SyntaxError:
+            continue  # never guess at an unparseable adapter module
+
+        # F-1: a register_adapter(...) call whose target class can't be
+        # uniquely resolved gets NOTHING scaffolded for it -- queue a
+        # manual-repair task instead of guessing. This is per-registration,
+        # not whole-module: a DIFFERENT registration in the same
+        # multi-adapter module can still resolve cleanly and be handled
+        # normally below.
+        _resolved, ambiguous_count = resolve_registered_adapter_classes(tree)
+        if ambiguous_count:
+            _append_ambiguous_adapter_registration_manual_repair_request(
+                operator_project_dir, canonical_id, adapter_relpath,
+                from_version, to_version,
+            )
+
         missing = _missing_evidence_predicates_for_adapter(source_text, required)
         if not missing:
             continue

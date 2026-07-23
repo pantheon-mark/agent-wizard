@@ -520,6 +520,101 @@ _DEFAULT_MISSING_EVIDENCE_PREDICATE_MESSAGE = (
 _REGISTER_ADAPTER_CALL_RE = re.compile(r"^register_adapter\(", re.MULTILINE)
 
 
+# ---------------------------------------------------------------------------
+# F-1 fix: AST registration-aware target-class resolution, shared by this
+# module's own `insert_missing_evidence_predicate_stubs` (below) AND
+# `upgrade_reconcile._missing_evidence_predicates_for_adapter` -- the exact
+# defect this task fixes was those two functions disagreeing about which
+# class they meant (detection inspected only the first top-level ClassDef;
+# insertion spliced before the first module-level register_adapter(...) call
+# -- i.e. the LAST class textually -- with no dedup). Both now resolve the
+# SAME way, from THIS one algorithm, so they can never again drift apart.
+# ---------------------------------------------------------------------------
+
+def _register_adapter_calls(tree: ast.Module) -> List[ast.Call]:
+    """Every module-level ``register_adapter(...)`` call in `tree` -- a bare
+    expression statement at the module's own top level whose value is a Call
+    to the bare name ``register_adapter`` (the exact self-registering
+    convention every `capability_code_scaffold`-emitted adapter module, and
+    the reference `adapters_gmail.py`, both follow at module scope)."""
+    calls: List[ast.Call] = []
+    for node in tree.body:
+        value = node.value if isinstance(node, ast.Expr) else node
+        if (isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id == "register_adapter"):
+            calls.append(value)
+    return calls
+
+
+def _register_adapter_target_class_name(call: ast.Call) -> Optional[str]:
+    """The adapter CLASS NAME a ``register_adapter(op_kind, <ctor>)`` call
+    registers, resolved from the call's own SECOND positional argument --
+    NEVER from text position. Returns the symbol name only when that
+    argument is a direct constructor call of a bare name (``SomeAdapter()``
+    -- the shape every real adapter module in this codebase uses); returns
+    `None` -- deliberately never guessed at -- for anything else (a missing
+    second argument, a factory-function call, a variable reference, an
+    attribute access, ...)."""
+    if len(call.args) < 2:
+        return None
+    ctor = call.args[1]
+    if not isinstance(ctor, ast.Call) or not isinstance(ctor.func, ast.Name):
+        return None
+    return ctor.func.id
+
+
+def resolve_registered_adapter_classes(
+    tree: ast.Module,
+) -> Tuple[Dict[str, ast.ClassDef], int]:
+    """Resolve, from the AST alone, which top-level class each module-level
+    ``register_adapter(...)`` call actually registers.
+
+    Returns ``(resolved, ambiguous_count)``:
+      * ``resolved`` maps each UNIQUELY-resolved class name to its own
+        ``ast.ClassDef`` node.
+      * ``ambiguous_count`` is the number of ``register_adapter(...)`` calls
+        whose target class could NOT be uniquely resolved (0 or >1
+        same-named top-level classes, or a non-constructor-call argument --
+        e.g. a factory function or a variable reference). NEVER guessed at:
+        an ambiguous registration contributes nothing to `resolved`; the
+        caller is expected to refuse/queue a manual-repair task for it
+        rather than pick one.
+
+    Backward-compatibility fallback: when the module declares NO
+    module-level ``register_adapter(...)`` call at all (a shape this
+    codebase's own emitted modules never produce, but exercised directly by
+    this task's narrower pre-existing helper unit tests), a module with
+    EXACTLY ONE top-level class treats that class as the implicit sole
+    target -- the same "the one and only ClassDef" resolution the pre-fix
+    code always used for this narrower shape. Zero, or more than one,
+    top-level class with no registration call to disambiguate is itself
+    ambiguous (never guessed at) -- reported as an empty `resolved` mapping,
+    since there is no register_adapter(...) call to even count as
+    ambiguous."""
+    class_defs = [n for n in tree.body if isinstance(n, ast.ClassDef)]
+    by_name: Dict[str, List[ast.ClassDef]] = {}
+    for c in class_defs:
+        by_name.setdefault(c.name, []).append(c)
+
+    calls = _register_adapter_calls(tree)
+    if not calls:
+        if len(class_defs) == 1:
+            return {class_defs[0].name: class_defs[0]}, 0
+        return {}, 0
+
+    resolved: Dict[str, ast.ClassDef] = {}
+    ambiguous_count = 0
+    for call in calls:
+        symbol = _register_adapter_target_class_name(call)
+        candidates = by_name.get(symbol, []) if symbol else []
+        if symbol is None or len(candidates) != 1:
+            ambiguous_count += 1
+            continue
+        resolved[symbol] = candidates[0]
+    return resolved, ambiguous_count
+
+
 def render_missing_evidence_predicate_stub(predicate_name: str) -> str:
     """Render ONE class-body-indented (4-space) method definition for
     `predicate_name` whose body is exactly a `raise NotImplementedError(...)`
@@ -562,34 +657,94 @@ def insert_missing_evidence_predicate_stubs(
     adapter_source: str, missing_predicates: Sequence[str],
 ) -> str:
     """Insert a FAILING `NotImplementedError` stub method for each name in
-    `missing_predicates` into `adapter_source` (an EXISTING adapter module's
-    own on-disk text), anchored immediately before its module-level
-    `register_adapter(...)` call -- the point every `capability_code_scaffold`
-    -emitted adapter module's Adapter class body ends at (see
-    `_ADAPTER_MODULE_TEMPLATE`). Pure string operation -- no filesystem I/O,
-    no parsing/executing `adapter_source` as code beyond this module's own
-    caller having already determined `missing_predicates` (this function
-    trusts that list, it does not recompute it).
+    `missing_predicates` that a REGISTERED adapter class genuinely lacks,
+    into `adapter_source` (an EXISTING adapter module's own on-disk text).
 
-    Returns `adapter_source` UNCHANGED when `missing_predicates` is empty
-    (no-op, not an error). Raises `CapabilityCodeScaffoldError` -- never
-    guesses an insertion point -- if no module-level `register_adapter(`
-    call can be found; this is the SAME fail-closed discipline every other
-    "cannot determine X, refuse rather than guess" primitive in this module
-    already follows."""
+    AST REGISTRATION-AWARE + DUPLICATE-SAFE (F-1 fix): resolves the actual
+    target class(es) from each module-level ``register_adapter(...)`` call
+    via `resolve_registered_adapter_classes` -- NEVER text position, NEVER
+    "the first ClassDef" -- and, independently for EACH resolved class,
+    inserts a stub ONLY for a name in `missing_predicates` that class's OWN
+    body does not already define, at THAT class's own ``end_lineno`` (a
+    surgical text splice -- never `ast.unparse`, so the operator's existing
+    formatting elsewhere in the file is untouched). A predicate already
+    correctly implemented on ANY registered class is therefore NEVER
+    shadowed by a duplicate stub, regardless of which OTHER class(es) in the
+    same module still need one -- the exact defect this task fixes: pre-fix,
+    this function anchored on the FIRST module-level `register_adapter(...)`
+    call textually (i.e. spliced right after the LAST class in the file),
+    with no per-class dedup at all.
+
+    A `register_adapter(...)` call whose target class cannot be uniquely
+    resolved is skipped entirely here (never guessed at) -- see
+    `resolve_registered_adapter_classes`'s own docstring; the caller
+    (`upgrade_reconcile.reconcile_missing_evidence_predicates`) is
+    responsible for queuing a manual-repair task for that registration.
+
+    Pure string/AST-read operation -- no filesystem I/O, no executing
+    `adapter_source` as code. This module's own caller has already
+    determined `missing_predicates` (this function trusts that list as an
+    upper bound -- it does not recompute WHICH names are missing overall,
+    only, per resolved class, which of those names that specific class still
+    lacks).
+
+    Returns `adapter_source` UNCHANGED when `missing_predicates` is empty,
+    OR when every resolved class already defines everything named in it
+    (both are legitimate no-ops, never an error). Raises
+    `CapabilityCodeScaffoldError` -- never guesses an insertion point -- if
+    the source does not parse, if no module-level `register_adapter(...)`
+    call can be found at all, or if every one present is ambiguous (nothing
+    left to safely anchor on); this is the SAME fail-closed discipline every
+    other "cannot determine X, refuse rather than guess" primitive in this
+    module already follows."""
     missing = list(missing_predicates)
     if not missing:
         return adapter_source
-    match = _REGISTER_ADAPTER_CALL_RE.search(adapter_source)
-    if match is None:
+    try:
+        tree = ast.parse(adapter_source)
+    except SyntaxError as exc:
+        raise CapabilityCodeScaffoldError(
+            "cannot auto-scaffold a failing evidence-predicate stub -- this "
+            "adapter module's source does not parse as Python; refusing to "
+            "guess where the stub method(s) belong."
+        ) from exc
+    if not _register_adapter_calls(tree):
         raise CapabilityCodeScaffoldError(
             "cannot auto-scaffold a failing evidence-predicate stub -- this "
             "adapter module's source has no module-level register_adapter(...) "
             "call to anchor the insertion point before; refusing to guess where "
             "the stub method(s) belong.")
-    stubs = "".join(render_missing_evidence_predicate_stub(name) for name in missing)
-    insertion_point = match.start()
-    return adapter_source[:insertion_point] + stubs + "\n\n" + adapter_source[insertion_point:]
+    resolved, _ambiguous_count = resolve_registered_adapter_classes(tree)
+    if not resolved:
+        raise CapabilityCodeScaffoldError(
+            "cannot auto-scaffold a failing evidence-predicate stub -- none of "
+            "this adapter module's register_adapter(...) calls resolve to a "
+            "uniquely-identifiable class; refusing to guess which class the "
+            "stub method(s) belong on.")
+
+    insertions: List[Tuple[int, str]] = []
+    for class_node in resolved.values():
+        defined = {
+            n.name for n in class_node.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        genuinely_missing = [name for name in missing if name not in defined]
+        if not genuinely_missing:
+            continue  # this class already has everything asked for -- never shadow it
+        stub_text = "".join(
+            render_missing_evidence_predicate_stub(name) for name in genuinely_missing)
+        insertions.append((class_node.end_lineno, stub_text))
+
+    if not insertions:
+        return adapter_source
+
+    # Apply from the BOTTOM of the file upward so an earlier class's
+    # insertion never shifts a LATER class's own end_lineno out from under it.
+    insertions.sort(key=lambda pair: pair[0], reverse=True)
+    lines = adapter_source.splitlines(keepends=True)
+    for end_lineno, stub_text in insertions:
+        lines[end_lineno:end_lineno] = [stub_text]
+    return "".join(lines)
 
 
 # ---------------------------------------------------------------------------

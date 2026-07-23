@@ -1150,5 +1150,213 @@ class TestMissingEvidencePredicateStubScaffold(unittest.TestCase):
                 instance.verify_undo_restored(None)
 
 
+# ---------------------------------------------------------------------------
+# F-1 fix: AST registration-aware, duplicate-safe insertion for a MULTI-adapter
+# module (e.g. adapters_gmail.py's real shape -- four classes, four
+# register_adapter(...) calls). Pre-fix, detection inspected only the FIRST
+# top-level ClassDef and insertion spliced before the FIRST register_adapter(
+# call (i.e. right after the LAST class textually), with no dedup -- so a
+# predicate correctly implemented on a non-first/non-last registered class
+# was invisible to detection AND, whenever something else in the module WAS
+# detected as missing, liable to be shadowed by a duplicate stub landing on
+# an already-complete class instead of the one that actually needed it.
+# ---------------------------------------------------------------------------
+
+_MULTI_CLASS_ADAPTER_SOURCE = '''"""Fixture multi-adapter module (F-1 test) -- mirrors adapters_gmail.py's
+real shape: several classes, each registered via its OWN register_adapter(...)
+call."""
+from external_write.adapter_registry import register_adapter
+
+OP_ONE = "acme.multi.one"
+OP_TWO = "acme.multi.two"
+OP_THREE = "acme.multi.three"
+
+
+class AcmeMultiOneAdapter:
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, observer, unit):
+        return {}
+
+    def verify_apply_landed(self, evidence):
+        return True
+
+    def verify_undo_restored(self, evidence):
+        return True
+
+
+class AcmeMultiTwoAdapter:
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, observer, unit):
+        return {}
+
+
+class AcmeMultiThreeAdapter:
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, observer, unit):
+        return {}
+
+    def verify_apply_landed(self, evidence):
+        return True
+
+    def verify_undo_restored(self, evidence):
+        return True
+
+
+register_adapter(OP_ONE, AcmeMultiOneAdapter())
+register_adapter(OP_TWO, AcmeMultiTwoAdapter())
+register_adapter(OP_THREE, AcmeMultiThreeAdapter())
+'''
+
+_AMBIGUOUS_ADAPTER_SOURCE = '''"""Fixture adapter module whose single registration cannot be resolved to a
+unique class (F-1 ambiguity test) -- the instance is built by a FACTORY
+FUNCTION, not a direct ClassName() constructor call."""
+from external_write.adapter_registry import register_adapter
+
+OP_KIND = "acme.ambiguous.op"
+
+
+class AcmeAmbiguousAdapter:
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, observer, unit):
+        return {}
+
+
+def _build_adapter():
+    return AcmeAmbiguousAdapter()
+
+
+register_adapter(OP_KIND, _build_adapter())
+'''
+
+
+def _class_method_name_list(tree: ast.Module, class_name: str):
+    """A LIST (not a set) of method names on `class_name` -- deliberately
+    preserves duplicates, so a regression that shadows an already-present
+    predicate with a second definition of the SAME name is actually caught
+    (a set would silently collapse the duplicate away)."""
+    class_node = next(n for n in tree.body if isinstance(n, ast.ClassDef)
+                       and n.name == class_name)
+    return [n.name for n in class_node.body if isinstance(n, ast.FunctionDef)]
+
+
+class TestMissingEvidencePredicateStubScaffoldMultiClass(unittest.TestCase):
+    """F-1: AST registration-aware evidence-predicate migrator -- never
+    shadow a working predicate in a multi-adapter module."""
+
+    def test_insert_never_shadows_a_predicate_already_present_on_a_registered_class(self):
+        # AcmeMultiOneAdapter and AcmeMultiThreeAdapter already define BOTH
+        # predicates. Even though the flat `missing_predicates` list (as a
+        # real caller's detection pass would compute it -- see
+        # upgrade_reconcile._missing_evidence_predicates_for_adapter) names
+        # both, NEITHER already-complete class may gain a duplicate/shadowing
+        # stub.
+        new_source = ccs.insert_missing_evidence_predicate_stubs(
+            _MULTI_CLASS_ADAPTER_SOURCE,
+            ["verify_apply_landed", "verify_undo_restored"])
+        tree = ast.parse(new_source)  # must stay syntactically valid
+
+        for class_name in ("AcmeMultiOneAdapter", "AcmeMultiThreeAdapter"):
+            names = _class_method_name_list(tree, class_name)
+            self.assertEqual(
+                sorted(names),
+                sorted(["plan", "apply_one", "undo_one", "verify_one",
+                        "verify_apply_landed", "verify_undo_restored"]),
+                f"{class_name} must be untouched -- it already had both "
+                "predicates before this call, and must not gain a SECOND "
+                "(shadowing) definition of either")
+            self.assertEqual(
+                names.count("verify_apply_landed"), 1,
+                f"{class_name} must keep exactly ONE verify_apply_landed -- "
+                "never a duplicate/shadowing stub")
+            self.assertEqual(
+                names.count("verify_undo_restored"), 1,
+                f"{class_name} must keep exactly ONE verify_undo_restored -- "
+                "never a duplicate/shadowing stub")
+
+        # Byte-level proof for the no-shadow property: both already-complete
+        # classes' ORIGINAL text survives unchanged in the new source.
+        original_one = _MULTI_CLASS_ADAPTER_SOURCE[
+            _MULTI_CLASS_ADAPTER_SOURCE.index("class AcmeMultiOneAdapter"):
+            _MULTI_CLASS_ADAPTER_SOURCE.index("class AcmeMultiTwoAdapter")
+        ].rstrip("\n")
+        self.assertIn(original_one, new_source)
+        original_three = _MULTI_CLASS_ADAPTER_SOURCE[
+            _MULTI_CLASS_ADAPTER_SOURCE.index("class AcmeMultiThreeAdapter"):
+            _MULTI_CLASS_ADAPTER_SOURCE.index("register_adapter(OP_ONE")
+        ].rstrip("\n")
+        self.assertIn(original_three, new_source)
+
+    def test_insert_targets_the_genuinely_missing_registered_class_only(self):
+        # AcmeMultiTwoAdapter is the ONLY registered class that actually
+        # lacks both predicates -- exactly one failing stub for each must
+        # land THERE, not on a sibling.
+        new_source = ccs.insert_missing_evidence_predicate_stubs(
+            _MULTI_CLASS_ADAPTER_SOURCE,
+            ["verify_apply_landed", "verify_undo_restored"])
+        tree = ast.parse(new_source)
+        class_two = next(n for n in tree.body if isinstance(n, ast.ClassDef)
+                         and n.name == "AcmeMultiTwoAdapter")
+        method_names = {n.name for n in class_two.body if isinstance(n, ast.FunctionDef)}
+        self.assertIn("verify_apply_landed", method_names)
+        self.assertIn("verify_undo_restored", method_names)
+
+        for predicate_name in ("verify_apply_landed", "verify_undo_restored"):
+            stub = next(n for n in class_two.body
+                       if isinstance(n, ast.FunctionDef) and n.name == predicate_name)
+            self.assertEqual(len(stub.body), 1, "must be a SINGLE raise -- never a passing stub")
+            self.assertIsInstance(stub.body[0], ast.Raise)
+            self.assertEqual(stub.body[0].exc.func.id, "NotImplementedError")
+
+        # Exactly one definition of each -- never duplicated across classes.
+        occurrences = new_source.count("def verify_apply_landed")
+        self.assertEqual(
+            occurrences, 3,
+            "expected exactly 3 total: AcmeMultiOne (pre-existing), "
+            "AcmeMultiTwo (newly scaffolded), AcmeMultiThree (pre-existing) "
+            "-- never a 4th duplicate")
+
+    def test_insert_refuses_when_the_only_registration_is_ambiguous(self):
+        # The sole register_adapter(...) call's second argument is a factory
+        # FUNCTION call (`_build_adapter()`), not a direct `ClassName()`
+        # constructor -- there is no uniquely-resolvable target class to
+        # anchor an insertion on, so this must refuse rather than guess.
+        with self.assertRaises(CapabilityCodeScaffoldError):
+            ccs.insert_missing_evidence_predicate_stubs(
+                _AMBIGUOUS_ADAPTER_SOURCE,
+                ["verify_apply_landed", "verify_undo_restored"])
+
+
 if __name__ == "__main__":
     unittest.main()

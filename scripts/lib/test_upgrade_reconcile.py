@@ -2220,6 +2220,265 @@ register_adapter(OP_KIND, AcmeWidgetTidyAdapter())
         )
 
 
+# ---------------------------------------------------------------------------
+# F-1: AST registration-aware evidence-predicate migrator -- never shadow a
+# working predicate. Regression coverage for a MULTI-adapter module (the real
+# adapters_gmail.py shape: several classes, each registered via its own
+# register_adapter(...) call). Pre-fix, detection inspected only the FIRST
+# top-level ClassDef and insertion spliced before the FIRST register_adapter(
+# call (i.e. right after the LAST class textually, no dedup) -- so a
+# predicate correctly implemented on a non-first registered class was
+# invisible to detection, AND liable to be shadowed by a duplicate stub
+# landing on an already-complete class instead of the one that genuinely
+# needed it.
+# ---------------------------------------------------------------------------
+
+_MULTI_CLASS_ADAPTER_SOURCE = '''"""Fixture multi-adapter module (F-1 test) -- mirrors adapters_gmail.py's
+real shape: several classes, each registered via its OWN register_adapter(...)
+call."""
+from external_write.adapter_registry import register_adapter
+
+OP_ONE = "acme.multi.one"
+OP_TWO = "acme.multi.two"
+OP_THREE = "acme.multi.three"
+
+
+class AcmeMultiOneAdapter:
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, observer, unit):
+        return {}
+
+    def verify_apply_landed(self, evidence):
+        return True
+
+    def verify_undo_restored(self, evidence):
+        return True
+
+
+class AcmeMultiTwoAdapter:
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, observer, unit):
+        return {}
+
+
+class AcmeMultiThreeAdapter:
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, observer, unit):
+        return {}
+
+    def verify_apply_landed(self, evidence):
+        return True
+
+    def verify_undo_restored(self, evidence):
+        return True
+
+
+register_adapter(OP_ONE, AcmeMultiOneAdapter())
+register_adapter(OP_TWO, AcmeMultiTwoAdapter())
+register_adapter(OP_THREE, AcmeMultiThreeAdapter())
+'''
+
+_AMBIGUOUS_ADAPTER_SOURCE = '''"""Fixture adapter module whose single registration cannot be resolved to a
+unique class (F-1 ambiguity test) -- the instance is built by a FACTORY
+FUNCTION, not a direct ClassName() constructor call."""
+from external_write.adapter_registry import register_adapter
+
+OP_KIND = "acme.ambiguous.op"
+
+
+class AcmeAmbiguousAdapter:
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, observer, unit):
+        return {}
+
+
+def _build_adapter():
+    return AcmeAmbiguousAdapter()
+
+
+register_adapter(OP_KIND, _build_adapter())
+'''
+
+
+class ReconcileMissingEvidencePredicatesMultiClassTests(_Base):
+    """F-1: detection + insertion must agree on the SAME registered target
+    class(es), resolved from each register_adapter(...) call's own AST
+    argument -- never "first ClassDef", never text position."""
+
+    def setUp(self):
+        super().setUp()
+        self._agents_lib = _REAL_REPO / "wizard" / "agents" / "lib"
+        for mod_name in list(sys.modules):
+            if mod_name == "external_write" or mod_name.startswith("external_write."):
+                del sys.modules[mod_name]
+        if str(self._agents_lib) not in sys.path:
+            sys.path.insert(0, str(self._agents_lib))
+
+    def _write_capability_with_adapter(self, proj, capability_id, adapter_source):
+        capdir = proj / "agents" / "capabilities"
+        capdir.mkdir(parents=True, exist_ok=True)
+        (capdir / f"{capability_id}_capability.py").write_text(
+            '"""fixture capability module (F-1 test) -- content irrelevant, '
+            'only its presence matters for capability_identity enumeration."""\n',
+            encoding="utf-8",
+        )
+        ext_dir = proj / "agents" / "lib" / "external_write"
+        ext_dir.mkdir(parents=True, exist_ok=True)
+        adapter_path = ext_dir / f"adapters_{capability_id}.py"
+        adapter_path.write_text(adapter_source, encoding="utf-8")
+        return adapter_path
+
+    def test_missing_predicates_helper_is_per_registered_class_not_first_class(self):
+        # Direct unit proof that detection is NOT "first ClassDef only":
+        # AcmeMultiOneAdapter (the first class) already has both predicates,
+        # yet the union must still surface both names because
+        # AcmeMultiTwoAdapter (a DIFFERENT registered class) lacks them.
+        self.assertEqual(
+            sorted(_missing_evidence_predicates_for_adapter(
+                _MULTI_CLASS_ADAPTER_SOURCE,
+                ("verify_apply_landed", "verify_undo_restored"))),
+            ["verify_apply_landed", "verify_undo_restored"])
+
+    def test_multi_class_module_no_shadow_when_first_class_already_complete(self):
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        adapter_path = self._write_capability_with_adapter(
+            proj, "acme_multi", _MULTI_CLASS_ADAPTER_SOURCE)
+
+        result = reconcile_missing_evidence_predicates(
+            proj, _REAL_REPO, from_version="0.13.1", to_version="0.14.0")
+
+        self.assertEqual(len(result), 1)
+        remediation = result[0]
+        self.assertEqual(remediation.canonical_id, "acme_multi")
+        self.assertEqual(
+            sorted(remediation.missing_predicates),
+            ["verify_apply_landed", "verify_undo_restored"])
+
+        new_source = adapter_path.read_text(encoding="utf-8")
+        tree = ast.parse(new_source)  # must stay syntactically valid
+
+        def method_name_list(class_name):
+            class_node = next(n for n in tree.body if isinstance(n, ast.ClassDef)
+                              and n.name == class_name)
+            return [n.name for n in class_node.body if isinstance(n, ast.FunctionDef)]
+
+        # The two ALREADY-CORRECT classes must be untouched -- no
+        # duplicate/shadowing stub landed on either of them.
+        for class_name in ("AcmeMultiOneAdapter", "AcmeMultiThreeAdapter"):
+            names = method_name_list(class_name)
+            self.assertEqual(names.count("verify_apply_landed"), 1)
+            self.assertEqual(names.count("verify_undo_restored"), 1)
+
+    def test_multi_class_module_genuinely_missing_class_gets_own_stub(self):
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        adapter_path = self._write_capability_with_adapter(
+            proj, "acme_multi", _MULTI_CLASS_ADAPTER_SOURCE)
+
+        reconcile_missing_evidence_predicates(
+            proj, _REAL_REPO, from_version="0.13.1", to_version="0.14.0")
+
+        new_source = adapter_path.read_text(encoding="utf-8")
+        tree = ast.parse(new_source)
+        class_two = next(n for n in tree.body if isinstance(n, ast.ClassDef)
+                         and n.name == "AcmeMultiTwoAdapter")
+        method_names = [n.name for n in class_two.body if isinstance(n, ast.FunctionDef)]
+        self.assertIn("verify_apply_landed", method_names)
+        self.assertIn("verify_undo_restored", method_names)
+
+        for predicate_name in ("verify_apply_landed", "verify_undo_restored"):
+            stub = next(n for n in class_two.body
+                       if isinstance(n, ast.FunctionDef) and n.name == predicate_name)
+            self.assertEqual(len(stub.body), 1, "must be a SINGLE raise -- never a passing stub")
+            self.assertIsInstance(stub.body[0], ast.Raise)
+            self.assertEqual(stub.body[0].exc.func.id, "NotImplementedError")
+
+        # Exactly 3 total definitions of each name across the whole module:
+        # AcmeMultiOne (pre-existing) + AcmeMultiTwo (newly scaffolded) +
+        # AcmeMultiThree (pre-existing) -- never a shadowing 4th.
+        self.assertEqual(new_source.count("def verify_apply_landed"), 3)
+        self.assertEqual(new_source.count("def verify_undo_restored"), 3)
+
+        # The migration queue records the real missing set for the capability
+        # as a whole, keyed on the correct kind.
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        entry = next(e for e in queue if e["mechanism_id"] == "acme_multi")
+        self.assertEqual(entry["kind"], "missing_evidence_predicates")
+        self.assertEqual(
+            sorted(entry["missing_predicates"]),
+            ["verify_apply_landed", "verify_undo_restored"])
+
+    def test_ambiguous_registration_scaffolds_nothing_and_queues_manual_repair(self):
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        adapter_path = self._write_capability_with_adapter(
+            proj, "acme_ambiguous", _AMBIGUOUS_ADAPTER_SOURCE)
+        original_source = adapter_path.read_text(encoding="utf-8")
+
+        result = reconcile_missing_evidence_predicates(
+            proj, _REAL_REPO, from_version="0.13.1", to_version="0.14.0")
+
+        self.assertEqual(result, [])
+        self.assertEqual(
+            adapter_path.read_text(encoding="utf-8"), original_source,
+            "an ambiguous registration must never be guessed at -- the "
+            "source must stay byte-unchanged")
+
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        entry = next(e for e in queue if e["mechanism_id"] == "acme_ambiguous")
+        self.assertEqual(entry["kind"], "ambiguous_adapter_registration")
+        self.assertEqual(entry["status"], "pending")
+        self.assertIn("register_adapter", entry["reason"])
+
+    def test_ambiguous_registration_is_idempotent_rerun_replaces_not_duplicates(self):
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        self._write_capability_with_adapter(
+            proj, "acme_ambiguous", _AMBIGUOUS_ADAPTER_SOURCE)
+
+        reconcile_missing_evidence_predicates(
+            proj, _REAL_REPO, from_version="0.13.1", to_version="0.14.0")
+        reconcile_missing_evidence_predicates(
+            proj, _REAL_REPO, from_version="0.13.1", to_version="0.14.0")
+
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        matching = [e for e in queue if e["mechanism_id"] == "acme_ambiguous"]
+        self.assertEqual(len(matching), 1)
+
+
 class ReconcileMissingEvidencePredicatesAntiTrustTheaterTests(_Base):
     """Task B2's own hard requirement, proved end-to-end (not just at the
     scaffold-string level): a scaffolded FAILING stub must NEVER let a
