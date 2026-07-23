@@ -88,6 +88,7 @@ Stdlib only — no third-party dependencies (operator/runtime path).
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib
 import json
 import os
@@ -281,13 +282,15 @@ class MechanismReport:
                         carry here). That collision no longer reaches the
                         pending-migrations queue or the pause-marker filename,
                         though: those are keyed on ``_migration_identity``
-                        instead (F-3A fix), which is collision-free for bespoke
-                        writers because it is derived from the writer's FULL
-                        relpath, not just its stem — see that function's own
-                        docstring for why keeping this field on the legacy value
-                        is still safe (bespoke writers have no descriptor to join
-                        back against, so nothing here depends on mechanism_id
-                        being collision-free).
+                        instead (F-3A fix), which relpath-derives (and, where the
+                        stem still collides after normalization, hash-suffixes) an
+                        id ONLY for a bespoke writer whose stem actually collides
+                        with another bespoke writer in the SAME discovered set —
+                        see that function's own docstring for the exact guarantee
+                        and why keeping THIS field on the legacy value is still
+                        safe (bespoke writers have no descriptor to join back
+                        against, so nothing here depends on mechanism_id being
+                        collision-free).
     writer_relpath:     the flagged file, project-relative (never edited).
     entrypoint_relpath: the wrapper script safe-paused, or None if no conventional
                         wrapper was found (nothing was paused automatically).
@@ -598,15 +601,18 @@ def _capability_mechanism_id(writer_relpath: str) -> str:
 _NON_IDENTITY_CHARS_RE = re.compile(r"[^A-Za-z0-9]+")
 
 
-def _migration_identity(writer_relpath: str) -> str:
+def _migration_identity(
+    writer_relpath: str,
+    colliding_bespoke_stems: "frozenset[str]" = frozenset(),
+) -> str:
     """(F-3A fix -- the root-cause fix for a validation-stop finding) The
-    collision-free identity key used ONLY for three things: the
-    pending-migrations queue's dedup/replace key (``_append_migration_request``),
-    that same queue entry's ``mechanism_id`` field, and the pause-marker /
-    pause-state FILENAME (``_pause_marker_path`` / ``_pause_state_path``).
-    Never used for anything that needs to match the legacy
-    per-capability_id/module-stem convention: the Orchestrator cron-route
-    match (``_orchestrator_routed_entrypoint``), the descriptor ``id`` join in
+    identity key used ONLY for three things: the pending-migrations queue's
+    dedup/replace key (``_append_migration_request``), that same queue
+    entry's ``mechanism_id`` field, and the pause-marker / pause-state
+    FILENAME (``_pause_marker_path`` / ``_pause_state_path``). Never used for
+    anything that needs to match the legacy per-capability_id/module-stem
+    convention: the Orchestrator cron-route match
+    (``_orchestrator_routed_entrypoint``), the descriptor ``id`` join in
     ``resolve_paused_op_kinds``, and the ``capability_identity`` module-stem
     resolve in ``_reset_accepted_for_scanner_red_capability`` all keep
     receiving ``_capability_mechanism_id``'s legacy value unchanged -- see
@@ -620,19 +626,38 @@ def _migration_identity(writer_relpath: str) -> str:
     task's brief); this function must never diverge from it there.
 
     For a BESPOKE writer (anything else -- a cron/scripts mechanism, or a
-    hand-rolled runner with no descriptor at all), this is derived from the
-    file's FULL project-relative path rather than its bare stem --
-    structurally collision-free regardless of which two directories happen to
-    share a filename. This is the actual bug this task fixes: the estate's
-    real ``agents/inbox/runner.py`` and a hypothetical
-    ``agents/upkeep/runner.py`` both normalized to the SAME bare-stem
-    mechanism_id ("runner") under the old scheme, so the second one processed
-    in a single ``reconcile_upgrade`` pass silently REPLACED the first's
-    migration-queue entry (``_append_migration_request``'s own
-    dedup-by-mechanism_id convention), and both wrappers' pause-marker guard
-    blocks pointed at the exact same ``.wizard/paused-mechanisms/runner.*``
-    pair -- pausing (or later un-pausing) one falsely paused/unpaused the
-    other too.
+    hand-rolled runner with no descriptor at all) whose bare file STEM is
+    NOT in ``colliding_bespoke_stems`` (build-lead decision: relpath-keying is
+    a real cost -- it degrades a clean id like "estate_upkeep" to
+    "agents_cron_estate_upkeep" -- so it is paid ONLY by a writer that
+    actually needs it), this returns the plain stem unchanged: identical to
+    the pre-F-3A behavior, and identical to ``_capability_mechanism_id`` for
+    that writer.
+
+    For a BESPOKE writer whose stem IS in ``colliding_bespoke_stems``
+    (``reconcile_upgrade`` computes this as a pre-pass: every bare stem shared
+    by 2+ bespoke writers discovered in the SAME reconcile pass), this derives
+    from the file's FULL project-relative path, with a short deterministic
+    hex digest of that exact relpath appended -- e.g.
+    ``agents/inbox/runner.py`` -> ``agents_inbox_runner_<8-hex-digest>``. The
+    digest is what makes this GENUINELY collision-free (not just "usually
+    distinct"): ``_NON_IDENTITY_CHARS_RE`` collapses every run of non-
+    alphanumeric characters to a single "_", which is lossy -- e.g.
+    ``agents/a.b/runner.py`` and ``agents/a-b/runner.py`` both normalize to
+    the identical ``agents_a_b_runner`` -- so the normalized path ALONE is not
+    a safe uniqueness guarantee once two colliding-stem writers also happen to
+    normalize to the same string. Appending ``sha1(writer_relpath)[:8]``
+    closes that gap: two DIFFERENT relpaths can never collide on both the
+    normalized prefix AND the digest of their own (necessarily different)
+    exact string. This is the actual bug this task fixes: the estate's real
+    ``agents/inbox/runner.py`` and a hypothetical ``agents/upkeep/runner.py``
+    both normalized to the SAME bare-stem mechanism_id ("runner") under the
+    old scheme, so the second one processed in a single ``reconcile_upgrade``
+    pass silently REPLACED the first's migration-queue entry
+    (``_append_migration_request``'s own dedup-by-mechanism_id convention),
+    and both wrappers' pause-marker guard blocks pointed at the exact same
+    ``.wizard/paused-mechanisms/runner.*`` pair -- pausing (or later
+    un-pausing) one falsely paused/unpaused the other too.
 
     Safe specifically because bespoke writers have no descriptor entry to
     begin with (add-capability's id-declaration convention only applies under
@@ -647,9 +672,13 @@ def _migration_identity(writer_relpath: str) -> str:
     if _is_under_capability_dir(writer_relpath):
         return _capability_mechanism_id(writer_relpath)
     p = Path(writer_relpath)
+    stem = p.stem
+    if stem not in colliding_bespoke_stems:
+        return stem
     relpath_no_suffix = (p.parent / p.stem).as_posix()
-    key = _NON_IDENTITY_CHARS_RE.sub("_", relpath_no_suffix).strip("_")
-    return key or _capability_mechanism_id(writer_relpath)
+    normalized = _NON_IDENTITY_CHARS_RE.sub("_", relpath_no_suffix).strip("_") or stem
+    digest = hashlib.sha1(writer_relpath.encode("utf-8")).hexdigest()[:8]
+    return f"{normalized}_{digest}"
 
 
 def _migrate_legacy_bespoke_identity(
@@ -675,7 +704,27 @@ def _migrate_legacy_bespoke_identity(
     match on the bare stem alone, since an unrelated writer could coincidentally
     share that same legacy stem (that ambiguity is exactly what this fix
     closes; this cleanup must not re-introduce it by cross-wiring two
-    different writers' state during migration).
+    different writers' state during migration). CRITICAL invariant fixed here:
+    the legacy marker/state files are removed ONLY inside the confirmed-match
+    branch below -- never as an unconditional sibling of that check. The
+    unconditional form (present before this fix) deleted ANY legacy artifact
+    at ``legacy_id`` the moment it existed on disk, even when its recorded
+    ``writer_relpath`` belonged to a DIFFERENT writer that coincidentally
+    shared the same legacy stem -- destroying that other writer's own live
+    pause state.
+
+    Also fixes a second, related fail-open: if ``writer_relpath``'s
+    conventional wrapper was ALREADY safe-paused by an EARLIER reconcile pass
+    (before this identity split existed), its inserted guard block is a frozen
+    string that literally names the legacy marker FILENAME --
+    ``_safe_pause_entrypoint`` never rewrites an existing guard (idempotent on
+    ``_GUARD_BEGIN in original``). Deleting the legacy marker file without
+    also updating that frozen reference would leave the guard's ``-e`` check
+    pointing at nothing, silently UN-PAUSING an already-paused writer even
+    though its pause state was "carried forward" onto the new key. See
+    ``_rewrite_wrapper_guard_marker_id``, called below BEFORE the legacy files
+    are removed, which keeps the guard and an existing marker in agreement --
+    the invariant: a writer that was paused stays paused across this rekey.
 
     Carries the pause state FORWARD onto the new key (never silently drops
     an operator's existing pause) and removes the stale legacy-keyed
@@ -692,6 +741,12 @@ def _migrate_legacy_bespoke_identity(
         except (json.JSONDecodeError, OSError):
             legacy_state = None
         if isinstance(legacy_state, dict) and legacy_state.get("writer_relpath") == writer_relpath:
+            entrypoint_relpath = legacy_state.get("entrypoint_relpath") or _find_entrypoint(
+                operator_project_dir, writer_relpath)
+            if entrypoint_relpath:
+                _rewrite_wrapper_guard_marker_id(
+                    operator_project_dir, entrypoint_relpath, legacy_id, migration_id)
+
             new_state_path = _pause_state_path(operator_project_dir, migration_id)
             new_marker_path = _pause_marker_path(operator_project_dir, migration_id)
             if not new_state_path.exists():
@@ -704,11 +759,16 @@ def _migrate_legacy_bespoke_identity(
             if legacy_marker_path.exists() and not new_marker_path.exists():
                 new_marker_path.parent.mkdir(parents=True, exist_ok=True)
                 new_marker_path.write_text("", encoding="utf-8")
-        for stale in (legacy_state_path, legacy_marker_path):
-            try:
-                stale.unlink()
-            except OSError:
-                pass
+
+            # (CRITICAL fix) Remove the legacy files ONLY here, inside the
+            # confirmed writer_relpath match -- see the docstring above. A
+            # legacy artifact that did NOT match this writer_relpath is left
+            # completely untouched: it belongs to someone else.
+            for stale in (legacy_state_path, legacy_marker_path):
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
 
     queue_path = operator_project_dir / MIGRATION_QUEUE_REL
     try:
@@ -1385,6 +1445,49 @@ def _relative_prefix(wrapper_relpath: str) -> str:
     return "/".join([".."] * depth) if depth else "."
 
 
+def _rewrite_wrapper_guard_marker_id(
+    operator_project_dir: Path,
+    entrypoint_relpath: str,
+    legacy_id: str,
+    migration_id: str,
+) -> bool:
+    """(F-3A CRITICAL fix) ``entrypoint_relpath``'s wrapper may ALREADY carry a
+    safe-pause guard block inserted by an EARLIER reconcile pass (before this
+    identity split existed). That guard's marker-existence check
+    (``_guard_block``) is a FROZEN string literally naming the ``legacy_id``
+    ``.pause`` filename -- ``_safe_pause_entrypoint`` never rewrites an
+    existing guard (its own idempotency check is exactly ``_GUARD_BEGIN not
+    in original``). If ``_migrate_legacy_bespoke_identity`` then moved/removed
+    that legacy marker file without also updating this frozen reference, the
+    guard's ``-e`` check would find nothing and the wrapper would run the
+    paused script again -- silently UN-PAUSING a writer that was safe-paused
+    before this fix landed.
+
+    Rewrites that ONE embedded path in place, from the legacy filename to the
+    new ``migration_id``-keyed filename, so the guard and the marker this
+    same reconcile pass (re)writes under ``migration_id`` stay in agreement.
+    No-op (returns False) when there is no guard block, the ids already
+    match, or the guard does not reference the exact legacy filename (nothing
+    to migrate) -- never a blind substring replace that could touch an
+    unrelated marker reference."""
+    if legacy_id == migration_id:
+        return False
+    wrapper_path = Path(operator_project_dir) / entrypoint_relpath
+    try:
+        original = wrapper_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    if _GUARD_BEGIN not in original:
+        return False
+    prefix = _relative_prefix(entrypoint_relpath)
+    old_marker_ref = f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{legacy_id}.pause"
+    new_marker_ref = f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{migration_id}.pause"
+    if old_marker_ref not in original:
+        return False
+    _atomic_write(wrapper_path, original.replace(old_marker_ref, new_marker_ref))
+    return True
+
+
 def _safe_pause_entrypoint(
     operator_project_dir: Path,
     mechanism_id: str,
@@ -1700,17 +1803,31 @@ def reconcile_upgrade(
         operator_project_dir, build_repo_root, operator_code_dirs=operator_code_dirs)
 
     flagged_relpaths = list(by_relpath)
+    # (F-3A, build-lead decision) Relpath-keying is a real cost -- it degrades a
+    # clean id like "estate_upkeep" to "agents_cron_estate_upkeep" -- so pay it
+    # ONLY for a bespoke (non-agents/capabilities/) writer whose bare stem
+    # actually collides with another bespoke writer discovered in THIS SAME
+    # pass. A one-off bespoke writer (no collision) keeps its bare-stem id,
+    # unchanged from pre-F-3A behavior. See `_migration_identity`'s docstring.
+    _bespoke_stem_counts: Dict[str, int] = {}
+    for _r in by_relpath:
+        if not _is_under_capability_dir(_r):
+            _stem = Path(_r).stem
+            _bespoke_stem_counts[_stem] = _bespoke_stem_counts.get(_stem, 0) + 1
+    colliding_bespoke_stems = frozenset(
+        stem for stem, count in _bespoke_stem_counts.items() if count > 1)
+
     mechanisms: List[MechanismReport] = []
     for relpath in sorted(by_relpath):
         violations = by_relpath[relpath]
         mechanism_id = _capability_mechanism_id(relpath)
-        # (F-3A fix) The collision-free identity used ONLY for the migration-queue
-        # dedup/entry and the pause-marker/state FILENAME -- see
-        # `_migration_identity`'s own docstring for why this must stay separate
-        # from `mechanism_id` above (which keeps its legacy stem/capability_id
-        # value for the Orchestrator cron-route match, the descriptor-id join,
-        # and the capability_identity resolve, below).
-        migration_id = _migration_identity(relpath)
+        # (F-3A fix) The identity used ONLY for the migration-queue dedup/entry
+        # and the pause-marker/state FILENAME -- see `_migration_identity`'s
+        # own docstring for why this must stay separate from `mechanism_id`
+        # above (which keeps its legacy stem/capability_id value for the
+        # Orchestrator cron-route match, the descriptor-id join, and the
+        # capability_identity resolve, below).
+        migration_id = _migration_identity(relpath, colliding_bespoke_stems)
         _migrate_legacy_bespoke_identity(
             operator_project_dir, relpath, mechanism_id, migration_id)
         entrypoint = _find_entrypoint(operator_project_dir, relpath)

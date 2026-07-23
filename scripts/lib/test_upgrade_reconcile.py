@@ -17,6 +17,7 @@ import contextlib
 import hashlib
 import io
 import json
+import re
 import shutil
 import stat
 import sys
@@ -44,6 +45,9 @@ from upgrade_reconcile import (  # noqa: E402
     scan_operator_mechanisms,
     _missing_evidence_predicates_for_adapter,
     _write_paused_live_write_state,
+    _GUARD_BEGIN,
+    _guard_block,
+    _relative_prefix,
 )
 
 _REAL_REPO = Path(__file__).resolve().parents[3]
@@ -323,15 +327,16 @@ class ReconcileEndToEndTests(_Base):
         self.assertTrue(wrapper_text.startswith("#!/usr/bin/env bash\n"))
         self.assertTrue(wrapper_path.stat().st_mode & stat.S_IEXEC)
 
-        # 3. A pause marker + state record exist. (F-3A) The marker/state FILENAME
-        # and its own "mechanism_id" field are keyed on the collision-free
-        # relpath-derived migration identity for this bespoke (non-capability-dir)
-        # writer, not the bare "estate_upkeep" stem -- see _migration_identity.
-        marker = proj / PAUSED_MECHANISMS_DIR_REL / "agents_cron_estate_upkeep.pause"
-        state = proj / PAUSED_MECHANISMS_DIR_REL / "agents_cron_estate_upkeep.json"
+        # 3. A pause marker + state record exist. (F-3A, build-lead decision) This
+        # bespoke writer's stem does not collide with any other bespoke writer in
+        # this project, so the marker/state FILENAME and its own "mechanism_id"
+        # field keep the bare "estate_upkeep" stem -- see _migration_identity's
+        # colliding-stem-only docstring.
+        marker = proj / PAUSED_MECHANISMS_DIR_REL / "estate_upkeep.pause"
+        state = proj / PAUSED_MECHANISMS_DIR_REL / "estate_upkeep.json"
         self.assertTrue(marker.exists())
         state_data = json.loads(state.read_text(encoding="utf-8"))
-        self.assertEqual(state_data["mechanism_id"], "agents_cron_estate_upkeep")
+        self.assertEqual(state_data["mechanism_id"], "estate_upkeep")
         self.assertTrue(state_data["credentials_preserved"])
         self.assertEqual(state_data["from_version"], "v0.10.2")
         self.assertEqual(state_data["to_version"], "v0.11.0")
@@ -358,12 +363,12 @@ class ReconcileEndToEndTests(_Base):
         self.assertIn("not been confirmed", notice_text.lower())
 
         # 6. Migration handed to the enhancement flow via the durable queue file.
-        # (F-3A) queue entry mechanism_id is the same relpath-derived migration
-        # identity as the marker filename above, not the bare stem.
+        # (F-3A) queue entry mechanism_id matches the marker filename above --
+        # the bare stem, since this writer's stem does not collide.
         self.assertIsNotNone(result.migration_queue_path)
         queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
         self.assertEqual(len(queue), 1)
-        self.assertEqual(queue[0]["mechanism_id"], "agents_cron_estate_upkeep")
+        self.assertEqual(queue[0]["mechanism_id"], "estate_upkeep")
         self.assertEqual(queue[0]["writer_relpath"], "agents/cron/estate_upkeep.py")
         self.assertEqual(queue[0]["status"], "pending")
 
@@ -379,10 +384,10 @@ class ReconcileEndToEndTests(_Base):
         )
 
         queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
-        # (F-3A) mechanism_id here is the relpath-derived migration identity, not
-        # the bare "estate_upkeep" stem -- match on writer_relpath instead, which
-        # is stable regardless of that identity scheme.
-        entry = next(e for e in queue if e["writer_relpath"] == "agents/cron/estate_upkeep.py")
+        # (F-3A) this writer's stem does not collide, so mechanism_id stays the
+        # bare "estate_upkeep" stem -- see _migration_identity's colliding-stem-
+        # only docstring.
+        entry = next(e for e in queue if e["mechanism_id"] == "estate_upkeep")
         self.assertIn("rebuild-paused-capability", entry["suggested_next_step"])
         self.assertNotIn("add-capability", entry["suggested_next_step"])
 
@@ -689,15 +694,41 @@ class BespokeWriterRelpathKeyingTests(_Base):
         self.assertFalse((marker_dir / "agents_capabilities_inbox_management_capability.json"
                           ).exists())
 
+    def test_single_bespoke_writer_no_collision_keeps_bare_stem(self):
+        # (IMPORTANT, build-lead decision) Relpath-keying is a real cost -- a
+        # lone bespoke writer (no stem collision in this project) must NOT pay
+        # it: its migration-queue entry and pause-marker filename keep the
+        # clean bare stem, exactly as before F-3A. Only a writer whose stem
+        # actually collides with another bespoke writer in the SAME discovered
+        # set gets relpath-keyed (see the two-same-stem test above).
+        proj = _write_project(self.tmp, writer_body=_DIRECT_WRITER)  # agents/cron/estate_upkeep.py
+
+        reconcile_upgrade(
+            proj, _REAL_REPO, from_version="v0.16.0", to_version="v0.17.0")
+
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        self.assertEqual(len(queue), 1)
+        self.assertEqual(queue[0]["mechanism_id"], "estate_upkeep")
+        self.assertEqual(queue[0]["writer_relpath"], "agents/cron/estate_upkeep.py")
+
+        marker_dir = proj / PAUSED_MECHANISMS_DIR_REL
+        self.assertTrue((marker_dir / "estate_upkeep.pause").exists())
+        self.assertFalse((marker_dir / "agents_cron_estate_upkeep.pause").exists())
+
     def test_legacy_stem_keyed_marker_and_queue_entry_migrated_with_no_orphan(self):
         # (Step 5) Legacy-marker cleanup: a project that ran reconcile BEFORE this
         # fix existed carries a pause marker/state pair and a pending-migrations
-        # entry keyed on the OLD bare stem ("runner") for a bespoke writer this fix
-        # now keys on its full relpath instead. The upgrade must carry the pause
-        # state FORWARD onto the new key and leave no orphaned legacy artifact
-        # behind (queue entry OR marker/state file).
+        # entry keyed on the OLD bare stem ("runner") for a bespoke writer. A
+        # SECOND bespoke writer sharing that same stem ("agents/upkeep/runner.py")
+        # is also present this pass, so "runner" collides and the inbox writer's
+        # CURRENT migration identity is now relpath-derived, differing from its
+        # legacy bare-stem key. The upgrade must carry the pause state FORWARD
+        # onto the new key and leave no orphaned legacy artifact behind (queue
+        # entry OR marker/state file) -- and must not disturb the upkeep writer's
+        # own, independently-created entry.
         proj = self.tmp
         writer_path = _write_bulk_runner(proj, "inbox")
+        _write_bulk_runner(proj, "upkeep")  # forces the "runner" stem to collide this pass
         writer_relpath = "agents/inbox/runner.py"
         (proj / ".wizard").mkdir(parents=True, exist_ok=True)
 
@@ -742,20 +773,110 @@ class BespokeWriterRelpathKeyingTests(_Base):
         runner_reports = [
             r for r in result.mechanisms if r.writer_relpath == writer_relpath]
         self.assertTrue(runner_reports)
-        new_id = json.loads(queue_path.read_text(encoding="utf-8"))[0]["mechanism_id"]
+        queue = json.loads(queue_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            len(queue), 2,
+            f"expected the inbox writer's migrated entry PLUS the upkeep "
+            f"writer's own independent entry, no orphan; got {queue}")
+        inbox_entry = next(e for e in queue if e["writer_relpath"] == writer_relpath)
+        new_id = inbox_entry["mechanism_id"]
         self.assertNotEqual(new_id, "runner")
 
         # No orphaned legacy artifacts remain.
         self.assertFalse((marker_dir / "runner.pause").exists())
         self.assertFalse((marker_dir / "runner.json").exists())
-        queue = json.loads(queue_path.read_text(encoding="utf-8"))
-        self.assertEqual(len(queue), 1, f"expected exactly one entry, no orphan; got {queue}")
-        self.assertEqual(queue[0]["mechanism_id"], new_id)
-        self.assertEqual(queue[0]["writer_relpath"], writer_relpath)
+        self.assertEqual(inbox_entry["mechanism_id"], new_id)
+        self.assertEqual(inbox_entry["writer_relpath"], writer_relpath)
 
         # The new-keyed marker exists (pause state carried forward, not dropped).
         self.assertTrue((marker_dir / f"{new_id}.pause").exists())
         _ = writer_path  # fixture side-effect only (file must exist for the scan)
+
+    def test_already_paused_bespoke_writer_stays_paused_after_relpath_rekey(self):
+        # CRITICAL regression: a writer safe-paused under the OLD bare-stem
+        # scheme (wrapper already carries the guard block + a legacy `.pause`
+        # marker exists), reconciled again once a colliding sibling appears and
+        # its migration identity is rekeyed to a relpath-derived id, must NOT be
+        # silently un-paused. Before the fix, `_migrate_legacy_bespoke_identity`
+        # deleted the legacy `.pause`/`.json` pair unconditionally (even as a
+        # sibling of the writer_relpath match-check), while the wrapper's
+        # ALREADY-INSERTED guard is a frozen string that still names the legacy
+        # marker filename (`_safe_pause_entrypoint` never rewrites an existing
+        # guard) -- so the guard's `-e` check found nothing and the wrapper
+        # would run the paused script again.
+        proj = self.tmp
+        _write_bulk_runner(proj, "inbox")
+        _write_bulk_runner(proj, "upkeep")  # forces the "runner" stem to collide this pass
+        writer_relpath = "agents/inbox/runner.py"
+        entrypoint_relpath = "agents/inbox/run_runner.sh"
+        legacy_id = "runner"
+
+        # Simulate a PRIOR reconcile pass having already safe-paused this
+        # writer under the old bare-stem id: the wrapper carries the real guard
+        # block (built with the same `_guard_block` the module itself uses),
+        # and the legacy-keyed marker/state pair exists on disk.
+        wrapper_path = proj / entrypoint_relpath
+        original = wrapper_path.read_text(encoding="utf-8")
+        prefix = _relative_prefix(entrypoint_relpath)
+        marker_from_wrapper = f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{legacy_id}.pause"
+        guard = _guard_block(
+            legacy_id, writer_relpath, marker_from_wrapper, "v0.15.0", "v0.16.0")
+        lines = original.splitlines(keepends=True)
+        gated = lines[0] + guard + "".join(lines[1:])
+        wrapper_path.write_text(gated, encoding="utf-8")
+
+        marker_dir = proj / PAUSED_MECHANISMS_DIR_REL
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        (marker_dir / f"{legacy_id}.pause").write_text("", encoding="utf-8")
+        legacy_state = {
+            "mechanism_id": legacy_id,
+            "writer_relpath": writer_relpath,
+            "entrypoint_relpath": entrypoint_relpath,
+            "paused_at": "2026-01-01T00:00:00Z",
+            "from_version": "v0.15.0",
+            "to_version": "v0.16.0",
+            "reason": "external-write gate violation detected on upgrade",
+            "violations": [],
+            "credentials_preserved": True,
+            "migration_status": "pending",
+        }
+        (marker_dir / f"{legacy_id}.json").write_text(
+            json.dumps(legacy_state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        queue_path = proj / MIGRATION_QUEUE_REL
+        queue_path.parent.mkdir(parents=True, exist_ok=True)
+        queue_path.write_text(json.dumps([{
+            "mechanism_id": legacy_id,
+            "writer_relpath": writer_relpath,
+            "entrypoint_relpath": entrypoint_relpath,
+            "requested_at": "2026-01-01T00:00:00Z",
+            "from_version": "v0.15.0",
+            "to_version": "v0.16.0",
+            "reason": "flagged non-conformant with the external-write gate on upgrade",
+            "violations": [],
+            "suggested_next_step": "Use the rebuild-paused-capability flow ...",
+            "status": "pending",
+        }], indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        reconcile_upgrade(
+            proj, _REAL_REPO, from_version="v0.16.0", to_version="v0.17.0")
+
+        # The writer must STILL be paused: the wrapper's guard must reference a
+        # marker file that actually exists on disk (whatever id it was rekeyed
+        # to) -- the guard and the marker must agree.
+        wrapper_text = wrapper_path.read_text(encoding="utf-8")
+        self.assertIn(_GUARD_BEGIN, wrapper_text)
+        match = re.search(r'if \[ -e "\$_RECONCILE_HERE/([^"]+)" \]', wrapper_text)
+        self.assertIsNotNone(
+            match, "expected the safe-pause guard's marker-existence check line")
+        # `_RECONCILE_HERE` is the wrapper's OWN directory (see `_guard_block`'s
+        # `cd "$(dirname "$0")"`), not the project root -- resolve relative to
+        # the wrapper's parent, matching what the shell guard actually checks.
+        referenced_marker = (wrapper_path.parent / match.group(1)).resolve()
+        self.assertTrue(
+            referenced_marker.is_file(),
+            f"guard references {referenced_marker}, which does not exist on disk -- "
+            "the writer was silently un-paused")
 
 
 class RenderImpactNoticeTests(unittest.TestCase):
@@ -2177,12 +2298,14 @@ class CliWiringTests(unittest.TestCase):
 
         wrapper_text = wrapper.read_text(encoding="utf-8")
         self.assertIn("paused pending migration", wrapper_text)
-        # (F-3A) marker filename + queue mechanism_id are the relpath-derived
-        # migration identity for this bespoke (non-capability-dir) writer.
+        # (F-3A, build-lead decision) This bespoke (non-capability-dir) writer's
+        # stem does not collide with any other bespoke writer in this project --
+        # it keeps its clean bare-stem id, unchanged from pre-F-3A behavior. See
+        # _migration_identity's colliding-stem-only docstring.
         self.assertTrue(
-            (proj / PAUSED_MECHANISMS_DIR_REL / "agents_cron_estate_upkeep.pause").exists())
+            (proj / PAUSED_MECHANISMS_DIR_REL / "estate_upkeep.pause").exists())
         queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
-        self.assertEqual(queue[0]["mechanism_id"], "agents_cron_estate_upkeep")
+        self.assertEqual(queue[0]["mechanism_id"], "estate_upkeep")
         self.assertEqual(queue[0]["writer_relpath"], "agents/cron/estate_upkeep.py")
 
     def test_cmd_apply_prints_plain_language_note_for_a_stale_acceptance_only_revocation(self):
