@@ -565,7 +565,12 @@ class RebuildRoutingTests(unittest.TestCase):
 
         self.assertTrue(result.any_affected)
         queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
-        entry = next(e for e in queue if e["mechanism_id"] == "generic_row_sync")
+        # (F-3A) this bespoke (non-capability-dir) writer's queue mechanism_id is
+        # the collision-free relpath-derived migration identity, not the bare
+        # "generic_row_sync" stem -- match on writer_relpath instead, which is
+        # stable regardless of that identity scheme.
+        entry = next(
+            e for e in queue if e["writer_relpath"] == "agents/cron/generic_row_sync.py")
         self.assertIn("rebuild-paused-capability", entry["suggested_next_step"])
         self.assertNotIn("add-capability", entry["suggested_next_step"])
 

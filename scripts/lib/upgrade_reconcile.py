@@ -272,10 +272,22 @@ class MechanismReport:
                         scaffold's descriptor entry declares as its ``id`` — the
                         join ``resolve_paused_op_kinds`` needs. Every other writer's
                         mechanism_id is its plain, unmodified file stem.
-                        NOTE (disclosed bound): keyed on stem only, so two flagged
-                        files with the same stem in DIFFERENT operator-code
-                        directories would collide — acceptable at v0 (the real
-                        subject and the acceptance fixture are each a single file).
+                        NOTE: this field is a REPORTING/join identity only (also
+                        used for the Orchestrator cron-route match and the
+                        descriptor-id join in ``resolve_paused_op_kinds`` — both
+                        need the legacy stem/capability_id convention). It is
+                        deliberately stem-only and CAN collide across directories
+                        for a bespoke writer (see the disclosed bound this used to
+                        carry here). That collision no longer reaches the
+                        pending-migrations queue or the pause-marker filename,
+                        though: those are keyed on ``_migration_identity``
+                        instead (F-3A fix), which is collision-free for bespoke
+                        writers because it is derived from the writer's FULL
+                        relpath, not just its stem — see that function's own
+                        docstring for why keeping this field on the legacy value
+                        is still safe (bespoke writers have no descriptor to join
+                        back against, so nothing here depends on mechanism_id
+                        being collision-free).
     writer_relpath:     the flagged file, project-relative (never edited).
     entrypoint_relpath: the wrapper script safe-paused, or None if no conventional
                         wrapper was found (nothing was paused automatically).
@@ -568,15 +580,153 @@ def _capability_mechanism_id(writer_relpath: str) -> str:
     operator-capability directory (see ``_is_under_capability_dir``) --
     never for a cron/scripts writer, whose mechanism_id is its plain file
     stem and must not be altered. Making ``mechanism_id == capability_id ==
-    descriptor id`` here is what makes the pause-marker filename, the
-    migration-queue entry, and ``resolve_paused_op_kinds``'s descriptor
-    lookup all agree with each other and with the id the rebuild-paused-
+    descriptor id`` here is what makes ``resolve_paused_op_kinds``'s descriptor
+    lookup, the ``capability_identity`` alias index, and every other per-id
+    consumer agree with each other and with the id the rebuild-paused-
     capability flow (Task B4, F-77) rebuilds under -- it keeps the SAME id
-    rather than having the operator re-declare a new one."""
+    rather than having the operator re-declare a new one. For a
+    CAPABILITY-dir writer this value is ALSO what the pause-marker filename
+    and migration-queue entry are keyed on (see ``_migration_identity``,
+    below, which is identical to this for that shape). For a BESPOKE writer
+    it no longer is -- see ``_migration_identity``."""
     stem = Path(writer_relpath).stem
     if _is_under_capability_dir(writer_relpath) and stem.endswith(CAPABILITY_MODULE_SUFFIX):
         return stem[: -len(CAPABILITY_MODULE_SUFFIX)]
     return stem
+
+
+_NON_IDENTITY_CHARS_RE = re.compile(r"[^A-Za-z0-9]+")
+
+
+def _migration_identity(writer_relpath: str) -> str:
+    """(F-3A fix -- the root-cause fix for a validation-stop finding) The
+    collision-free identity key used ONLY for three things: the
+    pending-migrations queue's dedup/replace key (``_append_migration_request``),
+    that same queue entry's ``mechanism_id`` field, and the pause-marker /
+    pause-state FILENAME (``_pause_marker_path`` / ``_pause_state_path``).
+    Never used for anything that needs to match the legacy
+    per-capability_id/module-stem convention: the Orchestrator cron-route
+    match (``_orchestrator_routed_entrypoint``), the descriptor ``id`` join in
+    ``resolve_paused_op_kinds``, and the ``capability_identity`` module-stem
+    resolve in ``_reset_accepted_for_scanner_red_capability`` all keep
+    receiving ``_capability_mechanism_id``'s legacy value unchanged -- see
+    ``reconcile_upgrade``'s call sites, which pass the two different values
+    to the right places on purpose.
+
+    For a CAPABILITY-dir writer (``_is_under_capability_dir``), this is
+    IDENTICAL to ``_capability_mechanism_id`` -- unchanged, byte-for-byte.
+    Many consumers depend on mechanism_id == capability_id == descriptor id
+    for that shape (see ``_capability_mechanism_id``'s own docstring and this
+    task's brief); this function must never diverge from it there.
+
+    For a BESPOKE writer (anything else -- a cron/scripts mechanism, or a
+    hand-rolled runner with no descriptor at all), this is derived from the
+    file's FULL project-relative path rather than its bare stem --
+    structurally collision-free regardless of which two directories happen to
+    share a filename. This is the actual bug this task fixes: the estate's
+    real ``agents/inbox/runner.py`` and a hypothetical
+    ``agents/upkeep/runner.py`` both normalized to the SAME bare-stem
+    mechanism_id ("runner") under the old scheme, so the second one processed
+    in a single ``reconcile_upgrade`` pass silently REPLACED the first's
+    migration-queue entry (``_append_migration_request``'s own
+    dedup-by-mechanism_id convention), and both wrappers' pause-marker guard
+    blocks pointed at the exact same ``.wizard/paused-mechanisms/runner.*``
+    pair -- pausing (or later un-pausing) one falsely paused/unpaused the
+    other too.
+
+    Safe specifically because bespoke writers have no descriptor entry to
+    begin with (add-capability's id-declaration convention only applies under
+    ``agents/capabilities/``), so nothing downstream ever needed to join back
+    on the legacy stem for them -- and the runtime write_gate's own paused-
+    marker loader (``write_gate._load_paused_op_kinds``) globs every ``*.json``
+    directly under the paused-mechanisms directory and unions their
+    ``paused_op_kinds`` content, filename-agnostic -- so a bespoke writer's
+    live-write runtime block (when one is installed) keeps working
+    regardless of what its marker is named. See this task's brief ("Locked
+    design") for the full analysis of every verified consumer."""
+    if _is_under_capability_dir(writer_relpath):
+        return _capability_mechanism_id(writer_relpath)
+    p = Path(writer_relpath)
+    relpath_no_suffix = (p.parent / p.stem).as_posix()
+    key = _NON_IDENTITY_CHARS_RE.sub("_", relpath_no_suffix).strip("_")
+    return key or _capability_mechanism_id(writer_relpath)
+
+
+def _migrate_legacy_bespoke_identity(
+    operator_project_dir: Path,
+    writer_relpath: str,
+    legacy_id: str,
+    migration_id: str,
+) -> None:
+    """(F-3A, Step 5 -- legacy-marker cleanup) A project that ran an
+    upgrade-reconcile BEFORE this fix existed may carry a pause marker/state
+    pair and a pending-migrations queue entry keyed on the OLD bare-stem
+    identity (``legacy_id``) for a bespoke writer this fix now keys on its
+    full relpath instead (``migration_id``). Left alone, that stale artifact
+    would become an ORPHAN forever: nothing after this fix ever looks it up
+    again by the old key, so it would neither get cleaned up nor kept
+    coherent with the new one.
+
+    No-op when ``legacy_id == migration_id`` (every capability-dir writer,
+    and any bespoke writer whose derived key happens to already equal its
+    legacy stem) or when no legacy artifact for THIS EXACT ``writer_relpath``
+    exists. Deliberately checks the ``writer_relpath`` recorded INSIDE the
+    old marker/queue-entry content before touching anything -- never a blind
+    match on the bare stem alone, since an unrelated writer could coincidentally
+    share that same legacy stem (that ambiguity is exactly what this fix
+    closes; this cleanup must not re-introduce it by cross-wiring two
+    different writers' state during migration).
+
+    Carries the pause state FORWARD onto the new key (never silently drops
+    an operator's existing pause) and removes the stale legacy-keyed
+    marker/state files and queue entry so no orphan is left behind."""
+    if legacy_id == migration_id:
+        return
+    operator_project_dir = Path(operator_project_dir)
+
+    legacy_state_path = _pause_state_path(operator_project_dir, legacy_id)
+    legacy_marker_path = _pause_marker_path(operator_project_dir, legacy_id)
+    if legacy_state_path.exists():
+        try:
+            legacy_state = json.loads(legacy_state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            legacy_state = None
+        if isinstance(legacy_state, dict) and legacy_state.get("writer_relpath") == writer_relpath:
+            new_state_path = _pause_state_path(operator_project_dir, migration_id)
+            new_marker_path = _pause_marker_path(operator_project_dir, migration_id)
+            if not new_state_path.exists():
+                legacy_state["mechanism_id"] = migration_id
+                _atomic_write(
+                    new_state_path,
+                    json.dumps(legacy_state, indent=2, sort_keys=True,
+                               ensure_ascii=False) + "\n",
+                )
+            if legacy_marker_path.exists() and not new_marker_path.exists():
+                new_marker_path.parent.mkdir(parents=True, exist_ok=True)
+                new_marker_path.write_text("", encoding="utf-8")
+        for stale in (legacy_state_path, legacy_marker_path):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+
+    queue_path = operator_project_dir / MIGRATION_QUEUE_REL
+    try:
+        existing = json.loads(queue_path.read_text(encoding="utf-8")) if queue_path.exists() else []
+        if not isinstance(existing, list):
+            existing = []
+    except (json.JSONDecodeError, OSError):
+        existing = []
+    filtered = [
+        e for e in existing
+        if not (isinstance(e, dict) and e.get("mechanism_id") == legacy_id
+                and e.get("writer_relpath") == writer_relpath)
+    ]
+    if len(filtered) != len(existing):
+        _atomic_write(
+            queue_path,
+            json.dumps(filtered, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+        )
 
 
 def _find_entrypoint(operator_project_dir: Path, writer_relpath: str) -> Optional[str]:
@@ -1554,6 +1704,15 @@ def reconcile_upgrade(
     for relpath in sorted(by_relpath):
         violations = by_relpath[relpath]
         mechanism_id = _capability_mechanism_id(relpath)
+        # (F-3A fix) The collision-free identity used ONLY for the migration-queue
+        # dedup/entry and the pause-marker/state FILENAME -- see
+        # `_migration_identity`'s own docstring for why this must stay separate
+        # from `mechanism_id` above (which keeps its legacy stem/capability_id
+        # value for the Orchestrator cron-route match, the descriptor-id join,
+        # and the capability_identity resolve, below).
+        migration_id = _migration_identity(relpath)
+        _migrate_legacy_bespoke_identity(
+            operator_project_dir, relpath, mechanism_id, migration_id)
         entrypoint = _find_entrypoint(operator_project_dir, relpath)
         carries_read_outputs: Optional[bool] = None
         separate_readonly_entrypoint: Optional[str] = None
@@ -1568,7 +1727,7 @@ def reconcile_upgrade(
         lifecycle_canonical_id: Optional[str] = None
         if entrypoint:
             _safe_pause_entrypoint(
-                operator_project_dir, mechanism_id, relpath, entrypoint,
+                operator_project_dir, migration_id, relpath, entrypoint,
                 violations, from_version, to_version,
             )
             paused = True
@@ -1662,7 +1821,7 @@ def reconcile_upgrade(
                     if resolved_paused_op_kinds:
                         paused_op_kinds = resolved_paused_op_kinds
                         _write_paused_live_write_state(
-                            operator_project_dir, mechanism_id, relpath, violations,
+                            operator_project_dir, migration_id, relpath, violations,
                             from_version, to_version, resolved_paused_op_kinds,
                         )
                     if scan_clean and resolved_paused_op_kinds:
@@ -1698,7 +1857,7 @@ def reconcile_upgrade(
                         "review it by hand"
                     )
         _append_migration_request(
-            operator_project_dir, mechanism_id, relpath, entrypoint, violations,
+            operator_project_dir, migration_id, relpath, entrypoint, violations,
             from_version, to_version,
         )
         # (Phase 3 Cut 1, Task B2) Run AFTER _append_migration_request (just above) so
