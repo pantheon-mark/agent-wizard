@@ -29,6 +29,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import upgrade_reconcile  # noqa: E402
 from upgrade_reconcile import (  # noqa: E402
     CAPABILITY_DESCRIPTOR_SET_REL,
     MIGRATION_QUEUE_REL,
@@ -877,6 +878,117 @@ class BespokeWriterRelpathKeyingTests(_Base):
             referenced_marker.is_file(),
             f"guard references {referenced_marker}, which does not exist on disk -- "
             "the writer was silently un-paused")
+
+    def test_failed_guard_rewrite_keeps_legacy_marker_so_writer_stays_paused(self):
+        # (F-3A residual fix) The prior fix (see the test above) made
+        # `_migrate_legacy_bespoke_identity` call `_rewrite_wrapper_guard_marker_id`
+        # BEFORE deleting the legacy marker, so the guard and the marker stay in
+        # agreement on the happy path. But the legacy-marker unlink loop still ran
+        # UNCONDITIONALLY afterwards, discarding the rewrite's own return value --
+        # so if the rewrite does NOT succeed (an OSError re-reading the wrapper
+        # mid-migration, or the guard's embedded reference no longer matching the
+        # reconstructed legacy path) while the wrapper's ALREADY-INSERTED guard
+        # still names the legacy `.pause` file, the legacy marker got deleted out
+        # from under a still-live guard reference anyway -- the guard's `-e` check
+        # then finds nothing on disk and silently un-pauses the writer. This must
+        # fail closed: when the rewrite does not succeed and the guard still names
+        # the legacy marker, the legacy `.pause` file must be LEFT ALONE (an
+        # orphan is acceptable; a silent un-pause is not).
+        proj = self.tmp
+        _write_bulk_runner(proj, "inbox")
+        _write_bulk_runner(proj, "upkeep")  # forces the "runner" stem to collide this pass
+        writer_relpath = "agents/inbox/runner.py"
+        entrypoint_relpath = "agents/inbox/run_runner.sh"
+        legacy_id = "runner"
+
+        # Simulate a PRIOR reconcile pass having already safe-paused this writer
+        # under the old bare-stem id, exactly as in the test above: the wrapper
+        # carries the real guard block (built with the same `_guard_block` the
+        # module itself uses), naming the legacy marker file, and the
+        # legacy-keyed marker/state pair exists on disk.
+        wrapper_path = proj / entrypoint_relpath
+        original = wrapper_path.read_text(encoding="utf-8")
+        prefix = _relative_prefix(entrypoint_relpath)
+        marker_from_wrapper = f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{legacy_id}.pause"
+        guard = _guard_block(
+            legacy_id, writer_relpath, marker_from_wrapper, "v0.15.0", "v0.16.0")
+        lines = original.splitlines(keepends=True)
+        gated = lines[0] + guard + "".join(lines[1:])
+        wrapper_path.write_text(gated, encoding="utf-8")
+
+        marker_dir = proj / PAUSED_MECHANISMS_DIR_REL
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        (marker_dir / f"{legacy_id}.pause").write_text("", encoding="utf-8")
+        legacy_state = {
+            "mechanism_id": legacy_id,
+            "writer_relpath": writer_relpath,
+            "entrypoint_relpath": entrypoint_relpath,
+            "paused_at": "2026-01-01T00:00:00Z",
+            "from_version": "v0.15.0",
+            "to_version": "v0.16.0",
+            "reason": "external-write gate violation detected on upgrade",
+            "violations": [],
+            "credentials_preserved": True,
+            "migration_status": "pending",
+        }
+        (marker_dir / f"{legacy_id}.json").write_text(
+            json.dumps(legacy_state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        queue_path = proj / MIGRATION_QUEUE_REL
+        queue_path.parent.mkdir(parents=True, exist_ok=True)
+        queue_path.write_text(json.dumps([{
+            "mechanism_id": legacy_id,
+            "writer_relpath": writer_relpath,
+            "entrypoint_relpath": entrypoint_relpath,
+            "requested_at": "2026-01-01T00:00:00Z",
+            "from_version": "v0.15.0",
+            "to_version": "v0.16.0",
+            "reason": "flagged non-conformant with the external-write gate on upgrade",
+            "violations": [],
+            "suggested_next_step": "Use the rebuild-paused-capability flow ...",
+            "status": "pending",
+        }], indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        # Force the rewrite step to NOT succeed, exactly as
+        # `_rewrite_wrapper_guard_marker_id` itself would if e.g. the wrapper
+        # read raised OSError or the guard's embedded marker text didn't match
+        # the reconstructed legacy reference -- while the guard block, in fact,
+        # still names the legacy marker on disk (built above).
+        with mock.patch.object(
+                upgrade_reconcile, "_rewrite_wrapper_guard_marker_id", return_value=False):
+            reconcile_upgrade(
+                proj, _REAL_REPO, from_version="v0.16.0", to_version="v0.17.0")
+
+        self.assertTrue(
+            (marker_dir / f"{legacy_id}.pause").exists(),
+            "the legacy pause marker was deleted even though the guard-rewrite "
+            "did not succeed and the wrapper's guard still names it -- the "
+            "writer was silently un-paused")
+
+    def test_dotted_and_dashed_relpaths_disambiguate_via_sha1_suffix(self):
+        # (MINOR, fold-in) `agents/a.b/runner.py` and `agents/a-b/runner.py`
+        # collide on the bare stem "runner" AND -- per `_migration_identity`'s
+        # own docstring -- both normalize to the identical `agents_a_b_runner`
+        # prefix once `_NON_IDENTITY_CHARS_RE` collapses the `.` and `-` to
+        # `_`. Only the appended `sha1(writer_relpath)[:8]` suffix can tell
+        # them apart; assert it actually does.
+        proj = self.tmp
+        _write_bulk_runner(proj, "a.b")
+        _write_bulk_runner(proj, "a-b")
+
+        reconcile_upgrade(
+            proj, _REAL_REPO, from_version="v0.16.0", to_version="v0.17.0")
+
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        by_relpath = {e["writer_relpath"]: e["mechanism_id"] for e in queue}
+        dotted_id = by_relpath["agents/a.b/runner.py"]
+        dashed_id = by_relpath["agents/a-b/runner.py"]
+        self.assertTrue(dotted_id.startswith("agents_a_b_runner_"), dotted_id)
+        self.assertTrue(dashed_id.startswith("agents_a_b_runner_"), dashed_id)
+        self.assertNotEqual(
+            dotted_id, dashed_id,
+            "relpaths that collide on both the bare stem AND the normalized "
+            "prefix must still get distinct migration ids via the sha1 suffix")
 
 
 class RenderImpactNoticeTests(unittest.TestCase):

@@ -743,9 +743,21 @@ def _migrate_legacy_bespoke_identity(
         if isinstance(legacy_state, dict) and legacy_state.get("writer_relpath") == writer_relpath:
             entrypoint_relpath = legacy_state.get("entrypoint_relpath") or _find_entrypoint(
                 operator_project_dir, writer_relpath)
+            # (F-3A residual fix) Capture whether the guard rewrite actually
+            # succeeded -- previously discarded -- so the legacy `.pause`
+            # unlink below can be gated on it. If it did NOT succeed, only
+            # proceed with the unlink when there is no live guard reference
+            # left to break (see `_wrapper_guard_still_references_legacy_marker`);
+            # a guard that still names the legacy marker must keep that
+            # marker file on disk, even as an orphan, rather than be
+            # silently un-paused.
+            safe_to_unlink_legacy_marker = True
             if entrypoint_relpath:
-                _rewrite_wrapper_guard_marker_id(
+                rewrite_succeeded = _rewrite_wrapper_guard_marker_id(
                     operator_project_dir, entrypoint_relpath, legacy_id, migration_id)
+                if not rewrite_succeeded:
+                    safe_to_unlink_legacy_marker = not _wrapper_guard_still_references_legacy_marker(
+                        operator_project_dir, entrypoint_relpath, legacy_id)
 
             new_state_path = _pause_state_path(operator_project_dir, migration_id)
             new_marker_path = _pause_marker_path(operator_project_dir, migration_id)
@@ -764,7 +776,17 @@ def _migrate_legacy_bespoke_identity(
             # confirmed writer_relpath match -- see the docstring above. A
             # legacy artifact that did NOT match this writer_relpath is left
             # completely untouched: it belongs to someone else.
-            for stale in (legacy_state_path, legacy_marker_path):
+            #
+            # (F-3A residual fix) The `.pause` sentinel specifically is
+            # further gated on `safe_to_unlink_legacy_marker`: the state
+            # `.json` is always cleaned up (nothing reads it by the legacy
+            # key any more), but the `.pause` file a still-un-rewritten guard
+            # references must be left in place -- an orphaned marker file is
+            # an acceptable cost; a silently un-paused writer is not.
+            stale_paths = [legacy_state_path]
+            if safe_to_unlink_legacy_marker:
+                stale_paths.append(legacy_marker_path)
+            for stale in stale_paths:
                 try:
                     stale.unlink()
                 except OSError:
@@ -1486,6 +1508,35 @@ def _rewrite_wrapper_guard_marker_id(
         return False
     _atomic_write(wrapper_path, original.replace(old_marker_ref, new_marker_ref))
     return True
+
+
+def _wrapper_guard_still_references_legacy_marker(
+    operator_project_dir: Path, entrypoint_relpath: str, legacy_id: str,
+) -> bool:
+    """(F-3A residual fix, Step 5 gate) Best-effort read of
+    ``entrypoint_relpath``'s CURRENT on-disk content -- called only after a
+    ``_rewrite_wrapper_guard_marker_id`` attempt did NOT return ``True`` -- to
+    tell apart the two reasons that can happen: (a) there was never a guard
+    block naming the legacy marker to begin with (no wrapper, no
+    ``_GUARD_BEGIN``, or a guard that already names something else), in which
+    case deleting the legacy ``.pause`` file is harmless; versus (b) a guard
+    IS present and still literally names the legacy marker file, in which
+    case deleting it would leave that guard's ``-e`` check pointing at
+    nothing -- silently un-pausing the writer. Mirrors
+    ``_rewrite_wrapper_guard_marker_id``'s own read + reference-reconstruction
+    logic, but never mutates anything; any read failure is treated as "no
+    guard to protect" (fail-closed lives in the caller only withholding the
+    unlink when this returns True, not in guessing here)."""
+    wrapper_path = Path(operator_project_dir) / entrypoint_relpath
+    try:
+        content = wrapper_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    if _GUARD_BEGIN not in content:
+        return False
+    prefix = _relative_prefix(entrypoint_relpath)
+    old_marker_ref = f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{legacy_id}.pause"
+    return old_marker_ref in content
 
 
 def _safe_pause_entrypoint(
