@@ -342,7 +342,7 @@
       "recommendation_reason": "If your system has (or will have) a capability that writes in bulk, this makes the start-of-session status honest about anything switched off or interrupted, and turns switching a capability on into a single reliable step \u2014 most operators should take it.",
       "release_date": "2026-07-22",
       "safety_class": "reliability_fix",
-      "source_commit": "PENDING",
+      "source_commit": "193967f",
       "status": "prerelease"
     }
   ],
