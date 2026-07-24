@@ -152,6 +152,24 @@ Some `technical_architecture.md` sections are intentionally reserved and say so 
 
 Do not surface the technical details to the operator -- bring the agents to a runnable state quietly.
 
+### Third-party dependency enrollment (silent, the moment you write a vendor import)
+
+`agents/lib/external_write/adapters_<capability_id>.py` (the module `capability_code_scaffold.py` scaffolds in add-capability, or an existing adapter you are completing for this phase) may need a real third-party vendor SDK -- for example `import googleapiclient.discovery` for a Google integration. This project's `requirements.txt` declares no third-party packages by default, and its `.venv` installs only what that file declares (see the file's own preamble) -- so a package your adapter code needs is not there until you put it there. **You do this, immediately, the moment you write that import -- never leave it for the operator to install, and never treat "add it to requirements.txt by hand" as an acceptable substitute.** The operator writes no code and runs no pip command; you do it, and they see only the plain-language result.
+
+Run, silently, from the project root, for each new vendor import this phase's adapter code needs:
+
+```
+python3 agents/lib/external_write/dependency_enrollment.py --import-name "<the vendor import, e.g. googleapiclient>" --capability-id "<this capability's id from the Step 2 lookup>" --project-root .
+```
+
+This resolves the import name to its real pip package name (they are not always the same string -- `googleapiclient` resolves to `google-api-python-client`), pins an exact version, records both in the project's segregated dependency manifest (`agents/lib/external_write/operator_requirements.json` -- upgrade-durable, exactly like the F-76 operator-adapter manifest it sits beside), re-renders `requirements.txt` (merging with anything already declared there -- it never overwrites an existing line), installs the pinned package into this project's own `.venv` right away, and appends a plain audit line recording what was installed and when. It exits `0` when the package is enrolled AND installed. Continue to the next step.
+
+If it exits non-zero, the dependency is still enrolled (the manifest and `requirements.txt` are already updated -- nothing is lost), but the environment is not yet satisfied -- read what it printed for the reason (commonly: no network access, or `.venv` does not exist yet, in which case run `./start-session.sh` once first). Fix that, then re-run the SAME command -- it is safe to run again for the same import; it never enrolls the same package twice. Do not continue to the deterministic self-check or Step 5 until it exits `0` for every vendor import this phase's capability code needs.
+
+**Do not hand-edit `requirements.txt` or `operator_requirements.json` yourself, and do not run `pip install` directly.** Always go through this command -- it is what keeps the manifest, `requirements.txt`, the installed `.venv`, and the audit log consistent with each other.
+
+**A lint, not a gate.** If you are unsure whether a capability's adapter module still imports something that was never enrolled this way (for example, one written before this step existed, or completed by hand outside this flow), you can check with `python3 agents/lib/external_write/dependency_enrollment.py --lint agents/lib/external_write/adapters_<capability_id>.py --project-root .` -- it flags a non-standard-library import absent from the manifest. This is a reliability check to help you catch a gap, not a safety or acceptance gate; nothing downstream reads its output.
+
 ### What this capability's own test should (and should not) cover
 
 When you write or update this capability's own test file, keep it scoped to what this

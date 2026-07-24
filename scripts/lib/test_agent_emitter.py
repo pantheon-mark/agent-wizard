@@ -6,6 +6,8 @@ exhaustion (no {{KEY}} survives), the tier-name-in-prompt / resolved-model-in-
 script split, script executability, and foundation-only mode emits nothing.
 """
 
+import copy
+import json
 import re
 import stat
 import sys
@@ -15,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import agent_emitter  # type: ignore  # noqa: E402
 from agent_emitter import emit_agent_layer  # noqa: E402
 from emission_plan import load_contract, default_contract_path, validate_emission_plan  # noqa: E402
 from generator import PLACEHOLDER_RE  # noqa: E402
@@ -195,6 +198,98 @@ class AgentEmitterTests(unittest.TestCase):
         staging, _ = self._emit(_valid_plan())  # researcher carries no cron_cadence
         cron = (staging / "agents/cron/cron_config.md").read_text()
         self.assertIn("No entries yet", cron)
+
+
+class RequirementsTxtDependencyDerivationTests(unittest.TestCase):
+    """F-9 (Cut 1.4, Task 5): _emit_requirements_txt derives its content from the static
+    preamble template PLUS any enrolled third-party packages already recorded in a capability
+    dependency-enrollment manifest staged at agents/lib/external_write/operator_requirements.json
+    (the file `wizard/agents/lib/external_write/dependency_enrollment.py` writes/reads at
+    next-phase time on an existing project). An absent or empty manifest -- the fresh-emit case,
+    and every system no capability has enrolled a package into -- must be byte-identical to the
+    preamble alone (back-compat)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.contract = load_contract(default_contract_path())
+
+    def _writes_back_plan(self):
+        plan_dict = copy.deepcopy(_valid_plan())
+        plan_dict["foundation_doc_inputs"]["EXTERNAL_DEPENDENCY_IDENTITY"] = json.dumps([
+            {"id": "acme_crm", "name": "Acme CRM", "type": "CRM", "roles": ["boundary_output"]},
+        ])
+        return validate_emission_plan(plan_dict, self.contract)
+
+    @staticmethod
+    def _stage_bundle_template(root: Path, bundle_version: str) -> str:
+        bundle_root_tpl = root / "foundation-bundles" / bundle_version / "templates" / "root"
+        bundle_root_tpl.mkdir(parents=True)
+        template_text = (Path(__file__).resolve().parents[2] / "templates" / "root"
+                         / "requirements_template").read_text(encoding="utf-8")
+        (bundle_root_tpl / "requirements_template").write_text(template_text, encoding="utf-8")
+        return template_text
+
+    def test_empty_manifest_is_byte_identical_to_preamble(self):
+        plan = self._writes_back_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            template_text = self._stage_bundle_template(root, plan.bundle_version)
+            staging = root / "staging"
+            staging.mkdir()
+
+            out = agent_emitter._emit_requirements_txt(plan, staging, root)
+
+            self.assertEqual(len(out), 1)
+            self.assertEqual(out[0].read_text(encoding="utf-8"), template_text)
+
+    def test_absent_manifest_directory_is_also_byte_identical(self):
+        # No agents/lib/external_write/ directory at all yet (a completely fresh staging
+        # dir, exactly what a real fresh emit looks like before this function is called).
+        plan = self._writes_back_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            template_text = self._stage_bundle_template(root, plan.bundle_version)
+            staging = root / "staging"
+
+            out = agent_emitter._emit_requirements_txt(plan, staging, root)
+
+            self.assertEqual(out[0].read_text(encoding="utf-8"), template_text)
+
+    def test_populated_manifest_appends_enrolled_packages_after_the_preamble(self):
+        plan = self._writes_back_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            template_text = self._stage_bundle_template(root, plan.bundle_version)
+            staging = root / "staging"
+            manifest_dir = staging / "agents" / "lib" / "external_write"
+            manifest_dir.mkdir(parents=True)
+            (manifest_dir / "operator_requirements.json").write_text(json.dumps([
+                {"import_name": "googleapiclient", "package_name": "google-api-python-client",
+                 "version": "2.149.0", "capability_id": "acme_gcal_sync"},
+            ]), encoding="utf-8")
+
+            out = agent_emitter._emit_requirements_txt(plan, staging, root)
+
+            self.assertEqual(len(out), 1)
+            text = out[0].read_text(encoding="utf-8")
+            self.assertTrue(text.startswith(template_text),
+                            "the static preamble must still be present, verbatim, at the top")
+            self.assertIn("google-api-python-client==2.149.0", text)
+
+    def test_malformed_manifest_degrades_to_preamble_only_not_a_crash(self):
+        plan = self._writes_back_plan()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            template_text = self._stage_bundle_template(root, plan.bundle_version)
+            staging = root / "staging"
+            manifest_dir = staging / "agents" / "lib" / "external_write"
+            manifest_dir.mkdir(parents=True)
+            (manifest_dir / "operator_requirements.json").write_text("{ not valid json",
+                                                                     encoding="utf-8")
+
+            out = agent_emitter._emit_requirements_txt(plan, staging, root)
+
+            self.assertEqual(out[0].read_text(encoding="utf-8"), template_text)
 
 
 if __name__ == "__main__":

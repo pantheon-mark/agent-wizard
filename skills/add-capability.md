@@ -186,6 +186,8 @@ python3 "${WIZARD_HOME:-$HOME/agent-wizard}/scripts/lib/capability_code_scaffold
 
 This writes two files — the part of the capability that is allowed to touch `acme_crm` (registered with the system's gate machinery, holding no ambient access to anything) and the part that proposes what to do (which can only read, never write, and never holds or sees any access credential) — and registers the first of those as a recognized, gate-covered module with zero further wiring from you or the operator. Next-phase fills in the one remaining per-vendor decision inside the files this generates; it never starts a writes-back capability from a blank file. If a capability's allowed actions are all read-only, notification-only, or otherwise never leave the project, skip this step — there is nothing external to gate-wire.
 
+If completing that per-vendor code needs a real third-party package (a vendor SDK import — `acme_crm`'s own client library, for example), do not install or declare it here: next-phase resolves, pins, enrolls, and installs it into the project's `.venv` automatically, the moment it writes that import, before any trial run — see its Step 4 "Third-party dependency enrollment." Nothing here waits on that; it is entirely next-phase's job.
+
 ### Land the typed record and teach the guard (silent)
 
 Before handing off, the typed record of what this capability is authorized to be must actually be written down, and — for a high-risk capability — the quality guard taught to watch for it, in one fail-safe pass. Do this through the system's own writer, never by editing the safety records by hand.

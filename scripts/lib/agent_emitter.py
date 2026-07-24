@@ -15,6 +15,7 @@ INVOCATION SCRIPTS receive the RESOLVED model string (programmatic --model selec
 the operator never picks a model).
 """
 
+import json
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -441,8 +442,17 @@ def _emit_requirements_txt(plan: "EmissionPlan", staging_dir: Path,
     the template — inert until a bundle cut copies wizard/templates/root/requirements_template
     into <bundle>/templates/root/, mirroring the same source-gating as the lib and descriptor set.
 
-    The template carries no {{KEY}} placeholders (its content is static — see
-    wizard/templates/root/requirements_template), so no inputs need to be supplied here."""
+    DERIVED, not static (Cut 1.4, Task 5 / F-9): the template's content is the static preamble
+    (no {{KEY}} placeholders — the substitution below always sees an empty inputs dict, so it is
+    unconditionally emitted verbatim), PLUS — when `staging_dir` already carries a capability
+    dependency-enrollment manifest (`agents/lib/external_write/operator_requirements.json`, the
+    segregated file `wizard/agents/lib/external_write/dependency_enrollment.py` writes/reads at
+    NEXT-PHASE time on an existing project) — one pinned `package==version` line per enrolled
+    entry, appended after the preamble. A FRESH emit (or one against a synthetic staging dir with
+    no manifest, as this function's own unit tests use) has no such manifest yet, so this is
+    byte-identical to the static preamble alone — the back-compat invariant this task's own tests
+    pin. See `_render_requirements_txt_content`'s own docstring for why this small amount of
+    rendering logic is duplicated here rather than imported from the emitted module."""
     if not _plan_has_writes_back(plan):
         return []
     bt = _bundle_agent_templates_root(build_repo_root, plan.bundle_version)
@@ -450,9 +460,62 @@ def _emit_requirements_txt(plan: "EmissionPlan", staging_dir: Path,
     if not template_path.is_file():
         # Source-gated: the bundle does not carry the template yet (pending a bundle cut).
         return []
+    preamble_text = template_path.read_text(encoding="utf-8")
+    manifest_entries = _load_operator_requirements_manifest(staging_dir)
+    content = _render_requirements_txt_content(preamble_text, manifest_entries)
     out_path = staging_dir / _REQUIREMENTS_TXT_REL
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    return [_emit_from_template(template_path, out_path, {}, "requirements.txt")]
+    out_path.write_text(content, encoding="utf-8")
+    return [out_path]
+
+
+_OPERATOR_REQUIREMENTS_MANIFEST_REL = f"{_EXTERNAL_WRITE_LIB_REL}/operator_requirements.json"
+
+
+def _load_operator_requirements_manifest(staging_dir: Path) -> List[Dict[str, str]]:
+    """Read the segregated dependency-enrollment manifest (F-9) from
+    `<staging_dir>/agents/lib/external_write/operator_requirements.json`, if present. A missing
+    manifest (the overwhelming common case: a fresh emit, or any system no capability has ever
+    enrolled a third-party package into) is a clean empty list — never an error. A present but
+    corrupt/malformed manifest degrades to an empty list too (fail-isolated, matching
+    `dependency_enrollment.load_manifest`'s own discipline) rather than aborting the whole emit
+    over one bad file — this is a toolkit-side READ ONLY, never a write, so there is nothing to
+    lose by degrading gracefully here."""
+    manifest_path = staging_dir / _OPERATOR_REQUIREMENTS_MANIFEST_REL
+    if not manifest_path.is_file():
+        return []
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [e for e in data if isinstance(e, dict) and e.get("package_name") and e.get("version")]
+
+
+def _render_requirements_txt_content(preamble_text: str, manifest_entries: List[Dict[str, str]]) -> str:
+    """Preamble verbatim + one sorted `package==version` line per manifest entry. Byte-identical
+    to `preamble_text` alone when `manifest_entries` is empty (F-9 Step 2 back-compat invariant).
+
+    Duplicated (not imported) from `wizard/agents/lib/external_write/dependency_enrollment.py`'s
+    own `render_requirements_txt`: this module is TOOLKIT (ships via `wizard self-update`) while
+    that one is EMITTED (ships inside the bundle, into the operator's own project tree) — the two
+    are never on the same sys.path at runtime, so a real import would cross a channel boundary
+    this codebase does not otherwise cross (mirrors `capability_code_scaffold.py`'s own
+    `_REGISTERED_ADAPTERS_BASELINE` duplicate-content discipline). This toolkit copy only ever
+    needs to reproduce a FRESH derivation from a manifest (no pre-existing requirements.txt to
+    merge against — this function only runs at emit time, before the operator project exists) —
+    the emitted module's own `render_requirements_txt` additionally merges against an
+    already-existing file, which this one deliberately does not need to do."""
+    if not manifest_entries:
+        return preamble_text
+    out = preamble_text if preamble_text.endswith("\n") else preamble_text + "\n"
+    out += ("\n# Enrolled by capability code (see agents/lib/external_write/"
+            "operator_requirements.json) -- do not hand-edit these lines; they are "
+            "regenerated on the next enrollment.\n")
+    for entry in sorted(manifest_entries, key=lambda e: str(e["package_name"]).lower()):
+        out += f"{entry['package_name']}=={entry['version']}\n"
+    return out
 
 
 def _bundle_agent_templates_root(build_repo_root: Path, version: Optional[str] = None) -> Path:
