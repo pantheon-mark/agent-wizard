@@ -737,6 +737,43 @@ class ExternalWriteLibRegistryEnrollmentTests(unittest.TestCase):
             "emitted external_write.standing_automation must import cleanly in a fresh "
             f"operator project; stderr:\n{result.stderr}")
 
+    def test_emitted_dependency_enrollment_module_is_physically_present_and_imports_cleanly(self):
+        # Cut 1.4 Task 5 review CRITICAL finding: dependency_enrollment.py was
+        # never added to _EXTERNAL_WRITE_LIB_FILES, so it never shipped into a
+        # real operator project even though add-capability.md / next-phase.md
+        # instruct the build agent to run it (`python3 agents/lib/
+        # external_write/dependency_enrollment.py ...`) and hard-block on a
+        # non-zero exit -- a 404 the first time a capability needs a vendor
+        # SDK. Nothing else in the lib imports it at module scope (it is a
+        # standalone CLI the build agent invokes directly), so this proves
+        # both the enrollment and that the module imports cleanly standalone
+        # in a fresh operator project.
+        plan = self._plan()
+        fixture_build_repo_root = self._fixture_build_repo_root()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name)
+
+        emit_operator_system(plan, staging, fixture_build_repo_root)
+
+        dependency_enrollment_path = (
+            staging / "agents" / "lib" / "external_write" / "dependency_enrollment.py")
+        self.assertTrue(
+            dependency_enrollment_path.is_file(),
+            "dependency_enrollment.py must be enrolled in _EXTERNAL_WRITE_LIB_FILES "
+            "and physically emitted -- add-capability.md/next-phase.md instruct the "
+            "build agent to run it against a real operator project")
+
+        result = subprocess.run(
+            [sys.executable, "-c",
+             "import sys; sys.path.insert(0, 'agents/lib'); "
+             "import external_write.dependency_enrollment"],
+            cwd=str(staging), capture_output=True, text=True)
+        self.assertEqual(
+            result.returncode, 0,
+            "emitted external_write.dependency_enrollment must import cleanly in a "
+            f"fresh operator project; stderr:\n{result.stderr}")
+
     def test_every_enrolled_lib_file_imports_from_a_real_emitted_project(self):
         # (Coordinator review, B1 must-fix #2) The three tests above each hardcode ONE
         # enrolled file -- nothing previously drove EVERY entry in

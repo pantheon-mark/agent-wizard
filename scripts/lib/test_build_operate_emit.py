@@ -1782,7 +1782,11 @@ class TestS253ContractDelta(unittest.TestCase):
         # (Count updated to 38 by Task E3 (Cut 1.1 Cluster E / F-85), which additionally
         # enrolled run_narration.py -- see that file's own enrollment comment in
         # agent_emitter.py, and test_emit_set_lists_the_taskE3_run_narration_file below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 38)
+        # (Count updated to 39 by Cut 1.4 Task 5 (F-9, review fix), which additionally
+        # enrolled dependency_enrollment.py -- see that file's own enrollment comment in
+        # agent_emitter.py, and test_emit_set_lists_the_cut14_task5_dependency_enrollment_file
+        # below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 39)
 
     def test_emit_set_lists_the_taskA3_lifecycle_test_fixtures_file(self):
         # Task A3 (hermetic lifecycle tests + probe, Cut 1.1 / F-71): lifecycle_test_fixtures.py
@@ -1821,6 +1825,16 @@ class TestS253ContractDelta(unittest.TestCase):
         # derived from a typed result.
         import agent_emitter
         self.assertIn("run_narration.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+
+    def test_emit_set_lists_the_cut14_task5_dependency_enrollment_file(self):
+        # Cut 1.4 Task 5 (F-9, review CRITICAL fix): dependency_enrollment.py must be
+        # enrolled, or a freshly-emitted writes-back system's add-capability/next-phase
+        # flow instructs the build agent to run a CLI (`python3 agents/lib/external_write/
+        # dependency_enrollment.py ...`) that was never physically shipped -- a 404 the
+        # first time any capability needs a vendor SDK, hard-blocking next-phase (the
+        # skill does not continue until this script exits 0).
+        import agent_emitter
+        self.assertIn("dependency_enrollment.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def _writes_back_plan(self):
         import copy, json

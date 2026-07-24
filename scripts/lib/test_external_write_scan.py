@@ -1327,6 +1327,64 @@ class TestCapabilityImportBoundary(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Cut 1.4 Task 5 review fix -- dependency_enrollment.py's trust zone must be a
+# DELIBERATE, registered decision, not an accident of scan.py's denylist not
+# yet knowing about "pip"/subprocess. It shells out to pip (a real network
+# reach) to resolve/install a capability's third-party dependency, but it is
+# TRUSTED build/maintenance infrastructure -- it never writes to the
+# operator's external (vendor) surface -- so it belongs in SEALED_KERNEL, not
+# CAPABILITY (the fail-closed default for anything unregistered) and not
+# ADAPTER_PROFILE (that zone is reserved for per-vendor write adapters).
+# ---------------------------------------------------------------------------
+
+
+class TestDependencyEnrollmentZone(unittest.TestCase):
+    """Pins the zone decision + its CAPABILITY-import-boundary consequence."""
+
+    def test_dependency_enrollment_is_registered_sealed_kernel(self):
+        zone = scan.classify_zone(
+            _ADAPTER_DIR / "dependency_enrollment.py", _ADAPTER_DIR)
+        self.assertEqual(
+            zone, scan.Zone.SEALED_KERNEL,
+            "dependency_enrollment.py manages the project's own .venv/"
+            "requirements (trusted build/maintenance infra, not operator-"
+            "external-surface capability code) -- it must be an explicit, "
+            "registered SEALED_KERNEL decision, not left CAPABILITY by the "
+            "fail-closed default")
+
+    def test_dependency_enrollment_module_path_is_in_the_registry(self):
+        # The registry membership itself (zones.SEALED_KERNEL_MODULE_PATHS),
+        # independent of classify_zone's resolution logic above.
+        self.assertIn("dependency_enrollment.py", scan.SEALED_KERNEL_MODULE_PATHS)
+
+    def test_capability_zone_importing_dependency_enrollment_is_flagged(self):
+        # SEALED_KERNEL registration does NOT grant a capability the right to
+        # import it -- the CAPABILITY-zone import allowlist is the
+        # independent, narrow {capability_api, operations, read_facade} set
+        # (mirrors test_sealed_kernel_membership_does_not_grant_capability_
+        # zone_import above for the identical shape with capability_health.py).
+        # This holds regardless of dependency_enrollment.py's own zone
+        # registration -- verifying the review finding's "verify this" ask.
+        src = "from external_write.dependency_enrollment import enroll_and_install\n"
+        kinds = _kinds(_scan_source(src))
+        self.assertIn(
+            "sealed_kernel_import", kinds,
+            "a capability importing dependency_enrollment.py directly must be "
+            "flagged -- it is not in the CAPABILITY-zone import allowlist")
+
+    def test_real_dependency_enrollment_module_scans_clean(self):
+        # The real module legitimately shells out to pip via subprocess; as a
+        # SEALED_KERNEL module it is scanned in full (not exempt from
+        # forbidden_import/direct_api_call/dynamic_import/subprocess_network/
+        # credential_construction -- see zones.py's module docstring) and must
+        # still come back clean, exactly like every other real SEALED_KERNEL
+        # module already does.
+        v = scan_paths([_ADAPTER_DIR / "dependency_enrollment.py"])
+        self.assertEqual(
+            v, [], f"real dependency_enrollment.py must scan clean; got {v}")
+
+
+# ---------------------------------------------------------------------------
 # F-3B (anti-deadlock; COUPLED to F-3A/Task 1) -- hash-bound migration
 # quarantine.
 #

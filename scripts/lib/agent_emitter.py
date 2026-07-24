@@ -222,6 +222,19 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # caught omission (same regression class this file's own docstring
     # already documents for every prior entry above).
     "run_narration.py",
+    # Cut 1.4 Task 5 (F-9, review CRITICAL fix): capability third-party
+    # dependency enrollment. Nothing else in the lib imports it at module
+    # scope (it is a standalone CLI the build agent invokes directly --
+    # `python3 agents/lib/external_write/dependency_enrollment.py ...` --
+    # from add-capability.md/next-phase.md, at the moment it writes a vendor
+    # `import` into a capability's adapter code), but omitting it here means
+    # a freshly-emitted writes-back system's add-capability/next-phase flow
+    # points the build agent at a module that was never physically shipped
+    # -- a 404 the FIRST time any capability needs a vendor SDK, hard-
+    # blocking next-phase (the skill does not continue until this script
+    # exits 0) -- not a caught omission (same regression class this file's
+    # own docstring already documents for every prior entry above).
+    "dependency_enrollment.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

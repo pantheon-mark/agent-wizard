@@ -292,5 +292,66 @@ class RequirementsTxtDependencyDerivationTests(unittest.TestCase):
             self.assertEqual(out[0].read_text(encoding="utf-8"), template_text)
 
 
+class RequirementsTxtRenderParityTests(unittest.TestCase):
+    """Cut 1.4 Task 5 review fix (MINOR — pin render parity): agent_emitter's
+    toolkit-side `_render_requirements_txt_content` deliberately duplicates a
+    reduced form of the EMITTED module's own `render_requirements_txt` (see
+    that function's own docstring for why a real cross-channel import is not
+    used). A duplicate with no pinning test can silently diverge; this loads
+    the real emitted module by file path (never on the toolkit's own
+    sys.path at runtime) and asserts byte-for-byte identical output for the
+    same manifest+preamble input, with no pre-existing requirements.txt to
+    merge against (the only case the toolkit copy ever needs to reproduce)."""
+
+    @staticmethod
+    def _load_emitted_dependency_enrollment_module():
+        import importlib.util
+        path = (REPO_ROOT / "wizard" / "agents" / "lib" / "external_write"
+                / "dependency_enrollment.py")
+        spec = importlib.util.spec_from_file_location(
+            "dependency_enrollment_emitted_for_parity_test", path)
+        module = importlib.util.module_from_spec(spec)
+        # Register in sys.modules BEFORE exec: the dataclass decorator's
+        # postponed-annotation resolution (`from __future__ import
+        # annotations` in the emitted module) looks the module up via
+        # sys.modules[cls.__module__] while the class body is still
+        # executing -- exec_module alone does not register it.
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        return module
+
+    def test_render_output_matches_emitted_module_byte_for_byte(self):
+        de = self._load_emitted_dependency_enrollment_module()
+        preamble = "# preamble line\n# second preamble line\n"
+        manifest_entries = [
+            {"import_name": "googleapiclient", "package_name": "google-api-python-client",
+             "version": "2.149.0", "capability_id": "acme_gcal_sync"},
+            {"import_name": "yaml", "package_name": "PyYAML", "version": "6.0.2",
+             "capability_id": "acme_config"},
+        ]
+
+        toolkit_output = agent_emitter._render_requirements_txt_content(
+            preamble, manifest_entries)
+
+        emitted_entries = [de.DependencyEntry.from_dict(e) for e in manifest_entries]
+        emitted_output = de.render_requirements_txt(
+            preamble, emitted_entries, existing_text=None)
+
+        self.assertEqual(
+            toolkit_output, emitted_output,
+            "the toolkit-side renderer must produce byte-identical output to "
+            "the emitted module's own renderer for the same manifest+preamble "
+            "(fresh-emit case: no pre-existing requirements.txt to merge)")
+
+    def test_render_output_matches_emitted_module_when_manifest_is_empty(self):
+        de = self._load_emitted_dependency_enrollment_module()
+        preamble = "# preamble only\n"
+
+        toolkit_output = agent_emitter._render_requirements_txt_content(preamble, [])
+        emitted_output = de.render_requirements_txt(preamble, [], existing_text=None)
+
+        self.assertEqual(toolkit_output, emitted_output)
+
+
 if __name__ == "__main__":
     unittest.main()

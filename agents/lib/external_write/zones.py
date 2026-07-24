@@ -218,6 +218,48 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         "evidence.py",
         "lifecycle_state.py",
         "run_narration.py",
+        # dependency_enrollment.py (Cut 1.4 Task 5 / F-9, review fix): capability
+        # third-party dependency enrollment -- resolves/pins a vendor package,
+        # records it in operator_requirements.json, re-renders requirements.txt,
+        # and installs it into the project's own .venv/. It shells out to pip
+        # (`pip index versions`, `pip install`, `pip freeze` via `subprocess`) --
+        # a REAL network reach -- which is exactly the shape a CAPABILITY-zone
+        # module must never be allowed (see this module's own docstring: the
+        # CAPABILITY-zone-ONLY checks scan.py enforces exist precisely to stop
+        # an ungated network reach like this one). Before this entry existed,
+        # dependency_enrollment.py scanned clean under the OLD rules by
+        # ACCIDENT, not by decision: scan.py's subprocess_network check only
+        # flags a shell-out that names a known network CLI tool
+        # (_NETWORK_CLI_TOOLS -- curl/wget/scp/...), and "pip" was never added
+        # to that list, so the module happened to pass regardless of its zone.
+        # This is a deliberate, reviewed decision that it is TRUSTED build/
+        # maintenance infrastructure, not operator-facing capability code that
+        # writes to the operator's external (vendor) surface: it manages the
+        # project's OWN Python environment (.venv/requirements.txt), never a
+        # customer/vendor mutation, and every capability's actual vendor write
+        # still goes through the ordinary adapter/broker/write_gate path this
+        # zone protects -- so it is SEALED_KERNEL, not ADAPTER_PROFILE (that
+        # zone is reserved for per-vendor WRITE adapters that mutate the
+        # operator's external surface, which this module never does) and not
+        # left CAPABILITY (the fail-closed default, which would make its own
+        # network reach look like an ordinary, ungated capability bypass the
+        # next time scan.py's denylist is tightened to include "pip" -- a
+        # separate, deliberately deferred follow-up; see this module's own
+        # docstring section on the pip subprocess reach for why it does not
+        # import a raw HTTP client instead).
+        #
+        # SEALED_KERNEL membership does NOT grant a capability the right to
+        # import it: the CAPABILITY-zone import allowlist
+        # (`scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES`) is the
+        # independent, narrow {capability_api, operations, read_facade} set --
+        # a capability importing `external_write.dependency_enrollment`
+        # directly is already a `sealed_kernel_import` violation under the
+        # existing A' module-boundary rule, exactly like capability_health.py
+        # (see test_sealed_kernel_membership_does_not_grant_capability_zone_
+        # import / test_capability_zone_importing_dependency_enrollment_is_
+        # flagged in test_external_write_scan.py). It is invoked ONLY by the
+        # build agent's own CLI call, never imported by emitted capability code.
+        "dependency_enrollment.py",
     }
 )
 

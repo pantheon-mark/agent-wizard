@@ -84,6 +84,41 @@ v0 answer instead.
 
 Stdlib only — no third-party dependencies (this module itself never imports
 anything it might be asked to enroll for someone else).
+
+Trust zone: SEALED_KERNEL, by deliberate decision (Cut 1.4 Task 5 review fix)
+------------------------------------------------------------------------------
+This module shells out to pip (`pip index versions`, `pip install`, `pip
+freeze` via `subprocess`) — a real network reach. That is registered as
+SEALED_KERNEL in `zones.SEALED_KERNEL_MODULE_PATHS` (see that registry
+entry's own comment for the full rationale), not left CAPABILITY (scan.py's
+fail-closed default for an unregistered module) and not ADAPTER_PROFILE (the
+zone reserved for per-vendor adapters that mutate the OPERATOR'S external
+surface). The distinction: this module is TRUSTED build/maintenance
+infrastructure that manages the project's OWN `.venv`/`requirements.txt` —
+never a customer/vendor write. A capability's actual vendor mutation still
+goes through the ordinary adapter/broker/write_gate path this zone protects;
+this module never touches that path at all.
+
+Before this registration, the module scanned clean under scan.py's rules by
+ACCIDENT, not by decision: the subprocess_network check only flags a
+shell-out that names a KNOWN network CLI tool (`curl`/`wget`/`scp`/... —
+`scan._NETWORK_CLI_TOOLS`), and "pip" was never added to that list, so this
+module passed regardless of its zone. Broadening that denylist to include
+pip is a deliberate, separate follow-up (flagged, not done here, to avoid
+introducing an FP-risk class-level tightening inside this task) — this
+registration is what makes the zone an explicit, reviewed, tested decision
+either way, not a scanner gap nobody looked at.
+
+SEALED_KERNEL membership does NOT grant a capability the right to import this
+module: the CAPABILITY-zone import allowlist
+(`scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES`) is the independent,
+narrow `{capability_api, operations, read_facade}` set — a capability
+importing `external_write.dependency_enrollment` directly is already a
+`sealed_kernel_import` violation under the existing A' module-boundary rule
+(same as `capability_health.py`). This module is invoked ONLY via its own
+CLI entrypoint (`__main__` block below), by the build agent from
+`add-capability.md` / `next-phase.md` — never imported by emitted capability
+code.
 """
 
 from __future__ import annotations
