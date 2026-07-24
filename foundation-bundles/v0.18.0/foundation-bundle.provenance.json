@@ -145,7 +145,7 @@
       "path": "templates/agents/lib/external_write/coverage_gate.py"
     },
     {
-      "hash": "sha256:9684646570404b3f34087a28a864c5c08917f5d14b721025ee957437ca7ba8dc",
+      "hash": "sha256:626e4df52c51b785673885e82a1fd9073af3db3ca0ce51644400bf53dcf69315",
       "path": "templates/agents/lib/external_write/dependency_enrollment.py"
     },
     {
@@ -197,7 +197,7 @@
       "path": "templates/agents/lib/external_write/run_narration.py"
     },
     {
-      "hash": "sha256:3eb2ea7fe8cd3e90cffcb60695fa7126f4cf9cfef10d2b8adae34b365a06b708",
+      "hash": "sha256:5a78053f3feac765a9d26a1b9efac4952e0be11c085d4fc1be9f4b029c9ed03a",
       "path": "templates/agents/lib/external_write/scan.py"
     },
     {
@@ -558,8 +558,8 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-07-24T01:24:02Z",
-  "generator_version": "ed2f64e77c56b6b67a7820ffba8a8dd89b50eb32",
+  "generated_at": "2026-07-24T02:37:41Z",
+  "generator_version": "5763309eb88efdbc54748dcfde7bced583930356",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.18.0",
