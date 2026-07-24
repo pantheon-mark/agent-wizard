@@ -599,6 +599,26 @@ def resolve_registered_adapter_classes(
 
     calls = _register_adapter_calls(tree)
     if not calls:
+        # Cut 1.4 fold (Finding #3 -- non-blocking minor): this fallback
+        # branch is DEAD from the insertion side --
+        # `insert_missing_evidence_predicate_stubs` (below) checks
+        # `_register_adapter_calls(tree)` and raises `CapabilityCodeScaffold
+        # Error` BEFORE ever calling this function, so a real insertion
+        # attempt on a no-register_adapter-call module never reaches here.
+        # It exists ONLY to preserve this function's own narrower
+        # pre-existing unit tests (see the docstring above), which call
+        # `resolve_registered_adapter_classes` directly. On the DETECTION
+        # side (`upgrade_reconcile._missing_evidence_predicates_for_adapter`,
+        # which has no such raise-first guard), this branch CAN fire for a
+        # real module: it reports a class as resolved, detection says a
+        # predicate is missing, but the later insertion attempt then raises
+        # and is caught with a silent `continue` (no manual-repair task
+        # queued -- unlike the ambiguous-registration case, which does
+        # queue one). This asymmetry is accepted as-is: every real emitted
+        # adapter module has a `register_adapter(...)` call (see this
+        # function's own docstring), so the shape that trips this branch on
+        # the detection side does not occur in practice today. Left as a
+        # documented, minimal comment rather than expanded logic.
         if len(class_defs) == 1:
             return {class_defs[0].name: class_defs[0]}, 0
         return {}, 0

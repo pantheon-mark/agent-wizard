@@ -152,6 +152,58 @@ class TestSubprocessCurl(unittest.TestCase):
         self.assertGreaterEqual(len(net), 3)
 
 
+class TestPipResidualIsADisclosedKnownGap(unittest.TestCase):
+    """Cut 1.4 fold (Finding #1 -- non-blocking minor): ``pip`` is a real
+    network-reaching CLI tool (installs from PyPI, i.e. the internet) but is
+    deliberately NOT in ``_NETWORK_CLI_TOOLS`` -- unlike curl/wget/etc, a
+    CAPABILITY module shelling out to ``pip`` is not itself an external-
+    surface WRITE (it does not mutate the operator's vendor account/data),
+    and ``dependency_enrollment.py`` (a real, trusted SEALED_KERNEL module)
+    legitimately shells out to pip via subprocess as its whole job. Adding
+    "pip" to the denylist would either false-positive that legitimate
+    SEALED_KERNEL usage or require a bespoke per-module carve-out; the AST-
+    ceiling residual is disclosed and deferred rather than chasing a class-
+    level tightening whose FP risk was judged not worth it for this cut (see
+    the module docstring's own "Curated, NOT exhaustive" discipline for
+    _FORBIDDEN_IMPORT_ROOTS -- the same disclosed-bound spirit applies here).
+
+    This pins the CURRENT boundary of that disclosed residual so a future
+    silent change (someone adding "pip" without updating this test, or
+    silently dropping the residual's disclosure) is caught rather than
+    drifting unnoticed. A REAL capability could still shell out to pip to
+    reach the network undetected -- that gap is real, known, and NOT closed
+    by this test."""
+
+    def test_pip_is_not_in_the_network_cli_denylist(self):
+        self.assertNotIn(
+            "pip", scan._NETWORK_CLI_TOOLS,
+            "pip is a disclosed, intentional omission from the network-CLI "
+            "denylist (see this test's own docstring) -- if this now fails, "
+            "someone added pip to the denylist without updating/removing "
+            "this pin, or the disclosed-residual decision changed and this "
+            "test (and its docstring) needs to be revisited deliberately, "
+            "not silently.")
+
+    def test_capability_shelling_out_to_pip_currently_scans_clean(self):
+        # A synthetic CAPABILITY-zone module shelling out to pip to install a
+        # package -- exactly the disclosed residual shape. This is expected
+        # to scan clean TODAY (pins the known gap); it is not an endorsement
+        # that this is safe.
+        src = (
+            "import subprocess\n"
+            "\n"
+            "def install_something():\n"
+            "    subprocess.run(['pip', 'install', 'requests'], check=True)\n"
+        )
+        v = _scan_source(src)
+        self.assertEqual(
+            v, [],
+            "pip shelling out is the disclosed residual this cut left open -- "
+            "if this now fails, either scan.py started flagging pip (update "
+            "this test/docstring to match the new, tighter behavior) or "
+            "something else about subprocess_network detection changed.")
+
+
 class TestSpoofedAnchor(unittest.TestCase):
     def test_fake_allowed_module_dir_outside_anchor_is_flagged(self):
         # A directory recreating the allowed module's NAME

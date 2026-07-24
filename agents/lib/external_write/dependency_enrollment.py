@@ -125,9 +125,11 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -306,16 +308,49 @@ def load_manifest(external_write_dir: Path) -> List[DependencyEntry]:
     return entries
 
 
+def _atomic_write_text(out_path: Path, text: str) -> None:
+    """Write ``text`` to ``out_path`` atomically: a temp file in the SAME
+    directory (so the final rename is same-filesystem, hence atomic), then
+    ``os.replace``. A crash or interruption between the temp-file write and
+    the rename leaves the ORIGINAL file (or its prior absence) completely
+    untouched -- never a truncated/partial write. Stdlib-only and
+    self-contained on purpose: this module is EMITTED (ships inside the
+    operator project's own tree) and must not depend on the toolkit's own
+    ``upgrade_reconcile.py::_atomic_write`` (same pattern, deliberately
+    duplicated rather than imported -- see ``DEFAULT_PREAMBLE``'s own
+    duplicate-content discipline note above for why an emitted module never
+    imports across the toolkit/emitted boundary)."""
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{MANIFEST_BASENAME}.", suffix=".tmp", dir=str(out_path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, str(out_path))
+    except Exception:
+        try:
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
 def save_manifest(external_write_dir: Path, entries: Sequence[DependencyEntry]) -> Path:
     """Idempotent, deterministic write: sorted by import_name so a re-write of
-    an unchanged manifest is byte-identical (clean diffs, no spurious churn)."""
+    an unchanged manifest is byte-identical (clean diffs, no spurious churn).
+    Written atomically -- see ``_atomic_write_text`` -- so a crash mid-write
+    can never truncate the operator's durable dependency record."""
     out_dir = Path(external_write_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / MANIFEST_BASENAME
     ordered = sorted(entries, key=lambda e: e.import_name)
-    out_path.write_text(
+    _atomic_write_text(
+        out_path,
         json.dumps([e.to_dict() for e in ordered], indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
     )
     return out_path
 

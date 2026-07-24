@@ -735,7 +735,22 @@ def _migrate_legacy_bespoke_identity(
 
     Carries the pause state FORWARD onto the new key (never silently drops
     an operator's existing pause) and removes the stale legacy-keyed
-    marker/state files and queue entry so no orphan is left behind."""
+    marker/state files and queue entry so no orphan is left behind.
+
+    Cut 1.4 fold (Finding #5b -- non-blocking minor, deferred): this only
+    migrates the FORWARD direction (bare-stem `legacy_id` -> relpath-keyed
+    `migration_id`, the shape a NEW stem collision produces). It does not
+    handle the REVERSE transition: a writer that was relpath-keyed in some
+    EARLIER pass (because it collided with another same-stem writer back
+    then) whose collision no longer exists today (e.g. the other writer was
+    removed) -- a fresh `migration_id` computation for it would now resolve
+    back to the bare stem, but nothing here migrates a relpath-keyed marker
+    back down to a stem-keyed one. The result is a stale relpath-keyed
+    marker/state file left as an orphan. This is NOT a safety gap: the
+    wrapper's guard block still literally references that same relpath-keyed
+    `.pause` filename (see `_guard_block`/`_rewrite_wrapper_guard_marker_id`),
+    so the writer correctly stays paused either way -- only the orphaned
+    file's cleanup is deferred."""
     if legacy_id == migration_id:
         return
     operator_project_dir = Path(operator_project_dir)
@@ -1342,6 +1357,15 @@ def reconcile_missing_evidence_predicates(
         try:
             new_source = insert_missing_evidence_predicate_stubs(source_text, missing)
         except CapabilityCodeScaffoldError:
+            # Cut 1.4 fold (Finding #3): if this ever fires for a module
+            # `_missing_evidence_predicates_for_adapter` just reported
+            # `missing` for, it is the documented no-register_adapter-call
+            # fallback asymmetry -- see `resolve_registered_adapter_classes`'s
+            # own comment in capability_code_scaffold.py. Unlike the
+            # ambiguous-registration case above, this is a SILENT skip (no
+            # manual-repair task queued) -- accepted because real emitted
+            # adapter modules always have a register_adapter(...) call, so
+            # this shape does not occur in practice today.
             continue  # could not find a safe insertion point -- never guess, skip
         _atomic_write(adapter_path, new_source)
         _append_missing_predicate_migration_request(
@@ -1714,6 +1738,23 @@ def _relative_prefix(wrapper_relpath: str) -> str:
     return "/".join([".."] * depth) if depth else "."
 
 
+def _wrapper_guard_marker_ref(entrypoint_relpath: str, mechanism_id: str) -> str:
+    """The exact marker-existence-check path string the inserted guard block
+    (see ``_guard_block``) embeds for ``mechanism_id``, as seen from
+    ``entrypoint_relpath``'s own wrapper location. Cut 1.4 fold (Finding #5a
+    -- non-blocking minor, DRY): extracted so
+    ``_rewrite_wrapper_guard_marker_id`` and ``_wrapper_guard_still_
+    references_legacy_marker`` -- which each used to reconstruct this SAME
+    string independently -- can never silently diverge if the marker-path
+    format ever changes. This is on the fail-closed pause-safety path
+    (F-3B coupling): a mismatch between the two reconstructions could either
+    fail to rewrite a stale guard reference, or fail to detect one still
+    present -- both would silently un-pause a writer. Pure string
+    construction; no I/O."""
+    prefix = _relative_prefix(entrypoint_relpath)
+    return f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{mechanism_id}.pause"
+
+
 def _rewrite_wrapper_guard_marker_id(
     operator_project_dir: Path,
     entrypoint_relpath: str,
@@ -1748,9 +1789,8 @@ def _rewrite_wrapper_guard_marker_id(
         return False
     if _GUARD_BEGIN not in original:
         return False
-    prefix = _relative_prefix(entrypoint_relpath)
-    old_marker_ref = f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{legacy_id}.pause"
-    new_marker_ref = f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{migration_id}.pause"
+    old_marker_ref = _wrapper_guard_marker_ref(entrypoint_relpath, legacy_id)
+    new_marker_ref = _wrapper_guard_marker_ref(entrypoint_relpath, migration_id)
     if old_marker_ref not in original:
         return False
     _atomic_write(wrapper_path, original.replace(old_marker_ref, new_marker_ref))
@@ -1781,8 +1821,7 @@ def _wrapper_guard_still_references_legacy_marker(
         return False
     if _GUARD_BEGIN not in content:
         return False
-    prefix = _relative_prefix(entrypoint_relpath)
-    old_marker_ref = f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{legacy_id}.pause"
+    old_marker_ref = _wrapper_guard_marker_ref(entrypoint_relpath, legacy_id)
     return old_marker_ref in content
 
 

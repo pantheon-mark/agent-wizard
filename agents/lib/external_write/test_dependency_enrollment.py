@@ -13,6 +13,7 @@ import json
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 _EXTERNAL_WRITE_DIR = Path(__file__).resolve().parent
@@ -121,6 +122,87 @@ class EnrollDependencyTests(unittest.TestCase):
             self.project_root, "requests", "some_capability",
             version_resolver=_stub_resolver("2.32.3"))
         self.assertEqual(result.package_name, "requests")
+
+
+class SaveManifestAtomicWriteTests(unittest.TestCase):
+    """Cut 1.4 fold (Finding #2 -- non-blocking minor): `save_manifest` must
+    write ``operator_requirements.json`` atomically (temp file in the same
+    directory, then ``os.replace``) so a crash mid-write can never leave a
+    truncated/partial manifest on disk -- the operator's durable F-9
+    dependency record either fully updates or is left exactly as it was."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.external_write_dir = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_uses_a_temp_file_in_the_same_directory_then_replaces(self):
+        """A real crash mid-write is exercised below by forcing os.replace to
+        raise; this test pins the mechanism itself -- a temp file is created
+        in the SAME directory as the manifest (never elsewhere, so the final
+        `os.replace` is guaranteed same-filesystem/atomic) and no temp file
+        survives a successful write."""
+        seen_tmp_names = []
+        real_mkstemp = tempfile.mkstemp
+
+        def _spying_mkstemp(*args, **kwargs):
+            fd, name = real_mkstemp(*args, **kwargs)
+            seen_tmp_names.append(name)
+            return fd, name
+
+        with unittest.mock.patch.object(de.tempfile, "mkstemp", _spying_mkstemp):
+            de.save_manifest(self.external_write_dir, [
+                de.DependencyEntry("googleapiclient", "google-api-python-client",
+                                    "2.149.0", "acme_gcal_sync"),
+            ])
+
+        self.assertEqual(len(seen_tmp_names), 1)
+        tmp_path = Path(seen_tmp_names[0])
+        self.assertEqual(
+            tmp_path.parent.resolve(), self.external_write_dir.resolve(),
+            "the temp file must be created in the SAME directory as the "
+            "final manifest so os.replace is atomic (same filesystem)")
+        self.assertFalse(
+            tmp_path.exists(),
+            "the temp file must not survive a successful write -- it is "
+            "renamed onto the final manifest path by os.replace")
+
+    def test_interrupted_write_leaves_prior_manifest_intact(self):
+        """Simulate a crash AFTER the temp file is fully written but BEFORE
+        the atomic rename lands (os.replace raises) -- the prior manifest
+        content must be completely untouched, never partially overwritten or
+        truncated."""
+        de.save_manifest(self.external_write_dir, [
+            de.DependencyEntry("googleapiclient", "google-api-python-client",
+                                "2.140.0", "acme_gcal_sync"),
+        ])
+        manifest_path = self.external_write_dir / de.MANIFEST_BASENAME
+        original_text = manifest_path.read_text(encoding="utf-8")
+
+        with unittest.mock.patch.object(
+            de.os, "replace", side_effect=OSError("simulated crash mid-write"),
+        ):
+            with self.assertRaises(OSError):
+                de.save_manifest(self.external_write_dir, [
+                    de.DependencyEntry("googleapiclient", "google-api-python-client",
+                                        "2.149.0", "acme_gcal_sync"),
+                ])
+
+        self.assertEqual(
+            manifest_path.read_text(encoding="utf-8"), original_text,
+            "an interrupted write (crash before the atomic rename lands) "
+            "must leave the prior manifest completely intact")
+
+        leftover_tmp_files = [
+            p for p in self.external_write_dir.iterdir()
+            if p.name != de.MANIFEST_BASENAME
+        ]
+        self.assertEqual(
+            leftover_tmp_files, [],
+            "the temp file must be cleaned up even when the replace itself "
+            f"fails; found leftover: {leftover_tmp_files}")
 
 
 class RequirementsTxtEmptyManifestBackCompatTests(unittest.TestCase):

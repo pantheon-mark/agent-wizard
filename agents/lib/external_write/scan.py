@@ -1698,6 +1698,15 @@ def _quarantined_violations(
         return violations  # this file is not a listed, queued quarantine candidate.
     recorded_hash = entry.get("paused_content_sha256")
     if not isinstance(recorded_hash, str) or not recorded_hash:
+        # A pre-F-3B pending-migrations entry (queued before this hash-bound
+        # quarantine existed) never recorded a paused_content_sha256 at all --
+        # this is CORRECTLY, fail-closed, not exempt: with no hash to bind the
+        # quarantine to, there is nothing to positively verify against. It
+        # self-heals on the next `--apply` reconcile pass, which re-pauses the
+        # estate fresh (recording a hash this time) rather than leaving it
+        # stuck unexempted. A one-time backfill of paused_content_sha256 onto
+        # existing pre-F-3B entries is deferred -- speculative, since the
+        # self-heal already resolves it without one.
         return violations  # no hash recorded -- never guess, no exemption.
     try:
         current_bytes = file_path.read_bytes()
