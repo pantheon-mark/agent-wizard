@@ -344,6 +344,19 @@
       "safety_class": "reliability_fix",
       "source_commit": "193967f",
       "status": "prerelease"
+    },
+    {
+      "bundle_manifest_sha256": "sha256:64f055c4a9383e1396bbaa1c2d6b42b3037821a8615cc51f1ebb8fcdc80c68c1",
+      "bundle_tree_sha256": "sha256:160d7b8ece68e14148c4565322f3fc4520da801c3bb576f52a4a11d0be50fae0",
+      "changelog": "This update makes building and turning on capabilities more reliable. Turning a capability on now always gives you an exact, ready-to-paste next step when it can't work out the details on its own \u2014 it never asks you to fix a command yourself. When a capability's code needs a third-party software package, the system now installs and records it for you automatically, so you never run an install command or edit a requirements file by hand. It also refuses to silently reuse a set-aside capability whose code has changed until it has been reconciled, and tells you plainly if the same capability was accidentally recorded twice.",
+      "foundation_bundle_version": "v0.18.0",
+      "manifest": "foundation-bundles/v0.18.0/manifest.yaml",
+      "path": "foundation-bundles/v0.18.0/",
+      "recommendation_reason": "This is a reliability fix for building and operating capabilities \u2014 safer turn-on with an always-paste-ready next step, automatic third-party dependency handling, and clearer honesty about set-aside or duplicated capabilities. It adds no breaking changes and touches none of your data, so most operators should take it.",
+      "release_date": "2026-07-23",
+      "safety_class": "reliability_fix",
+      "source_commit": "PENDING",
+      "status": "prerelease"
     }
   ],
   "registry_schema_version": "v2",

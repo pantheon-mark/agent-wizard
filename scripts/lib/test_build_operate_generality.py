@@ -833,20 +833,32 @@ class SupervisedCopyTargetSourceGuardTest(unittest.TestCase):
         self._assert_no_generic_placeholder(self.bundle_next_phase_text,
                                             "latest-bundle templates/wizard/skills/next-phase.md")
 
-    @unittest.expectedFailure
     def test_bundle_next_phase_matches_dev_home(self):
         """The emitted bundle next-phase.md is byte-identical to the dev home (single source
         of truth kept in sync by hand convention; no sync script exists).
 
-        MARKED expectedFailure AGAIN at Cut 1.4, Task 4 (F-2). The D' acceptance-fallback
-        paste-safety fix changed the "If it reports it could not determine the phase..."
-        wording in the DEV-HOME ``wizard/skills/next-phase.md`` (no more "re-run adding
-        --phase-id" -- the wrapping-command hazard this fix closes). v0.17.0 is
+        RE-SYNCED AGAIN at the v0.18.0 bundle cut (Cut 1.4, Task 6). Task 4 (F-2) changed the
+        DEV-HOME ``wizard/skills/next-phase.md`` acceptance-fallback wording (no more "re-run
+        adding --phase-id" -- the wrapping-command hazard that fix closes) and Task 5 (F-9)
+        added the "Third-party dependency enrollment" step; v0.17.0 was already-RELEASED and
+        byte-immutable at the time, so it could not be edited to carry these -- the guard was
+        marked expectedFailure until Cut 1.4 cut its own bundle. The v0.18.0 cut ports the
+        current dev-home ``wizard/skills/next-phase.md`` into the new bundle byte-for-byte
+        (verified via cmp), restoring dev-home == latest-bundle; the marker was removed
+        accordingly. Per the same self-clearing convention documented below: if a future slice
+        edits the dev-home copy again before its own bundle cut ships, this assertion will fail
+        again and must be re-marked expectedFailure with a fresh note, not silently patched
+        around.
+
+        HISTORICAL: was MARKED expectedFailure at Cut 1.4, Task 4 (F-2). The D' acceptance-
+        fallback paste-safety fix changed the "If it reports it could not determine the
+        phase..." wording in the DEV-HOME ``wizard/skills/next-phase.md`` (no more "re-run
+        adding --phase-id" -- the wrapping-command hazard this fix closes). v0.17.0 is
         already-RELEASED and byte-immutable (retro-editing it would break replay-conformance
         for any operator already emitted at v0.17.0 -- see
-        ``feedback_released_bundle_version_immutable_delta``), so it cannot be edited to carry
-        this. Per the self-clearing convention documented below: Task 6's v0.18.0 bundle cut
-        ports the current dev-home ``wizard/skills/next-phase.md`` into the new bundle
+        ``feedback_released_bundle_version_immutable_delta``), so it could not be edited to
+        carry this. Per the self-clearing convention documented below: Task 6's v0.18.0 bundle
+        cut ports the current dev-home ``wizard/skills/next-phase.md`` into the new bundle
         byte-for-byte, restoring dev-home == latest-bundle, at which point this marker is
         removed again.
 

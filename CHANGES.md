@@ -12,6 +12,22 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-23 — safer, more reliable capability building: an always-paste-ready turn-on step, automatic third-party package handling, and clearer honesty about set-aside or duplicated capabilities (v0.18.0)
+
+**Public-facing change:** Reliability improvements to how you build a capability, turn one on, and keep your system's records honest.
+
+- **Turning a capability on now always gives you an exact, ready-to-paste next step when it can't work out the details on its own.** If more than one capability is waiting, it prints one complete command for each; if there's nothing to do, or the same capability was recorded twice, it says so plainly and points you at the safe way to fix it — it never asks you to edit or extend a command by hand.
+- **When a capability's code needs a third-party software package, your system now resolves, pins, records, and installs it for you automatically**, the moment that code needs it and before it ever runs — you never run an install command or hand-edit a requirements file.
+- **A capability that was set aside (paused) is no longer silently reused if its code has changed since**, until it has been reconciled — closing a path where stale set-aside code could quietly come back into use.
+- **If the same capability is accidentally recorded twice, the start-of-session health check now tells you plainly** (it reports it, it does not act on it) so you can clean it up.
+- No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
+
+This is a reliability fix (`v0.18.0`, minor-additive, operator-explicit as always). Foundation documents are byte-identical to `v0.17.0`.
+
+`Source-Meta-Commit:` `PENDING` (private build repo) · public repo commit `PENDING`
+
+---
+
 ## 2026-07-22 — honest capability health at the start of every session, and turning a capability on is now a single reliable command (v0.17.0)
 
 **Public-facing change:** Improvements to how your system reports its own status and how you switch a capability on.
