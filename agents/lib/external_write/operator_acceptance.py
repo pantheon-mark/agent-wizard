@@ -263,6 +263,12 @@ class PhaseDiagnosis:
         is always a data-integrity same-id twin, never normal ambiguity -- see the module
         docstring. No accept command is ever produced for this case; healing happens at
         the source (upgrade-reconcile / capability registration), not by the operator.
+      * ``"phase_id_missing"`` -- the exact given id has exactly one descriptor entry, it is
+        NOT accepted (a real, still-pending entry), but its ``phase_id`` is missing or blank.
+        This is NOT the same situation as ``"zero_match"`` -- an entry genuinely exists, it
+        has a data-integrity problem, not a "nothing was found" problem -- so it gets its own
+        label and its own accurate operator-facing message (never the "no pending descriptor
+        entry was found" wording, which would be misleading here).
       * ``"zero_match"`` -- nothing at all was found for the given id, AND no OTHER
         capability in the descriptor set is genuinely pending either. A plain diagnostic;
         there is nothing to offer instead.
@@ -271,6 +277,15 @@ class PhaseDiagnosis:
         a usable ``phase_id``, and themselves free of a same-id conflict). ``candidates``
         names each one so the CLI can print a ready-to-paste command per capability,
         rather than a dead end.
+
+        IMPORTANT (review finding on this task): ``_ready_accept_command`` (below) raises if
+        ``operator_confirmation`` contains an embedded newline/carriage-return -- ``shlex.quote``
+        does not strip one, so interpolating it would silently break the single-physical-line
+        guarantee this whole mechanism exists to provide. A caller building a ready command from
+        ``candidates`` MUST check ``operator_confirmation`` for a newline/carriage-return itself
+        BEFORE calling ``_ready_accept_command`` and degrade to a plain diagnostic instead (see
+        the CLI's ``multiple_pending`` branch below) -- the raise is a defense-in-depth backstop,
+        not the primary guard.
 
     candidates: ``(capability_id, phase_id)`` pairs, populated only for ``"multiple_pending"``
                 (empty otherwise). Deterministically ordered by capability_id.
@@ -305,7 +320,17 @@ def diagnose_phase_resolution(capability_id: str, *, descriptor_set_path: Option
         if matches[0].get("accepted"):
             return PhaseDiagnosis(kind="already_accepted")
         # Exactly one match, not accepted -- resolve_pending_phase only returns None here
-        # when phase_id itself is missing/blank; nothing else to usefully offer either.
+        # when phase_id itself is missing/blank. That is a real, existing entry with a data
+        # problem, never a "nothing was found" situation -- give it its own distinct label
+        # (review finding on this task) rather than folding it into "zero_match", which the
+        # CLI renders as "no pending descriptor entry was found ... nothing to accept" --
+        # misleading, since an entry DOES exist here.
+        phase = matches[0].get("phase_id")
+        if not (isinstance(phase, str) and phase.strip()):
+            return PhaseDiagnosis(kind="phase_id_missing")
+        # Defensive fallback only -- unreachable in practice, since a valid phase_id here
+        # would have made resolve_pending_phase itself return non-None, so diagnose_phase_
+        # resolution would never have been called for this id at all.
         return PhaseDiagnosis(kind="zero_match")
 
     # Zero matches for the EXACT given id. Rather than a dead end, look at what else is
@@ -789,7 +814,26 @@ def _ready_accept_command(capability_id: str, phase_id: str, operator_confirmati
     what the operator's confirmation text contains (quotes, spaces, punctuation). Matches the
     documented invocation shape (``wizard/skills/next-phase.md`` Step 6 / ``rebuild-paused-
     capability.md`` Step 4) exactly, with ``--phase-id`` pre-filled -- never left for the
-    operator to add by hand."""
+    operator to add by hand.
+
+    Fail-closed guard (review finding on this task): ``shlex.quote`` escapes shell
+    metacharacters but does NOT strip or reject a literal embedded newline/carriage-return
+    inside the quoted argument -- e.g. ``shlex.quote("a\\nb")`` returns ``"'a\\nb'"``, which
+    STILL spans two physical lines when printed. Since ``operator_confirmation`` is free
+    operator text, a confirmation containing an embedded newline would otherwise make this
+    function silently emit a "single line" command that is not actually one physical line --
+    the exact paste-safety hazard this whole helper exists to eliminate. This function
+    therefore refuses (raises) rather than emit anything unsafe; every caller that might feed
+    it operator text must check for a newline/carriage-return FIRST and degrade to a plain
+    diagnostic instead (see the CLI's ``multiple_pending`` branch) -- this raise is a
+    defense-in-depth backstop, not the primary guard."""
+    if "\n" in operator_confirmation or "\r" in operator_confirmation:
+        raise ValueError(
+            "_ready_accept_command refuses to build a command: operator_confirmation "
+            "contains an embedded newline/carriage-return, and shlex.quote does not strip "
+            "one -- interpolating it here would produce a command that is not actually a "
+            "single physical line. The caller must check for this before calling this "
+            "function and degrade to a plain single-line diagnostic instead.")
     import shlex as _shlex
     parts = [
         "python3", "agents/lib/external_write/operator_acceptance.py",
@@ -871,17 +915,37 @@ if __name__ == "__main__":  # pragma: no cover
                     "data-integrity problem with the registry, not normal ambiguity, and it "
                     "cannot be safely accepted until the duplicate entries are healed. Run "
                     "your upgrade/reconcile step and try again.", file=_sys.stderr)
-            elif _diag.kind == "multiple_pending":
+            elif _diag.kind == "phase_id_missing":
                 print(
-                    f"capability {_opts['--capability-id']!r} does not have a pending "
-                    "acceptance -- but the following capabilities ARE currently pending. "
-                    "Paste the ONE command below that matches what you want to accept:",
-                    file=_sys.stderr)
-                for _cid, _cphase in _diag.candidates:
+                    f"capability {_opts['--capability-id']!r} has a pending descriptor entry, "
+                    "but its phase binding (phase_id) is missing or blank -- this is a "
+                    "data-integrity problem with that registry entry, not something re-running "
+                    "this command can fix. Ask whoever built this capability to backfill its "
+                    "phase_id, then try again.", file=_sys.stderr)
+            elif _diag.kind == "multiple_pending":
+                # (Review finding on this task) shlex.quote does NOT strip an embedded
+                # newline/carriage-return from a quoted argument -- interpolating an operator
+                # confirmation that contains one would make the "ready-to-paste" command below
+                # actually span more than one physical line, the exact V15-2 wrap-and-break
+                # hazard this fix exists to eliminate. Check BEFORE building any command; if
+                # unsafe, degrade to a single-line diagnostic and emit no command at all.
+                _confirmation = _opts["--operator-confirmation"]
+                if "\n" in _confirmation or "\r" in _confirmation:
                     print(
-                        _ready_accept_command(
-                            _cid, _cphase, _opts["--operator-confirmation"]),
+                        "the --operator-confirmation text you supplied contains a line break, "
+                        "so a ready-to-paste accept command cannot be safely generated -- "
+                        "re-run this command with a single-line confirmation (no line breaks) "
+                        "and try again.", file=_sys.stderr)
+                else:
+                    print(
+                        f"capability {_opts['--capability-id']!r} does not have a pending "
+                        "acceptance -- but the following capabilities ARE currently pending. "
+                        "Paste the ONE command below that matches what you want to accept:",
                         file=_sys.stderr)
+                    for _cid, _cphase in _diag.candidates:
+                        print(
+                            _ready_accept_command(_cid, _cphase, _confirmation),
+                            file=_sys.stderr)
             else:  # "zero_match"
                 print(
                     f"no pending descriptor entry was found for capability "

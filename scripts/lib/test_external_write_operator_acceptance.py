@@ -35,6 +35,7 @@ from external_write.operator_acceptance import (  # noqa: E402
     DEFAULT_COPY_RUN_PROOF_DIR,
     PENDING_MIGRATIONS_REL,
     close_pending_migration_if_matched,
+    _ready_accept_command,
 )
 from external_write.acceptance_ceremony import OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA  # noqa: E402
 from external_write.copy_run_proof import COPY_RUN_PROOF_SCHEMA  # noqa: E402
@@ -1088,6 +1089,39 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
         self.assertIn("already", result.stderr.lower())
         self.assertNotIn("\n", result.stderr.strip(), "diagnostic must be a single physical line")
 
+    def test_cli_entry_exists_but_phase_id_blank_reports_distinct_diagnostic(self):
+        # MINOR (review finding on Task 4 / F-2): exactly one descriptor entry exists for the
+        # given id, is NOT accepted, but its phase_id is missing/blank -- diagnose_phase_
+        # resolution used to lump this in with "zero_match" (nothing found at all), which is
+        # misleading: an entry DOES exist, it just has a data problem. This must get its own,
+        # distinct, accurate, single-line message -- never the true-zero-match wording, and
+        # never a flag to hand-append.
+        self.descriptor_set_path.write_text(json.dumps([
+            {"id": self.CAPABILITY_ID, "name": self.CAPABILITY_ID, "action_class": "update",
+             "risk_class": "sensitive_data", "recovery_profile_ref": None,
+             "declared_test_target": "copy", "blast_radius_cap": 10,
+             "accepted": False, "phase_id": ""},
+        ]), encoding="utf-8")
+        cli_path = self.external_write_dir / "operator_acceptance.py"
+        result = subprocess.run(
+            [sys.executable, str(cli_path),
+             "--capability-id", self.CAPABILITY_ID,
+             "--operator-confirmation", "yes"],
+            cwd=str(self.project_root), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("--phase-id", result.stderr,
+                        "must never instruct the operator to hand-append a flag")
+        self.assertNotIn("\n", result.stderr.strip(), "diagnostic must be a single physical line")
+        self.assertNotIn(
+            "no pending descriptor entry was found", result.stderr,
+            "must be distinct from the true zero-match wording -- an entry DOES exist")
+        self.assertIn(self.CAPABILITY_ID, result.stderr)
+        lowered = result.stderr.lower()
+        self.assertTrue(
+            "phase" in lowered and ("missing" in lowered or "blank" in lowered),
+            msg=f"must plainly say the entry's phase binding is missing/blank -- "
+                f"stderr={result.stderr!r}")
+
     def test_cli_zero_match_prints_plain_diagnostic_no_command(self):
         # Task 4 (F-2): nothing at all is pending anywhere in the descriptor set -- a plain
         # single-line diagnostic, no command to paste or hand-assemble.
@@ -1126,14 +1160,7 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
         self.assertNotIn("--phase-id", result.stderr)
         self.assertNotIn("operator_acceptance.py --capability-id", result.stderr)
 
-    def test_cli_multiple_distinct_pending_capabilities_prints_one_ready_command_each(self):
-        # Task 4 (F-2): the given --capability-id doesn't match anything currently pending
-        # (e.g. a stale Step-2 lookup), but two OTHER, DISTINCT capabilities ARE genuinely
-        # pending -- the CLI must print a ready-to-paste single-physical-line command for
-        # EACH of them, --phase-id pre-filled, every interpolated value shlex.quote'd, never
-        # asking the operator to hand-assemble anything.
-        other_phase = "phase_other"
-        confirmation = "Yes -- I'm accepting this, per Jane's approval."
+    def _write_two_distinct_pending_capabilities(self, other_phase):
         self.descriptor_set_path.write_text(json.dumps([
             {"id": "fixture_pending_one", "name": "fixture_pending_one",
              "action_class": "update", "risk_class": "sensitive_data",
@@ -1144,6 +1171,23 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
              "recovery_profile_ref": None, "declared_test_target": "copy",
              "blast_radius_cap": 10, "accepted": False, "phase_id": other_phase},
         ]), encoding="utf-8")
+
+    def test_cli_multiple_distinct_pending_capabilities_prints_one_ready_command_each(self):
+        # Task 4 (F-2): the given --capability-id doesn't match anything currently pending
+        # (e.g. a stale Step-2 lookup), but two OTHER, DISTINCT capabilities ARE genuinely
+        # pending -- the CLI must print a ready-to-paste single-physical-line command for
+        # EACH of them, --phase-id pre-filled, every interpolated value shlex.quote'd, never
+        # asking the operator to hand-assemble anything.
+        #
+        # NOTE: this asserts on the RAW, UN-split stderr (an exact physical-line count),
+        # not on `stderr.splitlines()` filtered to lines containing a marker substring --
+        # the latter is tautological (splitlines() has already broken any embedded newline
+        # apart for you before the "no \n in this line" assertion ever runs, so it can never
+        # catch a command that actually spans more than one physical line). See the sibling
+        # test below for the case that WOULD have slipped through the old assertion.
+        other_phase = "phase_other"
+        confirmation = "Yes -- I'm accepting this, per Jane's approval."
+        self._write_two_distinct_pending_capabilities(other_phase)
         cli_path = self.external_write_dir / "operator_acceptance.py"
         result = subprocess.run(
             [sys.executable, str(cli_path),
@@ -1152,27 +1196,80 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
             cwd=str(self.project_root), capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
 
-        lines = [ln for ln in result.stderr.splitlines() if "operator_acceptance.py" in ln]
-        self.assertEqual(len(lines), 2, msg=f"stderr={result.stderr!r}")
+        raw_lines = result.stderr.split("\n")
+        if raw_lines and raw_lines[-1] == "":
+            raw_lines = raw_lines[:-1]  # trailing newline from the final print()
+        # Exactly one preamble line + one ready-to-paste command line per pending
+        # capability -- if either command actually spanned more than one physical line,
+        # this count would be higher than 3.
+        self.assertEqual(len(raw_lines), 3, msg=f"stderr={result.stderr!r}")
+
+        command_lines = raw_lines[1:]
+        expected_commands = {
+            _ready_accept_command("fixture_pending_one", self.PHASE, confirmation),
+            _ready_accept_command("fixture_pending_two", other_phase, confirmation),
+        }
+        self.assertEqual(set(command_lines), expected_commands)
+
         found_ids = set()
-        for line in lines:
+        phase_by_id = {}
+        for line in command_lines:
             self.assertNotIn("\n", line)  # each printed command is ONE physical line
             tokens = shlex.split(line)
             self.assertIn("--capability-id", tokens)
             self.assertIn("--phase-id", tokens)
             self.assertIn("--operator-confirmation", tokens)
-            found_ids.add(tokens[tokens.index("--capability-id") + 1])
+            cid = tokens[tokens.index("--capability-id") + 1]
+            found_ids.add(cid)
+            phase_by_id[cid] = tokens[tokens.index("--phase-id") + 1]
             self.assertEqual(
                 tokens[tokens.index("--operator-confirmation") + 1], confirmation,
                 "shlex.quote round-trip must preserve the operator's verbatim confirmation")
         self.assertEqual(found_ids, {"fixture_pending_one", "fixture_pending_two"})
-        phase_by_id = {}
-        for line in lines:
-            tokens = shlex.split(line)
-            cid = tokens[tokens.index("--capability-id") + 1]
-            phase_by_id[cid] = tokens[tokens.index("--phase-id") + 1]
         self.assertEqual(phase_by_id["fixture_pending_one"], self.PHASE)
         self.assertEqual(phase_by_id["fixture_pending_two"], other_phase)
+
+    def test_cli_multiple_pending_with_embedded_newline_confirmation_degrades_safely(self):
+        # (F-2 review finding) shlex.quote does NOT strip an embedded newline from a quoted
+        # argument -- shlex.quote("a\nb") == "'a\nb'", still two physical lines. An
+        # operator_confirmation containing a literal newline must therefore never be
+        # interpolated into a ready-to-paste command (the exact V15-2 wrap-and-break hazard
+        # this task exists to eliminate). Instead the CLI must degrade to a single-line
+        # diagnostic and emit NO command at all. This test fails against the pre-fix code
+        # (which happily prints a two-physical-line "command") and passes after.
+        other_phase = "phase_other"
+        unsafe_confirmation = "Yes -- I accept\nsigned, Jane"
+        self._write_two_distinct_pending_capabilities(other_phase)
+        cli_path = self.external_write_dir / "operator_acceptance.py"
+        result = subprocess.run(
+            [sys.executable, str(cli_path),
+             "--capability-id", "no_such_capability_here",
+             "--operator-confirmation", unsafe_confirmation],
+            cwd=str(self.project_root), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn(
+            "operator_acceptance.py", result.stderr,
+            "no ready-to-paste command may ever be emitted for an unsafe confirmation")
+        self.assertNotIn(
+            "\n", result.stderr.strip(),
+            "the degraded diagnostic itself must be exactly one physical line")
+        self.assertIn("single-line", result.stderr.lower())
+
+    def test_cli_multiple_pending_with_embedded_carriage_return_confirmation_degrades_safely(self):
+        # Same hazard, \r instead of \n -- a lone CR in a pasted terminal command can still
+        # cause the line to visually overwrite itself; guarded identically.
+        other_phase = "phase_other"
+        unsafe_confirmation = "Yes -- I accept\rsigned, Jane"
+        self._write_two_distinct_pending_capabilities(other_phase)
+        cli_path = self.external_write_dir / "operator_acceptance.py"
+        result = subprocess.run(
+            [sys.executable, str(cli_path),
+             "--capability-id", "no_such_capability_here",
+             "--operator-confirmation", unsafe_confirmation],
+            cwd=str(self.project_root), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("operator_acceptance.py", result.stderr)
+        self.assertIn("single-line", result.stderr.lower())
 
 
 class OperatorAdapterSurvivesRegeneratedBaselineTest(unittest.TestCase):
