@@ -57,7 +57,7 @@ Capture their answer in their own words — never supply it for them. Once they 
 python3 agents/lib/external_write/operator_acceptance.py --capability-id "<the capability's id>" --operator-confirmation "<the operator's go-ahead, verbatim>"
 ```
 
-If it reports it could not determine the phase (more than one capability is pending), re-run adding `--phase-id "<its owning phase>"`.
+If it can't uniquely determine the phase, it never asks you to fix or extend the command yourself — it prints exactly what to do next, always as something you can paste as-is: a plain "nothing to do" message when nothing matches or it's already accepted, a plain data-integrity note (pointing at the upgrade/reconcile step, never at hand-editing) if the same capability is recorded twice, or one complete, ready-to-run command per capability if more than one is currently pending. Read whatever it prints and follow it exactly; never hand-edit or extend the command yourself.
 
 Because this capability keeps the SAME id as the pending entry's `mechanism_id` — this is a rebuild, not a redeclaration — a successful acceptance here closes that entry on its own. You never edit `pending_migrations.json` by hand, and you never need to remember to remove the entry yourself.
 

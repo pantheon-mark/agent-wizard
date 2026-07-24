@@ -46,7 +46,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 # sys.path bootstrap (mirrors acceptance_ceremony.py / capability_registration.py): make the
 # package parent importable when run as a direct script from the project root, so the sibling
@@ -244,6 +244,95 @@ def resolve_pending_phase(capability_id: str, *, descriptor_set_path: Optional[s
         return None
     phase = entry.get("phase_id")
     return phase if isinstance(phase, str) and phase.strip() else None
+
+
+@dataclass(frozen=True)
+class PhaseDiagnosis:
+    """(Task 4 / F-2) WHY ``resolve_pending_phase`` returned ``None`` for a given
+    ``capability_id`` -- computed only when it has, so the CLI can give the operator a
+    branch-specific, always-paste-safe next step instead of one generic "re-run with
+    --phase-id" message (the exact wrapping-command hazard V15-2 already fixed for
+    ``--copy-run-proof``/``--phase-id`` themselves, but that this fallback message was
+    still re-introducing).
+
+    kind:
+      * ``"already_accepted"`` -- the exact given id has exactly one descriptor entry, and
+        it is already accepted. Nothing pending to derive a phase for.
+      * ``"identity_conflict"`` -- the exact given id has MORE THAN ONE descriptor entry.
+        Every entry necessarily shares this id (that's the definition of "match"), so this
+        is always a data-integrity same-id twin, never normal ambiguity -- see the module
+        docstring. No accept command is ever produced for this case; healing happens at
+        the source (upgrade-reconcile / capability registration), not by the operator.
+      * ``"zero_match"`` -- nothing at all was found for the given id, AND no OTHER
+        capability in the descriptor set is genuinely pending either. A plain diagnostic;
+        there is nothing to offer instead.
+      * ``"multiple_pending"`` -- nothing matched the given id, but one or more OTHER,
+        DISTINCT capabilities in the descriptor set ARE genuinely pending (unaccepted, with
+        a usable ``phase_id``, and themselves free of a same-id conflict). ``candidates``
+        names each one so the CLI can print a ready-to-paste command per capability,
+        rather than a dead end.
+
+    candidates: ``(capability_id, phase_id)`` pairs, populated only for ``"multiple_pending"``
+                (empty otherwise). Deterministically ordered by capability_id.
+    """
+    kind: str
+    candidates: Tuple[Tuple[str, str], ...] = ()
+
+
+def diagnose_phase_resolution(capability_id: str, *, descriptor_set_path: Optional[str] = None,
+                              project_root: Optional[str] = None) -> PhaseDiagnosis:
+    """(Task 4 / F-2) Classify WHY ``resolve_pending_phase(capability_id, ...)`` returned
+    ``None`` -- see ``PhaseDiagnosis`` for the branch meanings. Callers only invoke this
+    AFTER ``resolve_pending_phase`` has already returned ``None`` for the same arguments;
+    it re-reads the same descriptor set independently (this module's existing convention --
+    every helper here reads its own fail-safe snapshot rather than threading state between
+    calls) rather than being a second authority: it classifies, it never derives a phase
+    itself, and it is never consulted by ``record_operator_acceptance``/the ceremony.
+
+    Fail-soft on the READ side (mirrors ``resolve_pending_phase``'s own convention): any
+    load/parse error is treated the same as an empty descriptor set (``"zero_match"``),
+    never a traceback."""
+    try:
+        entries = _load_descriptor_entries(
+            descriptor_set_path=descriptor_set_path, project_root=project_root)
+    except Exception:
+        entries = []
+
+    matches = [e for e in entries if isinstance(e, dict) and e.get("id") == capability_id]
+    if len(matches) > 1:
+        return PhaseDiagnosis(kind="identity_conflict")
+    if len(matches) == 1:
+        if matches[0].get("accepted"):
+            return PhaseDiagnosis(kind="already_accepted")
+        # Exactly one match, not accepted -- resolve_pending_phase only returns None here
+        # when phase_id itself is missing/blank; nothing else to usefully offer either.
+        return PhaseDiagnosis(kind="zero_match")
+
+    # Zero matches for the EXACT given id. Rather than a dead end, look at what else is
+    # genuinely pending across the whole descriptor set -- grouped by id so a same-id twin
+    # for some OTHER capability is excluded from the offered candidates (never suggest an
+    # accept command against a corrupted registry entry, even one the operator didn't ask
+    # about).
+    pending_by_id: Dict[str, list] = {}
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        eid = e.get("id")
+        if not (isinstance(eid, str) and eid):
+            continue
+        if e.get("accepted") is True:
+            continue
+        phase = e.get("phase_id")
+        if not (isinstance(phase, str) and phase.strip()):
+            continue
+        pending_by_id.setdefault(eid, []).append(phase)
+
+    candidates = tuple(
+        (eid, phases[0]) for eid, phases in sorted(pending_by_id.items()) if len(phases) == 1
+    )
+    if not candidates:
+        return PhaseDiagnosis(kind="zero_match")
+    return PhaseDiagnosis(kind="multiple_pending", candidates=candidates)
 
 
 def _atomic_write_text(path: str, text: str) -> None:
@@ -693,6 +782,24 @@ def record_operator_acceptance(
 # 2 on usage.
 # ---------------------------------------------------------------------------
 
+def _ready_accept_command(capability_id: str, phase_id: str, operator_confirmation: str) -> str:
+    """(Task 4 / F-2) Render the fully paste-safe, ready-to-run accept command for
+    ``capability_id`` -- a SINGLE PHYSICAL LINE, every interpolated value ``shlex.quote``'d, so
+    it can never wrap-and-break on paste (the exact V15-2 hazard this fix closes) regardless of
+    what the operator's confirmation text contains (quotes, spaces, punctuation). Matches the
+    documented invocation shape (``wizard/skills/next-phase.md`` Step 6 / ``rebuild-paused-
+    capability.md`` Step 4) exactly, with ``--phase-id`` pre-filled -- never left for the
+    operator to add by hand."""
+    import shlex as _shlex
+    parts = [
+        "python3", "agents/lib/external_write/operator_acceptance.py",
+        "--capability-id", capability_id,
+        "--phase-id", phase_id,
+        "--operator-confirmation", operator_confirmation,
+    ]
+    return " ".join(_shlex.quote(p) for p in parts)
+
+
 if __name__ == "__main__":  # pragma: no cover
     import sys as _sys
 
@@ -710,7 +817,8 @@ if __name__ == "__main__":  # pragma: no cover
               "agents/handoffs/<capability-id>.copy_run_proof.json)\n"
               "(V15-2 Task 5: --phase-id may also be omitted -- it is then derived from the "
               "single pending descriptor matching --capability-id; if it cannot be uniquely "
-              "determined, re-run passing --phase-id <id> explicitly)")
+              "determined, this prints a plain diagnostic or a ready-to-paste command per "
+              "pending capability -- Task 4/F-2 -- never a flag to hand-append)")
     _i = 0
     while _i < len(_args):
         _a = _args[_i]
@@ -735,18 +843,50 @@ if __name__ == "__main__":  # pragma: no cover
 
     # Task 5 (V15-2): when --phase-id is omitted, derive it from the single pending descriptor
     # matching --capability-id. Fail-closed -- this is a convenience over an already-recorded
-    # value, never a second authority, so any ambiguity (zero or multiple pending matches) must
-    # refuse rather than guess. The message names --phase-id explicitly so a non-technical
-    # operator knows exactly what to re-run with.
+    # value, never a second authority, so any ambiguity must refuse rather than guess.
+    #
+    # Task 4 (F-2): when it CAN'T be uniquely derived, the branch below reacts to the SPECIFIC
+    # cause instead of one generic "re-run with --phase-id" message -- that message told a
+    # non-technical operator to hand-append a flag to a wrapping command, the exact paste-safety
+    # hazard the single-line command was meant to kill. Every branch here prints either a plain
+    # single-line diagnostic (nothing to hand-assemble) or a fully ready, already-paste-safe
+    # command -- never an instruction to edit/extend a command by hand.
     _phase = _opts["--phase-id"]
     if _phase is None:
         _phase = resolve_pending_phase(
             _opts["--capability-id"], project_root=".",
             descriptor_set_path=_opts["--descriptor-set"])
         if _phase is None:
-            print(
-                "could not uniquely determine the phase for this capability -- "
-                "re-run with --phase-id <id>", file=_sys.stderr)
+            _diag = diagnose_phase_resolution(
+                _opts["--capability-id"], project_root=".",
+                descriptor_set_path=_opts["--descriptor-set"])
+            if _diag.kind == "already_accepted":
+                print(
+                    f"capability {_opts['--capability-id']!r} is already accepted -- there is "
+                    "nothing pending to accept.", file=_sys.stderr)
+            elif _diag.kind == "identity_conflict":
+                print(
+                    f"capability {_opts['--capability-id']!r} has more than one pending "
+                    "descriptor entry sharing that id (identity_conflict) -- this is a "
+                    "data-integrity problem with the registry, not normal ambiguity, and it "
+                    "cannot be safely accepted until the duplicate entries are healed. Run "
+                    "your upgrade/reconcile step and try again.", file=_sys.stderr)
+            elif _diag.kind == "multiple_pending":
+                print(
+                    f"capability {_opts['--capability-id']!r} does not have a pending "
+                    "acceptance -- but the following capabilities ARE currently pending. "
+                    "Paste the ONE command below that matches what you want to accept:",
+                    file=_sys.stderr)
+                for _cid, _cphase in _diag.candidates:
+                    print(
+                        _ready_accept_command(
+                            _cid, _cphase, _opts["--operator-confirmation"]),
+                        file=_sys.stderr)
+            else:  # "zero_match"
+                print(
+                    f"no pending descriptor entry was found for capability "
+                    f"{_opts['--capability-id']!r} -- there is nothing to accept.",
+                    file=_sys.stderr)
             _sys.exit(2)
 
     _res = record_operator_acceptance(

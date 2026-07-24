@@ -444,6 +444,11 @@ class ReconcileResult:
         auto-scaffolded with a FAILING evidence-predicate stub this pass -- ALSO scanner-status-
         independent (a fully gate-conformant capability can still be missing a newly-required
         predicate). See ``reconcile_missing_evidence_predicates``.
+
+    same_id_twins_healed: (Task 4, F-2) capability_ids for which the descriptor set carried MORE
+        THAN ONE entry sharing the exact same ``id`` with more than one unaccepted -- a
+        data-integrity defect (the registry never enforces ``id`` as a primary key), NOT normal
+        ambiguity. ALSO scanner-status-independent. See ``_heal_same_id_descriptor_twins``.
     """
     operator_project_path: str
     from_version: str
@@ -453,6 +458,7 @@ class ReconcileResult:
     migration_queue_path: Optional[str] = None
     stale_acceptance_reset: List[str] = field(default_factory=list)
     predicate_stubs_scaffolded: List["PredicateStubRemediation"] = field(default_factory=list)
+    same_id_twins_healed: List[str] = field(default_factory=list)
 
     @property
     def any_affected(self) -> bool:
@@ -1531,6 +1537,93 @@ def _reconcile_lifecycle_state_best_effort(
         pass
 
 
+# ===== Task 4 (F-2): heal same-id descriptor twins at source =================================
+#
+# The D' single-line acceptance command (operator_acceptance.py's `resolve_pending_phase`)
+# derives a capability's phase from its descriptor entry; when the descriptor set carries MORE
+# THAN ONE entry sharing the exact same `id` (the registry never enforces `id` as a primary
+# key), that is a data-integrity defect -- an `identity_conflict` (see capability_health.py's
+# `_same_id_unaccepted_conflict_ids`) -- not something a non-technical operator should ever be
+# asked to dedup by hand. This heals it AT SOURCE, during the SAME scanner-status-independent
+# reconcile pass as B2b/B2 above, so a corrupted registry self-heals on the next upgrade.
+
+def _heal_same_id_descriptor_twins(operator_project_dir: Path) -> List[str]:
+    """(Task 4, F-2) Dedup/strip unaccepted orphaned same-id descriptor twins in
+    ``security/capability_descriptors.json``.
+
+    For every capability_id with 2+ raw entries sharing that EXACT id string where MORE THAN
+    ONE of them is unaccepted (the same trigger ``capability_health`` surfaces as
+    ``identity_conflict``):
+      * exactly one of the group is ``accepted: true`` -- keep it, strip every unaccepted
+        duplicate (they add nothing an accepted row doesn't already carry: the ledger/audit
+        history any of them might have authorized is keyed by the shared ``id`` string, not by
+        the row's position in the array, so it stays reachable regardless of which row survives);
+      * none of the group is accepted -- keep the FIRST occurrence (stable, deterministic),
+        strip the rest (a clean, never-touched duplicate carries no state of its own to lose --
+        the same "safe to retire" reasoning ``capability_health``'s normalized-twin
+        classification already applies to a different-but-equivalent shape);
+      * MORE THAN ONE of the group is accepted -- a genuinely contradictory shape this function
+        does not resolve; left completely untouched for a person to sort out (never guessed).
+
+    A group with only ONE unaccepted entry (0 or 1) is entirely untouched, whether or not it
+    also has an accepted row -- this mirrors ``capability_health``'s own ">1 unaccepted" trigger
+    exactly, so healing and detection never disagree about what counts as a conflict.
+
+    Returns the sorted list of capability_ids actually healed this pass (mirrors every other
+    scanner-status-independent pass's own "ids acted on" return convention, e.g.
+    ``_reconcile_conformant_rebuild_staleness``). Fail-safe: an absent/unreadable/malformed
+    descriptor set is a normal no-op (``[]``), never a raised error blocking the rest of
+    reconcile -- mirrors ``_load_capability_descriptor_set``'s own fail-safe convention (this
+    function reuses it rather than re-reading the file a second way)."""
+    entries = _load_capability_descriptor_set(operator_project_dir)
+    if not entries:
+        return []
+
+    by_id: Dict[str, List[int]] = {}
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        cap_id = entry.get("id")
+        if isinstance(cap_id, str) and cap_id:
+            by_id.setdefault(cap_id, []).append(idx)
+
+    keep_indices = set(range(len(entries)))
+    healed: List[str] = []
+    for cap_id, idxs in by_id.items():
+        if len(idxs) <= 1:
+            continue
+        accepted_idxs = [i for i in idxs if entries[i].get("accepted") is True]
+        unaccepted_idxs = [i for i in idxs if entries[i].get("accepted") is not True]
+        if len(unaccepted_idxs) <= 1:
+            # Not this check's concern -- 0 or 1 unaccepted entry in the group, whether or not
+            # an accepted row is also present (mirrors capability_health's own trigger exactly).
+            continue
+        if len(accepted_idxs) > 1:
+            # Genuinely contradictory -- more than one row claims to be THE accepted one for
+            # this id. Not auto-resolved; leave every row untouched for a human to sort out.
+            continue
+        if len(accepted_idxs) == 1:
+            # Keep the accepted row; every unaccepted duplicate is a stale, safely-discardable
+            # twin -- the accepted row is now authoritative.
+            for i in unaccepted_idxs:
+                keep_indices.discard(i)
+        else:
+            # None accepted -- keep the first occurrence (stable, deterministic), strip the rest.
+            for i in unaccepted_idxs[1:]:
+                keep_indices.discard(i)
+        healed.append(cap_id)
+
+    if not healed:
+        return []
+
+    new_entries = [entries[i] for i in sorted(keep_indices)]
+    _atomic_write(
+        operator_project_dir / CAPABILITY_DESCRIPTOR_SET_REL,
+        json.dumps(new_entries, indent=2, ensure_ascii=False) + "\n",
+    )
+    return sorted(healed)
+
+
 # ===== Task B2b: conformant-rebuild acceptance-hash staleness (the SCANNER-CLEAN half) =======
 #
 # B2 above only ever revokes a capability the AST scanner finds RED -- a raw kernel-write / bypass
@@ -2215,6 +2308,11 @@ def reconcile_upgrade(
         text = render_impact_notice(mechanisms, from_version, to_version)
         notice_path = write_impact_notice(operator_project_dir, upgrade_id, text)
 
+    # (Task 4, F-2) Heal same-id descriptor twins FIRST, before any of the passes below read
+    # the descriptor set again -- a corrupted registry (two rows sharing an id) is cleaned up
+    # before other scanner-status-independent reconciliation runs against it, rather than after.
+    same_id_twins_healed = _heal_same_id_descriptor_twins(operator_project_dir)
+
     # (Task B2b) Run AFTER the scanner-driven loop above (and its notice) so this pass's own
     # revocations never interfere with — or get shadowed by — the scanner-red handling; see
     # _reconcile_conformant_rebuild_staleness's own docstring for why re-checking an
@@ -2242,6 +2340,7 @@ def reconcile_upgrade(
         ),
         stale_acceptance_reset=stale_acceptance_reset,
         predicate_stubs_scaffolded=predicate_stubs_scaffolded,
+        same_id_twins_healed=same_id_twins_healed,
     )
 
 

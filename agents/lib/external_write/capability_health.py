@@ -394,6 +394,45 @@ def _load_descriptor_accepted(entries: List[Dict[str, Any]]) -> Dict[str, bool]:
     return accepted_by_id
 
 
+def _same_id_unaccepted_conflict_ids(entries: List[Dict[str, Any]]) -> Set[str]:
+    """(Task 4 / F-2) The set of capability_ids for which the RAW descriptor set carries MORE
+    THAN ONE entry sharing that EXACT ``id`` string, with more than one of those entries
+    unaccepted (``accepted`` is not literally ``True``).
+
+    This is a DIFFERENT trigger from ``_find_identity_twin`` above: that function finds two
+    DIFFERENT id strings that merely NORMALIZE (case/separator-folded) to the same identity;
+    this one finds the exact same id string repeated -- a plain data-integrity defect, since
+    the registry (``security/capability_descriptors.json``) never enforces ``id`` as a primary
+    key. A same-id twin where only ONE entry is unaccepted (the other already ``accepted:
+    true``) is not this check's concern -- an accepted entry alongside a stray unaccepted
+    duplicate is a different, out-of-scope oddity; this only flags the case where the registry
+    itself cannot say which of two-or-more still-pending rows is the real one.
+
+    A pure derivation over ``entries`` (the SAME single already-parsed read every other
+    function in this module derives from) -- never a second file read."""
+    counts: Dict[str, int] = {}
+    for entry in entries:
+        cap_id = entry.get("id")
+        if isinstance(cap_id, str) and cap_id and entry.get("accepted") is not True:
+            counts[cap_id] = counts.get(cap_id, 0) + 1
+    return {cap_id for cap_id, count in counts.items() if count > 1}
+
+
+def _same_id_conflict_message(cap_id: str) -> str:
+    """(Task 4 / F-2) Plain-language guidance for a same-id descriptor-twin ``identity_conflict``
+    -- distinct wording from ``_identity_conflict_message`` (which explains a NORMALIZED twin,
+    two different id spellings). Points at healing the registry, never at an operator-run
+    dedup, and never suggests accepting either duplicate row directly."""
+    return (
+        f'the descriptor set has more than one entry for "{cap_id}" -- the registry does not '
+        "enforce this id as unique, and more than one of the duplicate entries is still "
+        "unaccepted. This is a data-integrity problem with the registry itself, not a normal "
+        f'"which one do you mean" ambiguity -- it needs to be healed at the source (the '
+        "duplicate, unaccepted entries removed) before this capability can be accepted. The "
+        "next upgrade/reconcile pass heals this automatically; if it persists, review "
+        "security/capability_descriptors.json by hand.")
+
+
 def _find_identity_twin(cap_id: str, canonical_ids: Any) -> Optional[str]:
     """(Task A4 / F-72) Return the OTHER, ALREADY-BUILT canonical capability id (a real
     ``agents/capabilities/<id>_capability.py`` source file exists for it) that ``cap_id``
@@ -821,6 +860,9 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
         descriptor_enumeration_degraded = True
     descriptor_ids = _load_descriptor_ids(descriptor_entries)
     descriptor_accepted = _load_descriptor_accepted(descriptor_entries)
+    # (Task 4 / F-2) Same-id descriptor twins -- see `_same_id_unaccepted_conflict_ids`'s own
+    # docstring for why this is a DIFFERENT check from the normalized-twin classification below.
+    same_id_conflict_ids = _same_id_unaccepted_conflict_ids(descriptor_entries)
     # (Fix 2, A4 post-merge review) capability_id -> declared `name`, for the ledger-attributed
     # run-history check below (`_ledger_run_history_for_twin`) -- the write-gate's own op->capability
     # join matches `op.surface` against a descriptor entry's `id` OR `name`, so a twin's ledger
@@ -874,6 +916,27 @@ def check_capabilities(project_root: Any) -> List[Dict[str, Any]]:
         })
 
     for cap_id in all_ids:
+        # (Task 4 / F-2) A same-id descriptor twin is a data-integrity problem, checked and
+        # reported BEFORE any of the normal health computation below -- a corrupted registry
+        # entry is never silently treated as green/pending/plain-red. Takes priority even over
+        # a same-named source file (there is nothing coherent to import/scan against when the
+        # descriptor set itself cannot say which of two-or-more rows for this id is real).
+        if cap_id in same_id_conflict_ids:
+            records.append({
+                "capability_id": cap_id,
+                "importable": False,
+                "scanner_clean": False,
+                "violations": [],
+                "paused": False,
+                "pending_migration": False,
+                "state_read_error": False,
+                "acceptance_stale": False,
+                "identity_twin_of": None,
+                "operator_message": _same_id_conflict_message(cap_id),
+                "health": "identity_conflict",
+            })
+            continue
+
         cap_path = source_files.get(cap_id)
         paused, paused_read_error = _is_paused(root, cap_id)
         pending_migration, migration_read_error = _is_pending_migration(root, cap_id)

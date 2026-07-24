@@ -833,9 +833,22 @@ class SupervisedCopyTargetSourceGuardTest(unittest.TestCase):
         self._assert_no_generic_placeholder(self.bundle_next_phase_text,
                                             "latest-bundle templates/wizard/skills/next-phase.md")
 
+    @unittest.expectedFailure
     def test_bundle_next_phase_matches_dev_home(self):
         """The emitted bundle next-phase.md is byte-identical to the dev home (single source
         of truth kept in sync by hand convention; no sync script exists).
+
+        MARKED expectedFailure AGAIN at Cut 1.4, Task 4 (F-2). The D' acceptance-fallback
+        paste-safety fix changed the "If it reports it could not determine the phase..."
+        wording in the DEV-HOME ``wizard/skills/next-phase.md`` (no more "re-run adding
+        --phase-id" -- the wrapping-command hazard this fix closes). v0.17.0 is
+        already-RELEASED and byte-immutable (retro-editing it would break replay-conformance
+        for any operator already emitted at v0.17.0 -- see
+        ``feedback_released_bundle_version_immutable_delta``), so it cannot be edited to carry
+        this. Per the self-clearing convention documented below: Task 6's v0.18.0 bundle cut
+        ports the current dev-home ``wizard/skills/next-phase.md`` into the new bundle
+        byte-for-byte, restoring dev-home == latest-bundle, at which point this marker is
+        removed again.
 
         RE-SYNCED at the v0.10.0 bundle cut (B2-T9b) — see history: this guard was marked
         expectedFailure during B1-7/B2 for the identical reason it is marked again below, and

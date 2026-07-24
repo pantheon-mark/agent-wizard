@@ -376,6 +376,56 @@ class TestDescriptorAliasResolvesToOwningModuleGreen(CapabilityHealthTestBase):
         self.assertNotIn("inbox-labels", {r["capability_id"] for r in records})
 
 
+class TestSameIdDescriptorTwinIsIdentityConflict(CapabilityHealthTestBase):
+    """Task 4 (F-2) -- a LITERAL same-id descriptor twin (two rows in
+    ``capability_descriptors.json`` sharing the exact same ``id``, neither of them yet
+    accepted) is a data-integrity problem the registry never enforced as a primary key,
+    NOT normal ambiguity. This is a distinct trigger from ``TestIdentityTwin*`` above
+    (which fires on two DIFFERENT ids that merely normalize to the same identity) -- here
+    the ids are byte-identical strings. Surfaced as the SAME ``identity_conflict`` health
+    value (never a plain RED, which would look like an ordinary broken capability, and
+    never GREEN/pending, since a corrupted registry must never be silently treated as
+    fine) so an agent's orientation prose declines to invite the operator into it, and so
+    ``operator_acceptance``'s CLI (see test_external_write_operator_acceptance.py) can
+    refuse to emit an accept command for a corrupted entry."""
+
+    def test_two_unaccepted_same_id_entries_report_identity_conflict(self):
+        self._write_descriptor_set([
+            {"id": "dup_cap", "name": "dup_cap", "accepted": False, "phase_id": "phase-1"},
+            {"id": "dup_cap", "name": "dup_cap", "accepted": False, "phase_id": "phase-2"},
+        ])
+
+        records = capability_health.check_capabilities(self.project_root)
+        record = self._record_for(records, "dup_cap")
+
+        self.assertEqual(record["health"], "identity_conflict")
+        self.assertIsNotNone(record["operator_message"])
+
+    def test_single_entry_for_an_id_is_never_flagged_identity_conflict(self):
+        # Regression guard: an ordinary, un-duplicated descriptor-only entry must be
+        # completely unaffected by this new check (stays the existing red treatment).
+        self._write_descriptor_set([{"id": "solo_cap", "name": "solo_cap"}])
+
+        records = capability_health.check_capabilities(self.project_root)
+        record = self._record_for(records, "solo_cap")
+
+        self.assertNotEqual(record["health"], "identity_conflict")
+
+    def test_one_accepted_one_unaccepted_same_id_not_flagged_by_this_check(self):
+        # The locked design's trigger is specifically ">1 UNACCEPTED entry sharing an
+        # id" -- one accepted + one unaccepted sharing an id is a different (out-of-scope
+        # here) oddity, not this check's concern.
+        self._write_descriptor_set([
+            {"id": "mixed_cap", "name": "mixed_cap", "accepted": True, "phase_id": "phase-1"},
+            {"id": "mixed_cap", "name": "mixed_cap", "accepted": False, "phase_id": "phase-1"},
+        ])
+
+        records = capability_health.check_capabilities(self.project_root)
+        record = self._record_for(records, "mixed_cap")
+
+        self.assertNotEqual(record["health"], "identity_conflict")
+
+
 class TestUncorroboratedOrphanDescriptorNotMasked(CapabilityHealthTestBase):
     """CRITICAL regression (coordinator review round 2): the same-cardinality guess that used
     to live in ``capability_identity._build_name_alias_map`` (resolve an unmatched id to the

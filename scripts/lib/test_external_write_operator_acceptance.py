@@ -11,6 +11,7 @@ REFUSES an unaccepted one. No mocks of the units under test.
 
 import hashlib
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1068,11 +1069,12 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
                          msg=f"stdout={result.stdout!r} stderr={result.stderr!r}")
         self.assertIn("ACCEPTED", result.stdout)
 
-    def test_cli_fails_closed_when_phase_unresolvable(self):
-        # Fail-closed CLI path: nothing pending (descriptor already accepted) means the
-        # phase cannot be derived -- the CLI must refuse with a clear, actionable message
-        # (naming --phase-id so the operator knows exactly what to re-run with), never
-        # guess or silently proceed with a stale/wrong phase.
+    def test_cli_already_accepted_prints_plain_diagnostic_never_a_flag_to_hand_append(self):
+        # Task 4 (F-2): fail-closed CLI path -- nothing pending (descriptor already accepted)
+        # means the phase cannot be derived. The CLI must refuse with a clear, PLAIN,
+        # single-line diagnostic and must NEVER tell the operator to hand-append --phase-id
+        # to a wrapping command (the exact V15-2 paste-safety hazard this fix closes; the old
+        # "re-run with --phase-id" wording is what next-phase.md used to relay verbatim).
         self._write_descriptor_and_proof(accepted=True)  # nothing pending
         cli_path = self.external_write_dir / "operator_acceptance.py"
         result = subprocess.run(
@@ -1081,7 +1083,96 @@ class TurnkeyAcceptanceCLIE2ETest(unittest.TestCase):
              "--operator-confirmation", "yes"],
             cwd=str(self.project_root), capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
-        self.assertIn("--phase-id", result.stderr)  # tells operator to pass it explicitly
+        self.assertNotIn("--phase-id", result.stderr,
+                        "must never instruct the operator to hand-append a flag")
+        self.assertIn("already", result.stderr.lower())
+        self.assertNotIn("\n", result.stderr.strip(), "diagnostic must be a single physical line")
+
+    def test_cli_zero_match_prints_plain_diagnostic_no_command(self):
+        # Task 4 (F-2): nothing at all is pending anywhere in the descriptor set -- a plain
+        # single-line diagnostic, no command to paste or hand-assemble.
+        self.descriptor_set_path.write_text("[]\n", encoding="utf-8")
+        cli_path = self.external_write_dir / "operator_acceptance.py"
+        result = subprocess.run(
+            [sys.executable, str(cli_path),
+             "--capability-id", self.CAPABILITY_ID,
+             "--operator-confirmation", "yes"],
+            cwd=str(self.project_root), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("--phase-id", result.stderr)
+        self.assertNotIn("operator_acceptance.py", result.stderr)
+        self.assertNotIn("\n", result.stderr.strip())
+
+    def test_cli_same_id_descriptor_twin_reports_identity_conflict_no_accept_command(self):
+        # Task 4 (F-2): two unaccepted descriptor entries sharing the SAME id is a
+        # data-integrity identity_conflict, not normal ambiguity -- heal at source, never
+        # emit an accept command for a corrupted registry.
+        dup_entry = {
+            "id": self.CAPABILITY_ID, "name": self.CAPABILITY_ID, "action_class": "update",
+            "risk_class": "sensitive_data", "recovery_profile_ref": None,
+            "declared_test_target": "copy", "blast_radius_cap": 10,
+            "accepted": False, "phase_id": self.PHASE,
+        }
+        self.descriptor_set_path.write_text(
+            json.dumps([dup_entry, dict(dup_entry)]), encoding="utf-8")
+        cli_path = self.external_write_dir / "operator_acceptance.py"
+        result = subprocess.run(
+            [sys.executable, str(cli_path),
+             "--capability-id", self.CAPABILITY_ID,
+             "--operator-confirmation", "yes"],
+            cwd=str(self.project_root), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("identity_conflict", result.stderr)
+        self.assertNotIn("--phase-id", result.stderr)
+        self.assertNotIn("operator_acceptance.py --capability-id", result.stderr)
+
+    def test_cli_multiple_distinct_pending_capabilities_prints_one_ready_command_each(self):
+        # Task 4 (F-2): the given --capability-id doesn't match anything currently pending
+        # (e.g. a stale Step-2 lookup), but two OTHER, DISTINCT capabilities ARE genuinely
+        # pending -- the CLI must print a ready-to-paste single-physical-line command for
+        # EACH of them, --phase-id pre-filled, every interpolated value shlex.quote'd, never
+        # asking the operator to hand-assemble anything.
+        other_phase = "phase_other"
+        confirmation = "Yes -- I'm accepting this, per Jane's approval."
+        self.descriptor_set_path.write_text(json.dumps([
+            {"id": "fixture_pending_one", "name": "fixture_pending_one",
+             "action_class": "update", "risk_class": "sensitive_data",
+             "recovery_profile_ref": None, "declared_test_target": "copy",
+             "blast_radius_cap": 10, "accepted": False, "phase_id": self.PHASE},
+            {"id": "fixture_pending_two", "name": "fixture_pending_two",
+             "action_class": "update", "risk_class": "sensitive_data",
+             "recovery_profile_ref": None, "declared_test_target": "copy",
+             "blast_radius_cap": 10, "accepted": False, "phase_id": other_phase},
+        ]), encoding="utf-8")
+        cli_path = self.external_write_dir / "operator_acceptance.py"
+        result = subprocess.run(
+            [sys.executable, str(cli_path),
+             "--capability-id", "no_such_capability_here",
+             "--operator-confirmation", confirmation],
+            cwd=str(self.project_root), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+
+        lines = [ln for ln in result.stderr.splitlines() if "operator_acceptance.py" in ln]
+        self.assertEqual(len(lines), 2, msg=f"stderr={result.stderr!r}")
+        found_ids = set()
+        for line in lines:
+            self.assertNotIn("\n", line)  # each printed command is ONE physical line
+            tokens = shlex.split(line)
+            self.assertIn("--capability-id", tokens)
+            self.assertIn("--phase-id", tokens)
+            self.assertIn("--operator-confirmation", tokens)
+            found_ids.add(tokens[tokens.index("--capability-id") + 1])
+            self.assertEqual(
+                tokens[tokens.index("--operator-confirmation") + 1], confirmation,
+                "shlex.quote round-trip must preserve the operator's verbatim confirmation")
+        self.assertEqual(found_ids, {"fixture_pending_one", "fixture_pending_two"})
+        phase_by_id = {}
+        for line in lines:
+            tokens = shlex.split(line)
+            cid = tokens[tokens.index("--capability-id") + 1]
+            phase_by_id[cid] = tokens[tokens.index("--phase-id") + 1]
+        self.assertEqual(phase_by_id["fixture_pending_one"], self.PHASE)
+        self.assertEqual(phase_by_id["fixture_pending_two"], other_phase)
 
 
 class OperatorAdapterSurvivesRegeneratedBaselineTest(unittest.TestCase):

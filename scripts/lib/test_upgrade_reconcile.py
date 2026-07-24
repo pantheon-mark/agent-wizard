@@ -1987,6 +1987,121 @@ class ConformantRebuildStalenessTests(_Base):
 
 
 # ===================================================================================
+# Task 4 (F-2): heal-at-source for a same-id descriptor twin -- a data-integrity defect
+# (the registry never enforces `id` as a primary key), NOT normal ambiguity. Like
+# ConformantRebuildStalenessTests just above, this is SCANNER-STATUS-INDEPENDENT: it runs
+# every reconcile pass regardless of whether anything was scanner-flagged, so a corrupted
+# registry self-heals without the operator ever having to dedup it by hand.
+# ===================================================================================
+
+class SameIdDescriptorTwinHealingTests(_Base):
+    def _write_descriptor_set(self, proj, entries):
+        path = proj / CAPABILITY_DESCRIPTOR_SET_REL
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+
+    def _entries(self, proj):
+        return json.loads((proj / CAPABILITY_DESCRIPTOR_SET_REL).read_text(encoding="utf-8"))
+
+    def test_two_unaccepted_same_id_entries_dedup_to_one(self):
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        self._write_descriptor_set(proj, [
+            {"id": "dup_cap", "name": "dup_cap", "accepted": False, "phase_id": "phase-1"},
+            {"id": "dup_cap", "name": "dup_cap", "accepted": False, "phase_id": "phase-1"},
+        ])
+
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.17.0", to_version="0.18.0")
+
+        self.assertEqual(result.mechanisms, [])  # scanner-status-independent -- no findings
+        self.assertEqual(result.same_id_twins_healed, ["dup_cap"])
+        dup_entries = [e for e in self._entries(proj) if e["id"] == "dup_cap"]
+        self.assertEqual(len(dup_entries), 1)
+
+    def test_accepted_entry_kept_unaccepted_duplicates_stripped(self):
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        self._write_descriptor_set(proj, [
+            {"id": "dup_cap", "name": "dup_cap", "accepted": True, "phase_id": "phase-1"},
+            {"id": "dup_cap", "name": "dup_cap", "accepted": False, "phase_id": "phase-1"},
+            {"id": "dup_cap", "name": "dup_cap", "accepted": False, "phase_id": "phase-1"},
+        ])
+
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.17.0", to_version="0.18.0")
+
+        dup_entries = [e for e in self._entries(proj) if e["id"] == "dup_cap"]
+        self.assertEqual(len(dup_entries), 1)
+        self.assertTrue(dup_entries[0]["accepted"])
+        self.assertEqual(result.same_id_twins_healed, ["dup_cap"])
+
+    def test_other_entries_untouched(self):
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        self._write_descriptor_set(proj, [
+            {"id": "solo_cap", "name": "solo_cap", "accepted": False, "phase_id": "phase-1"},
+            {"id": "dup_cap", "name": "dup_cap", "accepted": False, "phase_id": "phase-1"},
+            {"id": "dup_cap", "name": "dup_cap", "accepted": False, "phase_id": "phase-1"},
+        ])
+
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.17.0", to_version="0.18.0")
+
+        self.assertEqual(result.same_id_twins_healed, ["dup_cap"])
+        ids = [e["id"] for e in self._entries(proj)]
+        self.assertEqual(ids.count("solo_cap"), 1)
+        self.assertEqual(ids.count("dup_cap"), 1)
+
+    def test_single_entry_for_an_id_is_never_touched(self):
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        self._write_descriptor_set(proj, [
+            {"id": "solo_cap", "name": "solo_cap", "accepted": False, "phase_id": "phase-1"},
+        ])
+
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.17.0", to_version="0.18.0")
+
+        self.assertEqual(result.same_id_twins_healed, [])
+        self.assertEqual(len(self._entries(proj)), 1)
+
+    def test_two_accepted_rows_sharing_an_id_left_untouched_needs_a_human(self):
+        # A genuinely contradictory shape (2+ ACCEPTED rows sharing an id) is not this
+        # check's concern (it only acts on groups with >1 UNACCEPTED entries) -- left alone
+        # rather than guessed at, exactly like capability_health's own same-id trigger.
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        self._write_descriptor_set(proj, [
+            {"id": "dup_cap", "name": "dup_cap", "accepted": True, "phase_id": "phase-1"},
+            {"id": "dup_cap", "name": "dup_cap", "accepted": True, "phase_id": "phase-2"},
+        ])
+
+        result = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.17.0", to_version="0.18.0")
+
+        self.assertEqual(result.same_id_twins_healed, [])
+        self.assertEqual(len(self._entries(proj)), 2)
+
+    def test_idempotent_rerun_does_not_re_touch(self):
+        proj = self.tmp / "operator_proj"
+        proj.mkdir(parents=True)
+        self._write_descriptor_set(proj, [
+            {"id": "dup_cap", "name": "dup_cap", "accepted": False, "phase_id": "phase-1"},
+            {"id": "dup_cap", "name": "dup_cap", "accepted": False, "phase_id": "phase-1"},
+        ])
+
+        reconcile_upgrade(proj, _REAL_REPO, from_version="0.17.0", to_version="0.18.0")
+        first = (proj / CAPABILITY_DESCRIPTOR_SET_REL).read_bytes()
+        result2 = reconcile_upgrade(
+            proj, _REAL_REPO, from_version="0.17.0", to_version="0.18.0")
+        second = (proj / CAPABILITY_DESCRIPTOR_SET_REL).read_bytes()
+
+        self.assertEqual(first, second)
+        self.assertEqual(result2.same_id_twins_healed, [])
+
+
+# ===================================================================================
 # Task B2 (F-75): migrator auto-scaffolds a FAILING predicate stub for a capability
 # whose adapter does not declare a required evidence predicate. Like B2b's
 # `ConformantRebuildStalenessTests` just above, this is SCANNER-STATUS-INDEPENDENT --

@@ -248,7 +248,13 @@ Do this through the system's acceptance step rather than by editing any safety r
 python3 agents/lib/external_write/operator_acceptance.py --capability-id "<the capability's id from the Step 2 lookup>" --operator-confirmation "<the operator's acceptance, verbatim>"
 ```
 
-If it reports it could not determine the phase (more than one capability is pending), re-run adding `--phase-id "<its owning phase from the Step 2 lookup>"`.
+If it can't uniquely determine the phase, it never asks you to fix or extend the command yourself. Instead it prints exactly what to do next, always as something you can paste as-is:
+
+- If nothing matches at all, or the capability is already accepted, it says so plainly — there is nothing further to run.
+- If there's a data-integrity problem in the capability records (the same capability recorded twice), it says so plainly and points at running the upgrade/reconcile step to clean it up — never something to fix by hand, and never a command to run for a corrupted record.
+- If more than one capability is currently pending acceptance, it prints one complete, ready-to-run command for each — copy and paste the one that matches the capability you mean.
+
+Read whatever it prints and follow it exactly; never hand-edit or extend the command yourself.
 
 This mints the acceptance record from the operator's exact words and runs the one deterministic step that grants live use, but only if every safety condition still holds — the trial proof is valid and belongs to this exact capability, the risk level has not been quietly lowered since the trial, and the phase matches. If it declines, do not claim the capability is live. Tell the operator plainly, in business terms, what is not yet satisfied (for example, the safe trial needs to be re-run), and treat the phase as not accepted until it succeeds. Never present a capability as turned on when the acceptance step refused.
 
