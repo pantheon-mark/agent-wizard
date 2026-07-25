@@ -196,9 +196,12 @@ from external_write.operator_acceptance import (  # noqa: E402
     close_pending_migration_if_matched,
 )
 # (Cut 1.5 / v0.19.0, Task A -- V15-3 keystone) the ONE canonical open-bespoke-writer-bypass
-# predicate. _ext_write_state imports nothing from this package (stdlib-only, reads one JSON file),
-# so a top-level import here introduces no import cycle. check_completion consumes it to make the
-# gate go non-done PROJECT-WIDE on any open bespoke-writer entry -- see its use below.
+# predicate; Task B added the state-mutating auto-reap to the same module. _ext_write_state's only
+# intra-package import is ``external_write.scan`` (Task B, for the reap's real bypass verdict), and
+# scan imports only ``external_write.zones`` + stdlib -- neither imports _ext_write_state or
+# lifecycle_state, so this top-level import introduces no import cycle. check_completion consumes
+# the predicate to make the gate go non-done PROJECT-WIDE on any open bespoke-writer entry, and
+# reconcile_state calls the reap fail-safe -- see their uses below.
 from external_write import _ext_write_state  # noqa: E402
 from external_write.proof_hash import (  # noqa: E402
     compute_implementation_hash,

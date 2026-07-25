@@ -180,6 +180,38 @@ class WriterMigrationAutoReapTests(unittest.TestCase):
                 "an unchanged, still-bespoke writer must NOT be reaped (it is still a live bypass)")
             self.assertEqual(still_open[0].get("writer_relpath"), BESPOKE_WRITER_RELPATH)
 
+    # -- case (d) writer EDITED but STILL bespoke -> NOT reaped (scan-branch fail-open guard) ------
+
+    def test_edited_but_still_bespoke_writer_is_not_reaped(self):
+        """The most safety-critical branch: the operator EDITED the writer (its hash now DIFFERS
+        from the recorded paused_content_sha256, so the hash-match short-circuit is bypassed and
+        the reap DOES reach the scan branch), but the edit did NOT migrate it -- it is still a
+        per-chunk mint_run_envelope bypass (scan-RED). It MUST stay pending. If scan_paths ever
+        returned empty for this out-of-package path, this writer would be falsely reaped -- a
+        re-introduced false green. This test pins the guard: hash-changed alone never reaps; the
+        (non-quarantined) scan must ALSO be clean."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_harness(root)
+            # Recorded pause-time hash is the ORIGINAL bespoke content; the file on disk is an
+            # EDITED-but-still-bespoke variant (different bytes -> different sha256, but still a
+            # scan-RED per-chunk mint loop).
+            edited_bespoke = _BESPOKE_RUNNER_SRC.replace(
+                "results = []", "results = []  # operator tweaked a comment; still a bypass")
+            self.assertNotEqual(_sha256(edited_bespoke), _sha256(_BESPOKE_RUNNER_SRC))
+            _write(root / BESPOKE_WRITER_RELPATH, edited_bespoke)
+            _write_queue(root, [_bespoke_entry(paused_content_sha256=_sha256(_BESPOKE_RUNNER_SRC))])
+            self.assertEqual(len(open_bespoke_writer_migrations(str(root))), 1)
+
+            lifecycle_state.reconcile_state(str(root), HARNESS_CAP_ID)
+
+            still_open = open_bespoke_writer_migrations(str(root))
+            self.assertEqual(
+                len(still_open), 1,
+                "an edited-but-still-bespoke (scan-RED) writer must NOT be reaped even though its "
+                "hash changed -- the scan branch must catch it (fail-closed against a false green)")
+            self.assertEqual(still_open[0].get("writer_relpath"), BESPOKE_WRITER_RELPATH)
+
     # -- direct-function coverage of the reaped-id return value ----------------------------------
 
     def test_reap_returns_reaped_mechanism_ids(self):
