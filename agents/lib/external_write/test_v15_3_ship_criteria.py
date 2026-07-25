@@ -24,8 +24,8 @@ Criterion 5 (EMPIRICAL -- the durable-ledger assertion: ONE ``run_id``/consent/W
 chunks written UNDER that one envelope, on the real rebuilt writer) is NOT a build-time fixture.
 It requires a real adapter/vendor surface and a real multi-chunk bulk run to observe the ledger
 shape empirically; that is out of reach for a stdlib-only, no-network unit test. It is proven in
-the Cut 1.5 re-validation runbook on a real estate project (``external_review/v0.19.0_cut1.5_
-validation_runbook_<date>.md``, Task F Step 5 of the plan above), not here. See the deliberately
+the Cut 1.5 re-validation runbook on a real estate project (kept in the build repo's private
+review area, Task F Step 5 of the plan above), not here. See the deliberately
 skipped placeholder at the bottom of this file.
 
 Fixture discipline (ANTI-OVERFIT, matching every Task A-E test module): every fixture reuses the
@@ -377,7 +377,7 @@ class V153ShipCriteriaTests(_ls_fixtures._CheckCompletionFixtureMixin, unittest.
         "vendor surface) is EMPIRICAL: it requires a real multi-chunk bulk run to observe, which "
         "is out of reach for a stdlib-only, no-network unit test. It is proven in the Cut 1.5 "
         "re-validation runbook on a real estate project "
-        "(external_review/v0.19.0_cut1.5_validation_runbook_<date>.md, Task F Step 5 of "
+        "(kept in the build repo's private review area, Task F Step 5 of the plan at "
         "docs/superpowers/plans/2026-07-25-cut1.5-acceptance-linkage-false-green.md), not here.")
     def test_criterion5_durable_ledger_is_empirical_see_revalidation_runbook(self):
         raise AssertionError("this criterion is proven empirically, never in the build suite")
