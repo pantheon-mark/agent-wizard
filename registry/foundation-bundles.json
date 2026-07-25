@@ -368,7 +368,7 @@
       "recommendation_reason": "This is a reliability fix that closes a false all-clear when turning capabilities on: a capability can no longer be marked ready around a hand-rolled writer that bypasses the safe, gated write surface, and the system now tells you the exact file to rebuild and fails safe instead of reporting a false all-clear. It adds no breaking changes and touches none of your data, so most operators should take it.",
       "release_date": "2026-07-25",
       "safety_class": "reliability_fix",
-      "source_commit": "PENDING",
+      "source_commit": "db5ec280303537b4188562d4fb381def4405c586",
       "status": "prerelease"
     }
   ],
