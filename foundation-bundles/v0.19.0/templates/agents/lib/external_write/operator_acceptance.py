@@ -747,12 +747,14 @@ def record_operator_acceptance(
     # green this cut exists to close).
     try:
         _open_bypasses = open_bespoke_writer_migrations(identity_root)
-    except ExternalWriteStateReadError as e:
+    except ExternalWriteStateReadError:
+        # C(a) scrub: never surface the raw exception to a non-technical operator (repo
+        # "no raw errors to the operator" convention). Keep it plain-language + actionable.
         return _refuse(
             "cannot verify whether an external-write bypass is still open, so this capability "
-            f"cannot be live-enabled right now: {e} -- fix step: repair the pending-migrations "
-            "queue at agents/handoffs/pending_migrations.json so it can be read, then re-run "
-            "acceptance; nothing was accepted")
+            "cannot be live-enabled right now -- fix step: the pending-migrations queue at "
+            "agents/handoffs/pending_migrations.json could not be read (it may be malformed); "
+            "repair it so it can be read, then re-run acceptance; nothing was accepted")
     if _open_bypasses:
         _writers = ", ".join(f"`{e.get('writer_relpath')}`" for e in _open_bypasses)
         return _refuse(

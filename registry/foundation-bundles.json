@@ -360,7 +360,7 @@
     },
     {
       "bundle_manifest_sha256": "sha256:cae17646b382109c4bbb1ba726b32623c6301e4ce72b3ed6440b2792adeda144",
-      "bundle_tree_sha256": "sha256:bf99efe8e693d4cfb1599c9b51fce2277a84f69275a40f94db1c49e0afc49238",
+      "bundle_tree_sha256": "sha256:567092fe2e78dd54d0bca532596cb582240b1d88613116fb8fcb06da87121514",
       "changelog": "This update closes a safety gap in turning capabilities on. Before, a capability could be marked ready even while a hand-rolled file still wrote to your external world by a path that skipped the safe, gated write surface. Now turning a capability on refuses to go live while any such bypass is open, and it names the exact file to rebuild. Whenever a bypass like that exists, the health check and the completion check report the whole project as not-normal / not-done and point you to the file — and they fail safe rather than ever reporting a false all-clear. Once you rebuild the flagged file through the safe path, the block clears on its own the next time the check runs. No breaking changes, and none of your data is touched.",
       "foundation_bundle_version": "v0.19.0",
       "manifest": "foundation-bundles/v0.19.0/manifest.yaml",
