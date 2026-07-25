@@ -195,6 +195,11 @@ from external_write.capability_identity import (  # noqa: E402
 from external_write.operator_acceptance import (  # noqa: E402
     close_pending_migration_if_matched,
 )
+# (Cut 1.5 / v0.19.0, Task A -- V15-3 keystone) the ONE canonical open-bespoke-writer-bypass
+# predicate. _ext_write_state imports nothing from this package (stdlib-only, reads one JSON file),
+# so a top-level import here introduces no import cycle. check_completion consumes it to make the
+# gate go non-done PROJECT-WIDE on any open bespoke-writer entry -- see its use below.
+from external_write import _ext_write_state  # noqa: E402
 from external_write.proof_hash import (  # noqa: E402
     compute_implementation_hash,
     ProofHashError,
@@ -1376,6 +1381,18 @@ _CONJUNCT_EXPLANATIONS: Dict[str, Tuple[str, str]] = {
         "Confirm the capability's source file is present at "
         "agents/capabilities/<capability_id>_capability.py, then run this check again.",
     ),
+    # (Cut 1.5 / v0.19.0, Task A -- V15-3 keystone) A PROJECT-WIDE, attribution-free block: this
+    # project carries an OPEN "bespoke writer" external-write bypass (a hand-rolled write path that
+    # skips the sanctioned, gated write surface), so nothing here can be called done -- INDEPENDENT
+    # of whether the bypass resolves to THIS capability. The actual file(s) to fix are named on
+    # their own line(s) by _completion_not_done_message (a static detail cannot carry them).
+    "open_external_write_bypass": (
+        "this project has an open, hand-rolled file that writes to your external world by a path "
+        "that bypasses the sanctioned, safety-gated write surface -- so it is not safe to call "
+        "anything here done until that is rebuilt, regardless of this capability's own state.",
+        "Rebuild the flagged file(s) named below through the sanctioned write path (use the "
+        "rebuild-paused-capability flow), then run this check again.",
+    ),
 }
 
 _GENERIC_CONJUNCT_EXPLANATION: Tuple[str, str] = (
@@ -1384,7 +1401,12 @@ _GENERIC_CONJUNCT_EXPLANATION: Tuple[str, str] = (
 )
 
 
-def _completion_not_done_message(canonical_id: str, failed_conjuncts: List[str]) -> str:
+def _completion_not_done_message(
+    canonical_id: str,
+    failed_conjuncts: List[str],
+    bypass_writer_relpaths: Optional[List[str]] = None,
+    bypass_read_error: bool = False,
+) -> str:
     lines = [
         f"NOT FINISHED -- {canonical_id!r} is not yet confirmed safe/complete for live use.",
         "Safe state: treat this capability as NOT authorized for additional live writes based "
@@ -1394,6 +1416,17 @@ def _completion_not_done_message(canonical_id: str, failed_conjuncts: List[str])
         detail, next_step = _CONJUNCT_EXPLANATIONS.get(key, _GENERIC_CONJUNCT_EXPLANATION)
         lines.append(f"- Why: {detail}")
         lines.append(f"  Next: {next_step}")
+        # (Cut 1.5 / v0.19.0, Task A) name the actual bespoke-writer file(s) to fix -- a static
+        # explanation cannot carry them, and the operator needs the concrete path(s).
+        if key == "open_external_write_bypass":
+            if bypass_read_error:
+                lines.append(
+                    "  Affected: the pending-migrations queue "
+                    "(agents/handoffs/pending_migrations.json) exists but could not be read, so "
+                    "any bespoke external-write bypass must be treated as unresolved (safe "
+                    "state). Repair or restore that file, then run this check again.")
+            for relpath in (bypass_writer_relpaths or []):
+                lines.append(f"  Fix this file: {relpath}")
     return "\n".join(lines)
 
 
@@ -1517,6 +1550,23 @@ def check_completion(project_root: str, canonical_id: str) -> CompletionResult:
     if not audit_ok:
         core_failed.append("audit-appended")
 
+    # (Cut 1.5 / v0.19.0, Task A -- V15-3 keystone) PROJECT-WIDE, attribution-free fail-closed
+    # block: ANY open bespoke-writer external-write bypass in this project (a hand-rolled write
+    # path keyed on a relpath-derived mechanism_id, structurally invisible to the id-keyed
+    # pending-migration view above) makes the gate non-done, INDEPENDENT of whether the bypass
+    # resolves to `cid`. Fail-closed on an unreadable queue: a read failure is treated as blocking
+    # (never a silent "no bypass" false green). This is a distinct projection-consistency
+    # conjunct -- the project's external-write views are not coherent while a sanctioned-path
+    # bypass remains open.
+    bypass_writer_relpaths: List[str] = []
+    bypass_read_error = False
+    try:
+        bypass_writer_relpaths = _ext_write_state.open_bespoke_writer_relpaths(str(root))
+    except _ext_write_state.ExternalWriteStateReadError:
+        bypass_read_error = True
+    if bypass_read_error or bypass_writer_relpaths:
+        projection_failed.append("open_external_write_bypass")
+
     core_ok = not core_failed
     projection_ok = not projection_failed
     done = core_ok and projection_ok
@@ -1525,7 +1575,10 @@ def check_completion(project_root: str, canonical_id: str) -> CompletionResult:
     failed_conjuncts = core_failed + projection_failed
     operator_message = (
         _completion_done_message(cid, operator_signal_ok) if done
-        else _completion_not_done_message(cid, failed_conjuncts)
+        else _completion_not_done_message(
+            cid, failed_conjuncts,
+            bypass_writer_relpaths=bypass_writer_relpaths,
+            bypass_read_error=bypass_read_error)
     )
 
     return CompletionResult(

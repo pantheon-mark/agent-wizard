@@ -226,6 +226,10 @@ if __package__ in (None, ""):  # pragma: no cover - only true when run as a scri
 
 from external_write import scan  # noqa: E402
 from external_write import run_envelope  # noqa: E402
+# (Cut 1.5 / v0.19.0, Task A -- V15-3 keystone) the ONE canonical open-bespoke-writer-bypass
+# predicate, consumed by overall_status below to forbid normal status PROJECT-WIDE on any open
+# bespoke-writer entry. Stdlib-only, imports nothing from this package -- no import cycle.
+from external_write import _ext_write_state  # noqa: E402
 from external_write.capability_identity import (  # noqa: E402
     build_capability_index,
     IdentityResolutionError,
@@ -1060,8 +1064,19 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
     """A typed, below-the-LLM honest-status object for session-start.
 
     ``normal_status_allowed`` is True ONLY when every capability is green AND
-    no run envelope is non-finalized. The agent may not report "everything is
-    running normally" unless this is True (relay-verbatim convention).
+    no run envelope is non-finalized AND (Cut 1.5 / v0.19.0, Task A) there is no
+    OPEN bespoke-writer external-write bypass anywhere in this project. The agent
+    may not report "everything is running normally" unless this is True
+    (relay-verbatim convention).
+
+    The open-bespoke-writer block is PROJECT-WIDE and attribution-free: any open
+    bespoke-writer migration entry (a hand-rolled write path that bypasses the
+    sanctioned, gated write surface, keyed on a relpath-derived mechanism_id and
+    thus invisible to the per-capability ``pending_migration`` view above)
+    forbids normal status regardless of which capability, if any, it belongs to.
+    Fail-closed: an unreadable pending-migrations queue is treated as blocking
+    (``read_error``), never a silent "no bypass" false green -- see V15-3 and
+    ``_ext_write_state.open_bespoke_writer_migrations``.
     """
     caps = check_capabilities_with_self_heal(project_root)
     red = sorted({c["capability_id"] for c in caps if c.get("health") != "green"})
@@ -1074,13 +1089,30 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
         # legacy old-format runs have no WAL/authorize_resume affordance
         "resumable": s.raw_had_run_state,
     } for s in runs]
-    normal_ok = (not red) and (not orphaned)
+
+    bypass_writer_relpaths: List[str] = []
+    bypass_read_error = False
+    try:
+        bypass_writer_relpaths = _ext_write_state.open_bespoke_writer_relpaths(str(project_root))
+    except _ext_write_state.ExternalWriteStateReadError:
+        bypass_read_error = True
+    bypass_blocking = bypass_read_error or bool(bypass_writer_relpaths)
+
+    normal_ok = (not red) and (not orphaned) and (not bypass_blocking)
     return {
         "overall": "green" if normal_ok else "red",
         "normal_status_allowed": normal_ok,
         "red_capabilities": red,
         "paused_capabilities": paused,
         "orphaned_runs": orphaned,
+        # (Task A) the distinct, named reason + the concrete file(s) to fix. Present (and, when
+        # blocking, self-describing via this key's own name) so an agent reading this typed status
+        # can name the open external-write bypass to the operator, not just report "not normal".
+        "open_external_write_bypass": {
+            "blocking": bypass_blocking,
+            "writer_relpaths": bypass_writer_relpaths,
+            "read_error": bypass_read_error,
+        },
     }
 
 

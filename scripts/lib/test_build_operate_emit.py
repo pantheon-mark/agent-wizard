@@ -1786,7 +1786,21 @@ class TestS253ContractDelta(unittest.TestCase):
         # enrolled dependency_enrollment.py -- see that file's own enrollment comment in
         # agent_emitter.py, and test_emit_set_lists_the_cut14_task5_dependency_enrollment_file
         # below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 39)
+        # (Count updated to 40 by Cut 1.5 / v0.19.0 Task A (V15-3 keystone), which additionally
+        # enrolled _ext_write_state.py -- BOTH lifecycle_state.py and capability_health.py now
+        # hard-import external_write._ext_write_state at module scope; see that file's own
+        # enrollment comment in agent_emitter.py, and
+        # test_emit_set_lists_the_cut15_taskA_ext_write_state_file below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 40)
+
+    def test_emit_set_lists_the_cut15_taskA_ext_write_state_file(self):
+        # Cut 1.5 / v0.19.0 Task A (V15-3 false-green keystone): _ext_write_state.py (the ONE
+        # canonical open-bespoke-writer-bypass predicate) must be enrolled, or an emitted
+        # writes-back system ships lifecycle_state.py + capability_health.py -- both of which
+        # hard-import external_write._ext_write_state at module scope -- WITHOUT the module they
+        # import, a raw ModuleNotFoundError at import time.
+        import agent_emitter
+        self.assertIn("_ext_write_state.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def test_emit_set_lists_the_taskA3_lifecycle_test_fixtures_file(self):
         # Task A3 (hermetic lifecycle tests + probe, Cut 1.1 / F-71): lifecycle_test_fixtures.py

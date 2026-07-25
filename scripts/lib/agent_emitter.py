@@ -235,6 +235,18 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # exits 0) -- not a caught omission (same regression class this file's
     # own docstring already documents for every prior entry above).
     "dependency_enrollment.py",
+    # Cut 1.5 / v0.19.0 Task A (V15-3 false-green keystone): the ONE canonical
+    # open-bespoke-writer-bypass predicate. BOTH `lifecycle_state.py` (the
+    # completion gate) AND `capability_health.py` (`overall_status`/`--overall`)
+    # now hard-import `external_write._ext_write_state` at MODULE SCOPE -- so
+    # omitting it here means a freshly-emitted writes-back system ships two
+    # already-enrolled trust-core modules that import a module never physically
+    # copied into the package, dying with a raw ModuleNotFoundError at import
+    # time (the session-start health read and the completion self-check both
+    # break before the operator ever runs anything) -- not a caught omission
+    # (same regression class this file's own docstring already documents for
+    # every prior entry above).
+    "_ext_write_state.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
