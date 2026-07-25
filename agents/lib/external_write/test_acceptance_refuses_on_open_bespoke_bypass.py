@@ -1,0 +1,225 @@
+"""Task C / Cut 1.5 (bundle v0.19.0) -- live-enable-only acceptance gate.
+
+Task A (KEYSTONE) makes an OPEN bespoke-writer entry block the whole project
+non-green; Task B reaps such an entry once the writer is genuinely fixed. Task C
+is the acceptance-time enforcement: BEFORE the ceremony flips ``accepted:true``,
+``record_operator_acceptance`` REFUSES to live-enable a capability while ANY open
+bespoke-writer bypass exists in the project (attribution-free -- it fires on the
+mere existence of an open entry, regardless of which capability it belongs to).
+
+The gate sits AHEAD of the atomic flip, so a refusal leaves NO partial state:
+``accepted`` stays False, no receipt is minted, no acceptance record is written.
+This ordering IS the anti-deadlock property -- edit/scan/prove/repair are never
+blocked (they do not run through this helper), so repair is always available
+while the capability is paused. Once Task B reaps the entry (writer fixed -> gone
+from the queue), the SAME acceptance call succeeds.
+
+Run:  python3 -m unittest discover -s wizard/agents/lib/external_write \\
+          -p test_acceptance_refuses_on_open_bespoke_bypass.py
+"""
+
+import json
+import sys
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+_EXTERNAL_WRITE_DIR = Path(__file__).resolve().parent
+_AGENTS_LIB = _EXTERNAL_WRITE_DIR.parent  # agents/lib -- external_write is a package under here
+if str(_AGENTS_LIB) not in sys.path:
+    sys.path.insert(0, str(_AGENTS_LIB))
+_WIZARD_DIR = _EXTERNAL_WRITE_DIR.parents[2]  # .../wizard
+
+# Name-form imports (NOT the dotted-submodule form): the whole-package bypass scan
+# (test_external_write_scan) asserts every .py under this dir -- test files included -- is
+# violation-free, and the dotted-submodule form trips the CAPABILITY-zone sealed_kernel_import
+# rule. Every other test file in this dir uses the same name form for the same reason.
+from external_write import operator_acceptance  # noqa: E402
+from external_write import acceptance_ceremony  # noqa: E402
+from external_write import copy_run_proof  # noqa: E402
+from external_write import verifiers  # noqa: E402
+from external_write import proof_hash  # noqa: E402
+
+record_operator_acceptance = operator_acceptance.record_operator_acceptance
+OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA = acceptance_ceremony.OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA
+COPY_RUN_PROOF_SCHEMA = copy_run_proof.COPY_RUN_PROOF_SCHEMA
+POSTWRITE_VERIFICATION_SCHEMA = verifiers.POSTWRITE_VERIFICATION_SCHEMA
+
+PHASE = "phase_02"
+OP_KIND = "delete_record"  # irreversible_external; gated; non-binding
+CAP_ID = "google_sheets"
+
+# The estate's real shape: a hand-rolled bulk runner OUTSIDE agents/capabilities/, keyed on a
+# relpath-derived mechanism_id with no owning capability -- an OPEN bespoke-writer bypass.
+BESPOKE_WRITER_RELPATH = "agents/inbox/runner.py"
+
+
+def _verification():
+    return {
+        "schema": POSTWRITE_VERIFICATION_SCHEMA,
+        "verification_mode": "prestate_snapshot_diff",
+        "claim_strength": "verified",
+        "verifier_id": "prestate_snapshot_diff_v1",
+        "source_lineage": {
+            "pre_write_sources": ["prewrite_csv_backup"],
+            "post_write_sources": ["live_surface_read"],
+            "forbidden_sources": [
+                "writer_generated_id_map", "live_id_column_as_truth", "apply_report",
+            ],
+        },
+        "invariant_checked": "record absent after delete",
+        "evidence_ref": "agents/handoffs/.ev.txt",
+    }
+
+
+def _proof(capability_id=CAP_ID, op_kind=OP_KIND):
+    return {
+        "schema": COPY_RUN_PROOF_SCHEMA,
+        "operation_id": "op-001",
+        "op_kind": op_kind,
+        "capability_id": capability_id,
+        "data_class": "estate_tracker_rows",
+        "copy_source_ref": "copies/estate_copy.csv",
+        "prestate_snapshot_ref": "copies/estate_copy.prestate.csv",
+        "copy_apply_proof": {
+            "apply_receipt_ref": "agents/handoffs/.apply_receipt.json",
+            "apply_verification": _verification(),
+        },
+        "copy_undo_proof": {
+            "undo_receipt_ref": "agents/handoffs/.undo_receipt.json",
+            "undo_verification": _verification(),
+        },
+        "durability_checks": [],
+        "accepted_for_live_use": True,
+        "implementation_hash": proof_hash.compute_implementation_hash(op_kind),
+        "contract_hash": proof_hash.compute_contract_hash(op_kind),
+        # A real, clean, on-disk capability module fixture (the same one the scanner test suite
+        # proves scans to zero violations).
+        "capability_module_paths": [str(
+            _WIZARD_DIR / "test_fixtures" / "external_write_scan" / "legal_through_adapter.py"
+        )],
+    }
+
+
+def _descriptor(id=CAP_ID, *, risk_class="irreversible_external", phase_id=PHASE,
+                blast_radius_cap=5, accepted=False, action_class="delete"):
+    return {
+        "id": id, "name": id, "action_class": action_class, "risk_class": risk_class,
+        "recovery_profile_ref": None, "declared_test_target": "copy",
+        "blast_radius_cap": blast_radius_cap, "accepted": accepted, "phase_id": phase_id,
+    }
+
+
+class AcceptanceRefusesOnOpenBespokeBypassTest(unittest.TestCase):
+    """The Task-C gate, end to end through the real ceremony (no mocks of the unit under test).
+
+    project_root is the temp tree so ``open_bespoke_writer_migrations(root)`` reads THIS test's
+    controlled ``agents/handoffs/pending_migrations.json`` -- with no ``agents/capabilities``
+    tree the identity index falls back to the literal id (the pre-A1 no-capabilities case),
+    exactly like ``test_no_capabilities_dir_at_all_falls_back_to_literal_unaffected``."""
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+        self.security = self.tmp / "security"
+        self.security.mkdir(parents=True, exist_ok=True)
+        self.set_path = self.security / "capability_descriptors.json"
+        self.proof_path = self.tmp / "proof.json"
+        self.receipt_path = self.security / "acceptance_receipts" / f"{CAP_ID}.receipt.json"
+        self.audit_path = self.security / "capability_acceptance_log.jsonl"
+        # The open-bespoke-writer gate reads the queue at the project-root-relative default
+        # location (agents/handoffs/pending_migrations.json), NOT the pending_migrations_path
+        # kwarg (that param feeds only the best-effort close_pending_migration_if_matched tidy).
+        self.queue_path = self.tmp / "agents" / "handoffs" / "pending_migrations.json"
+        self.queue_path.parent.mkdir(parents=True, exist_ok=True)
+
+        self.set_path.write_text(
+            json.dumps([_descriptor()], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        self.proof_path.write_text(json.dumps(_proof()), encoding="utf-8")
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _write_open_bespoke_queue(self):
+        self.queue_path.write_text(json.dumps([
+            {"mechanism_id": "runner", "writer_relpath": BESPOKE_WRITER_RELPATH,
+             "entrypoint_relpath": "agents/inbox/run_runner.sh", "violations": ["bespoke bulk"],
+             "suggested_next_step": "migrate via add-capability",
+             "paused_content_sha256": "deadbeef", "status": "pending"},
+        ], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    def _call(self, operator_confirmation="Yes -- I accept this capability for live use."):
+        return record_operator_acceptance(
+            CAP_ID, PHASE, str(self.proof_path), operator_confirmation,
+            receipt_path=str(self.receipt_path),
+            descriptor_set_path=str(self.set_path),
+            audit_log_path=str(self.audit_path),
+            project_root=str(self.tmp))
+
+    def _accepted_flag(self):
+        for e in json.loads(self.set_path.read_text(encoding="utf-8")):
+            if e.get("id") == CAP_ID:
+                return e.get("accepted")
+        return None
+
+    # -- Part 1: an OPEN bespoke-writer entry present -> live-enable REFUSED, no partial state ---
+
+    def test_open_bespoke_bypass_refuses_live_enable_with_no_partial_state(self):
+        self._write_open_bespoke_queue()
+
+        res = self._call()
+
+        # Refused (never live-enabled).
+        self.assertFalse(res.accepted, "an open bespoke-writer bypass must refuse live-enable")
+        # The refusal names the specific writer path + the rebuild next step.
+        self.assertIsNotNone(res.reason)
+        self.assertIn(BESPOKE_WRITER_RELPATH, res.reason)
+        self.assertIn("bypass", res.reason)
+        self.assertIn("re-run acceptance", res.reason)
+        self.assertNotIn("Traceback", res.reason)
+        # The ceremony was never even invoked -- the gate is AHEAD of the atomic flip.
+        self.assertIsNone(res.acceptance)
+        # NO inconsistent state on the refusal path: accepted stays False, no receipt, no record.
+        self.assertEqual(self._accepted_flag(), False)
+        self.assertIsNone(res.receipt_ref)
+        self.assertFalse(self.receipt_path.exists(), "a refusal must mint no receipt")
+        self.assertFalse(self.audit_path.exists(), "a refusal must write no acceptance record")
+
+    # -- Part 2: writer fixed + entry reaped away -> the SAME call now SUCCEEDS -----------------
+
+    def test_after_reap_same_call_succeeds(self):
+        # Simulate Task B reaping the resolved entry (writer fixed -> gone from the queue). The
+        # anti-deadlock property: with the bypass cleared, the identical acceptance call now
+        # live-enables the capability -- repair was always available while it was paused.
+        self.queue_path.write_text(json.dumps([]) + "\n", encoding="utf-8")
+
+        res = self._call()
+
+        self.assertTrue(res.accepted, res.reason)
+        self.assertEqual(self._accepted_flag(), True)
+        receipt = json.loads(self.receipt_path.read_text(encoding="utf-8"))
+        self.assertEqual(receipt["schema"], OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA)
+        self.assertEqual(receipt["capability_id"], CAP_ID)
+
+    # -- Fail-closed: an unreadable queue is a REFUSAL (cannot verify safety) --------------------
+
+    def test_unreadable_queue_fails_closed_to_refusal(self):
+        # An EXISTING-but-malformed queue must NEVER fall through to acceptance (the exact false
+        # green this whole cut closes). open_bespoke_writer_migrations raises
+        # ExternalWriteStateReadError; the gate treats that raise as a refusal, plain-language,
+        # never a crash and never a live-enable.
+        self.queue_path.write_text("{ not valid json", encoding="utf-8")
+
+        res = self._call()
+
+        self.assertFalse(res.accepted, "an unreadable queue must fail closed to a refusal")
+        self.assertIsNotNone(res.reason)
+        self.assertNotIn("Traceback", res.reason)
+        self.assertIsNone(res.acceptance)
+        self.assertEqual(self._accepted_flag(), False)
+        self.assertFalse(self.receipt_path.exists())
+        self.assertFalse(self.audit_path.exists())
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()

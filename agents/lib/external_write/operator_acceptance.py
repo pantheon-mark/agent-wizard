@@ -71,6 +71,10 @@ from external_write.capability_identity import (
 )
 from external_write.contracts import get_contract
 from external_write.effects_manifest import unresolvable_adapter_seal_gap
+from external_write._ext_write_state import (
+    open_bespoke_writer_migrations,
+    ExternalWriteStateReadError,
+)
 from external_write.proof_hash import (
     compute_contract_hash,
     compute_implementation_hash,
@@ -712,6 +716,48 @@ def record_operator_acceptance(
         return _refuse(ambiguous_note)
     resolved_capability_module_path = os.path.join(
         identity_root, CAPABILITIES_DIR_REL, f"{resolved_module_id}{CAPABILITY_FILE_SUFFIX}")
+
+    # --- Task C (Cut 1.5 / v0.19.0): live-enable-only external-write-bypass gate. ---
+    # BEFORE anything that could authorize a live write -- the receipt mint just below AND the
+    # ceremony's atomic `accepted:true` flip (accept_capability_for_live_use, a few lines down)
+    # -- REFUSE to live-enable while the project carries ANY OPEN external-write bypass (a
+    # bespoke writer that routes AROUND the sanctioned bulk path; see _ext_write_state.
+    # open_bespoke_writer_migrations). This closes the V15-3 false green: previously the ceremony
+    # flipped `accepted:true` FIRST and only then ran the best-effort
+    # close_pending_migration_if_matched (which is now no longer load-bearing but is left in
+    # place as a tidy), so a capability could go green AROUND an unmigrated bespoke writer.
+    #
+    # Attribution-free by design: the mere EXISTENCE of an open bespoke-writer entry pauses the
+    # LIVE-ENABLE transition for the whole project, regardless of which capability owns the writer
+    # (safety must never depend on attributing the writer to a capability -- that is a separate,
+    # advisory-only concern).
+    #
+    # This gate is placed AHEAD of the atomic flip AND ahead of the receipt mint, so a refusal
+    # leaves NO partial state: `accepted` stays false, no receipt is minted, no acceptance record
+    # is written. It gates the LIVE-ENABLE transition ONLY -- it never runs on edit/scan/prove/
+    # repair (those do not go through this helper), so the writer's repair is always available
+    # while the capability is paused. THIS SEQUENCING IS THE ANTI-DEADLOCK PROPERTY: once the
+    # writer is fixed and Task B (reap_resolved_writer_migrations, run inside reconcile_state)
+    # clears the entry, this SAME acceptance call succeeds.
+    #
+    # Fail-closed on read error: an EXISTING-but-unreadable/malformed queue makes
+    # open_bespoke_writer_migrations RAISE ExternalWriteStateReadError. Cannot verify safety ->
+    # do NOT live-enable: caught and turned into a plain-language refusal here, never allowed to
+    # crash the flow or fall through to acceptance (falling through would be exactly the false
+    # green this cut exists to close).
+    try:
+        _open_bypasses = open_bespoke_writer_migrations(identity_root)
+    except ExternalWriteStateReadError as e:
+        return _refuse(
+            "cannot verify whether an external-write bypass is still open, so this capability "
+            f"cannot be live-enabled right now: {e} -- fix step: repair the pending-migrations "
+            "queue at agents/handoffs/pending_migrations.json so it can be read, then re-run "
+            "acceptance; nothing was accepted")
+    if _open_bypasses:
+        _writers = ", ".join(f"`{e.get('writer_relpath')}`" for e in _open_bypasses)
+        return _refuse(
+            f"an external-write bypass is unrepaired: {_writers} -- rebuild it so it routes "
+            "through the sanctioned bulk path, then re-run acceptance; nothing was accepted")
 
     if receipt_path is None:
         # A per-capability receipt filename; deterministic so a re-run overwrites its own prior

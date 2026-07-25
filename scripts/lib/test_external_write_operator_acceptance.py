@@ -522,9 +522,18 @@ class PendingMigrationAutoCloseTest(unittest.TestCase):
         self._write_capability_module("google_sheets", surface="gs-legacy-mechanism")
         pm_path = self.tmp / "agents" / "handoffs" / "pending_migrations.json"
         pm_path.parent.mkdir(parents=True, exist_ok=True)
+        # Task C (Cut 1.5 / v0.19.0): the entry this best-effort close path acts on is a
+        # CANONICAL-capability migration entry (``writer_relpath`` is None), NOT a bespoke-writer
+        # bypass. Task C's live-enable gate refuses acceptance outright while ANY open
+        # bespoke-writer entry (``writer_relpath`` set + ``status == "pending"``) exists, so a
+        # bespoke entry can never coexist with a SUCCESSFUL acceptance for the close path to then
+        # tidy -- that sub-case is now handled by Task B's reap ahead of a re-run, and the close
+        # helper (no longer load-bearing) only ever runs on canonical entries the gate ignores.
+        # The F-60 canonical-resolution surfacing behavior under test here is unchanged: close
+        # keys on ``mechanism_id`` resolution, independent of ``writer_relpath``.
         pm_path.write_text(json.dumps([
-            {"mechanism_id": "gs-legacy-mechanism", "writer_relpath": "agents/cron/x.py",
-             "entrypoint_relpath": "agents/cron/run_x.sh", "violations": [],
+            {"mechanism_id": "gs-legacy-mechanism", "writer_relpath": None,
+             "entrypoint_relpath": None, "violations": [],
              "suggested_next_step": "migrate via add-capability", "status": "pending"},
         ], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         self._write_set([_descriptor(id="google_sheets")])
