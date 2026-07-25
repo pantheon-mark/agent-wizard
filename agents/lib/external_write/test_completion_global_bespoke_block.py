@@ -71,6 +71,32 @@ def _bespoke_entry(writer_relpath=BESPOKE_WRITER_RELPATH, status="pending"):
     }
 
 
+# A still-bespoke per-chunk mint loop -- the REAL writer an open bespoke-writer entry points at.
+# (Cut 1.5 / v0.19.0, Task B composition) The Task-B auto-reap runs inside reconcile_state (which
+# capability_health.overall_status / check_completion drive fail-safe), and it treats a
+# bespoke-writer entry whose writer file NO LONGER EXISTS as resolved -> reaped. So an "open
+# bypass" fixture must put the writer file ON DISK, or the composed system correctly reaps it and
+# reports green. This entry carries no paused_content_sha256, so the reap's fail-closed
+# "no pause-time baseline -> keep" branch holds the entry regardless of the file's content; the
+# still-bespoke content below keeps it realistic (a genuine, unmigrated bypass writer).
+_BESPOKE_RUNNER_SRC = '''"""Hand-rolled per-chunk bulk writer -- bypasses run_sanctioned_bulk."""
+from external_write.run_envelope import mint_run_envelope
+
+
+def run_all(chunks):
+    return [mint_run_envelope(chunk) for chunk in chunks]
+'''
+
+
+def _write_bespoke_writer_file(root, writer_relpath=BESPOKE_WRITER_RELPATH):
+    """Put the entry's writer file on disk so the fixture models a REAL open bypass (see
+    _BESPOKE_RUNNER_SRC) rather than an entry pointing at a vanished file (which Task B's reap
+    correctly clears)."""
+    p = Path(root) / writer_relpath
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_BESPOKE_RUNNER_SRC, encoding="utf-8")
+
+
 def _canonical_entry(mechanism_id="some_other_capability", status="pending"):
     """A canonical-capability migration entry: writer_relpath is None. Must NOT
     trip the project-wide bespoke-writer block."""
@@ -91,6 +117,9 @@ class GlobalBespokeWriterBlockTests(_ls_fixtures._CheckCompletionFixtureMixin, u
             root = Path(tmp)
             # inbox_management is otherwise fully accepted/clean -> would be done/green.
             self._accept_real_capability(root, CAP_ID)
+            # A REAL open bypass: the writer file exists on disk and is still bespoke (see
+            # _write_bespoke_writer_file) -- so the Task-B auto-reap does NOT clear it.
+            _write_bespoke_writer_file(root)
             _write_pending_migrations(root, [_bespoke_entry()])
 
             # capability_health --overall: NOT allowed, and names the bypass + writer path.

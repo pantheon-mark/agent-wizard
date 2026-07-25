@@ -216,6 +216,23 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         "capability_health.py",
         "consent_narration.py",
         "evidence.py",
+        # _ext_write_state.py (Cut 1.5 / v0.19.0, Task B): the open-bespoke-writer
+        # bypass predicate (Task A) PLUS the stateless auto-reap (Task B) that
+        # REWRITES agents/handoffs/pending_migrations.json to remove a resolved
+        # writer entry, and imports the sibling scanner (external_write.scan) to
+        # get the writer's real (non-quarantined) verdict. That makes it ordinary
+        # internal kernel wiring of the SAME class as lifecycle_state.py below
+        # (which also mutates the descriptor set / pause markers / this same
+        # queue) -- so it is listed here by decision, not left CAPABILITY-clean
+        # by accident of the name-form import gap. It imports no vendor SDK,
+        # constructs/obtains no write-capable credential, performs no raw vendor
+        # mutation, and never calls run_operation -- so, exactly like every other
+        # entry in this V15-3b group, it passes every universal bypass check on
+        # its own merits and needs exemption ONLY from the CAPABILITY-zone-ONLY
+        # rules. SEALED_KERNEL membership does NOT grant a capability the right to
+        # import it (that allowlist is the independent
+        # scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES set).
+        "_ext_write_state.py",
         "lifecycle_state.py",
         "run_narration.py",
         # dependency_enrollment.py (Cut 1.4 Task 5 / F-9, review fix): capability

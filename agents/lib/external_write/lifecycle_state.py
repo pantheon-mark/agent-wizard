@@ -531,6 +531,21 @@ def reconcile_state(project_root: str, canonical_id: str) -> ReconcileResult:
     guessed (see module docstring's "Fail-closed on broken state").
     """
     root = Path(project_root).resolve()
+
+    # (Cut 1.5 / v0.19.0, Task B) Fail-safe self-heal on read: reap any bespoke-writer migration
+    # entry whose writer is demonstrably resolved (file gone, or content changed since pause-time
+    # AND now scan-clean) BEFORE the reconcile reads state below -- so a genuinely fixed project
+    # stops being held non-green project-wide by the Task-A keystone. Best-effort by design: a
+    # transient reap failure (or an unreadable queue) is swallowed here so it can never turn a
+    # reconcile INTO a failure it would not otherwise have had -- the state_read_error check
+    # immediately below still fail-closes a genuinely broken descriptor set / migration queue into
+    # a blocking ReconcileStateError, exactly as before. Reaping nothing leaves the queue untouched
+    # (idempotent), so calling this on every reconcile_state is safe.
+    try:
+        _ext_write_state.reap_resolved_writer_migrations(str(root))
+    except Exception:
+        pass
+
     index = build_capability_index(str(root))
     if index.state_read_error:
         raise ReconcileStateError(
