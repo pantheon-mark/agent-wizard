@@ -357,6 +357,19 @@
       "safety_class": "reliability_fix",
       "source_commit": "2b94173968900c123db89fb695ff2f9f8eb8b027",
       "status": "prerelease"
+    },
+    {
+      "bundle_manifest_sha256": "sha256:cae17646b382109c4bbb1ba726b32623c6301e4ce72b3ed6440b2792adeda144",
+      "bundle_tree_sha256": "sha256:bf99efe8e693d4cfb1599c9b51fce2277a84f69275a40f94db1c49e0afc49238",
+      "changelog": "This update closes a safety gap in turning capabilities on. Before, a capability could be marked ready even while a hand-rolled file still wrote to your external world by a path that skipped the safe, gated write surface. Now turning a capability on refuses to go live while any such bypass is open, and it names the exact file to rebuild. Whenever a bypass like that exists, the health check and the completion check report the whole project as not-normal / not-done and point you to the file — and they fail safe rather than ever reporting a false all-clear. Once you rebuild the flagged file through the safe path, the block clears on its own the next time the check runs. No breaking changes, and none of your data is touched.",
+      "foundation_bundle_version": "v0.19.0",
+      "manifest": "foundation-bundles/v0.19.0/manifest.yaml",
+      "path": "foundation-bundles/v0.19.0/",
+      "recommendation_reason": "This is a reliability fix that closes a false all-clear when turning capabilities on: a capability can no longer be marked ready around a hand-rolled writer that bypasses the safe, gated write surface, and the system now tells you the exact file to rebuild and fails safe instead of reporting a false all-clear. It adds no breaking changes and touches none of your data, so most operators should take it.",
+      "release_date": "2026-07-25",
+      "safety_class": "reliability_fix",
+      "source_commit": "PENDING",
+      "status": "prerelease"
     }
   ],
   "registry_schema_version": "v2",

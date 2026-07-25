@@ -1,0 +1,25 @@
+# Hash baseline for audit_framework.md (bundle v0.4.0)
+# Enforced-path drift detection mechanism for this foundation bundle's templates.
+# Regeneration rationale: render-contract reconcile: schema + baseline aligned to template
+template: audit_framework.md
+schema_revision: v0.3
+sections_hash:
+- id: security_audits
+  heading: Security Audits
+  heading_hash: 3461245c80316cdf852ae38a8ac3738bc84c981d
+- id: log_audits
+  heading: Log Audits
+  heading_hash: 9feb560160a82a46dbc8f8a9b0674bf05ed39e9e
+- id: architecture_audits
+  heading: Architecture Audits
+  heading_hash: 959e481181bf1581bd50132ec4ed733b9cdd5eb7
+- id: drift_audits
+  heading: Drift Audits
+  heading_hash: bc4d6ca465d9bdef6154f6520b3a72924d14b170
+- id: rules_library
+  heading: Rules library
+  heading_hash: 1fc42c98fc6799658ee969116f653ec63585809f
+- id: system_lifecycle
+  heading: System lifecycle
+  heading_hash: 7208ed60326c12def460bed7b0cdfbc71482cbc1
+base_hash: 72ca183c070b96248315d22a8656eb9bcf3fa79b

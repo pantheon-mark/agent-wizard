@@ -1,0 +1,173 @@
+_note: JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing companion. Both files MUST stay in sync.
+artifact_notes:
+  agents/lib/external_write/_ext_write_state.py: 'New internal helper: the single place the system decides whether an unrebuilt hand-rolled external-write file is still open, plus a self-heal that clears that flag once the file is rebuilt or gone. You never call it directly.'
+  agents/lib/external_write/capability_health.py: The health check now reports not-normal for the whole project -- and names the exact file(s) to rebuild -- whenever a hand-rolled writer still bypasses the safety-gated write surface, and treats an unreadable check as blocking rather than reporting a false all-clear.
+  agents/lib/external_write/lifecycle_state.py: The done/completion check now reports not-done for the whole project, and names the file(s) to fix, while any such bypass is open; and it self-heals -- once you rebuild the flagged file, the block clears on its own the next time the check runs.
+  agents/lib/external_write/operator_acceptance.py: Turning a capability on now refuses to go live while any hand-rolled writer bypasses the sanctioned, safety-gated write surface, and tells you exactly which file to rebuild -- so nothing can be marked ready around an unrebuilt writer. Repair stays available while the capability is paused.
+  agents/lib/external_write/zones.py: Marks the new internal state helper as a sealed internal module so a capability cannot import it directly.
+  wizard/skills/rebuild-paused-capability.md: Carries the matching guidance for rebuilding a flagged hand-rolled writer through the sanctioned write path so turning the capability on succeeds.
+migrations:
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.18.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.18.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.18.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.17.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.17.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.17.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.16.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.16.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.16.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.15.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.14.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.14.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.14.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.13.1
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.13.1 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.13.1.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.13.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.13.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.13.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.12.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.12.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.12.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.11.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.11.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.11.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.10.2
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.10.2 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.10.2.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.10.1
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.10.1 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.10.1.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.10.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.10.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.10.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.9.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.9.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.9.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.8.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.8.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.8.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.7.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.7.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.7.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.6.9
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2. On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard" self-upgrade --to v0.19.0 --apply). 3. A backup is taken first; the operator's own data, rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.19.0 (Cut 1.5). Reliability fix that closes a false-green in turning capabilities on: (1) turning a capability on now refuses to go live while any hand-rolled file writes to your external world by a path that bypasses the sanctioned, safety-gated write surface -- previously a capability could be marked ready around such an unrebuilt writer; (2) whenever an open bypass like that exists anywhere in the project, the health check and the completion check now report not-normal / not-done for the whole project and name the exact file(s) to rebuild, and they fail safe (treat an unreadable queue as blocking) rather than reporting a false all-clear; and (3) once you rebuild the flagged file through the sanctioned path, the block clears on its own the next time the check runs. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version is v0.6.9 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.19.0/ and set foundation_bundle_version back to v0.6.9.
+  stop_condition: not_applicable
+  supported: true
+release_classification: minor_additive_prerelease
+release_date: '2026-07-25'
+schema_version: v1
+target_version: v0.19.0

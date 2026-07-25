@@ -12,6 +12,21 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-25 — turning a capability on can no longer report a false all-clear around a hand-rolled writer that skips the safe write surface (v0.19.0)
+
+**Public-facing change:** A reliability fix that closes a gap where a capability could be marked ready even though a hand-rolled file still wrote to your external world by a path that bypassed the safe, safety-gated write surface.
+
+- **Turning a capability on now refuses to go live while any such bypass is still open**, and it names the exact file to rebuild — so nothing can be marked ready around an unrebuilt hand-rolled writer. Repair stays available the whole time the capability is paused.
+- **Whenever a bypass like that exists anywhere in your project, the start-of-session health check and the completion check now report the whole project as not-normal / not-done and point you at the file(s) to fix** — and they fail safe (a check that can't be read is treated as blocking) rather than ever reporting a false all-clear.
+- **Once you rebuild the flagged file through the safe write path, the block clears on its own** the next time the check runs — no extra step to un-stick it.
+- No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
+
+This is a reliability fix (`v0.19.0`, minor-additive, operator-explicit as always). Foundation documents are byte-identical to `v0.18.0`. Enforcement ceiling unchanged.
+
+`Source-Meta-Commit:` `PENDING` (private build repo) · public repo commit `PENDING`
+
+---
+
 ## 2026-07-23 — safer, more reliable capability building: an always-paste-ready turn-on step, automatic third-party package handling, and clearer honesty about set-aside or duplicated capabilities (v0.18.0)
 
 **Public-facing change:** Reliability improvements to how you build a capability, turn one on, and keep your system's records honest.
