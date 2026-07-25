@@ -1883,6 +1883,158 @@ def _safe_pause_entrypoint(
     )
 
 
+# ===== Task E (Cut 1.5 / v0.19.0): ADVISORY owning-capability link -- UX ONLY ===================
+#
+# Duplicated-by-value from ``_ext_write_state.derive_owning_capability`` (wizard/agents/lib/
+# external_write/_ext_write_state.py) -- never imported: THIS module is build-side toolkit
+# (ships via ``wizard self-update``), that module is the emitted runtime kernel copied into the
+# operator's own project. Every shared algorithm crossing that boundary is duplicated-by-value,
+# never imported, the same discipline this module already follows for
+# ``MIGRATION_QUEUE_REL``/``PAUSED_MECHANISMS_DIR_REL``/etc. -- see this module's own imports
+# and ``_ext_write_state.py``'s module docstring.
+#
+# Stamps ``owning_capability_id`` / ``ownership_status`` onto a bespoke-writer migration entry
+# AT THE MOMENT IT IS QUEUED (``_append_migration_request``, immediately below) -- a purely
+# advisory annotation a completion/acceptance view MAY use to enrich its plain-language message
+# ("fix `<writer>` (part of `<capability>`)"). NEVER a safety input: Task A's project-wide,
+# attribution-free block (the mere EXISTENCE of an open bespoke-writer entry) already covers
+# safety regardless of whether this resolves an owner -- nothing in ``reconcile_upgrade`` or
+# anywhere else in this module may ever let these two fields change a scan/pause/queue decision.
+# See ``test_owning_capability_advisory.py``'s dedicated safety-independence assertions for the
+# runtime-side proof of this same boundary.
+
+def _owning_capability_known_modules(operator_project_dir: Path) -> Dict[str, Path]:
+    """capability_id -> source file path, for every ``agents/capabilities/<capability_id>_
+    capability.py`` on disk under ``operator_project_dir`` -- the known-capability universe this
+    derivation matches a writer's evidence against. Fail-safe: an absent capabilities directory
+    yields ``{}``, never a raise (this is advisory-only; it must never be able to abort
+    anything)."""
+    cap_dir = Path(operator_project_dir) / DEFAULT_CAPABILITIES_REL
+    found: Dict[str, Path] = {}
+    if not cap_dir.is_dir():
+        return found
+    suffix = f"{CAPABILITY_MODULE_SUFFIX}.py"
+    for path in sorted(cap_dir.glob(f"*{suffix}")):
+        if not path.is_file():
+            continue
+        cap_id = path.name[: -len(suffix)]
+        if cap_id:
+            found[cap_id] = path
+    return found
+
+
+def _owning_capability_module_literal(source_text: str, target_name: str) -> Optional[str]:
+    """Statically extract a module-level ``<target_name> = "<literal>"`` string assignment via
+    AST parse only -- NEVER imported/executed. Generalizes ``_extract_op_kind_literal`` (same
+    discipline) to any single target name, so this one helper covers both ``OP_KIND`` and
+    ``ENVELOPE_CAPABILITY_ID`` evidence below. MODULE-LEVEL ONLY (``tree.body``, not
+    ``ast.walk``). Returns ``None`` when the source does not parse, cannot be read, or carries
+    no such literal -- fail-closed/empty-safe (toward "no evidence"), never guesses."""
+    try:
+        tree = ast.parse(source_text)
+    except SyntaxError:
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+        elif isinstance(node, ast.AnnAssign):
+            target = node.target
+        else:
+            continue
+        if isinstance(target, ast.Name) and target.id == target_name:
+            value = node.value
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                return value.value
+    return None
+
+
+def _owning_capability_imports_module(source_text: str, module_stem: str) -> bool:
+    """True iff ``source_text`` contains an import naming ``module_stem`` (a capability's
+    module stem, e.g. ``google_sheets_capability``) -- ``import <module_stem>``, a dotted
+    ``import a.b.<module_stem>``, ``from a.b import <module_stem>``, or ``from <module_stem>
+    import x`` / ``from a.b.<module_stem> import x``. AST parse only, NEVER imported/executed.
+    Walks the WHOLE tree (``ast.walk``), unlike the module-level-only literal extractor above --
+    an import can legitimately appear anywhere a writer chooses to place it. Returns ``False`` on
+    any parse failure -- fail-closed toward "no evidence", never guesses."""
+    try:
+        tree = ast.parse(source_text)
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == module_stem or alias.name.endswith("." + module_stem):
+                    return True
+        elif isinstance(node, ast.ImportFrom):
+            if node.module and (
+                node.module == module_stem or node.module.endswith("." + module_stem)
+            ):
+                return True
+            for alias in node.names:
+                if alias.name == module_stem:
+                    return True
+    return False
+
+
+def _derive_owning_capability_at_reconcile(
+    operator_project_dir: Path, writer_relpath: str,
+) -> Tuple[Optional[str], str]:
+    """ADVISORY-ONLY ranked-evidence derivation, called once at migration-queue-write time by
+    ``_append_migration_request`` (never re-derived later by this module -- a completion/
+    acceptance view on the RUNTIME side may re-derive fresh via ``_ext_write_state.derive_
+    owning_capability`` instead of trusting this stamp; see that function's own docstring for
+    the full ranked-evidence contract this mirrors: STRONG-only evidence -- the writer imports
+    ``<id>_capability``, OR carries a literal ``ENVELOPE_CAPABILITY_ID`` matching a known
+    capability id, OR shares its ``OP_KIND`` with EXACTLY ONE known capability; WEAK stem/path
+    similarity is NEVER authority).
+
+    Returns ``(owning_capability_id_or_None, "resolved" | "ambiguous" | "unresolved")``. NEVER a
+    safety input and never raises: any read/parse failure, a missing writer file, or an absent/
+    empty capabilities directory simply contributes no evidence rather than aborting."""
+    try:
+        writer_source = (Path(operator_project_dir) / writer_relpath).read_text(encoding="utf-8")
+    except OSError:
+        return None, "unresolved"
+
+    known = _owning_capability_known_modules(operator_project_dir)
+    if not known:
+        return None, "unresolved"
+
+    candidates: set = set()
+
+    # Signal 1: the writer imports `<id>_capability` for some known capability id.
+    for cap_id in known:
+        if _owning_capability_imports_module(
+            writer_source, f"{cap_id}{CAPABILITY_MODULE_SUFFIX}"
+        ):
+            candidates.add(cap_id)
+
+    # Signal 2: the writer carries a literal ENVELOPE_CAPABILITY_ID == <canonical id>.
+    envelope_literal = _owning_capability_module_literal(writer_source, "ENVELOPE_CAPABILITY_ID")
+    if envelope_literal is not None and envelope_literal in known:
+        candidates.add(envelope_literal)
+
+    # Signal 3: the writer's own OP_KIND literal is shared with EXACTLY ONE known capability.
+    writer_op_kind = _owning_capability_module_literal(writer_source, "OP_KIND")
+    if writer_op_kind is not None:
+        sharing: List[str] = []
+        for cap_id, cap_path in known.items():
+            try:
+                cap_source = cap_path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if _owning_capability_module_literal(cap_source, "OP_KIND") == writer_op_kind:
+                sharing.append(cap_id)
+        if len(sharing) == 1:
+            candidates.add(sharing[0])
+
+    if len(candidates) == 1:
+        return next(iter(candidates)), "resolved"
+    if len(candidates) >= 2:
+        return None, "ambiguous"
+    return None, "unresolved"
+
+
 # ===== 3. GUIDE MIGRATION ========================================================
 
 def _append_migration_request(
@@ -1914,6 +2066,13 @@ def _append_migration_request(
         e for e in existing
         if not (isinstance(e, dict) and e.get("mechanism_id") == mechanism_id)
     ]
+    # (Cut 1.5 / v0.19.0, Task E -- ADVISORY ONLY, never a safety input) Best-effort
+    # owning-capability attribution, computed once here at queue-write time. See
+    # `_derive_owning_capability_at_reconcile`'s own docstring immediately above for the
+    # ranked-evidence contract and the hard "never gates safety" boundary this stamp must
+    # never be allowed to cross.
+    owning_capability_id, ownership_status = _derive_owning_capability_at_reconcile(
+        operator_project_dir, writer_relpath)
     existing.append({
         "mechanism_id": mechanism_id,
         "writer_relpath": writer_relpath,
@@ -1937,6 +2096,10 @@ def _append_migration_request(
             "(run_operation), then let that flow carry it through proof and "
             "acceptance again."
         ),
+        # (Cut 1.5 / v0.19.0, Task E) ADVISORY ONLY -- see the derivation's own docstring.
+        # `owning_capability_id` is None unless `ownership_status == "resolved"`.
+        "owning_capability_id": owning_capability_id,
+        "ownership_status": ownership_status,
         "status": "pending",
     })
     _atomic_write(path, json.dumps(existing, indent=2, ensure_ascii=False, sort_keys=True) + "\n")

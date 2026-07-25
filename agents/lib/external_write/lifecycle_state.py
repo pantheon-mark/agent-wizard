@@ -1424,6 +1424,7 @@ def _completion_not_done_message(
     failed_conjuncts: List[str],
     bypass_writer_relpaths: Optional[List[str]] = None,
     bypass_read_error: bool = False,
+    bypass_owning_capability_by_relpath: Optional[Dict[str, str]] = None,
 ) -> str:
     lines = [
         f"NOT FINISHED -- {canonical_id!r} is not yet confirmed safe/complete for live use.",
@@ -1444,7 +1445,18 @@ def _completion_not_done_message(
                     "any bespoke external-write bypass must be treated as unresolved (safe "
                     "state). Repair or restore that file, then run this check again.")
             for relpath in (bypass_writer_relpaths or []):
-                lines.append(f"  Fix this file: {relpath}")
+                # (Cut 1.5 / v0.19.0, Task E -- ADVISORY ONLY) When the owning capability is
+                # resolved with strong evidence, name it too -- purely a message enrichment.
+                # An ambiguous/unresolved owner (the common case) leaves this line exactly as
+                # Task A wrote it: the file is still named, just without the "(part of X)"
+                # clause. This dict is NEVER consulted above to decide `failed_conjuncts` itself
+                # -- see derive_owning_capability's own docstring on why ownership can never
+                # gate safety.
+                owner = (bypass_owning_capability_by_relpath or {}).get(relpath)
+                if owner:
+                    lines.append(f"  Fix this file: {relpath} (part of `{owner}`)")
+                else:
+                    lines.append(f"  Fix this file: {relpath}")
     return "\n".join(lines)
 
 
@@ -1576,14 +1588,40 @@ def check_completion(project_root: str, canonical_id: str) -> CompletionResult:
     # (never a silent "no bypass" false green). This is a distinct projection-consistency
     # conjunct -- the project's external-write views are not coherent while a sanctioned-path
     # bypass remains open.
-    bypass_writer_relpaths: List[str] = []
+    # (Cut 1.5 / v0.19.0, Task A reads full entries -- not just relpaths -- so Task E's advisory
+    # ownership enrichment below can be derived from the SAME read, with no second queue read and
+    # no change whatsoever to the safety-decision inputs: `bypass_writer_relpaths` is derived
+    # from these same entries and is byte-for-value identical to what
+    # `open_bespoke_writer_relpaths` itself would have returned.)
+    bypass_entries: List[Dict[str, Any]] = []
     bypass_read_error = False
     try:
-        bypass_writer_relpaths = _ext_write_state.open_bespoke_writer_relpaths(str(root))
+        bypass_entries = _ext_write_state.open_bespoke_writer_migrations(str(root))
     except _ext_write_state.ExternalWriteStateReadError:
         bypass_read_error = True
+    bypass_writer_relpaths: List[str] = sorted({
+        str(e.get("writer_relpath")) for e in bypass_entries
+    })
     if bypass_read_error or bypass_writer_relpaths:
         projection_failed.append("open_external_write_bypass")
+
+    # (Cut 1.5 / v0.19.0, Task E -- ADVISORY ONLY, message enrichment) Best-effort, per-relpath
+    # owning-capability lookup for the message below -- NEVER consulted by the block decision
+    # above (already made, entirely from `bypass_entries`/`bypass_read_error`). A lookup failure
+    # for any one entry is skipped (that file is simply named without attribution), never
+    # allowed to affect `projection_failed`/`done` or crash this read-only gate.
+    bypass_owning_capability_by_relpath: Dict[str, str] = {}
+    for _relpath in bypass_writer_relpaths:
+        _entry = next(
+            (e for e in bypass_entries if str(e.get("writer_relpath")) == _relpath), None)
+        if _entry is None:
+            continue
+        try:
+            _derived = _ext_write_state.derive_owning_capability(str(root), _entry)
+        except Exception:
+            continue
+        if _derived.get("ownership_status") == "resolved" and _derived.get("owning_capability_id"):
+            bypass_owning_capability_by_relpath[_relpath] = _derived["owning_capability_id"]
 
     core_ok = not core_failed
     projection_ok = not projection_failed
@@ -1596,7 +1634,8 @@ def check_completion(project_root: str, canonical_id: str) -> CompletionResult:
         else _completion_not_done_message(
             cid, failed_conjuncts,
             bypass_writer_relpaths=bypass_writer_relpaths,
-            bypass_read_error=bypass_read_error)
+            bypass_read_error=bypass_read_error,
+            bypass_owning_capability_by_relpath=bypass_owning_capability_by_relpath)
     )
 
     return CompletionResult(

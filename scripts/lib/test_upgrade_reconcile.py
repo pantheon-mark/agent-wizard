@@ -44,6 +44,8 @@ from upgrade_reconcile import (  # noqa: E402
     render_reconcile_result,
     resolve_paused_op_kinds,
     scan_operator_mechanisms,
+    _append_migration_request,
+    _derive_owning_capability_at_reconcile,
     _missing_evidence_predicates_for_adapter,
     _write_paused_live_write_state,
     _GUARD_BEGIN,
@@ -1004,6 +1006,134 @@ class BespokeWriterRelpathKeyingTests(_Base):
             dotted_id, dashed_id,
             "relpaths that collide on both the bare stem AND the normalized "
             "prefix must still get distinct migration ids via the sha1 suffix")
+
+
+# ===================================================================================
+# Task E (Cut 1.5 / v0.19.0): ADVISORY owning-capability link, stamped onto a bespoke-writer
+# migration entry AT THE MOMENT IT IS QUEUED (`_append_migration_request`). UX ONLY -- see
+# `_ext_write_state.derive_owning_capability`'s own docstring (this is its duplicated-by-value
+# build-side twin, per this module's never-import-across-the-build/runtime-boundary discipline)
+# for the full ranked-evidence contract and the hard "never a safety input" boundary. The
+# corresponding safety-independence proof lives in
+# wizard/agents/lib/external_write/test_owning_capability_advisory.py (this module never reads
+# these fields for a block decision -- reconcile_upgrade's own scanner-violation-driven queueing
+# is completely unaffected by whether an owner resolves).
+# ===================================================================================
+
+def _write_capability_module(proj: Path, cap_id: str, op_kind=None) -> Path:
+    d = proj / "agents" / "capabilities"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"{cap_id}_capability.py"
+    lines = [f'"""{cap_id} -- fixture capability module (Task E test)."""', ""]
+    if op_kind is not None:
+        lines.append(f'OP_KIND = "{op_kind}"')
+        lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def _write_bespoke_writer_source(proj: Path, relpath: str, source: str) -> Path:
+    p = proj / relpath
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(source, encoding="utf-8")
+    return p
+
+
+class DeriveOwningCapabilityAtReconcileTests(_Base):
+    """Direct unit coverage of the build-side ranked-evidence helper itself, mirroring
+    test_owning_capability_advisory.py's coverage of its runtime twin."""
+
+    def test_envelope_capability_id_literal_resolves(self):
+        proj = self.tmp
+        _write_capability_module(proj, "google_sheets")
+        _write_bespoke_writer_source(
+            proj, "agents/inbox/runner.py", 'ENVELOPE_CAPABILITY_ID = "google_sheets"\n')
+
+        owner, status = _derive_owning_capability_at_reconcile(proj, "agents/inbox/runner.py")
+
+        self.assertEqual(status, "resolved")
+        self.assertEqual(owner, "google_sheets")
+
+    def test_two_distinct_strong_owners_is_ambiguous(self):
+        proj = self.tmp
+        _write_capability_module(proj, "google_sheets")
+        _write_capability_module(proj, "gmail")
+        _write_bespoke_writer_source(
+            proj, "agents/inbox/runner.py",
+            "from agents.capabilities import google_sheets_capability\n"
+            "from agents.capabilities import gmail_capability\n")
+
+        owner, status = _derive_owning_capability_at_reconcile(proj, "agents/inbox/runner.py")
+
+        self.assertEqual(status, "ambiguous")
+        self.assertIsNone(owner)
+
+    def test_no_evidence_is_unresolved(self):
+        proj = self.tmp
+        _write_capability_module(proj, "google_sheets")
+        _write_bespoke_writer_source(
+            proj, "agents/inbox/runner.py",
+            "from external_write.run_envelope import mint_run_envelope\n"
+            "def run_all(chunks):\n    return [mint_run_envelope(c) for c in chunks]\n")
+
+        owner, status = _derive_owning_capability_at_reconcile(proj, "agents/inbox/runner.py")
+
+        self.assertEqual(status, "unresolved")
+        self.assertIsNone(owner)
+
+
+class AppendMigrationRequestOwnershipStampTests(_Base):
+    """`_append_migration_request` stamps the advisory owning_capability_id / ownership_status
+    fields onto the queued entry -- resolved/ambiguous/unresolved, matching the ranked-evidence
+    contract exactly."""
+
+    def test_resolved_owner_is_stamped_onto_the_queued_entry(self):
+        proj = self.tmp
+        _write_capability_module(proj, "google_sheets")
+        _write_bespoke_writer_source(
+            proj, "agents/inbox/runner.py", 'ENVELOPE_CAPABILITY_ID = "google_sheets"\n')
+
+        _append_migration_request(
+            proj, "runner", "agents/inbox/runner.py", None, [], "v0.18.0", "v0.19.0")
+
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        entry = next(e for e in queue if e["mechanism_id"] == "runner")
+        self.assertEqual(entry["ownership_status"], "resolved")
+        self.assertEqual(entry["owning_capability_id"], "google_sheets")
+        # Untouched: every pre-existing field this fix must never alter.
+        self.assertEqual(entry["writer_relpath"], "agents/inbox/runner.py")
+        self.assertEqual(entry["status"], "pending")
+
+    def test_ambiguous_owner_is_stamped_with_no_id(self):
+        proj = self.tmp
+        _write_capability_module(proj, "google_sheets")
+        _write_capability_module(proj, "gmail")
+        _write_bespoke_writer_source(
+            proj, "agents/inbox/runner.py",
+            "from agents.capabilities import google_sheets_capability\n"
+            "from agents.capabilities import gmail_capability\n")
+
+        _append_migration_request(
+            proj, "runner", "agents/inbox/runner.py", None, [], "v0.18.0", "v0.19.0")
+
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        entry = next(e for e in queue if e["mechanism_id"] == "runner")
+        self.assertEqual(entry["ownership_status"], "ambiguous")
+        self.assertIsNone(entry["owning_capability_id"])
+
+    def test_unresolved_owner_is_stamped_with_no_id(self):
+        proj = self.tmp
+        _write_bespoke_writer_source(
+            proj, "agents/inbox/runner.py",
+            "from external_write.run_envelope import mint_run_envelope\n")
+
+        _append_migration_request(
+            proj, "runner", "agents/inbox/runner.py", None, [], "v0.18.0", "v0.19.0")
+
+        queue = json.loads((proj / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        entry = next(e for e in queue if e["mechanism_id"] == "runner")
+        self.assertEqual(entry["ownership_status"], "unresolved")
+        self.assertIsNone(entry["owning_capability_id"])
 
 
 class RenderImpactNoticeTests(unittest.TestCase):

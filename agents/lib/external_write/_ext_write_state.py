@@ -93,12 +93,13 @@ stdlib-only); it never imports across the build/runtime boundary.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from external_write import scan as _scan
 
@@ -321,3 +322,190 @@ def reap_resolved_writer_migrations(project_root: str) -> List[str]:
             json.dumps(kept, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
         )
     return reaped_ids
+
+
+# ---------------------------------------------------------------------------
+# Task E (Cut 1.5 / v0.19.0): ADVISORY owning-capability link. UX ONLY -- NEVER a safety input.
+# See the module docstring's Task A section: the block above fires on the mere EXISTENCE of an
+# open bespoke-writer entry, independent of any owning-capability attribution. This section adds
+# the OPPOSITE-purpose, deliberately-non-authoritative companion: a best-effort, ranked-evidence
+# guess at which capability (if any) a bespoke writer belongs to, so a plain-language view can
+# say "fix `<writer>` (part of `<capability>`)" instead of just naming a path. Nothing in this
+# section may ever be consulted by a safety/block decision -- see
+# ``test_owning_capability_advisory.py``'s dedicated safety-independence assertions.
+# ---------------------------------------------------------------------------
+
+# Duplicated-by-value (same discipline as MIGRATION_QUEUE_REL above and every other module in
+# this package -- acceptance_ceremony.py / capability_health.py / capability_identity.py each
+# independently declare the identical two constants rather than importing a shared source).
+CAPABILITIES_DIR_REL = "agents/capabilities"
+CAPABILITY_FILE_SUFFIX = "_capability.py"
+CAPABILITY_MODULE_SUFFIX = "_capability"
+
+
+def _known_capability_modules(root: Path) -> Dict[str, Path]:
+    """capability_id -> source file path, for every ``agents/capabilities/<capability_id>_
+    capability.py`` on disk under ``root`` -- the known-capability universe ``derive_owning_
+    capability`` matches a writer's evidence against. Duplicated-by-value from
+    ``capability_health._capability_source_files`` (this module must not import
+    ``capability_health`` -- ``capability_health`` already imports THIS module, so a reverse
+    import would be circular). Fail-safe: an absent capabilities directory yields ``{}``, never
+    a raise (this is advisory-only; it must never be able to abort anything)."""
+    cap_dir = root / CAPABILITIES_DIR_REL
+    found: Dict[str, Path] = {}
+    if not cap_dir.is_dir():
+        return found
+    for path in sorted(cap_dir.glob(f"*{CAPABILITY_FILE_SUFFIX}")):
+        if not path.is_file():
+            continue
+        cap_id = path.name[: -len(CAPABILITY_FILE_SUFFIX)]
+        if cap_id:
+            found[cap_id] = path
+    return found
+
+
+def _module_level_string_literal(source_text: str, target_name: str) -> Optional[str]:
+    """Statically extract a module-level ``<target_name> = "<literal>"`` string assignment via
+    AST parse only -- NEVER imported/executed (this module never runs operator-authored code).
+    Generalizes ``lifecycle_state._extract_op_kind_literal`` / ``upgrade_reconcile._extract_
+    op_kind_literal`` (duplicated-by-value, same discipline) to any single target name, so this
+    one helper covers both ``OP_KIND`` and ``ENVELOPE_CAPABILITY_ID`` evidence below.
+    MODULE-LEVEL ONLY (``tree.body``, not ``ast.walk``) -- matches the real emitted form (a
+    capability's own ``OP_KIND`` is always written at module scope by ``capability_code_
+    scaffold.py``'s ``render_capability_module``; a writer's own self-declared ``ENVELOPE_
+    CAPABILITY_ID``, if any, is expected to follow the identical convention). Returns ``None``
+    when the source does not parse, cannot be read, or carries no such literal -- fail-closed/
+    empty-safe (toward "no evidence"), never guesses."""
+    try:
+        tree = ast.parse(source_text)
+    except SyntaxError:
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+        elif isinstance(node, ast.AnnAssign):
+            target = node.target
+        else:
+            continue
+        if isinstance(target, ast.Name) and target.id == target_name:
+            value = node.value
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                return value.value
+    return None
+
+
+def _imports_capability_module(source_text: str, module_stem: str) -> bool:
+    """True iff ``source_text`` contains an import naming ``module_stem`` (a capability's
+    module stem, e.g. ``google_sheets_capability``) -- ``import <module_stem>``, a dotted
+    ``import a.b.<module_stem>``, ``from a.b import <module_stem>``, or ``from <module_stem>
+    import x`` / ``from a.b.<module_stem> import x``. AST parse only, NEVER imported/executed.
+    Walks the WHOLE tree (``ast.walk``), unlike the module-level-only literal extractor above --
+    an import can legitimately appear anywhere a writer chooses to place it, unlike the fixed-
+    convention module-scope literals. Returns ``False`` on any parse failure -- fail-closed
+    toward "no evidence", never guesses."""
+    try:
+        tree = ast.parse(source_text)
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == module_stem or alias.name.endswith("." + module_stem):
+                    return True
+        elif isinstance(node, ast.ImportFrom):
+            if node.module and (
+                node.module == module_stem or node.module.endswith("." + module_stem)
+            ):
+                return True
+            for alias in node.names:
+                if alias.name == module_stem:
+                    return True
+    return False
+
+
+def derive_owning_capability(project_root: str, entry: Dict[str, Any]) -> Dict[str, Any]:
+    """ADVISORY-ONLY (Task E, Cut 1.5 / v0.19.0): the ranked-evidence derivation of which
+    capability, if any, OWNS the bespoke writer named by ``entry["writer_relpath"]`` -- used
+    ONLY to enrich the plain-language "fix this file (part of X)" message a completion/
+    acceptance view shows the operator (see ``lifecycle_state._completion_not_done_message``).
+
+    THIS IS NEVER A SAFETY INPUT. Task A's project-wide, attribution-free block (the mere
+    EXISTENCE of an open bespoke-writer entry -- see ``open_bespoke_writer_migrations`` above)
+    already covers safety regardless of whether this function resolves an owner; no caller may
+    let its result change any block/refuse/done decision. See ``test_owning_capability_
+    advisory.py``'s dedicated safety-independence assertions, which prove ``open_bespoke_writer_
+    migrations`` / ``lifecycle_state.check_completion`` / ``capability_health.overall_status``
+    fire identically for a resolved, an ambiguous, and an unresolved entry.
+
+    RANKED EVIDENCE -- STRONG signals only; WEAK evidence (a writer's file stem/path merely
+    resembling a capability id) is NEVER authority and is not consulted at all:
+      - the writer's source imports ``<id>_capability`` for some known capability id, OR
+      - the writer's source carries a literal ``ENVELOPE_CAPABILITY_ID = "<id>"`` matching a
+        known capability id exactly, OR
+      - the writer's own ``OP_KIND`` literal (if it has one) matches EXACTLY ONE known
+        capability's own ``OP_KIND`` literal (shared with two or more -> that signal
+        contributes no candidate at all -- it is not itself strong evidence for any one of
+        them).
+    Each signal that fires contributes the capability id(s) it points to; the UNION across all
+    three signals is the candidate owner set.
+
+    Returns ``{"owning_capability_id": <id> or None, "ownership_status": "resolved" |
+    "ambiguous" | "unresolved"}``:
+      - exactly one candidate            -> resolved,   owning_capability_id = that id.
+      - two or more DISTINCT candidates   -> ambiguous, owning_capability_id = None.
+      - zero candidates (including any read/parse failure or an empty/absent capabilities
+        directory) -> unresolved, owning_capability_id = None.
+
+    Fail-closed toward "we don't know" -- never toward fabricating/guessing a single owner it
+    cannot support with strong evidence -- and never raises: a non-dict ``entry``, a missing/
+    empty ``writer_relpath``, an unreadable writer file, or an unreadable/unparsable capability
+    module file simply contributes no evidence (or is skipped) rather than aborting the whole
+    derivation."""
+    unresolved: Dict[str, Any] = {"owning_capability_id": None, "ownership_status": "unresolved"}
+    if not isinstance(entry, dict):
+        return unresolved
+    writer_relpath = entry.get("writer_relpath")
+    if not isinstance(writer_relpath, str) or not writer_relpath:
+        return unresolved
+
+    root = Path(project_root)
+    try:
+        writer_source = (root / writer_relpath).read_text(encoding="utf-8")
+    except OSError:
+        return unresolved
+
+    known = _known_capability_modules(root)
+    if not known:
+        return unresolved
+
+    candidates: set = set()
+
+    # Signal 1: the writer imports `<id>_capability` for some known capability id.
+    for cap_id in known:
+        if _imports_capability_module(writer_source, f"{cap_id}{CAPABILITY_MODULE_SUFFIX}"):
+            candidates.add(cap_id)
+
+    # Signal 2: the writer carries a literal ENVELOPE_CAPABILITY_ID == <canonical id>.
+    envelope_literal = _module_level_string_literal(writer_source, "ENVELOPE_CAPABILITY_ID")
+    if envelope_literal is not None and envelope_literal in known:
+        candidates.add(envelope_literal)
+
+    # Signal 3: the writer's own OP_KIND literal is shared with EXACTLY ONE known capability.
+    writer_op_kind = _module_level_string_literal(writer_source, "OP_KIND")
+    if writer_op_kind is not None:
+        sharing: List[str] = []
+        for cap_id, cap_path in known.items():
+            try:
+                cap_source = cap_path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if _module_level_string_literal(cap_source, "OP_KIND") == writer_op_kind:
+                sharing.append(cap_id)
+        if len(sharing) == 1:
+            candidates.add(sharing[0])
+
+    if len(candidates) == 1:
+        return {"owning_capability_id": next(iter(candidates)), "ownership_status": "resolved"}
+    if len(candidates) >= 2:
+        return {"owning_capability_id": None, "ownership_status": "ambiguous"}
+    return unresolved
