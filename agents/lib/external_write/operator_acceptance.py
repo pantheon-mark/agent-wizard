@@ -73,6 +73,9 @@ from external_write.contracts import get_contract
 from external_write.effects_manifest import unresolvable_adapter_seal_gap
 from external_write._ext_write_state import (
     open_bespoke_writer_migrations,
+    blocking_bespoke_writer_migrations,
+    classify_bespoke_writer_entry,
+    WriterState,
     ExternalWriteStateReadError,
 )
 from external_write.proof_hash import (
@@ -745,8 +748,14 @@ def record_operator_acceptance(
     # do NOT live-enable: caught and turned into a plain-language refusal here, never allowed to
     # crash the flow or fall through to acceptance (falling through would be exactly the false
     # green this cut exists to close).
+    # (Cut 1.6 / Task 2) Keys on the BLOCKING SUBSET, not on every open entry. ADR-0046's
+    # presence-of-violation principle is unchanged; what changed is which entries are ADMITTED to
+    # the blocking set (see _ext_write_state's Task 1 section). A non-live test module or an
+    # operator-acknowledged unrepairable writer stays visible in `capability_health --overall` but
+    # no longer refuses acceptance for every capability in the project, forever (F-VAL19-1 /
+    # F-VAL19-5). NEEDS_PERSON deliberately REMAINS blocking -- see the refusal branch below.
     try:
-        _open_bypasses = open_bespoke_writer_migrations(identity_root)
+        _open_bypasses = blocking_bespoke_writer_migrations(identity_root)
     except ExternalWriteStateReadError:
         # C(a) scrub: never surface the raw exception to a non-technical operator (repo
         # "no raw errors to the operator" convention). Keep it plain-language + actionable.
@@ -756,10 +765,35 @@ def record_operator_acceptance(
             "agents/handoffs/pending_migrations.json could not be read (it may be malformed); "
             "repair it so it can be read, then re-run acceptance; nothing was accepted")
     if _open_bypasses:
-        _writers = ", ".join(f"`{e.get('writer_relpath')}`" for e in _open_bypasses)
-        return _refuse(
-            f"an external-write bypass is unrepaired: {_writers} -- rebuild it so it routes "
-            "through the sanctioned bulk path, then re-run acceptance; nothing was accepted")
+        # Split the refusal by STATE. Telling a non-technical operator to "rebuild it" when the
+        # file cannot be repaired by any tooling we ship is a dead end -- it is exactly what
+        # stalled the real estate at F-VAL19-1, where the flagged file also delivered the
+        # operator's daily alert and could be neither made scan-clean nor deleted. Each group
+        # gets the next step that is actually available to it.
+        _needs_person, _rebuildable = [], []
+        for _e in _open_bypasses:
+            _rel = str(_e.get("writer_relpath"))
+            try:
+                _state = classify_bespoke_writer_entry(identity_root, _e)
+            except Exception:
+                _state = WriterState.BLOCKING_LIVE_ENABLE   # unclassifiable -> treat as rebuildable.
+            (_needs_person if _state == WriterState.NEEDS_PERSON else _rebuildable).append(_rel)
+
+        _parts = []
+        if _rebuildable:
+            _parts.append(
+                "an external-write bypass is unrepaired: "
+                + ", ".join(f"`{r}`" for r in sorted(_rebuildable))
+                + " -- rebuild it so it routes through the sanctioned bulk path")
+        if _needs_person:
+            _parts.append(
+                "this cannot be fixed automatically and needs a person: "
+                + ", ".join(f"`{r}`" for r in sorted(_needs_person))
+                + " -- it does something the rebuild flow cannot rewrite for you, so either "
+                "change it by hand until it passes the check, or record that you accept the "
+                "risk of leaving it as it is (that decision is kept on file and shown again "
+                "whenever the file changes)")
+        return _refuse("; ".join(_parts) + "; then re-run acceptance; nothing was accepted")
 
     if receipt_path is None:
         # A per-capability receipt filename; deterministic so a re-run overwrites its own prior

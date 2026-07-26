@@ -1090,15 +1090,32 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
         "resumable": s.raw_had_run_state,
     } for s in runs]
 
+    # (Cut 1.6 / Task 2) Two DIFFERENT questions, deliberately answered separately:
+    #   * `blocking` -- does anything hold back live-enable? Keys on the BLOCKING SUBSET.
+    #   * `normal_status_allowed` -- may an agent tell the operator everything is normal? Keys on
+    #     ANY open entry, blocking or not.
+    # Visibility is NOT gated on blocking: a non-live test module or an acknowledged unrepairable
+    # writer stops bricking acceptance but is still named here and still withholds the all-clear.
+    # Not blocking must never mean invisible.
     bypass_writer_relpaths: List[str] = []
+    bypass_blocking_relpaths: List[str] = []
+    bypass_writer_states: Dict[str, str] = {}
     bypass_read_error = False
     try:
         bypass_writer_relpaths = _ext_write_state.open_bespoke_writer_relpaths(str(project_root))
+        for _state, _entries in _ext_write_state.bespoke_writer_state_report(
+                str(project_root)).items():
+            for _e in _entries:
+                bypass_writer_states[str(_e.get("writer_relpath"))] = _state
+        bypass_blocking_relpaths = sorted({
+            str(e.get("writer_relpath"))
+            for e in _ext_write_state.blocking_bespoke_writer_migrations(str(project_root))})
     except _ext_write_state.ExternalWriteStateReadError:
         bypass_read_error = True
-    bypass_blocking = bypass_read_error or bool(bypass_writer_relpaths)
+    bypass_blocking = bypass_read_error or bool(bypass_blocking_relpaths)
+    any_open_bypass = bypass_read_error or bool(bypass_writer_relpaths)
 
-    normal_ok = (not red) and (not orphaned) and (not bypass_blocking)
+    normal_ok = (not red) and (not orphaned) and (not any_open_bypass)
     return {
         "overall": "green" if normal_ok else "red",
         "normal_status_allowed": normal_ok,
@@ -1111,6 +1128,12 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
         "open_external_write_bypass": {
             "blocking": bypass_blocking,
             "writer_relpaths": bypass_writer_relpaths,
+            # (Cut 1.6) the subset that actually holds back live-enable, and the per-writer
+            # state so a plain-language view can say WHY -- "needs a person" reads very
+            # differently to the operator than "rebuild it", and telling someone to rebuild a
+            # structurally unrepairable file is the dead end that stalled the real estate.
+            "blocking_writer_relpaths": bypass_blocking_relpaths,
+            "writer_states": bypass_writer_states,
             "read_error": bypass_read_error,
         },
     }

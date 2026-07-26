@@ -325,15 +325,18 @@ class StateClassifierTests(unittest.TestCase):
             str(self.p.root), ews.open_bespoke_writer_migrations(str(self.p.root))[0])
         self.assertEqual(state, ews.WriterState.BLOCKING_LIVE_ENABLE)
 
-    def test_absent_writer_is_resolved_not_blocking(self):
-        """Must not contradict the Cut 1.5 reap predicate, which treats an
-        absent writer file as resolved (the bypass is gone). The classifier
-        agrees rather than inventing a second, conflicting truth."""
+    def test_absent_writer_still_blocks_because_the_reaper_owns_resolution(self):
+        """The classifier must NOT re-derive "resolved". reap_resolved_writer_
+        migrations is the single authority (its predicate is absent OR
+        hash-changed-AND-scan-clean, and it REMOVES the entry). A second,
+        weaker rule here would be two authorities over one fact -- the
+        duplicated-inference class ADR-0045 exists to close -- and would
+        un-block an entry the reaper has not cleared. Fail closed instead; the
+        reaper clears it via reconcile-on-read moments later."""
         self.p.write_queue([_entry("agents/gone/missing.py", ["sealed_kernel_import"])])
         state = ews.classify_bespoke_writer_entry(
             str(self.p.root), ews.open_bespoke_writer_migrations(str(self.p.root))[0])
-        self.assertEqual(state, ews.WriterState.RESOLVED)
-        self.assertEqual(ews.blocking_bespoke_writer_migrations(str(self.p.root)), [])
+        self.assertEqual(state, ews.WriterState.BLOCKING_LIVE_ENABLE)
 
     def test_inaccessible_writer_is_blocking_not_resolved(self):
         """os.stat-style distinction (memory: fail-closed fs checks must
@@ -395,3 +398,63 @@ class StateClassifierTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConsumerWiringTests(unittest.TestCase):
+    """Task 2 / Cut 1.6 -- the three safety consumers block on the BLOCKING
+    SUBSET, while still REPORTING every open entry.
+
+    The distinction matters for a non-technical operator: a non-blocking entry
+    must never become invisible just because it stopped blocking. Visibility is
+    not gated on blocking."""
+
+    def setUp(self):
+        self.p = _Project()
+        self.addCleanup(self.p.close)
+
+    def _non_live_entry(self):
+        self.p.write_file("agents/inbox/test_inbox_bulk.py", _TEST_MODULE_SRC)
+        self.p.write_queue([_entry("agents/inbox/test_inbox_bulk.py",
+                                   ["sealed_kernel_import"])])
+
+    def _blocking_entry(self):
+        self.p.write_file("agents/inbox/runner.py", _LIVE_WRITER_SRC)
+        self.p.write_queue([_entry("agents/inbox/runner.py",
+                                   ["sealed_kernel_import"])])
+
+    # ------------------------------------------------------------ health view
+
+    def test_health_does_not_block_on_a_non_live_entry(self):
+        from external_write import capability_health as ch
+        self._non_live_entry()
+        status = ch.overall_status(str(self.p.root))
+        self.assertFalse(status["open_external_write_bypass"]["blocking"])
+
+    def test_health_still_reports_a_non_live_entry_and_withholds_the_all_clear(self):
+        """Not blocking != invisible. `normal_status_allowed` stays False while
+        ANY open entry exists in any non-resolved state, so the operator is
+        still told about it -- it simply no longer bricks acceptance."""
+        from external_write import capability_health as ch
+        self._non_live_entry()
+        status = ch.overall_status(str(self.p.root))
+        self.assertFalse(status["normal_status_allowed"],
+                         "an open non-live entry must still withhold the all-clear")
+        self.assertIn("agents/inbox/test_inbox_bulk.py",
+                      status["open_external_write_bypass"]["writer_relpaths"])
+        states = status["open_external_write_bypass"]["writer_states"]
+        self.assertEqual(states["agents/inbox/test_inbox_bulk.py"], ews.WriterState.NON_LIVE)
+
+    def test_health_blocks_on_a_blocking_entry(self):
+        from external_write import capability_health as ch
+        self._blocking_entry()
+        status = ch.overall_status(str(self.p.root))
+        self.assertTrue(status["open_external_write_bypass"]["blocking"])
+        self.assertFalse(status["normal_status_allowed"])
+
+    def test_health_fails_closed_on_an_unreadable_queue(self):
+        from external_write import capability_health as ch
+        (self.p.root / QUEUE_REL).write_text("{not json", encoding="utf-8")
+        status = ch.overall_status(str(self.p.root))
+        self.assertTrue(status["open_external_write_bypass"]["blocking"])
+        self.assertTrue(status["open_external_write_bypass"]["read_error"])
+        self.assertFalse(status["normal_status_allowed"])

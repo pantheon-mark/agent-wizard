@@ -184,3 +184,81 @@ class GlobalBespokeWriterBlockTests(_ls_fixtures._CheckCompletionFixtureMixin, u
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BlockingSubsetTests(_ls_fixtures._CheckCompletionFixtureMixin, unittest.TestCase):
+    """Cut 1.6 / Task 2 -- completion and health key on the BLOCKING SUBSET.
+
+    The keystone above is unchanged: presence of an unresolved LIVE bypass still
+    blocks project-wide, attribution-free. What changes is which entries are
+    ADMITTED to the blocking set. Before this cut, a test module -- whose
+    violations are intrinsic to testing the write path -- blocked acceptance for
+    every capability in the project, forever (4 of the estate's 7 real entries
+    were exactly this, and none of them could ever be reaped)."""
+
+    _NON_LIVE_RELPATH = "agents/inbox/test_inbox_bulk.py"
+
+    def _write_non_live_test_module(self, root):
+        p = root / self._NON_LIVE_RELPATH
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            "import unittest\n"
+            "from external_write.adapters_inbox import InboxAdapter\n\n\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_x(self):\n        self.assertTrue(InboxAdapter)\n",
+            encoding="utf-8")
+
+    def test_non_live_test_module_does_not_block_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._accept_real_capability(root, CAP_ID)
+            self._write_non_live_test_module(root)
+            _write_pending_migrations(root, [
+                _bespoke_entry(writer_relpath=self._NON_LIVE_RELPATH)])
+
+            result = lifecycle_state.check_completion(str(root), CAP_ID)
+            self.assertTrue(
+                result.done,
+                f"a non-live test module must not block completion: {result.operator_message}")
+            self.assertNotIn("open_external_write_bypass", result.failed_conjuncts)
+
+    def test_non_live_test_module_is_still_reported_and_withholds_the_all_clear(self):
+        """Not blocking must never mean invisible. The operator is still told."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._accept_real_capability(root, CAP_ID)
+            self._write_non_live_test_module(root)
+            _write_pending_migrations(root, [
+                _bespoke_entry(writer_relpath=self._NON_LIVE_RELPATH)])
+
+            overall = capability_health.overall_status(str(root))
+            self.assertFalse(overall["normal_status_allowed"],
+                             "an open non-live entry must still withhold the all-clear")
+            self.assertFalse(overall["open_external_write_bypass"]["blocking"])
+            self.assertIn(self._NON_LIVE_RELPATH,
+                          overall["open_external_write_bypass"]["writer_relpaths"])
+            self.assertEqual(
+                overall["open_external_write_bypass"]["writer_states"][self._NON_LIVE_RELPATH],
+                "non_live")
+
+    def test_a_real_live_writer_alongside_it_still_blocks(self):
+        """No over-correction: adding a non-live entry must not mask a real one."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._accept_real_capability(root, CAP_ID)
+            self._write_non_live_test_module(root)
+            _write_bespoke_writer_file(root)
+            _write_pending_migrations(root, [
+                _bespoke_entry(writer_relpath=self._NON_LIVE_RELPATH),
+                _bespoke_entry(),
+            ])
+
+            result = lifecycle_state.check_completion(str(root), CAP_ID)
+            self.assertFalse(result.done)
+            self.assertIn("open_external_write_bypass", result.failed_conjuncts)
+            overall = capability_health.overall_status(str(root))
+            self.assertTrue(overall["open_external_write_bypass"]["blocking"])
+            self.assertIn(BESPOKE_WRITER_RELPATH,
+                          overall["open_external_write_bypass"]["blocking_writer_relpaths"])
+            self.assertNotIn(self._NON_LIVE_RELPATH,
+                             overall["open_external_write_bypass"]["blocking_writer_relpaths"])

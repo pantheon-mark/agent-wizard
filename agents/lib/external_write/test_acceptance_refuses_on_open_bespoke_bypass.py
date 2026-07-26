@@ -162,6 +162,72 @@ class AcceptanceRefusesOnOpenBespokeBypassTest(unittest.TestCase):
                 return e.get("accepted")
         return None
 
+    # -- Cut 1.6: the gate now blocks on the BLOCKING SUBSET, not every open entry ---------------
+
+    def _write_queue(self, entries):
+        self.queue_path.write_text(
+            json.dumps(entries, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    def _write_file(self, relpath, text):
+        p = self.tmp / relpath
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+
+    def test_non_live_test_module_entry_does_not_block_acceptance(self):
+        """Cut 1.6 / Task 2. A test module is not a live write path. Before this
+        cut its presence in the queue blocked acceptance for the ENTIRE project
+        forever (4 of the estate's 7 real entries were exactly this). It must
+        still be VISIBLE, but it must not block."""
+        self._write_file(
+            "agents/inbox/test_inbox_bulk.py",
+            "import unittest\n"
+            "from external_write.adapters_inbox import InboxAdapter\n\n\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_x(self):\n        self.assertTrue(InboxAdapter)\n")
+        self._write_queue([{
+            "mechanism_id": "agents_inbox_test_inbox_bulk",
+            "writer_relpath": "agents/inbox/test_inbox_bulk.py",
+            "status": "pending",
+            "paused_content_sha256": "deadbeef",
+            "violations": [{"kind": "sealed_kernel_import", "line": 2,
+                            "path": "agents/inbox/test_inbox_bulk.py"}],
+        }])
+
+        res = self._call()
+
+        self.assertTrue(res.accepted,
+                        f"a non-live test module must not block acceptance: {res.reason}")
+        self.assertTrue(self._accepted_flag())
+
+    def test_needs_person_entry_still_refuses_and_names_the_person_path(self):
+        """THE GUARD (see _ext_write_state's Task 1 section). A live writer whose
+        violations our remediator cannot fix stays BLOCKING -- letting it through
+        silently would re-open F-VAL18-1. The refusal must also stop telling a
+        non-technical operator to 'rebuild it', which is the dead end that
+        stalled the real estate (F-VAL19-1): it must name the acknowledgement
+        path instead."""
+        self._write_file(
+            "agents/upkeep/runner.py",
+            '"""Daily upkeep."""\nimport urllib.request\n')
+        self._write_queue([{
+            "mechanism_id": "agents_upkeep_runner",
+            "writer_relpath": "agents/upkeep/runner.py",
+            "status": "pending",
+            "paused_content_sha256": "deadbeef",
+            "violations": [{"kind": "forbidden_import", "line": 2,
+                            "path": "agents/upkeep/runner.py"}],
+        }])
+
+        res = self._call()
+
+        self.assertFalse(res.accepted, "a needs-a-person writer must still refuse live-enable")
+        self.assertFalse(self._accepted_flag())
+        self.assertIn("agents/upkeep/runner.py", res.reason)
+        reason = res.reason.lower()
+        self.assertTrue(
+            "acknowledge" in reason or "cannot be fixed automatically" in reason,
+            f"refusal must name the person/acknowledgement path, not just 'rebuild it': {res.reason}")
+
     # -- Part 1: an OPEN bespoke-writer entry present -> live-enable REFUSED, no partial state ---
 
     def test_open_bespoke_bypass_refuses_live_enable_with_no_partial_state(self):

@@ -552,7 +552,7 @@ class WriterState:
     NEEDS_PERSON = "needs_person"
     NON_LIVE = "non_live"
     ACKNOWLEDGED_RISK = "acknowledged_risk"
-    RESOLVED = "resolved"
+    RESOLVED = "resolved"   # reserved: emitted by the REAPER, never by classify_bespoke_writer_entry
 
 
 #: Violation kinds OUR OWN remediation covers. The rebuild flow rewrites a
@@ -766,10 +766,17 @@ def classify_bespoke_writer_entry(project_root: str,
     writer_path = root / writer_relpath
     try:
         source_text = writer_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return WriterState.RESOLVED
     except (OSError, UnicodeDecodeError):
-        return WriterState.BLOCKING_LIVE_ENABLE   # present but unverifiable.
+        # Deliberately NOT "absent -> RESOLVED". ``reap_resolved_writer_migrations`` is the SINGLE
+        # authority on whether a writer is resolved -- it owns the full predicate (absent OR
+        # hash-changed-AND-scan-clean) and it REMOVES the entry. A second, weaker resolution rule
+        # here would be two authorities over one fact: exactly the duplicated-inference defect
+        # class ADR-0045 exists to close, and it would silently un-block an entry the reaper has
+        # not cleared. So an unreadable/absent writer simply falls through to fail-closed BLOCKING;
+        # reconcile-on-read runs the reaper moments later and the entry disappears properly.
+        # (Caught by test_open_bespoke_bypass_refuses_live_enable_with_no_partial_state, whose
+        # fixture has no writer file on disk -- that keystone regression test found this.)
+        return WriterState.BLOCKING_LIVE_ENABLE
 
     if acknowledged is None:
         acknowledged = _active_acknowledgement_relpaths(project_root)

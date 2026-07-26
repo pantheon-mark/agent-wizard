@@ -1593,10 +1593,17 @@ def check_completion(project_root: str, canonical_id: str) -> CompletionResult:
     # no change whatsoever to the safety-decision inputs: `bypass_writer_relpaths` is derived
     # from these same entries and is byte-for-value identical to what
     # `open_bespoke_writer_relpaths` itself would have returned.)
+    # (Cut 1.6 / Task 2) The DECISION keys on the BLOCKING SUBSET, not on every open entry.
+    # ADR-0046's presence-of-violation principle is unchanged -- what changed is WHICH entries
+    # are admitted to the blocking set (see _ext_write_state's Task 1 section): a non-live test
+    # module or an operator-acknowledged unrepairable writer is still OPEN and still reported by
+    # `capability_health --overall`, but it no longer holds this capability's completion hostage.
+    # Without this, one unrepairable writer bricked completion project-wide, permanently
+    # (F-VAL19-1/F-VAL19-5). Fail-closed is untouched: a read error still blocks.
     bypass_entries: List[Dict[str, Any]] = []
     bypass_read_error = False
     try:
-        bypass_entries = _ext_write_state.open_bespoke_writer_migrations(str(root))
+        bypass_entries = _ext_write_state.blocking_bespoke_writer_migrations(str(root))
     except _ext_write_state.ExternalWriteStateReadError:
         bypass_read_error = True
     bypass_writer_relpaths: List[str] = sorted({
