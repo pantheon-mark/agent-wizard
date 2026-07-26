@@ -115,6 +115,9 @@ from capability_code_scaffold import (  # type: ignore  # noqa: E402
 from capability_code_scaffold import (
     _missing_evidence_predicates_for_adapter_source as _missing_evidence_predicates_for_adapter,
 )
+from capability_code_scaffold import (
+    _update_adapter_profile_registry,
+)
 from adapter_migrations import ADAPTER_MIGRATIONS, MigrationContext
 from provisioner_migration import PROVISIONER_NAME
 
@@ -1423,6 +1426,13 @@ def reconcile_adapter_migrations(
 
     Best-effort per module, exactly as the pass it replaces: an unparseable or
     unwritable adapter skips that module and never half-corrupts a project.
+
+    Also reconciles every resolved target's ADAPTER_PROFILE zone-registry
+    entry (``adapter_profile_registry.json``), regardless of whether that
+    target's source needed a migration -- see the inline comment at the call
+    site for why. Idempotent and additive only; never touches a shipped
+    baseline (those are excluded from ``targets`` before this function ever
+    sees them).
     """
     operator_project_dir = Path(operator_project_dir)
     remediated: List[PredicateStubRemediation] = []
@@ -1445,6 +1455,7 @@ def reconcile_adapter_migrations(
     if targets.manifest_blocking_reason:
         return remediated, outcomes, targets.manifest_blocking_reason
 
+    external_write_dir = operator_project_dir / DEFAULT_EXTERNAL_WRITE_REL
     context = MigrationContext(required_predicates=required)
     canonical_by_relpath = {
         f"{DEFAULT_EXTERNAL_WRITE_REL.as_posix()}/adapters_{cid}.py": cid
@@ -1495,6 +1506,24 @@ def reconcile_adapter_migrations(
 
         if current != source:
             _atomic_write(adapter_path, current)
+
+        # `relpath` reached this point because resolve_adapter_migration_targets
+        # already declared it an operator adapter (enrolment manifest UNION
+        # canonical-id convention, shipped baselines excluded) -- not because
+        # its source needed a migration. The ADAPTER_PROFILE zone allowlist is
+        # a materialized view of that SAME declaration, so it is reconciled
+        # here for every resolved target, changed or not: an enrolled adapter
+        # missing its zone-registry entry is scan-RED on a file this reconcile
+        # may have just repaired, which would block the operator's own
+        # ability to rebuild or accept the fix. Reuses the sanctioned writer
+        # (idempotent, additive) rather than hand-rolling the JSON. Best-
+        # effort, like every other per-module step above: a failure here
+        # skips this module's registration and never aborts the rest of the
+        # reconcile.
+        try:
+            _update_adapter_profile_registry(external_write_dir, Path(relpath).name)
+        except OSError:
+            pass
 
     record_adapter_migration_refusals(
         operator_project_dir, refusals,

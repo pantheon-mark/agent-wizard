@@ -3377,6 +3377,133 @@ class ResolveAdapterMigrationTargetsTests(_Base):
                          f"expected exactly one write, got {len(writes)}")
 
 
+class AdapterProfileZoneRegistryReconciliationTests(_Base):
+    """The zone allowlist (``adapter_profile_registry.json``) is a materialized
+    view of the SAME declaration ``resolve_adapter_migration_targets`` already
+    computes (enrolment manifest UNION canonical-id convention, shipped
+    baselines excluded) -- not a second, independent judgement. An enrolled
+    adapter missing this entry is scan-RED on a file the upgrade may have just
+    repaired, which blocks the operator's own ability to rebuild or accept the
+    fix -- see ``test_legacy_shape_upgrade_runnable.py``'s
+    ``test_the_upgraded_project_is_scan_clean`` for the end-to-end proof.
+    """
+
+    #: Deliberately needs NEITHER migration -- the read-client builder is
+    #: already a method and both evidence predicates are already present. This
+    #: is the case a changed-only fix would still leave unregistered: the
+    #: adapter's SOURCE was already fine, only its zone registration was
+    #: missing.
+    _ALREADY_CONFORMANT_ADAPTER = (
+        "from typing import Any\n"
+        "from external_write.adapter_registry import register_adapter\n"
+        "\n"
+        "OP_KIND = 'demo.op'\n"
+        "\n"
+        "\n"
+        "class DemoAdapter:\n"
+        "    def apply_one(self, raw_client, unit):\n"
+        "        return None\n"
+        "\n"
+        "    def verify_apply_landed(self, observer, unit):\n"
+        "        return True\n"
+        "\n"
+        "    def verify_undo_restored(self, evidence):\n"
+        "        return True\n"
+        "\n"
+        "    def build_read_only_client(self, op):\n"
+        "        return object()\n"
+        "\n"
+        "\n"
+        "register_adapter(OP_KIND, DemoAdapter())\n"
+    )
+
+    def _registry_path(self, root):
+        return (root / "agents" / "lib" / "external_write"
+                / "adapter_profile_registry.json")
+
+    def _registry_entries(self, root):
+        path = self._registry_path(root)
+        if not path.is_file():
+            return []
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def test_an_enrolled_adapter_that_needed_no_migration_still_gets_registered(self):
+        """The case a changed-only fix would miss: no migration touched the
+        adapter's source, but it is still a declared operator adapter and must
+        still land in the zone allowlist."""
+        from upgrade_reconcile import reconcile_adapter_migrations
+        root = self._project_with_capability(
+            canonical_id="demo", op_kind="demo.op",
+            adapter_name="adapters_demo.py",
+            adapter_source=self._ALREADY_CONFORMANT_ADAPTER)
+        _remediated, outcomes, blocking = reconcile_adapter_migrations(
+            root, _REAL_REPO, from_version="v0.20.0", to_version="v0.21.0")
+        self.assertIsNone(blocking)
+        self.assertFalse(any(o.changed for o in outcomes),
+                         "this fixture must need neither migration")
+        self.assertIn("adapters_demo.py", self._registry_entries(root))
+
+    def test_reconciling_twice_is_byte_identical(self):
+        """Idempotent: re-running must not duplicate an entry or otherwise
+        perturb the file."""
+        from upgrade_reconcile import reconcile_adapter_migrations
+        root = self._project_with_capability(
+            canonical_id="demo", op_kind="demo.op",
+            adapter_name="adapters_demo.py",
+            adapter_source=self._ALREADY_CONFORMANT_ADAPTER)
+        reconcile_adapter_migrations(
+            root, _REAL_REPO, from_version="v0.20.0", to_version="v0.21.0")
+        first = self._registry_path(root).read_bytes()
+        reconcile_adapter_migrations(
+            root, _REAL_REPO, from_version="v0.20.0", to_version="v0.21.0")
+        second = self._registry_path(root).read_bytes()
+        self.assertEqual(first, second,
+                         "a second reconcile must leave the registry file "
+                         "byte-identical")
+        self.assertEqual(self._registry_entries(root).count("adapters_demo.py"), 1)
+
+    def test_a_preexisting_registry_entry_is_kept_never_reordered_away(self):
+        """Additive only: an entry an earlier flow (or an operator) already put
+        there must survive, in place, alongside the newly reconciled one."""
+        from upgrade_reconcile import reconcile_adapter_migrations
+        root = self._project_with_capability(
+            canonical_id="demo", op_kind="demo.op",
+            adapter_name="adapters_demo.py",
+            adapter_source=self._ALREADY_CONFORMANT_ADAPTER)
+        registry_path = self._registry_path(root)
+        registry_path.write_text(
+            json.dumps(["adapters_gmail.py", "adapters_preexisting.py"]),
+            encoding="utf-8")
+        reconcile_adapter_migrations(
+            root, _REAL_REPO, from_version="v0.20.0", to_version="v0.21.0")
+        entries = self._registry_entries(root)
+        self.assertEqual(entries[:2], ["adapters_gmail.py", "adapters_preexisting.py"],
+                         "pre-existing entries must be kept, in place")
+        self.assertIn("adapters_demo.py", entries)
+
+    def test_shipped_baselines_are_never_added_by_this_path(self):
+        """adapters.py / adapters_gmail.py must never be written here --
+        confirmed directly against THIS reconciliation path, not merely
+        assumed from resolve_adapter_migration_targets's own exclusion."""
+        from upgrade_reconcile import reconcile_adapter_migrations
+        root = self._project_with_capability(
+            canonical_id="demo", op_kind="demo.op",
+            adapter_name="adapters_demo.py",
+            adapter_source=self._ALREADY_CONFORMANT_ADAPTER)
+        lib = root / "agents" / "lib" / "external_write"
+        (lib / "adapters.py").write_text("# reference adapter\n", encoding="utf-8")
+        (lib / "adapters_gmail.py").write_text("# shipped baseline\n", encoding="utf-8")
+        (lib / "operator_adapters.json").write_text(
+            json.dumps(["adapters_demo", "adapters", "adapters_gmail"]),
+            encoding="utf-8")
+        reconcile_adapter_migrations(
+            root, _REAL_REPO, from_version="v0.20.0", to_version="v0.21.0")
+        entries = self._registry_entries(root)
+        self.assertNotIn("adapters.py", entries)
+        self.assertNotIn("adapters_gmail.py", entries)
+        self.assertIn("adapters_demo.py", entries)
+
+
 # ===================================================================================
 # The read-provisioner conformance POST-CONDITION — asserted against the END STATE,
 # after any migrations have run, so a gap in what they enumerated cannot produce a
