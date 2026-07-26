@@ -3169,9 +3169,15 @@ class ResolveAdapterMigrationTargetsTests(_Base):
 
     def test_shipped_baseline_adapters_are_never_migration_targets(self):
         """The migration set REWRITES its targets. A shipped baseline adapter is
-        emitted-lib code, not operator-enrolled code, so it must never be
-        rewritten in an operator's project -- scaffolding a failing stub into it
-        would break a working shipped adapter."""
+        wizard-emitted library code, refreshed by the upgrade's own file
+        delivery, so it must never be rewritten in an operator's project --
+        scaffolding a failing stub into one would break a working adapter.
+
+        The shipped names are enrolled in the manifest here ON PURPOSE: that is
+        the only way they can become candidates at all, so it is the only way
+        this test can reach the exclusion it exists to pin. With the exclusion
+        removed, this test must fail.
+        """
         from upgrade_reconcile import resolve_adapter_migration_targets
         root = Path(self.tmp)
         lib = root / "agents" / "lib" / "external_write"
@@ -3179,9 +3185,17 @@ class ResolveAdapterMigrationTargetsTests(_Base):
         (lib / "adapters.py").write_text("# reference adapter\n", encoding="utf-8")
         (lib / "adapters_gmail.py").write_text("# shipped baseline\n", encoding="utf-8")
         (lib / "adapters_estate_upkeep.py").write_text("# operator\n", encoding="utf-8")
+        (lib / "operator_adapters.json").write_text(
+            json.dumps(["adapters", "adapters_gmail", "adapters_estate_upkeep"]),
+            encoding="utf-8")
         targets = resolve_adapter_migration_targets(root, ["estate_upkeep"])
         self.assertNotIn("agents/lib/external_write/adapters.py", targets.relpaths)
-        self.assertNotIn("agents/lib/external_write/adapters_gmail.py", targets.relpaths)
+        self.assertNotIn("agents/lib/external_write/adapters_gmail.py",
+                         targets.relpaths)
+        self.assertEqual(
+            targets.relpaths,
+            ("agents/lib/external_write/adapters_estate_upkeep.py",),
+            "the operator's own adapter must be the ONLY target")
 
 
 if __name__ == "__main__":
