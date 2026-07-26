@@ -500,9 +500,16 @@ class TestGoldenEmitZoneClean(unittest.TestCase):
             f"capability module must import from EXACTLY these modules, got: "
             f"{sorted(imports_by_module.keys())}",
         )
+        # Cut 1.6: this surface SHRANK deliberately -- `build_read_facade` is
+        # gone. The kernel runner (capability_runner.py) now builds the facade
+        # and INJECTS it into propose_operations, so capability code no longer
+        # builds, names, or holds anything client-shaped. Narrowing the curated
+        # surface is always the safe direction; if a future change tries to add
+        # a symbol back here, that is a design decision this assertion should
+        # force someone to justify.
         self.assertEqual(
             imports_by_module["external_write.capability_api"],
-            {"run_enveloped_operation", "run_sanctioned_bulk", "build_read_facade"},
+            {"run_enveloped_operation", "run_sanctioned_bulk"},
         )
         # The raw kernel primitive must NOT be imported through any module.
         for mod, names in imports_by_module.items():

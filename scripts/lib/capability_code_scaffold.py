@@ -874,16 +874,16 @@ adapters_gmail.py's own "Structural safety" section): this module never
 imports a vendor SDK, never constructs or references a write-capable
 credential, and never calls anything shaped like a raw vendor mutation. Its
 ENTIRE external_write import surface is the curated kernel surface --
-``external_write.capability_api`` (``run_enveloped_operation``,
-``run_sanctioned_bulk``, and ``build_read_facade``)
+``external_write.capability_api`` (``run_enveloped_operation`` and
+``run_sanctioned_bulk``)
 and ``external_write.operations`` (pure data) -- it never imports
 ${adapter_module_stem}.py, the adapter registry, ``get_adapter``, the raw
 ``run_operation`` primitive, the run-envelope MINTING entrypoint (only the
 sanctioned helper mints -- see ``run_bulk_approved`` below), or the
-concrete ${class_prefix}ReadFacade class (see
-${read_facade_module_stem}.py, which registers that class against the kernel
-read-facade registry at import time; ``build_read_facade`` resolves it from
-there, keyed by op_kind, so this module never needs to name it at all).
+concrete ${class_prefix}ReadFacade class (see ${read_facade_module_stem}.py,
+which registers that class against the kernel read-facade registry at import
+time; the kernel runner resolves it from there, keyed by op_kind, and injects
+the built facade -- so this module never needs to name it at all).
 
 It cannot even NAME a write-credential provider: the write-capable credential
 is built solely by the adapter module's ${class_prefix}Adapter.build_write_client,
@@ -891,12 +891,18 @@ resolved INTERNALLY inside the adapter execution path (run_enveloped_operation
 calls the kernel primitive, which resolves it) -- enforced deterministically
 by scan.py's credential_provider_reference rule, not by a comment convention.
 
-NOTE for whoever wires this capability's entrypoint together: `build_facade`
-below requires ${read_facade_module_stem}.py to have been imported at least
-once in the running process (its module-scope `register_read_facade` call is
-what populates the kernel registry `build_read_facade` resolves from) --
-`build_read_facade` fails closed (raises ReadFacadeEligibilityError) if it
-has not been.
+HOW THIS RUNS (Cut 1.6 -- nothing here bootstraps anything). This module is
+CALLED by the sealed kernel, never run directly:
+
+    python3 agents/lib/external_write/capability_runner.py ${capability_id}
+
+The kernel resolves this capability's adapter, builds its READ-ONLY client, and
+passes the resulting facade into `propose_operations` below. That is why this
+module names no client, no adapter and no facade class: it has nothing to wire.
+Before Cut 1.6 this scaffold deferred that wiring to "whoever wires this
+capability's entrypoint together" -- and every possible place to do it was
+CAPABILITY-zoned, where obtaining a read client is a scan violation. A writer
+that complied could not read; a writer that read could not comply (F-VAL19-5).
 
 TODO (a human/next-phase decision, not this emitter's job): propose_operations
 below is a structural stub -- it shows the SHAPE (read via the facade, build
@@ -908,7 +914,7 @@ the real design in vision.md / execution_plan.md.
 from typing import Any, Callable, List, Optional, Tuple
 
 from external_write.capability_api import (
-    build_read_facade, run_enveloped_operation, run_sanctioned_bulk,
+    run_enveloped_operation, run_sanctioned_bulk,
 )
 from external_write.operations import Operation, SCHEMA_V2_ACTION
 
@@ -917,20 +923,14 @@ OP_KIND = "${op_kind}"
 SURFACE = "${surface}"
 
 
-def build_facade(read_only_client: Any) -> Any:
-    """Build this capability's read-only facade via the kernel registry (the
-    two-arg, capability-facing form -- the concrete subclass is resolved by
-    ``build_read_facade`` from the registry ${read_facade_module_stem}.py
-    populates at import time, never imported here by name). `read_only_client`
-    must already be scoped to ${read_only_scope} by its caller (see the
-    adapter module's build_read_only_client)."""
-    return build_read_facade(OP_KIND, read_only_client)
-
-
 def propose_operations(facade: Any, batch_id: str) -> List[Operation]:
     """TODO: read via `facade` (its declared read methods only) and return the
     Operation(s) this capability proposes. Structural stub -- returns no
-    operations until the real per-capability logic is filled in."""
+    operations until the real per-capability logic is filled in.
+
+    `facade` is INJECTED by the kernel runner, already built on a client scoped
+    to ${read_only_scope}. Do not construct one here, and do not import the
+    adapter to get one -- both are scan violations, and neither is necessary."""
     raise NotImplementedError(
         "TODO: read via facade and build the real Operation params for "
         "'${op_kind}' here.")
@@ -966,7 +966,7 @@ def run_bulk_approved(*, op_builder: Callable[[Tuple[str, ...]], Operation],
                       contract_hash: str, implementation_hash: str,
                       reviewed_set_schema: Optional[str] = None,
                       operator_approved_review_artifact: Optional[str] = None,
-                      read_only_client: Any = None, chunk_size: int = 25,
+                      chunk_size: int = 25,
                       resume_run_id: Optional[str] = None,
                       fresh_operator_approval_verbatim: Optional[str] = None,
                       fresh_approved_at: Optional[str] = None) -> Any:
@@ -988,7 +988,7 @@ def run_bulk_approved(*, op_builder: Callable[[Tuple[str, ...]], Operation],
     one (same credential-isolation property as ``run_approved`` above).
     Returns a ``BulkRunSummary``."""
     return run_sanctioned_bulk(
-        op_builder=op_builder, client=None, read_only_client=read_only_client,
+        op_builder=op_builder, client=None, read_only_client=None,
         chunk_size=chunk_size, run_label=run_label, capability_id="${capability_id}",
         op_kind=OP_KIND, contract_hash=contract_hash, implementation_hash=implementation_hash,
         reviewed_set=reviewed_set, operator_approval_verbatim=operator_approval_verbatim,
@@ -1093,7 +1093,7 @@ def run_bulk_approved(*, op_builder: Callable[[Tuple[str, ...]], Operation],
                       contract_hash: str, implementation_hash: str,
                       reviewed_set_schema: Optional[str] = None,
                       operator_approved_review_artifact: Optional[str] = None,
-                      read_only_client: Any = None, chunk_size: int = 25,
+                      chunk_size: int = 25,
                       resume_run_id: Optional[str] = None,
                       fresh_operator_approval_verbatim: Optional[str] = None,
                       fresh_approved_at: Optional[str] = None) -> Any:
@@ -1106,7 +1106,7 @@ def run_bulk_approved(*, op_builder: Callable[[Tuple[str, ...]], Operation],
     run, pass ``resume_run_id`` plus a FRESH operator confirmation
     (``fresh_operator_approval_verbatim`` / ``fresh_approved_at``)."""
     return run_sanctioned_bulk(
-        op_builder=op_builder, client=None, read_only_client=read_only_client,
+        op_builder=op_builder, client=None, read_only_client=None,
         chunk_size=chunk_size, run_label=run_label, capability_id="${capability_id}",
         op_kind=OP_KIND, contract_hash=contract_hash, implementation_hash=implementation_hash,
         reviewed_set=reviewed_set, operator_approval_verbatim=operator_approval_verbatim,

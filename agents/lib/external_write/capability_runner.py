@@ -194,3 +194,39 @@ def run_capability_proposal(project_root: Any,
     if operations is None:
         return []
     return list(operations)
+
+
+# ---------------------------------------------------------------------------
+# CLI entrypoint -- the sanctioned way to run a capability's proposal step.
+#
+# This is deliberately part of the KERNEL rather than an emitted per-capability
+# runner script. An emitted entrypoint is a file that can drift, and every place
+# an operator project could put one is CAPABILITY-zoned, where obtaining a read
+# client is a scan violation -- which is precisely how F-VAL19-5 happened. The
+# kernel already holds the only legitimate wiring, so it holds the entrypoint
+# too, and there is no per-capability file to get wrong.
+#
+# Usage:
+#   python3 agents/lib/external_write/capability_runner.py <capability_id> [batch_id]
+#
+# Exits 0 on success (proposal count on stdout), 1 on a plain-language refusal.
+# Never prints a traceback -- a non-technical operator reads this output.
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":  # pragma: no cover
+    import sys as _sys
+
+    _argv = _sys.argv[1:]
+    if not _argv or len(_argv) > 2:
+        print("Usage: python3 agents/lib/external_write/capability_runner.py "
+              "<capability_id> [batch_id]", file=_sys.stderr)
+        raise SystemExit(2)
+
+    _capability_id = _argv[0]
+    _batch_id = _argv[1] if len(_argv) == 2 else "manual"
+    try:
+        _ops = run_capability_proposal(".", _capability_id, batch_id=_batch_id)
+    except CapabilityRunnerError as _exc:
+        print(f"Cannot run this yet: {_exc}", file=_sys.stderr)
+        raise SystemExit(1)
+    print(f"{_capability_id}: proposed {len(_ops)} change(s) for review.")
