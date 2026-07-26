@@ -1248,12 +1248,11 @@ def _check_known_bad_fails(root: Path, canonical_id: str, cap_path: Path,
     fix closes:
       * a pytest-style suite (bare ``def test_...`` functions, never inside a
         ``unittest.TestCase``) collects ZERO tests under ``unittest
-        discover`` and exits CLEAN (0) both before and after the mutation --
-        the OLD baseline check scored that clean exit as "green" and let it
-        fall through to the mutated run, where it landed on the generic
-        "still reported all tests passing" inert-suite message: unhelpful and
-        dead-ending for an operator who wrote functionally-correct tests in
-        the wrong style.
+        discover`` -- the OLD baseline check scored a clean exit as "green"
+        and let it fall through to the mutated run, where it landed on the
+        generic "still reported all tests passing" inert-suite message:
+        unhelpful and dead-ending for an operator who wrote
+        functionally-correct tests in the wrong style.
       * a suite built entirely of MODULE-LEVEL assertions (never inside a
         ``unittest.TestCase`` method) also collects ZERO real tests, but
         passes SILENTLY at baseline (the real, working implementation makes
@@ -1265,16 +1264,32 @@ def _check_known_bad_fails(root: Path, canonical_id: str, cap_path: Path,
         real tests ever ran.
 
     Both failure modes share the same root cause -- ZERO real tests ran at
-    baseline -- and the same fix: if ``real_tests_ran == 0`` at baseline (see
-    ``_DiscoverOutcome.real_tests_ran``), STOP right there with a plain-
-    language, actionable message (write real ``unittest.TestCase`` tests) --
-    this is NEITHER scored "effective" (there is nothing to be effective; the
-    mutated run is never even reached) NOR the generic inert-suite dead-end
-    (which implies the suite ran and just didn't catch anything, which is not
-    what happened here). A baseline run that DOES collect real tests but
-    fails or errors for a real reason (or crashes on an UNRELATED import,
-    e.g. a genuinely missing dependency) still gets the existing "does not
-    pass cleanly" message, unchanged.
+    baseline -- and the same fix: if ``tests_run == 0`` at baseline AND the
+    run was not itself an import/collection crash (``import_error`` is
+    False), STOP right there with a plain-language, actionable message
+    (write real ``unittest.TestCase`` tests) -- this is NEITHER scored
+    "effective" (there is nothing to be effective; the mutated run is never
+    even reached) NOR the generic inert-suite dead-end (which implies the
+    suite ran and just didn't catch anything, which is not what happened
+    here). A baseline run that genuinely crashes on collection
+    (``import_error`` True -- e.g. a genuinely missing dependency) still
+    gets the existing "does not pass cleanly" message, unchanged; so does a
+    baseline run that DOES collect real tests (``tests_run > 0``) but fails
+    or errors for a real reason.
+
+    Interpreter-portability note: the THREE-WAY check below is deliberately
+    ordered import_error, THEN tests_run == 0, THEN failed/exit-code -- never
+    the reverse -- because a bare exit code is not a stable cross-version
+    signal for "collected zero tests": one supported interpreter reports a
+    clean exit for that case, another reports a non-zero exit for the exact
+    same zero-tests-collected outcome (unittest's own policy for what a
+    zero-test run's exit code means is not pinned across interpreter
+    versions; unittest's own "Ran N tests" summary line and its own
+    collection-failure marker text ARE stable across those same versions --
+    see ``_TESTS_RUN_RE`` / ``_IMPORT_ERROR_MARKERS`` above). Checking
+    ``tests_run == 0`` before ever looking at ``failed`` means this
+    classification is correct regardless of which exit-code policy the
+    running interpreter happens to use for that case.
 
     The probe passes only when (a) is entirely green (real tests ran, none
     failed) AND (b) is entirely red (every file shows a REAL failure/error,
@@ -1321,11 +1336,19 @@ def _check_known_bad_fails(root: Path, canonical_id: str, cap_path: Path,
         )
 
         # --- (a) Baseline: the UNMUTATED copy must be fully green ------------
-        # Three buckets, checked in this order per file (a collection-time crash
-        # -- import_error or a non-zero exit -- always takes priority over the
-        # zero-real-tests bucket, so an UNRELATED import crash, e.g. a genuinely
-        # missing dependency, still gets the "does not pass cleanly" message, not
-        # the "write as unittest.TestCase" one):
+        # Three buckets, checked in THIS order per file, deliberately NOT
+        # `failed` before `tests_run == 0` (see this function's own docstring,
+        # "Interpreter-portability note"): a collection-time crash
+        # (import_error) always takes priority over the zero-real-tests
+        # bucket, so an UNRELATED import crash, e.g. a genuinely missing
+        # dependency, still gets the "does not pass cleanly" message, not the
+        # "write as unittest.TestCase" one -- but a clean (non-import-error)
+        # zero-tests-collected outcome is classified by `tests_run == 0`
+        # ALONE, never by the run's exit code, because the exit code an
+        # interpreter uses for "zero tests collected" is not stable across
+        # supported versions while `tests_run` (parsed from unittest's own
+        # summary line) and `import_error` (from unittest's own marker text)
+        # both are.
         baseline_not_green: List[str] = []
         baseline_zero_real_tests: List[str] = []
         baseline_uncertain = False
@@ -1333,11 +1356,13 @@ def _check_known_bad_fails(root: Path, canonical_id: str, cap_path: Path,
             outcome = _run_discover(sys.executable, copy_root, copy_root / rel_tf, env)
             if outcome is None:
                 baseline_uncertain = True
-            elif outcome.import_error or outcome.failed:
+            elif outcome.import_error:
                 baseline_not_green.append(str(rel_tf))
             elif outcome.tests_run == 0:
                 baseline_zero_real_tests.append(str(rel_tf))
-            # else: real_tests_ran > 0, not failed, not import_error -- green.
+            elif outcome.failed:
+                baseline_not_green.append(str(rel_tf))
+            # else: tests_run > 0, not failed, not import_error -- green.
 
         if baseline_uncertain:
             return (
