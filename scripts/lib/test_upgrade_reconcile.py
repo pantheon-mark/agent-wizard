@@ -112,6 +112,25 @@ cd "$(dirname "$0")/../.." || exit 1
 /usr/bin/python3 "agents/cron/{name}.py"
 """
 
+_LEGACY_MODULE_LEVEL = (
+    "from typing import Any\n"
+    "from external_write.adapter_registry import register_adapter\n"
+    "\n"
+    "OP_KIND = 'inbox.labels.modify'\n"
+    "\n"
+    "\n"
+    "def build_read_only_client() -> Any:\n"
+    "    return object()\n"
+    "\n"
+    "\n"
+    "class InboxLabelsAdapter:\n"
+    "    def apply_one(self, raw_client, unit):\n"
+    "        return None\n"
+    "\n"
+    "\n"
+    "register_adapter(OP_KIND, InboxLabelsAdapter())\n"
+)
+
 
 def _write_project(tmp: Path, *, writer_body: str, writer_name: str = "estate_upkeep",
                    with_read_only: bool = True, with_wrapper: bool = True) -> Path:
@@ -153,6 +172,24 @@ class _Base(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmpdir.name)
         self.addCleanup(self._tmpdir.cleanup)
+
+    def _project_with_capability(self, *, canonical_id, op_kind,
+                                adapter_name, adapter_source):
+        """A minimal operator project: one capability declaring op_kind, one
+        adapter module registering it, and the adapter enrolled in the manifest
+        under a name the filename convention cannot produce."""
+        root = self.tmp / f"proj_{canonical_id}"
+        lib = root / "agents" / "lib" / "external_write"
+        caps = root / "agents" / "capabilities"
+        lib.mkdir(parents=True, exist_ok=True)
+        caps.mkdir(parents=True, exist_ok=True)
+        (lib / adapter_name).write_text(adapter_source, encoding="utf-8")
+        (lib / "operator_adapters.json").write_text(
+            json.dumps([Path(adapter_name).stem]), encoding="utf-8")
+        (caps / f"{canonical_id}_capability.py").write_text(
+            f"OP_KIND = {op_kind!r}\n\n\ndef propose_operations(facade, batch_id):\n"
+            "    return []\n", encoding="utf-8")
+        return root
 
 
 class DetectTests(_Base):
@@ -3216,24 +3253,6 @@ class ResolveAdapterMigrationTargetsTests(_Base):
         "register_adapter(OP_KIND, DemoAdapter())\n"
     )
 
-    def _project_with_capability(self, *, canonical_id, op_kind,
-                                adapter_name, adapter_source):
-        """A minimal operator project: one capability declaring op_kind, one
-        adapter module registering it, and the adapter enrolled in the manifest
-        under a name the filename convention cannot produce."""
-        root = self.tmp / f"proj_{canonical_id}"
-        lib = root / "agents" / "lib" / "external_write"
-        caps = root / "agents" / "capabilities"
-        lib.mkdir(parents=True, exist_ok=True)
-        caps.mkdir(parents=True, exist_ok=True)
-        (lib / adapter_name).write_text(adapter_source, encoding="utf-8")
-        (lib / "operator_adapters.json").write_text(
-            json.dumps([Path(adapter_name).stem]), encoding="utf-8")
-        (caps / f"{canonical_id}_capability.py").write_text(
-            f"OP_KIND = {op_kind!r}\n\n\ndef propose_operations(facade, batch_id):\n"
-            "    return []\n", encoding="utf-8")
-        return root
-
     def test_both_migrations_land_on_the_same_adapter_module(self):
         """The divergent case the default masks: a module needing BOTH a
         predicate stub AND the provisioner move. Two passes that each read and
@@ -3293,6 +3312,279 @@ class ResolveAdapterMigrationTargetsTests(_Base):
             ur._atomic_write = real_write
         self.assertEqual(len(writes), 1,
                          f"expected exactly one write, got {len(writes)}")
+
+
+# ===================================================================================
+# The read-provisioner conformance POST-CONDITION — asserted against the END STATE,
+# after any migrations have run, so a gap in what they enumerated cannot produce a
+# green upgrade with a broken read path.
+# ===================================================================================
+
+class ReadProvisionerConformanceTests(_Base):
+    def test_post_condition_catches_an_unmigrated_provisioner(self):
+        """The observed failure, reproduced: the read-client builder sits at
+        module level, so the registry's class lookup finds nothing and the read
+        path cannot work. Whatever the migration did or did not enumerate, the
+        post-condition sees the end state."""
+        from upgrade_reconcile import check_read_provisioner_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_LEGACY_MODULE_LEVEL)
+        violations = check_read_provisioner_conformance(root)
+        self.assertEqual(len(violations), 1, violations)
+        self.assertEqual(violations[0].kind, "read_provisioner_missing")
+        self.assertEqual(violations[0].op_kind, "inbox.labels.modify")
+        self.assertEqual(violations[0].adapter_relpath,
+                         "agents/lib/external_write/adapters_inbox.py")
+
+    def test_post_condition_passes_once_the_method_is_on_the_class(self):
+        from upgrade_reconcile import check_read_provisioner_conformance
+        migrated = _LEGACY_MODULE_LEVEL.replace(
+            "def build_read_only_client() -> Any:\n    return object()\n\n\n", ""
+        ).replace(
+            "class InboxLabelsAdapter:\n",
+            "class InboxLabelsAdapter:\n"
+            "    def build_read_only_client(self, op) -> Any:\n"
+            "        return object()\n\n")
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py", adapter_source=migrated)
+        self.assertEqual(check_read_provisioner_conformance(root), [])
+
+    def test_post_condition_finds_the_adapter_by_registration_not_by_filename(self):
+        """Immunity to the resolution defect: the adapter filename does not match
+        the capability's canonical id, and the post-condition still finds it --
+        it globs the adapter directory and reads registrations, never a filename
+        convention or a manifest."""
+        from upgrade_reconcile import check_read_provisioner_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_LEGACY_MODULE_LEVEL)
+        (root / "agents" / "lib" / "external_write"
+         / "operator_adapters.json").unlink()
+        violations = check_read_provisioner_conformance(root)
+        self.assertEqual(len(violations), 1,
+                         "no manifest and a non-matching filename must not hide it")
+
+    def test_post_condition_does_not_fire_on_shipped_adapters_with_no_capability(self):
+        """The over-firing guard. Shipped baseline adapters register op_kinds no
+        capability declares and legitimately have no read-client builder. A gate
+        that flagged them would fire in every project including every fresh
+        build, and a guard that always fires trains people to ignore it."""
+        from upgrade_reconcile import check_read_provisioner_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_LEGACY_MODULE_LEVEL.replace(
+                "def build_read_only_client() -> Any:\n    return object()\n\n\n", ""
+            ).replace(
+                "class InboxLabelsAdapter:\n",
+                "class InboxLabelsAdapter:\n"
+                "    def build_read_only_client(self, op):\n"
+                "        return object()\n\n"))
+        lib = root / "agents" / "lib" / "external_write"
+        (lib / "adapters_gmail.py").write_text(
+            "from external_write.adapter_registry import register_adapter\n"
+            "\n"
+            "OP_TRASH = 'gmail.message.trash'\n"
+            "OP_UNTRASH = 'gmail.message.untrash'\n"
+            "\n"
+            "\n"
+            "class GmailMessageTrashAdapter:\n"
+            "    pass\n"
+            "\n"
+            "\n"
+            "class GmailMessageUntrashAdapter:\n"
+            "    pass\n"
+            "\n"
+            "\n"
+            "register_adapter(OP_TRASH, GmailMessageTrashAdapter())\n"
+            "register_adapter(OP_UNTRASH, GmailMessageUntrashAdapter())\n",
+            encoding="utf-8")
+        self.assertEqual(check_read_provisioner_conformance(root), [],
+                         "a registered op_kind that no capability declares must "
+                         "not be flagged")
+
+    def test_post_condition_reports_a_capability_with_no_registered_adapter(self):
+        from upgrade_reconcile import check_read_provisioner_conformance
+        root = self._project_with_capability(
+            canonical_id="orphan", op_kind="orphan.op",
+            adapter_name="adapters_orphan.py",
+            adapter_source="# no registration at all\n")
+        violations = check_read_provisioner_conformance(root)
+        self.assertEqual(len(violations), 1)
+        self.assertEqual(violations[0].kind, "no_registered_adapter")
+
+    def test_post_condition_accepts_an_inherited_provisioner(self):
+        """An adapter may inherit the builder from a base class in the same
+        module. Flagging that would be a false red."""
+        from upgrade_reconcile import check_read_provisioner_conformance
+        root = self._project_with_capability(
+            canonical_id="demo", op_kind="demo.op",
+            adapter_name="adapters_demo.py",
+            adapter_source=(
+                "from external_write.adapter_registry import register_adapter\n"
+                "\n"
+                "OP_KIND = 'demo.op'\n"
+                "\n"
+                "\n"
+                "class BaseAdapter:\n"
+                "    def build_read_only_client(self, op):\n"
+                "        return object()\n"
+                "\n"
+                "\n"
+                "class DemoAdapter(BaseAdapter):\n"
+                "    def apply_one(self, raw_client, unit):\n"
+                "        return None\n"
+                "\n"
+                "\n"
+                "register_adapter(OP_KIND, DemoAdapter())\n"))
+        self.assertEqual(check_read_provisioner_conformance(root), [])
+
+
+class ReadProvisionerConformanceRecordingTests(_Base):
+    def test_a_violation_becomes_a_blocking_queue_entry(self):
+        """A printed note is not a safety state. The violation must land in the
+        pending-migrations queue with a non-empty writer_relpath and pending
+        status, which is exactly what the project-wide safety predicate selects
+        on -- so it blocks live-enable without any new blocking channel."""
+        import json
+        from upgrade_reconcile import (
+            check_read_provisioner_conformance, record_read_provisioner_conformance,
+        )
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_LEGACY_MODULE_LEVEL)
+        violations = check_read_provisioner_conformance(root)
+        record_read_provisioner_conformance(
+            root, violations, from_version="v0.20.0", to_version="v0.21.0")
+        queue = json.loads(
+            (root / "agents" / "handoffs" / "pending_migrations.json")
+            .read_text(encoding="utf-8"))
+        entries = [e for e in queue if e.get("kind") == "read_provisioner_missing"]
+        self.assertEqual(len(entries), 1, queue)
+        entry = entries[0]
+        self.assertTrue(entry["writer_relpath"])
+        self.assertEqual(entry["status"], "pending")
+        self.assertTrue(entry["reason"])
+        self.assertTrue(entry["suggested_next_step"])
+
+    def test_a_violation_entry_records_no_content_hash(self):
+        """Deliberate omission. The auto-reaper clears an entry whose file's hash
+        changed and which now scans clean -- so recording a hash here would let
+        an unrelated edit to the adapter un-block a still-missing reader. This
+        entry kind is cleared by re-running the check, never by a hash."""
+        import json
+        from upgrade_reconcile import (
+            check_read_provisioner_conformance, record_read_provisioner_conformance,
+        )
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_LEGACY_MODULE_LEVEL)
+        record_read_provisioner_conformance(
+            root, check_read_provisioner_conformance(root),
+            from_version="v0.20.0", to_version="v0.21.0")
+        entry = [e for e in json.loads(
+            (root / "agents" / "handoffs" / "pending_migrations.json")
+            .read_text(encoding="utf-8"))
+            if e.get("kind") == "read_provisioner_missing"][0]
+        self.assertIsNone(entry.get("paused_content_sha256"))
+
+    def test_recording_is_idempotent_and_clears_when_conformant(self):
+        """Re-running must replace, not duplicate; and once the adapter is fixed
+        the entry must go, or a repaired project stays blocked forever."""
+        import json
+        from upgrade_reconcile import (
+            check_read_provisioner_conformance, record_read_provisioner_conformance,
+        )
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_LEGACY_MODULE_LEVEL)
+        queue_path = root / "agents" / "handoffs" / "pending_migrations.json"
+        for _ in range(3):
+            record_read_provisioner_conformance(
+                root, check_read_provisioner_conformance(root),
+                from_version="v0.20.0", to_version="v0.21.0")
+        entries = [e for e in json.loads(queue_path.read_text(encoding="utf-8"))
+                   if e.get("kind") == "read_provisioner_missing"]
+        self.assertEqual(len(entries), 1, "must replace, never duplicate")
+
+        record_read_provisioner_conformance(
+            root, [], from_version="v0.20.0", to_version="v0.21.0")
+        entries = [e for e in json.loads(queue_path.read_text(encoding="utf-8"))
+                   if e.get("kind") == "read_provisioner_missing"]
+        self.assertEqual(entries, [], "a conformant project must be unblocked")
+
+    def test_recording_never_touches_another_entry_kind(self):
+        """One authority per fact. This writer owns its own entry kind only --
+        a second authority over somebody else's entry is the duplicated-inference
+        defect this package guards against."""
+        import json
+        from upgrade_reconcile import record_read_provisioner_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_LEGACY_MODULE_LEVEL)
+        queue_path = root / "agents" / "handoffs" / "pending_migrations.json"
+        queue_path.parent.mkdir(parents=True, exist_ok=True)
+        foreign = {
+            "mechanism_id": "agents_inbox_runner",
+            "writer_relpath": "agents/inbox/runner.py",
+            "kind": "external_write_bypass", "status": "pending",
+            "paused_content_sha256": "deadbeef",
+        }
+        queue_path.write_text(json.dumps([foreign]), encoding="utf-8")
+        record_read_provisioner_conformance(
+            root, [], from_version="v0.20.0", to_version="v0.21.0")
+        queue = json.loads(queue_path.read_text(encoding="utf-8"))
+        self.assertIn(foreign, queue, "a foreign entry must survive untouched")
+
+
+class ReconcileUpgradeReadProvisionerConformanceTests(_Base):
+    def test_reconcile_upgrade_runs_the_post_condition(self):
+        """Bound at the engine entrypoint, not at a sub-function: this is the one
+        funnel every upgrade path and the standalone reconcile command go
+        through."""
+        from upgrade_reconcile import reconcile_upgrade
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_LEGACY_MODULE_LEVEL)
+        result = reconcile_upgrade(
+            root, _REAL_REPO,
+            from_version="v0.20.0", to_version="v0.21.0")
+        self.assertEqual(result.read_provisioner_violations, [],
+                         "the declared migration set should have fixed it, so "
+                         "the post-condition must come back clean")
+
+    def test_reconcile_upgrade_blocks_when_the_migration_cannot_fix_it(self):
+        """The property that makes an enumeration bug non-fatal: with the module
+        unmigratable (two registered classes, so the migration correctly
+        refuses), the upgrade must end blocking rather than green."""
+        import json
+        from upgrade_reconcile import reconcile_upgrade
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_LEGACY_MODULE_LEVEL.replace(
+                "register_adapter(OP_KIND, InboxLabelsAdapter())\n",
+                "class OtherAdapter:\n    pass\n\n\n"
+                "register_adapter(OP_KIND, InboxLabelsAdapter())\n"
+                "register_adapter('other.op', OtherAdapter())\n"))
+        result = reconcile_upgrade(
+            root, _REAL_REPO,
+            from_version="v0.20.0", to_version="v0.21.0")
+        self.assertEqual(len(result.read_provisioner_violations), 1)
+        queue = json.loads(
+            (root / "agents" / "handoffs" / "pending_migrations.json")
+            .read_text(encoding="utf-8"))
+        self.assertTrue([e for e in queue
+                         if e.get("kind") == "read_provisioner_missing"])
 
 
 if __name__ == "__main__":

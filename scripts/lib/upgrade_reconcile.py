@@ -116,6 +116,7 @@ from capability_code_scaffold import (
     _missing_evidence_predicates_for_adapter_source as _missing_evidence_predicates_for_adapter,
 )
 from adapter_migrations import ADAPTER_MIGRATIONS, MigrationContext
+from provisioner_migration import PROVISIONER_NAME
 
 
 # ===== Reused T5 scanner (single-home import; canonical location) ===========
@@ -463,6 +464,8 @@ class ReconcileResult:
     stale_acceptance_reset: List[str] = field(default_factory=list)
     predicate_stubs_scaffolded: List["PredicateStubRemediation"] = field(default_factory=list)
     same_id_twins_healed: List[str] = field(default_factory=list)
+    read_provisioner_violations: List["ReadProvisionerViolation"] = field(
+        default_factory=list)
 
     @property
     def any_affected(self) -> bool:
@@ -1421,6 +1424,314 @@ def reconcile_adapter_migrations(
             _atomic_write(adapter_path, current)
 
     return remediated, outcomes, None
+
+
+# ===== The conformance POST-CONDITION ==========================================
+#
+# Every item above this line improves the enumeration of which adapter modules an
+# upgrade should migrate. This check makes an enumeration bug non-fatal.
+#
+# It asks one question of the END STATE, after the migrations have run: for every
+# op_kind a capability in this project declares, does the adapter class actually
+# registered for it carry a read-client builder? The kernel builds a read facade
+# unconditionally before running any capability's proposal step, so for a
+# capability-declared op_kind the answer must be yes -- it is not a judgement
+# call. If a migration missed a module for ANY reason -- a filename that does not
+# match, an unusable enrolment manifest, a naming shape nobody predicted -- this
+# still catches it and blocks.
+#
+# Two deliberate scope decisions, both of which a wider check gets wrong:
+#
+#  1. CAPABILITY-DECLARED op_kinds, not every registered one. The wizard ships
+#     baseline adapters that register op_kinds no capability declares and that
+#     legitimately have no read-client builder. Quantifying over every
+#     registration would flag them in every project, fresh builds included, and a
+#     guard that always fires is a guard people learn to click past.
+#
+#  2. STATIC analysis, never an import. The operator's adapters import vendor
+#     SDKs this process has no reason to have, so an import-based check would
+#     fail -- and therefore block -- in any project whose interpreter is not the
+#     operator's. A fail-closed check that cannot run is a check that blocks
+#     everything. The runtime property is asserted where dependencies are
+#     controlled: the fresh-emit gate runs the real emitted wiring and proves a
+#     working facade.
+
+
+@dataclass(frozen=True)
+class ReadProvisionerViolation:
+    """One capability whose read path cannot work.
+
+    ``kind`` is recorded on the durable queue entry so a later reader can tell a
+    missing builder from a missing registration without re-deriving it.
+    """
+
+    capability_id: str
+    op_kind: str
+    adapter_relpath: Optional[str]
+    kind: str
+    reason: str
+
+
+def _module_level_string_constants(tree: ast.Module) -> Dict[str, str]:
+    """Module-scope ``NAME = "literal"`` assignments.
+
+    Needed because a registration names its op_kind through a constant
+    (``register_adapter(OP_KIND, Adapter())``), so resolving the registered
+    op_kind means resolving that constant."""
+    found: Dict[str, str] = {}
+    for node in getattr(tree, "body", []):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not (isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                found[target.id] = node.value.value
+    return found
+
+
+def _registered_op_kind_classes(tree: ast.Module) -> Dict[str, str]:
+    """Map each op_kind this module registers to the class name it registers.
+
+    Reads ``register_adapter(<op_kind>, <Class>())`` calls at module scope,
+    resolving an op_kind given as a module-level string constant. A registration
+    whose op_kind or class cannot be resolved contributes nothing -- never a
+    guess."""
+    constants = _module_level_string_constants(tree)
+    mapping: Dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        fname = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if fname != "register_adapter" or len(node.args) < 2:
+            continue
+        op_arg, adapter_arg = node.args[0], node.args[1]
+        if isinstance(op_arg, ast.Constant) and isinstance(op_arg.value, str):
+            op_kind = op_arg.value
+        elif isinstance(op_arg, ast.Name):
+            op_kind = constants.get(op_arg.id, "")
+        else:
+            continue
+        if not op_kind:
+            continue
+        if isinstance(adapter_arg, ast.Call) and isinstance(adapter_arg.func, ast.Name):
+            mapping[op_kind] = adapter_arg.func.id
+    return mapping
+
+
+def _class_or_in_module_base_defines(tree: ast.Module, class_name: str,
+                                     method_name: str) -> bool:
+    """True when ``class_name`` -- or any base class defined in this same module,
+    transitively -- declares ``method_name``.
+
+    Inheritance within the module is a legitimate shape; flagging it would be a
+    false red. Bases from other modules are not followed: this check never
+    imports, so an out-of-module base is simply unprovable here, which the
+    fresh-emit runnable gate covers instead."""
+    by_name = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+    seen = set()
+    queue = [class_name]
+    while queue:
+        name = queue.pop()
+        if name in seen or name not in by_name:
+            continue
+        seen.add(name)
+        node = by_name[name]
+        if any(isinstance(b, ast.FunctionDef) and b.name == method_name
+               for b in node.body):
+            return True
+        for base in node.bases:
+            if isinstance(base, ast.Name):
+                queue.append(base.id)
+    return False
+
+
+def check_read_provisioner_conformance(
+    operator_project_dir: Path,
+) -> List[ReadProvisionerViolation]:
+    """Assert every capability-declared op_kind has a usable read-client builder.
+
+    Static, never an import. Globs the adapter directory rather than resolving by
+    filename or manifest, which is what makes it immune to a resolution bug in
+    the migration's own target enumeration.
+
+    Returns one violation per capability whose read path cannot work. An empty
+    list means the property holds.
+    """
+    root = Path(operator_project_dir)
+    lib_dir = root / DEFAULT_EXTERNAL_WRITE_REL
+    caps_dir = root / DEFAULT_CAPABILITIES_REL
+
+    # op_kind -> (adapter_relpath, class_name, parsed module)
+    registry: Dict[str, Tuple[str, str, ast.Module]] = {}
+    if lib_dir.is_dir():
+        for adapter_path in sorted(lib_dir.glob("adapters*.py")):
+            try:
+                tree = ast.parse(adapter_path.read_text(encoding="utf-8"))
+            except (OSError, SyntaxError):
+                continue
+            relpath = adapter_path.relative_to(root).as_posix()
+            for op_kind, class_name in _registered_op_kind_classes(tree).items():
+                registry.setdefault(op_kind, (relpath, class_name, tree))
+
+    violations: List[ReadProvisionerViolation] = []
+    if not caps_dir.is_dir():
+        return violations
+
+    for cap_path in sorted(caps_dir.glob(f"*{CAPABILITY_MODULE_SUFFIX}.py")):
+        capability_id = cap_path.stem[: -len(CAPABILITY_MODULE_SUFFIX)]
+        try:
+            cap_tree = ast.parse(cap_path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError):
+            continue
+        op_kind = _module_level_string_constants(cap_tree).get("OP_KIND", "")
+        if not op_kind:
+            continue  # a capability declaring no op_kind is refused elsewhere
+
+        entry = registry.get(op_kind)
+        if entry is None:
+            violations.append(ReadProvisionerViolation(
+                capability_id=capability_id, op_kind=op_kind,
+                adapter_relpath=None, kind="no_registered_adapter",
+                reason=(
+                    f"`{capability_id}` says it performs `{op_kind}`, but no "
+                    "adapter in this project is registered to handle it, so it "
+                    "cannot talk to the outside system at all"),
+            ))
+            continue
+
+        relpath, class_name, adapter_tree = entry
+        if not _class_or_in_module_base_defines(
+                adapter_tree, class_name, PROVISIONER_NAME):
+            violations.append(ReadProvisionerViolation(
+                capability_id=capability_id, op_kind=op_kind,
+                adapter_relpath=relpath, kind="read_provisioner_missing",
+                reason=(
+                    f"`{capability_id}` needs to look at the outside system in "
+                    "read-only mode before it can work out what to change, but "
+                    f"`{class_name}` in {relpath} has no read-only reader on it, "
+                    "so that is not possible yet"),
+            ))
+    return violations
+
+
+def record_read_provisioner_conformance(
+    operator_project_dir: Path,
+    violations: Sequence[ReadProvisionerViolation],
+    *,
+    from_version: str,
+    to_version: str,
+) -> None:
+    """Persist the post-condition's verdict as durable, blocking, visible state.
+
+    Reuses the pending-migrations queue rather than inventing a state file. The
+    project-wide safety predicate selects every queue entry with a non-empty
+    ``writer_relpath`` and ``pending`` status, regardless of kind or attribution,
+    and an entry recording no violation kinds classifies as blocking because
+    nothing recorded means nothing proven. So an entry written here is already
+    open, already blocking live-enable, already named in the operator-facing
+    state report, and already withholds the all-clear -- with no new blocking
+    channel and no new persisted source of truth.
+
+    Deliberately records NO content hash. The auto-reaper clears an entry whose
+    file changed and which now scans clean; with a hash recorded, editing an
+    unrelated line in the adapter would satisfy that and un-block a project whose
+    read path was still broken. This kind is cleared by re-running the check --
+    which happens on every upgrade and on every ``reconcile`` -- and by nothing
+    else.
+
+    Single authority: only entries of the kinds this check owns are added or
+    removed. Every other entry is left exactly as found.
+    """
+    owned_kinds = {"read_provisioner_missing", "no_registered_adapter"}
+    path = Path(operator_project_dir) / MIGRATION_QUEUE_REL
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        if not isinstance(existing, list):
+            existing = []
+    except (json.JSONDecodeError, OSError):
+        existing = []
+
+    kept = [e for e in existing
+            if not (isinstance(e, dict) and e.get("kind") in owned_kinds)]
+
+    for v in violations:
+        if v.kind == "no_registered_adapter":
+            next_step = (
+                f"`{v.capability_id}` has nothing wired up to talk to the outside "
+                "system. Ask your assistant to rebuild this capability, which "
+                "will create and register the adapter it needs.")
+        else:
+            next_step = (
+                f"Ask your assistant to add the read-only reader to the adapter "
+                f"in {v.adapter_relpath}. This is a change to the adapter, not to "
+                f"`{v.capability_id}` itself -- rebuilding the capability will "
+                "not fix it.")
+        kept.append({
+            "mechanism_id": v.capability_id,
+            "writer_relpath": v.adapter_relpath or (
+                f"{DEFAULT_CAPABILITIES_REL.as_posix()}/"
+                f"{v.capability_id}{CAPABILITY_MODULE_SUFFIX}.py"),
+            "entrypoint_relpath": None,
+            "requested_at": _utcnow_iso(),
+            "from_version": from_version,
+            "to_version": to_version,
+            "kind": v.kind,
+            "op_kind": v.op_kind,
+            "reason": v.reason,
+            "suggested_next_step": next_step,
+            "status": "pending",
+        })
+
+    if kept == existing:
+        return
+    _atomic_write(path, json.dumps(kept, indent=2, ensure_ascii=False,
+                                   sort_keys=True) + "\n")
+
+
+def _append_adapter_enrolment_blocking_request(
+    operator_project_dir: Path,
+    reason: str,
+    from_version: str,
+    to_version: str,
+) -> Path:
+    """A PRESENT-but-unusable adapter-enrolment list is a blocking state, not a
+    warning. Without this the upgrade would migrate whichever subset a filename
+    convention happened to find and report success -- an upgrade that says it
+    worked while an enrolled adapter was skipped. Idempotent: replaces this
+    kind's entry rather than duplicating it."""
+    path = Path(operator_project_dir) / MIGRATION_QUEUE_REL
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        if not isinstance(existing, list):
+            existing = []
+    except (json.JSONDecodeError, OSError):
+        existing = []
+    existing = [e for e in existing
+                if not (isinstance(e, dict)
+                        and e.get("kind") == "adapter_enrolment_unreadable")]
+    existing.append({
+        "mechanism_id": "adapter_enrolment",
+        "writer_relpath": _OPERATOR_ADAPTER_MANIFEST_REL,
+        "entrypoint_relpath": None,
+        "requested_at": _utcnow_iso(),
+        "from_version": from_version,
+        "to_version": to_version,
+        "kind": "adapter_enrolment_unreadable",
+        "reason": reason,
+        "suggested_next_step": (
+            f"Ask your assistant to repair {_OPERATOR_ADAPTER_MANIFEST_REL}. It "
+            "should be a plain list of the adapter file names you have added. "
+            "Until it is readable, this upgrade cannot safely tell which "
+            "adapters still need updating, so it has stopped rather than "
+            "guessing."),
+        "status": "pending",
+    })
+    _atomic_write(path, json.dumps(existing, indent=2, ensure_ascii=False,
+                                   sort_keys=True) + "\n")
+    return path
 
 
 def reconcile_missing_evidence_predicates(
@@ -2598,6 +2909,21 @@ def reconcile_upgrade(
         from_version=from_version, to_version=to_version,
     )
 
+    # THE POST-CONDITION. Runs after the migrations, against the end state, so a
+    # gap in what they enumerated cannot produce a green upgrade with a broken
+    # read path. Its verdict is durable and blocking, never a printed note.
+    read_provisioner_violations = check_read_provisioner_conformance(
+        operator_project_dir)
+    record_read_provisioner_conformance(
+        operator_project_dir, read_provisioner_violations,
+        from_version=from_version, to_version=to_version,
+    )
+    if adapter_targets_blocking_reason:
+        _append_adapter_enrolment_blocking_request(
+            operator_project_dir, adapter_targets_blocking_reason,
+            from_version, to_version,
+        )
+
     return ReconcileResult(
         operator_project_path=str(operator_project_dir),
         from_version=from_version,
@@ -2611,6 +2937,7 @@ def reconcile_upgrade(
         stale_acceptance_reset=stale_acceptance_reset,
         predicate_stubs_scaffolded=predicate_stubs_scaffolded,
         same_id_twins_healed=same_id_twins_healed,
+        read_provisioner_violations=read_provisioner_violations,
     )
 
 
