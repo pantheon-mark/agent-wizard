@@ -1495,9 +1495,13 @@ def _registered_op_kind_classes(tree: ast.Module) -> Dict[str, str]:
     """Map each op_kind this module registers to the class name it registers.
 
     Reads ``register_adapter(<op_kind>, <Class>())`` calls at module scope,
-    resolving an op_kind given as a module-level string constant. A registration
-    whose op_kind or class cannot be resolved contributes nothing -- never a
-    guess."""
+    resolving an op_kind given as a module-level string constant. A
+    registration contributes only when its second argument is a call of a
+    bare name -- that name is recorded as-is, so a factory call such as
+    ``make_adapter()`` has the same shape and still contributes, under the
+    function's own name, which then fails the class lookup downstream and
+    surfaces as a violation rather than a silent pass. A bare variable
+    reference or a call through an attribute contributes nothing."""
     constants = _module_level_string_constants(tree)
     mapping: Dict[str, str] = {}
     for node in ast.walk(tree):

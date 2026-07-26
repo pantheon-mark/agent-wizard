@@ -3521,11 +3521,19 @@ class ReadProvisionerConformanceRecordingTests(_Base):
         self.assertEqual(entries, [], "a conformant project must be unblocked")
 
     def test_recording_never_touches_another_entry_kind(self):
-        """One authority per fact. This writer owns its own entry kind only --
+        """One authority per fact. This writer owns its own entry kinds only --
         a second authority over somebody else's entry is the duplicated-inference
-        defect this package guards against."""
+        defect this package guards against.
+
+        A real violation is recorded here ON PURPOSE: with nothing to record the
+        writer returns before writing at all, so the foreign entry would survive
+        even a writer that clobbered it. The write path has to actually run for
+        this to prove anything.
+        """
         import json
-        from upgrade_reconcile import record_read_provisioner_conformance
+        from upgrade_reconcile import (
+            check_read_provisioner_conformance, record_read_provisioner_conformance,
+        )
         root = self._project_with_capability(
             canonical_id="inbox_management", op_kind="inbox.labels.modify",
             adapter_name="adapters_inbox.py",
@@ -3539,10 +3547,45 @@ class ReadProvisionerConformanceRecordingTests(_Base):
             "paused_content_sha256": "deadbeef",
         }
         queue_path.write_text(json.dumps([foreign]), encoding="utf-8")
+
+        violations = check_read_provisioner_conformance(root)
+        self.assertTrue(violations, "fixture must produce a real violation, or "
+                                    "this test cannot exercise the write path")
         record_read_provisioner_conformance(
-            root, [], from_version="v0.20.0", to_version="v0.21.0")
+            root, violations, from_version="v0.20.0", to_version="v0.21.0")
+
         queue = json.loads(queue_path.read_text(encoding="utf-8"))
         self.assertIn(foreign, queue, "a foreign entry must survive untouched")
+        self.assertTrue([e for e in queue
+                         if e.get("kind") == "read_provisioner_missing"],
+                        "the writer must actually have written")
+
+    def test_a_missing_registration_records_a_blocking_entry_with_a_real_path(self):
+        """The fallback path matters: an entry with an empty writer_relpath is
+        invisible to the project-wide safety check, so a capability with no
+        registered adapter would silently fail to block."""
+        import json
+        from upgrade_reconcile import (
+            check_read_provisioner_conformance, record_read_provisioner_conformance,
+        )
+        root = self._project_with_capability(
+            canonical_id="orphan", op_kind="orphan.op",
+            adapter_name="adapters_orphan.py",
+            adapter_source="# no registration at all\n")
+        violations = check_read_provisioner_conformance(root)
+        self.assertEqual([v.kind for v in violations], ["no_registered_adapter"])
+        record_read_provisioner_conformance(
+            root, violations, from_version="v0.20.0", to_version="v0.21.0")
+        entry = [e for e in json.loads(
+            (root / "agents" / "handoffs" / "pending_migrations.json")
+            .read_text(encoding="utf-8"))
+            if e.get("kind") == "no_registered_adapter"][0]
+        self.assertEqual(entry["writer_relpath"],
+                         "agents/capabilities/orphan_capability.py")
+        self.assertTrue(entry["writer_relpath"], "must never be empty")
+        self.assertEqual(entry["status"], "pending")
+        self.assertIsNone(entry.get("paused_content_sha256"))
+        self.assertIn("rebuild", entry["suggested_next_step"].lower())
 
 
 class ReconcileUpgradeReadProvisionerConformanceTests(_Base):
