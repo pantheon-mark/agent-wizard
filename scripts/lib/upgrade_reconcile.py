@@ -115,6 +115,7 @@ from capability_code_scaffold import (  # type: ignore  # noqa: E402
 from capability_code_scaffold import (
     _missing_evidence_predicates_for_adapter_source as _missing_evidence_predicates_for_adapter,
 )
+from adapter_migrations import ADAPTER_MIGRATIONS, MigrationContext
 
 
 # ===== Reused T5 scanner (single-home import; canonical location) ===========
@@ -1313,6 +1314,115 @@ def resolve_adapter_migration_targets(
     return AdapterTargets(tuple(sorted(keep)), None)
 
 
+@dataclass(frozen=True)
+class AdapterMigrationOutcome:
+    """What ONE declared migration did to ONE adapter module.
+
+    Recorded for changed AND unchanged outcomes alike: a refusal that goes
+    nowhere is how a remediation the operator needed to know about gets lost.
+    """
+
+    relpath: str
+    migration_name: str
+    changed: bool
+    reason: str
+    detail: Tuple[str, ...] = ()
+
+
+def reconcile_adapter_migrations(
+    operator_project_dir: Path,
+    build_repo_root: Path,
+    *,
+    from_version: str,
+    to_version: str,
+) -> Tuple[List[PredicateStubRemediation], List["AdapterMigrationOutcome"], Optional[str]]:
+    """Apply every DECLARED adapter migration to every resolved adapter module.
+
+    One read, all migrations, one atomic write per module. Composition rather
+    than sequencing is the shipped form deliberately: two passes that each read
+    and write the same module make the second write clobber the first from stale
+    text, and no test of either pass alone would notice.
+
+    Returns ``(predicate_remediations, outcomes, blocking_reason)``.
+    ``blocking_reason`` is non-None when the adapter-enrolment manifest is
+    present but unusable -- the caller turns it into a durable blocking entry
+    rather than proceeding against a partial target set.
+
+    Best-effort per module, exactly as the pass it replaces: an unparseable or
+    unwritable adapter skips that module and never half-corrupts a project.
+    """
+    operator_project_dir = Path(operator_project_dir)
+    remediated: List[PredicateStubRemediation] = []
+    outcomes: List[AdapterMigrationOutcome] = []
+
+    try:
+        capability_identity = _external_write_module(build_repo_root, "capability_identity")
+        evidence = _external_write_module(build_repo_root, "evidence")
+    except Exception:
+        return remediated, outcomes, None
+    required = tuple(getattr(evidence, "REQUIRED_EVIDENCE_PREDICATES", ()) or ())
+    try:
+        index = capability_identity.build_capability_index(str(operator_project_dir))
+        canonical_ids = sorted(index.canonical_ids)
+    except Exception:
+        return remediated, outcomes, None
+
+    targets = resolve_adapter_migration_targets(operator_project_dir, canonical_ids)
+    if targets.manifest_blocking_reason:
+        return remediated, outcomes, targets.manifest_blocking_reason
+
+    context = MigrationContext(required_predicates=required)
+    canonical_by_relpath = {
+        f"{DEFAULT_EXTERNAL_WRITE_REL.as_posix()}/adapters_{cid}.py": cid
+        for cid in canonical_ids
+    }
+
+    for relpath in targets.relpaths:
+        adapter_path = operator_project_dir / relpath
+        try:
+            source = adapter_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue  # never guess at an unparseable adapter module
+
+        canonical_id = canonical_by_relpath.get(relpath, Path(relpath).stem)
+
+        _resolved, ambiguous_count = resolve_registered_adapter_classes(tree)
+        if ambiguous_count:
+            _append_ambiguous_adapter_registration_manual_repair_request(
+                operator_project_dir, canonical_id, relpath,
+                from_version, to_version,
+            )
+
+        current = source
+        for migration in ADAPTER_MIGRATIONS:
+            result = migration.plan(current, context)
+            outcomes.append(AdapterMigrationOutcome(
+                relpath=relpath, migration_name=migration.name,
+                changed=result.changed, reason=result.reason,
+                detail=tuple(result.detail),
+            ))
+            if result.changed:
+                current = result.source
+                if migration.name == "missing_evidence_predicates":
+                    remediated.append(PredicateStubRemediation(
+                        canonical_id=canonical_id, adapter_relpath=relpath,
+                        missing_predicates=list(result.detail),
+                    ))
+                    _append_missing_predicate_migration_request(
+                        operator_project_dir, canonical_id, relpath,
+                        list(result.detail), from_version, to_version,
+                    )
+
+        if current != source:
+            _atomic_write(adapter_path, current)
+
+    return remediated, outcomes, None
+
+
 def reconcile_missing_evidence_predicates(
     operator_project_dir: Path,
     build_repo_root: Path,
@@ -1320,95 +1430,15 @@ def reconcile_missing_evidence_predicates(
     from_version: str,
     to_version: str,
 ) -> List[PredicateStubRemediation]:
-    """(Task B2, F-75) The migrator's auto-scaffold pass: for every capability
-    this project KNOWS about (via `capability_identity.build_capability_index`
-    -- REGARDLESS of scanner status, unlike every mechanism above), check its
-    adapter module (when one exists on disk) against the SAME canonical
-    required-predicate tuple (`evidence.REQUIRED_EVIDENCE_PREDICATES`, read via
-    MODULE attribute access -- never a frozen name-import, so a test that
-    patches this attribute on the imported module object is honored) Task B1's
-    self-QA gate and the proof/run-time gate both already read. For each
-    missing predicate found, scaffolds a FAILING stub onto the adapter module
-    IN PLACE and queues a repair task -- never a passing stub, and never a
-    silent gap.
+    """Back-compatible projection over :func:`reconcile_adapter_migrations`.
 
-    Best-effort, project-wide and per-capability (mirrors `_reconcile_
-    conformant_rebuild_staleness`'s own convention): a failure importing the
-    toolkit's own trusted `capability_identity`/`evidence` modules, or building
-    the capability index, degrades to an empty result (nothing scaffolded) --
-    never half-corrupts a project. A failure resolving ONE capability's
-    missing predicates or insertion point (unparseable/malformed adapter
-    source) skips just that capability, never the whole pass -- see
-    `_missing_evidence_predicates_for_adapter`'s and `insert_missing_evidence_
-    predicate_stubs`'s own never-guess docstrings for why."""
-    operator_project_dir = Path(operator_project_dir)
-    remediated: List[PredicateStubRemediation] = []
-    try:
-        capability_identity = _external_write_module(build_repo_root, "capability_identity")
-        evidence = _external_write_module(build_repo_root, "evidence")
-    except Exception:
-        return remediated
-    required = tuple(getattr(evidence, "REQUIRED_EVIDENCE_PREDICATES", ()) or ())
-    if not required:
-        return remediated
-    try:
-        index = capability_identity.build_capability_index(str(operator_project_dir))
-    except Exception:
-        return remediated
-
-    for canonical_id in sorted(index.canonical_ids):
-        adapter_relpath = (
-            DEFAULT_EXTERNAL_WRITE_REL / f"adapters_{canonical_id}.py"
-        ).as_posix()
-        adapter_path = operator_project_dir / adapter_relpath
-        try:
-            source_text = adapter_path.read_text(encoding="utf-8")
-        except OSError:
-            continue  # no adapter module for this capability -- not adapter-backed, N/A
-
-        try:
-            tree = ast.parse(source_text)
-        except SyntaxError:
-            continue  # never guess at an unparseable adapter module
-
-        # F-1: a register_adapter(...) call whose target class can't be
-        # uniquely resolved gets NOTHING scaffolded for it -- queue a
-        # manual-repair task instead of guessing. This is per-registration,
-        # not whole-module: a DIFFERENT registration in the same
-        # multi-adapter module can still resolve cleanly and be handled
-        # normally below.
-        _resolved, ambiguous_count = resolve_registered_adapter_classes(tree)
-        if ambiguous_count:
-            _append_ambiguous_adapter_registration_manual_repair_request(
-                operator_project_dir, canonical_id, adapter_relpath,
-                from_version, to_version,
-            )
-
-        missing = _missing_evidence_predicates_for_adapter(source_text, required)
-        if not missing:
-            continue
-        try:
-            new_source = insert_missing_evidence_predicate_stubs(source_text, missing)
-        except CapabilityCodeScaffoldError:
-            # Cut 1.4 fold (Finding #3): if this ever fires for a module
-            # `_missing_evidence_predicates_for_adapter` just reported
-            # `missing` for, it is the documented no-register_adapter-call
-            # fallback asymmetry -- see `resolve_registered_adapter_classes`'s
-            # own comment in capability_code_scaffold.py. Unlike the
-            # ambiguous-registration case above, this is a SILENT skip (no
-            # manual-repair task queued) -- accepted because real emitted
-            # adapter modules always have a register_adapter(...) call, so
-            # this shape does not occur in practice today.
-            continue  # could not find a safe insertion point -- never guess, skip
-        _atomic_write(adapter_path, new_source)
-        _append_missing_predicate_migration_request(
-            operator_project_dir, canonical_id, adapter_relpath, missing,
-            from_version, to_version,
-        )
-        remediated.append(PredicateStubRemediation(
-            canonical_id=canonical_id, adapter_relpath=adapter_relpath,
-            missing_predicates=list(missing),
-        ))
+    Kept because existing callers and tests name this function; it is no longer
+    a separate pass. There is exactly ONE pass over adapter modules now, and it
+    applies every declared migration.
+    """
+    remediated, _outcomes, _blocking = reconcile_adapter_migrations(
+        operator_project_dir, build_repo_root,
+        from_version=from_version, to_version=to_version)
     return remediated
 
 
@@ -2558,7 +2588,12 @@ def reconcile_upgrade(
     # (Task B2, F-75) ALSO scanner-status-independent, same reasoning as the pass just
     # above: a fully gate-conformant capability (never scanner-flagged, nothing in
     # `mechanisms`) can still be missing a newly-required adapter evidence predicate.
-    predicate_stubs_scaffolded = reconcile_missing_evidence_predicates(
+    # ONE pass over adapter modules, applying every DECLARED migration to each.
+    # Membership in the declared set is the only way a migration runs, so a
+    # migration nobody remembered to call cannot exist.
+    (predicate_stubs_scaffolded,
+     adapter_migration_outcomes,
+     adapter_targets_blocking_reason) = reconcile_adapter_migrations(
         operator_project_dir, build_repo_root,
         from_version=from_version, to_version=to_version,
     )

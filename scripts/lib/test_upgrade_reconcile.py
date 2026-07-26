@@ -3197,6 +3197,103 @@ class ResolveAdapterMigrationTargetsTests(_Base):
             ("agents/lib/external_write/adapters_estate_upkeep.py",),
             "the operator's own adapter must be the ONLY target")
 
+    _BOTH_MIGRATIONS_NEEDED = (
+        "from typing import Any\n"
+        "from external_write.adapter_registry import register_adapter\n"
+        "\n"
+        "OP_KIND = 'demo.op'\n"
+        "\n"
+        "\n"
+        "def build_read_only_client() -> Any:\n"
+        "    return object()\n"
+        "\n"
+        "\n"
+        "class DemoAdapter:\n"
+        "    def apply_one(self, raw_client, unit):\n"
+        "        return None\n"
+        "\n"
+        "\n"
+        "register_adapter(OP_KIND, DemoAdapter())\n"
+    )
+
+    def _project_with_capability(self, *, canonical_id, op_kind,
+                                adapter_name, adapter_source):
+        """A minimal operator project: one capability declaring op_kind, one
+        adapter module registering it, and the adapter enrolled in the manifest
+        under a name the filename convention cannot produce."""
+        root = self.tmp / f"proj_{canonical_id}"
+        lib = root / "agents" / "lib" / "external_write"
+        caps = root / "agents" / "capabilities"
+        lib.mkdir(parents=True, exist_ok=True)
+        caps.mkdir(parents=True, exist_ok=True)
+        (lib / adapter_name).write_text(adapter_source, encoding="utf-8")
+        (lib / "operator_adapters.json").write_text(
+            json.dumps([Path(adapter_name).stem]), encoding="utf-8")
+        (caps / f"{canonical_id}_capability.py").write_text(
+            f"OP_KIND = {op_kind!r}\n\n\ndef propose_operations(facade, batch_id):\n"
+            "    return []\n", encoding="utf-8")
+        return root
+
+    def test_both_migrations_land_on_the_same_adapter_module(self):
+        """The divergent case the default masks: a module needing BOTH a
+        predicate stub AND the provisioner move. Two passes that each read and
+        write would have the second clobber the first from stale text, and the
+        upgrade would report success with one migration silently lost."""
+        from upgrade_reconcile import reconcile_adapter_migrations
+        root = self._project_with_capability(
+            canonical_id="demo", op_kind="demo.op",
+            adapter_name="adapters_demo.py",
+            adapter_source=self._BOTH_MIGRATIONS_NEEDED)
+        remediated, outcomes, blocking = reconcile_adapter_migrations(
+            root, _REAL_REPO, from_version="v0.20.0", to_version="v0.21.0")
+        self.assertIsNone(blocking)
+        src = (root / "agents" / "lib" / "external_write"
+               / "adapters_demo.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        cls = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.ClassDef) and n.name == "DemoAdapter")
+        methods = {b.name for b in cls.body if isinstance(b, ast.FunctionDef)}
+        self.assertIn("build_read_only_client", methods,
+                      "the provisioner move must have landed")
+        self.assertTrue(
+            methods & {"verify_apply_landed", "verify_undo_restored"},
+            f"the evidence-predicate stub must have landed too: {methods}")
+        self.assertFalse(
+            any(isinstance(n, ast.FunctionDef)
+                and n.name == "build_read_only_client" for n in tree.body),
+            "the module-level provisioner must be gone")
+        self.assertTrue(remediated, "the predicate scaffold must be reported")
+        names = {o.migration_name for o in outcomes if o.changed}
+        self.assertEqual(names, {"missing_evidence_predicates",
+                                 "module_level_provisioner"})
+
+    def test_the_module_is_written_exactly_once(self):
+        """Single-read/single-write is the shipped form, not sequencing."""
+        from upgrade_reconcile import reconcile_adapter_migrations
+        import upgrade_reconcile as ur
+        root = self._project_with_capability(
+            canonical_id="demo", op_kind="demo.op",
+            adapter_name="adapters_demo.py",
+            adapter_source=self._BOTH_MIGRATIONS_NEEDED)
+        target = (root / "agents" / "lib" / "external_write" / "adapters_demo.py")
+        writes = []
+        real_write = ur._atomic_write
+
+        def counting_write(path, text):
+            if Path(path) == target:
+                writes.append(text)
+            return real_write(path, text)
+
+        ur._atomic_write = counting_write
+        try:
+            reconcile_adapter_migrations(
+                root, _REAL_REPO,
+                from_version="v0.20.0", to_version="v0.21.0")
+        finally:
+            ur._atomic_write = real_write
+        self.assertEqual(len(writes), 1,
+                         f"expected exactly one write, got {len(writes)}")
+
 
 if __name__ == "__main__":
     unittest.main()
