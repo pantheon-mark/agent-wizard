@@ -104,10 +104,25 @@ class RebuildPausedCapabilitySkillTests(unittest.TestCase):
         self.assertIn("operator_acceptance.py", self.text)
         self.assertIn("--operator-confirmation", self.text)
 
-    def test_explains_the_entry_closes_itself_via_matching_id(self):
-        self.assertIn("mechanism_id", self.text)
-        self.assertIn("closes", self.text.lower())
-        self.assertIn("never edit", self.text.lower())
+    def test_explains_the_entry_clears_BEFORE_acceptance_and_never_by_hand(self):
+        """Cut 1.6 / F-PRE-5. This test previously asserted the OPPOSITE
+        causality -- that "a successful acceptance closes that entry on its
+        own" -- which was the retired Cut 1.4 mechanism. Under v0.19.0+ the
+        entry must be clear BEFORE acceptance can even be reached: the reap
+        clears it once the file genuinely passes, and only then does acceptance
+        go through. The old assertion enshrined the defect, so an agent
+        following the skill would wait for an acceptance that could never
+        happen. Asserting the real order now, and still that the operator never
+        hand-edits the queue."""
+        lowered = self.text.lower()
+        self.assertIn("never edit", lowered)
+        self.assertIn("pending_migrations.json", self.text)
+        self.assertIn("acceptance does **not** close", lowered)
+        self.assertIn("before", lowered)
+        # The needs-a-person branch must be present: telling an operator to
+        # rebuild a file no rebuild of ours can rewrite is the dead end that
+        # stalled the real estate (F-VAL19-1).
+        self.assertIn("cannot be fixed automatically", lowered)
 
     def test_references_live_readiness_confirmation(self):
         self.assertIn("capability_health", self.text)
