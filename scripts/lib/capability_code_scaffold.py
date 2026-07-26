@@ -572,22 +572,21 @@ def _register_adapter_target_class_name(call: ast.Call) -> Optional[str]:
 
 
 def has_register_adapter_call(tree: ast.Module) -> bool:
-    """True when the module makes at least one ``register_adapter(...)`` call.
+    """True when the module makes at least one module-level
+    ``register_adapter(...)`` call, as ``_register_adapter_calls`` defines it.
 
-    ``resolve_registered_adapter_classes`` deliberately falls back to "the one and
-    only top-level class" for a module that makes NO registration call, because
-    its older callers depend on that shape. A caller that must never infer a
-    target from incidental structure pairs the resolver with this predicate and
-    refuses when it is False.
+    ``resolve_registered_adapter_classes`` deliberately falls back to "the one
+    and only top-level class" for a module with no such call, because its older
+    callers depend on that shape. A caller that must never infer a target from
+    incidental structure pairs the resolver with this predicate and refuses when
+    it is False.
+
+    Delegates to ``_register_adapter_calls`` rather than re-deriving the
+    condition: this predicate and the fallback it guards against MUST be the
+    same test, or a call shape that satisfies one and not the other reopens the
+    inference this guard exists to close.
     """
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-        if name == "register_adapter":
-            return True
-    return False
+    return bool(_register_adapter_calls(tree))
 
 
 def resolve_registered_adapter_classes(

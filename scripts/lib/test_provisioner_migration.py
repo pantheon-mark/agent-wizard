@@ -79,6 +79,29 @@ class ProvisionerMigrationTests(unittest.TestCase):
         self.assertEqual(result.source, source, "source must be untouched")
         self.assertIn("register_adapter", result.reason)
 
+    def test_a_decoy_nested_registration_does_not_authorise_a_rewrite(self):
+        """The guard and the resolver's fallback trigger must be the same test.
+        A registration call that is not a module-level statement does not make a
+        lone class the registered target -- rewriting it anyway is exactly the
+        incidental-structure inference this migration refuses."""
+        from provisioner_migration import plan_provisioner_migration
+        source = (
+            "from typing import Any\n"
+            "\n"
+            "def build_read_only_client() -> Any:\n"
+            "    return object()\n"
+            "\n"
+            "def _setup():\n"
+            "    register_adapter('unrelated.op', SomeOtherThing())\n"
+            "\n"
+            "class DemoAdapter:\n"
+            "    pass\n"
+        )
+        result = plan_provisioner_migration(source)
+        self.assertFalse(result.changed)
+        self.assertEqual(result.source, source, "source must be untouched")
+        self.assertIn("register_adapter", result.reason)
+
 
 if __name__ == "__main__":
     unittest.main()
