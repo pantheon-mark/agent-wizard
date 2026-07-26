@@ -143,9 +143,18 @@ def build_capability_read_facade(project_root: Any, capability_id: str) -> Any:
 
     provision = getattr(dispatch, "provision_read_only_client", None)
     if provision is None:
+        # Name the ADAPTER, not a rebuild of the capability. This is a defect in
+        # the adapter's shape -- the read-only reader has to be a method on the
+        # registered adapter class -- and the rebuild flow carries no guidance
+        # for it, so "rebuild this capability" sends the operator in a circle.
+        # Same wording the upgrade uses for the same fact, deliberately.
         raise CapabilityRunnerError(
-            f"`{capability_id}` has no read-only way to look at the outside system, "
-            "so it cannot safely work out what to change -- it needs to be rebuilt")
+            f"`{capability_id}` cannot look at the outside system in read-only "
+            "mode yet, so it cannot safely work out what to change. What is "
+            f"missing is on the adapter that handles `{op_kind}`, not in "
+            f"`{capability_id}` itself: that adapter class needs a read-only "
+            f"reader on it. Rebuilding `{capability_id}` will not fix this -- "
+            "ask for the adapter to be updated instead")
     try:
         client = provision(dispatch.instance, None)
     except Exception as exc:  # noqa: BLE001

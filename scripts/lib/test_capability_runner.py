@@ -97,6 +97,25 @@ class _AdapterB(_AdapterA):
         return _ClientB()
 
 
+class _AdapterMissingReader:
+    """Registered for its own op_kind but deliberately has NO
+    build_read_only_client -- the adapter-SHAPE defect the honest-refusal fix
+    (the `provision is None` branch) targets. Does not subclass _AdapterA:
+    inheriting would hand it a read-only reader it is meant to lack."""
+
+    def plan(self, params):
+        return []
+
+    def apply_one(self, raw_client, unit):
+        pass
+
+    def undo_one(self, raw_client, unit):
+        pass
+
+    def verify_one(self, observer, unit):
+        return {}
+
+
 _CAPABILITY_SRC = textwrap.dedent('''\
     """A read-dependent capability."""
     OP_KIND = "{op_kind}"
@@ -250,6 +269,31 @@ class CapabilityRunnerTests(unittest.TestCase):
         with self.assertRaises(cr.CapabilityRunnerError) as ctx:
             cr.build_capability_read_facade(self.root, "cap_np")
         self.assertNotIn("Traceback", str(ctx.exception))
+
+    def test_a_missing_provisioner_names_the_adapter_not_a_rebuild(self):
+        """The misdirection: this is an adapter-shape problem, and the rebuild
+        flow has no guidance for it, so telling the operator to rebuild the
+        capability sends them in a circle."""
+        op_kind = "test_runner_op_missing_reader"
+        _register_contract(op_kind)
+        _quietly(register_adapter, op_kind, _AdapterMissingReader())
+        self._write_capability("cap_missing_reader", op_kind)
+        with self.assertRaises(cr.CapabilityRunnerError) as ctx:
+            cr.build_capability_read_facade(self.root, "cap_missing_reader")
+        message = str(ctx.exception)
+        self.assertIn("adapter", message.lower())
+        self.assertIn("read-only reader", message)
+        self.assertNotIn("it needs to be rebuilt", message)
+
+    def test_a_missing_registration_still_says_rebuild(self):
+        """When nothing is registered at all, a rebuild IS the remedy -- the
+        honest-refusal fix must not blur the two cases together."""
+        op_kind = "test_runner_op_never_registered"
+        _register_contract(op_kind)
+        self._write_capability("cap_unregistered", op_kind)
+        with self.assertRaises(cr.CapabilityRunnerError) as ctx:
+            cr.build_capability_read_facade(self.root, "cap_unregistered")
+        self.assertIn("rebuilt", str(ctx.exception))
 
     def test_an_unfinished_capability_refuses_in_plain_language(self):
         p = self.root / "agents" / "capabilities" / "cap_todo_capability.py"
