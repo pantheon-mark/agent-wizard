@@ -112,6 +112,9 @@ from capability_code_scaffold import (  # type: ignore  # noqa: E402
     insert_missing_evidence_predicate_stubs,
     resolve_registered_adapter_classes,
 )
+from capability_code_scaffold import (
+    _missing_evidence_predicates_for_adapter_source as _missing_evidence_predicates_for_adapter,
+)
 
 
 # ===== Reused T5 scanner (single-home import; canonical location) ===========
@@ -1083,69 +1086,6 @@ class PredicateStubRemediation:
     missing_predicates: List[str]
 
 
-def _missing_evidence_predicates_for_adapter(
-    source_text: str, required_predicates: Sequence[str],
-) -> Optional[List[str]]:
-    """AST-parse an adapter module's OWN on-disk source (never imported/
-    executed) and return the (deduplicated, `required_predicates`-ordered)
-    UNION of names that are missing from AT LEAST ONE class actually
-    REGISTERED via a module-level `register_adapter(...)` call -- resolved
-    via `capability_code_scaffold.resolve_registered_adapter_classes`, the
-    SAME AST registration-aware resolution `insert_missing_evidence_
-    predicate_stubs` uses, so detection and insertion can never again
-    disagree about which class they mean (the exact defect F-1 fixes: this
-    function used to inspect only the FIRST top-level class, so a
-    multi-adapter module like `adapters_gmail.py` -- four classes, four
-    `register_adapter(...)` calls -- could have a predicate genuinely
-    missing on its second/third/fourth registered class and this function
-    would still report "nothing missing" because the FIRST class happened
-    to already have it).
-
-    This is deliberately NOT a "present anywhere in the module" check
-    (REJECTED by the locked design): a predicate correctly implemented on
-    one registered class does not hide that a DIFFERENT registered class in
-    the same module still lacks it -- both facts are independently true and
-    this function's union return surfaces the latter regardless of the
-    former. Per-class dedup of what actually needs a stub happens in
-    `insert_missing_evidence_predicate_stubs` (which re-resolves the same
-    per-class detail this function only reports in aggregate).
-
-    Returns `None` (deliberately distinct from `[]`) when the source does
-    not parse, or when it resolves to NO registered class at all (no
-    top-level class; or -- the narrower shape this function's own direct
-    unit tests exercise -- more than one top-level class with no
-    `register_adapter(...)` call present to disambiguate) -- ambiguous,
-    never guessed at; the caller skips this capability for this pass rather
-    than risk a false negative or a corrupting edit, mirroring
-    `_extract_op_kind_literal`'s own fail-closed/never-guess discipline.
-    An INDIVIDUAL ambiguous registration (when at least one OTHER
-    registration in the same module resolves cleanly) is silently excluded
-    from this union rather than turning the whole result into `None` --
-    `reconcile_missing_evidence_predicates` calls
-    `resolve_registered_adapter_classes` itself to learn about those and
-    queue a manual-repair task for them; that is out of scope for this
-    narrower "what needs a stub, in aggregate" helper."""
-    try:
-        tree = ast.parse(source_text)
-    except SyntaxError:
-        return None
-    resolved, _ambiguous_count = resolve_registered_adapter_classes(tree)
-    if not resolved:
-        return None
-    missing: List[str] = []
-    seen = set()
-    for class_node in resolved.values():
-        defined = {
-            n.name for n in class_node.body
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-        for name in required_predicates:
-            if name not in defined and name not in seen:
-                missing.append(name)
-                seen.add(name)
-    return missing
-
-
 def _append_missing_predicate_migration_request(
     operator_project_dir: Path,
     canonical_id: str,
@@ -1278,6 +1218,99 @@ def _append_ambiguous_adapter_registration_manual_repair_request(
     })
     _atomic_write(path, json.dumps(existing, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
     return path
+
+
+#: Adapter modules the wizard itself ships into every project. They are
+#: emitted-lib code, refreshed by the upgrade's own file delivery, and are never
+#: migration targets: rewriting one in an operator's project would damage a
+#: working shipped adapter. Kept as a name set rather than a zone lookup because
+#: this decision is about provenance (who wrote the file), not about zoning.
+_SHIPPED_ADAPTER_MODULE_NAMES = frozenset({"adapters.py", "adapters_gmail.py"})
+
+_OPERATOR_ADAPTER_MANIFEST_REL = (
+    DEFAULT_EXTERNAL_WRITE_REL / "operator_adapters.json").as_posix()
+
+
+@dataclass(frozen=True)
+class AdapterTargets:
+    """The adapter modules this upgrade may rewrite.
+
+    ``manifest_blocking_reason`` is set when an enrolment manifest is PRESENT but
+    unusable. In that state ``relpaths`` is deliberately empty: migrating the
+    subset the filename convention happens to find, and reporting success, is
+    precisely the false green this resolution exists to prevent. The caller
+    turns the reason into a durable blocking entry.
+    """
+
+    relpaths: Tuple[str, ...] = ()
+    manifest_blocking_reason: Optional[str] = None
+
+
+def resolve_adapter_migration_targets(
+    operator_project_dir: Path,
+    canonical_ids: Sequence[str],
+) -> AdapterTargets:
+    """Resolve which adapter modules the declared migration set may rewrite.
+
+    Two sources, UNIONED, never one instead of the other:
+
+      * the explicit enrolment manifest ``operator_adapters.json`` -- the typed
+        source of truth the runtime registry already reads. Authoritative when
+        present.
+      * the ``adapters_<canonical_id>.py`` filename convention -- kept for
+        installs that predate the manifest.
+
+    The union is what closes the observed gap: an enrolled adapter whose filename
+    does not match its capability's canonical id is invisible to the convention,
+    and an install predating the manifest is invisible to the manifest.
+
+    A PRESENT-but-unusable manifest is a fail-closed block, never a silent
+    fallback. An ABSENT manifest is a clean no-op -- most installs have none.
+    """
+    root = Path(operator_project_dir)
+    lib_rel = DEFAULT_EXTERNAL_WRITE_REL.as_posix()
+    found: List[str] = []
+
+    manifest_path = root / _OPERATOR_ADAPTER_MANIFEST_REL
+    if manifest_path.exists():
+        try:
+            raw = manifest_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            return AdapterTargets(
+                (),
+                f"the list of adapters you have added ({_OPERATOR_ADAPTER_MANIFEST_REL}) "
+                f"could not be read ({exc.__class__.__name__}), so this upgrade "
+                "cannot tell which of them still need updating")
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            return AdapterTargets(
+                (),
+                f"the list of adapters you have added ({_OPERATOR_ADAPTER_MANIFEST_REL}) "
+                "is not readable as a list, so this upgrade cannot tell which of "
+                "them still need updating")
+        if not isinstance(data, list) or any(
+                not isinstance(stem, str) or not stem for stem in data):
+            return AdapterTargets(
+                (),
+                f"the list of adapters you have added ({_OPERATOR_ADAPTER_MANIFEST_REL}) "
+                "does not contain a plain list of adapter names, so this upgrade "
+                "cannot tell which of them still need updating")
+        for stem in data:
+            found.append(f"{lib_rel}/{stem}.py")
+
+    for canonical_id in canonical_ids:
+        found.append(f"{lib_rel}/adapters_{canonical_id}.py")
+
+    keep: List[str] = []
+    for relpath in found:
+        if Path(relpath).name in _SHIPPED_ADAPTER_MODULE_NAMES:
+            continue
+        if not (root / relpath).is_file():
+            continue
+        if relpath not in keep:
+            keep.append(relpath)
+    return AdapterTargets(tuple(sorted(keep)), None)
 
 
 def reconcile_missing_evidence_predicates(

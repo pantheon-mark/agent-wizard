@@ -108,6 +108,8 @@ from pathlib import Path
 from string import Template
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from adapter_migrations import MigrationContext, TransformResult  # noqa: F401
+
 
 _VALID_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -790,6 +792,108 @@ def insert_missing_evidence_predicate_stubs(
     for end_lineno, stub_text in insertions:
         lines[end_lineno:end_lineno] = [stub_text]
     return "".join(lines)
+
+
+def _missing_evidence_predicates_for_adapter_source(
+    source_text: str, required_predicates: Sequence[str],
+) -> Optional[List[str]]:
+    """AST-parse an adapter module's OWN on-disk source (never imported/
+    executed) and return the (deduplicated, `required_predicates`-ordered)
+    UNION of names that are missing from AT LEAST ONE class actually
+    REGISTERED via a module-level `register_adapter(...)` call -- resolved
+    via `capability_code_scaffold.resolve_registered_adapter_classes`, the
+    SAME AST registration-aware resolution `insert_missing_evidence_
+    predicate_stubs` uses, so detection and insertion can never again
+    disagree about which class they mean (the exact defect F-1 fixes: this
+    function used to inspect only the FIRST top-level class, so a
+    multi-adapter module like `adapters_gmail.py` -- four classes, four
+    `register_adapter(...)` calls -- could have a predicate genuinely
+    missing on its second/third/fourth registered class and this function
+    would still report "nothing missing" because the FIRST class happened
+    to already have it).
+
+    This is deliberately NOT a "present anywhere in the module" check
+    (REJECTED by the locked design): a predicate correctly implemented on
+    one registered class does not hide that a DIFFERENT registered class in
+    the same module still lacks it -- both facts are independently true and
+    this function's union return surfaces the latter regardless of the
+    former. Per-class dedup of what actually needs a stub happens in
+    `insert_missing_evidence_predicate_stubs` (which re-resolves the same
+    per-class detail this function only reports in aggregate).
+
+    Returns `None` (deliberately distinct from `[]`) when the source does
+    not parse, or when it resolves to NO registered class at all (no
+    top-level class; or -- the narrower shape this function's own direct
+    unit tests exercise -- more than one top-level class with no
+    `register_adapter(...)` call present to disambiguate) -- ambiguous,
+    never guessed at; the caller skips this capability for this pass rather
+    than risk a false negative or a corrupting edit, mirroring
+    `_extract_op_kind_literal`'s own fail-closed/never-guess discipline.
+    An INDIVIDUAL ambiguous registration (when at least one OTHER
+    registration in the same module resolves cleanly) is silently excluded
+    from this union rather than turning the whole result into `None` --
+    `reconcile_missing_evidence_predicates` calls
+    `resolve_registered_adapter_classes` itself to learn about those and
+    queue a manual-repair task for them; that is out of scope for this
+    narrower "what needs a stub, in aggregate" helper."""
+    try:
+        tree = ast.parse(source_text)
+    except SyntaxError:
+        return None
+    resolved, _ambiguous_count = resolve_registered_adapter_classes(tree)
+    if not resolved:
+        return None
+    missing: List[str] = []
+    seen = set()
+    for class_node in resolved.values():
+        defined = {
+            n.name for n in class_node.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        for name in required_predicates:
+            if name not in defined and name not in seen:
+                missing.append(name)
+                seen.add(name)
+    return missing
+
+
+def plan_missing_evidence_predicates(source: str,
+                                     context: "MigrationContext") -> TransformResult:
+    """Scaffold a FAILING stub for every required evidence predicate the
+    registered adapter class does not declare, and return the replacement source.
+
+    PURE: no filesystem access. Wraps the existing detector and inserter so the
+    upgrade engine can compose this with the other adapter migrations on one
+    in-memory copy of the module.
+
+    Never emits a passing stub: a scaffolded predicate raises, so proof and
+    acceptance stay refused until a real implementation replaces it.
+    """
+    required = tuple(context.required_predicates or ())
+    if not required:
+        return TransformResult(source, False,
+                               "no evidence predicates are required -- nothing to do")
+    try:
+        ast.parse(source)
+    except SyntaxError:
+        return TransformResult(source, False,
+                               "could not be parsed, so it was left untouched")
+    missing = _missing_evidence_predicates_for_adapter_source(source, required)
+    if not missing:
+        return TransformResult(source, False,
+                               "every required evidence predicate is already "
+                               "declared -- nothing to do")
+    try:
+        new_source = insert_missing_evidence_predicate_stubs(source, missing)
+    except CapabilityCodeScaffoldError as exc:
+        return TransformResult(
+            source, False,
+            f"could not find a safe place to add {', '.join(missing)} "
+            f"({exc}) -- left untouched")
+    return TransformResult(
+        new_source, True,
+        f"added a not-yet-written check for {', '.join(missing)}",
+        detail=tuple(missing))
 
 
 # ---------------------------------------------------------------------------

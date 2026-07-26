@@ -49,3 +49,42 @@ class MigrationContext:
     """
 
     required_predicates: Tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class AdapterMigration:
+    """One declared adapter migration.
+
+    ``name`` is stable and operator-visible: it is recorded on every queue entry
+    and every refusal reason, so an outcome can always be traced back to the
+    migration that produced it.
+    """
+
+    name: str
+    plan: Callable[[str, MigrationContext], TransformResult]
+
+
+def _provisioner_migration(source: str, context: MigrationContext) -> TransformResult:
+    # Imported lazily: provisioner_migration imports this module for its value
+    # types, so a module-scope import here would be circular.
+    from provisioner_migration import plan_provisioner_migration
+    return plan_provisioner_migration(source, context)
+
+
+def _evidence_predicate_migration(source: str,
+                                  context: MigrationContext) -> TransformResult:
+    from capability_code_scaffold import plan_missing_evidence_predicates
+    return plan_missing_evidence_predicates(source, context)
+
+
+#: The declared set, applied IN ORDER to one in-memory copy of each adapter
+#: module. Order is deliberate and load-bearing: the evidence-predicate stub
+#: inserts at the registered class's end_lineno, and moving the read-client
+#: builder onto that same class also changes where the class ends. Running the
+#: predicate stub first preserves the behaviour that shipped before the two were
+#: composed, and the engine re-parses between migrations so the second one sees
+#: the first one's real line numbers.
+ADAPTER_MIGRATIONS: Tuple[AdapterMigration, ...] = (
+    AdapterMigration("missing_evidence_predicates", _evidence_predicate_migration),
+    AdapterMigration("module_level_provisioner", _provisioner_migration),
+)

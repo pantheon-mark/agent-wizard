@@ -3116,5 +3116,73 @@ class CliWiringTests(unittest.TestCase):
             self.assertIn(code_dir, message)
 
 
+class ResolveAdapterMigrationTargetsTests(_Base):
+
+    def test_adapter_targets_union_manifest_and_convention(self):
+        """The manifest is authoritative when present; the filename convention
+        is kept for installs that predate it. Neither alone is enough -- the
+        estate's own inbox adapter is enrolled in the manifest under a name the
+        convention cannot produce."""
+        from upgrade_reconcile import resolve_adapter_migration_targets
+        root = Path(self.tmp)
+        lib = root / "agents" / "lib" / "external_write"
+        lib.mkdir(parents=True, exist_ok=True)
+        (lib / "adapters_inbox.py").write_text("# enrolled only\n", encoding="utf-8")
+        (lib / "adapters_estate_upkeep.py").write_text("# both\n", encoding="utf-8")
+        (lib / "operator_adapters.json").write_text(
+            '["adapters_inbox", "adapters_estate_upkeep"]', encoding="utf-8")
+        targets = resolve_adapter_migration_targets(
+            root, ["estate_upkeep", "inbox_management"])
+        self.assertIsNone(targets.manifest_blocking_reason)
+        self.assertIn("agents/lib/external_write/adapters_inbox.py", targets.relpaths)
+        self.assertIn("agents/lib/external_write/adapters_estate_upkeep.py",
+                      targets.relpaths)
+
+    def test_a_malformed_manifest_blocks_and_never_falls_back_silently(self):
+        """A present-but-unparseable enrolment manifest must fail closed. Falling
+        back to the filename convention would migrate a SUBSET and report
+        success -- an upgrade that says it worked while an enrolled adapter was
+        skipped is the failure this cut exists to close."""
+        from upgrade_reconcile import resolve_adapter_migration_targets
+        root = Path(self.tmp)
+        lib = root / "agents" / "lib" / "external_write"
+        lib.mkdir(parents=True, exist_ok=True)
+        (lib / "adapters_estate_upkeep.py").write_text("# x\n", encoding="utf-8")
+        (lib / "operator_adapters.json").write_text("{not json", encoding="utf-8")
+        targets = resolve_adapter_migration_targets(root, ["estate_upkeep"])
+        self.assertIsNotNone(targets.manifest_blocking_reason)
+        self.assertEqual(targets.relpaths, (),
+                         "a blocking manifest problem must yield NO targets, "
+                         "never a partial set")
+
+    def test_an_absent_manifest_is_not_a_problem(self):
+        """Most installs predate the manifest. Absent is a clean no-op."""
+        from upgrade_reconcile import resolve_adapter_migration_targets
+        root = Path(self.tmp)
+        lib = root / "agents" / "lib" / "external_write"
+        lib.mkdir(parents=True, exist_ok=True)
+        (lib / "adapters_estate_upkeep.py").write_text("# x\n", encoding="utf-8")
+        targets = resolve_adapter_migration_targets(root, ["estate_upkeep"])
+        self.assertIsNone(targets.manifest_blocking_reason)
+        self.assertEqual(targets.relpaths,
+                         ("agents/lib/external_write/adapters_estate_upkeep.py",))
+
+    def test_shipped_baseline_adapters_are_never_migration_targets(self):
+        """The migration set REWRITES its targets. A shipped baseline adapter is
+        emitted-lib code, not operator-enrolled code, so it must never be
+        rewritten in an operator's project -- scaffolding a failing stub into it
+        would break a working shipped adapter."""
+        from upgrade_reconcile import resolve_adapter_migration_targets
+        root = Path(self.tmp)
+        lib = root / "agents" / "lib" / "external_write"
+        lib.mkdir(parents=True, exist_ok=True)
+        (lib / "adapters.py").write_text("# reference adapter\n", encoding="utf-8")
+        (lib / "adapters_gmail.py").write_text("# shipped baseline\n", encoding="utf-8")
+        (lib / "adapters_estate_upkeep.py").write_text("# operator\n", encoding="utf-8")
+        targets = resolve_adapter_migration_targets(root, ["estate_upkeep"])
+        self.assertNotIn("agents/lib/external_write/adapters.py", targets.relpaths)
+        self.assertNotIn("agents/lib/external_write/adapters_gmail.py", targets.relpaths)
+
+
 if __name__ == "__main__":
     unittest.main()
