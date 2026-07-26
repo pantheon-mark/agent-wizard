@@ -1,0 +1,75 @@
+# Foundation bundle v0.21.0 manifest
+# Minor-additive release over v0.20.0 (Cut 1.7 — closes F-VAL20-1: the migrator shipped in the
+# toolkit while nothing in either channel invoked it, itself a two-channel delivery failure).
+# The engine half of this cut -- the declared migration set, fail-closed target resolution, the
+# single-write composition, the conformance post-condition, remediation routing, and durable
+# failure state -- ships with the toolkit (`wizard self-update`), not this bundle.
+# This bundle carries the emitted-lib channel's half: the kernel runner's refusal message now
+# names the ADAPTER, not a rebuild of the capability, when the registered adapter class has no
+# read-only reader on it -- a defect in the adapter's shape that "rebuild this capability"
+# sent an operator in a circle trying to fix. The health check and the acceptance refusal are
+# also now kind-aware in what they DESCRIBE (never in what they block): a shared queue entry
+# that is not a bespoke-writer bypass (for example, a safety check that itself could not finish)
+# is described in its own words instead of the bypass-writer's "rebuild it" sentence, which names
+# a fix that does not apply to it. Nothing about what blocks changed; only what is said about it.
+# Foundation docs are BYTE-IDENTICAL to v0.20.0 (managed_files hashes unchanged;
+# foundation_schema_version unchanged).
+_note: JSON sidecar for manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing
+  companion. Both files MUST stay in sync.
+agent_contract_version: v0-pre-rebuild
+bundle_manifest_schema_version: v2
+foundation_bundle_version: v0.21.0
+foundation_schema_version: v0.3
+included_templates:
+  foundation_docs:
+  - vision.md
+  - approach.md
+  - technical_architecture.md
+  - execution_plan.md
+  - test_cases.md
+  - audit_framework.md
+managed_files:
+  foundation/approach.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/audit_framework.md:
+    local_modifications: not_recommended
+    managed_by: wizard
+    merge_strategy: warn_on_drift
+  foundation/execution_plan.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/prd.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/technical_architecture.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/test_cases.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/vision.md:
+    local_modifications: expected
+    managed_by: shared
+    merge_strategy: three_way
+min_engine_version: v1.0.0
+public_api:
+  required_files:
+  - foundation/vision.md
+  - foundation/prd.md
+  - foundation/approach.md
+  - foundation/execution_plan.md
+  - foundation/technical_architecture.md
+  - foundation/test_cases.md
+  - foundation/audit_framework.md
+  required_frontmatter_fields_per_file: see the canonical foundation-versioning specification § 1.1
+  required_sections_per_doc_type: see schemas/section-schema.yaml in this bundle
+  section_schema: schemas/section-schema.yaml
+release_date: '2026-07-26'
+source_commit: PENDING
+status: prerelease

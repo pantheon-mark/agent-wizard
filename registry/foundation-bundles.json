@@ -383,6 +383,19 @@
       "safety_class": "reliability_fix",
       "source_commit": "f3e2f5c9f8e21aa6623c30afd9d596434adb28fb",
       "status": "prerelease"
+    },
+    {
+      "bundle_manifest_sha256": "sha256:5e346ef3741443ffa1ded288836e171493fab06ae0461d5586c9c9f761a2bd5d",
+      "bundle_tree_sha256": "sha256:006f93cefc1fb19f535e0c98f5cf960534a8ac8536dbe3d4ddeaec205304ec33",
+      "changelog": "When a capability of yours cannot yet look at your outside system in a safe, read-only way, the message you get now names the exact adapter that needs a read-only reader added to it, and says plainly that rebuilding the capability will not fix this -- instead of sending you in a circle trying to rebuild the capability itself. The health check and turning a capability on also now describe each blocking item honestly: a file that genuinely needs to be rebuilt still gets that guidance, but something else recorded on the same list -- for example, a safety check that itself could not finish -- is described in its own words instead of being told, wrongly, to rebuild something that was never the problem. This release also makes sure every upgrade and safety review actually checks and records whether each capability can look at your outside system safely, closing a gap where that check could silently be skipped without anyone knowing.",
+      "foundation_bundle_version": "v0.21.0",
+      "manifest": "foundation-bundles/v0.21.0/manifest.yaml",
+      "path": "foundation-bundles/v0.21.0/",
+      "recommendation_reason": "This is a reliability fix for a misleading error message that sent you in a circle: when a capability could not yet look at your outside system safely, it told you to rebuild the capability instead of naming the adapter that actually needed the fix. It also closes a gap in the update tool itself, so the safety check behind every upgrade actually runs and is recorded rather than silently being skippable. No breaking changes; most operators should take it.",
+      "release_date": "2026-07-26",
+      "safety_class": "reliability_fix",
+      "source_commit": "PENDING",
+      "status": "prerelease"
     }
   ],
   "registry_schema_version": "v2",
