@@ -1370,6 +1370,57 @@ class RenderReconcileResultTests(unittest.TestCase):
         self.assertIn("switched off", out.lower())
 
 
+class RenderReconcileResultRemediationTests(_Base):
+    """The pre-existing handoff hole this closes: the guard set
+    ``migration_queue_path`` when predicate stubs were scaffolded but rendered
+    nothing unless ``mechanisms`` or ``stale_acceptance_reset`` were also
+    populated -- an upgrade could rewrite an operator's adapter, queue a
+    repair task, and print no handoff at all."""
+
+    def test_render_reports_scaffolded_predicate_stubs(self):
+        """The pre-existing handoff hole: the upgrade could rewrite an operator's
+        adapter, queue a repair task, set the queue path -- and print nothing.
+        The neighbouring field was explicitly protected against exactly this."""
+        from upgrade_reconcile import (
+            PredicateStubRemediation, ReconcileResult, render_reconcile_result,
+        )
+        result = ReconcileResult(
+            operator_project_path="/tmp/p", from_version="v0.20.0",
+            to_version="v0.21.0",
+            migration_queue_path="/tmp/p/agents/handoffs/pending_migrations.json",
+            predicate_stubs_scaffolded=[PredicateStubRemediation(
+                canonical_id="inbox_management",
+                adapter_relpath="agents/lib/external_write/adapters_inbox.py",
+                missing_predicates=["verify_apply_landed"])],
+        )
+        out = render_reconcile_result(result)
+        self.assertTrue(out, "must not render empty when real work was done")
+        self.assertIn("inbox_management", out)
+        self.assertIn("pending_migrations.json", out)
+
+    def test_render_reports_read_provisioner_violations(self):
+        from upgrade_reconcile import (
+            ReadProvisionerViolation, ReconcileResult, render_reconcile_result,
+        )
+        result = ReconcileResult(
+            operator_project_path="/tmp/p", from_version="v0.20.0",
+            to_version="v0.21.0",
+            read_provisioner_violations=[ReadProvisionerViolation(
+                capability_id="inbox_management", op_kind="inbox.labels.modify",
+                adapter_relpath="agents/lib/external_write/adapters_inbox.py",
+                kind="read_provisioner_missing", reason="no read-only reader")],
+        )
+        out = render_reconcile_result(result)
+        self.assertIn("inbox_management", out)
+        self.assertNotIn("rebuild the capability", out.lower())
+
+    def test_render_is_still_empty_when_there_is_genuinely_nothing(self):
+        from upgrade_reconcile import ReconcileResult, render_reconcile_result
+        self.assertEqual(render_reconcile_result(ReconcileResult(
+            operator_project_path="/tmp/p", from_version="v0.20.0",
+            to_version="v0.21.0")), "")
+
+
 # ===================================================================================
 # F-55 B2 — paused_op_kinds resolution + writer, exercised at the HELPER level
 # directly (constructed inputs), not by forcing an unreachable reconcile_upgrade
@@ -3628,6 +3679,65 @@ class ReconcileUpgradeReadProvisionerConformanceTests(_Base):
             .read_text(encoding="utf-8"))
         self.assertTrue([e for e in queue
                          if e.get("kind") == "read_provisioner_missing"])
+
+
+class AdapterMigrationRefusalRoutingTests(_Base):
+    """A migration that DECLINES to act must say so somewhere durable. Before
+    this, a refusal existed only as an in-memory ``AdapterMigrationOutcome``
+    -- the reason that matters most, "found more than one registered adapter
+    class, move it by hand", was a dead end for a non-technical operator
+    unless it landed somewhere durable and visible."""
+
+    def test_a_migration_refusal_reaches_the_repair_queue(self):
+        """A migration that declines to act must say so somewhere durable. The
+        refusal that mattered most here -- 'found 2 registered classes, move it
+        by hand' -- is a dead end at the non-technical bar if it only ever
+        existed as a return value nobody recorded."""
+        import json
+        from upgrade_reconcile import reconcile_upgrade
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_LEGACY_MODULE_LEVEL.replace(
+                "register_adapter(OP_KIND, InboxLabelsAdapter())\n",
+                "class OtherAdapter:\n    pass\n\n\n"
+                "register_adapter(OP_KIND, InboxLabelsAdapter())\n"
+                "register_adapter('other.op', OtherAdapter())\n"))
+        reconcile_upgrade(root, _REAL_REPO,
+                          from_version="v0.20.0", to_version="v0.21.0")
+        queue = json.loads(
+            (root / "agents" / "handoffs" / "pending_migrations.json")
+            .read_text(encoding="utf-8"))
+        refusals = [e for e in queue
+                    if e.get("kind") == "adapter_migration_refused"]
+        self.assertTrue(refusals, f"no refusal recorded: {queue}")
+        self.assertIn("module_level_provisioner", refusals[0]["migration_name"])
+        self.assertTrue(refusals[0]["reason"])
+        self.assertEqual(refusals[0]["status"], "pending")
+
+    def test_a_nothing_to_do_outcome_is_not_queued_as_a_refusal(self):
+        """'Nothing to do' is not a refusal. Queueing it would put a blocking
+        entry in every already-correct project -- a guard that always fires."""
+        import json
+        from upgrade_reconcile import reconcile_upgrade
+        migrated = _LEGACY_MODULE_LEVEL.replace(
+            "def build_read_only_client() -> Any:\n    return object()\n\n\n", ""
+        ).replace(
+            "class InboxLabelsAdapter:\n",
+            "class InboxLabelsAdapter:\n"
+            "    def build_read_only_client(self, op) -> Any:\n"
+            "        return object()\n\n")
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py", adapter_source=migrated)
+        reconcile_upgrade(root, _REAL_REPO,
+                          from_version="v0.20.0", to_version="v0.21.0")
+        queue_path = (root / "agents" / "handoffs" / "pending_migrations.json")
+        queue = json.loads(queue_path.read_text(encoding="utf-8")) \
+            if queue_path.exists() else []
+        self.assertEqual(
+            [e for e in queue if e.get("kind") == "adapter_migration_refused"],
+            [])
 
 
 if __name__ == "__main__":

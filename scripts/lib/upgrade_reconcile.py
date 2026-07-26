@@ -1224,6 +1224,66 @@ def _append_ambiguous_adapter_registration_manual_repair_request(
     return path
 
 
+#: Refusal reasons that mean "correctly nothing to do", not "could not act".
+#: Queueing these would put a blocking entry in every already-correct project.
+_BENIGN_REFUSAL_MARKERS = ("nothing to do",)
+
+
+def _append_adapter_migration_refusal_request(
+    operator_project_dir: Path,
+    outcome: "AdapterMigrationOutcome",
+    from_version: str,
+    to_version: str,
+) -> Optional[Path]:
+    """Record a migration that DECLINED to act, so the reason reaches a person.
+
+    A refusal that exists only as a return value is how a remediation the
+    operator needed goes missing. The most consequential one here -- "there is
+    more than one registered adapter class, so move the read-client builder by
+    hand" -- is a dead end for a non-technical operator unless it lands somewhere
+    durable and visible.
+
+    A benign "nothing to do" outcome is not queued: a blocking entry in every
+    already-correct project is a guard nobody reads. Idempotent per
+    ``(relpath, migration_name)``.
+    """
+    if any(marker in outcome.reason for marker in _BENIGN_REFUSAL_MARKERS):
+        return None
+    path = Path(operator_project_dir) / MIGRATION_QUEUE_REL
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        if not isinstance(existing, list):
+            existing = []
+    except (json.JSONDecodeError, OSError):
+        existing = []
+    existing = [
+        e for e in existing
+        if not (isinstance(e, dict)
+                and e.get("kind") == "adapter_migration_refused"
+                and e.get("writer_relpath") == outcome.relpath
+                and e.get("migration_name") == outcome.migration_name)
+    ]
+    existing.append({
+        "mechanism_id": Path(outcome.relpath).stem,
+        "writer_relpath": outcome.relpath,
+        "entrypoint_relpath": None,
+        "requested_at": _utcnow_iso(),
+        "from_version": from_version,
+        "to_version": to_version,
+        "kind": "adapter_migration_refused",
+        "migration_name": outcome.migration_name,
+        "reason": outcome.reason,
+        "suggested_next_step": (
+            f"Ask your assistant to look at {outcome.relpath} and finish this "
+            "update by hand. It stopped rather than guess, so nothing has been "
+            "changed in that file."),
+        "status": "pending",
+    })
+    _atomic_write(path, json.dumps(existing, indent=2, ensure_ascii=False,
+                                   sort_keys=True) + "\n")
+    return path
+
+
 #: Adapter modules the wizard itself ships into every project. They are
 #: emitted-lib code, refreshed by the upgrade's own file delivery, and are never
 #: migration targets: rewriting one in an operator's project would damage a
@@ -1419,6 +1479,11 @@ def reconcile_adapter_migrations(
                         operator_project_dir, canonical_id, relpath,
                         list(result.detail), from_version, to_version,
                     )
+            else:
+                _append_adapter_migration_refusal_request(
+                    operator_project_dir, outcomes[-1],
+                    from_version, to_version,
+                )
 
         if current != source:
             _atomic_write(adapter_path, current)
@@ -2955,8 +3020,16 @@ def render_reconcile_result(result: ReconcileResult) -> str:
     never entering ``mechanisms`` at all. Returning "" in that case would be a SILENT
     switch-off -- the operator's own approved capability just lost its acceptance and nothing
     was ever printed about it. Both sections are rendered (whichever are non-empty); returns ""
-    only when NEITHER carries anything to report."""
-    if not result.mechanisms and not result.stale_acceptance_reset:
+    only when NEITHER carries anything to report.
+
+    (This function renders EVERY section that carries something to report. It
+    returns "" only when none of them do. A field that does real work to the
+    operator's project and renders nothing is a silent switch-off; that has now
+    happened twice in this function's history, once per field, so the guard
+    enumerates the fields rather than naming two of them.)"""
+    if not (result.mechanisms or result.stale_acceptance_reset
+            or result.predicate_stubs_scaffolded
+            or result.read_provisioner_violations):
         return ""
     lines = ["", "Upgrade safety check found something to review:"]
     for m in result.mechanisms:
@@ -2980,6 +3053,28 @@ def render_reconcile_result(result: ReconcileResult) -> str:
             f"  - {canonical_id}: its code changed since you approved it, so its approval "
             "has been switched back off until you try it again and approve it again"
         )
+    for remediation in result.predicate_stubs_scaffolded:
+        lines.append(
+            f"  - {remediation.canonical_id}: a check it was missing has been "
+            f"added to {remediation.adapter_relpath} as a placeholder, so it "
+            "stays switched off until someone writes the real check")
+    for violation in result.read_provisioner_violations:
+        if violation.kind == "no_registered_adapter":
+            lines.append(
+                f"  - {violation.capability_id}: nothing in this project is set "
+                "up to talk to the outside system for it, so it cannot run")
+        else:
+            lines.append(
+                f"  - {violation.capability_id}: it cannot look at the outside "
+                f"system in read-only mode yet -- the adapter in "
+                f"{violation.adapter_relpath} needs a read-only reader added to "
+                "it (this is an adapter change, not a rebuild of the capability)")
     if result.notice_path:
         lines.append(f"  See {result.notice_path} for what this means and what happens next.")
+    elif result.migration_queue_path:
+        # No impact notice was written this pass (nothing scanner-flagged), but a
+        # repair task WAS queued (a scaffolded predicate stub, most often) -- point
+        # at the durable queue file so this isn't the silent switch-off the
+        # docstring above warns about.
+        lines.append(f"  See {result.migration_queue_path} for what this means and what happens next.")
     return "\n".join(lines) + "\n"
