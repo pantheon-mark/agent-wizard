@@ -381,7 +381,7 @@
       "recommendation_reason": "This is a reliability fix that removes a dead end: a capability that must read your outside system before proposing changes had no safe way to do so, which could leave the whole project unable to switch anything on. It also stops files that are not part of your live setup from blocking you, and gives you an honest, recorded way to accept a file that cannot be rebuilt automatically. Everything that genuinely needs attention still blocks.",
       "release_date": "2026-07-26",
       "safety_class": "reliability_fix",
-      "source_commit": "PENDING",
+      "source_commit": "f3e2f5c9f8e21aa6623c30afd9d596434adb28fb",
       "status": "prerelease"
     }
   ],
