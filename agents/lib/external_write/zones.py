@@ -126,6 +126,16 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         # for the identical reason.
         "capability_invariants.py",
         "capability_registration.py",
+        # capability_runner.py (Task 5 / Cut 1.6 — v0.20.0): the kernel-as-runner
+        # that resolves a capability's adapter, builds its READ-ONLY client, and
+        # injects the resulting facade — so capability code never bootstraps a
+        # client and never has a reason to import the adapter (F-VAL19-5). It
+        # legitimately reaches the adapter registry (`get_dispatch`) and imports
+        # capability/adapter modules by name, which are precisely the
+        # CAPABILITY-zone-only bans, so it needs the same SEALED_KERNEL
+        # membership registered_adapters.py already carries for the identical
+        # reason. It builds no WRITE credential and never calls run_operation.
+        "capability_runner.py",
         "contracts.py",
         "copy_run_proof.py",
         "coverage_gate.py",

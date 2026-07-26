@@ -521,6 +521,19 @@ def build_read_facade(op_kind: str, read_only_client: Any,
     handed actually holds a read-only-scoped credential).
     """
     require_read_only_scope(op_kind)
+    # (Cut 1.6, STEP 0 fold) Refuse a null client AT CONSTRUCTION. Before this,
+    # build_read_facade(op_kind, None) cheerfully returned a facade wrapping
+    # None and the failure surfaced later as a raw
+    # `AttributeError: 'NoneType' object has no attribute '<read method>'`
+    # mid-run, in front of a non-technical operator. A trust surface must not
+    # hand back a hollow object that dies on first use; it must decline up
+    # front, with a reason the operator can act on.
+    if read_only_client is None:
+        raise ReadFacadeEligibilityError(
+            f"no read-only connection was supplied for operation kind {op_kind!r}, so "
+            "there is nothing to read the outside system with -- refusing rather than "
+            "returning a facade that would fail on its first use."
+        )
     if facade_cls is not None:
         cls = facade_cls
     else:
