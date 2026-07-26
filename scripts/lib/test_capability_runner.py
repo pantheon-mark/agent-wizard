@@ -119,7 +119,7 @@ def _register_contract(op_kind):
         writes=("__record__",),
         produces=(),
         dependency_set=(),
-        verifier_set=("prestate_snapshot_diff",),
+        verifier_set=("prestate_snapshot_diff_v1",),
         introduces_persistent_binding=False,
         risk_class="reversible_external",
         blast_radius_cap=5,
@@ -150,7 +150,23 @@ class CapabilityRunnerTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        # Snapshot the global registries so this module can RESTORE them.
+        # These registries are process-global and shared with every other test
+        # module; leaking test op_kinds into them caused a real cross-module
+        # failure (test_external_write_contracts asserts every REGISTERED
+        # contract references a registered verifier, and picked up ours). A
+        # test that mutates global state must put it back, or it turns an
+        # unrelated suite red depending on discovery order.
+        cls._contracts_before = dict(_contracts.OPERATION_CONTRACTS)
+        cls._facades_before = dict(_rf._READ_FACADE_REGISTRY)
         _register_everything()
+
+    @classmethod
+    def tearDownClass(cls):
+        _contracts.OPERATION_CONTRACTS.clear()
+        _contracts.OPERATION_CONTRACTS.update(cls._contracts_before)
+        _rf._READ_FACADE_REGISTRY.clear()
+        _rf._READ_FACADE_REGISTRY.update(cls._facades_before)
 
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()
