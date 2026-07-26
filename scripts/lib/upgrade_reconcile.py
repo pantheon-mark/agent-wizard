@@ -1127,7 +1127,8 @@ def _append_missing_predicate_migration_request(
         existing = []
     existing = [
         e for e in existing
-        if not (isinstance(e, dict) and e.get("mechanism_id") == canonical_id)
+        if not (isinstance(e, dict) and e.get("mechanism_id") == canonical_id
+                and e.get("kind") == "missing_evidence_predicates")
     ]
     missing_joined = "/".join(missing_predicates)
     existing.append({
@@ -1229,26 +1230,32 @@ def _append_ambiguous_adapter_registration_manual_repair_request(
 _BENIGN_REFUSAL_MARKERS = ("nothing to do",)
 
 
-def _append_adapter_migration_refusal_request(
+def record_adapter_migration_refusals(
     operator_project_dir: Path,
-    outcome: "AdapterMigrationOutcome",
+    refusals: Sequence[Tuple[str, "AdapterMigrationOutcome"]],
+    *,
     from_version: str,
     to_version: str,
-) -> Optional[Path]:
-    """Record a migration that DECLINED to act, so the reason reaches a person.
+) -> None:
+    """Persist EXACTLY the set of migrations that declined to act this run.
 
     A refusal that exists only as a return value is how a remediation the
-    operator needed goes missing. The most consequential one here -- "there is
-    more than one registered adapter class, so move the read-client builder by
-    hand" -- is a dead end for a non-technical operator unless it lands somewhere
-    durable and visible.
+    operator needed goes missing -- the one that matters most is "there is more
+    than one registered adapter class, so this has to be moved by hand", which is
+    a dead end unless it lands somewhere durable and visible.
 
-    A benign "nothing to do" outcome is not queued: a blocking entry in every
-    already-correct project is a guard nobody reads. Idempotent per
-    ``(relpath, migration_name)``.
+    Set-reconciled, not append-only: entries of this kind are rebuilt from THIS
+    run's outcomes, so a refusal whose cause has since been fixed disappears on
+    the next reconcile. Append-only would be a permanent block -- this entry kind
+    records no content hash (so the auto-reaper cannot clear it) and carries no
+    canonical id the acceptance flow can match, which would leave a repaired
+    project blocked with no operator-reachable way out.
+
+    Single authority: only entries of this kind are added or removed; every other
+    entry is left exactly as found. A benign "nothing to do" outcome is never
+    recorded -- a blocking entry in an already-correct project is a guard nobody
+    reads.
     """
-    if any(marker in outcome.reason for marker in _BENIGN_REFUSAL_MARKERS):
-        return None
     path = Path(operator_project_dir) / MIGRATION_QUEUE_REL
     try:
         existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
@@ -1256,32 +1263,35 @@ def _append_adapter_migration_refusal_request(
             existing = []
     except (json.JSONDecodeError, OSError):
         existing = []
-    existing = [
-        e for e in existing
-        if not (isinstance(e, dict)
-                and e.get("kind") == "adapter_migration_refused"
-                and e.get("writer_relpath") == outcome.relpath
-                and e.get("migration_name") == outcome.migration_name)
-    ]
-    existing.append({
-        "mechanism_id": Path(outcome.relpath).stem,
-        "writer_relpath": outcome.relpath,
-        "entrypoint_relpath": None,
-        "requested_at": _utcnow_iso(),
-        "from_version": from_version,
-        "to_version": to_version,
-        "kind": "adapter_migration_refused",
-        "migration_name": outcome.migration_name,
-        "reason": outcome.reason,
-        "suggested_next_step": (
-            f"Ask your assistant to look at {outcome.relpath} and finish this "
-            "update by hand. It stopped rather than guess, so nothing has been "
-            "changed in that file."),
-        "status": "pending",
-    })
-    _atomic_write(path, json.dumps(existing, indent=2, ensure_ascii=False,
+
+    kept = [e for e in existing
+            if not (isinstance(e, dict)
+                    and e.get("kind") == "adapter_migration_refused")]
+
+    for canonical_id, outcome in refusals:
+        if any(marker in outcome.reason for marker in _BENIGN_REFUSAL_MARKERS):
+            continue
+        kept.append({
+            "mechanism_id": canonical_id,
+            "writer_relpath": outcome.relpath,
+            "entrypoint_relpath": None,
+            "requested_at": _utcnow_iso(),
+            "from_version": from_version,
+            "to_version": to_version,
+            "kind": "adapter_migration_refused",
+            "migration_name": outcome.migration_name,
+            "reason": outcome.reason,
+            "suggested_next_step": (
+                f"Ask your assistant to look at {outcome.relpath} and finish this "
+                "update by hand. It stopped rather than guess, so nothing has been "
+                "changed in that file."),
+            "status": "pending",
+        })
+
+    if kept == existing:
+        return
+    _atomic_write(path, json.dumps(kept, indent=2, ensure_ascii=False,
                                    sort_keys=True) + "\n")
-    return path
 
 
 #: Adapter modules the wizard itself ships into every project. They are
@@ -1417,6 +1427,7 @@ def reconcile_adapter_migrations(
     operator_project_dir = Path(operator_project_dir)
     remediated: List[PredicateStubRemediation] = []
     outcomes: List[AdapterMigrationOutcome] = []
+    refusals: List[Tuple[str, AdapterMigrationOutcome]] = []
 
     try:
         capability_identity = _external_write_module(build_repo_root, "capability_identity")
@@ -1480,13 +1491,14 @@ def reconcile_adapter_migrations(
                         list(result.detail), from_version, to_version,
                     )
             else:
-                _append_adapter_migration_refusal_request(
-                    operator_project_dir, outcomes[-1],
-                    from_version, to_version,
-                )
+                refusals.append((canonical_id, outcomes[-1]))
 
         if current != source:
             _atomic_write(adapter_path, current)
+
+    record_adapter_migration_refusals(
+        operator_project_dir, refusals,
+        from_version=from_version, to_version=to_version)
 
     return remediated, outcomes, None
 
@@ -3001,7 +3013,8 @@ def reconcile_upgrade(
         notice_path=str(notice_path) if notice_path else None,
         migration_queue_path=(
             str(operator_project_dir / MIGRATION_QUEUE_REL)
-            if (mechanisms or stale_acceptance_reset or predicate_stubs_scaffolded) else None
+            if (mechanisms or stale_acceptance_reset or predicate_stubs_scaffolded
+                or read_provisioner_violations) else None
         ),
         stale_acceptance_reset=stale_acceptance_reset,
         predicate_stubs_scaffolded=predicate_stubs_scaffolded,

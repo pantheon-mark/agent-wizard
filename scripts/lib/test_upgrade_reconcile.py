@@ -3739,6 +3739,49 @@ class AdapterMigrationRefusalRoutingTests(_Base):
             [e for e in queue if e.get("kind") == "adapter_migration_refused"],
             [])
 
+    def test_a_refusal_clears_once_the_cause_is_fixed(self):
+        """Append-only would be a permanent block: this entry kind records no
+        content hash, so the auto-reaper cannot clear it, and carries nothing the
+        acceptance flow can match. A repaired project must unblock itself on the
+        next reconcile, or a non-technical operator has no way out."""
+        import json
+        from upgrade_reconcile import reconcile_upgrade
+        ambiguous = _LEGACY_MODULE_LEVEL.replace(
+            "register_adapter(OP_KIND, InboxLabelsAdapter())\n",
+            "class OtherAdapter:\n    pass\n\n\n"
+            "register_adapter(OP_KIND, InboxLabelsAdapter())\n"
+            "register_adapter('other.op', OtherAdapter())\n")
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py", adapter_source=ambiguous)
+        queue_path = root / "agents" / "handoffs" / "pending_migrations.json"
+
+        reconcile_upgrade(root, _REAL_REPO,
+                          from_version="v0.20.0", to_version="v0.21.0")
+        refused = [e for e in json.loads(queue_path.read_text(encoding="utf-8"))
+                   if e.get("kind") == "adapter_migration_refused"]
+        self.assertTrue(refused, "the ambiguous adapter must be reported")
+
+        # Repair it the way an assistant would: one registered class, and the
+        # read-only reader already on it.
+        (root / "agents" / "lib" / "external_write"
+         / "adapters_inbox.py").write_text(
+            _LEGACY_MODULE_LEVEL.replace(
+                "def build_read_only_client() -> Any:\n    return object()\n\n\n", ""
+            ).replace(
+                "class InboxLabelsAdapter:\n",
+                "class InboxLabelsAdapter:\n"
+                "    def build_read_only_client(self, op) -> Any:\n"
+                "        return object()\n\n"),
+            encoding="utf-8")
+
+        reconcile_upgrade(root, _REAL_REPO,
+                          from_version="v0.20.0", to_version="v0.21.0")
+        refused = [e for e in json.loads(queue_path.read_text(encoding="utf-8"))
+                   if e.get("kind") == "adapter_migration_refused"]
+        self.assertEqual(refused, [],
+                         "a repaired project must unblock itself")
+
 
 if __name__ == "__main__":
     unittest.main()
