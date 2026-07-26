@@ -83,8 +83,8 @@ from lib.upgrade_apply import (  # noqa: E402
     UpgradeApplyError,
 )
 from lib.upgrade_reconcile import (  # noqa: E402
-    OPERATOR_CODE_DIRS,
     reconcile_upgrade,
+    record_reconcile_incomplete,
     render_reconcile_result,
 )
 from lib.self_update import (  # noqa: E402
@@ -408,10 +408,20 @@ def _run_reconcile_best_effort(operator_dir: Path, build_repo_root: Path, result
             upgrade_id=result.upgrade_id,
         )
     except Exception as e:  # noqa: BLE001 - see docstring: never fatal to a completed apply
+        # Surfacing to stderr is not a safety state: the note scrolls past and
+        # the project would otherwise report itself normal with an unverified
+        # read path. Leave a durable blocking entry as well, which the next
+        # completed reconcile clears by itself.
+        try:
+            record_reconcile_incomplete(
+                operator_dir, e.__class__.__name__,
+                from_version=result.from_version, to_version=result.to_version)
+        except Exception:  # noqa: BLE001 - a marker failure must not mask the original
+            pass
         print(
-            f"note: the upgrade safety check could not complete ({e}). Run a manual review "
-            f"of {', '.join(OPERATOR_CODE_DIRS)} against agents/lib/external_write/scan.py "
-            "before relying on any scheduled write.",
+            f"note: the upgrade safety check could not complete ({e}). This project "
+            "is held back from going live until it has run. Ask your assistant to "
+            "run `wizard reconcile`.",
             file=sys.stderr,
         )
         return

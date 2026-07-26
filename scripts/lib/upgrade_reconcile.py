@@ -1815,6 +1815,76 @@ def _append_adapter_enrolment_blocking_request(
     return path
 
 
+def record_reconcile_incomplete(
+    operator_project_dir: Path,
+    detail: str,
+    *,
+    from_version: str,
+    to_version: str,
+) -> Path:
+    """Persist "the upgrade safety check did not finish" as a blocking state.
+
+    The apply itself may well have succeeded, and this deliberately does not undo
+    it. What it prevents is the combination that actually hurts: a completed
+    apply, a safety check that crashed, a note on stderr, and a project that
+    reports itself normal. Since the read path now depends on this check having
+    run, not-having-run is itself a blocking condition.
+
+    Idempotent. Uses the same queue as every other remediation, so it is picked
+    up by the project-wide predicate with no new channel.
+    """
+    path = Path(operator_project_dir) / MIGRATION_QUEUE_REL
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        if not isinstance(existing, list):
+            existing = []
+    except (json.JSONDecodeError, OSError):
+        existing = []
+    existing = [e for e in existing
+                if not (isinstance(e, dict)
+                        and e.get("kind") == "reconcile_incomplete")]
+    existing.append({
+        "mechanism_id": "upgrade_safety_check",
+        "writer_relpath": MIGRATION_QUEUE_REL,
+        "entrypoint_relpath": None,
+        "requested_at": _utcnow_iso(),
+        "from_version": from_version,
+        "to_version": to_version,
+        "kind": "reconcile_incomplete",
+        "reason": (
+            "the upgrade safety check could not finish, so this project has not "
+            f"been confirmed safe to run ({detail})"),
+        "suggested_next_step": (
+            "Ask your assistant to run `wizard reconcile`. That re-runs the same "
+            "safety check against what is installed now. This entry clears by "
+            "itself once the check completes."),
+        "status": "pending",
+    })
+    _atomic_write(path, json.dumps(existing, indent=2, ensure_ascii=False,
+                                   sort_keys=True) + "\n")
+    return path
+
+
+def _clear_reconcile_incomplete(operator_project_dir: Path) -> None:
+    """Remove the did-not-finish marker. Called only from a reconcile run that
+    reached this point, which is the only evidence that the check completed."""
+    path = Path(operator_project_dir) / MIGRATION_QUEUE_REL
+    if not path.exists():
+        return
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(existing, list):
+            return
+    except (json.JSONDecodeError, OSError):
+        return
+    kept = [e for e in existing
+            if not (isinstance(e, dict)
+                    and e.get("kind") == "reconcile_incomplete")]
+    if kept != existing:
+        _atomic_write(path, json.dumps(kept, indent=2, ensure_ascii=False,
+                                       sort_keys=True) + "\n")
+
+
 def reconcile_missing_evidence_predicates(
     operator_project_dir: Path,
     build_repo_root: Path,
@@ -2989,6 +3059,10 @@ def reconcile_upgrade(
         operator_project_dir, build_repo_root,
         from_version=from_version, to_version=to_version,
     )
+
+    # A completed run clears any marker a previous crashed run left behind --
+    # otherwise a one-off failure would block the project permanently.
+    _clear_reconcile_incomplete(operator_project_dir)
 
     # THE POST-CONDITION. Runs after the migrations, against the end state, so a
     # gap in what they enumerated cannot produce a green upgrade with a broken

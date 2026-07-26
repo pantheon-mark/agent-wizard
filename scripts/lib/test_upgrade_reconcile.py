@@ -3174,13 +3174,16 @@ class CliWiringTests(unittest.TestCase):
         self.assertEqual({e["mechanism_id"] for e in queue},
                           {"inbox_management"})
 
-    def test_reconcile_fallback_message_lists_all_operator_code_dirs(self):
-        # F-55 review fix: the except-branch fallback message used to hardcode
-        # "agents/cron and agents/scripts" -- a second, independent copy of the
-        # scan scope that went blind to agents/capabilities/ exactly like the
-        # pre-fix OPERATOR_CODE_DIRS did. Force the except branch and assert every
-        # OPERATOR_CODE_DIRS entry is named in the operator-facing message, so this
-        # can't silently re-drift from the single source of truth again.
+    def test_reconcile_fallback_leaves_a_durable_blocking_marker(self):
+        # (Task 6 supersedes the F-55 A review fix this test used to guard.)
+        # The fallback message used to enumerate OPERATOR_CODE_DIRS by hand as
+        # manual-review advice -- a second, independent copy of the scan scope
+        # that could go blind to a newly added code dir. That advice is now
+        # replaced entirely: a failed safety check leaves a durable, blocking
+        # queue entry (record_reconcile_incomplete) and points the operator at
+        # `wizard reconcile`, which cannot go stale because it names no
+        # directories at all. Force the except branch and assert both halves of
+        # the new contract: the message, and the durable marker.
         _scripts_dir = str(Path(__file__).resolve().parents[1])  # wizard/scripts
         if _scripts_dir not in sys.path:
             sys.path.insert(0, _scripts_dir)
@@ -3200,8 +3203,17 @@ class CliWiringTests(unittest.TestCase):
             cli.reconcile_upgrade = original
 
         message = buf.getvalue()
-        for code_dir in cli.OPERATOR_CODE_DIRS:
-            self.assertIn(code_dir, message)
+        self.assertIn("wizard reconcile", message)
+        self.assertIn("held back", message)
+
+        queue = json.loads(
+            (self.tmp / MIGRATION_QUEUE_REL).read_text(encoding="utf-8"))
+        entries = [e for e in queue if e.get("kind") == "reconcile_incomplete"]
+        self.assertEqual(len(entries), 1)
+        self.assertTrue(entries[0]["writer_relpath"])
+        self.assertEqual(entries[0]["status"], "pending")
+        self.assertEqual(entries[0]["from_version"], "v1")
+        self.assertEqual(entries[0]["to_version"], "v2")
 
 
 class ResolveAdapterMigrationTargetsTests(_Base):
@@ -3781,6 +3793,69 @@ class AdapterMigrationRefusalRoutingTests(_Base):
                    if e.get("kind") == "adapter_migration_refused"]
         self.assertEqual(refused, [],
                          "a repaired project must unblock itself")
+
+
+class ReconcileIncompleteMarkerTests(_Base):
+    """Stderr is not a safety state. If the safety check itself could not run,
+    the project must be blocking -- not green with a note that scrolled past."""
+
+    def test_a_reconcile_failure_leaves_a_blocking_entry(self):
+        import json
+        from upgrade_reconcile import record_reconcile_incomplete
+        root = self.tmp / "failproj"
+        root.mkdir(parents=True, exist_ok=True)
+        record_reconcile_incomplete(
+            root, "RuntimeError", from_version="v0.20.0", to_version="v0.21.0")
+        queue = json.loads(
+            (root / "agents" / "handoffs" / "pending_migrations.json")
+            .read_text(encoding="utf-8"))
+        entries = [e for e in queue if e.get("kind") == "reconcile_incomplete"]
+        self.assertEqual(len(entries), 1)
+        self.assertTrue(entries[0]["writer_relpath"])
+        self.assertEqual(entries[0]["status"], "pending")
+
+    def test_reconcile_incomplete_is_idempotent(self):
+        import json
+        from upgrade_reconcile import record_reconcile_incomplete
+        root = self.tmp / "failproj2"
+        root.mkdir(parents=True, exist_ok=True)
+        for _ in range(3):
+            record_reconcile_incomplete(
+                root, "RuntimeError", from_version="v0.20.0", to_version="v0.21.0")
+        queue = json.loads(
+            (root / "agents" / "handoffs" / "pending_migrations.json")
+            .read_text(encoding="utf-8"))
+        self.assertEqual(
+            len([e for e in queue if e.get("kind") == "reconcile_incomplete"]), 1)
+
+    def test_a_completed_reconcile_clears_the_incomplete_marker(self):
+        """A one-off failure must not block a project permanently."""
+        import json
+        from upgrade_reconcile import record_reconcile_incomplete, reconcile_upgrade
+        root = self._project_with_capability(
+            canonical_id="demo", op_kind="demo.op",
+            adapter_name="adapters_demo.py",
+            adapter_source=(
+                "from external_write.adapter_registry import register_adapter\n"
+                "\n"
+                "OP_KIND = 'demo.op'\n"
+                "\n"
+                "\n"
+                "class DemoAdapter:\n"
+                "    def build_read_only_client(self, op):\n"
+                "        return object()\n"
+                "\n"
+                "\n"
+                "register_adapter(OP_KIND, DemoAdapter())\n"))
+        record_reconcile_incomplete(
+            root, "RuntimeError", from_version="v0.20.0", to_version="v0.21.0")
+        reconcile_upgrade(root, _REAL_REPO,
+                          from_version="v0.20.0", to_version="v0.21.0")
+        queue = json.loads(
+            (root / "agents" / "handoffs" / "pending_migrations.json")
+            .read_text(encoding="utf-8"))
+        self.assertEqual(
+            [e for e in queue if e.get("kind") == "reconcile_incomplete"], [])
 
 
 if __name__ == "__main__":
