@@ -12,13 +12,14 @@ Entries appear newest-first.
 
 ---
 
-## 2026-07-26 — a stuck capability's error message now names the actual fix, and every upgrade honestly checks its own safety work (v0.21.0)
+## 2026-07-26 — a stuck capability's error message now names the actual fix, every upgrade honestly checks its own safety work, and a test-quality check is now correct on the Python version this wizard has you install (v0.21.0)
 
-**Public-facing change:** A reliability fix for a misleading error message, plus a fix to the update tool itself so a safety check it runs can no longer be silently skipped.
+**Public-facing change:** A reliability fix for a misleading error message, a fix to the update tool itself so a safety check it runs can no longer be silently skipped, and a fix to a self-check on a capability's own tests.
 
 - **When a capability of yours cannot yet look at your outside system in a safe, read-only way, the message you get now names the exact adapter that needs a read-only reader added to it**, and says plainly that rebuilding the capability will not fix this. Previously the message told you to rebuild the capability itself, which sent you in a circle: the capability was never the problem, and rebuilding it changed nothing.
 - **The health check and turning a capability on now describe each blocking item honestly.** A file that genuinely needs to be rebuilt still gets that guidance. But something else recorded on the same list — for example, a safety check that itself could not finish — is now described in its own words, instead of being told, wrongly, to rebuild something that was never the writer at fault. What blocks is unchanged; only what is said about it got more honest.
 - **The update tool itself now actually runs and records the safety check behind every upgrade**, closing a gap where that check — whether each of your capabilities can look at your outside system safely — could be silently skipped without anyone knowing, including you.
+- **A self-check your system runs when you build or rebuild a capability — proving that capability's own tests would really catch a mistake — is now correct on Python 3.12**, the version this wizard recommends you install. Before this fix, if that capability's tests were not written in the required style, you got only a generic "your tests do not pass cleanly" message; now you always get the actionable guidance telling you to write them as the required kind of test, on every Python version this wizard supports.
 - No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
 
 This is a reliability fix (`v0.21.0`, minor-additive, operator-explicit as always). Foundation documents are byte-identical to `v0.20.0`. Enforcement ceiling unchanged.

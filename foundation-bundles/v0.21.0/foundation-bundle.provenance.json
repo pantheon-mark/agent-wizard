@@ -29,15 +29,15 @@
       "path": "manifest.json"
     },
     {
-      "hash": "sha256:cfcd3e7a2cf2a9d82d529a70965fc0acfe0477a8b460e13a780e4caab2a7e2dc",
+      "hash": "sha256:44bb0bc0d913c8e88f53d9951d38045c66760b1f82505c319e92d408a0a65f36",
       "path": "manifest.yaml"
     },
     {
-      "hash": "sha256:5e346ef3741443ffa1ded288836e171493fab06ae0461d5586c9c9f761a2bd5d",
+      "hash": "sha256:a1d1052ba0374169dbf185c632b844027f69948a955f6128e004ac8cbe88dceb",
       "path": "migration-manifest.json"
     },
     {
-      "hash": "sha256:08ff491b965a913f9427921438f3aa8ec450ab5ce6b21dbe8fe6a4ba702b938a",
+      "hash": "sha256:abadb2361489ea00edb146467469227ed8bc7106f26accabf11293b70fd6da8b",
       "path": "migration-manifest.yaml"
     },
     {
@@ -121,7 +121,7 @@
       "path": "templates/agents/lib/external_write/capability_identity.py"
     },
     {
-      "hash": "sha256:97b3bad424359b2afcc65100f6dcb03c41ad38feec61eddf030f01095ee6d759",
+      "hash": "sha256:9a59d74da51e06aa2553cf487d31e9a0db42f708639d8babbdfd2927b8f60ee4",
       "path": "templates/agents/lib/external_write/capability_invariants.py"
     },
     {
@@ -570,8 +570,8 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-07-26T21:43:38Z",
-  "generator_version": "093330585ec3d190e431644806da63eac9ed9371",
+  "generated_at": "2026-07-26T23:17:50Z",
+  "generator_version": "b986affef130a491bf3581f452de4a62dd2bcb0f",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.21.0",

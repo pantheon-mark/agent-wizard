@@ -12,6 +12,16 @@
 # that is not a bespoke-writer bypass (for example, a safety check that itself could not finish)
 # is described in its own words instead of the bypass-writer's "rebuild it" sentence, which names
 # a fix that does not apply to it. Nothing about what blocks changed; only what is said about it.
+# A fifth emitted file also lands in this cut: agents/lib/external_write/capability_invariants.py
+# (the self-QA probe that scores a capability's own test suite "effective" only if it passes
+# cleanly and then genuinely fails under a deliberate change). On Python 3.12 -- the operator's
+# recommended runtime -- a pytest-style (zero real tests) suite fell into the generic "does not
+# pass cleanly" message instead of the actionable "write them as unittest.TestCase" guidance,
+# because the probe consulted the run's exit code before checking whether any tests actually ran,
+# and CPython changed that exit code's meaning for a zero-tests-collected run between 3.9 and
+# 3.12. The check is now ordered import-error, then zero-real-tests, then exit-code/failed, and
+# keys only on unittest's own stable summary text -- no interpreter-version branch, no widening
+# of what counts as passing.
 # Foundation docs are BYTE-IDENTICAL to v0.20.0 (managed_files hashes unchanged;
 # foundation_schema_version unchanged).
 _note: JSON sidecar for manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing
