@@ -425,6 +425,26 @@ class ${class_prefix}Adapter:
             "write-capable client) and return a poststate mapping "
             "verify_apply_landed can check.")
 
+    # Read-only client -- scoped to ${read_only_scope}; NOT write-capable. The
+    # write-capable credential is built only by build_write_client above (the
+    # ONE legal place), reached only by run_operation inside the adapter
+    # execution path.
+    #
+    # THIS MUST BE A METHOD ON THIS CLASS, NOT A MODULE-LEVEL FUNCTION.
+    # adapter_registry.py captures it with `getattr(cls,
+    # "build_read_only_client", None)` -- a CLASS-attribute lookup -- to
+    # populate AdapterDispatch.provision_read_only_client. Emitting it at module
+    # level (as this scaffold did before Cut 1.6) leaves that field None, so the
+    # kernel can never provision a read client for this op_kind: verification
+    # silently degrades to applied_not_verified, and capability code has no
+    # sanctioned way to read at all. That was F-STEP0-1 -- the field was None in
+    # 100% of deployments and the branch consuming it had never once executed.
+    def build_read_only_client(self, op: Any) -> Any:
+        raise NotImplementedError(
+            "TODO: construct/obtain a client scoped to the read-only scope "
+            "${read_only_scope} here and return it. It must be READ-ONLY -- "
+            "never the write-capable client build_write_client returns.")
+
     # TODO (turnkey-honesty note -- see the module docstring's matching TODO):
     # add verify_apply_landed(self, evidence) -> bool and
     # verify_undo_restored(self, evidence) -> bool methods HERE, evaluating the
@@ -435,19 +455,6 @@ class ${class_prefix}Adapter:
 
 
 register_adapter(OP_KIND, ${class_prefix}Adapter())
-
-
-# ---------------------------------------------------------------------------
-# Read-only client -- scoped to the declared read-only scope; NOT write-capable.
-# The write-capable credential is built only by ${class_prefix}Adapter.
-# build_write_client above (the ONE legal place), reached only by run_operation
-# inside the adapter execution path.
-# ---------------------------------------------------------------------------
-
-def build_read_only_client() -> Any:
-    raise NotImplementedError(
-        "TODO: construct/obtain a client scoped to the read-only scope "
-        "${read_only_scope} here and return it.")
 ''')
 
 _READ_METHOD_BODY_TEMPLATE = Template('''    def ${method_name}(self, *args: Any, **kwargs: Any) -> Any:
