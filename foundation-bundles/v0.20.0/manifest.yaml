@@ -1,0 +1,79 @@
+# Foundation bundle v0.20.0 manifest
+# Minor-additive release over v0.19.0 (Cut 1.6 — closes F-VAL19-5: the read-client gap that made
+# the Cut 1.5 remediation path structurally impossible, and bounds the coarse gate's blast radius).
+# Emitted-content changes since v0.19.0 are confined to the emitted external_write lib and one
+# operator-fill skill template, plus TWO NEW emitted files:
+# agents/lib/external_write/capability_runner.py (the kernel-as-runner: the sealed kernel now RUNS
+# a capability and INJECTS a READ-ONLY facade it builds itself, so capability code never bootstraps
+# a client and never has a reason to import the adapter — a writer that complied previously could
+# not read, and a writer that read could not comply) and
+# agents/lib/external_write/writer_acknowledgement.py (the ONE sanctioned exit from a writer state
+# no tooling of ours can repair: an explicit, HASH-BOUND, visible, audited operator decision that
+# voids the moment the file changes).
+# The blocking set is now a SUBSET of the open set: ADR-0046's coarse, attribution-free
+# presence-of-violation gate is UNCHANGED and is not undone — what changed is which entries are
+# admitted to it, so one unrepairable writer no longer bricks acceptance project-wide forever. A
+# non-live test module or an acknowledged unrepairable writer stays VISIBLE (health still withholds
+# the all-clear and names it) but no longer blocks. NEEDS_PERSON deliberately REMAINS blocking; its
+# only exit is the recorded human decision above.
+# Foundation docs are BYTE-IDENTICAL to v0.19.0 (managed_files hashes unchanged;
+# foundation_schema_version unchanged).
+_note: JSON sidecar for manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing
+  companion. Both files MUST stay in sync.
+agent_contract_version: v0-pre-rebuild
+bundle_manifest_schema_version: v2
+foundation_bundle_version: v0.20.0
+foundation_schema_version: v0.3
+included_templates:
+  foundation_docs:
+  - vision.md
+  - approach.md
+  - technical_architecture.md
+  - execution_plan.md
+  - test_cases.md
+  - audit_framework.md
+managed_files:
+  foundation/approach.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/audit_framework.md:
+    local_modifications: not_recommended
+    managed_by: wizard
+    merge_strategy: warn_on_drift
+  foundation/execution_plan.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/prd.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/technical_architecture.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/test_cases.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/vision.md:
+    local_modifications: expected
+    managed_by: shared
+    merge_strategy: three_way
+min_engine_version: v1.0.0
+public_api:
+  required_files:
+  - foundation/vision.md
+  - foundation/prd.md
+  - foundation/approach.md
+  - foundation/execution_plan.md
+  - foundation/technical_architecture.md
+  - foundation/test_cases.md
+  - foundation/audit_framework.md
+  required_frontmatter_fields_per_file: see the canonical foundation-versioning specification § 1.1
+  required_sections_per_doc_type: see schemas/section-schema.yaml in this bundle
+  section_schema: schemas/section-schema.yaml
+release_date: '2026-07-26'
+source_commit: PENDING
+status: prerelease

@@ -1,7 +1,7 @@
 """Task 1 / Cut 1.6 (bundle v0.20.0) -- deterministic state classes for open
 bespoke-writer migration entries.
 
-WHY THIS EXISTS. ADR-0046's coarse, attribution-free gate WORKED (v0.19.0
+WHY THIS EXISTS. the coarse safety gate's coarse, attribution-free gate WORKED (v0.19.0
 ship-criterion #1 passed live) and is NOT being undone: safety still keys on the
 PRESENCE of an unresolved violation, never on attributing it to an owner. What
 the v0.19.0 real-operator validation found (F-VAL19-1 / F-VAL19-5) is that
@@ -36,7 +36,7 @@ VALIDATED AGAINST ALL 7 REAL ESTATE ENTRIES (2026-07-25, read-only):
 DELIBERATE DEVIATION FROM THE CROSS-VENDOR ADVISOR OUTPUT -- DO NOT "SIMPLIFY"
 THIS BACK. gpt-5.5's proposed state table listed ``needs_person`` as NON-blocking.
 That silently re-opens F-VAL18-1: acceptance would go green around an unmigrated
-LIVE writer with no human in the loop, which is the exact false-green ADR-0046
+LIVE writer with no human in the loop, which is the exact false-green the coarse safety gate
 exists to prevent. Here NEEDS_PERSON REMAINS BLOCKING. Its only sanctioned exit
 is an explicit, hash-bound operator acknowledgement (Task 3) -- a recorded human
 decision, never a classifier's silent judgement.
@@ -222,7 +222,7 @@ class StateClassifierTests(unittest.TestCase):
         test_inbox_runner.py)`. A comment is not an invocation. An earlier
         text-grep implementation of the reference check treated it as one and
         misclassified the test module as live -- the same infer-from-incidental-
-        text defect class ADR-0045 exists to close. Reference detection is
+        text defect class the typed-identity rule exists to close. Reference detection is
         AST-based for Python, so comments (absent from the AST) cannot
         disqualify, while string literals (how subprocess actually invokes)
         still can."""
@@ -330,7 +330,7 @@ class StateClassifierTests(unittest.TestCase):
         migrations is the single authority (its predicate is absent OR
         hash-changed-AND-scan-clean, and it REMOVES the entry). A second,
         weaker rule here would be two authorities over one fact -- the
-        duplicated-inference class ADR-0045 exists to close -- and would
+        duplicated-inference class the typed-identity rule exists to close -- and would
         un-block an entry the reaper has not cleared. Fail closed instead; the
         reaper clears it via reconcile-on-read moments later."""
         self.p.write_queue([_entry("agents/gone/missing.py", ["sealed_kernel_import"])])
@@ -350,7 +350,7 @@ class StateClassifierTests(unittest.TestCase):
         self.assertEqual(state, ews.WriterState.BLOCKING_LIVE_ENABLE)
 
     def test_unreadable_queue_still_raises(self):
-        """The ADR-0046 fail-closed contract is preserved: a read failure must
+        """The the coarse safety gate fail-closed contract is preserved: a read failure must
         never present as 'nothing blocking'."""
         (self.p.root / QUEUE_REL).write_text("{not json", encoding="utf-8")
         with self.assertRaises(ews.ExternalWriteStateReadError):
@@ -359,7 +359,7 @@ class StateClassifierTests(unittest.TestCase):
     # ------------------------------------------------------------- INVARIANTS
 
     def test_blocking_is_always_a_subset_of_open(self):
-        """The ADR-0046 keystone stays intact: the blocking set is a FILTER over
+        """The the coarse safety gate keystone stays intact: the blocking set is a FILTER over
         the attribution-free superset, never a different query."""
         self.p.write_file("agents/inbox/runner.py", _LIVE_WRITER_SRC)
         self.p.write_file("agents/inbox/test_inbox_runner.py", _TEST_MODULE_SRC)

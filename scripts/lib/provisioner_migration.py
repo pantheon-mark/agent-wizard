@@ -25,7 +25,7 @@ accommodated by a silent runtime guess.
 
 What this does
 --------------
-Reuses the ADR-0045 F-1 discipline: ONE shared AST resolver drives detection and
+Reuses the registration-aware-migrator discipline: ONE shared AST resolver drives detection and
 duplicate-safe insertion, keyed on the class actually passed to
 ``register_adapter(...)`` -- never "the first ClassDef in the file", which is the
 same incidental-structure inference the F-1 finding closed.
@@ -63,7 +63,7 @@ def resolve_registered_adapter_classes(tree: ast.AST) -> List[str]:
     module scope -- e.g. ``register_adapter(OP_KIND, InboxAdapter())`` yields
     ``["InboxAdapter"]``.
 
-    Keyed on real registration, NOT on ClassDef order (ADR-0045 F-1: inferring
+    Keyed on real registration, NOT on ClassDef order (inferring
     the target from incidental structure is the defect class this project keeps
     re-finding). A registration whose argument is not a plain ``Name()`` call is
     deliberately not resolved -- the caller then refuses rather than guessing."""

@@ -1,0 +1,25 @@
+# Hash baseline for vision.md
+# Enforced-path drift detection mechanism for foundation bundle v0.1.
+# Regeneration rationale: initial baseline at foundation-bundle v0.1 release.
+template: vision.md
+schema_revision: v0.3
+sections_hash:
+- id: purpose
+  heading: Purpose
+  heading_hash: a0fb821bdaf93ed9a1f1e920acfb2840eff5b153
+- id: goals_objectives_priorities
+  heading: Goals, Objectives, and Priorities
+  heading_hash: 2bce17b62f2a587248c2331368876be28f4a3c5d
+- id: audience_and_outputs
+  heading: Audience and Outputs
+  heading_hash: 7e8fc9ffa8fb90c28895df4d6ecc45c12d62f6e8
+- id: scope_boundary
+  heading: Scope Boundary
+  heading_hash: a6e42bb8237a37d3b5d9c03197168869e8d38e11
+- id: constraints
+  heading: Constraints
+  heading_hash: 52e68a873a2be3470675b9ee933b98d781ae7fef
+- id: success_criteria
+  heading: Success Criteria
+  heading_hash: 120a7c64a3215baf343cbbd742c5bdf5a39aecfa
+base_hash: b04206986d75fe10bcd38a8df7c3865f19131f83

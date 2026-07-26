@@ -247,6 +247,17 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # (same regression class this file's own docstring already documents for
     # every prior entry above).
     "_ext_write_state.py",
+    # Cut 1.6 (v0.20.0) -- BOTH of these are load-bearing at session start, so
+    # omitting either reproduces exactly the regression class documented above:
+    # capability_runner.py is the kernel-as-runner that resolves a capability's
+    # adapter, builds its READ-ONLY client and injects the facade (without it a
+    # read-dependent capability cannot run at all -- F-VAL19-5), and
+    # writer_acknowledgement.py is the ONLY sanctioned exit from
+    # WriterState.NEEDS_PERSON, which `_ext_write_state` imports lazily and
+    # whose absence silently means "no acknowledgements", leaving an
+    # unrepairable writer blocking acceptance forever.
+    "capability_runner.py",
+    "writer_acknowledgement.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

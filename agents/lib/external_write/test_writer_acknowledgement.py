@@ -160,7 +160,7 @@ class WriterAcknowledgementTests(unittest.TestCase):
         self.assertEqual(len(ews.blocking_bespoke_writer_migrations(self._root())), 1)
 
     def test_multiline_confirmation_refuses(self):
-        """Paste-safety, mirroring ADR-0045's F-2 acceptance rule: a line-split
+        """Paste-safety, mirroring the typed-identity rule's F-2 acceptance rule: a line-split
         paste may be truncated, so what the operator 'said' cannot be trusted."""
         with self.assertRaises(ack.WriterAcknowledgementError):
             ack.acknowledge_writer(self._root(), WRITER,

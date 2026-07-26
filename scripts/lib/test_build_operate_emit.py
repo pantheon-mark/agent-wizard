@@ -1791,7 +1791,31 @@ class TestS253ContractDelta(unittest.TestCase):
         # hard-import external_write._ext_write_state at module scope; see that file's own
         # enrollment comment in agent_emitter.py, and
         # test_emit_set_lists_the_cut15_taskA_ext_write_state_file below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 40)
+        # (Count updated to 42 by Cut 1.6 / v0.20.0, which additionally enrolled
+        # capability_runner.py -- the kernel-as-runner that builds a capability's READ-ONLY client
+        # and injects the facade, without which a read-dependent capability cannot run at all --
+        # and writer_acknowledgement.py, the ONLY sanctioned exit from the needs-a-person writer
+        # state, which _ext_write_state imports lazily and whose absence silently means "no
+        # acknowledgements", leaving an unrepairable writer blocking acceptance forever. See both
+        # files' own enrollment comments in agent_emitter.py, and the two dedicated tests below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 42)
+
+    def test_emit_set_lists_the_cut16_capability_runner_file(self):
+        # Cut 1.6 / v0.20.0: capability_runner.py must be enrolled, or an emitted writes-back
+        # system has no sanctioned way to run a capability that must READ its external system
+        # before proposing changes -- the exact dead end this cut exists to remove. Omitting it
+        # reproduces the gap rather than fixing it.
+        import agent_emitter
+        self.assertIn("capability_runner.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
+
+    def test_emit_set_lists_the_cut16_writer_acknowledgement_file(self):
+        # Cut 1.6 / v0.20.0: writer_acknowledgement.py must be enrolled. _ext_write_state imports
+        # it LAZILY and treats an ImportError as "no acknowledgements" -- the fail-closed
+        # direction -- so omitting it does not crash. It silently removes the only exit from the
+        # needs-a-person state, leaving an unrepairable writer blocking acceptance forever with no
+        # operator-reachable way out. A silent failure is exactly why this needs its own test.
+        import agent_emitter
+        self.assertIn("writer_acknowledgement.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def test_emit_set_lists_the_cut15_taskA_ext_write_state_file(self):
         # Cut 1.5 / v0.19.0 Task A (V15-3 false-green keystone): _ext_write_state.py (the ONE

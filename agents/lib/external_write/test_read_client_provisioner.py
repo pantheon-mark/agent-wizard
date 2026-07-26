@@ -93,7 +93,7 @@ class FreshEmitProvisionerShapeTests(unittest.TestCase):
 class ProvisionerMigrationTests(unittest.TestCase):
     """The migrator that moves an already-emitted module-level provisioner onto
     its registered adapter class. Keyed on the class actually passed to
-    register_adapter (ADR-0045 F-1), never on ClassDef order."""
+    register_adapter (the typed-identity rule F-1), never on ClassDef order."""
 
     LEGACY = textwrap.dedent('''\
         """Legacy adapter."""
@@ -162,7 +162,7 @@ class ProvisionerMigrationTests(unittest.TestCase):
         self.assertEqual(p.read_text(encoding="utf-8"), before, "a refusal must not write")
 
     def test_it_never_shadows_an_existing_method(self):
-        """ADR-0045 F-1's lesson: an upgrade must never emit a method whose name
+        """the typed-identity rule F-1's lesson: an upgrade must never emit a method whose name
         already exists on the target class."""
         src = self.LEGACY.replace(
             "    def plan(self, params):\n        return []",

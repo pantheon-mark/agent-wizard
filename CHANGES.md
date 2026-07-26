@@ -12,6 +12,23 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-26 — a capability that must look before it proposes can now do so safely, and files that cannot be rebuilt automatically no longer leave you stuck (v0.20.0)
+
+**Public-facing change:** A reliability fix that removes the one situation where your project could end up with no way forward.
+
+- **A capability that needs to LOOK at your outside system before proposing changes can now do that through a safe, read-only path.** Previously there was no legitimate way for it to do so, which meant such a capability could neither be rebuilt nor switched on — and while it stayed flagged, nothing else in the project could be switched on either. The system now opens the read-only view itself and hands it to the capability, so the capability never handles a connection or a password of its own.
+- **Files that are not part of your live setup no longer hold everything back.** The tests that ship alongside a capability, for example, are still listed for you, but they no longer block you from switching things on.
+- **If a flagged file genuinely cannot be rebuilt automatically, the system now says so plainly instead of asking you to rebuild something that cannot be rebuilt.** That happens when the file also does something else you rely on — sending your daily email, say. You can then record that you accept the risk of leaving it as it is. Your decision is kept on file in your own words, stays visible in the health check, and is asked again the moment that file changes, so accepting a risk once never quietly covers a later change.
+- **Everything that genuinely still needs fixing continues to block, exactly as before.** Nothing was loosened: a file that can be rebuilt still has to be rebuilt, and a file needing a person still blocks until you decide. The health check also still withholds the all-clear while anything at all is outstanding, even when it is no longer blocking — not blocking never means invisible.
+- **Clearer rebuild guidance.** The rebuild instructions previously pointed at a tool location that never exists inside your project, described the order of rebuilding and switching back on backwards, and checked too narrow a view of your project's health. All three are corrected.
+- No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
+
+This is a reliability fix (`v0.20.0`, minor-additive, operator-explicit as always). Foundation documents are byte-identical to `v0.19.0`. Enforcement ceiling unchanged.
+
+`Source-Meta-Commit:` `PENDING` (private build repo) · public repo commit `PENDING`
+
+---
+
 ## 2026-07-25 — turning a capability on can no longer report a false all-clear around a hand-rolled writer that skips the safe write surface (v0.19.0)
 
 **Public-facing change:** A reliability fix that closes a gap where a capability could be marked ready even though a hand-rolled file still wrote to your external world by a path that bypassed the safe, safety-gated write surface.

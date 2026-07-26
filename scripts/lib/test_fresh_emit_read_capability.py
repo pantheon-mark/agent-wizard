@@ -18,7 +18,7 @@ exactly what let this ship three times:
 A writer that complied could not read; a writer that read could not comply. The
 gap was invisible to a scan-only gate because the compliant shape scans
 perfectly -- it just cannot work. See
-``external_review/v0.19.0_step0_fresh_build_read_gap_2026-07-25.md``.
+the build-side validation record.
 
 Run:  python3 -m unittest discover -s wizard/scripts/lib \\
           -p test_fresh_emit_read_capability.py
@@ -105,7 +105,7 @@ class FreshEmitReadCapabilityGate(unittest.TestCase):
         #
         # (The provisioner cannot be monkey-patched after import: the registry
         # CAPTURES the class-bound method at register_adapter time precisely so
-        # instance/class patching is inert -- ADR-0039's captured-dispatch
+        # instance/class patching is inert -- the credential-isolation invariant's captured-dispatch
         # property. So the TODO is filled in the source, before import, which is
         # also what a real operator build does.)
         adapter_path = (self.root / "agents" / "lib" / "external_write"
