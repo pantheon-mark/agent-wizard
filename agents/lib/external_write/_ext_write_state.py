@@ -509,3 +509,321 @@ def derive_owning_capability(project_root: str, entry: Dict[str, Any]) -> Dict[s
     if len(candidates) >= 2:
         return {"owning_capability_id": None, "ownership_status": "ambiguous"}
     return unresolved
+
+
+# ---------------------------------------------------------------------------
+# Task 1 (Cut 1.6 / v0.20.0): deterministic STATE CLASSES over the open
+# bespoke-writer set.
+#
+# ADR-0046's coarse, attribution-free gate WORKED and is NOT undone here:
+# ``open_bespoke_writer_migrations`` above is untouched and remains the single
+# attribution-free definition of "is there an open external-write bypass".
+# What the v0.19.0 real-operator validation found (F-VAL19-1 / F-VAL19-5) is
+# that making EVERY open entry block EVERYTHING means one unrepairable writer
+# bricks acceptance project-wide, permanently, with no operator-reachable exit
+# -- ADR-0046's own "never block the REPAIR" principle holding locally and
+# failing globally.
+#
+# THE DECIDABILITY MOVE. "Does a reachable remediation exist?" is undecidable
+# in general -- proving a behaviour-preserving rewrite to scan-clean code
+# exists is exactly the semantic judgement the coarse gate exists to keep out
+# (both cross-vendor advisors independently rejected asking it). So we do not
+# ask it. We ask a question we CAN answer: does OUR OWN deterministic
+# remediator cover every violation recorded on this entry? That is decidable,
+# because we know what our remediator does. It keys on the scanner's recorded
+# violation KINDS, which the reconcile already persists on each entry.
+#
+# DELIBERATE DEVIATION FROM ADVISOR OUTPUT -- DO NOT "SIMPLIFY" BACK.
+# gpt-5.5's proposed table listed ``needs_person`` as NON-blocking. That
+# silently re-opens F-VAL18-1 (acceptance green around an unmigrated LIVE
+# writer, no human in the loop). Here NEEDS_PERSON REMAINS BLOCKING; its only
+# sanctioned exit is an explicit, hash-bound operator acknowledgement (Task 3)
+# -- a recorded human decision, never a classifier's silent judgement.
+# Guarded by test_writer_state_classes.test_needs_person_without_
+# acknowledgement_is_blocking.
+# ---------------------------------------------------------------------------
+
+class WriterState:
+    """The five states an open bespoke-writer entry can be in. Plain string
+    constants (not an Enum) so they serialize into health/report JSON directly,
+    matching how every other typed signal in this package is surfaced."""
+
+    BLOCKING_LIVE_ENABLE = "blocking_live_enable"
+    NEEDS_PERSON = "needs_person"
+    NON_LIVE = "non_live"
+    ACKNOWLEDGED_RISK = "acknowledged_risk"
+    RESOLVED = "resolved"
+
+
+#: Violation kinds OUR OWN remediation covers. The rebuild flow rewrites a
+#: bespoke writer onto the sanctioned bulk path, and Cut 1.6's kernel-runner
+#: injection removes the capability's reason to name a client/adapter at all --
+#: between them these five kinds are mechanically fixable. Verified against all
+#: 7 real estate entries 2026-07-25: agents/inbox/runner.py and
+#: scripts/finish_estate_cleanup.py record only kinds from this set (correctly
+#: BLOCKING -- we can fix them), while agents/upkeep/runner.py additionally
+#: records ``forbidden_import`` (correctly NEEDS_PERSON -- F-VAL19-1's entangled
+#: urllib notification delivery, which no remediator of ours rewrites).
+REMEDIABLE_VIOLATION_KINDS = frozenset({
+    "adapter_module_import",
+    "adapter_registry_reference",
+    "sealed_kernel_import",
+    "raw_run_operation_reference",
+    "credential_provider_reference",
+})
+
+#: Declared invocation surfaces -- the places the running system says what it
+#: actually invokes. Used only to DISQUALIFY a non_live classification, never to
+#: grant one.
+_LIVE_SURFACE_RELPATHS = (
+    "agents/cron/cron_config.md",
+    "agents/roster.md",
+)
+
+#: Directory names that are never operator code and never an invocation
+#: surface: vendored dependencies, VCS internals, and derived caches. Excluded
+#: from the reference scan entirely. (Real estate case 2026-07-25: `.venv`
+#: carried third-party pycparser modules that are INTENTIONALLY unparseable,
+#: and scanning them fail-closed every non_live classification in the project.)
+_NON_PROJECT_DIRS = frozenset({
+    ".venv", "venv", ".git", "__pycache__", "node_modules",
+    ".mypy_cache", ".pytest_cache", "site-packages", "build", "dist",
+})
+
+
+def _recorded_violation_kinds(entry: Dict[str, Any]) -> set:
+    """The set of violation ``kind`` strings recorded on ``entry`` by the
+    reconcile at pause time. Unknown/odd shapes contribute a sentinel that is
+    NOT in ``REMEDIABLE_VIOLATION_KINDS``, so anything unrecognised fails
+    closed toward NEEDS_PERSON rather than toward "we can fix it"."""
+    kinds = set()
+    for v in entry.get("violations") or []:
+        if isinstance(v, dict):
+            kind = v.get("kind") or v.get("rule")
+            kinds.add(str(kind) if kind else "__unrecognised__")
+        else:
+            kinds.add("__unrecognised__")
+    return kinds
+
+
+def _matches_test_naming(writer_relpath: str) -> bool:
+    """Signal 1 of 3 for non_live: unittest discovery naming."""
+    stem = Path(writer_relpath).name
+    return stem.startswith("test_") or stem.endswith("_test.py")
+
+
+def _has_test_structure(source_text: str) -> bool:
+    """Signal 2 of 3 for non_live: the module actually contains test-framework
+    structure -- a ``unittest``/``pytest`` import AND either a TestCase-shaped
+    class or a ``test_*`` function. AST-parsed, never a text grep, so a mere
+    mention in a string or comment does not qualify. Unparseable -> False
+    (fail-closed: an unparseable module is never granted non_live)."""
+    try:
+        tree = ast.parse(source_text)
+    except (SyntaxError, ValueError):
+        return False
+
+    imports_framework = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(a.name.split(".")[0] in ("unittest", "pytest") for a in node.names):
+                imports_framework = True
+        elif isinstance(node, ast.ImportFrom):
+            if (node.module or "").split(".")[0] in ("unittest", "pytest"):
+                imports_framework = True
+    if not imports_framework:
+        return False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                name = base.attr if isinstance(base, ast.Attribute) else getattr(base, "id", "")
+                if name == "TestCase":
+                    return True
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name.startswith("test_"):
+                return True
+    return False
+
+
+def _referenced_by_live_surface(root: Path, writer_relpath: str) -> bool:
+    """Signal 3 of 3 for non_live (inverted): is this writer named by anything
+    the running system actually invokes? True DISQUALIFIES non_live.
+
+    Checks the declared invocation surfaces (cron config / roster) and any
+    non-test Python module in the project that names this writer's relpath or
+    module stem. Any read failure returns True (fail-closed: unverifiable means
+    we must not grant the non-blocking classification)."""
+    stem = Path(writer_relpath).stem
+
+    # Declared invocation surfaces are prose/tables, not code -- a textual
+    # match is the only available signal and the right one there.
+    for rel in _LIVE_SURFACE_RELPATHS:
+        p = root / rel
+        try:
+            if not p.is_file():
+                continue
+            text = p.read_text(encoding="utf-8")
+        except OSError:
+            return True
+        if writer_relpath in text or stem in text:
+            return True
+
+    # Python modules are parsed, never grepped. A COMMENT mentioning the module
+    # is NOT an invocation (real estate case: agents/inbox/runner.py carries
+    # `# Header / From parsing (pure -- see test_inbox_runner.py)`), whereas an
+    # import or a string literal naming it IS. The AST gives exactly that
+    # discrimination for free: comments are absent from the tree, string
+    # literals are not. A text grep here would be the same infer-from-
+    # incidental-text defect class ADR-0045 exists to close.
+    try:
+        candidates = list(root.rglob("*.py"))
+    except OSError:
+        return True
+    for p in candidates:
+        try:
+            rel_posix = p.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if rel_posix == writer_relpath:
+            continue
+        if _matches_test_naming(rel_posix):
+            continue          # a test referencing a test does not make it live
+        if "/lib/external_write/" in "/" + rel_posix:
+            continue          # the sealed kernel is not an invocation surface
+        parts = set(Path(rel_posix).parts)
+        if parts & _NON_PROJECT_DIRS:
+            continue          # vendored/derived trees are not invocation surfaces.
+        try:
+            text = p.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return True       # unreadable -> cannot verify -> fail closed.
+        # Cheap, over-inclusive PRE-FILTER: a file that never mentions this
+        # writer cannot reference it, so it is irrelevant and is never parsed.
+        # Without this, one unparseable file ANYWHERE would disqualify every
+        # non_live classification -- the same "one bad file bricks everything"
+        # fault this cut exists to fix.
+        if writer_relpath not in text and stem not in text:
+            continue
+        try:
+            tree = ast.parse(text)
+        except (SyntaxError, ValueError):
+            return True       # mentions it but unparseable -> fail closed.
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                if any(a.name.split(".")[-1] == stem for a in node.names):
+                    return True
+            elif isinstance(node, ast.ImportFrom):
+                mod = node.module or ""
+                if mod.split(".")[-1] == stem or any(a.name == stem for a in node.names):
+                    return True
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if writer_relpath in node.value or node.value.strip() == stem:
+                    return True
+    return False
+
+
+def _active_acknowledgement_relpaths(project_root: str) -> set:
+    """Writer relpaths carrying a VALID, hash-matching operator acknowledgement
+    (Task 3). Delegated to ``writer_acknowledgement`` so this module never owns
+    the acknowledgement record format. Absent module -> empty set (no
+    acknowledgements), which is the fail-closed direction: without it every
+    NEEDS_PERSON entry simply stays blocking."""
+    try:
+        from external_write import writer_acknowledgement as _ack
+    except ImportError:
+        return set()
+    try:
+        return set(_ack.active_acknowledgements(project_root))
+    except Exception:
+        return set()   # unreadable acknowledgement state -> treat as none -> keep blocking.
+
+
+def classify_bespoke_writer_entry(project_root: str,
+                                  entry: Dict[str, Any],
+                                  acknowledged: Optional[set] = None) -> str:
+    """Classify ONE open bespoke-writer ``entry`` into a ``WriterState``.
+
+    Deterministic and fail-closed: every path that cannot positively establish a
+    non-blocking state returns ``BLOCKING_LIVE_ENABLE``. Precedence:
+
+      1. writer file ABSENT            -> RESOLVED   (agrees with the Cut 1.5
+                                                      reap predicate; never a
+                                                      second conflicting truth)
+      2. valid acknowledgement present -> ACKNOWLEDGED_RISK
+      3. test module, unreferenced     -> NON_LIVE   (3 signals, all required)
+      4. any non-remediable violation  -> NEEDS_PERSON  (STILL BLOCKING)
+      5. otherwise                     -> BLOCKING_LIVE_ENABLE
+
+    An INACCESSIBLE-but-present writer is never RESOLVED (os.stat-style
+    absent-vs-inaccessible distinction, via the read's own exception type --
+    never ``os.path.exists``/``is_file``, which conflate the two)."""
+    root = Path(project_root)
+    writer_relpath = str(entry.get("writer_relpath") or "")
+    if not writer_relpath:
+        return WriterState.BLOCKING_LIVE_ENABLE
+
+    writer_path = root / writer_relpath
+    try:
+        source_text = writer_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return WriterState.RESOLVED
+    except (OSError, UnicodeDecodeError):
+        return WriterState.BLOCKING_LIVE_ENABLE   # present but unverifiable.
+
+    if acknowledged is None:
+        acknowledged = _active_acknowledgement_relpaths(project_root)
+    if writer_relpath in acknowledged:
+        return WriterState.ACKNOWLEDGED_RISK
+
+    if (_matches_test_naming(writer_relpath)
+            and _has_test_structure(source_text)
+            and not _referenced_by_live_surface(root, writer_relpath)):
+        return WriterState.NON_LIVE
+
+    kinds = _recorded_violation_kinds(entry)
+    if not kinds:
+        return WriterState.BLOCKING_LIVE_ENABLE   # nothing recorded -> unprovable -> block.
+    if kinds - REMEDIABLE_VIOLATION_KINDS:
+        return WriterState.NEEDS_PERSON
+    return WriterState.BLOCKING_LIVE_ENABLE
+
+
+#: The states that hold back live-enable. NEEDS_PERSON is deliberately here --
+#: see the section header. Only an explicit operator acknowledgement moves an
+#: entry out of it.
+BLOCKING_WRITER_STATES = frozenset({
+    WriterState.BLOCKING_LIVE_ENABLE,
+    WriterState.NEEDS_PERSON,
+})
+
+
+def blocking_bespoke_writer_migrations(project_root: str) -> List[Dict[str, Any]]:
+    """The subset of ``open_bespoke_writer_migrations`` whose state is in
+    ``BLOCKING_WRITER_STATES`` -- a FILTER over the attribution-free superset,
+    never a different query (asserted by
+    ``test_blocking_is_always_a_subset_of_open``). Raises
+    ``ExternalWriteStateReadError`` on an unreadable queue, preserving ADR-0046's
+    fail-closed contract exactly."""
+    acknowledged = _active_acknowledgement_relpaths(project_root)
+    return [e for e in open_bespoke_writer_migrations(project_root)
+            if classify_bespoke_writer_entry(project_root, e, acknowledged)
+            in BLOCKING_WRITER_STATES]
+
+
+def bespoke_writer_state_report(project_root: str) -> Dict[str, List[Dict[str, Any]]]:
+    """Every open bespoke-writer entry bucketed by ``WriterState`` -- the
+    visibility surface. Nothing becomes invisible merely because it stopped
+    blocking: a NON_LIVE or ACKNOWLEDGED_RISK entry is still reported, and
+    ``normal_status_allowed`` stays False while any bucket is non-empty."""
+    acknowledged = _active_acknowledgement_relpaths(project_root)
+    report: Dict[str, List[Dict[str, Any]]] = {
+        WriterState.BLOCKING_LIVE_ENABLE: [],
+        WriterState.NEEDS_PERSON: [],
+        WriterState.NON_LIVE: [],
+        WriterState.ACKNOWLEDGED_RISK: [],
+        WriterState.RESOLVED: [],
+    }
+    for e in open_bespoke_writer_migrations(project_root):
+        report[classify_bespoke_writer_entry(project_root, e, acknowledged)].append(e)
+    return report
