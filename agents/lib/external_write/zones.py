@@ -157,6 +157,17 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         "scan.py",
         "verification_modes.py",
         "verifiers.py",
+        # writer_acknowledgement.py (Task 3 / Cut 1.6 — v0.20.0): records the
+        # operator's accepted-risk decision for an unrepairable bespoke writer,
+        # the ONE sanctioned exit from WriterState.NEEDS_PERSON. It WRITES
+        # project state (security/bespoke_writer_acknowledgements.json) and
+        # reads a sibling kernel submodule, making it ordinary internal kernel
+        # wiring — the same class as _ext_write_state.py / lifecycle_state.py,
+        # which carry this membership for the identical reason. It imports no
+        # vendor SDK, constructs no credential, and never calls run_operation,
+        # so it is exempt ONLY from the four CAPABILITY-zone-only rules; every
+        # universal bypass check still binds.
+        "writer_acknowledgement.py",
         "write_gate.py",
         "zones.py",
         # standing_automation.py (Task 9 / B2 / F-42 — v0.13.0 Slice 2): the safe
