@@ -251,6 +251,63 @@ class AcceptanceRefusesOnOpenBespokeBypassTest(unittest.TestCase):
         self.assertFalse(self.receipt_path.exists(), "a refusal must mint no receipt")
         self.assertFalse(self.audit_path.exists(), "a refusal must write no acceptance record")
 
+    # -- Kind-aware rendering: a queue entry that is NOT a bespoke-writer bypass must not be
+    # described as one, even though it still refuses live-enable exactly like a real bypass ------
+
+    def _write_reconcile_incomplete_queue(self):
+        """The shape ``upgrade_reconcile.record_reconcile_incomplete`` writes when the upgrade
+        safety check itself could not finish. Its ``writer_relpath`` deliberately points at the
+        pending-migrations queue file itself (so the non-empty-``writer_relpath`` blocking
+        predicate still fires on it) -- it is not a bespoke writer to rebuild."""
+        self._write_queue([{
+            "mechanism_id": "upgrade_safety_check",
+            "writer_relpath": "agents/handoffs/pending_migrations.json",
+            "entrypoint_relpath": None,
+            "from_version": "v0.20.0",
+            "to_version": "v0.21.0",
+            "kind": "reconcile_incomplete",
+            "reason": (
+                "the upgrade safety check could not finish, so this project has not "
+                "been confirmed safe to run (RuntimeError)"),
+            "suggested_next_step": (
+                "Ask your assistant to run `wizard reconcile`. That re-runs the same "
+                "safety check against what is installed now. This entry clears by "
+                "itself once the check completes."),
+            "status": "pending",
+        }])
+
+    def test_a_reconcile_incomplete_marker_still_refuses_but_speaks_for_itself(self):
+        """The marker's ``writer_relpath`` is the queue file, not a writer -- describing it with
+        the generic bypass sentence ("rebuild it so it routes through the sanctioned bulk path")
+        would tell the operator to do something meaningless. It must still refuse (blocking is
+        unaffected by kind), but the refusal must carry the entry's own next step instead."""
+        self._write_reconcile_incomplete_queue()
+
+        res = self._call()
+
+        self.assertFalse(res.accepted,
+                         "an incomplete upgrade safety check must still refuse live-enable")
+        self.assertNotIn("routes through the sanctioned bulk path", res.reason)
+        self.assertNotIn("an external-write bypass is unrepaired", res.reason)
+        self.assertIn("wizard reconcile", res.reason)
+        self.assertNotIn("Traceback", res.reason)
+        self.assertIsNone(res.acceptance)
+        self.assertEqual(self._accepted_flag(), False)
+
+    def test_a_genuine_bypass_entrys_wording_is_unchanged(self):
+        """Regression guard for the fix above: a REAL bespoke-writer bypass entry (no ``kind``
+        field at all -- see ``upgrade_reconcile._append_migration_request``) must keep the exact
+        rebuild wording it has always had; the kind-aware split must not touch this path."""
+        self._write_open_bespoke_queue()
+
+        res = self._call()
+
+        self.assertFalse(res.accepted)
+        self.assertIn(
+            "an external-write bypass is unrepaired: `agents/inbox/runner.py` "
+            "-- rebuild it so it routes through the sanctioned bulk path",
+            res.reason)
+
     # -- Part 2: writer fixed + entry reaped away -> the SAME call now SUCCEEDS -----------------
 
     def test_after_reap_same_call_succeeds(self):

@@ -3175,7 +3175,7 @@ class CliWiringTests(unittest.TestCase):
                           {"inbox_management"})
 
     def test_reconcile_fallback_leaves_a_durable_blocking_marker(self):
-        # (Task 6 supersedes the F-55 A review fix this test used to guard.)
+        # Supersedes the F-55 A review fix this test used to guard against.
         # The fallback message used to enumerate OPERATOR_CODE_DIRS by hand as
         # manual-review advice -- a second, independent copy of the scan scope
         # that could go blind to a newly added code dir. That advice is now

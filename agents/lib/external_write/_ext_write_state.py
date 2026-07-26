@@ -834,3 +834,59 @@ def bespoke_writer_state_report(project_root: str) -> Dict[str, List[Dict[str, A
     for e in open_bespoke_writer_migrations(project_root):
         report[classify_bespoke_writer_entry(project_root, e, acknowledged)].append(e)
     return report
+
+
+#: Entry ``kind`` values that describe a real unrepaired external-write bypass in
+#: an operator-authored writer file -- the ONLY case the "rebuild it so it routes
+#: through the sanctioned bulk path" wording actually fits. The bespoke-writer
+#: bypass entries this package was originally built for carry NO ``kind`` field at
+#: all (see ``upgrade_reconcile._append_migration_request``, build-side); a
+#: missing kind is treated the same as membership here (see
+#: ``is_bypass_writer_entry``), so today's only real bypass entries keep the
+#: wording they have always had. This set exists for a future writer that wants
+#: to opt an explicitly-kinded entry INTO bypass wording on purpose.
+_BYPASS_WRITER_KINDS = frozenset({"external_write_bypass"})
+
+
+def is_bypass_writer_entry(entry: Dict[str, Any]) -> bool:
+    """True iff ``entry`` is a real, unrepaired external-write bypass in an
+    operator-authored writer file -- the only entry shape the rebuild-and-
+    route-through-the-sanctioned-path wording actually describes.
+
+    This queue (``agents/handoffs/pending_migrations.json``) is shared by every
+    remediation this package's siblings record, not only bypass writers -- an
+    entry can equally record a fact that has nothing to do with a hand-rolled
+    write path (for example, that a safety check itself could not finish). Those
+    entries are still real and still block (see ``open_bespoke_writer_migrations``
+    / ``blocking_bespoke_writer_migrations``, both attribution- and kind-free by
+    design), but they must not be DESCRIBED as a bypass writer, because the fix
+    this wording names ("rebuild it so it routes through the sanctioned bulk
+    path") does not apply to them.
+    """
+    kind = entry.get("kind")
+    return kind is None or kind in _BYPASS_WRITER_KINDS
+
+
+def describe_blocking_entry(entry: Dict[str, Any]) -> str:
+    """One plain-language sentence for ONE open blocking entry.
+
+    A bypass entry (``is_bypass_writer_entry``) keeps the rebuild wording it has
+    always had. Every other kind speaks for itself, because this queue carries
+    facts that are not bypasses -- describing those with the bypass sentence
+    tells the operator to do something impossible to a file that was never the
+    problem (rebuilding ``agents/handoffs/pending_migrations.json`` itself "so it
+    routes through the sanctioned bulk path" is meaningless; it is the queue, not
+    a writer).
+
+    Blocking is unaffected by any of this: what an entry BLOCKS is decided
+    without consulting its kind, and only what the operator READS is chosen here.
+    """
+    if is_bypass_writer_entry(entry):
+        relpath = str(entry.get("writer_relpath"))
+        return (f"an external-write bypass is unrepaired: `{relpath}` -- rebuild "
+                "it so it routes through the sanctioned bulk path")
+    next_step = entry.get("suggested_next_step") or entry.get("reason")
+    if not next_step:
+        relpath = str(entry.get("writer_relpath"))
+        next_step = f"this project has an open item to review at `{relpath}`"
+    return str(next_step)

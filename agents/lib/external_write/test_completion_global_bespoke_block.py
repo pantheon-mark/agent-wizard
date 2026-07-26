@@ -108,6 +108,31 @@ def _canonical_entry(mechanism_id="some_other_capability", status="pending"):
     }
 
 
+RECONCILE_INCOMPLETE_RELPATH = "agents/handoffs/pending_migrations.json"
+
+
+def _reconcile_incomplete_entry():
+    """The shape ``upgrade_reconcile.record_reconcile_incomplete`` writes when the upgrade
+    safety check itself could not finish. Its ``writer_relpath`` deliberately points at the
+    pending-migrations queue file itself (so it still trips the non-empty-``writer_relpath``
+    blocking predicate) -- it is not a bespoke writer to rebuild, and must not be described
+    as one."""
+    return {
+        "mechanism_id": "upgrade_safety_check",
+        "writer_relpath": RECONCILE_INCOMPLETE_RELPATH,
+        "entrypoint_relpath": None,
+        "kind": "reconcile_incomplete",
+        "reason": (
+            "the upgrade safety check could not finish, so this project has not been "
+            "confirmed safe to run (RuntimeError)"),
+        "suggested_next_step": (
+            "Ask your assistant to run `wizard reconcile`. That re-runs the same safety "
+            "check against what is installed now. This entry clears by itself once the "
+            "check completes."),
+        "status": "pending",
+    }
+
+
 class GlobalBespokeWriterBlockTests(_ls_fixtures._CheckCompletionFixtureMixin, unittest.TestCase):
 
     # -- RED / keystone: an open bespoke-writer entry blocks project-wide -------------------------
@@ -180,6 +205,51 @@ class GlobalBespokeWriterBlockTests(_ls_fixtures._CheckCompletionFixtureMixin, u
             result = lifecycle_state.check_completion(str(root), CAP_ID)
             self.assertTrue(result.done, result.operator_message)
             self.assertNotIn("open_external_write_bypass", result.failed_conjuncts)
+
+    # -- Kind-aware rendering: an entry that is not a bespoke-writer bypass must still
+    # block (blocking stays kind-free), but must not be DESCRIBED as one ----------------
+
+    def test_reconcile_incomplete_marker_blocks_but_is_not_described_as_a_bypass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._accept_real_capability(root, CAP_ID)
+            _write_pending_migrations(root, [_reconcile_incomplete_entry()])
+
+            overall = capability_health.overall_status(str(root))
+
+            # Blocking is unaffected by kind: this still forbids normal status, exactly like a
+            # real bypass would.
+            self.assertFalse(
+                overall["normal_status_allowed"],
+                f"an incomplete upgrade safety check must forbid normal status; got {overall}")
+            bypass = overall["open_external_write_bypass"]
+            self.assertTrue(bypass["blocking"])
+            self.assertIn(RECONCILE_INCOMPLETE_RELPATH, bypass["writer_relpaths"])
+
+            # But the TEXT must speak for itself, not the generic bypass sentence -- rebuilding
+            # the queue file itself "so it routes through the sanctioned bulk path" is meaningless.
+            description = bypass["descriptions"][RECONCILE_INCOMPLETE_RELPATH]
+            self.assertNotIn("routes through the sanctioned bulk path", description)
+            self.assertNotIn("an external-write bypass is unrepaired", description)
+            self.assertIn("wizard reconcile", description)
+
+    def test_a_genuine_bypass_descriptions_wording_is_unchanged(self):
+        """Regression guard: a REAL bespoke-writer bypass entry must keep the exact rebuild
+        wording it has always had in the new ``descriptions`` field too."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._accept_real_capability(root, CAP_ID)
+            _write_bespoke_writer_file(root)
+            _write_pending_migrations(root, [_bespoke_entry()])
+
+            overall = capability_health.overall_status(str(root))
+
+            description = overall["open_external_write_bypass"]["descriptions"][
+                BESPOKE_WRITER_RELPATH]
+            self.assertEqual(
+                description,
+                "an external-write bypass is unrepaired: `agents/inbox/runner.py` -- rebuild "
+                "it so it routes through the sanctioned bulk path")
 
 
 if __name__ == "__main__":

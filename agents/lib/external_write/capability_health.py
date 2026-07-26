@@ -1077,6 +1077,15 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
     Fail-closed: an unreadable pending-migrations queue is treated as blocking
     (``read_error``), never a silent "no bypass" false green -- see V15-3 and
     ``_ext_write_state.open_bespoke_writer_migrations``.
+
+    Not every listed relpath is actually a bespoke writer, though every one of
+    them genuinely blocks: this queue is shared with sibling remediations that
+    record a different kind of fact on the same non-empty-``writer_relpath`` +
+    ``pending`` shape (for example, a safety check that itself could not
+    finish). ``open_external_write_bypass["descriptions"]`` carries the
+    accurate, ready-to-relay sentence per relpath -- read from there, not from
+    the "hand-rolled write path" framing above, when presenting a specific
+    entry to the operator.
     """
     caps = check_capabilities_with_self_heal(project_root)
     red = sorted({c["capability_id"] for c in caps if c.get("health") != "green"})
@@ -1100,13 +1109,24 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
     bypass_writer_relpaths: List[str] = []
     bypass_blocking_relpaths: List[str] = []
     bypass_writer_states: Dict[str, str] = {}
+    bypass_descriptions: Dict[str, str] = {}
     bypass_read_error = False
     try:
         bypass_writer_relpaths = _ext_write_state.open_bespoke_writer_relpaths(str(project_root))
         for _state, _entries in _ext_write_state.bespoke_writer_state_report(
                 str(project_root)).items():
             for _e in _entries:
-                bypass_writer_states[str(_e.get("writer_relpath"))] = _state
+                _relpath = str(_e.get("writer_relpath"))
+                bypass_writer_states[_relpath] = _state
+                # Kind-aware TEXT only -- every key above this one keys on the same
+                # attribution- and kind-free predicate as always, unaffected. This queue is
+                # shared by entries that are not a bespoke-writer bypass at all (for example,
+                # a safety check that itself could not finish), and describing one of those
+                # with the bypass wording ("rebuild it so it routes through the sanctioned
+                # bulk path") tells the operator to do something impossible to a file that
+                # was never the problem -- so an agent presenting this status reads THIS
+                # field for the sentence, not the relpath list alone.
+                bypass_descriptions[_relpath] = _ext_write_state.describe_blocking_entry(_e)
         bypass_blocking_relpaths = sorted({
             str(e.get("writer_relpath"))
             for e in _ext_write_state.blocking_bespoke_writer_migrations(str(project_root))})
@@ -1122,18 +1142,22 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
         "red_capabilities": red,
         "paused_capabilities": paused,
         "orphaned_runs": orphaned,
-        # (Task A) the distinct, named reason + the concrete file(s) to fix. Present (and, when
+        # The distinct, named reason + the concrete file(s) to fix. Present (and, when
         # blocking, self-describing via this key's own name) so an agent reading this typed status
         # can name the open external-write bypass to the operator, not just report "not normal".
         "open_external_write_bypass": {
             "blocking": bypass_blocking,
             "writer_relpaths": bypass_writer_relpaths,
-            # (Cut 1.6) the subset that actually holds back live-enable, and the per-writer
-            # state so a plain-language view can say WHY -- "needs a person" reads very
-            # differently to the operator than "rebuild it", and telling someone to rebuild a
-            # structurally unrepairable file is the dead end that stalled the real estate.
+            # The subset that actually holds back live-enable, and the per-writer state so a
+            # plain-language view can say WHY -- "needs a person" reads very differently to the
+            # operator than "rebuild it", and telling someone to rebuild a structurally
+            # unrepairable file is a dead end.
             "blocking_writer_relpaths": bypass_blocking_relpaths,
             "writer_states": bypass_writer_states,
+            # One ready-to-relay, plain-language sentence per relpath -- a real bypass keeps
+            # its rebuild wording; anything else recorded on this same shared queue speaks in
+            # its own words instead (``_ext_write_state.describe_blocking_entry``).
+            "descriptions": bypass_descriptions,
             "read_error": bypass_read_error,
         },
     }

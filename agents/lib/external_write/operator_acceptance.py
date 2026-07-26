@@ -75,6 +75,8 @@ from external_write._ext_write_state import (
     open_bespoke_writer_migrations,
     blocking_bespoke_writer_migrations,
     classify_bespoke_writer_entry,
+    describe_blocking_entry,
+    is_bypass_writer_entry,
     WriterState,
     ExternalWriteStateReadError,
 )
@@ -765,13 +767,24 @@ def record_operator_acceptance(
             "agents/handoffs/pending_migrations.json could not be read (it may be malformed); "
             "repair it so it can be read, then re-run acceptance; nothing was accepted")
     if _open_bypasses:
-        # Split the refusal by STATE. Telling a non-technical operator to "rebuild it" when the
-        # file cannot be repaired by any tooling we ship is a dead end -- it is exactly what
-        # stalled the real estate at F-VAL19-1, where the flagged file also delivered the
-        # operator's daily alert and could be neither made scan-clean nor deleted. Each group
-        # gets the next step that is actually available to it.
+        # Kind-aware RENDERING only -- the predicate just above stays coarse and
+        # kind-free (precision here is a wording affordance, never a safety
+        # input). A real bespoke-writer bypass (is_bypass_writer_entry) keeps the
+        # exact grouped-by-state wording this block has always used. Any other
+        # entry recorded a different fact on this same shared queue (for example,
+        # that a safety check itself could not finish) and is described in its
+        # own words below instead -- the generic "rebuild it" sentence names a
+        # fix that does not apply to it.
+        _bypass_entries = [e for e in _open_bypasses if is_bypass_writer_entry(e)]
+        _other_entries = [e for e in _open_bypasses if not is_bypass_writer_entry(e)]
+
+        # Split the bypass refusal by STATE. Telling a non-technical operator to "rebuild it"
+        # when the file cannot be repaired by any tooling we ship is a dead end -- it is exactly
+        # what stalled the real estate, where the flagged file also delivered the operator's
+        # daily alert and could be neither made scan-clean nor deleted. Each group gets the next
+        # step that is actually available to it.
         _needs_person, _rebuildable = [], []
-        for _e in _open_bypasses:
+        for _e in _bypass_entries:
             _rel = str(_e.get("writer_relpath"))
             try:
                 _state = classify_bespoke_writer_entry(identity_root, _e)
@@ -793,6 +806,8 @@ def record_operator_acceptance(
                 "change it by hand until it passes the check, or record that you accept the "
                 "risk of leaving it as it is (that decision is kept on file and shown again "
                 "whenever the file changes)")
+        for _e in sorted(_other_entries, key=lambda e: str(e.get("writer_relpath"))):
+            _parts.append(describe_blocking_entry(_e))
         return _refuse("; ".join(_parts) + "; then re-run acceptance; nothing was accepted")
 
     if receipt_path is None:
