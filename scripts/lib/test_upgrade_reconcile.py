@@ -2398,10 +2398,10 @@ register_adapter(OP_KIND, AcmeWidgetTidyAdapter())
         })
         op_kind_line = f'OP_KIND = "{declared_op_kinds[0]}"\n' if declared_op_kinds else ""
         (capdir / f"{capability_id}_capability.py").write_text(
-            '"""fixture capability module (Task B2 test) -- only its presence '
-            'matters for capability_identity enumeration, and (since the '
-            'declaration-topology fix) its OP_KIND must match one this '
-            'fixture\'s adapter actually declares, for attribution to join."""\n'
+            '"""fixture capability module -- only its presence matters for '
+            'capability identity enumeration, and its OP_KIND must match one '
+            'this fixture\'s adapter actually declares, for attribution to '
+            'join."""\n'
             + op_kind_line,
             encoding="utf-8",
         )
@@ -2711,9 +2711,9 @@ class ReconcileMissingEvidencePredicatesMultiClassTests(_Base):
         })
         op_kind_line = f'OP_KIND = "{declared_op_kinds[0]}"\n' if declared_op_kinds else ""
         (capdir / f"{capability_id}_capability.py").write_text(
-            '"""fixture capability module (F-1 test) -- only its presence '
-            'matters for capability_identity enumeration, plus an OP_KIND '
-            'matching this fixture\'s adapter for attribution to join."""\n'
+            '"""fixture capability module -- only its presence matters for '
+            'capability identity enumeration, plus an OP_KIND matching this '
+            'fixture\'s adapter for attribution to join."""\n'
             + op_kind_line,
             encoding="utf-8",
         )

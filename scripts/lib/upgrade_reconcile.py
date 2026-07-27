@@ -109,6 +109,7 @@ from capability_code_scaffold import (  # type: ignore  # noqa: E402
     DEFAULT_CAPABILITIES_REL,
     DEFAULT_EXTERNAL_WRITE_REL,
     CapabilityCodeScaffoldError,
+    canonical_id_from_module_stem,
     insert_missing_evidence_predicate_stubs,
     resolve_registered_adapter_classes,
 )
@@ -1178,6 +1179,10 @@ def _append_ambiguous_adapter_registration_manual_repair_request(
     adapter_relpath: str,
     from_version: str,
     to_version: str,
+    *,
+    kind: str = "ambiguous_adapter_registration",
+    reason: Optional[str] = None,
+    suggested_next_step: Optional[str] = None,
 ) -> Path:
     """(F-1) Land (or refresh) a manual-repair task in the SAME
     pending-migrations queue `_append_missing_predicate_migration_request`
@@ -1197,7 +1202,19 @@ def _append_ambiguous_adapter_registration_manual_repair_request(
     registration in a multi-adapter module is ambiguous while another
     resolves cleanly and genuinely needs a stub) never clobber each other.
     Idempotent: re-running an upgrade REPLACES this capability's existing
-    entry of this SAME kind rather than duplicating it."""
+    entry of this SAME (mechanism_id, kind) pair rather than duplicating it.
+
+    Reused (never duplicated) for a SECOND, unrelated cause via the
+    `kind`/`reason`/`suggested_next_step` overrides: a `register_adapter(...)`
+    call whose target class resolves fine but whose OP_KIND itself could not
+    be read by `topology.discover_declarations` (see
+    `AdapterAttributionUnresolvedError`). That cause is ADAPTER-scoped, not
+    capability-scoped -- a property of the FILE, exactly like
+    `adapter_migration_refused`/`adapter_enrolment_unreadable` below -- so
+    its caller passes the adapter's own stem as `canonical_id` and a
+    distinct `kind` ("adapter_registration_unresolved"), never the class-
+    ambiguity kind's default identity space or wording. One queue-writing
+    mechanism, two causes -- never guessing an id for either."""
     path = Path(operator_project_dir) / MIGRATION_QUEUE_REL
     try:
         existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
@@ -1208,7 +1225,7 @@ def _append_ambiguous_adapter_registration_manual_repair_request(
     existing = [
         e for e in existing
         if not (isinstance(e, dict) and e.get("mechanism_id") == canonical_id
-                and e.get("kind") == "ambiguous_adapter_registration")
+                and e.get("kind") == kind)
     ]
     existing.append({
         "mechanism_id": canonical_id,
@@ -1217,14 +1234,14 @@ def _append_ambiguous_adapter_registration_manual_repair_request(
         "requested_at": _utcnow_iso(),
         "from_version": from_version,
         "to_version": to_version,
-        "kind": "ambiguous_adapter_registration",
-        "reason": (
+        "kind": kind,
+        "reason": reason or (
             "this adapter module has a register_adapter(...) call whose "
             "target class could not be uniquely identified by static "
             "analysis -- the evidence-predicate migrator refuses to guess "
             "which class to check or repair"
         ),
-        "suggested_next_step": (
+        "suggested_next_step": suggested_next_step or (
             f"Open {adapter_relpath} and confirm which class each "
             "register_adapter(...) call registers (it must be a direct "
             "ClassName() constructor call naming exactly one class defined "
@@ -1395,6 +1412,40 @@ def resolve_adapter_migration_targets(
     return AdapterTargets(tuple(sorted(keep)), None)
 
 
+class AdapterAttributionUnresolvedError(Exception):
+    """Raised by ``attribute_adapter_to_capability`` when this adapter's
+    capability cannot be safely determined -- NOT the same thing as "no
+    capability serves it" (that is a clean, legitimate ``None`` return).
+    Raised when:
+
+      * the adapter module has at least one ``register_adapter(...)`` call
+        whose op_kind ``topology.discover_declarations`` could not read
+        (reported with ``op_kind=None`` and a named reason -- never
+        dropped); or
+      * the capabilities directory exists but could not be scanned (a
+        permission problem, say) -- an ABSENT directory is a different,
+        trustworthy case (most projects have no capabilities yet) and never
+        raises this; or
+      * a capability module under it exists but could not be read.
+
+    In every one of these cases, treating the result as ``None`` would be
+    indistinguishable from "genuinely serves no capability" -- exactly the
+    silent-miss failure mode this whole mechanism exists to close. Carries
+    ``reasons``: one or more plain-language strings, each already naming the
+    responsible file (and line, where topology supplies one), so a caller
+    can report this to the operator without re-deriving anything.
+
+    Callers must catch this and report it through a durable, operator-
+    visible record, then move on to the next adapter -- never let it
+    propagate uncaught, and never treat catching it as license to guess at
+    a fallback id (the filename convention this whole mechanism replaces).
+    """
+
+    def __init__(self, reasons):
+        self.reasons = tuple(reasons)
+        super().__init__(" / ".join(self.reasons))
+
+
 def attribute_adapter_to_capability(
     operator_project_dir: Path, adapter_relpath: str,
 ) -> Optional[str]:
@@ -1417,9 +1468,17 @@ def attribute_adapter_to_capability(
     adapter can serve no capability), not an error. A ``None`` here can never
     surface as a WRONG capability id downstream: only RESOLVED op_kinds ever
     enter the join (an adapter declaration or a capability's OP_KIND that
-    this checker could not read is excluded, not treated as a wildcard), and
-    the sole caller falls back to the adapter's own filename stem on
-    ``None`` -- always at least as correct as the adapter's own name.
+    this checker could not read is EXCLUDED from the join, not treated as a
+    wildcard).
+
+    Raises ``AdapterAttributionUnresolvedError`` instead of returning
+    ``None`` when this checker could not read something it needed to answer
+    the question honestly (see that class's own docstring for the three
+    causes) -- "we do not know" and "the answer is nothing" are different
+    facts, and collapsing them into the same ``None`` is precisely the
+    silent-miss regression this distinction exists to prevent. The caller
+    must not treat catching this as a fallback license; see the exception's
+    own docstring.
 
     Never imports the adapter or capability module -- AST source reads only,
     matching this file's and topology.py's existing discipline (this module
@@ -1433,22 +1492,53 @@ def attribute_adapter_to_capability(
     except OSError:
         return None
 
-    adapter_ops = {
-        d.op_kind for d in topology.discover_declarations(adapter_src, str(adapter_relpath))
-        if d.role == "adapter" and d.op_kind
-    }
+    declarations = topology.discover_declarations(adapter_src, str(adapter_relpath))
+    unresolved = tuple(
+        d.unresolved_reason for d in declarations
+        if d.role == "adapter" and d.unresolved_reason
+    )
+    if unresolved:
+        raise AdapterAttributionUnresolvedError(unresolved)
+
+    adapter_ops = {d.op_kind for d in declarations if d.role == "adapter" and d.op_kind}
     if not adapter_ops:
         return None
 
     caps_dir = root / DEFAULT_CAPABILITIES_REL
-    for cap_path in sorted(caps_dir.glob("*_capability.py")):
+    try:
+        # iterdir (not glob): glob silently swallows a PermissionError while
+        # scanning, which would make an INACCESSIBLE capabilities directory
+        # indistinguishable from an ABSENT one -- exactly the standing
+        # fail-closed rule this must not violate. Sorted for the same
+        # deterministic tie-break glob gave.
+        cap_paths = sorted(caps_dir.iterdir())
+    except FileNotFoundError:
+        return None  # no capabilities directory at all -- a clean, trustworthy empty scan
+    except OSError as exc:
+        raise AdapterAttributionUnresolvedError((
+            f"the capabilities folder ({DEFAULT_CAPABILITIES_REL.as_posix()}) "
+            f"could not be read ({exc.__class__.__name__}), so this check "
+            "cannot tell what capabilities this project has",
+        ))
+
+    unreadable_capability_reasons: List[str] = []
+    for cap_path in cap_paths:
+        if not cap_path.name.endswith(f"{CAPABILITY_MODULE_SUFFIX}.py"):
+            continue
         try:
             cap_src = cap_path.read_text(encoding="utf-8")
-        except OSError:
+        except OSError as exc:
+            unreadable_capability_reasons.append(
+                f"{DEFAULT_CAPABILITIES_REL.as_posix()}/{cap_path.name} could "
+                f"not be read ({exc.__class__.__name__}), so this check "
+                "cannot tell what it declares")
             continue
         for declared_op_kind in _extract_op_kind_literal(cap_src):
             if declared_op_kind in adapter_ops:
-                return cap_path.stem[: -len("_capability")]
+                return canonical_id_from_module_stem(cap_path.stem)
+
+    if unreadable_capability_reasons:
+        raise AdapterAttributionUnresolvedError(tuple(unreadable_capability_reasons))
     return None
 
 
@@ -1557,9 +1647,46 @@ def reconcile_adapter_migrations(
         # an adapter, not a capability.
         # Attribution now joins on the declared op_kind (see
         # attribute_adapter_to_capability); the filename is never an input.
-        canonical_id = (attribute_adapter_to_capability(operator_project_dir, relpath)
-                        or Path(relpath).stem)
+        # A third case belongs to neither bucket above: this checker could
+        # not tell WHAT the adapter declares at all (an unresolvable
+        # registration, or a capabilities scan it could not trust -- see
+        # AdapterAttributionUnresolvedError). That is ADAPTER-scoped (kind
+        # "adapter_registration_unresolved", keyed on the adapter's own
+        # stem, handled below) -- never guessed into a capability id, and
+        # never allowed to reach the capability-scoped writes past this point.
         adapter_stem = Path(relpath).stem
+        try:
+            canonical_id = attribute_adapter_to_capability(
+                operator_project_dir, relpath) or adapter_stem
+        except AdapterAttributionUnresolvedError as exc:
+            # "we do not know what this adapter provides" is a DIFFERENT
+            # fact from "it provides nothing a capability needs" -- silently
+            # keying a capability-scoped entry on the adapter's own stem here
+            # would be a WRONG capability id wearing a plausible-looking
+            # disguise. Report it, ADAPTER-scoped (a property of this file,
+            # same identity space as adapter_migration_refused below), and
+            # move on -- one unreadable operator adapter must never stop the
+            # rest of this reconcile.
+            _append_ambiguous_adapter_registration_manual_repair_request(
+                operator_project_dir, adapter_stem, relpath,
+                from_version, to_version,
+                kind="adapter_registration_unresolved",
+                reason=(
+                    "this adapter's declared operation could not be fully "
+                    "read by static analysis, so this upgrade cannot safely "
+                    "tell which capability (if any) it belongs to: "
+                    + " / ".join(exc.reasons)
+                ),
+                suggested_next_step=(
+                    f"Open {relpath} and make sure its operation name is "
+                    "written directly -- a plain quoted piece of text, or a "
+                    "single name defined at the top of the file -- not "
+                    "built by a function call, text formatting, or a loop "
+                    "this check cannot follow line by line. Then re-run the "
+                    "upgrade."
+                ),
+            )
+            continue  # report and contain -- never guess an id when we do not know
 
         _resolved, ambiguous_count = resolve_registered_adapter_classes(tree)
         if ambiguous_count:

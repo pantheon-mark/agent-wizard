@@ -344,15 +344,14 @@ class MigratorScaffoldsFailingStubTests(unittest.TestCase):
 
         cap_dir = self.proj / "agents" / "capabilities"
         cap_dir.mkdir(parents=True)
-        # The declaration-topology attribution join
-        # (upgrade_reconcile.attribute_adapter_to_capability) resolves this
+        # upgrade_reconcile.attribute_adapter_to_capability resolves this
         # capability's canonical id from a shared OP_KIND, never the
         # filename -- so the fixture capability module needs the SAME
         # OP_KIND the adapter below actually registers.
         (cap_dir / f"{_B2_CAPABILITY_ID}_capability.py").write_text(
             '"""fixture capability module (isolation test) -- presence matters '
             'for capability enumeration, and OP_KIND matches the adapter below '
-            'for declaration-topology attribution to join."""\n'
+            'so attribution can join."""\n'
             f'OP_KIND = "{_B2_OP_KIND}"\n',
             encoding="utf-8",
         )
