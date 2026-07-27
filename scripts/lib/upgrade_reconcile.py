@@ -457,6 +457,13 @@ class ReconcileResult:
         THAN ONE entry sharing the exact same ``id`` with more than one unaccepted -- a
         data-integrity defect (the registry never enforces ``id`` as a primary key), NOT normal
         ambiguity. ALSO scanner-status-independent. See ``_heal_same_id_descriptor_twins``.
+
+    adapter_enrolment_blocking_reason: non-None when the adapter-enrolment manifest
+        (``operator_adapters.json``) is PRESENT but unusable this run -- set-reconciled every
+        call (see ``record_adapter_enrolment_state``), so it clears to None on the next
+        reconcile once the manifest is repaired. Must be surfaced by
+        ``render_reconcile_result``: it names a durable, blocking queue entry, and a field that
+        writes blocking state but renders nothing is a silent switch-off.
     """
     operator_project_path: str
     from_version: str
@@ -469,6 +476,7 @@ class ReconcileResult:
     same_id_twins_healed: List[str] = field(default_factory=list)
     read_provisioner_violations: List["ReadProvisionerViolation"] = field(
         default_factory=list)
+    adapter_enrolment_blocking_reason: Optional[str] = None
 
     @property
     def any_affected(self) -> bool:
@@ -1228,11 +1236,6 @@ def _append_ambiguous_adapter_registration_manual_repair_request(
     return path
 
 
-#: Refusal reasons that mean "correctly nothing to do", not "could not act".
-#: Queueing these would put a blocking entry in every already-correct project.
-_BENIGN_REFUSAL_MARKERS = ("nothing to do",)
-
-
 def record_adapter_migration_refusals(
     operator_project_dir: Path,
     refusals: Sequence[Tuple[str, "AdapterMigrationOutcome"]],
@@ -1255,9 +1258,10 @@ def record_adapter_migration_refusals(
     project blocked with no operator-reachable way out.
 
     Single authority: only entries of this kind are added or removed; every other
-    entry is left exactly as found. A benign "nothing to do" outcome is never
-    recorded -- a blocking entry in an already-correct project is a guard nobody
-    reads.
+    entry is left exactly as found. A benign "nothing to do" outcome (structural
+    ``TransformResult.benign`` / ``AdapterMigrationOutcome.benign``, never prose
+    matching -- see ``TransformResult``'s own docstring) is never recorded -- a
+    blocking entry in an already-correct project is a guard nobody reads.
     """
     path = Path(operator_project_dir) / MIGRATION_QUEUE_REL
     try:
@@ -1272,7 +1276,7 @@ def record_adapter_migration_refusals(
                     and e.get("kind") == "adapter_migration_refused")]
 
     for canonical_id, outcome in refusals:
-        if any(marker in outcome.reason for marker in _BENIGN_REFUSAL_MARKERS):
+        if outcome.benign:
             continue
         kept.append({
             "mechanism_id": canonical_id,
@@ -1403,6 +1407,7 @@ class AdapterMigrationOutcome:
     changed: bool
     reason: str
     detail: Tuple[str, ...] = ()
+    benign: bool = False
 
 
 def reconcile_adapter_migrations(
@@ -1473,7 +1478,30 @@ def reconcile_adapter_migrations(
         except SyntaxError:
             continue  # never guess at an unparseable adapter module
 
+        # Id-space convention (deliberate, not incidental): this pass
+        # writes queue entries of two different SCOPES, and each keys its
+        # `mechanism_id` on the id that scope actually names:
+        #   * CAPABILITY-scoped kinds (missing_evidence_predicates,
+        #     ambiguous_adapter_registration -- and, elsewhere in this module,
+        #     read_provisioner_missing/no_registered_adapter) key on
+        #     `canonical_id`, the capability's own id (e.g. "inbox_management").
+        #     These entries drive the rebuild-paused-capability flow and the
+        #     acceptance ceremony, both of which operate per-CAPABILITY, so the
+        #     id must be the capability's -- falling back to the adapter's own
+        #     stem only when no capability's filename convention matches (see
+        #     `canonical_by_relpath` just above), which is still the best
+        #     available identity for a human reading the queue.
+        #   * ADAPTER-scoped kinds (adapter_migration_refused,
+        #     adapter_enrolment_unreadable) key on the ADAPTER MODULE's own
+        #     stem, never a capability id -- a migration refusal or an
+        #     unreadable enrolment manifest is a property of the adapter FILE,
+        #     which may serve more than one capability (or none a filename
+        #     convention can resolve), so forcing it onto one capability's id
+        #     would be arbitrary at best and wrong at worst.
+        # The two are NOT unified: an adapter-scoped entry legitimately names
+        # an adapter, not a capability.
         canonical_id = canonical_by_relpath.get(relpath, Path(relpath).stem)
+        adapter_stem = Path(relpath).stem
 
         _resolved, ambiguous_count = resolve_registered_adapter_classes(tree)
         if ambiguous_count:
@@ -1488,7 +1516,7 @@ def reconcile_adapter_migrations(
             outcomes.append(AdapterMigrationOutcome(
                 relpath=relpath, migration_name=migration.name,
                 changed=result.changed, reason=result.reason,
-                detail=tuple(result.detail),
+                detail=tuple(result.detail), benign=result.benign,
             ))
             if result.changed:
                 current = result.source
@@ -1502,7 +1530,10 @@ def reconcile_adapter_migrations(
                         list(result.detail), from_version, to_version,
                     )
             else:
-                refusals.append((canonical_id, outcomes[-1]))
+                # ADAPTER-scoped (see the id-space comment above): keyed on
+                # the module's own stem, never `canonical_id` -- a refusal
+                # kind names the adapter, not a capability.
+                refusals.append((adapter_stem, outcomes[-1]))
 
         if current != source:
             _atomic_write(adapter_path, current)
@@ -1669,13 +1700,29 @@ def check_read_provisioner_conformance(
 
     Returns one violation per capability whose read path cannot work. An empty
     list means the property holds.
+
+    More than one adapter MODULE can register the SAME op_kind
+    -- the runtime registry resolves that as LAST-registered-wins, an ordering
+    this static pass has no reliable way to reproduce (it depends on the
+    operator project's own import order, not on this glob's alphabetical
+    sort). Binding to any ONE candidate module here -- picking the
+    alphabetically-first, as an earlier version of this function did via
+    ``dict.setdefault`` -- can go wrong in BOTH directions: a shipped module
+    with no builder (e.g. ``adapters_gmail.py``, which sorts early) can shadow
+    a compliant operator module and produce a FALSE violation naming a file
+    migration deliberately excludes; symmetrically, a compliant module that
+    happens to sort first can shadow a non-compliant one and produce a FALSE
+    all-clear. So every candidate module registering a given op_kind is
+    collected, and a violation is reported only when NONE of them defines the
+    builder -- never guessing which one the runtime would actually pick.
     """
     root = Path(operator_project_dir)
     lib_dir = root / DEFAULT_EXTERNAL_WRITE_REL
     caps_dir = root / DEFAULT_CAPABILITIES_REL
 
-    # op_kind -> (adapter_relpath, class_name, parsed module)
-    registry: Dict[str, Tuple[str, str, ast.Module]] = {}
+    # op_kind -> every (adapter_relpath, class_name, parsed module) that
+    # registers it -- ALL candidates, never just the first one found.
+    registry: Dict[str, List[Tuple[str, str, ast.Module]]] = {}
     if lib_dir.is_dir():
         for adapter_path in sorted(lib_dir.glob("adapters*.py")):
             try:
@@ -1684,7 +1731,7 @@ def check_read_provisioner_conformance(
                 continue
             relpath = adapter_path.relative_to(root).as_posix()
             for op_kind, class_name in _registered_op_kind_classes(tree).items():
-                registry.setdefault(op_kind, (relpath, class_name, tree))
+                registry.setdefault(op_kind, []).append((relpath, class_name, tree))
 
     violations: List[ReadProvisionerViolation] = []
     if not caps_dir.is_dir():
@@ -1700,8 +1747,8 @@ def check_read_provisioner_conformance(
         if not op_kind:
             continue  # a capability declaring no op_kind is refused elsewhere
 
-        entry = registry.get(op_kind)
-        if entry is None:
+        candidates = registry.get(op_kind)
+        if not candidates:
             violations.append(ReadProvisionerViolation(
                 capability_id=capability_id, op_kind=op_kind,
                 adapter_relpath=None, kind="no_registered_adapter",
@@ -1712,18 +1759,29 @@ def check_read_provisioner_conformance(
             ))
             continue
 
-        relpath, class_name, adapter_tree = entry
-        if not _class_or_in_module_base_defines(
-                adapter_tree, class_name, PROVISIONER_NAME):
-            violations.append(ReadProvisionerViolation(
-                capability_id=capability_id, op_kind=op_kind,
-                adapter_relpath=relpath, kind="read_provisioner_missing",
-                reason=(
-                    f"`{capability_id}` needs to look at the outside system in "
-                    "read-only mode before it can work out what to change, but "
-                    f"`{class_name}` in {relpath} has no read-only reader on it, "
-                    "so that is not possible yet"),
-            ))
+        # A violation is reported only when NONE of the candidates that
+        # register this op_kind defines the builder -- see this function's own
+        # docstring for why picking just one candidate (in either direction)
+        # is unsafe.
+        if any(_class_or_in_module_base_defines(tree, class_name, PROVISIONER_NAME)
+               for _relpath, class_name, tree in candidates):
+            continue
+
+        # None of them are compliant. Name one an operator can actually act
+        # on: prefer a candidate that is NOT a wizard-shipped module (those
+        # are excluded from migration and editing one would do nothing).
+        reportable = [c for c in candidates
+                      if Path(c[0]).name not in _SHIPPED_ADAPTER_MODULE_NAMES]
+        relpath, class_name, _tree = (reportable or candidates)[0]
+        violations.append(ReadProvisionerViolation(
+            capability_id=capability_id, op_kind=op_kind,
+            adapter_relpath=relpath, kind="read_provisioner_missing",
+            reason=(
+                f"`{capability_id}` needs to look at the outside system in "
+                "read-only mode before it can work out what to change, but "
+                f"`{class_name}` in {relpath} has no read-only reader on it, "
+                "so that is not possible yet"),
+        ))
     return violations
 
 
@@ -1801,17 +1859,40 @@ def record_read_provisioner_conformance(
                                    sort_keys=True) + "\n")
 
 
-def _append_adapter_enrolment_blocking_request(
+def record_adapter_enrolment_state(
     operator_project_dir: Path,
-    reason: str,
+    blocking_reason: Optional[str],
+    *,
     from_version: str,
     to_version: str,
-) -> Path:
-    """A PRESENT-but-unusable adapter-enrolment list is a blocking state, not a
-    warning. Without this the upgrade would migrate whichever subset a filename
-    convention happened to find and report success -- an upgrade that says it
-    worked while an enrolled adapter was skipped. Idempotent: replaces this
-    kind's entry rather than duplicating it."""
+) -> None:
+    """Persist whether the adapter-enrolment manifest is CURRENTLY unusable, as
+    durable, blocking, visible state -- set-reconciled from THIS run's verdict,
+    never append-only.
+
+    Mirrors ``record_read_provisioner_conformance`` exactly, for the same reason:
+    an append-only recorder here would be a PERMANENT block. This kind
+    deliberately records no content hash (so the stateless auto-reaper cannot
+    clear it either -- editing an unrelated line in the manifest would satisfy a
+    hash check without proving the manifest is readable again), and it carries
+    no canonical id an acceptance flow could match. The only trustworthy
+    clearing signal is "the check ran again and found nothing wrong" -- which is
+    exactly what rebuilding this kind's entry from ``blocking_reason`` on every
+    call provides. An earlier version of this recorder was append-only: it wrote
+    an entry when the manifest was unreadable and NEVER removed it, so a project
+    whose operator repaired the manifest exactly as instructed stayed blocked
+    forever, with guidance telling them to do something they had already done.
+
+    Call this UNCONDITIONALLY on every reconcile -- passing None for
+    ``blocking_reason`` when there is no problem is what clears a previously
+    written entry once the manifest has been repaired. Do not guard this call
+    with ``if blocking_reason:``; that reintroduces the append-only defect this
+    function exists to close.
+
+    Single authority: only entries of this kind (``adapter_enrolment_unreadable``)
+    are added or removed; every other entry is left exactly as found.
+    """
+    owned_kind = "adapter_enrolment_unreadable"
     path = Path(operator_project_dir) / MIGRATION_QUEUE_REL
     try:
         existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
@@ -1819,29 +1900,33 @@ def _append_adapter_enrolment_blocking_request(
             existing = []
     except (json.JSONDecodeError, OSError):
         existing = []
-    existing = [e for e in existing
-                if not (isinstance(e, dict)
-                        and e.get("kind") == "adapter_enrolment_unreadable")]
-    existing.append({
-        "mechanism_id": "adapter_enrolment",
-        "writer_relpath": _OPERATOR_ADAPTER_MANIFEST_REL,
-        "entrypoint_relpath": None,
-        "requested_at": _utcnow_iso(),
-        "from_version": from_version,
-        "to_version": to_version,
-        "kind": "adapter_enrolment_unreadable",
-        "reason": reason,
-        "suggested_next_step": (
-            f"Ask your assistant to repair {_OPERATOR_ADAPTER_MANIFEST_REL}. It "
-            "should be a plain list of the adapter file names you have added. "
-            "Until it is readable, this upgrade cannot safely tell which "
-            "adapters still need updating, so it has stopped rather than "
-            "guessing."),
-        "status": "pending",
-    })
-    _atomic_write(path, json.dumps(existing, indent=2, ensure_ascii=False,
+
+    kept = [e for e in existing
+            if not (isinstance(e, dict) and e.get("kind") == owned_kind)]
+
+    if blocking_reason:
+        kept.append({
+            "mechanism_id": "adapter_enrolment",
+            "writer_relpath": _OPERATOR_ADAPTER_MANIFEST_REL,
+            "entrypoint_relpath": None,
+            "requested_at": _utcnow_iso(),
+            "from_version": from_version,
+            "to_version": to_version,
+            "kind": owned_kind,
+            "reason": blocking_reason,
+            "suggested_next_step": (
+                f"Ask your assistant to repair {_OPERATOR_ADAPTER_MANIFEST_REL}. It "
+                "should be a plain list of the adapter file names you have added. "
+                "Until it is readable, this upgrade cannot safely tell which "
+                "adapters still need updating, so it has stopped rather than "
+                "guessing."),
+            "status": "pending",
+        })
+
+    if kept == existing:
+        return
+    _atomic_write(path, json.dumps(kept, indent=2, ensure_ascii=False,
                                    sort_keys=True) + "\n")
-    return path
 
 
 def record_reconcile_incomplete(
@@ -2608,7 +2693,17 @@ def _append_migration_request(
     a genuinely new capability only.
 
     Idempotent: re-running an upgrade (or a later reconcile pass) for the same
-    mechanism_id REPLACES its existing entry rather than duplicating it."""
+    mechanism_id REPLACES its existing entry rather than duplicating it.
+
+    Dedupes on ``(mechanism_id, kind)``, not ``mechanism_id``
+    alone -- matching every sibling recorder in this module. ``mechanism_id``
+    alone was safe only by the accident of call ordering (nothing else writing
+    to this queue currently reuses this exact mechanism_id with a different
+    kind for the SAME entry-writing pass); a future reorder, or a mechanism_id
+    that happens to collide with another kind's id, would otherwise silently
+    replace -- and drop -- an unrelated queued violation.
+    """
+    kind = "external_write_gate_violation"
     path = Path(operator_project_dir) / MIGRATION_QUEUE_REL
     try:
         existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
@@ -2618,7 +2713,14 @@ def _append_migration_request(
         existing = []
     existing = [
         e for e in existing
-        if not (isinstance(e, dict) and e.get("mechanism_id") == mechanism_id)
+        if not (isinstance(e, dict) and e.get("mechanism_id") == mechanism_id
+                # `e.get("kind") is None` covers an entry of this SAME family
+                # written before this field existed (every other kind this
+                # module writes has always carried a "kind" -- a None here can
+                # only be this recorder's own pre-fix shape), so an upgrading
+                # project's stale un-kinded entry is replaced rather than left
+                # behind as a duplicate alongside the newly-kinded one.
+                and e.get("kind") in (kind, None))
     ]
     # (Cut 1.5 / v0.19.0, Task E -- ADVISORY ONLY, never a safety input) Best-effort
     # owning-capability attribution, computed once here at queue-write time. See
@@ -2634,6 +2736,7 @@ def _append_migration_request(
         "requested_at": _utcnow_iso(),
         "from_version": from_version,
         "to_version": to_version,
+        "kind": kind,
         "reason": "flagged non-conformant with the external-write gate on upgrade",
         "violations": [
             {"path": writer_relpath, "line": getattr(v, "lineno", None),
@@ -3102,11 +3205,15 @@ def reconcile_upgrade(
         operator_project_dir, read_provisioner_violations,
         from_version=from_version, to_version=to_version,
     )
-    if adapter_targets_blocking_reason:
-        _append_adapter_enrolment_blocking_request(
-            operator_project_dir, adapter_targets_blocking_reason,
-            from_version, to_version,
-        )
+    # UNCONDITIONAL call: passing None when there is no
+    # problem is what CLEARS a previously written entry once the operator has
+    # repaired the manifest -- see record_adapter_enrolment_state's own
+    # docstring. Guarding this with `if adapter_targets_blocking_reason:` would
+    # reintroduce the append-only permanent-block defect this replaces.
+    record_adapter_enrolment_state(
+        operator_project_dir, adapter_targets_blocking_reason,
+        from_version=from_version, to_version=to_version,
+    )
 
     return ReconcileResult(
         operator_project_path=str(operator_project_dir),
@@ -3116,13 +3223,19 @@ def reconcile_upgrade(
         notice_path=str(notice_path) if notice_path else None,
         migration_queue_path=(
             str(operator_project_dir / MIGRATION_QUEUE_REL)
+            # `same_id_twins_healed` is deliberately NOT in this condition: that
+            # pass writes to security/capability_descriptors.json, never to the
+            # migration queue, so pointing at the queue file for it would name
+            # the wrong file.
             if (mechanisms or stale_acceptance_reset or predicate_stubs_scaffolded
-                or read_provisioner_violations) else None
+                or read_provisioner_violations or adapter_targets_blocking_reason)
+            else None
         ),
         stale_acceptance_reset=stale_acceptance_reset,
         predicate_stubs_scaffolded=predicate_stubs_scaffolded,
         same_id_twins_healed=same_id_twins_healed,
         read_provisioner_violations=read_provisioner_violations,
+        adapter_enrolment_blocking_reason=adapter_targets_blocking_reason,
     )
 
 
@@ -3141,11 +3254,20 @@ def render_reconcile_result(result: ReconcileResult) -> str:
     (This function renders EVERY section that carries something to report. It
     returns "" only when none of them do. A field that does real work to the
     operator's project and renders nothing is a silent switch-off; that has now
-    happened twice in this function's history, once per field, so the guard
-    enumerates the fields rather than naming two of them.)"""
+    happened three times in this function's history (most recently for
+    ``adapter_enrolment_blocking_reason``, populated but never rendered), so the
+    guard enumerates
+    every field on ``ReconcileResult`` that can carry something to report,
+    rather than naming a subset of them: ``mechanisms``, ``stale_acceptance_reset``,
+    ``predicate_stubs_scaffolded``, ``read_provisioner_violations``,
+    ``same_id_twins_healed``, and ``adapter_enrolment_blocking_reason``. If a
+    future field is added to ``ReconcileResult`` that a caller can observe, add
+    it here too, in both the guard and the render loop below -- not just one."""
     if not (result.mechanisms or result.stale_acceptance_reset
             or result.predicate_stubs_scaffolded
-            or result.read_provisioner_violations):
+            or result.read_provisioner_violations
+            or result.same_id_twins_healed
+            or result.adapter_enrolment_blocking_reason):
         return ""
     lines = ["", "Upgrade safety check found something to review:"]
     for m in result.mechanisms:
@@ -3185,6 +3307,15 @@ def render_reconcile_result(result: ReconcileResult) -> str:
                 f"system in read-only mode yet -- the adapter in "
                 f"{violation.adapter_relpath} needs a read-only reader added to "
                 "it (this is an adapter change, not a rebuild of the capability)")
+    for capability_id in result.same_id_twins_healed:
+        lines.append(
+            f"  - {capability_id}: duplicate entries sharing this id were found "
+            "and cleaned up automatically -- nothing for you to do")
+    if result.adapter_enrolment_blocking_reason:
+        lines.append(
+            f"  - the list of adapters you have added "
+            f"({_OPERATOR_ADAPTER_MANIFEST_REL}) could not be used this time: "
+            f"{result.adapter_enrolment_blocking_reason}")
     if result.notice_path:
         lines.append(f"  See {result.notice_path} for what this means and what happens next.")
     elif result.migration_queue_path:

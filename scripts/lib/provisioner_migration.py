@@ -146,7 +146,8 @@ def plan_provisioner_migration(source: str,
     if func is None:
         return TransformResult(
             source, False,
-            "no module-level read-client builder -- nothing to do")
+            "no module-level read-client builder -- nothing to do",
+            benign=True)
 
     if not has_register_adapter_call(tree):
         return TransformResult(
@@ -166,10 +167,16 @@ def plan_provisioner_migration(source: str,
 
     class_name = next(iter(resolved))
     if _class_defines(tree, class_name, PROVISIONER_NAME):
+        # Benign: the target class already carries the read-client builder --
+        # exactly the shape an operator produces by hand-applying this same
+        # migration's own remediation guidance, which leaves the now-redundant
+        # module-level function behind. That is a correctly-finished project,
+        # not a refusal a human still owes work on.
         return TransformResult(
             source, False,
             f"{class_name} already defines {PROVISIONER_NAME} -- left untouched "
-            "(never shadow a working method)")
+            "(never shadow a working method)",
+            benign=True)
 
     cls = _class_node(tree, class_name)
     if cls is None or not getattr(cls, "end_lineno", None):

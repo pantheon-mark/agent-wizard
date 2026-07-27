@@ -3377,6 +3377,86 @@ class ResolveAdapterMigrationTargetsTests(_Base):
                          f"expected exactly one write, got {len(writes)}")
 
 
+class AdapterEnrolmentStateRecordingTests(_Base):
+    """An unusable adapter-enrolment manifest is a
+    durable, blocking entry that must (a) clear once the operator repairs it
+    and (b) be visible in the CLI's rendered summary, never silently withheld."""
+
+    def _malformed_manifest_project(self):
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=(
+                "from external_write.adapter_registry import register_adapter\n"
+                "\n"
+                "OP_KIND = 'inbox.labels.modify'\n"
+                "\n"
+                "\n"
+                "class InboxLabelsAdapter:\n"
+                "    def build_read_only_client(self, op):\n"
+                "        return object()\n"
+                "\n"
+                "\n"
+                "register_adapter(OP_KIND, InboxLabelsAdapter())\n"))
+        (root / "agents" / "lib" / "external_write"
+         / "operator_adapters.json").write_text("{not json", encoding="utf-8")
+        return root
+
+    def test_a_repaired_manifest_clears_the_enrolment_entry_on_reconcile(self):
+        """The defect: an operator repairs operator_adapters.json exactly as the
+        queued entry's own suggested_next_step instructs, but an append-only
+        recorder never removes the entry -- every live-enable stays refused
+        forever. Fixed by making this recorder set-reconciled and calling it
+        unconditionally every reconcile."""
+        from upgrade_reconcile import reconcile_upgrade
+        root = self._malformed_manifest_project()
+        queue_path = root / "agents" / "handoffs" / "pending_migrations.json"
+
+        reconcile_upgrade(root, _REAL_REPO,
+                          from_version="v0.20.0", to_version="v0.21.0")
+        entries = [e for e in json.loads(queue_path.read_text(encoding="utf-8"))
+                   if e.get("kind") == "adapter_enrolment_unreadable"]
+        self.assertTrue(entries, "the malformed manifest must be recorded as blocking")
+
+        # Repair it exactly the way the entry's own suggested_next_step says to.
+        (root / "agents" / "lib" / "external_write"
+         / "operator_adapters.json").write_text(
+            json.dumps(["adapters_inbox"]), encoding="utf-8")
+
+        reconcile_upgrade(root, _REAL_REPO,
+                          from_version="v0.20.0", to_version="v0.21.0")
+        entries = [e for e in json.loads(queue_path.read_text(encoding="utf-8"))
+                   if e.get("kind") == "adapter_enrolment_unreadable"]
+        self.assertEqual(entries, [],
+                         "a repaired manifest must clear the block on the very "
+                         "next reconcile -- an append-only recorder would leave "
+                         "the operator blocked forever")
+
+    def test_the_enrolment_block_is_populated_onto_reconcile_result(self):
+        from upgrade_reconcile import reconcile_upgrade
+        root = self._malformed_manifest_project()
+        result = reconcile_upgrade(root, _REAL_REPO,
+                                   from_version="v0.20.0", to_version="v0.21.0")
+        self.assertIsNotNone(result.adapter_enrolment_blocking_reason)
+
+    def test_the_enrolment_block_renders_in_the_cli_summary(self):
+        """The block must not be silent: render_reconcile_result's
+        early-return guard and render loop must both surface it, naming the
+        file to repair."""
+        from upgrade_reconcile import ReconcileResult, render_reconcile_result
+        result = ReconcileResult(
+            operator_project_path="/tmp/x", from_version="v1", to_version="v2",
+            adapter_enrolment_blocking_reason=(
+                "the list of adapters you have added could not be read"),
+        )
+        out = render_reconcile_result(result)
+        self.assertNotEqual(out, "",
+                            "a populated adapter_enrolment_blocking_reason must "
+                            "not render as nothing")
+        self.assertIn("operator_adapters.json", out)
+        self.assertNotIn("Traceback", out)
+
+
 class AdapterProfileZoneRegistryReconciliationTests(_Base):
     """The zone allowlist (``adapter_profile_registry.json``) is a materialized
     view of the SAME declaration ``resolve_adapter_migration_targets`` already
@@ -3632,6 +3712,98 @@ class ReadProvisionerConformanceTests(_Base):
                 "\n"
                 "register_adapter(OP_KIND, DemoAdapter())\n"))
         self.assertEqual(check_read_provisioner_conformance(root), [])
+
+    def _project_with_two_modules_registering_one_op_kind(self, *, compliant_module):
+        """Two adapter MODULES both register the same op_kind -- the shape the
+        runtime resolves as last-registered-wins, which a static, no-import
+        check cannot reproduce. `compliant_module` names which one (by relpath
+        stem) carries the read-client builder; the other does not."""
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_aaa_inbox.py",
+            adapter_source=(
+                "from external_write.adapter_registry import register_adapter\n"
+                "\n"
+                "OP_KIND = 'inbox.labels.modify'\n"
+                "\n"
+                "\n"
+                "class AaaAdapter:\n"
+                + ("    def build_read_only_client(self, op):\n"
+                   "        return object()\n\n"
+                   if compliant_module == "adapters_aaa_inbox" else
+                   "    def apply_one(self, raw_client, unit):\n"
+                   "        return None\n\n")
+                + "\n"
+                "register_adapter(OP_KIND, AaaAdapter())\n"))
+        lib = root / "agents" / "lib" / "external_write"
+        (lib / "adapters_zzz_inbox.py").write_text(
+            "from external_write.adapter_registry import register_adapter\n"
+            "\n"
+            "OP_KIND = 'inbox.labels.modify'\n"
+            "\n"
+            "\n"
+            "class ZzzAdapter:\n"
+            + ("    def build_read_only_client(self, op):\n"
+               "        return object()\n\n"
+               if compliant_module == "adapters_zzz_inbox" else
+               "    def apply_one(self, raw_client, unit):\n"
+               "        return None\n\n")
+            + "\n"
+            "register_adapter(OP_KIND, ZzzAdapter())\n",
+            encoding="utf-8")
+        # Enroll both so a manifest-driven install exhibits the same shape.
+        (lib / "operator_adapters.json").write_text(
+            json.dumps(["adapters_aaa_inbox", "adapters_zzz_inbox"]),
+            encoding="utf-8")
+        return root
+
+    def test_two_modules_register_one_op_kind_no_violation_when_the_first_is_compliant(self):
+        """The alphabetically-FIRST module (`adapters_aaa_inbox.py`)
+        carries the builder; the second does not. Must be clean: at least one
+        candidate defines it."""
+        from upgrade_reconcile import check_read_provisioner_conformance
+        root = self._project_with_two_modules_registering_one_op_kind(
+            compliant_module="adapters_aaa_inbox")
+        self.assertEqual(check_read_provisioner_conformance(root), [])
+
+    def test_two_modules_register_one_op_kind_no_violation_when_the_second_is_compliant(self):
+        """The alphabetically-LAST module (`adapters_zzz_inbox.py`)
+        carries the builder; the first does not -- the false-RED shape (an
+        earlier version picked the first candidate via dict.setdefault and
+        would wrongly report a violation naming the non-compliant one)."""
+        from upgrade_reconcile import check_read_provisioner_conformance
+        root = self._project_with_two_modules_registering_one_op_kind(
+            compliant_module="adapters_zzz_inbox")
+        self.assertEqual(check_read_provisioner_conformance(root), [])
+
+    def test_two_modules_register_one_op_kind_violation_names_actionable_module(self):
+        """When NEITHER candidate is compliant, the violation must name a module
+        an operator can actually act on -- never a wizard-shipped one they
+        cannot edit to any effect."""
+        from upgrade_reconcile import check_read_provisioner_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_LEGACY_MODULE_LEVEL)
+        lib = root / "agents" / "lib" / "external_write"
+        (lib / "adapters_gmail.py").write_text(
+            "from external_write.adapter_registry import register_adapter\n"
+            "\n"
+            "OP_KIND = 'inbox.labels.modify'\n"
+            "\n"
+            "\n"
+            "class GmailShadowAdapter:\n"
+            "    pass\n"
+            "\n"
+            "\n"
+            "register_adapter(OP_KIND, GmailShadowAdapter())\n",
+            encoding="utf-8")
+        violations = check_read_provisioner_conformance(root)
+        self.assertEqual(len(violations), 1, violations)
+        self.assertEqual(violations[0].adapter_relpath,
+                         "agents/lib/external_write/adapters_inbox.py",
+                         "must name the operator-editable module, never the "
+                         "shipped adapters_gmail.py")
 
 
 class ReadProvisionerConformanceRecordingTests(_Base):
@@ -3920,6 +4092,46 @@ class AdapterMigrationRefusalRoutingTests(_Base):
                    if e.get("kind") == "adapter_migration_refused"]
         self.assertEqual(refused, [],
                          "a repaired project must unblock itself")
+
+    def test_class_method_plus_leftover_module_level_function_ends_healthy(self):
+        """The shape our own guidance produces: an operator
+        hand-applies the documented remediation (adds the class method) but
+        leaves the now-redundant module-level function in place. The
+        migration correctly refuses to touch it ("already defines ... never
+        shadow a working method") -- but that refusal is BENIGN, not a defect
+        report. Before the fix, this refusal's reason did not match the
+        substring-based benign filter, so a fully healthy, working project was
+        queued with a blocking adapter_migration_refused entry."""
+        import json as _json
+        from upgrade_reconcile import reconcile_upgrade
+        # Also declares both required evidence predicates -- otherwise the
+        # SEPARATE missing_evidence_predicates migration would legitimately
+        # scaffold a stub and queue its own (unrelated, correct) entry, which
+        # would confound this test's "truly nothing left to do" assertion.
+        hand_repaired = _LEGACY_MODULE_LEVEL.replace(
+            "class InboxLabelsAdapter:\n",
+            "class InboxLabelsAdapter:\n"
+            "    def build_read_only_client(self, op):\n"
+            "        return object()\n\n"
+            "    def verify_apply_landed(self, evidence):\n"
+            "        return True\n\n"
+            "    def verify_undo_restored(self, evidence):\n"
+            "        return True\n\n")
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py", adapter_source=hand_repaired)
+        queue_path = root / "agents" / "handoffs" / "pending_migrations.json"
+
+        result = reconcile_upgrade(root, _REAL_REPO,
+                                   from_version="v0.20.0", to_version="v0.21.0")
+
+        self.assertEqual(result.read_provisioner_violations, [],
+                         "the read path works (class method present) -- must be HEALTHY")
+        queue = _json.loads(queue_path.read_text(encoding="utf-8")) \
+            if queue_path.exists() else []
+        self.assertEqual(
+            queue, [],
+            f"a healthy, hand-repaired project must have an EMPTY queue, got {queue}")
 
 
 class ReconcileIncompleteMarkerTests(_Base):

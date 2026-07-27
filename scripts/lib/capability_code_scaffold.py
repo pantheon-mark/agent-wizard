@@ -872,17 +872,31 @@ def plan_missing_evidence_predicates(source: str,
     required = tuple(context.required_predicates or ())
     if not required:
         return TransformResult(source, False,
-                               "no evidence predicates are required -- nothing to do")
+                               "no evidence predicates are required -- nothing to do",
+                               benign=True)
     try:
         ast.parse(source)
     except SyntaxError:
         return TransformResult(source, False,
                                "could not be parsed, so it was left untouched")
     missing = _missing_evidence_predicates_for_adapter_source(source, required)
+    if missing is None:
+        # Distinct from an empty list: `None` means this
+        # module's registered adapter class could not be identified at all, so
+        # NOTHING was actually checked -- reporting that as "already declared"
+        # would be false reassurance on an operator-visible surface, and it
+        # must never be marked benign: a human still has to make the class
+        # resolvable before this migration can verify anything.
+        return TransformResult(
+            source, False,
+            "this adapter module's registered class could not be identified, "
+            "so its evidence-predicate checks could not be verified -- left "
+            "untouched")
     if not missing:
         return TransformResult(source, False,
                                "every required evidence predicate is already "
-                               "declared -- nothing to do")
+                               "declared -- nothing to do",
+                               benign=True)
     try:
         new_source = insert_missing_evidence_predicate_stubs(source, missing)
     except CapabilityCodeScaffoldError as exc:

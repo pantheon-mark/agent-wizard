@@ -32,12 +32,24 @@ class TransformResult:
     ``changed`` is the ONLY signal the engine acts on. ``reason`` is
     operator-facing plain language and is recorded whether or not anything
     changed -- a refusal that goes nowhere is how remediation outcomes get lost.
+
+    ``benign`` is True ONLY for an unchanged outcome that means "correctly
+    nothing to do" -- the module already has whatever this migration would have
+    added. It is False (the default) for EVERY unchanged outcome that means "I
+    could not act and a human must": an unparseable module, a class that could
+    not be uniquely resolved, a missing insertion point, or anything else this
+    migration refused to guess at. A structural flag rather than matching words
+    in ``reason``, because prose can change (or a refusal reason can coincide
+    with benign-sounding words) without the underlying outcome changing -- the
+    caller that decides whether to queue a blocking entry must never have to
+    re-derive "was this actually a no-op" from a string.
     """
 
     source: str
     changed: bool
     reason: str
     detail: Tuple[str, ...] = field(default_factory=tuple)
+    benign: bool = False
 
 
 @dataclass(frozen=True)
