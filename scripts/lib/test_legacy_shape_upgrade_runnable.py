@@ -114,9 +114,12 @@ def propose_operations(facade, batch_id, context=None):
 #: this predates and is orthogonal to both migrations under test (any adapter
 #: that could ever actually read has always needed a registered contract +
 #: a registered ReadFacade class; that is not part of what
-#: ADAPTER_MIGRATIONS scaffolds). Named from the CAPABILITY id (matching
-#: capability_runner._ensure_read_facade_registered's import convention),
-#: never from the adapter's own (non-standard) filename.
+#: ADAPTER_MIGRATIONS scaffolds). Named from the CAPABILITY id, which is what
+#: an older build's scaffolding did -- never from the adapter's own
+#: (non-standard) filename. The kernel no longer cares whether a facade's
+#: filename matches the capability id or not; this fixture keeps the
+#: id-matching name to prove the conforming case still resolves correctly
+#: too, not just the mismatched one.
 _LEGACY_READ_FACADE = '''\
 """Read-only facade for vendor_cleanup, as an older build left it."""
 

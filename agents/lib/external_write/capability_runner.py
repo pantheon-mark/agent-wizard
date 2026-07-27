@@ -102,16 +102,54 @@ def _import_capability_module(project_root: Path, capability_id: str) -> Any:
             "it needs to be rebuilt before it can run") from exc
 
 
-def _ensure_read_facade_registered(capability_id: str) -> None:
-    """Import the sibling ``read_facades_<capability_id>`` module so its
-    module-scope ``register_read_facade`` call populates the kernel registry
-    ``build_read_facade`` resolves from. Best-effort: if it is absent,
-    ``build_read_facade`` fails closed on its own with a better-scoped message
-    than anything this helper could invent."""
+def resolve_read_facade_class(project_root: Any, capability_id: str) -> type:
+    """Resolve the ReadFacade subclass for ``capability_id``'s op_kind by
+    reading what the modules DECLARE, never by deriving a filename from the
+    id. Imports exactly one module -- the one that declares the op_kind --
+    inside its own try/except, matching registered_adapters.py's
+    per-module isolation.
+
+    The directory scanned for declarations is this kernel module's OWN
+    location, not anything derived from ``project_root``. The resolved
+    module is subsequently imported as ``external_write.<module_stem>``, so
+    the directory scanned here has to be the same directory that import will
+    actually load from -- deriving it from ``project_root`` instead risks
+    scanning one directory while importing from another, which would just be
+    a second copy of the "two paths that have to agree" defect this is
+    fixing.
+    """
+    from external_write.topology import build_topology, TopologyError
+
+    root = Path(project_root)
+    module = _import_capability_module(root, capability_id)
+    op_kind = getattr(module, "OP_KIND", None)
+    if not isinstance(op_kind, str) or not op_kind:
+        raise CapabilityRunnerError(
+            f"`{capability_id}` does not declare what kind of operation it "
+            "performs, so it cannot be run safely -- it needs to be rebuilt")
+
+    lib_dir = Path(__file__).resolve().parent
+    topology = build_topology(lib_dir)
     try:
-        importlib.import_module(f"{EXTERNAL_WRITE_PKG}.read_facades_{capability_id}")
-    except Exception:  # noqa: BLE001 -- absence is handled downstream, fail-closed.
-        pass
+        declaration = topology.find_read_facade(op_kind)
+    except TopologyError as exc:
+        raise CapabilityRunnerError(str(exc)) from exc
+
+    try:
+        facade_module = importlib.import_module(
+            f"{EXTERNAL_WRITE_PKG}.{declaration.module_stem}")
+    except Exception as exc:  # noqa: BLE001 -- isolation, and it is REPORTED.
+        raise CapabilityRunnerError(
+            f"the file that provides read-only access for `{capability_id}` "
+            f"({declaration.relpath}) could not be loaded ({exc}). It needs to "
+            "be fixed before this can run.") from exc
+
+    facade_cls = getattr(facade_module, declaration.symbol, None)
+    if facade_cls is None:
+        raise CapabilityRunnerError(
+            f"{declaration.relpath} was expected to define "
+            f"`{declaration.symbol}` but does not")
+    return facade_cls
 
 
 def build_capability_read_facade(project_root: Any, capability_id: str) -> Any:
@@ -166,8 +204,8 @@ def build_capability_read_facade(project_root: Any, capability_id: str) -> Any:
             f"`{capability_id}` could not obtain read-only access to the outside "
             "system -- check that its access is set up, then try again")
 
-    _ensure_read_facade_registered(capability_id)
-    return build_read_facade(op_kind, client)
+    facade_cls = resolve_read_facade_class(project_root, capability_id)
+    return build_read_facade(op_kind, client, facade_cls)
 
 
 def run_capability_proposal(project_root: Any,

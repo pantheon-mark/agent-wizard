@@ -19,6 +19,7 @@ Two tests carry the design's load:
 Run:  python3 -m unittest discover -s wizard/scripts/lib -p test_capability_runner.py
 """
 
+import shutil
 import sys
 import tempfile
 import textwrap
@@ -39,11 +40,11 @@ _AGENTS_LIB = _WIZARD / "agents" / "lib"
 if str(_AGENTS_LIB) not in sys.path:
     sys.path.insert(0, str(_AGENTS_LIB))
 
+import external_write as _ew                               # noqa: E402
 from external_write import capability_runner as cr        # noqa: E402
 from external_write import contracts as _contracts        # noqa: E402
 from external_write import read_facade as _rf             # noqa: E402
 from external_write.adapter_registry import register_adapter  # noqa: E402
-from external_write.read_facade import ReadFacade, register_read_facade  # noqa: E402
 
 
 OP_A = "test_runner_op_a"
@@ -59,20 +60,6 @@ class _ClientA:
 class _ClientB:
     def list_records(self):
         return ["SECRET-B"]
-
-
-class _FacadeA(ReadFacade):
-    read_methods = ("list_records",)
-
-    def list_records(self, *a, **k):
-        return self._read("list_records", *a, **k)
-
-
-class _FacadeB(ReadFacade):
-    read_methods = ("list_records",)
-
-    def list_records(self, *a, **k):
-        return self._read("list_records", *a, **k)
 
 
 class _AdapterA:
@@ -156,13 +143,43 @@ def _quietly(fn, *a):
 
 
 def _register_everything():
-    """Register both op_kinds so a cross-surface request is *possible* to
-    attempt -- otherwise the escalation test would pass vacuously."""
-    for op_kind, adapter, facade in ((OP_A, _AdapterA(), _FacadeA),
-                                     (OP_B, _AdapterB(), _FacadeB)):
+    """Register both op_kinds' contracts and adapters so a cross-surface
+    request is *possible* to attempt -- otherwise the escalation test would
+    pass vacuously. Their read facades are declared on disk instead (see
+    setUpClass below), because the kernel now resolves a read facade by
+    reading what a module on disk declares, not from a call made directly in
+    this process."""
+    for op_kind, adapter in ((OP_A, _AdapterA()), (OP_B, _AdapterB())):
         _register_contract(op_kind)
         _quietly(register_adapter, op_kind, adapter)
-        _quietly(register_read_facade, op_kind, facade)
+
+
+#: A minimal read facade module, written to disk for the kernel to find by
+#: reading it -- not just registered in this process. The filename is
+#: deliberately unrelated to the op_kind or to any capability id, the same
+#: way a real project's facade file is free to be named anything as long as
+#: it declares what it provides.
+_SCRATCH_FACADE_SRC = textwrap.dedent('''\
+    from external_write.read_facade import ReadFacade, register_read_facade
+
+    OP_KIND = "{op_kind}"
+
+
+    class {class_name}(ReadFacade):
+        read_methods = ("list_records",)
+
+        def list_records(self, *a, **k):
+            return self._read("list_records", *a, **k)
+
+
+    register_read_facade(OP_KIND, {class_name})
+    ''')
+
+
+def _write_scratch_read_facade(directory, filename, op_kind, class_name):
+    (directory / filename).write_text(
+        _SCRATCH_FACADE_SRC.format(op_kind=op_kind, class_name=class_name),
+        encoding="utf-8")
 
 
 class CapabilityRunnerTests(unittest.TestCase):
@@ -178,6 +195,24 @@ class CapabilityRunnerTests(unittest.TestCase):
         # unrelated suite red depending on discovery order.
         cls._contracts_before = dict(_contracts.OPERATION_CONTRACTS)
         cls._facades_before = dict(_rf._READ_FACADE_REGISTRY)
+
+        # The kernel resolves a read facade by scanning the directory its own
+        # module file lives in, then importing whichever file on disk there
+        # declares the op_kind it needs. A bare register_read_facade() call
+        # made directly in this process, with nothing backing it on disk, is
+        # invisible to that scan -- so, for the duration of this test class,
+        # `capability_runner`'s own reported location and `external_write`'s
+        # own import search path both point at a scratch directory carrying
+        # real declarations for OP_A / OP_B. Restored in tearDownClass.
+        cls._facade_dir = Path(tempfile.mkdtemp())
+        cls._orig_cr_file = cr.__file__
+        cr.__file__ = str(cls._facade_dir / "capability_runner.py")
+        _ew.__path__.append(str(cls._facade_dir))
+        _write_scratch_read_facade(
+            cls._facade_dir, "runner_test_facade_one.py", OP_A, "_ScratchFacadeA")
+        _write_scratch_read_facade(
+            cls._facade_dir, "runner_test_facade_two.py", OP_B, "_ScratchFacadeB")
+
         _register_everything()
 
     @classmethod
@@ -186,6 +221,9 @@ class CapabilityRunnerTests(unittest.TestCase):
         _contracts.OPERATION_CONTRACTS.update(cls._contracts_before)
         _rf._READ_FACADE_REGISTRY.clear()
         _rf._READ_FACADE_REGISTRY.update(cls._facades_before)
+        cr.__file__ = cls._orig_cr_file
+        _ew.__path__.remove(str(cls._facade_dir))
+        shutil.rmtree(cls._facade_dir, ignore_errors=True)
 
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()
