@@ -105,7 +105,23 @@ def _import_capability_module(project_root: Path, capability_id: str) -> Any:
 def resolve_read_facade_class(project_root: Any, capability_id: str) -> type:
     """Resolve the ReadFacade subclass for ``capability_id``'s op_kind by
     reading what the modules DECLARE, never by deriving a filename from the
-    id. Imports exactly one module -- the one that declares the op_kind --
+    id -- and never by pulling an unvalidated object out of the declaring
+    module's namespace.
+
+    Declaration topology is the mandatory authority for WHICH module to
+    import (``declaration.module_stem`` -- filenames are still never an
+    input). The OBJECT itself always comes from
+    ``read_facade.get_read_facade_class``, the SAME registry accessor that
+    ``register_read_facade`` populates, and only populates after checking
+    ``isinstance(x, type) and issubclass(x, ReadFacade)`` -- so anything this
+    function returns is guaranteed to already be a validated ReadFacade
+    subclass. ``declaration.symbol`` is advisory only (naming things in a
+    message); it is never the source of the returned object, because a
+    declaration this module can locate but cannot read a plain symbol name
+    for -- or one naming something that turns out not to be a ReadFacade --
+    must still never be able to hand back an unvalidated value.
+
+    Imports exactly one module -- the one that declares the op_kind --
     inside its own try/except, matching registered_adapters.py's
     per-module isolation.
 
@@ -119,6 +135,7 @@ def resolve_read_facade_class(project_root: Any, capability_id: str) -> type:
     fixing.
     """
     from external_write.topology import build_topology, TopologyError
+    from external_write.read_facade import get_read_facade_class
 
     root = Path(project_root)
     module = _import_capability_module(root, capability_id)
@@ -133,22 +150,39 @@ def resolve_read_facade_class(project_root: Any, capability_id: str) -> type:
     try:
         declaration = topology.find_read_facade(op_kind)
     except TopologyError as exc:
-        raise CapabilityRunnerError(str(exc)) from exc
+        # Translate the build-time-audience topology message into plain,
+        # operator-actionable language -- the detail stays available via
+        # exception chaining, never in the sentence handed to the operator.
+        hits = [d for d in topology.declarations
+                if d.role == "read_facade" and d.op_kind == op_kind]
+        conflicting = sorted({d.relpath for d in hits})
+        if len(conflicting) > 1:
+            raise CapabilityRunnerError(
+                f"more than one file in this project claims to provide "
+                f"read-only access for `{capability_id}` "
+                f"({', '.join(conflicting)}), so it is unclear which one to "
+                "use. One of them needs to be removed or fixed so only one "
+                "remains.") from exc
+        raise CapabilityRunnerError(
+            f"`{capability_id}` cannot look at the outside system in "
+            "read-only mode yet, so it cannot safely work out what to "
+            "change -- it needs to be rebuilt") from exc
 
     try:
-        facade_module = importlib.import_module(
-            f"{EXTERNAL_WRITE_PKG}.{declaration.module_stem}")
+        importlib.import_module(f"{EXTERNAL_WRITE_PKG}.{declaration.module_stem}")
     except Exception as exc:  # noqa: BLE001 -- isolation, and it is REPORTED.
         raise CapabilityRunnerError(
             f"the file that provides read-only access for `{capability_id}` "
-            f"({declaration.relpath}) could not be loaded ({exc}). It needs to "
-            "be fixed before this can run.") from exc
+            f"({declaration.relpath}) could not be loaded "
+            f"({exc.__class__.__name__}). It needs to be fixed before this "
+            "can run.") from exc
 
-    facade_cls = getattr(facade_module, declaration.symbol, None)
+    facade_cls = get_read_facade_class(op_kind)
     if facade_cls is None:
         raise CapabilityRunnerError(
-            f"{declaration.relpath} was expected to define "
-            f"`{declaration.symbol}` but does not")
+            f"{declaration.relpath} loaded, but did not provide a working "
+            f"reader for `{capability_id}`. It needs to be fixed before "
+            "this can run.")
     return facade_cls
 
 

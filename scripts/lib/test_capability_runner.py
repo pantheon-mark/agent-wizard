@@ -204,10 +204,20 @@ class CapabilityRunnerTests(unittest.TestCase):
         # `capability_runner`'s own reported location and `external_write`'s
         # own import search path both point at a scratch directory carrying
         # real declarations for OP_A / OP_B. Restored in tearDownClass.
+        # Each mutation below registers its own cleanup immediately, via
+        # addClassCleanup -- so if a LATER line in this method raises (a
+        # write failing, or _register_everything() itself), whatever was
+        # already set up here is still guaranteed to be undone. Cleanups
+        # run after tearDownClass regardless of whether setUpClass raised,
+        # as long as they were registered before the failure.
         cls._facade_dir = Path(tempfile.mkdtemp())
-        cls._orig_cr_file = cr.__file__
+        cls.addClassCleanup(shutil.rmtree, cls._facade_dir, ignore_errors=True)
+        orig_cr_file = cr.__file__
         cr.__file__ = str(cls._facade_dir / "capability_runner.py")
+        cls.addClassCleanup(setattr, cr, "__file__", orig_cr_file)
         _ew.__path__.append(str(cls._facade_dir))
+        cls.addClassCleanup(_ew.__path__.remove, str(cls._facade_dir))
+
         _write_scratch_read_facade(
             cls._facade_dir, "runner_test_facade_one.py", OP_A, "_ScratchFacadeA")
         _write_scratch_read_facade(
@@ -221,9 +231,6 @@ class CapabilityRunnerTests(unittest.TestCase):
         _contracts.OPERATION_CONTRACTS.update(cls._contracts_before)
         _rf._READ_FACADE_REGISTRY.clear()
         _rf._READ_FACADE_REGISTRY.update(cls._facades_before)
-        cr.__file__ = cls._orig_cr_file
-        _ew.__path__.remove(str(cls._facade_dir))
-        shutil.rmtree(cls._facade_dir, ignore_errors=True)
 
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()
