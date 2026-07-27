@@ -1399,6 +1399,11 @@ def resolve_adapter_migration_targets(
             found.append(f"{lib_rel}/{stem}.py")
 
     for canonical_id in canonical_ids:
+        # resolver-monopoly-exempt: the filename-convention half of the UNION
+        # above, deliberately kept for installs that predate the adapter list.
+        # It is unioned WITH the declared list, never used instead of it, so a
+        # name this convention cannot find is still found by the list -- which
+        # is the whole point of taking both sources.
         found.append(f"{lib_rel}/adapters_{canonical_id}.py")
 
     keep: List[str] = []
@@ -1967,6 +1972,12 @@ def check_read_provisioner_conformance(
         return violations
 
     for cap_path in sorted(caps_dir.glob(f"*{CAPABILITY_MODULE_SUFFIX}.py")):
+        # resolver-monopoly-exempt: a CAPABILITY module's stem is not a guess at
+        # its identity -- it IS the canonical identity, by definition (see
+        # capability_identity.py, "Canonical id"), because the emitter owns that
+        # filename and a build-time check refuses any capability whose four
+        # identity fields disagree. This is the one stem that is authoritative;
+        # an adapter's or a reader's stem is not, and must not be read this way.
         capability_id = cap_path.stem[: -len(CAPABILITY_MODULE_SUFFIX)]
         try:
             cap_tree = ast.parse(cap_path.read_text(encoding="utf-8"))

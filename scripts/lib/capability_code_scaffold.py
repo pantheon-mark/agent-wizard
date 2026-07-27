@@ -210,12 +210,17 @@ class CapabilityCodeSpec:
 
     @property
     def adapter_module_stem(self) -> str:
+        # resolver-monopoly-exempt: this is where a new module's filename is
+        # CHOSEN, not guessed at -- the file does not exist yet. Every consumer
+        # afterwards has to ask what the module declares, never re-derive this.
         return f"adapters_{self.capability_id}"
 
     @property
     def read_facade_module_stem(self) -> str:
         """The split-out read-facade module's filename stem,
         mirroring the reference `read_facades_gmail.py` naming."""
+        # resolver-monopoly-exempt: same as adapter_module_stem above -- the
+        # name is authored here, for a file that does not exist yet.
         return f"read_facades_{self.capability_id}"
 
     @property
