@@ -1,0 +1,88 @@
+# Foundation bundle v0.22.0 manifest
+# Minor-additive release over v0.21.0.
+# This bundle carries the emitted-lib half of one change: a capability's safe, read-only
+# access to the outside system is now found by what a module DECLARES it provides --
+# `register_read_facade(op_kind, ...)` / `register_adapter(op_kind, ...)`, joined on
+# op_kind -- instead of by deriving a filename from the capability id. A project whose
+# files were named before that convention existed resolved to nothing, and the miss was
+# silent. Filenames are no longer an input to the lookup at all.
+# NEW FILE: agents/lib/external_write/topology.py -- an AST-only reader of those
+# declarations. It never imports the modules it reads, so resolution can never execute
+# operator code as a side effect, and a registration it cannot resolve is surfaced as
+# unresolved, naming the file and the line, rather than silently dropped: a silent drop is
+# the exact mechanism that hid the defect this closes.
+# agents/lib/external_write/capability_runner.py now resolves the read facade through that
+# topology and translates a resolution failure into plain, operator-actionable language
+# (more than one file claiming the same op_kind; a file whose declaration cannot be read;
+# a file that fails to load), classifying purely from the topology error's own attributes
+# so the wording can never drift from what the resolver actually decided. The object it
+# returns still comes only from the registry accessor that validates it, never out of the
+# declaring module's namespace.
+# agents/lib/external_write/zones.py adds the kernel-side topology test module to the
+# sealed-kernel membership list, for the same reason capability_runner.py already carries
+# it: kernel-internal test code, never emitted capability code.
+# The other half of this change -- the same declaration reader on the toolkit side, and the
+# upgrade notices that name the exact file involved -- ships with the toolkit
+# (`wizard self-update`), not this bundle.
+# system-artifacts.json goes from 143 to 144 artifacts (the one added file).
+# Foundation docs are BYTE-IDENTICAL to v0.21.0 (managed_files hashes unchanged;
+# foundation_schema_version unchanged).
+_note: JSON sidecar for manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing
+  companion. Both files MUST stay in sync.
+agent_contract_version: v0-pre-rebuild
+bundle_manifest_schema_version: v2
+foundation_bundle_version: v0.22.0
+foundation_schema_version: v0.3
+included_templates:
+  foundation_docs:
+  - vision.md
+  - approach.md
+  - technical_architecture.md
+  - execution_plan.md
+  - test_cases.md
+  - audit_framework.md
+managed_files:
+  foundation/approach.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/audit_framework.md:
+    local_modifications: not_recommended
+    managed_by: wizard
+    merge_strategy: warn_on_drift
+  foundation/execution_plan.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/prd.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/technical_architecture.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/test_cases.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/vision.md:
+    local_modifications: expected
+    managed_by: shared
+    merge_strategy: three_way
+min_engine_version: v1.0.0
+public_api:
+  required_files:
+  - foundation/vision.md
+  - foundation/prd.md
+  - foundation/approach.md
+  - foundation/execution_plan.md
+  - foundation/technical_architecture.md
+  - foundation/test_cases.md
+  - foundation/audit_framework.md
+  required_frontmatter_fields_per_file: see the canonical foundation-versioning specification § 1.1
+  required_sections_per_doc_type: see schemas/section-schema.yaml in this bundle
+  section_schema: schemas/section-schema.yaml
+release_date: '2026-07-27'
+source_commit: PENDING
+status: prerelease
