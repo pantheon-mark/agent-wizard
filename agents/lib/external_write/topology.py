@@ -33,6 +33,13 @@ because a silent skip is the exact mechanism that hid the read-facade
 defect this module exists to fix.
 """
 
+# SHARED CORE
+# Everything from this line through the matching end-of-region marker near
+# the bottom of this file is copied verbatim into the toolkit's own copy of
+# this module and kept byte-identical there. The module docstring above
+# this line is the one part allowed to differ between the two copies;
+# nothing below this line may.
+
 import ast
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
