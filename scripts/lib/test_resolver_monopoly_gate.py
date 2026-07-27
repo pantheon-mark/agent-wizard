@@ -9,11 +9,13 @@ id-derived lookup, whether or not any test ever runs that line.
 
 WHY THIS IS AST-BASED, NOT TEXT-BASED
 --------------------------------------
-The defect signature is NOT "an f-string inside ``import_module``". Three of
-this tree's four ``import_module(f"...")`` call sites are the SANCTIONED
-resolver and its relatives -- they interpolate a stem that came from a
-DECLARATION (``declaration.module_stem``) or from the enrolment list
-(``_stem``), which is precisely the shape this gate exists to require. A text
+The defect signature is NOT "an f-string inside ``import_module``". ALL THREE of
+this tree's real ``import_module(f"...")`` call sites are the SANCTIONED resolver
+and its relatives -- they interpolate a stem that came from a DECLARATION
+(``declaration.module_stem``) or from the enrolment list (``_stem``) or is a
+first-party literal, which is precisely the shape this gate exists to require.
+(There is a FOURTH textual occurrence, inside the emitter's template string. It
+is not a call site at all -- see "the emitter's TEMPLATE TEXT" below.) A text
 rule that banned the syntax would ban the resolver it is here to mandate, and
 the only way to get such a rule green would be to allowlist whole files --
 including the two files most likely to regress. That is not a gate.
@@ -58,13 +60,20 @@ for the next instance to arrive.
     resolution above is ONE step, over a plain local, inside one scope. There is
     no general value-flow analysis here, and a name reaching an import as a
     function PARAMETER has no binding in scope to resolve at all.
+  * A CLOSURE. The alias step reads one scope's own bindings, so an id-derived
+    local bound in an OUTER function and read as a free variable by a nested
+    function that imports it is not resolved. (This is the inverse of the
+    boundary the alias step deliberately enforces in the other direction -- an
+    inner function's local is never mistaken for an outer one's -- and neither
+    case is covered by the other.)
   * A name built with a prefix this gate does not police. ``adapters_`` and
     ``read_facades_`` are the two prefixes that actually carried this defect. A
     future ``writers_<id>`` is caught only if the id-shaped rule reaches it --
     as a direct import argument, or through the one alias step. Measured, for
     honesty: 36 sites in these two trees build a name or a path by interpolating
-    an id-shaped value, and this gate polices 3 of them. "Pinned at 4
-    exemptions" therefore describes the POLICED surface, not the whole
+    an id-shaped value, and this gate polices 4 of them -- the three with a
+    policed prefix, plus the capability-module stem the alias step reaches. The
+    pinned exempt surface therefore describes the POLICED surface, not the whole
     identity-to-name surface, and should not be read as the latter.
   * The emitter's TEMPLATE TEXT. ``capability_code_scaffold.py`` carries the
     source it emits inside string literals, so its own
@@ -90,16 +99,26 @@ own justification, at the site:
 The marker is recognised on any physical line of the offending expression, or
 in the comment block immediately above it.
 
-``test_the_exemption_surface_is_pinned`` pins the IDENTITY of every exempted
-finding -- a ``file::kind`` multiset -- and not how many markers exist. Counting
-markers was not enough: a marker exempts every finding on the lines it covers,
-so splicing a new banned shape onto an already-exempt line held the marker count
-constant and turned the whole gate green. Pinning identities means a new
-exempted finding changes the pinned surface even when it hides on an existing
-marker's line. The same test rejects a marker whose justification is a stub, and
-a marker that exempts nothing (so one cannot be planted ahead of a shape it will
-later cover). Widening the exempt surface to make the violation list shorter is
-the exact reflex this gate exists to catch.
+``test_the_exemption_surface_is_pinned`` pins the STRUCTURAL identity of every
+exempted finding -- ``file::kind::enclosing symbol`` -- and not how many markers
+exist, nor where they sit on the page.
+
+Two weaker versions of this pin were each defeated, which is why it is shaped
+this way. Counting MARKERS failed: a marker exempts every finding on the lines it
+covers, so splicing a new banned shape onto an already-exempt line held the count
+constant and the gate stayed green. Keying on ``file::kind`` failed too, one step
+removed: neutralising a legitimate exemption and adding a fabricated one of the
+SAME kind in the same file held the total, and the gate stayed green again. The
+enclosing symbol closes that, because a substituted construction lives in a
+different function or property. Line numbers are deliberately NOT part of the
+identity -- they drift on any unrelated edit above, which would force edits to
+this gate for changes that have nothing to do with it, and train the reflexive
+marker-adding the gate exists to resist.
+
+The same test rejects a marker whose justification is a stub, and a marker that
+exempts nothing (so one cannot be planted ahead of a shape it will later cover).
+Widening the exempt surface to make the violation list shorter is the exact
+reflex this gate exists to catch.
 
 SCOPE
 ------
@@ -183,11 +202,20 @@ class _Finding(NamedTuple):
     lineno: int
     end_lineno: int
     kind: str
+    symbol: str          # enclosing function/method/property qualname, or "<module>"
     detail: str
 
+    @property
+    def identity(self) -> str:
+        """The finding's STABLE identity: where it is in the module's structure,
+        not where it is on the page. Invariant under an unrelated edit above it,
+        and different the moment the exempted construction is replaced by a
+        different one."""
+        return "{}::{}::{}".format(self.relpath, self.kind, self.symbol)
+
     def render(self) -> str:
-        return "{}:{}: {} -- {}; or mark the line '# {} <why>'".format(
-            self.relpath, self.lineno, self.kind,
+        return "{}:{}: {} in {} -- {}; or mark the line '# {} <why>'".format(
+            self.relpath, self.lineno, self.kind, self.symbol,
             _GUIDANCE[self.kind].format(detail=self.detail),
             _EXEMPTION_MARKER)
 
@@ -374,6 +402,38 @@ def _local_bindings(own: List[ast.AST]) -> Dict[str, List[Tuple[int, ast.AST]]]:
     return bound
 
 
+_DEF_TYPES: Tuple[type, ...] = (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _symbol_spans(tree: ast.Module) -> List[Tuple[int, int, str]]:
+    """``(first line, last line, qualified name)`` for every class, function,
+    method and property in the module, innermost resolvable by span width."""
+    spans: List[Tuple[int, int, str]] = []
+
+    def descend(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, _DEF_TYPES):
+                qualname = prefix + child.name
+                spans.append((child.lineno,
+                              getattr(child, "end_lineno", None) or child.lineno,
+                              qualname))
+                descend(child, qualname + ".")
+            else:
+                descend(child, prefix)
+
+    descend(tree, "")
+    return spans
+
+
+def _symbol_at(spans: List[Tuple[int, int, str]], lineno: int) -> str:
+    """The innermost enclosing symbol's qualified name, or ``"<module>"``."""
+    enclosing = [span for span in spans if span[0] <= lineno <= span[1]]
+    if not enclosing:
+        return "<module>"
+    enclosing.sort(key=lambda span: span[1] - span[0])
+    return enclosing[0][2]
+
+
 def _last_binding_before(bindings: List[Tuple[int, ast.AST]],
                          lineno: int) -> Optional[Tuple[int, ast.AST]]:
     """The last binding at or above ``lineno``; failing that, the last binding
@@ -395,16 +455,17 @@ def _scan_source(source: str, relpath: str) -> List[_Finding]:
     except SyntaxError as exc:
         return [_Finding(relpath, getattr(exc, "lineno", 0) or 0,
                          getattr(exc, "lineno", 0) or 0,
-                         "id_derived_module_name",
+                         "id_derived_module_name", "<module>",
                          "unreadable as Python ({})".format(exc.msg))]
 
     found: List[_Finding] = []
     claimed = set()
+    spans = _symbol_spans(tree)
 
     def add(node: ast.AST, kind: str, detail: str) -> None:
         found.append(_Finding(
             relpath, node.lineno, getattr(node, "end_lineno", None) or node.lineno,
-            kind, detail))
+            kind, _symbol_at(spans, node.lineno), detail))
 
     for node in ast.walk(tree):
         # id_derived_module_name -- an identity interpolated into a name handed
@@ -480,13 +541,10 @@ def _scan_source(source: str, relpath: str) -> List[_Finding]:
                     continue
                 names = _interpolated_id_names(resolved[1])
                 if names:
-                    found.append(_Finding(
-                        relpath, resolved[1].lineno,
-                        getattr(resolved[1], "end_lineno", None) or resolved[1].lineno,
-                        "id_derived_module_name",
+                    add(resolved[1], "id_derived_module_name",
                         "{}, which a module import in the same scope then "
                         "consumes".format(
-                            ", ".join(repr(n) for n in sorted(set(names))))))
+                            ", ".join(repr(n) for n in sorted(set(names)))))
 
     return sorted(set(found))
 
@@ -718,6 +776,31 @@ class ResolverMonopolyGateTests(unittest.TestCase):
             with self.subTest(prose=prose.strip()):
                 self.assertEqual(_scan_source(prose, "clean.py"), [])
 
+        # The structural identity a finding carries: the qualified name of the
+        # enclosing symbol, which is what makes a same-kind substitution in a
+        # DIFFERENT symbol visible to the exemption census.
+        nested = (
+            "class Spec:\n"
+            "    @property\n"
+            "    def adapter_module_stem(self):\n"
+            '        return f"adapters_{self.capability_id}"\n'
+            "\n"
+            "    @property\n"
+            "    def rogue_alias(self):\n"
+            '        return f"adapters_{self.capability_id}"\n'
+            "\n"
+            "\n"
+            'TOP = f"adapters_{some_id}"\n'
+        )
+        self.assertEqual(
+            [(f.symbol, f.identity.split("::")[-1])
+             for f in _scan_source(nested, "p.py")],
+            [("Spec.adapter_module_stem", "Spec.adapter_module_stem"),
+             ("Spec.rogue_alias", "Spec.rogue_alias"),
+             ("<module>", "<module>")],
+            "the enclosing symbol must distinguish two same-kind findings in "
+            "the same file, and name the module when there is no symbol")
+
         # A reporting handler around a resolution is the correct shape.
         reporting = (
             "try:\n"
@@ -731,27 +814,39 @@ class ResolverMonopolyGateTests(unittest.TestCase):
         """There are no file-level exemptions -- only single lines carrying
         their own justification.
 
-        What is pinned is the IDENTITY of every exempted finding, not how many
-        markers exist. Counting markers was not enough: a marker exempts every
-        finding on the lines it covers, so splicing a new banned shape onto an
-        already-exempt line kept the marker count constant and turned the whole
-        gate green. Pinning ``file::kind`` multiplicities instead means a new
-        exempted finding changes the pinned surface even when it hides on an
-        existing marker's line."""
+        What is pinned is the STRUCTURAL identity of every exempted finding --
+        ``file::kind::enclosing symbol`` -- not how many markers exist and not
+        where they sit on the page.
+
+        Counting markers was not enough: a marker exempts every finding on the
+        lines it covers, so splicing a new banned shape onto an already-exempt
+        line kept the count constant and turned the whole gate green. Keying on
+        ``file::kind`` alone was still one level too coarse: neutralising a
+        legitimate exemption and adding a fabricated one of the SAME kind in the
+        same file held the total, and the gate stayed green again. The enclosing
+        symbol closes that, because a substituted construction lives in a
+        different function or property. Line numbers are deliberately NOT part of
+        the identity: they drift on any unrelated edit above, which would force
+        gate edits for changes that have nothing to do with this and train the
+        reflexive marker-adding this gate exists to resist."""
         expected = {
             # The one place an id may reach a module name: a CAPABILITY module's
             # stem, which a build-time check pins to its canonical identity.
             "agents/lib/external_write/capability_runner.py"
-            "::id_derived_module_name": 1,
+            "::id_derived_module_name::_import_capability_module": 1,
             # The emitter: it CHOOSES the name a new module will be written
             # under, which is the one place a name is authored, not resolved.
             "scripts/lib/capability_code_scaffold.py"
-            "::interpolated_sibling_prefix": 2,
+            "::interpolated_sibling_prefix::CapabilityCodeSpec.adapter_module_stem": 1,
+            "scripts/lib/capability_code_scaffold.py"
+            "::interpolated_sibling_prefix::CapabilityCodeSpec.read_facade_module_stem": 1,
             # One filename convention deliberately kept alongside the declared
             # adapter list, and one identity a capability module's own stem is
             # DEFINED to carry.
-            "scripts/lib/upgrade_reconcile.py::interpolated_sibling_prefix": 1,
-            "scripts/lib/upgrade_reconcile.py::filename_stem_used_as_id": 1,
+            "scripts/lib/upgrade_reconcile.py"
+            "::interpolated_sibling_prefix::resolve_adapter_migration_targets": 1,
+            "scripts/lib/upgrade_reconcile.py"
+            "::filename_stem_used_as_id::check_read_provisioner_conformance": 1,
         }
         actual: Dict[str, int] = {}
         unjustified = []
@@ -767,8 +862,7 @@ class ResolverMonopolyGateTests(unittest.TestCase):
                 marker = _exempting_marker(finding, source, marked)
                 if marker is None:
                     continue
-                key = "{}::{}".format(relpath, finding.kind)
-                actual[key] = actual.get(key, 0) + 1
+                actual[finding.identity] = actual.get(finding.identity, 0) + 1
                 working.add(marker)
             for number, why in _marker_sites(source):
                 if len(why) < 20:
