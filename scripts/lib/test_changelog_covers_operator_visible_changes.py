@@ -17,7 +17,15 @@ public clone of this toolkit -- there is nothing to check against, so these
 tests skip rather than fail. Where it IS present (a build checkout), each
 declared item names a short, specific phrase; a declared item whose phrase does
 not appear anywhere in its own release's `CHANGES.md` section fails the test
-BY NAME, so a reviewer knows exactly which promised disclosure is missing.
+BY NAME, so a person reading the failure knows exactly which promised
+disclosure is missing.
+
+LIMIT, stated plainly: this check proves that each declared phrase is PRESENT
+somewhere in its release's published text. It cannot tell whether the sentence
+containing that phrase ASSERTS the change or DENIES it -- text that reuses a
+declared phrase inside a sentence saying the change did NOT happen would still
+satisfy this check. This is a presence check, not a meaning check, and it does
+not replace a person actually reading the entry for sense before publication.
 
 Run: python3 -m unittest discover -s wizard/scripts/lib \
         -p test_changelog_covers_operator_visible_changes.py
@@ -145,7 +153,8 @@ class ChangelogCoversOperatorVisibleChangesTests(unittest.TestCase):
         """The substantive gate: every item a human declared as operator-visible
         for a release must actually be represented in that release's published
         `CHANGES.md` text. Fails by NAMING the uncovered item(s), never just
-        'changelog looks wrong'."""
+        'changelog looks wrong'. Presence only -- see the module docstring's
+        LIMIT paragraph for what this does not establish."""
         for path in self.declaration_files:
             data = self._load(path)
             version = data["version"]
