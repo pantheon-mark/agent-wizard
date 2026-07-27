@@ -46,8 +46,17 @@ DEFAULT_NOTICE_RELPATH = "wizard/scripts/lib/upgrade_reconcile.py"
 # notice source. Exact text, gated on `not m.paused_op_kinds` in the
 # `broken_requires_migration` branch of `reconcile_upgrade`: when no runtime block
 # could be installed, the operator must be told plainly not to rely on one existing.
+#
+# TWO variants, because the caveat's closing clause names what the operator is
+# waiting FOR, and that differs by what it would actually take to clear the file.
+# A writer our own remediation covers is waiting to be REBUILT; a writer that needs
+# a person is not, and telling them to wait for a rebuild that will never clear it
+# is the same class of misdirection this lint exists to prevent. Both are pinned, so
+# neither branch can be softened, dropped, or quietly collapsed into the other.
+# A NEW closing clause needs a NEW entry here -- that is the point.
 REQUIRED_CAVEAT_SUBSTRINGS: Sequence[str] = (
     "do not rely on it being blocked until it is rebuilt",
+    "do not rely on it being blocked until it is fixed",
 )
 
 

@@ -46,11 +46,15 @@ _BROKEN_SKILL_MD = (
     "```\n"
 )
 
+# DERIVED from the real required set, never transcribed. This is a baseline whose
+# only job is to be CLEAN while some other artifact is broken, so it must stay
+# clean by construction: a hand-copied caveat list goes stale the moment a new
+# required caveat is added, and the resulting failure looks like the OTHER check
+# misfiring. (It did exactly that when a second caveat variant landed.)
 _CLEAN_NOTICE_PY = (
     "# fixture deterministic notice source\n"
-    "CAVEAT = (\n"
-    "    \"do not rely on it being blocked until it is rebuilt\"\n"
-    ")\n"
+    + "".join(f"CAVEAT_{i} = {substring!r}\n"
+              for i, substring in enumerate(REQUIRED_CAVEAT_SUBSTRINGS))
 )
 
 _BROKEN_NOTICE_PY = (

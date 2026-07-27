@@ -424,6 +424,37 @@ class MechanismReport:
                                   mechanism's live writes are denied for, when
                                   state == "paused_live_write". Empty for every
                                   other state.
+    writer_state:                 the emitted classifier's separate answer to
+                                  "what would it TAKE to clear this file" --
+                                  one of the ``_ext_write_state.WriterState``
+                                  values, mirrored here as
+                                  ``_WRITER_STATE_*`` (see those constants).
+                                  Stamped by ``reconcile_upgrade`` from the ONE
+                                  canonical classifier the operator's health
+                                  surface uses, so the impact notice and the
+                                  health surface can never disagree about the
+                                  same file. Empty string means "not
+                                  determined" (the classifier could not be
+                                  consulted); the notice then renders its most
+                                  cautious wording -- never a reassurance.
+
+                                  DO NOT CONFLATE THIS WITH ``state`` ABOVE.
+                                  They are two DIFFERENT vocabularies over two
+                                  DIFFERENT questions, and they are not
+                                  interchangeable:
+                                    ``state``        -- what this upgrade DID
+                                        to the file ("entrypoint_paused",
+                                        "broken_requires_migration",
+                                        "paused_live_write", ...).
+                                    ``writer_state`` -- what it would TAKE to
+                                        clear the file ("blocking_live_enable",
+                                        "needs_person", "non_live", ...).
+                                  A test module and a live capability can share
+                                  the SAME ``state`` and need opposite
+                                  sentences; that is exactly the defect this
+                                  field exists to fix (four test modules were
+                                  each told their external writes had been
+                                  switched off and would be rebuilt).
     """
     mechanism_id: str
     writer_relpath: str
@@ -437,6 +468,7 @@ class MechanismReport:
     orchestrator_routed: bool = False
     state: str = "manual_review"
     paused_op_kinds: List[str] = field(default_factory=list)
+    writer_state: str = ""
 
 
 @dataclass
@@ -3004,6 +3036,188 @@ def _append_migration_request(
 
 
 # ===== 4. NOTICE (plain language) ================================================
+#
+# WHY THE NOTICE NEEDS A SECOND STATE AXIS
+# -----------------------------------------
+# ``MechanismReport.state`` answers "what did this upgrade DO to the file". It
+# cannot answer "what would it TAKE to clear the file", and the notice needs
+# BOTH: on a real project all seven affected files shared one ``state``
+# (``broken_requires_migration``) and therefore one byte-identical sentence,
+# including four test modules each told that its ability to make changes outside
+# the project had been switched off and that it would be rebuilt, and one writer
+# that a rebuild cannot fix at all.
+#
+# The second axis already exists, and it has exactly ONE home: the emitted
+# kernel's ``_ext_write_state.classify_bespoke_writer_entry`` -- the same
+# classifier the operator's own health surface reads. This module consults THAT
+# classifier (via the sanctioned ``_external_write_module`` channel it already
+# uses for ``lifecycle_state`` / ``capability_identity`` / ``evidence``, all
+# trusted, stdlib-only kernel modules resolved from the toolkit's single
+# canonical ``agents/lib/external_write/`` home) rather than re-deriving the
+# rule. Re-deriving it would put a second copy of a safety-adjacent judgement on
+# disk, and a PARTIAL copy is worse than none here: the "this is only a test
+# file" determination requires three independent signals, all required, and a
+# copy that dropped the third would hand the operator a false "no action needed"
+# about a file the running system does invoke.
+#
+# The renderer itself stays a PURE function of its arguments -- no import, no
+# filesystem. ``reconcile_upgrade`` does the one classification pass and stamps
+# the answer onto each ``MechanismReport`` (see ``_writer_states_by_relpath``).
+
+# Duplicated-by-value from the emitted classifier's own ``WriterState`` -- its
+# values are already a serialization contract (they go into health/report JSON
+# verbatim), and holding them here is what lets the renderer stay import-free.
+# PINNED byte-identical AND exhaustive against the real class by
+# ``test_impact_notice_kind_aware.WriterStateVocabularyPinTests``, so this second
+# copy cannot drift and a newly-added state cannot land silently in the
+# fall-through bucket.
+_WRITER_STATE_BLOCKING_LIVE_ENABLE = "blocking_live_enable"
+_WRITER_STATE_NEEDS_PERSON = "needs_person"
+_WRITER_STATE_NON_LIVE = "non_live"
+_WRITER_STATE_ACKNOWLEDGED_RISK = "acknowledged_risk"
+_WRITER_STATE_RESOLVED = "resolved"
+
+#: MOST-CAUTIOUS FIRST. Two open queue entries can name the same writer file; if
+#: they classify differently, the EARLIER state here wins, so a second entry can
+#: never talk the notice down from "someone has to deal with this" into "nothing
+#: to do here". Also the exhaustive set the pin test checks against.
+_WRITER_STATE_NOTICE_PRECEDENCE: Tuple[str, ...] = (
+    _WRITER_STATE_NEEDS_PERSON,
+    _WRITER_STATE_BLOCKING_LIVE_ENABLE,
+    _WRITER_STATE_ACKNOWLEDGED_RISK,
+    _WRITER_STATE_NON_LIVE,
+    _WRITER_STATE_RESOLVED,
+)
+
+#: The states the notice has dedicated wording for. Anything else -- unset, or a
+#: state added to the classifier after this renderer was written -- falls back to
+#: ``_WRITER_STATE_BLOCKING_LIVE_ENABLE``'s demand-action wording, which is the
+#: fail-closed direction (today's behavior, never a new reassurance).
+_WRITER_STATES_WITH_OWN_WORDING: Tuple[str, ...] = (
+    _WRITER_STATE_NON_LIVE,
+    _WRITER_STATE_NEEDS_PERSON,
+    _WRITER_STATE_ACKNOWLEDGED_RISK,
+)
+
+
+def _writer_states_by_relpath(
+    operator_project_dir: Path, build_repo_root: Path,
+) -> Dict[str, str]:
+    """``writer_relpath -> WriterState`` for every OPEN bespoke-writer entry in
+    the operator project's pending-migrations queue, via the ONE canonical
+    classifier (``_ext_write_state.bespoke_writer_state_report``).
+
+    Called by ``reconcile_upgrade`` AFTER its per-mechanism loop has queued every
+    entry (``_append_migration_request``) and BEFORE it renders the notice, so
+    the classifier sees this pass's own entries. That ordering is load-bearing
+    and is guarded by a test.
+
+    FAIL-SAFE, NEVER FAIL-STOP: an unavailable classifier, an unreadable or
+    malformed queue, or any other failure yields ``{}`` rather than raising. Each
+    mechanism then renders with an empty ``writer_state``, which the notice
+    treats as its most cautious case -- byte-identical to the pre-existing
+    wording. A degraded classification must never be able to abort an upgrade's
+    impact notice, and must never produce a reassurance it could not verify."""
+    try:
+        ext_state = _external_write_module(build_repo_root, "_ext_write_state")
+        report = ext_state.bespoke_writer_state_report(str(operator_project_dir))
+    except Exception:
+        return {}
+    if not isinstance(report, dict):
+        return {}
+    ordered: List[str] = list(_WRITER_STATE_NOTICE_PRECEDENCE)
+    ordered += sorted(s for s in report if s not in _WRITER_STATE_NOTICE_PRECEDENCE)
+    found: Dict[str, str] = {}
+    for state in ordered:
+        for entry in report.get(state) or []:
+            if not isinstance(entry, dict):
+                continue
+            relpath = entry.get("writer_relpath")
+            if isinstance(relpath, str) and relpath and relpath not in found:
+                found[relpath] = state
+    return found
+
+
+def _writer_state_of(m: MechanismReport) -> str:
+    """The remediation state the notice renders for ``m``. Anything the renderer
+    has no dedicated wording for -- unset (classifier unavailable) or a state
+    invented after this code was written -- becomes
+    ``_WRITER_STATE_BLOCKING_LIVE_ENABLE``: the demand-action wording, which is
+    the safe direction and what this notice has always said."""
+    ws = m.writer_state or ""
+    if ws in _WRITER_STATES_WITH_OWN_WORDING:
+        return ws
+    return _WRITER_STATE_BLOCKING_LIVE_ENABLE
+
+
+def _restored_when(m: MechanismReport) -> str:
+    """The plain-language verb for "when does this come back".
+
+    A writer that needs a person is never told it comes back when it is REBUILT
+    -- a rebuild is precisely what will not clear it (the real case: a writer
+    whose banned network import also delivers the operator's daily alerts, which
+    no remediation of ours rewrites).
+
+    An ACKNOWLEDGED writer gets the same neutral verb, for the mirror-image
+    reason: the operator has recorded a decision to LEAVE it as it is, so a
+    sentence promising it comes back when rebuilt implies a rebuild they have
+    already declined. ("fixed" states the condition for restoration without
+    promising a route, or that anyone will take it.) Acknowledgement is in any
+    case the sanctioned exit from needing a person, so the two share a verb."""
+    if _writer_state_of(m) in (_WRITER_STATE_NEEDS_PERSON,
+                               _WRITER_STATE_ACKNOWLEDGED_RISK):
+        return "fixed"
+    return "rebuilt"
+
+
+def _next_step_line(m: MechanismReport) -> str:
+    """The one indented sentence saying how THIS file gets cleared. Exactly one
+    place in the notice says that, so it cannot be state-correct in one branch
+    and state-wrong in another."""
+    ws = _writer_state_of(m)
+    if ws == _WRITER_STATE_NEEDS_PERSON:
+        return (
+            "  - This one cannot be fixed automatically. It needs a person to look at "
+            "what it does and decide what happens next. Tell your assistant you want "
+            "to go through this one together, and it will explain what it found and "
+            "what your choices are."
+        )
+    if ws == _WRITER_STATE_ACKNOWLEDGED_RISK:
+        return (
+            "  - You have already looked at this one and recorded a decision to leave "
+            "it as it is, so it is not holding anything else up. It stays listed here "
+            "so it does not quietly disappear."
+        )
+    return (
+        "  - The fix has been queued, and it will be rebuilt through the same "
+        "reviewed process used for any new capability before it runs live again."
+    )
+
+
+def _test_file_notice_lines(m: MechanismReport) -> List[str]:
+    """The whole bullet for a file the classifier established is ONLY a test: it
+    is named like a test, it really contains test structure, and nothing in the
+    running system invokes it (three independent signals, all required -- see
+    ``_ext_write_state.classify_bespoke_writer_entry``).
+
+    This replaces the bullet entirely rather than adding to it. Every sentence
+    the normal bullet would have carried is false here: nothing of its was
+    switched off, no runtime block was owed, and it is not queued for a rebuild.
+    """
+    lines = [
+        f"- **{m.writer_relpath}**: this is a test file. Nothing in your running "
+        "system uses it, so nothing it does reaches anything outside this project. "
+        "It only runs when someone is checking that the system works."
+    ]
+    action = "  - No action is needed for this one, and it does not need to be rebuilt."
+    if m.paused and m.entrypoint_relpath:
+        action += (
+            f" The script that runs it (`{m.entrypoint_relpath}`) was switched off as "
+            "a precaution, which affects only that check."
+        )
+    lines.append(action)
+    return lines
+
 
 def _human_join(items: Sequence[str]) -> str:
     items = list(items)
@@ -3042,14 +3256,14 @@ def _pause_notice_lines(m: MechanismReport) -> List[str]:
         return [
             paused_line + f" This is the same place that produces your {what} for "
             f"you, so your {what} is paused too, not just the change it was making "
-            "-- it stays dark until this is rebuilt and reviewed again."
+            f"-- it stays dark until this is {_restored_when(m)} and reviewed again."
         ]
     # Unknown / unverified: fail toward "paused too", never toward reassurance.
     return [
         paused_line + " It has not been confirmed whether this same place also "
         "reads and reports to you (a summary, an alert, a backup). Until that is "
         "checked, treat anything it reports to you as paused too, not running as "
-        "before -- it comes back once this is rebuilt and reviewed again."
+        f"before -- it comes back once this is {_restored_when(m)} and reviewed again."
     ]
 
 
@@ -3063,6 +3277,25 @@ def render_impact_notice(
     any more (see ``_pause_notice_lines``) — a continuity claim is only ever
     made when a separate read-only entrypoint was positively verified to
     survive the pause.
+
+    Kind-aware per file. Each bullet is named by the file's own PATH (never its
+    bare filename, which collides: two different projects' directories can each
+    hold a ``runner.py``, and on a real project both rendered as the same bold
+    ``runner`` with the path relegated to parentheses), and each bullet's
+    what-happens-next sentence is chosen from that file's ``writer_state`` --
+    so a test module is never told its external writes were switched off and
+    will be rebuilt, and a writer that needs a person is never offered a rebuild
+    that cannot clear it. See this section's header comment for why the state
+    comes from the emitted classifier rather than being re-derived here.
+
+    The single worked example in "What happens next" is DERIVED from the first
+    file the example's own advice actually fits, and is omitted entirely when no
+    such file is present. It used to be hardcoded, naming one specific writer in
+    every project -- including projects with no such file, and including the one
+    real project where it named precisely the writer that advice cannot help.
+
+    Pure function of its arguments: no filesystem, no imports, no classification
+    work. ``reconcile_upgrade`` stamps ``writer_state`` before calling this.
     """
     if from_version == to_version:
         # (review fix, F-55 D) `wizard reconcile` re-checks the CURRENTLY
@@ -3093,8 +3326,13 @@ def render_impact_notice(
         "",
     ]
     for m in mechanisms:
+        if _writer_state_of(m) == _WRITER_STATE_NON_LIVE:
+            # Replaces the bullet outright -- every sentence below would be
+            # false about a file nothing in the running system invokes.
+            lines.extend(_test_file_notice_lines(m))
+            continue
         lines.append(
-            f"- **{m.mechanism_id}** (`{m.writer_relpath}`): this changes information "
+            f"- **{m.writer_relpath}**: this changes information "
             "outside the project directly, without going through the safety check."
         )
         if m.paused:
@@ -3126,17 +3364,37 @@ def render_impact_notice(
             # off there; NO continuity/"keeps running as before" claim, and
             # entanglement does not apply to something built against a
             # changed safety interface.
+            #
+            # The "how it gets fixed" half of this sentence MOVED OUT to
+            # ``_next_step_line`` -- it was the wrong promise for a writer that
+            # needs a person, and leaving it here made the correct sentence
+            # unreachable for that case. What stays here is only what is true
+            # regardless of who or what clears it.
+            # The no-runtime-block caveat is deliberately spelled out in FULL,
+            # per state, as ONE contiguous string literal each -- never assembled
+            # around an interpolated verb. ``notice_fidelity_lint`` pins this exact
+            # text as a printed string literal, and a caveat split across an
+            # f-string placeholder is a caveat that a verbatim check can no longer
+            # see. Both variants are pinned there; see
+            # ``notice_fidelity_lint.REQUIRED_CAVEAT_SUBSTRINGS``.
+            if m.paused_op_kinds:
+                caveat = ""
+            elif _restored_when(m) == "fixed":
+                caveat = (
+                    " A runtime block could not be automatically installed for it, so "
+                    "do not rely on it being blocked until it is fixed."
+                )
+            else:
+                caveat = (
+                    " A runtime block could not be automatically installed for it, so "
+                    "do not rely on it being blocked until it is rebuilt."
+                )
             lines.append(
                 "  - This was built against a safety check that has since changed, so "
                 "its ability to make changes outside your project has been switched "
-                "off until it is rebuilt. It was not on any automatic schedule, so "
-                "there was nothing to switch off there. The fix has been queued, and "
-                "it will be rebuilt through the same reviewed process used for any "
-                "new capability before it runs live again."
-                + ("" if m.paused_op_kinds else (
-                    " A runtime block could not be automatically installed for it, so "
-                    "do not rely on it being blocked until it is rebuilt."
-                ))
+                f"off until it is {_restored_when(m)}. It was not on any automatic "
+                "schedule, so there was nothing to switch off there."
+                + caveat
             )
         elif m.state == "paused_live_write":
             # (F-55 B2) Honest state: distinct from BOTH "paused" (an entrypoint
@@ -3148,23 +3406,57 @@ def render_impact_notice(
             lines.append(
                 "  - It keeps running, but the specific change(s) it makes outside this "
                 "project have been switched off every time it tries them -- until it is "
-                "rebuilt through the same reviewed process used for any new capability."
+                f"{_restored_when(m)}."
             )
         else:
             lines.append(
                 "  - No automatic schedule was found for it, so nothing could be paused "
                 "automatically — please review it by hand before relying on it."
             )
+        lines.append(_next_step_line(m))
+
+    # "What happens next" is assembled from what is actually in this
+    # notice, never from a fixed template: a bullet that names a file, or offers
+    # a route, must be true of a file that is really present.
+    non_live = [m for m in mechanisms
+                if _writer_state_of(m) == _WRITER_STATE_NON_LIVE]
+    needs_person = [m for m in mechanisms
+                    if _writer_state_of(m) == _WRITER_STATE_NEEDS_PERSON]
+    rebuildable = [m for m in mechanisms
+                   if _writer_state_of(m) == _WRITER_STATE_BLOCKING_LIVE_ENABLE]
+    lines += ["", "## What happens next", ""]
+    if mechanisms and len(non_live) == len(mechanisms):
+        # Nothing was switched off, so the reassurance below would be describing
+        # something that never happened.
+        lines.append(
+            "- Nothing here needs anything from you. Every item above is a test file, "
+            "and none of them changes anything outside this project.")
+    else:
+        lines.append(
+            "- Nothing was deleted, and no saved access (credentials) was removed — only "
+            "the part that changes things was switched off, until it is put right the "
+            "safe way.")
+    if rebuildable:
+        # DERIVED, never hardcoded: the first file this advice actually fits.
+        lines.append(
+            "- To fix this, just tell your assistant (for example: \"let's fix "
+            f"{rebuildable[0].writer_relpath}\") and it will walk through the same "
+            "careful, reviewed process used for any new capability, so the paused part "
+            "gets rebuilt onto the safety check and you approve it again before it runs "
+            "live.")
+    if len(needs_person) == 1:
+        lines.append(
+            "- One of the items above cannot be fixed automatically and needs a person "
+            "to look at it. Tell your assistant you want to go through it together. It "
+            "will explain what it found and what your choices are, and nothing changes "
+            "until you decide.")
+    elif needs_person:
+        lines.append(
+            "- Some of the items above cannot be fixed automatically and need a person "
+            "to look at them. Tell your assistant you want to go through them together. "
+            "It will explain what it found and what your choices are, and nothing "
+            "changes until you decide.")
     lines += [
-        "",
-        "## What happens next",
-        "",
-        "- Nothing was deleted, and no saved access (credentials) was removed — only the "
-        "part that changes things was switched off, until it is rebuilt the safe way.",
-        "- To fix this, just tell your assistant (for example: \"let's fix the upkeep "
-        "writer\") and it will walk through the same careful, reviewed process used for "
-        "any new capability, so the paused part gets rebuilt onto the safety check and "
-        "you approve it again before it runs live.",
         f"- This has also been written down in this project's pending-work list "
         f"(`{MIGRATION_QUEUE_REL}`) so it isn't forgotten.",
         "",
@@ -3404,6 +3696,18 @@ def reconcile_upgrade(
 
     notice_path: Optional[Path] = None
     if mechanisms:
+        # ONE classification pass, through the SAME classifier the
+        # operator's health surface reads, so the notice and the health surface
+        # can never disagree about the same file. Runs HERE and not inside the
+        # renderer for two reasons: every entry this pass queued is already on
+        # disk (``_append_migration_request``, in the loop above), which is what
+        # the classifier reads; and it keeps ``render_impact_notice`` a pure
+        # function of its arguments. Fail-safe -- an empty result leaves each
+        # ``writer_state`` unset, which renders the pre-existing cautious
+        # wording. See ``_writer_states_by_relpath``.
+        writer_states = _writer_states_by_relpath(operator_project_dir, build_repo_root)
+        for m in mechanisms:
+            m.writer_state = writer_states.get(m.writer_relpath, "")
         text = render_impact_notice(mechanisms, from_version, to_version)
         notice_path = write_impact_notice(operator_project_dir, upgrade_id, text)
 
@@ -3511,7 +3815,21 @@ def render_reconcile_result(result: ReconcileResult) -> str:
         return ""
     lines = ["", "Upgrade safety check found something to review:"]
     for m in result.mechanisms:
-        if m.paused:
+        # Same two defects as the impact notice, on the surface the
+        # operator reads FIRST (this prints at the terminal; the notice is a file
+        # they open afterwards). Keeping only one of the two fixed would hand
+        # them a contradictory pair. Named by PATH, because the bare filename
+        # collides -- two directories can each hold a `runner.py`. And kind-aware,
+        # because "queued for rebuild" is false about a test module and about a
+        # writer a rebuild cannot clear. See ``_writer_state_of``.
+        writer_state = _writer_state_of(m)
+        if writer_state == _WRITER_STATE_NON_LIVE:
+            status = "a test file -- nothing switched off, no action needed"
+        elif writer_state == _WRITER_STATE_NEEDS_PERSON:
+            status = "external writes switched off -- needs a person to look at it"
+        elif writer_state == _WRITER_STATE_ACKNOWLEDGED_RISK:
+            status = "left as it is, by your own recorded decision"
+        elif m.paused:
             status = "paused"
         elif m.state == "paused_live_write":
             status = "paused (live-write blocked pending migration)"
@@ -3525,7 +3843,7 @@ def render_reconcile_result(result: ReconcileResult) -> str:
             status = "external writes switched off -- queued for rebuild"
         else:
             status = "needs manual review (no schedule found)"
-        lines.append(f"  - {m.mechanism_id}: {status}")
+        lines.append(f"  - {m.writer_relpath}: {status}")
     for canonical_id in result.stale_acceptance_reset:
         lines.append(
             f"  - {canonical_id}: its code changed since you approved it, so its approval "

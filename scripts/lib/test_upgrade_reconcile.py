@@ -549,7 +549,17 @@ class ReconcileEndToEndTests(_Base):
         self.assertNotIn("keeps running exactly as before", notice_text)
         self.assertIn("digest", notice_text.lower())
         self.assertIn("paused too", notice_text.lower())
-        self.assertIn("rebuilt", notice_text.lower())
+        # The entanglement-honesty property here is that the dark read outputs are
+        # promised back ONLY
+        # after this is put right -- never unconditionally. The VERB now varies
+        # with what it would actually take to put it right (see
+        # `upgrade_reconcile._restored_when`): this fixture records
+        # `direct_api_call` + `forbidden_import`, neither of which our own
+        # remediation covers, so the canonical classifier states it needs a
+        # person and the notice must not promise a rebuild it cannot deliver.
+        # Assert the property, not the word.
+        self.assertRegex(notice_text.lower(),
+                         r"stays dark until this is (rebuilt|fixed) and reviewed again")
 
     def test_split_read_write_agent_verified_separate_gets_continuity_promise(self):
         # Anti-overfit shape 2: read and write are cleanly split into two
