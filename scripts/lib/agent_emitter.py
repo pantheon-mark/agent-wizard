@@ -56,6 +56,7 @@ _EXTERNAL_WRITE_LIB_FILES = (
     "scan.py",
     "verification_modes.py",
     "contracts.py",
+    "topology.py",
     "verifiers.py",
     "boundary.py",
     "proof_hash.py",
