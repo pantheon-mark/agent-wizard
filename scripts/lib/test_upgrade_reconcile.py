@@ -2385,9 +2385,24 @@ register_adapter(OP_KIND, AcmeWidgetTidyAdapter())
     def _write_capability_with_adapter(self, proj, capability_id, adapter_source):
         capdir = proj / "agents" / "capabilities"
         capdir.mkdir(parents=True, exist_ok=True)
+        # The capability module's OP_KIND must be one this adapter actually
+        # DECLARES (topology's declaration join is the canonical-id
+        # attribution now -- filename convention is never an input; see
+        # upgrade_reconcile.attribute_adapter_to_capability). Derived from
+        # the adapter source itself, never hand-picked, so this fixture stays
+        # correct however many op_kinds/classes the adapter source declares.
+        declared_op_kinds = sorted({
+            d.op_kind for d in upgrade_reconcile.topology.discover_declarations(
+                adapter_source, f"agents/lib/external_write/adapters_{capability_id}.py")
+            if d.role == "adapter" and d.op_kind
+        })
+        op_kind_line = f'OP_KIND = "{declared_op_kinds[0]}"\n' if declared_op_kinds else ""
         (capdir / f"{capability_id}_capability.py").write_text(
-            '"""fixture capability module (Task B2 test) -- content irrelevant, '
-            'only its presence matters for capability_identity enumeration."""\n',
+            '"""fixture capability module (Task B2 test) -- only its presence '
+            'matters for capability_identity enumeration, and (since the '
+            'declaration-topology fix) its OP_KIND must match one this '
+            'fixture\'s adapter actually declares, for attribution to join."""\n'
+            + op_kind_line,
             encoding="utf-8",
         )
         ext_dir = proj / "agents" / "lib" / "external_write"
@@ -2682,9 +2697,24 @@ class ReconcileMissingEvidencePredicatesMultiClassTests(_Base):
     def _write_capability_with_adapter(self, proj, capability_id, adapter_source):
         capdir = proj / "agents" / "capabilities"
         capdir.mkdir(parents=True, exist_ok=True)
+        # See the sibling helper's identical comment in
+        # ReconcileMissingEvidencePredicatesTests: the capability's OP_KIND
+        # must be one this adapter actually declares, derived from the
+        # adapter source rather than hand-picked, for the declaration join
+        # (upgrade_reconcile.attribute_adapter_to_capability) to attribute
+        # this file to `capability_id` instead of falling back to the
+        # adapter's own filename stem.
+        declared_op_kinds = sorted({
+            d.op_kind for d in upgrade_reconcile.topology.discover_declarations(
+                adapter_source, f"agents/lib/external_write/adapters_{capability_id}.py")
+            if d.role == "adapter" and d.op_kind
+        })
+        op_kind_line = f'OP_KIND = "{declared_op_kinds[0]}"\n' if declared_op_kinds else ""
         (capdir / f"{capability_id}_capability.py").write_text(
-            '"""fixture capability module (F-1 test) -- content irrelevant, '
-            'only its presence matters for capability_identity enumeration."""\n',
+            '"""fixture capability module (F-1 test) -- only its presence '
+            'matters for capability_identity enumeration, plus an OP_KIND '
+            'matching this fixture\'s adapter for attribution to join."""\n'
+            + op_kind_line,
             encoding="utf-8",
         )
         ext_dir = proj / "agents" / "lib" / "external_write"

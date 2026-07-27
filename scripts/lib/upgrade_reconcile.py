@@ -120,6 +120,7 @@ from capability_code_scaffold import (
 )
 from adapter_migrations import ADAPTER_MIGRATIONS, MigrationContext
 from provisioner_migration import PROVISIONER_NAME
+import topology
 
 
 # ===== Reused T5 scanner (single-home import; canonical location) ===========
@@ -1394,6 +1395,63 @@ def resolve_adapter_migration_targets(
     return AdapterTargets(tuple(sorted(keep)), None)
 
 
+def attribute_adapter_to_capability(
+    operator_project_dir: Path, adapter_relpath: str,
+) -> Optional[str]:
+    """Which capability's declared op_kind does this adapter module serve?
+
+    Joins on the op_kind BOTH sides DECLARE -- never the filename:
+
+      * the adapter's own ``register_adapter(op_kind, ...)`` call site(s),
+        read via ``topology.discover_declarations`` (AST-only; resolves the
+        same shapes the emitted registry's own kernel resolves against, and
+        REPORTS rather than silently drops a call site it cannot read);
+      * each capability module's own ``OP_KIND`` literal, read via this
+        file's existing ``_extract_op_kind_literal`` -- the same AST-only
+        reader already used to classify a capability's evidence predicates.
+        Reused rather than re-implemented so there is exactly one place that
+        knows how to read a capability's ``OP_KIND``.
+
+    Returns the capability's canonical id, or ``None`` if no capability
+    declares an op_kind this adapter registers -- a legitimate outcome (an
+    adapter can serve no capability), not an error. A ``None`` here can never
+    surface as a WRONG capability id downstream: only RESOLVED op_kinds ever
+    enter the join (an adapter declaration or a capability's OP_KIND that
+    this checker could not read is excluded, not treated as a wildcard), and
+    the sole caller falls back to the adapter's own filename stem on
+    ``None`` -- always at least as correct as the adapter's own name.
+
+    Never imports the adapter or capability module -- AST source reads only,
+    matching this file's and topology.py's existing discipline (this module
+    runs under the toolkit interpreter, not the operator's virtual
+    environment).
+    """
+    root = Path(operator_project_dir)
+    adapter_path = root / adapter_relpath
+    try:
+        adapter_src = adapter_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+    adapter_ops = {
+        d.op_kind for d in topology.discover_declarations(adapter_src, str(adapter_relpath))
+        if d.role == "adapter" and d.op_kind
+    }
+    if not adapter_ops:
+        return None
+
+    caps_dir = root / DEFAULT_CAPABILITIES_REL
+    for cap_path in sorted(caps_dir.glob("*_capability.py")):
+        try:
+            cap_src = cap_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for declared_op_kind in _extract_op_kind_literal(cap_src):
+            if declared_op_kind in adapter_ops:
+                return cap_path.stem[: -len("_capability")]
+    return None
+
+
 @dataclass(frozen=True)
 class AdapterMigrationOutcome:
     """What ONE declared migration did to ONE adapter module.
@@ -1462,10 +1520,6 @@ def reconcile_adapter_migrations(
 
     external_write_dir = operator_project_dir / DEFAULT_EXTERNAL_WRITE_REL
     context = MigrationContext(required_predicates=required)
-    canonical_by_relpath = {
-        f"{DEFAULT_EXTERNAL_WRITE_REL.as_posix()}/adapters_{cid}.py": cid
-        for cid in canonical_ids
-    }
 
     for relpath in targets.relpaths:
         adapter_path = operator_project_dir / relpath
@@ -1488,9 +1542,10 @@ def reconcile_adapter_migrations(
         #     These entries drive the rebuild-paused-capability flow and the
         #     acceptance ceremony, both of which operate per-CAPABILITY, so the
         #     id must be the capability's -- falling back to the adapter's own
-        #     stem only when no capability's filename convention matches (see
-        #     `canonical_by_relpath` just above), which is still the best
-        #     available identity for a human reading the queue.
+        #     stem only when no capability declares an op_kind this adapter
+        #     registers (see `attribute_adapter_to_capability` above), which
+        #     is still the best available identity for a human reading the
+        #     queue.
         #   * ADAPTER-scoped kinds (adapter_migration_refused,
         #     adapter_enrolment_unreadable) key on the ADAPTER MODULE's own
         #     stem, never a capability id -- a migration refusal or an
@@ -1500,7 +1555,10 @@ def reconcile_adapter_migrations(
         #     would be arbitrary at best and wrong at worst.
         # The two are NOT unified: an adapter-scoped entry legitimately names
         # an adapter, not a capability.
-        canonical_id = canonical_by_relpath.get(relpath, Path(relpath).stem)
+        # Attribution now joins on the declared op_kind (see
+        # attribute_adapter_to_capability); the filename is never an input.
+        canonical_id = (attribute_adapter_to_capability(operator_project_dir, relpath)
+                        or Path(relpath).stem)
         adapter_stem = Path(relpath).stem
 
         _resolved, ambiguous_count = resolve_registered_adapter_classes(tree)
