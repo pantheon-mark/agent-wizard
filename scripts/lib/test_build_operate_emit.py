@@ -1798,7 +1798,14 @@ class TestS253ContractDelta(unittest.TestCase):
         # state, which _ext_write_state imports lazily and whose absence silently means "no
         # acknowledgements", leaving an unrepairable writer blocking acceptance forever. See both
         # files' own enrollment comments in agent_emitter.py, and the two dedicated tests below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 42)
+        # (Count updated to 43 by the topology enrollment, which additionally enrolled topology.py --
+        # the operation-declaration resolver that every consumer uses to determine which module
+        # declares support for a given operation. capability_runner.py imports it at module scope, so
+        # omitting it here means an emitted writes-back system ships a kernel runner that imports a
+        # module never physically copied into the package, dying with ModuleNotFoundError on every
+        # read-facade build -- exactly the failure this enrollment prevents. See topology.py's own
+        # enrollment comment in agent_emitter.py, and test_topology_enrollment.py below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 43)
 
     def test_emit_set_lists_the_cut16_capability_runner_file(self):
         # Cut 1.6 / v0.20.0: capability_runner.py must be enrolled, or an emitted writes-back
