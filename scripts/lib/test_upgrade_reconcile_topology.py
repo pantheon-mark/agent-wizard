@@ -104,6 +104,9 @@ class AdapterAttributionUnresolvedRaisesTests(unittest.TestCase):
         self.assertEqual(len(ctx.exception.reasons), 1)
         self.assertIn("adapters_nested.py", ctx.exception.reasons[0])
         self.assertIn("line", ctx.exception.reasons[0])
+        # The repair guidance must point at the SAME file the reason names
+        # -- the adapter itself, for this cause.
+        self.assertIn("adapters_nested.py", ctx.exception.suggested_next_step)
 
     def test_function_call_op_kind_raises_rather_than_matching_nothing(self):
         # A second ordinary hand-authored shape: the op_kind argument is a
@@ -136,6 +139,16 @@ class AdapterAttributionUnresolvedRaisesTests(unittest.TestCase):
             upgrade_reconcile.attribute_adapter_to_capability(
                 self.root, "agents/lib/external_write/adapters_clean.py")
         self.assertIn("capabilities", ctx.exception.reasons[0])
+        # The repair guidance must point at the CAPABILITIES FOLDER, not the
+        # (perfectly fine) adapter file -- pointing the operator at the
+        # adapter here would send them to open a file that has nothing
+        # wrong with it.
+        self.assertIn("capabilities", ctx.exception.suggested_next_step)
+        self.assertNotIn("adapters_clean.py", ctx.exception.suggested_next_step)
+        # Plain words only -- no raw Python exception class name leaking
+        # into operator-facing text.
+        self.assertNotIn("PermissionError", ctx.exception.reasons[0])
+        self.assertNotIn("PermissionError", ctx.exception.suggested_next_step)
 
     def test_absent_capabilities_directory_is_a_clean_none_not_an_error(self):
         # The companion case to the previous test: ABSENT is not
@@ -165,6 +178,13 @@ class AdapterAttributionUnresolvedRaisesTests(unittest.TestCase):
             upgrade_reconcile.attribute_adapter_to_capability(
                 self.root, "agents/lib/external_write/adapters_clean.py")
         self.assertIn("locked_capability.py", ctx.exception.reasons[0])
+        # The repair guidance must point at the CAPABILITY file that is
+        # actually locked, not the (perfectly fine) adapter file -- the
+        # exact misdirection this fix closes.
+        self.assertIn("locked_capability.py", ctx.exception.suggested_next_step)
+        self.assertNotIn("adapters_clean.py", ctx.exception.suggested_next_step)
+        self.assertNotIn("PermissionError", ctx.exception.reasons[0])
+        self.assertNotIn("PermissionError", ctx.exception.suggested_next_step)
 
 
 class ReconcileReportsAndContainsUnresolvedAttributionTests(unittest.TestCase):
@@ -222,6 +242,47 @@ class ReconcileReportsAndContainsUnresolvedAttributionTests(unittest.TestCase):
         self.assertIn("adapters_crm_contact_sync.py", entry["reason"])
         self.assertNotIn("Traceback", entry["reason"])
         self.assertEqual(entry["status"], "pending")
+
+    def test_unresolvable_AND_class_ambiguous_registration_still_yields_one_clean_report(self):
+        # The assertion above (no ambiguous_adapter_registration in the
+        # queue) is not genuinely exercised by a registration whose class
+        # was never ambiguous in the first place -- that kind was never
+        # going to fire either way. This fixture IS class-ambiguous (the
+        # instance comes from a factory function, not a direct ClassName()
+        # call -- the same shape capability_code_scaffold.
+        # resolve_registered_adapter_classes already treats as ambiguous)
+        # AND op-kind-unresolvable (an f-string), so both the OLD
+        # capability-scoped code paths this fix bypasses are live
+        # candidates to fire wrongly, not merely absent by construction.
+        caps = self.root / "agents" / "capabilities"
+        caps.mkdir(parents=True)
+        (caps / "crm_contact_sync_capability.py").write_text(
+            'OP_KIND = "crm.contacts.update"\n', encoding="utf-8")
+
+        ext_dir = self.root / "agents" / "lib" / "external_write"
+        ext_dir.mkdir(parents=True)
+        (ext_dir / "adapters_crm_contact_sync.py").write_text(
+            "SURFACE = 'crm'\n"
+            "class CrmContactSyncAdapter: pass\n\n"
+            "def _build_adapter():\n"
+            "    return CrmContactSyncAdapter()\n\n"
+            "register_adapter(f\"{SURFACE}.contacts.update\", _build_adapter())\n",
+            encoding="utf-8")
+        (ext_dir / "operator_adapters.json").write_text(
+            json.dumps(["adapters_crm_contact_sync"]), encoding="utf-8")
+
+        remediated, outcomes, blocking = upgrade_reconcile.reconcile_adapter_migrations(
+            self.root, self.build_repo_root, from_version="1.0.0", to_version="1.1.0")
+
+        self.assertIsNone(blocking)
+        self.assertEqual(remediated, [])
+
+        queue_path = self.root / upgrade_reconcile.MIGRATION_QUEUE_REL
+        queue = json.loads(queue_path.read_text(encoding="utf-8")) if queue_path.exists() else []
+        kinds = [e.get("kind") for e in queue]
+        self.assertNotIn("ambiguous_adapter_registration", kinds)
+        self.assertNotIn("missing_evidence_predicates", kinds)
+        self.assertEqual(kinds.count("adapter_registration_unresolved"), 1)
 
 
 if __name__ == "__main__":

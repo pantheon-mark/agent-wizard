@@ -1430,10 +1430,25 @@ class AdapterAttributionUnresolvedError(Exception):
 
     In every one of these cases, treating the result as ``None`` would be
     indistinguishable from "genuinely serves no capability" -- exactly the
-    silent-miss failure mode this whole mechanism exists to close. Carries
-    ``reasons``: one or more plain-language strings, each already naming the
-    responsible file (and line, where topology supplies one), so a caller
-    can report this to the operator without re-deriving anything.
+    silent-miss failure mode this whole mechanism exists to close.
+
+    Carries TWO pieces of operator-facing text, built TOGETHER at the exact
+    raise site that knows which of the three causes this is and which file
+    is responsible, so the two can never disagree about what needs fixing:
+
+      * ``reasons`` -- one or more plain-language strings, each already
+        naming the responsible file (and line, where topology supplies
+        one). Never an exception class name -- plain words only.
+      * ``suggested_next_step`` -- a single plain-language instruction,
+        naming the SAME file(s) ``reasons`` names, describing the repair
+        that actually applies to THIS cause (never a repair for a
+        different one of the three).
+
+    A caller must use both exactly as given -- never re-deriving one from
+    the other, never writing a fallback ``suggested_next_step`` of its own.
+    Deciding both together, once, at the one place that knows the cause, is
+    what makes it impossible for them to point at different files or
+    different repairs (the failure this project keeps having to close).
 
     Callers must catch this and report it through a durable, operator-
     visible record, then move on to the next adapter -- never let it
@@ -1441,8 +1456,9 @@ class AdapterAttributionUnresolvedError(Exception):
     a fallback id (the filename convention this whole mechanism replaces).
     """
 
-    def __init__(self, reasons):
+    def __init__(self, reasons, suggested_next_step):
         self.reasons = tuple(reasons)
+        self.suggested_next_step = suggested_next_step
         super().__init__(" / ".join(self.reasons))
 
 
@@ -1498,13 +1514,23 @@ def attribute_adapter_to_capability(
         if d.role == "adapter" and d.unresolved_reason
     )
     if unresolved:
-        raise AdapterAttributionUnresolvedError(unresolved)
+        raise AdapterAttributionUnresolvedError(
+            unresolved,
+            suggested_next_step=(
+                f"Open {adapter_relpath} and make sure its operation name "
+                "is written directly -- a plain quoted piece of text, or a "
+                "single name defined at the top of the file -- not built "
+                "by a function call, text formatting, or a loop this check "
+                "cannot follow line by line. Then re-run the upgrade."
+            ),
+        )
 
     adapter_ops = {d.op_kind for d in declarations if d.role == "adapter" and d.op_kind}
     if not adapter_ops:
         return None
 
     caps_dir = root / DEFAULT_CAPABILITIES_REL
+    caps_dir_display = DEFAULT_CAPABILITIES_REL.as_posix()
     try:
         # iterdir (not glob): glob silently swallows a PermissionError while
         # scanning, which would make an INACCESSIBLE capabilities directory
@@ -1514,31 +1540,50 @@ def attribute_adapter_to_capability(
         cap_paths = sorted(caps_dir.iterdir())
     except FileNotFoundError:
         return None  # no capabilities directory at all -- a clean, trustworthy empty scan
-    except OSError as exc:
-        raise AdapterAttributionUnresolvedError((
-            f"the capabilities folder ({DEFAULT_CAPABILITIES_REL.as_posix()}) "
-            f"could not be read ({exc.__class__.__name__}), so this check "
-            "cannot tell what capabilities this project has",
-        ))
+    except OSError:
+        # Plain words only -- no exception class name in operator-facing
+        # text. "Could not be opened" covers a permission problem or any
+        # other reason this folder could not be looked into.
+        raise AdapterAttributionUnresolvedError(
+            (
+                f"the capabilities folder ({caps_dir_display}) could not be "
+                "opened, so this check cannot tell what capabilities this "
+                "project has",
+            ),
+            suggested_next_step=(
+                f"Check that the folder {caps_dir_display} can be opened "
+                "normally (a permissions problem is the usual cause), then "
+                "re-run the upgrade."
+            ),
+        )
 
     unreadable_capability_reasons: List[str] = []
+    unreadable_capability_relpaths: List[str] = []
     for cap_path in cap_paths:
         if not cap_path.name.endswith(f"{CAPABILITY_MODULE_SUFFIX}.py"):
             continue
         try:
             cap_src = cap_path.read_text(encoding="utf-8")
-        except OSError as exc:
+        except OSError:
+            cap_relpath_display = f"{caps_dir_display}/{cap_path.name}"
             unreadable_capability_reasons.append(
-                f"{DEFAULT_CAPABILITIES_REL.as_posix()}/{cap_path.name} could "
-                f"not be read ({exc.__class__.__name__}), so this check "
+                f"{cap_relpath_display} could not be opened, so this check "
                 "cannot tell what it declares")
+            unreadable_capability_relpaths.append(cap_relpath_display)
             continue
         for declared_op_kind in _extract_op_kind_literal(cap_src):
             if declared_op_kind in adapter_ops:
                 return canonical_id_from_module_stem(cap_path.stem)
 
     if unreadable_capability_reasons:
-        raise AdapterAttributionUnresolvedError(tuple(unreadable_capability_reasons))
+        raise AdapterAttributionUnresolvedError(
+            tuple(unreadable_capability_reasons),
+            suggested_next_step=(
+                "Check that the following file(s) can be opened normally "
+                "(a permissions problem is the usual cause), then re-run "
+                "the upgrade: " + ", ".join(unreadable_capability_relpaths)
+            ),
+        )
     return None
 
 
@@ -1667,24 +1712,23 @@ def reconcile_adapter_migrations(
             # same identity space as adapter_migration_refused below), and
             # move on -- one unreadable operator adapter must never stop the
             # rest of this reconcile.
+            # `reason`'s wrapping sentence is deliberately cause-AGNOSTIC
+            # (true for all three causes AdapterAttributionUnresolvedError
+            # can carry, not just "the adapter's own declaration is
+            # unreadable") -- the cause-SPECIFIC detail (which file, why)
+            # comes entirely from `exc.reasons`/`exc.suggested_next_step`,
+            # decided together at the one raise site that knows which cause
+            # this is, so the two strings can never point at different
+            # files or different repairs.
             _append_ambiguous_adapter_registration_manual_repair_request(
                 operator_project_dir, adapter_stem, relpath,
                 from_version, to_version,
                 kind="adapter_registration_unresolved",
                 reason=(
-                    "this adapter's declared operation could not be fully "
-                    "read by static analysis, so this upgrade cannot safely "
-                    "tell which capability (if any) it belongs to: "
-                    + " / ".join(exc.reasons)
+                    "this upgrade cannot safely tell which capability (if "
+                    "any) this adapter belongs to: " + " / ".join(exc.reasons)
                 ),
-                suggested_next_step=(
-                    f"Open {relpath} and make sure its operation name is "
-                    "written directly -- a plain quoted piece of text, or a "
-                    "single name defined at the top of the file -- not "
-                    "built by a function call, text formatting, or a loop "
-                    "this check cannot follow line by line. Then re-run the "
-                    "upgrade."
-                ),
+                suggested_next_step=exc.suggested_next_step,
             )
             continue  # report and contain -- never guess an id when we do not know
 
