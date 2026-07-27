@@ -67,7 +67,7 @@ class DiscoverDeclarationsTests(unittest.TestCase):
     def test_module_with_no_registrations_yields_nothing(self):
         self.assertEqual(discover_declarations("x = 1\n", "helper.py"), ())
 
-    # -- Fix round 1: nothing is ever silently dropped, at any nesting -----
+    # -- Call sites nested inside control flow: still reported, never dropped --
 
     def test_conservation_no_call_site_is_ever_dropped(self):
         """For N syntactic register_* call sites, at least N Declarations
@@ -197,6 +197,75 @@ class DiscoverDeclarationsTests(unittest.TestCase):
         self.assertIsNone(decls[0].op_kind)
         self.assertIsNotNone(decls[0].unresolved_reason)
         self.assertIn("nested_for.py", decls[0].unresolved_reason)
+
+
+from topology import Topology, TopologyError, build_topology, Declaration
+
+
+def _d(role, stem, op_kind, symbol="Cls"):
+    return Declaration(role=role, module_stem=stem, relpath=stem + ".py",
+                       op_kind=op_kind, symbol=symbol, unresolved_reason=None)
+
+
+class TopologySelectionTests(unittest.TestCase):
+
+    def test_finds_the_module_regardless_of_its_filename(self):
+        t = Topology((_d("read_facade", "read_facades_inbox", "inbox.labels.modify"),))
+        self.assertEqual(t.find_read_facade("inbox.labels.modify").module_stem,
+                         "read_facades_inbox")
+
+    def test_ONE_facade_serving_FOUR_op_kinds_is_legitimate_not_ambiguous(self):
+        decls = tuple(_d("read_facade", "read_facades_gmail", k, "GmailReadFacade")
+                      for k in ("gmail.message.trash", "gmail.message.untrash",
+                                "gmail.message.modify_labels", "gmail.filter.create"))
+        t = Topology(decls)
+        for k in ("gmail.message.trash", "gmail.filter.create"):
+            self.assertEqual(t.find_read_facade(k).symbol, "GmailReadFacade")
+
+    def test_TWO_MODULES_claiming_the_same_op_kind_is_fail_closed(self):
+        t = Topology((_d("read_facade", "read_facades_a", "x.y"),
+                      _d("read_facade", "read_facades_b", "x.y")))
+        with self.assertRaises(TopologyError) as ctx:
+            t.find_read_facade("x.y")
+        msg = str(ctx.exception)
+        self.assertIn("read_facades_a", msg)
+        self.assertIn("read_facades_b", msg)
+
+    def test_zero_matches_is_fail_closed_and_names_the_op_kind(self):
+        with self.assertRaises(TopologyError) as ctx:
+            Topology(()).find_read_facade("nothing.here")
+        self.assertIn("nothing.here", str(ctx.exception))
+
+    def test_roles_do_not_collide(self):
+        t = Topology((_d("adapter", "adapters_inbox", "x.y", "A"),
+                      _d("read_facade", "read_facades_inbox", "x.y", "F")))
+        self.assertEqual(t.find_adapter("x.y").symbol, "A")
+        self.assertEqual(t.find_read_facade("x.y").symbol, "F")
+
+    def test_zero_declarations_at_all_says_nothing_provides(self):
+        with self.assertRaises(TopologyError) as ctx:
+            Topology(()).find_read_facade("inbox.labels.modify")
+        self.assertIn("nothing in this project provides", str(ctx.exception))
+
+    def test_zero_matches_with_an_unresolved_declaration_names_the_reason_not_nothing_provides(self):
+        """A module DID try to register something -- the scanner just could
+        not read the shape it used. Telling the operator nothing provides it
+        would send them off to write a new module instead of fixing the one
+        that already exists."""
+        unresolved = Declaration(
+            role="read_facade", module_stem="read_facades_weird",
+            relpath="read_facades_weird.py", op_kind=None, symbol=None,
+            unresolved_reason=(
+                "read_facades_weird.py registers something on line 4 but the "
+                "operation name and the class/adapter it applies to are not "
+                "both written in a form this check can read"))
+        t = Topology((unresolved,))
+        with self.assertRaises(TopologyError) as ctx:
+            t.find_read_facade("inbox.labels.modify")
+        msg = str(ctx.exception)
+        self.assertIn(unresolved.unresolved_reason, msg)
+        self.assertIn("read_facades_weird.py", msg)
+        self.assertNotIn("nothing in this project provides", msg)
 
 
 if __name__ == "__main__":

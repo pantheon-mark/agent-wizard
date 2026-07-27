@@ -325,3 +325,73 @@ def discover_declarations(source: str, relpath: str) -> Tuple[Declaration, ...]:
             found.append(_nested_declaration(node, stem, relpath))
 
     return tuple(found)
+
+
+class TopologyError(Exception):
+    """Fail-closed resolution failure. Message is operator-readable."""
+
+
+class Topology:
+    """Resolved declarations, queryable by op_kind."""
+
+    def __init__(self, declarations: Tuple[Declaration, ...]):
+        self.declarations = tuple(declarations)
+
+    def unresolved(self) -> Tuple[Declaration, ...]:
+        return tuple(d for d in self.declarations if d.unresolved_reason)
+
+    def _find(self, role: str, op_kind: str) -> Declaration:
+        hits = [d for d in self.declarations
+                if d.role == role and d.op_kind == op_kind]
+        if not hits:
+            what = "a read-only reader" if role == "read_facade" else "an adapter"
+            unresolved = self.unresolved()
+            if unresolved:
+                reasons = " / ".join(d.unresolved_reason for d in unresolved)
+                raise TopologyError(
+                    f"cannot tell whether anything in this project provides "
+                    f"{what} for the operation '{op_kind}', because some "
+                    f"files could not be fully read, so what they provide "
+                    f"is unknown: {reasons}")
+            raise TopologyError(
+                f"nothing in this project provides {what} for the operation "
+                f"'{op_kind}'. A module has to declare it by calling "
+                f"register_{role}('{op_kind}', ...) at the top level.")
+        stems = sorted({d.module_stem for d in hits})
+        if len(stems) > 1:
+            raise TopologyError(
+                f"more than one module claims the operation '{op_kind}': "
+                f"{', '.join(stems)}. Exactly one has to provide it -- refusing "
+                "to guess which.")
+        # Many-to-one (one module, one symbol, several op_kinds) is legitimate.
+        return hits[0]
+
+    def find_read_facade(self, op_kind: str) -> Declaration:
+        return self._find("read_facade", op_kind)
+
+    def find_adapter(self, op_kind: str) -> Declaration:
+        return self._find("adapter", op_kind)
+
+
+def build_topology(lib_dir) -> Topology:
+    """Read every ``*.py`` in ``lib_dir`` and collect its declarations.
+
+    AST-only: nothing here imports the modules it reads.
+    """
+    from pathlib import Path
+    found: List[Declaration] = []
+    for path in sorted(Path(lib_dir).glob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        try:
+            source = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            found.append(Declaration(
+                role="unknown", module_stem=path.stem, relpath=path.name,
+                op_kind=None, symbol=None,
+                unresolved_reason=f"{path.name} could not be opened ({exc})"))
+            continue
+        found.extend(discover_declarations(source, path.name))
+    return Topology(tuple(found))
+
+# END SHARED CORE
