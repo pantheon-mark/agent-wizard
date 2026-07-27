@@ -12,6 +12,23 @@ Entries appear newest-first.
 
 ---
 
+## 2026-07-27 — a project named before today's rules now works, an upgrade never blames the wrong file, and its notices always name the exact file involved (v0.22.0)
+
+**Public-facing change:** A reliability release. Your capabilities' safe, read-only access is now found by what a file actually provides instead of by what it's called, and an upgrade's own notices — what changed, which file, and what you already decided about it — are more accurate and more specific.
+
+- **Read-only access for a capability is now found by what a file declares it provides, rather than by what the file is named.** Before this fix, that lookup expected an exact naming pattern; a project whose files were set up before that pattern existed could fail here even though everything needed was already in place. It now works correctly for that kind of project too.
+- **An upgrade's status notice now tells a test file apart from a file your system actually runs.** A test file is now told plainly that nothing in your running system uses it and there is nothing for you to do — it is no longer told, incorrectly, that its outside access was switched off and that it needs to be rebuilt.
+- **That notice, and the summary printed when an upgrade finishes, now show each flagged file's full location, not just its name.** Two files that happen to share a name in different folders are no longer shown as if they were the same file.
+- **When an upgrade cannot read what a file has registered, it now says so plainly and names that file**, instead of quietly pointing at a different, unrelated file as the cause. This is written into your pending-work list as its own item, so you know exactly which file needs attention and why.
+- **After you record a decision to leave a flagged file exactly as it is, the notice now says plainly that this did not switch anything back on.** It only means that file stops holding up the rest of your system — nothing about it was quietly turned back on.
+- No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
+
+This is a reliability fix (`v0.22.0`, minor-additive, operator-explicit as always). Foundation documents are byte-identical to `v0.21.0`. Enforcement ceiling unchanged.
+
+`Source-Meta-Commit:` `PENDING` (private build repo) · public repo commit `PENDING`
+
+---
+
 ## 2026-07-26 — a stuck capability's error message now names the actual fix, every upgrade honestly checks its own safety work, and a test-quality check is now correct on the Python version this wizard has you install (v0.21.0)
 
 **Public-facing change:** A reliability fix for a misleading error message, a fix to the update tool itself so a safety check it runs can no longer be silently skipped, and a fix to a self-check on a capability's own tests.
