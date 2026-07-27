@@ -41,6 +41,45 @@ Because the rules read the AST, PROSE IS NOT CODE: a docstring or a comment
 that names ``read_facades_{id}.py`` in order to document the banned shape is
 never flagged. The resolver module's own docstring does exactly that.
 
+An id does not escape by being parked in a local first. When a dynamic import's
+argument is a plain local name, that name is resolved to its last binding in the
+SAME scope and the rules are applied to what was bound -- so a module name built
+one line before the import that consumes it is still flagged, reported at the
+line that BUILT it, which is the line that has to change.
+
+WHAT THIS GATE DOES NOT SEE
+----------------------------
+Stated plainly, because the whole reason this gate exists is that three previous
+gates were green and blind, and an undisclosed boundary is the likeliest place
+for the next instance to arrive.
+
+  * An id LAUNDERED through a name that is not id-shaped, over more than one
+    step (``label = capability_id``, then ``stem = f"...{label}"``). The alias
+    resolution above is ONE step, over a plain local, inside one scope. There is
+    no general value-flow analysis here, and a name reaching an import as a
+    function PARAMETER has no binding in scope to resolve at all.
+  * A name built with a prefix this gate does not police. ``adapters_`` and
+    ``read_facades_`` are the two prefixes that actually carried this defect. A
+    future ``writers_<id>`` is caught only if the id-shaped rule reaches it --
+    as a direct import argument, or through the one alias step. Measured, for
+    honesty: 36 sites in these two trees build a name or a path by interpolating
+    an id-shaped value, and this gate polices 3 of them. "Pinned at 4
+    exemptions" therefore describes the POLICED surface, not the whole
+    identity-to-name surface, and should not be read as the latter.
+  * The emitter's TEMPLATE TEXT. ``capability_code_scaffold.py`` carries the
+    source it emits inside string literals, so its own
+    ``import_module(f"external_write.{_stem}")`` is one Constant node to the AST
+    and no rule here can reach it. A banned shape planted inside that emitted
+    text stays green. There is no live exposure today -- the current templates
+    resolve either a literal or a stem from the enrolment list -- but it is a
+    real boundary. Emitted operator projects are not scanned by this gate
+    either; what protects them is that the templates producing them are.
+  * A broad handler whose no-op body is more than one statement. The swallow
+    rule requires a single ``pass`` / ``...`` / ``continue`` / ``break`` /
+    ``return None``; two statements that together do nothing evade it.
+  * A filename stem spelled another way -- slicing ``.name``, hand-stripping a
+    ``.py`` suffix -- is not matched by the stem rule.
+
 WHAT IS EXEMPT, AND HOW
 ------------------------
 There are NO file-level exemptions. Every exemption is one line, carrying its
@@ -49,10 +88,18 @@ own justification, at the site:
     # resolver-monopoly-exempt: <why this name is chosen and not guessed>
 
 The marker is recognised on any physical line of the offending expression, or
-in the comment block immediately above it. ``test_the_exemption_surface_is_pinned``
-pins how many markers exist and where, so a fifth one cannot appear quietly --
-widening the exempt surface to make the violation list shorter is the exact
-reflex this gate exists to catch.
+in the comment block immediately above it.
+
+``test_the_exemption_surface_is_pinned`` pins the IDENTITY of every exempted
+finding -- a ``file::kind`` multiset -- and not how many markers exist. Counting
+markers was not enough: a marker exempts every finding on the lines it covers,
+so splicing a new banned shape onto an already-exempt line held the marker count
+constant and turned the whole gate green. Pinning identities means a new
+exempted finding changes the pinned surface even when it hides on an existing
+marker's line. The same test rejects a marker whose justification is a stub, and
+a marker that exempts nothing (so one cannot be planted ahead of a shape it will
+later cover). Widening the exempt surface to make the violation list shorter is
+the exact reflex this gate exists to catch.
 
 SCOPE
 ------
@@ -109,7 +156,7 @@ _EXEMPTION_MARKER = "resolver-monopoly-exempt:"
 
 _GUIDANCE = {
     "id_derived_module_name": (
-        "builds a module name by interpolating the identifier {detail!r}. Ask "
+        "builds a module name by interpolating the identifier {detail}. Ask "
         "the declaration topology which module provides the operation "
         "(topology.find_adapter / topology.find_read_facade) and import the "
         "module_stem it returns"
@@ -275,6 +322,69 @@ def _handler_is_broad(handler: ast.ExceptHandler) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# One-step alias resolution: an id parked in a local before its import
+# ---------------------------------------------------------------------------
+
+_SCOPE_TYPES: Tuple[type, ...] = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def _own_nodes(scope: ast.AST) -> List[ast.AST]:
+    """Every node belonging to ``scope`` itself, stopping at a nested function --
+    an inner function's locals are not the outer one's."""
+    collected: List[ast.AST] = []
+
+    def descend(node: ast.AST, is_root: bool) -> None:
+        if not is_root and isinstance(node, _SCOPE_TYPES):
+            return
+        collected.append(node)
+        for child in ast.iter_child_nodes(node):
+            descend(child, False)
+
+    descend(scope, True)
+    return collected
+
+
+def _scopes(tree: ast.Module):
+    """The module, then every function in it."""
+    yield tree
+    for node in ast.walk(tree):
+        if isinstance(node, _SCOPE_TYPES):
+            yield node
+
+
+def _local_bindings(own: List[ast.AST]) -> Dict[str, List[Tuple[int, ast.AST]]]:
+    """``name -> [(lineno, bound expression)]`` for plain single-name bindings in
+    one scope, in source order. A ``for`` target is deliberately absent: it binds
+    an ELEMENT of the iterable, not the iterable, so treating the iterable as the
+    bound value would be wrong."""
+    bound: Dict[str, List[Tuple[int, ast.AST]]] = {}
+    named_expr = getattr(ast, "NamedExpr", None)
+    for node in own:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        elif named_expr is not None and isinstance(node, named_expr):
+            targets, value = [node.target], node.value
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                bound.setdefault(target.id, []).append((node.lineno, value))
+    return bound
+
+
+def _last_binding_before(bindings: List[Tuple[int, ast.AST]],
+                         lineno: int) -> Optional[Tuple[int, ast.AST]]:
+    """The last binding at or above ``lineno``; failing that, the last binding
+    anywhere in the scope -- a gate prefers looking than not looking."""
+    earlier = [pair for pair in bindings if pair[0] <= lineno]
+    if earlier:
+        return earlier[-1]
+    return bindings[-1] if bindings else None
+
+
+# ---------------------------------------------------------------------------
 # The rules
 # ---------------------------------------------------------------------------
 
@@ -304,7 +414,8 @@ def _scan_source(source: str, relpath: str) -> List[_Finding]:
             if arg is not None:
                 names = _interpolated_id_names(arg)
                 if names:
-                    add(node, "id_derived_module_name", ", ".join(sorted(set(names))))
+                    add(node, "id_derived_module_name",
+                        ", ".join(repr(n) for n in sorted(set(names))))
 
         # interpolated_sibling_prefix -- a sibling-name prefix with an
         # interpolation spliced straight onto it, anywhere in code.
@@ -347,6 +458,35 @@ def _scan_source(source: str, relpath: str) -> List[_Finding]:
                 for handler in node.handlers:
                     if _handler_is_broad(handler) and _handler_reports_nothing(handler):
                         add(handler, "silent_resolution_swallow", why)
+
+    # id_derived_module_name, one alias step -- a name BUILT from an id and then
+    # handed to a dynamic import as a plain local, which no rule above reaches
+    # because neither the construction nor the import mentions both halves.
+    # Reported at the line that built the name; that is the line to change.
+    for scope in _scopes(tree):
+        own = _own_nodes(scope)
+        bindings = _local_bindings(own)
+        if not bindings:
+            continue
+        for node in own:
+            if not (isinstance(node, ast.Call) and _is_dynamic_import(node)):
+                continue
+            args = list(node.args) + [kw.value for kw in node.keywords]
+            for arg in args:
+                if not isinstance(arg, ast.Name) or arg.id not in bindings:
+                    continue
+                resolved = _last_binding_before(bindings[arg.id], node.lineno)
+                if resolved is None:
+                    continue
+                names = _interpolated_id_names(resolved[1])
+                if names:
+                    found.append(_Finding(
+                        relpath, resolved[1].lineno,
+                        getattr(resolved[1], "end_lineno", None) or resolved[1].lineno,
+                        "id_derived_module_name",
+                        "{}, which a module import in the same scope then "
+                        "consumes".format(
+                            ", ".join(repr(n) for n in sorted(set(names))))))
 
     return sorted(set(found))
 
@@ -408,18 +548,26 @@ def _exempt_lines(source: str) -> Dict[int, str]:
     return {number: why for number, why in _marker_sites(source)}
 
 
-def _is_exempt(finding: _Finding, source: str, marked: Dict[int, str]) -> bool:
-    """A marker on any physical line of the offending expression, or in the
-    comment block immediately above it, exempts that one site."""
-    if any(number in marked for number in range(finding.lineno, finding.end_lineno + 1)):
-        return True
+def _exempting_marker(finding: _Finding, source: str,
+                      marked: Dict[int, str]) -> Optional[int]:
+    """The line number of the marker that exempts ``finding``, if any -- a marker
+    on a physical line of the offending expression, or in the comment block
+    immediately above it. Returned rather than a bool so the census can tell
+    which markers are actually doing work."""
+    for number in range(finding.lineno, finding.end_lineno + 1):
+        if number in marked:
+            return number
     lines = source.splitlines()
     index = finding.lineno - 2
     while index >= 0 and lines[index].strip().startswith("#"):
         if index + 1 in marked:
-            return True
+            return index + 1
         index -= 1
-    return False
+    return None
+
+
+def _is_exempt(finding: _Finding, source: str, marked: Dict[int, str]) -> bool:
+    return _exempting_marker(finding, source, marked) is not None
 
 
 class ResolverMonopolyGateTests(unittest.TestCase):
@@ -495,6 +643,52 @@ class ResolverMonopolyGateTests(unittest.TestCase):
                 self.assertIn(kind, kinds,
                               "the gate did not flag a planted {}".format(kind))
 
+        # An id parked in a local first, then imported -- the shape that
+        # mentions neither a policed prefix at the construction site nor an id
+        # at the import site, so only the alias step reaches it. Reported at the
+        # line that BUILT the name.
+        laundered = (
+            "def go(project_root, capability_id):\n"
+            '    stem = f"{capability_id}_writer"\n'
+            "    return importlib.import_module(stem)\n"
+        )
+        aliased = _scan_source(laundered, "planted.py")
+        self.assertEqual([(f.kind, f.lineno) for f in aliased],
+                         [("id_derived_module_name", 2)])
+
+        # The same shape as the capability runner's own module import.
+        runner_shape = (
+            "def _import_capability_module(project_root, capability_id):\n"
+            '    module_stem = f"{capability_id}{CAPABILITY_MODULE_SUFFIX}"\n'
+            "    if str(d) not in sys.path:\n"
+            "        sys.path.insert(0, str(d))\n"
+            "    return importlib.import_module(module_stem)\n"
+        )
+        self.assertEqual([(f.kind, f.lineno) for f in _scan_source(runner_shape, "p.py")],
+                         [("id_derived_module_name", 2)])
+
+        # A local built from a DECLARATION is the sanctioned shape and must stay
+        # clean through the alias step too, or the gate bans its own mechanism.
+        declared_local = (
+            "def go(declaration):\n"
+            '    stem = f"{EXTERNAL_WRITE_PKG}.{declaration.module_stem}"\n'
+            "    return importlib.import_module(stem)\n"
+        )
+        self.assertEqual(_scan_source(declared_local, "clean.py"), [])
+
+        # A local bound in an INNER function is not the outer function's local:
+        # the alias step must not reach across a scope boundary.
+        other_scope = (
+            "def outer(capability_id):\n"
+            "    def inner():\n"
+            '        stem = f"{capability_id}_writer"\n'
+            "        return stem\n"
+            "    return importlib.import_module(stem)\n"
+        )
+        self.assertEqual(
+            [f.kind for f in _scan_source(other_scope, "p.py")], [],
+            "the alias step reached into another scope's locals")
+
         # The real shape this gate replaced -- an id spliced onto a read-facade
         # module name -- trips both name rules at once.
         deleted_shape = (
@@ -535,38 +729,64 @@ class ResolverMonopolyGateTests(unittest.TestCase):
 
     def test_the_exemption_surface_is_pinned(self):
         """There are no file-level exemptions -- only single lines carrying
-        their own justification. This pins how many exist and where, so a new
-        one is a deliberate, visible change rather than a quiet widening."""
+        their own justification.
+
+        What is pinned is the IDENTITY of every exempted finding, not how many
+        markers exist. Counting markers was not enough: a marker exempts every
+        finding on the lines it covers, so splicing a new banned shape onto an
+        already-exempt line kept the marker count constant and turned the whole
+        gate green. Pinning ``file::kind`` multiplicities instead means a new
+        exempted finding changes the pinned surface even when it hides on an
+        existing marker's line."""
         expected = {
+            # The one place an id may reach a module name: a CAPABILITY module's
+            # stem, which a build-time check pins to its canonical identity.
+            "agents/lib/external_write/capability_runner.py"
+            "::id_derived_module_name": 1,
             # The emitter: it CHOOSES the name a new module will be written
-            # under, which is the one place a name is authored rather than
-            # guessed at.
-            "scripts/lib/capability_code_scaffold.py": 2,
-            # One filename convention deliberately kept alongside the adapter
-            # list, and one identity that a capability module's own stem is
+            # under, which is the one place a name is authored, not resolved.
+            "scripts/lib/capability_code_scaffold.py"
+            "::interpolated_sibling_prefix": 2,
+            # One filename convention deliberately kept alongside the declared
+            # adapter list, and one identity a capability module's own stem is
             # DEFINED to carry.
-            "scripts/lib/upgrade_reconcile.py": 2,
+            "scripts/lib/upgrade_reconcile.py::interpolated_sibling_prefix": 1,
+            "scripts/lib/upgrade_reconcile.py::filename_stem_used_as_id": 1,
         }
-        actual = {}
+        actual: Dict[str, int] = {}
         unjustified = []
+        dead = []
         for path in self._production_files():
             source = path.read_text(encoding="utf-8", errors="replace")
-            sites = _marker_sites(source)
-            if not sites:
+            marked = _exempt_lines(source)
+            if not marked:
                 continue
             relpath = path.relative_to(_WIZARD).as_posix()
-            actual[relpath] = len(sites)
-            for number, why in sites:
+            working = set()
+            for finding in _scan_source(source, relpath):
+                marker = _exempting_marker(finding, source, marked)
+                if marker is None:
+                    continue
+                key = "{}::{}".format(relpath, finding.kind)
+                actual[key] = actual.get(key, 0) + 1
+                working.add(marker)
+            for number, why in _marker_sites(source):
                 if len(why) < 20:
                     unjustified.append("{}:{}".format(relpath, number))
+                if number not in working:
+                    dead.append("{}:{}".format(relpath, number))
         self.assertEqual(
             actual, expected,
-            "the exempt surface changed. Every entry must be a line whose name "
-            "is authored, not guessed at -- if this is here to shorten the "
-            "violation list, resolve by declaration instead")
+            "the exempt surface changed. Every exempted finding must be a name "
+            "that is authored, not resolved -- if a new one is here to shorten "
+            "the violation list, resolve by declaration instead")
         self.assertEqual(unjustified, [],
                          "an exemption marker with no real justification: "
                          + ", ".join(unjustified))
+        self.assertEqual(dead, [],
+                         "an exemption marker that exempts nothing -- remove it "
+                         "rather than leaving it to cover a future shape: "
+                         + ", ".join(dead))
 
 
 if __name__ == "__main__":

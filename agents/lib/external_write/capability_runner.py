@@ -85,6 +85,13 @@ def _import_capability_module(project_root: Path, capability_id: str) -> Any:
     Uses the 4-way capability-identity invariant (``capability_id == module
     stem``) rather than inferring the module from anything incidental. Mirrors
     the kernel-side importlib precedent in ``registered_adapters.py``."""
+    # resolver-monopoly-exempt: a CAPABILITY module's stem is not a guess at its
+    # identity -- it IS the canonical identity, by definition, because the
+    # emitter owns that filename and a build-time check refuses any capability
+    # whose four identity fields disagree. This holds for a CAPABILITY module's
+    # stem and for NOTHING else: an adapter's or a reader's module name is
+    # chosen freely and nothing pins it, so those must be resolved by asking
+    # what the module declares, never by rebuilding the name from an id.
     module_stem = f"{capability_id}{CAPABILITY_MODULE_SUFFIX}"
     capabilities_dir = project_root / CAPABILITIES_DIR_REL
     source = capabilities_dir / f"{module_stem}.py"
