@@ -298,6 +298,20 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         # flagged in test_external_write_scan.py). It is invoked ONLY by the
         # build agent's own CLI call, never imported by emitted capability code.
         "dependency_enrollment.py",
+        # test_capability_runner_topology.py: kernel-side tests of
+        # capability_runner.py's own read-facade resolution. It legitimately
+        # imports `external_write.topology` directly -- constructing
+        # `TopologyError` with known attributes and, in one test, replacing
+        # `Topology.find_read_facade` for the duration of a single test -- to
+        # prove the kernel classifies a resolution failure purely from the
+        # exception's own attributes rather than re-deriving the
+        # classification itself. `topology` is not in the CAPABILITY-zone
+        # import allowlist, so this needs the same membership
+        # capability_runner.py itself already carries for the identical
+        # reason: it is kernel-internal test code, never emitted capability
+        # code, and it imports no vendor SDK, constructs no credential, and
+        # never calls run_operation.
+        "test_capability_runner_topology.py",
     }
 )
 

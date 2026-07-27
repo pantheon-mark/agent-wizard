@@ -335,7 +335,30 @@ def discover_declarations(source: str, relpath: str) -> Tuple[Declaration, ...]:
 
 
 class TopologyError(Exception):
-    """Fail-closed resolution failure. Message is operator-readable."""
+    """Fail-closed resolution failure. Message is operator-readable.
+
+    Carries the classification `_find` already computed, as attributes set
+    at raise time, so a caller never has to re-derive it from `Topology`'s
+    own declarations: `op_kind` / `role` (what was asked for),
+    `conflicting_relpaths` (the relpaths of every module claiming the same
+    op_kind -- empty unless that is the reason for this raise), and
+    `unreadable_relpaths` (the relpaths of declarations carrying an
+    `unresolved_reason` -- empty unless that is the reason). At most one of
+    `conflicting_relpaths` / `unreadable_relpaths` is ever non-empty for a
+    single raise. The message text is unchanged by this -- it is written for
+    a build-time audience and stays that way; the attributes exist so an
+    operator-facing caller can build its OWN wording from the same
+    classification instead of parsing this message or re-deriving the
+    predicate."""
+
+    def __init__(self, message: str, *, op_kind: str = "", role: str = "",
+                 conflicting_relpaths: Tuple[str, ...] = (),
+                 unreadable_relpaths: Tuple[str, ...] = ()):
+        super().__init__(message)
+        self.op_kind = op_kind
+        self.role = role
+        self.conflicting_relpaths = conflicting_relpaths
+        self.unreadable_relpaths = unreadable_relpaths
 
 
 class Topology:
@@ -359,17 +382,22 @@ class Topology:
                     f"cannot tell whether anything in this project provides "
                     f"{what} for the operation '{op_kind}', because some "
                     f"files could not be fully read, so what they provide "
-                    f"is unknown: {reasons}")
+                    f"is unknown: {reasons}",
+                    op_kind=op_kind, role=role,
+                    unreadable_relpaths=tuple(sorted({d.relpath for d in unresolved})))
             raise TopologyError(
                 f"nothing in this project provides {what} for the operation "
                 f"'{op_kind}'. A module has to declare it by calling "
-                f"register_{role}('{op_kind}', ...) at the top level.")
+                f"register_{role}('{op_kind}', ...) at the top level.",
+                op_kind=op_kind, role=role)
         stems = sorted({d.module_stem for d in hits})
         if len(stems) > 1:
             raise TopologyError(
                 f"more than one module claims the operation '{op_kind}': "
                 f"{', '.join(stems)}. Exactly one has to provide it -- refusing "
-                "to guess which.")
+                "to guess which.",
+                op_kind=op_kind, role=role,
+                conflicting_relpaths=tuple(sorted({d.relpath for d in hits})))
         # Many-to-one (one module, one symbol, several op_kinds) is legitimate.
         return hits[0]
 

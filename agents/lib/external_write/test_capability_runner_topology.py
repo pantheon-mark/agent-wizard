@@ -144,6 +144,55 @@ class ReadFacadeResolutionRefusalTests(_ScratchKernelDirTestCase):
         self.assertIn("read_facades_selfundoing.py", message)
         self.assertNotIn("Traceback", message)
 
+    def test_an_unreadable_declaring_file_is_named_not_treated_as_a_rebuild(self):
+        # Nothing resolvably declares THIS op_kind, but a DIFFERENT
+        # declaration in the project sits inside a function body, which
+        # cannot be resolved -- so it is unknown whether that file might
+        # have been the one providing it. Saying "rebuilt" here would send
+        # the operator to create a brand new file instead of fixing the one
+        # that already exists but could not be read.
+        self._write_facade_module(
+            "read_facades_unreadable.py",
+            'from external_write.read_facade import ReadFacade, register_read_facade\n\n'
+            'def _register_late():\n'
+            '    class NestedFacade(ReadFacade):\n'
+            '        read_methods = ()\n'
+            '    register_read_facade("something.unrelated", NestedFacade)\n')
+
+        with self.assertRaises(cr.CapabilityRunnerError) as ctx:
+            self._resolve()
+        message = str(ctx.exception)
+        self.assertNotIn("rebuilt", message)
+        self.assertIn("read_facades_unreadable.py", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_the_kernel_classifies_from_the_exception_not_by_re_deriving(self):
+        # The kernel has to branch on TopologyError's own attributes, never
+        # by re-inspecting Topology's declarations itself. Proven by making
+        # the two disagree: the exception claims a conflict between two
+        # files that do not exist anywhere on disk, while nothing on disk
+        # declares anything at all. If the kernel were re-deriving its own
+        # filter over the declarations, it could not possibly reproduce
+        # this conflict, because there would be nothing to find it in.
+        from external_write.topology import Topology, TopologyError
+
+        def _fake_find_read_facade(self, op_kind):
+            raise TopologyError(
+                "a build-time message, not read by the kernel",
+                op_kind=op_kind, role="read_facade",
+                conflicting_relpaths=("totally_fake_a.py", "totally_fake_b.py"))
+
+        orig = Topology.find_read_facade
+        Topology.find_read_facade = _fake_find_read_facade
+        self.addCleanup(setattr, Topology, "find_read_facade", orig)
+
+        with self.assertRaises(cr.CapabilityRunnerError) as ctx:
+            self._resolve()
+        message = str(ctx.exception)
+        self.assertIn("totally_fake_a.py", message)
+        self.assertIn("totally_fake_b.py", message)
+        self.assertNotIn("rebuilt", message)
+
 
 class ReadFacadeResolutionNeverReturnsAnUnvalidatedObjectTests(_ScratchKernelDirTestCase):
     """The class has to come from the registry accessor `register_read_facade`

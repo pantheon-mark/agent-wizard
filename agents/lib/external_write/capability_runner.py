@@ -153,16 +153,24 @@ def resolve_read_facade_class(project_root: Any, capability_id: str) -> type:
         # Translate the build-time-audience topology message into plain,
         # operator-actionable language -- the detail stays available via
         # exception chaining, never in the sentence handed to the operator.
-        hits = [d for d in topology.declarations
-                if d.role == "read_facade" and d.op_kind == op_kind]
-        conflicting = sorted({d.relpath for d in hits})
-        if len(conflicting) > 1:
+        # The classification (conflict / unreadable / neither) comes from
+        # the exception's own attributes, set by Topology._find itself --
+        # never re-derived here, so this can never drift from what _find
+        # actually decided.
+        if exc.conflicting_relpaths:
             raise CapabilityRunnerError(
                 f"more than one file in this project claims to provide "
                 f"read-only access for `{capability_id}` "
-                f"({', '.join(conflicting)}), so it is unclear which one to "
-                "use. One of them needs to be removed or fixed so only one "
-                "remains.") from exc
+                f"({', '.join(exc.conflicting_relpaths)}), so it is unclear "
+                "which one to use. One of them needs to be removed or fixed "
+                "so only one remains.") from exc
+        if exc.unreadable_relpaths:
+            raise CapabilityRunnerError(
+                f"`{capability_id}` cannot be set up to read yet, because "
+                f"one of this project's own files "
+                f"({', '.join(exc.unreadable_relpaths)}) declares what it "
+                "provides in a way that cannot be read. That file needs to "
+                "be fixed before this can run.") from exc
         raise CapabilityRunnerError(
             f"`{capability_id}` cannot look at the outside system in "
             "read-only mode yet, so it cannot safely work out what to "
