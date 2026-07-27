@@ -3183,11 +3183,41 @@ def _next_step_line(m: MechanismReport) -> str:
             "what your choices are."
         )
     if ws == _WRITER_STATE_ACKNOWLEDGED_RISK:
-        return (
+        # ESTABLISHED BY EXECUTION, not by reading the docs: recording a decision
+        # to leave a writer as it is does NOT restore its live external-write
+        # path. Driven end to end (reconcile -> acknowledge -> re-evaluate), the
+        # runtime pre-write gate refused the writer's operation BEFORE the
+        # acknowledgement and refused it AFTER, with the byte-identical refusal
+        # reason, and the pause marker's paused op kinds were unchanged. What the
+        # acknowledgement changes is a DIFFERENT thing: the writer drops out of
+        # the blocking set, so it stops holding back live-enable for the whole
+        # project.
+        #
+        # So both facts are individually TRUE, which is why they cannot be left
+        # sitting next to each other as bare prose -- read together they sound
+        # like a contradiction ("switched off" / "not holding anything up"). This
+        # sentence RECONCILES them out loud instead: the decision did not switch
+        # anything back on, and what it did do is narrower than it sounds.
+        line = (
             "  - You have already looked at this one and recorded a decision to leave "
-            "it as it is, so it is not holding anything else up. It stays listed here "
-            "so it does not quietly disappear."
+            "it as it is. That decision did not switch anything back on: it only means "
+            "this one is no longer holding up the rest of your system."
         )
+        if m.paused or m.paused_op_kinds:
+            # Only claim it stays off where something demonstrably IS holding it
+            # off (a gated runner, or a runtime block on its specific changes).
+            # Where neither exists, the line above this one has already told the
+            # operator plainly not to rely on it being blocked, and repeating the
+            # opposite here would contradict it.
+            line += (
+                " The part of it that changes things outside this project stays "
+                "switched off."
+            )
+        line += (
+            " Nothing more is expected from you, and it stays listed here so it does "
+            "not quietly disappear."
+        )
+        return line
     return (
         "  - The fix has been queued, and it will be rebuilt through the same "
         "reviewed process used for any new capability before it runs live again."
@@ -3824,26 +3854,50 @@ def render_reconcile_result(result: ReconcileResult) -> str:
         # writer a rebuild cannot clear. See ``_writer_state_of``.
         writer_state = _writer_state_of(m)
         if writer_state == _WRITER_STATE_NON_LIVE:
-            status = "a test file -- nothing switched off, no action needed"
-        elif writer_state == _WRITER_STATE_NEEDS_PERSON:
-            status = "external writes switched off -- needs a person to look at it"
-        elif writer_state == _WRITER_STATE_ACKNOWLEDGED_RISK:
-            status = "left as it is, by your own recorded decision"
-        elif m.paused:
-            status = "paused"
+            # A test module is the ONE case where the mechanical claim below does
+            # not apply: nothing of its was switched off and no rebuild is owed.
+            # But if its runner wrapper WAS gated, saying "nothing switched off"
+            # is a flat contradiction of what the notice tells the operator about
+            # the same file -- so mirror the notice's own conditional exactly
+            # (see ``_test_file_notice_lines``).
+            if m.paused:
+                status = ("a test file -- no action needed; the script that runs it "
+                          "was switched off as a precaution")
+            else:
+                status = "a test file -- nothing switched off, no action needed"
+            lines.append(f"  - {m.writer_relpath}: {status}")
+            continue
+        # For every other file, MECHANICAL and ROUTE are COMPOSED, never
+        # substituted: the kind of file it is does not change what this upgrade
+        # actually did to it. Letting the kind pre-empt the mechanical half
+        # dropped the "paused" signal for an entrypoint-paused writer needing a
+        # person -- so the operator lost, on the surface they read FIRST, the fact
+        # that an entire scheduled job (its digest and alerts included) had gone
+        # dark, while the notice for that same file still told them so.
+        if m.paused:
+            mechanical = "paused"
         elif m.state == "paused_live_write":
-            status = "paused (live-write blocked pending migration)"
+            mechanical = "paused (live-write blocked pending migration)"
         elif m.state == "broken_requires_migration":
-            # (xvendor round-2, R2-2) "cannot run as-is" was the same overclaim
+            # "cannot run as-is" was the same overclaim
             # the impact-notice text already dropped for this state (see the
-            # module docstring's Finding-1 note just above) -- import-broken
+            # module docstring's note just above) -- import-broken
             # was never actually verified before this label was written. The
             # honest claim, matching the notice: its ability to write outside
             # this project was switched off, not a claim about importability.
-            status = "external writes switched off -- queued for rebuild"
+            # The ROUTE ("queued for rebuild") used to be welded into this same
+            # string, which is what made it impossible to state the mechanical
+            # fact without also promising a rebuild.
+            mechanical = "external writes switched off"
         else:
-            status = "needs manual review (no schedule found)"
-        lines.append(f"  - {m.writer_relpath}: {status}")
+            mechanical = "needs manual review (no schedule found)"
+        if writer_state == _WRITER_STATE_NEEDS_PERSON:
+            route = "needs a person to look at it"
+        elif writer_state == _WRITER_STATE_ACKNOWLEDGED_RISK:
+            route = "left as it is, by your own recorded decision"
+        else:
+            route = "queued for rebuild"
+        lines.append(f"  - {m.writer_relpath}: {mechanical} -- {route}")
     for canonical_id in result.stale_acceptance_reset:
         lines.append(
             f"  - {canonical_id}: its code changed since you approved it, so its approval "

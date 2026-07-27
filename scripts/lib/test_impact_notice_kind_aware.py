@@ -248,6 +248,36 @@ class BlockingWriterKeepsItsAccurateWordingTests(unittest.TestCase):
         self.assertNotIn("rebuilt", bullet)
         self.assertIn("already looked at this one", bullet.lower())
 
+    def test_the_acknowledged_bullet_reconciles_its_two_true_facts(self):
+        # ESTABLISHED BY EXECUTION: an acknowledgement does NOT restore the live
+        # external-write path (the runtime gate refuses identically before and
+        # after); what it does is drop the writer out of the blocking set, so it
+        # stops holding back live-enable. Both facts are true, so the bullet must
+        # not leave them adjacent reading like a contradiction -- it has to say
+        # out loud that the decision did not switch anything back on.
+        text = render_impact_notice(
+            [_mechanism("agents/upkeep/runner.py", _ACKNOWLEDGED,
+                        paused_op_kinds=["acme.widget.delete"])],
+            from_version="v0.21.0", to_version="v0.22.0")
+        bullet = _bullet_for(text, "agents/upkeep/runner.py")
+        self.assertIn("did not switch anything back on", bullet)
+        self.assertIn("no longer holding up the rest of your system", bullet)
+        self.assertIn(
+            "changes things outside this project stays switched off", bullet)
+
+    def test_the_acknowledged_bullet_does_not_claim_a_block_that_does_not_exist(self):
+        # The mirror case: no gated runner and no runtime block on its changes.
+        # The line above has already told the operator plainly NOT to rely on it
+        # being blocked, so claiming here that it "stays switched off" would
+        # contradict the notice's own caveat two sentences earlier.
+        text = render_impact_notice(
+            [_mechanism("agents/upkeep/runner.py", _ACKNOWLEDGED)],
+            from_version="v0.21.0", to_version="v0.22.0")
+        bullet = _bullet_for(text, "agents/upkeep/runner.py")
+        self.assertIn("do not rely on it being blocked", bullet)
+        self.assertNotIn("stays switched off", bullet)
+        self.assertIn("did not switch anything back on", bullet)
+
 
 class DisplayNameCollisionTests(unittest.TestCase):
 
@@ -439,6 +469,159 @@ class ReconcileWiresTheClassifierInTests(unittest.TestCase):
         self.assertNotIn(
             "queued for rebuild",
             summary_lines.get("- agents/inbox/test_inbox_bulk.py", ""))
+
+
+def _cli_status_for(out, writer_relpath):
+    """The one status clause the CLI summary printed for ``writer_relpath``."""
+    line = next(ln for ln in out.splitlines()
+                if ln.strip().startswith(f"- {writer_relpath}:"))
+    return line.split(":", 1)[1].strip()
+
+
+class CliSummaryAgreesWithTheNoticeTests(unittest.TestCase):
+    """The CLI summary prints at the terminal; the notice is a file the operator
+    opens afterwards. Anything the CLI says that the notice contradicts is worse
+    than either surface being wrong alone, because the operator sees both."""
+
+    def _both(self, mechanisms):
+        notice = render_impact_notice(
+            mechanisms, from_version="v0.21.0", to_version="v0.22.0")
+        cli = render_reconcile_result(ReconcileResult(
+            operator_project_path="/tmp/x", from_version="v0.21.0",
+            to_version="v0.22.0", mechanisms=mechanisms,
+            notice_path="/tmp/x/.wizard/upgrade-review/u1/impact-notice.md"))
+        return notice, cli
+
+    def test_a_paused_test_module_is_not_told_nothing_was_switched_off(self):
+        # The CLI said "nothing switched off" while the notice said the script
+        # that runs it WAS switched off, about the same file, in the same run.
+        m = _mechanism("agents/inbox/test_nightly_sync.py", _NON_LIVE,
+                       paused=True, state="entrypoint_paused",
+                       entrypoint_relpath="agents/inbox/run_test_nightly_sync.sh")
+        notice, cli = self._both([m])
+        status = _cli_status_for(cli, "agents/inbox/test_nightly_sync.py")
+        self.assertNotIn("nothing switched off", status)
+        self.assertIn("switched off as a precaution", status)
+        self.assertIn("test file", status)
+        self.assertIn("no action needed", status)
+        # ... and the notice agrees, naming the same wrapper.
+        bullet = _bullet_for(notice, "agents/inbox/test_nightly_sync.py")
+        self.assertIn("agents/inbox/run_test_nightly_sync.sh", bullet)
+        self.assertIn("switched off as", bullet)
+
+    def test_an_unpaused_test_module_still_says_nothing_was_switched_off(self):
+        # Guard the conditional the other way -- the common case must keep the
+        # plainer, and true, wording.
+        m = _mechanism("agents/inbox/test_inbox_bulk.py", _NON_LIVE)
+        _notice, cli = self._both([m])
+        status = _cli_status_for(cli, "agents/inbox/test_inbox_bulk.py")
+        self.assertIn("nothing switched off, no action needed", status)
+        self.assertNotIn("precaution", status)
+
+    def test_kind_composes_with_pause_rather_than_swallowing_it(self):
+        # An entrypoint-paused writer that needs a person: the operator must keep
+        # BOTH signals. Losing "paused" loses the fact that a whole scheduled job
+        # went dark -- which the notice for the same file does tell them.
+        m = _mechanism("agents/cron/estate_upkeep.py", _NEEDS_PERSON,
+                       paused=True, state="entrypoint_paused",
+                       entrypoint_relpath="agents/cron/run_estate_upkeep.sh",
+                       carries_read_outputs=True,
+                       entangled_read_outputs=["digest", "alert", "backup"])
+        notice, cli = self._both([m])
+        status = _cli_status_for(cli, "agents/cron/estate_upkeep.py")
+        self.assertIn("paused", status)
+        self.assertIn("needs a person to look at it", status)
+        self.assertNotIn("queued for rebuild", status)
+        bullet = _bullet_for(notice, "agents/cron/estate_upkeep.py")
+        self.assertIn("paused too", bullet.lower())
+        self.assertIn("needs a person", bullet.lower())
+
+    def test_a_paused_live_write_writer_keeps_its_mechanical_clause(self):
+        m = _mechanism("agents/capabilities/acme_capability.py", _NEEDS_PERSON,
+                       state="paused_live_write",
+                       paused_op_kinds=["acme.widget.delete"])
+        _notice, cli = self._both([m])
+        status = _cli_status_for(cli, "agents/capabilities/acme_capability.py")
+        self.assertIn("live-write blocked pending migration", status)
+        self.assertIn("needs a person to look at it", status)
+
+    def test_the_mechanical_clause_no_longer_welds_in_the_rebuild_route(self):
+        # `broken_requires_migration` used to hardcode "queued for rebuild" INTO
+        # its mechanical string, which is what made it impossible to state the
+        # mechanical fact without also promising a rebuild.
+        person = _mechanism("agents/upkeep/runner.py", _NEEDS_PERSON)
+        blocking = _mechanism("agents/inbox/runner.py", _BLOCKING)
+        _notice, cli = self._both([person, blocking])
+        self.assertEqual(
+            _cli_status_for(cli, "agents/upkeep/runner.py"),
+            "external writes switched off -- needs a person to look at it")
+        self.assertEqual(
+            _cli_status_for(cli, "agents/inbox/runner.py"),
+            "external writes switched off -- queued for rebuild")
+
+    def test_an_acknowledged_writer_keeps_its_mechanical_clause_too(self):
+        m = _mechanism("agents/legacy/notifier.py", _ACKNOWLEDGED, paused=True,
+                       state="entrypoint_paused",
+                       entrypoint_relpath="agents/legacy/run_notifier.sh")
+        _notice, cli = self._both([m])
+        status = _cli_status_for(cli, "agents/legacy/notifier.py")
+        self.assertIn("paused", status)
+        self.assertIn("your own recorded decision", status)
+        self.assertNotIn("queued for rebuild", status)
+
+    def test_neither_surface_names_a_file_by_its_bare_filename(self):
+        notice, cli = self._both([
+            _mechanism("agents/inbox/runner.py", _BLOCKING),
+            _mechanism("agents/upkeep/runner.py", _NEEDS_PERSON),
+        ])
+        for surface, label in ((notice, "notice"), (cli, "cli")):
+            self.assertIn("agents/inbox/runner.py", surface, label)
+            self.assertIn("agents/upkeep/runner.py", surface, label)
+        self.assertNotIn("- runner:", cli)
+
+
+class AcknowledgementIsReachableEndToEndTests(unittest.TestCase):
+    """``acknowledged_risk`` is not reachable from the scanner alone, but it IS
+    reachable through the emitted public acknowledgement API -- so the branch that
+    renders it is a real operator path, not scaffolding, and is covered as one."""
+
+    _NEEDS_PERSON_RUNNER = (
+        "import urllib.request\n"
+        "from external_write.run_envelope import mint_run_envelope, new_bulk_run_id\n"
+        "def run_batches(batches):\n"
+        "    for b in batches:\n"
+        "        mint_run_envelope(run_id=new_bulk_run_id('x'))\n"
+    )
+
+    def test_reconcile_then_acknowledge_reclassifies_and_rewords(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = Path(tmp)
+            relpath = "agents/upkeep/runner.py"
+            p = proj / relpath
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(self._NEEDS_PERSON_RUNNER, encoding="utf-8")
+
+            first = reconcile_upgrade(
+                proj, _REAL_REPO, from_version="v0.21.0", to_version="v0.22.0",
+                upgrade_id="u1")
+            self.assertEqual(first.mechanisms[0].writer_state, _NEEDS_PERSON)
+
+            ack = upgrade_reconcile._external_write_module(
+                _REAL_REPO, "writer_acknowledgement")
+            ack.acknowledge_writer(
+                str(proj), relpath,
+                operator_confirmation="I accept the risk of leaving this as it is.")
+
+            states = upgrade_reconcile._writer_states_by_relpath(proj, _REAL_REPO)
+            self.assertEqual(states.get(relpath), _ACKNOWLEDGED)
+
+            first.mechanisms[0].writer_state = states[relpath]
+            text = render_impact_notice(
+                first.mechanisms, from_version="v0.21.0", to_version="v0.22.0")
+            bullet = _bullet_for(text, relpath)
+            self.assertIn("did not switch anything back on", bullet)
+            self.assertNotIn("needs a person", bullet.lower())
+            self.assertNotIn("rebuilt", bullet)
 
 
 class ClassifierFailureIsFailClosedTests(unittest.TestCase):
