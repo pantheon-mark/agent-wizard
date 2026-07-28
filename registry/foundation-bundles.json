@@ -407,7 +407,7 @@
       "recommendation_reason": "This is a reliability fix for a lookup that could come up empty and stay silent about it: the safe, read-only access a capability needs is now found by what a file declares it provides rather than by what the file is named, so a project whose files were set up before that naming convention existed now works. It also makes an upgrade's notices honest about which file they mean -- naming the exact file when a declaration cannot be read, showing each flagged file's full location, telling a test file apart from a file your system actually runs, and never blaming an unrelated file. No breaking changes; most operators should take it.",
       "release_date": "2026-07-27",
       "safety_class": "reliability_fix",
-      "source_commit": "PENDING",
+      "source_commit": "5c1501581af7744431c4145766d2a0ccc31d6cf7",
       "status": "prerelease"
     }
   ],
