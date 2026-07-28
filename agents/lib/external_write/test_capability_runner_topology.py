@@ -166,6 +166,56 @@ class ReadFacadeResolutionRefusalTests(_ScratchKernelDirTestCase):
         self.assertIn("read_facades_unreadable.py", message)
         self.assertNotIn("Traceback", message)
 
+    def test_a_file_that_declares_nothing_at_all_is_not_said_to_declare_anything(self):
+        # DIVERGENT INPUT, and the shape a real project actually has: the
+        # project's reader modules are healthy, and the file that cannot be
+        # read is an unrelated half-finished one with NO registration in it
+        # at all. It still has to be named -- while it cannot be read, it
+        # cannot be ruled out -- but the refusal must not assert that it
+        # declares what it provides, because it declares nothing. That
+        # sentence sent someone to repair a file whose repair changes
+        # nothing about the answer.
+        self._write_facade_module(
+            "read_facades_healthy.py",
+            'from external_write.read_facade import ReadFacade, register_read_facade\n'
+            'class HealthyFacade(ReadFacade):\n'
+            '    read_methods = ()\n'
+            'register_read_facade("some.other.operation", HealthyFacade)\n')
+        self._write_facade_module(
+            "half_finished_scratch.py",
+            '# no registration of any kind in this file\n'
+            'def _unfinished(\n')
+
+        with self.assertRaises(cr.CapabilityRunnerError) as ctx:
+            self._resolve()
+        message = str(ctx.exception)
+        self.assertIn("half_finished_scratch.py", message)
+        self.assertNotIn("declares", message)
+        self.assertNotIn("needs to be fixed", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_an_unreadable_adapter_declaration_stays_out_of_a_reader_refusal(self):
+        # DIVERGENT INPUT: the only thing in the project that cannot be
+        # resolved is an ADAPTER registration -- the other role entirely.
+        # Whether an adapter's registration can be read has no bearing on
+        # whether anything provides read-only access, so it must not be
+        # named here and must not be described as declaring what this
+        # capability needs.
+        self._write_facade_module(
+            "acme_writer.py",
+            'from external_write.adapter_registry import register_adapter\n\n'
+            'def _install():\n'
+            '    class _A:\n'
+            '        pass\n'
+            '    register_adapter("some.other.operation", _A())\n')
+
+        with self.assertRaises(cr.CapabilityRunnerError) as ctx:
+            self._resolve()
+        message = str(ctx.exception)
+        self.assertNotIn("acme_writer.py", message)
+        self.assertNotIn("declares", message)
+        self.assertNotIn("Traceback", message)
+
     def test_the_kernel_classifies_from_the_exception_not_by_re_deriving(self):
         # The kernel has to branch on TopologyError's own attributes, never
         # by re-inspecting Topology's declarations itself. Proven by making

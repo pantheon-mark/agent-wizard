@@ -549,15 +549,45 @@ class CliSummaryAgreesWithTheNoticeTests(unittest.TestCase):
         # `broken_requires_migration` used to hardcode "queued for rebuild" INTO
         # its mechanical string, which is what made it impossible to state the
         # mechanical fact without also promising a rebuild.
+        # The trailing parenthetical is the no-runtime-block caveat, which
+        # travels with the mechanical claim on BOTH surfaces -- see
+        # ``test_the_no_runtime_block_caveat_reaches_the_cli_too``.
         person = _mechanism("agents/upkeep/runner.py", _NEEDS_PERSON)
         blocking = _mechanism("agents/inbox/runner.py", _BLOCKING)
         _notice, cli = self._both([person, blocking])
         self.assertEqual(
             _cli_status_for(cli, "agents/upkeep/runner.py"),
-            "external writes switched off -- needs a person to look at it")
+            "external writes switched off -- needs a person to look at it "
+            "(a runtime block could not be automatically installed for it, so "
+            "do not rely on it being blocked until it is fixed)")
         self.assertEqual(
             _cli_status_for(cli, "agents/inbox/runner.py"),
-            "external writes switched off -- queued for rebuild")
+            "external writes switched off -- queued for rebuild "
+            "(a runtime block could not be automatically installed for it, so "
+            "do not rely on it being blocked until it is rebuilt)")
+
+    def test_the_no_runtime_block_caveat_reaches_the_cli_too(self):
+        # The notice said "do not rely on it being blocked until it is
+        # rebuilt" while this surface -- the one the operator reads FIRST --
+        # said "external writes switched off" flatly. Whether anything is
+        # actually holding the writes off is the whole question, so the two
+        # surfaces may not answer it differently.
+        m = _mechanism("agents/inbox/runner.py", _BLOCKING)
+        notice, cli = self._both([m])
+        caveat = "do not rely on it being blocked until it is rebuilt"
+        self.assertIn(caveat, _bullet_for(notice, "agents/inbox/runner.py"))
+        self.assertIn(caveat, _cli_status_for(cli, "agents/inbox/runner.py"))
+
+    def test_a_resolved_op_kind_carries_the_caveat_on_NEITHER_surface(self):
+        # The inverse, so the caveat cannot become unconditional: when an
+        # op_kind WAS resolved a runtime block really was installed, and
+        # telling the operator not to rely on it would be false the other way.
+        m = _mechanism("agents/inbox/runner.py", _BLOCKING,
+                       paused_op_kinds=["inbox.message.send"])
+        notice, cli = self._both([m])
+        caveat = "do not rely on it being blocked"
+        self.assertNotIn(caveat, _bullet_for(notice, "agents/inbox/runner.py"))
+        self.assertNotIn(caveat, _cli_status_for(cli, "agents/inbox/runner.py"))
 
     def test_an_acknowledged_writer_keeps_its_mechanical_clause_too(self):
         m = _mechanism("agents/legacy/notifier.py", _ACKNOWLEDGED, paused=True,

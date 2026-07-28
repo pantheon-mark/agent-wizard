@@ -88,6 +88,28 @@ for the next instance to arrive.
     ``return None``; two statements that together do nothing evade it.
   * A filename stem spelled another way -- slicing ``.name``, hand-stripping a
     ``.py`` suffix -- is not matched by the stem rule.
+  * A WAY OF LOADING A MODULE that is not one of the three this gate names.
+    ``_DYNAMIC_IMPORT_ATTRS`` / ``_DYNAMIC_IMPORT_NAMES`` recognise
+    ``import_module``, ``find_spec`` and ``__import__``, and nothing else.
+    ``importlib.util.spec_from_file_location``, ``SourceFileLoader``,
+    ``runpy.run_module`` and ``exec(compile(...))`` all load a module from a
+    computed name or path and reach NO rule here. Checked against each of those
+    four forms rather than assumed: an id interpolated into them is reported
+    only if the string it builds happens to carry a policed sibling prefix, and
+    is missed outright otherwise.
+  * ``op_kind`` IS NOT ID-SHAPED TO THIS GATE, and that is the boundary most
+    worth knowing. ``_is_id_shaped`` matches a name that is exactly one of
+    ``_ID_NAMES`` (``id`` / ``capability_id`` / ``canonical_id`` /
+    ``mechanism_id``) or ends in ``_id``. ``op_kind`` matches neither -- nor do
+    ``vendor`` or ``slug`` -- so ``import_module(f"external_write.x_{op_kind}")``
+    passes this gate cleanly, confirmed by running the rules over exactly that
+    line. The operation name is now the value every consumer joins on, which
+    makes it the most natural identifier for someone to build a module name out
+    of next, and the rules here would not see it. Widening the id rule is a
+    design change, not a tightening: ``module_stem`` and ``_stem`` are absent
+    from that set deliberately (see the note on ``_ID_NAMES``), and the
+    sanctioned resolver interpolates a stem. So this is DISCLOSED rather than
+    quietly extended.
 
 WHAT IS EXEMPT, AND HOW
 ------------------------

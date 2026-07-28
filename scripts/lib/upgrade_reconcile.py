@@ -435,8 +435,28 @@ class MechanismReport:
                                   health surface can never disagree about the
                                   same file. Empty string means "not
                                   determined" (the classifier could not be
-                                  consulted); the notice then renders its most
-                                  cautious wording -- never a reassurance.
+                                  consulted); the notice then renders the
+                                  ``blocking_live_enable`` wording, which is
+                                  what it said before this field existed.
+                                  STATED PRECISELY, because this used to claim
+                                  "its most cautious wording -- never a
+                                  reassurance" and that is not true as
+                                  written: that wording says the fix is queued
+                                  AND that the file will be rebuilt through
+                                  the reviewed process before it runs live
+                                  again. The queued half is verified (the
+                                  entry was written in this same pass); the
+                                  rebuild ROUTE is not -- an undetermined file
+                                  could be one only a person can clear. Nor is
+                                  it the head of
+                                  ``_WRITER_STATE_NOTICE_PRECEDENCE``. That is
+                                  deliberate, not an oversight: the head
+                                  (``needs_person``) asserts the file cannot
+                                  be fixed automatically and sends someone
+                                  into a manual review, which is equally
+                                  unverified here -- it would swap one
+                                  unverified claim for another rather than
+                                  remove one. See ``_writer_state_of``.
 
                                   DO NOT CONFLATE THIS WITH ``state`` ABOVE.
                                   They are two DIFFERENT vocabularies over two
@@ -3081,6 +3101,11 @@ _WRITER_STATE_RESOLVED = "resolved"
 #: they classify differently, the EARLIER state here wins, so a second entry can
 #: never talk the notice down from "someone has to deal with this" into "nothing
 #: to do here". Also the exhaustive set the pin test checks against.
+#:
+#: SCOPE: this ordering picks between two states the classifier DID determine.
+#: It is NOT the fallback for a state it could not determine -- that is
+#: ``_writer_state_of``, which lands on ``blocking_live_enable`` (index 1) on
+#: purpose, and says why.
 _WRITER_STATE_NOTICE_PRECEDENCE: Tuple[str, ...] = (
     _WRITER_STATE_NEEDS_PERSON,
     _WRITER_STATE_BLOCKING_LIVE_ENABLE,
@@ -3115,9 +3140,11 @@ def _writer_states_by_relpath(
     FAIL-SAFE, NEVER FAIL-STOP: an unavailable classifier, an unreadable or
     malformed queue, or any other failure yields ``{}`` rather than raising. Each
     mechanism then renders with an empty ``writer_state``, which the notice
-    treats as its most cautious case -- byte-identical to the pre-existing
-    wording. A degraded classification must never be able to abort an upgrade's
-    impact notice, and must never produce a reassurance it could not verify."""
+    renders with the pre-existing wording, byte-identical. A degraded
+    classification must never be able to abort an upgrade's impact notice. What
+    that fallback wording does and does not assert is stated exactly at
+    ``MechanismReport.writer_state`` -- it is the status-quo sentence, not a
+    verified one, and it is not the most cautious sentence available."""
     try:
         ext_state = _external_write_module(build_repo_root, "_ext_write_state")
         report = ext_state.bespoke_writer_state_report(str(operator_project_dir))
@@ -3143,7 +3170,15 @@ def _writer_state_of(m: MechanismReport) -> str:
     has no dedicated wording for -- unset (classifier unavailable) or a state
     invented after this code was written -- becomes
     ``_WRITER_STATE_BLOCKING_LIVE_ENABLE``: the demand-action wording, which is
-    the safe direction and what this notice has always said."""
+    what this notice said before ``writer_state`` existed.
+
+    NOT the head of ``_WRITER_STATE_NOTICE_PRECEDENCE``, and this fallback is
+    not claimed to be the most cautious answer available. It carries one thing
+    the classifier did not verify -- that the file will be REBUILT through the
+    reviewed process -- and the alternative fallback carries a different
+    unverified claim (that no automatic fix can clear it). See
+    ``MechanismReport.writer_state`` for why the status-quo wording is kept
+    rather than substituting one unverified sentence for another."""
     ws = m.writer_state or ""
     if ws in _WRITER_STATES_WITH_OWN_WORDING:
         return ws
@@ -3874,6 +3909,7 @@ def render_reconcile_result(result: ReconcileResult) -> str:
         # person -- so the operator lost, on the surface they read FIRST, the fact
         # that an entire scheduled job (its digest and alerts included) had gone
         # dark, while the notice for that same file still told them so.
+        caveat = ""
         if m.paused:
             mechanical = "paused"
         elif m.state == "paused_live_write":
@@ -3889,6 +3925,31 @@ def render_reconcile_result(result: ReconcileResult) -> str:
             # string, which is what made it impossible to state the mechanical
             # fact without also promising a rebuild.
             mechanical = "external writes switched off"
+            # The impact notice carries a caveat for exactly this case: when
+            # no op_kind could be resolved (empty paused_op_kinds) NO runtime
+            # block was installed, so the switched-off claim is about intent,
+            # not about something demonstrably holding the writes. This
+            # surface is read FIRST and stated it flatly, so the two surfaces
+            # disagreed on whether anything is actually blocking. The caveat
+            # travels with the claim now.
+            #
+            # Spelled out in FULL per state as ONE contiguous string literal
+            # each, never assembled around an interpolated verb -- the same
+            # reason the notice does it that way (a caveat split across a
+            # placeholder is a caveat a verbatim check can no longer see).
+            if not m.paused_op_kinds:
+                if _restored_when(m) == "fixed":
+                    caveat = (
+                        " (a runtime block could not be automatically installed "
+                        "for it, so do not rely on it being blocked until it is "
+                        "fixed)"
+                    )
+                else:
+                    caveat = (
+                        " (a runtime block could not be automatically installed "
+                        "for it, so do not rely on it being blocked until it is "
+                        "rebuilt)"
+                    )
         else:
             mechanical = "needs manual review (no schedule found)"
         if writer_state == _WRITER_STATE_NEEDS_PERSON:
@@ -3897,7 +3958,7 @@ def render_reconcile_result(result: ReconcileResult) -> str:
             route = "left as it is, by your own recorded decision"
         else:
             route = "queued for rebuild"
-        lines.append(f"  - {m.writer_relpath}: {mechanical} -- {route}")
+        lines.append(f"  - {m.writer_relpath}: {mechanical} -- {route}{caveat}")
     for canonical_id in result.stale_acceptance_reset:
         lines.append(
             f"  - {canonical_id}: its code changed since you approved it, so its approval "
