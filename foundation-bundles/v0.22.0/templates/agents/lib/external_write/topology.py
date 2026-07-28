@@ -342,8 +342,10 @@ class TopologyError(Exception):
     own declarations: `op_kind` / `role` (what was asked for),
     `conflicting_relpaths` (the relpaths of every module claiming the same
     op_kind -- empty unless that is the reason for this raise), and
-    `unreadable_relpaths` (the relpaths of declarations carrying an
-    `unresolved_reason` -- empty unless that is the reason). At most one of
+    `unreadable_relpaths` (the relpaths of the declarations carrying an
+    `unresolved_reason` THAT BEAR ON THIS QUERY -- the ones for the same
+    role, plus any file that could not be parsed at all, whose role is
+    unknowable; empty unless that is the reason). At most one of
     `conflicting_relpaths` / `unreadable_relpaths` is ever non-empty for a
     single raise. The message text is unchanged by this -- it is written for
     a build-time audience and stays that way; the attributes exist so an
@@ -375,7 +377,16 @@ class Topology:
                 if d.role == role and d.op_kind == op_kind]
         if not hits:
             what = "a read-only reader" if role == "read_facade" else "an adapter"
-            unresolved = self.unresolved()
+            # ROLE-SCOPED, deliberately. An unresolved declaration bears on
+            # THIS query only when it is for the SAME role, or when the file
+            # could not be parsed at all (role "unknown"), where what it
+            # might have declared is genuinely unknowable. An unreadable
+            # ADAPTER registration says nothing about whether a reader
+            # exists: reporting it under a reader query names a file that has
+            # no bearing on the question asked, and a caller acting on it
+            # sends someone to change a file that cannot change the answer.
+            unresolved = tuple(d for d in self.unresolved()
+                               if d.role in (role, "unknown"))
             if unresolved:
                 reasons = " / ".join(d.unresolved_reason for d in unresolved)
                 raise TopologyError(

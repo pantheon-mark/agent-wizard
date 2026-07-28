@@ -129,7 +129,7 @@
       "path": "templates/agents/lib/external_write/capability_registration.py"
     },
     {
-      "hash": "sha256:f79fcb7f4adc67760d72dc2425be818c447c99465cb669b8cceb56c7f1bd2fa8",
+      "hash": "sha256:2ad4b129188ca4b204342856099eb3fa70cd146a284b012a81f6be53950f9178",
       "path": "templates/agents/lib/external_write/capability_runner.py"
     },
     {
@@ -213,7 +213,7 @@
       "path": "templates/agents/lib/external_write/standing_automation.py"
     },
     {
-      "hash": "sha256:84aa79f56f1c5b7c21843ea78e32c6015ac9f9080ec564bdf6f334a4bc758f57",
+      "hash": "sha256:0fd86cdfabba246b0a1d4e87f566606e0d1334e64fce41cb01bd33514d9d805e",
       "path": "templates/agents/lib/external_write/topology.py"
     },
     {
@@ -574,12 +574,12 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-07-27T23:00:27Z",
-  "generator_version": "f17984921d4c23d1f34ce1a36ca5bd29338c4c5e",
+  "generated_at": "2026-07-28T00:14:45Z",
+  "generator_version": "2e907ba421cf3fd9c0dcc3cdd9c5ce3c612ef12e",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.22.0",
-  "source_registry_entry_hash": "sha256:33b5522089adfac65765fe298741bc036f1e53e1a5827113fd4a6647589f956e",
+  "source_registry_entry_hash": "sha256:29d8e68b2d1963a367dde3281f95ccd87621c91fc2722d27db59fcc8da6ebbfa",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
   "template_tree_hash": "sha256:5516d3e9758d794d0bdf6d8c2acf4b8a8bc5c3478d124d7107ad389d8207a435",

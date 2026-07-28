@@ -172,12 +172,22 @@ def resolve_read_facade_class(project_root: Any, capability_id: str) -> type:
                 "which one to use. One of them needs to be removed or fixed "
                 "so only one remains.") from exc
         if exc.unreadable_relpaths:
+            # Say only what this failure actually establishes: a file could
+            # not be read, so the question cannot be answered either way. It
+            # does NOT establish that the named file declares anything -- a
+            # file that could not be read at all may declare nothing, and
+            # claiming otherwise sends someone to repair a file that cannot
+            # change the answer. The count matters too: the sentence names
+            # every such file, so it may not say "one of".
+            named = ", ".join(exc.unreadable_relpaths)
+            subject = ("A file in this project"
+                       if len(exc.unreadable_relpaths) == 1
+                       else "Some files in this project")
             raise CapabilityRunnerError(
-                f"`{capability_id}` cannot be set up to read yet, because "
-                f"one of this project's own files "
-                f"({', '.join(exc.unreadable_relpaths)}) declares what it "
-                "provides in a way that cannot be read. That file needs to "
-                "be fixed before this can run.") from exc
+                f"`{capability_id}` cannot be set up to read yet. "
+                f"{subject} ({named}) could not be read, so this check "
+                f"cannot tell whether anything here provides what "
+                f"`{capability_id}` needs.") from exc
         raise CapabilityRunnerError(
             f"`{capability_id}` cannot look at the outside system in "
             "read-only mode yet, so it cannot safely work out what to "
