@@ -219,6 +219,22 @@ class PlacementObeysTheMroOrderRule(unittest.TestCase):
             with self.subTest(class_name=class_name):
                 self.assertIs(_exec_and_resolve(result.source, class_name), False)
 
+    def test_declaration_lands_next_to_an_undo_one_that_was_ASSIGNED(self):
+        """The migration must agree with the post-condition about this shape too.
+        While the static walk saw only ``def``s, the migration treated an assigned
+        ``undo_one`` as "nothing here to describe" (benign no-op) while the
+        post-condition blocked the same file -- the two halves of one task
+        contradicting each other in operator-facing terms."""
+        source = (
+            "def _undo(self, raw_client, unit):\n"
+            "    return None\n"
+            "\n"
+            "\n"
+            + _adapter("    undo_one = _undo\n"))
+        result = plan_undo_declaration_migration(source, _CTX)
+        self.assertTrue(result.changed, result.reason)
+        self.assertIs(_exec_and_resolve(result.source, "InboxAdapter"), False)
+
     def test_running_the_migration_twice_changes_nothing_the_second_time(self):
         once = plan_undo_declaration_migration(_adapter(_UNDO_METHOD), _CTX)
         twice = plan_undo_declaration_migration(once.source, _CTX)
@@ -342,32 +358,127 @@ class TheStaticResolverMatchesTheKernelRule(unittest.TestCase):
             f"    {UNDO_DECLARATION_ATTR}: bool = True\n" + _UNDO_METHOD))
         self.assertEqual(site.status, UNDO_DECLARATION_DECLARED)
 
+    def test_an_undo_one_ASSIGNED_in_the_class_body_counts_as_defining_it(self):
+        """The runtime rule is ``undo_one in vars(klass)`` -- ANY class-body
+        binding of the name, not only a ``def``. A class carrying the declaration
+        alongside ``undo_one = _undo`` is fully eligible at runtime, so a static
+        check that reported it as "no undo step here" would emit a durable
+        blocking entry whose stated reason is FALSE and whose named repair cannot
+        clear it (no declaration edit changes an undo-not-found verdict). An
+        assigned method is also the shape this estate's own defects have taken."""
+        source = (
+            "def _undo(self, raw_client, unit):\n"
+            "    return None\n"
+            "\n"
+            "\n"
+            + _adapter(f"    {UNDO_DECLARATION_ATTR} = True\n"
+                       "    undo_one = _undo\n"))
+        site = self._site(source)
+        self.assertEqual(site.status, UNDO_DECLARATION_DECLARED)
+        self.assertEqual(site.undo_defining_class, "InboxAdapter")
+        self.assertIs(_exec_and_resolve(source, "InboxAdapter"), True,
+                      "fixture precondition: the runtime must honour this shape, "
+                      "or the static verdict has nothing to agree with")
+
+    def test_an_assigned_undo_one_can_still_be_SUPERSEDED(self):
+        """The MRO-order rule has to keep applying to the assigned shape too: a
+        base declares, the subclass replaces ``undo_one`` with an assignment."""
+        source = (
+            "def _undo(self, raw_client, unit):\n"
+            "    return None\n"
+            "\n"
+            "\n"
+            + _adapter(
+                "    undo_one = _undo\n",
+                extra_classes=("class BaseAdapter:\n"
+                               f"    {UNDO_DECLARATION_ATTR} = True\n"
+                               + _UNDO_METHOD + "\n"),
+                registered="InboxAdapter", bases="(BaseAdapter)"))
+        self.assertEqual(self._site(source).status,
+                         UNDO_DECLARATION_SUPERSEDED_STATUS)
+        self.assertIs(_exec_and_resolve(source, "InboxAdapter"),
+                      adapter_registry.UNDO_DECLARATION_SUPERSEDED)
+
+    def test_a_declaration_is_HONOURED_when_undo_one_comes_from_outside_the_module(self):
+        """The disclosed out-of-module-base case. The static walk cannot follow a
+        base defined elsewhere -- but the runtime CAN, and it resolves
+        ``d_decl <= d_undo`` for ANY in-module declaration, because the class
+        carrying it necessarily sits at or before whatever defines ``undo_one``
+        further up the real MRO. So a declaration here is genuinely honoured, and
+        reporting it as unresolvable would leave a durable block that the correct
+        repair cannot clear. Fail-closed is right for a MISSING declaration; it is
+        not right for one that is present and will be read."""
+        source = (
+            "from external_write.adapter_registry import register_adapter\n"
+            "from vendor_shared import SharedAdapterBase\n"
+            "\n"
+            "OP_KIND = 'inbox.labels.modify'\n"
+            "\n"
+            "\n"
+            "class InboxAdapter(SharedAdapterBase):\n"
+            f"    {UNDO_DECLARATION_ATTR} = True\n"
+            "    def apply_one(self, raw_client, unit):\n"
+            "        return None\n"
+            "\n"
+            "\n"
+            "register_adapter(OP_KIND, InboxAdapter())\n")
+        site = self._site(source)
+        self.assertEqual(site.status, UNDO_DECLARATION_DECLARED)
+        self.assertEqual(site.declaring_class, "InboxAdapter")
+        self.assertIsNone(site.undo_defining_class,
+                          "the static walk must not claim to have found the "
+                          "undo step it cannot see")
+
+    def test_undo_not_found_stays_the_verdict_only_when_NOTHING_declares_it(self):
+        source = (
+            "from external_write.adapter_registry import register_adapter\n"
+            "from vendor_shared import SharedAdapterBase\n"
+            "\n"
+            "OP_KIND = 'inbox.labels.modify'\n"
+            "\n"
+            "\n"
+            "class InboxAdapter(SharedAdapterBase):\n"
+            "    def apply_one(self, raw_client, unit):\n"
+            "        return None\n"
+            "\n"
+            "\n"
+            "register_adapter(OP_KIND, InboxAdapter())\n")
+        self.assertEqual(self._site(source).status,
+                         UNDO_DECLARATION_UNDO_NOT_FOUND)
+
     def test_the_static_resolver_agrees_with_the_kernel_on_every_shape(self):
         """Cross-check: for each shape, the static verdict and the RUNTIME
         verdict must agree. A static approximation that drifts from the rule
         actually enforced at registration is worse than no check."""
+        _assigned = ("def _undo(self, raw_client, unit):\n    return None\n\n\n")
         shapes = {
-            UNDO_DECLARATION_MISSING: _adapter(_UNDO_METHOD),
-            UNDO_DECLARATION_DECLARED: _adapter(
-                f"    {UNDO_DECLARATION_ATTR} = True\n" + _UNDO_METHOD),
-            UNDO_DECLARATION_SUPERSEDED_STATUS: _adapter(
-                _UNDO_METHOD,
-                extra_classes=("class BaseAdapter:\n"
-                               f"    {UNDO_DECLARATION_ATTR} = True\n"
-                               + _UNDO_METHOD + "\n"),
-                registered="InboxAdapter", bases="(BaseAdapter)"),
+            "missing": (
+                _adapter(_UNDO_METHOD), UNDO_DECLARATION_MISSING, None),
+            "declared": (
+                _adapter(f"    {UNDO_DECLARATION_ATTR} = True\n" + _UNDO_METHOD),
+                UNDO_DECLARATION_DECLARED, True),
+            "superseded": (
+                _adapter(_UNDO_METHOD,
+                         extra_classes=("class BaseAdapter:\n"
+                                        f"    {UNDO_DECLARATION_ATTR} = True\n"
+                                        + _UNDO_METHOD + "\n"),
+                         registered="InboxAdapter", bases="(BaseAdapter)"),
+                UNDO_DECLARATION_SUPERSEDED_STATUS,
+                adapter_registry.UNDO_DECLARATION_SUPERSEDED),
+            # The fourth shape. Left out of the original cross-check, and it is
+            # the one that produced an unclearable operator block.
+            "assigned_undo_declared": (
+                _assigned + _adapter(f"    {UNDO_DECLARATION_ATTR} = True\n"
+                                     "    undo_one = _undo\n"),
+                UNDO_DECLARATION_DECLARED, True),
+            "assigned_undo_missing": (
+                _assigned + _adapter("    undo_one = _undo\n"),
+                UNDO_DECLARATION_MISSING, None),
         }
-        expected_runtime = {
-            UNDO_DECLARATION_MISSING: None,
-            UNDO_DECLARATION_DECLARED: True,
-            UNDO_DECLARATION_SUPERSEDED_STATUS:
-                adapter_registry.UNDO_DECLARATION_SUPERSEDED,
-        }
-        for status, source in shapes.items():
-            with self.subTest(status=status):
+        for label, (source, status, runtime) in shapes.items():
+            with self.subTest(shape=label):
                 self.assertEqual(self._site(source).status, status)
-                self.assertIs(_exec_and_resolve(source, "InboxAdapter"),
-                              expected_runtime[status])
+                self.assertIs(_exec_and_resolve(source, "InboxAdapter"), runtime)
 
 
 if __name__ == "__main__":

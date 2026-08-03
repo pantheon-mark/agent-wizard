@@ -4437,6 +4437,64 @@ class UndoDeclarationConformanceTests(_Base):
                          "must name the operator-editable module, never the "
                          "shipped adapters_gmail.py")
 
+    _OUT_OF_MODULE_BASE = (
+        "from external_write.adapter_registry import register_adapter\n"
+        "from vendor_shared import SharedAdapterBase\n"
+        "\n"
+        "OP_KIND = 'inbox.labels.modify'\n"
+        "\n"
+        "\n"
+        "class InboxLabelsAdapter(SharedAdapterBase):\n"
+        "{declaration}"
+        "    def apply_one(self, raw_client, unit):\n"
+        "        return None\n"
+        "\n"
+        "\n"
+        "register_adapter(OP_KIND, InboxLabelsAdapter())\n"
+    )
+
+    def test_it_does_not_fire_on_an_undo_one_ASSIGNED_in_the_class_body(self):
+        """The runtime rule is ``undo_one in vars(klass)``, so a class carrying the
+        declaration alongside ``undo_one = _undo`` is fully eligible. Blocking it
+        would state a false reason ("no undo step in that file") AND be
+        unclearable, because no declaration edit changes an undo-not-found
+        verdict."""
+        from upgrade_reconcile import check_undo_declaration_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=(
+                "from external_write.adapter_registry import register_adapter\n"
+                "\n"
+                "OP_KIND = 'inbox.labels.modify'\n"
+                "\n"
+                "\n"
+                "def _undo(self, raw_client, unit):\n"
+                "    return None\n"
+                "\n"
+                "\n"
+                "class InboxLabelsAdapter:\n"
+                f"    {_UNDO_DECL} = True\n"
+                "    undo_one = _undo\n"
+                "\n"
+                "\n"
+                "register_adapter(OP_KIND, InboxLabelsAdapter())\n"))
+        self.assertEqual(check_undo_declaration_conformance(root), [])
+
+    def test_a_declaration_is_accepted_when_undo_one_lives_in_another_module(self):
+        """Fail-closed is right for a MISSING declaration. It is not right for one
+        that is present and WILL be read: the runtime follows the full MRO, so an
+        in-module declaration necessarily sits at or before whatever defines
+        ``undo_one`` further up it. Blocking here would survive the correct
+        repair."""
+        from upgrade_reconcile import check_undo_declaration_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=self._OUT_OF_MODULE_BASE.format(
+                declaration=f"    {_UNDO_DECL} = True\n"))
+        self.assertEqual(check_undo_declaration_conformance(root), [])
+
     def test_it_does_not_fire_on_a_FRESH_BUILD(self):
         """The gate must not be blind to its own motivating case AND must not
         fire on a project that never had the defect. This emits the adapter and
@@ -4557,6 +4615,59 @@ class UndoDeclarationConformanceRecordingTests(_Base):
         self.assertTrue([e for e in queue
                          if e.get("kind") == "undo_declaration_missing"])
 
+    def test_performing_the_named_repair_actually_CLEARS_the_durable_block(self):
+        """A durable block whose own ``suggested_next_step`` cannot clear it is a
+        state the system can enter and the operator cannot leave. So this drives
+        the loop end to end: block, then do EXACTLY what the entry says, then
+        re-run the check and the recorder and assert the entry is gone.
+
+        The fixture is the hard case -- ``undo_one`` inherited from a base in
+        another module, which the static walk cannot follow. Adding the
+        declaration to the class the entry NAMES is honoured at runtime, so it
+        must clear here too.
+        """
+        from upgrade_reconcile import (
+            check_undo_declaration_conformance, record_undo_declaration_conformance,
+        )
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=UndoDeclarationConformanceTests
+            ._OUT_OF_MODULE_BASE.format(declaration=""))
+        adapter = root / "agents" / "lib" / "external_write" / "adapters_inbox.py"
+
+        violations = check_undo_declaration_conformance(root)
+        record_undo_declaration_conformance(
+            root, violations, from_version="v0.22.0", to_version="v0.23.0")
+        entries = [e for e in self._queue(root)
+                   if e.get("kind", "").startswith("undo_declaration")]
+        self.assertEqual(len(entries), 1, self._queue(root))
+        entry = entries[0]
+
+        # The entry must name the class the repair goes on, or a non-technical
+        # operator's assistant has nowhere to put it.
+        self.assertIn("InboxLabelsAdapter", entry["suggested_next_step"])
+        self.assertIn("adapters_inbox.py", entry["suggested_next_step"])
+        # And its stated reason must not assert something false about the file.
+        self.assertNotIn("no undo step in that file at all", entry["reason"])
+
+        # Do exactly what it says: record the answer on the named class.
+        adapter.write_text(
+            adapter.read_text(encoding="utf-8").replace(
+                "class InboxLabelsAdapter(SharedAdapterBase):\n",
+                "class InboxLabelsAdapter(SharedAdapterBase):\n"
+                f"    {_UNDO_DECL} = True\n"),
+            encoding="utf-8")
+
+        record_undo_declaration_conformance(
+            root, check_undo_declaration_conformance(root),
+            from_version="v0.22.0", to_version="v0.23.0")
+        self.assertEqual(
+            [e for e in self._queue(root)
+             if e.get("kind", "").startswith("undo_declaration")], [],
+            "the repair the entry itself named must clear the block -- an "
+            "unclearable durable block is a state the operator cannot leave")
+
     def test_the_superseded_kind_gets_its_own_repair_instruction(self):
         """"Add the declaration" is the wrong instruction for a file that
         already has one -- the operator would look in the wrong class."""
@@ -4630,9 +4741,80 @@ class UndoDeclarationEndToEndTests(_Base):
                              "leave a notice, even with nothing scanner-flagged")
         notice = Path(result.notice_path).read_text(encoding="utf-8")
         self.assertIn("adapters_inbox.py", notice)
-        self.assertIn("approve it again", notice)
+        self.assertIn("no longer covers what is now on disk", notice)
+        self.assertIn("approved again", notice)
         self.assertIn("it will be switched off again the next time this check runs",
                       notice)
+
+    def test_the_notice_does_not_claim_the_upgrade_DELIVERED_what_the_rule_needs(self):
+        """The upgrade added the declaration SITE, set to the safe answer. The
+        rule needs the answer itself, which by this task's central decision only a
+        human who has read ``undo_one`` may record. Because the post-condition
+        guards delivery (satisfied by the site), the block CLEARS and this notice
+        is the operator's only signal -- so a notice that reads as "done" walks a
+        non-technical operator into re-approving and being refused at the trial
+        preflight with no idea why. That is the false-continuity-promise shape."""
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_undo_adapter())
+        result = reconcile_upgrade(root, _REAL_REPO,
+                                  from_version="v0.22.0", to_version="v0.23.0")
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+
+        self.assertNotIn("added what the new safety rule needs", notice,
+                         "the upgrade added the place to record the answer, not "
+                         "the answer")
+        # It must name the actual next action, and say plainly that approving
+        # again is not on its own enough.
+        self.assertIn("not yet checked", notice)
+        self.assertIn("cannot be approved for live use", notice)
+        self.assertIn("approving it again on its own is not enough", notice)
+
+    def test_the_terminal_summary_makes_the_same_honest_claim(self):
+        """The terminal line is read FIRST; the notice is a file opened
+        afterwards. Fixing only one of the two hands the operator a contradictory
+        pair."""
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_undo_adapter())
+        result = reconcile_upgrade(root, _REAL_REPO,
+                                  from_version="v0.22.0", to_version="v0.23.0")
+        summary = render_reconcile_result(result)
+        self.assertIn("adapters_inbox.py", summary)
+        self.assertIn("not yet checked", summary)
+        self.assertNotIn("you will be asked to try it and approve it again", summary)
+
+    def test_the_shared_consequence_is_not_a_sub_bullet_of_the_last_file(self):
+        """With two edited adapters, indenting the shared consequence under the
+        per-file loop makes it read as if it applied only to the second one."""
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_undo_adapter())
+        lib = root / "agents" / "lib" / "external_write"
+        (lib / "adapters_upkeep.py").write_text(
+            _undo_adapter(op_kind="upkeep.cell.write", registered="UpkeepAdapter"),
+            encoding="utf-8")
+        (lib / "operator_adapters.json").write_text(
+            json.dumps(["adapters_inbox", "adapters_upkeep"]), encoding="utf-8")
+        (root / "agents" / "capabilities" / "estate_upkeep_capability.py").write_text(
+            "OP_KIND = 'upkeep.cell.write'\n\n\n"
+            "def propose_operations(facade, batch_id):\n    return []\n",
+            encoding="utf-8")
+        result = reconcile_upgrade(root, _REAL_REPO,
+                                  from_version="v0.22.0", to_version="v0.23.0")
+        self.assertEqual(len(result.adapter_source_edits), 2,
+                         result.adapter_source_edits)
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+        consequence = [line for line in notice.splitlines()
+                       if "no longer covers what is now on disk" in line]
+        self.assertEqual(len(consequence), 1, notice)
+        self.assertTrue(consequence[0].startswith("- "),
+                        f"the shared consequence must be its own top-level "
+                        f"bullet, not indented under the last file: "
+                        f"{consequence[0]!r}")
 
 
 if __name__ == "__main__":

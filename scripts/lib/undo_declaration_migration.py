@@ -198,29 +198,54 @@ def _linearize(tree: ast.Module, class_name: str) -> List[ast.ClassDef]:
     return order
 
 
-def _own_body_declares(node: ast.ClassDef) -> bool:
-    """True when this class's OWN body assigns the declaration attribute.
+def _own_body_binds(node: ast.ClassDef, name: str) -> bool:
+    """True when this class's OWN body binds ``name`` -- the static mirror of the
+    runtime's ``name in vars(klass)``.
 
-    Both ``ATTR = ...`` and ``ATTR: bool = ...`` count -- matching only
-    ``ast.Assign`` would report a real annotated declaration as missing, and the
-    migration would then shadow it with ``False``.
+    ONE predicate for BOTH the declaration attribute and ``undo_one``, because
+    the runtime rule (``adapter_registry._resolve_undo_declaration``) asks the
+    identical question about each of them: is this name in this class's own
+    ``vars()``. Two predicates that answered it differently is precisely how this
+    resolver first went wrong -- ``undo_one`` was matched as ``FunctionDef`` only,
+    while the declaration was matched as ``FunctionDef``-or-assignment eleven
+    lines away. A class carrying ``undo_one = _undo`` (an ordinary class-body
+    binding of a module-level function, and the shape this project's own defects
+    have taken twice) is honoured at runtime; reporting it as "no undo step here"
+    produced a durable operator-facing block whose stated reason was FALSE and
+    whose named repair could not clear it, because no declaration edit changes an
+    undo-not-found verdict. An unclearable block is a state the operator cannot
+    leave, so the two questions are answered here once.
+
+    Counts: ``def`` / ``async def`` / nested ``class`` / ``name = ...``
+    (including a tuple target) / ``name: T = ...``.
+
+    Does NOT count a BARE annotation (``name: bool`` with no value): that binds
+    nothing in ``vars()`` -- it only records an entry in ``__annotations__`` --
+    so the runtime resolves it as absent. Counting it would be the same
+    divergence in the opposite direction: the post-condition would report a
+    project conformant while the trial preflight refused it.
+
+    Disclosed bound: an exotic binding this does not model (an ``import`` inside
+    a class body, a metaclass-synthesized attribute) resolves as absent, which is
+    the fail-closed direction for a MISSING declaration and, for ``undo_one``,
+    lands in the ``undo_not_found`` branch that :func:`resolve_undo_declaration_site`
+    keeps clearable.
     """
     for stmt in node.body:
-        if isinstance(stmt, ast.Assign):
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if stmt.name == name:
+                return True
+        elif isinstance(stmt, ast.Assign):
             for target in stmt.targets:
-                if isinstance(target, ast.Name) and target.id == UNDO_DECLARATION_ATTR:
-                    return True
+                for sub in ast.walk(target):
+                    if isinstance(sub, ast.Name) and sub.id == name:
+                        return True
         elif isinstance(stmt, ast.AnnAssign):
-            if (isinstance(stmt.target, ast.Name)
-                    and stmt.target.id == UNDO_DECLARATION_ATTR):
+            if (stmt.value is not None
+                    and isinstance(stmt.target, ast.Name)
+                    and stmt.target.id == name):
                 return True
     return False
-
-
-def _own_body_defines_undo(node: ast.ClassDef) -> bool:
-    return any(isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
-               and stmt.name == UNDO_METHOD_NAME
-               for stmt in node.body)
 
 
 def resolve_undo_declaration_site(tree: ast.Module,
@@ -247,17 +272,31 @@ def resolve_undo_declaration_site(tree: ast.Module,
     undo_at: Optional[int] = None
     decl_at: Optional[int] = None
     for index, node in enumerate(chain):
-        if undo_at is None and _own_body_defines_undo(node):
+        if undo_at is None and _own_body_binds(node, UNDO_METHOD_NAME):
             undo_at = index
-        if decl_at is None and _own_body_declares(node):
+        if decl_at is None and _own_body_binds(node, UNDO_DECLARATION_ATTR):
             decl_at = index
 
     undo_class = chain[undo_at].name if undo_at is not None else None
     decl_class = chain[decl_at].name if decl_at is not None else None
 
-    if undo_at is None:
-        return UndoDeclarationSite(UNDO_DECLARATION_UNDO_NOT_FOUND,
+    if undo_at is None and decl_at is not None:
+        # ``undo_one`` is not bound anywhere this static walk can see, so it comes
+        # from a base defined in ANOTHER module -- which this deliberately never
+        # imports. The runtime, however, walks the FULL MRO: it will find
+        # ``undo_one`` at some index BEYOND every class in this module, so any
+        # in-module declaration necessarily satisfies ``d_decl <= d_undo`` and IS
+        # honoured. Reporting this as unresolvable would leave a durable block
+        # that survives the correct repair, which is a worse failure than the
+        # false green it was guarding against: fail-closed is right for a MISSING
+        # declaration, not for one that is present and will be read.
+        #
+        # ``undo_defining_class`` stays None on purpose -- this walk must not
+        # claim to have located an ``undo_one`` it cannot see.
+        return UndoDeclarationSite(UNDO_DECLARATION_DECLARED,
                                    declaring_class=decl_class)
+    if undo_at is None:
+        return UndoDeclarationSite(UNDO_DECLARATION_UNDO_NOT_FOUND)
     if decl_at is None:
         return UndoDeclarationSite(UNDO_DECLARATION_MISSING,
                                    undo_defining_class=undo_class)

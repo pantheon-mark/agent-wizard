@@ -2321,11 +2321,19 @@ def check_undo_declaration_conformance(
             ))
             continue
 
+        # Both remaining statuses mean the SAME operator-facing fact -- nothing
+        # records whether the undo puts things back -- and the SAME repair:
+        # record the answer on this class. They differ only in whether the undo
+        # step itself is written in this file, and the wording must not assert
+        # more than that. Claiming "there is no undo step" about a file whose undo
+        # is simply inherited from elsewhere would be a false statement on a
+        # durable blocking record.
         detail = ("has no note saying whether its undo step puts things back "
                   "exactly as they were"
                   if site.status == UNDO_DECLARATION_MISSING else
-                  "has no undo step in that file at all, so there is nothing "
-                  "recording whether a change it makes can be put back")
+                  "has no note saying whether undoing a change puts things back "
+                  "exactly as they were (its undo step is not written in that "
+                  "file, so this cannot be worked out automatically)")
         violations.append(UndoDeclarationViolation(
             capability_id=capability_id, op_kind=op_kind,
             adapter_relpath=relpath, adapter_class=class_name,
@@ -2393,15 +2401,22 @@ def record_undo_declaration_conformance(
                 f"`{v.capability_id}` itself; rebuilding the capability will not "
                 "fix it.")
         else:
+            # This wording is the ONLY route out of a durable block, so the action
+            # it names has to be one that actually clears it: recording the answer
+            # ON THE NAMED CLASS is honoured by the kernel wherever that class's
+            # undo step lives -- in the same file or inherited from another one --
+            # and `check_undo_declaration_conformance` reports clean on the next
+            # run. An entry whose own instruction cannot clear it is a state the
+            # operator cannot leave, which is worse than the false green it guards.
             next_step = (
-                f"Ask your assistant to check the undo step on "
-                f"`{v.adapter_class}` in {v.adapter_relpath} and record whether "
-                "it puts things back exactly as they were. It must only say yes "
-                "if that is genuinely what the undo does -- saying yes when the "
-                "undo works by removing what was added is worse than leaving it "
-                "as it is. This is a change to the adapter, not to "
-                f"`{v.capability_id}` itself; rebuilding the capability will not "
-                "fix it.")
+                f"Ask your assistant to check what the undo step for "
+                f"`{v.adapter_class}` in {v.adapter_relpath} actually does, and to "
+                f"record the answer on `{v.adapter_class}` itself. It must only "
+                "record yes if the undo genuinely puts things back exactly as they "
+                "were -- recording yes when the undo works by removing what was "
+                "added is worse than leaving it as it is. This is a change to the "
+                f"adapter, not to `{v.capability_id}` itself; rebuilding the "
+                "capability will not fix it.")
         kept.append({
             "mechanism_id": v.capability_id,
             "writer_relpath": v.adapter_relpath or (
@@ -3798,23 +3813,46 @@ def render_impact_notice(
         # interpolated placeholder inside it, because `notice_fidelity_lint` pins
         # it verbatim -- a sentence split across an f-string placeholder is a
         # sentence a verbatim check can no longer see.
+        #
+        # AND IT MUST NOT READ AS "DONE". What the upgrade added is the PLACE to
+        # record the answer, set to the safe value; the safety rule needs the
+        # ANSWER, which only a person who has read this adapter's undo step may
+        # give. Because the conformance post-condition is satisfied by the place
+        # existing, the block CLEARS -- so this notice is the operator's only
+        # signal. An earlier draft said the upgrade "added what the new safety rule
+        # needs" and told them to approve it again: a non-technical operator would
+        # have re-approved and been refused at the trial preflight with no idea
+        # why. That is the false-continuity-promise shape, and the outage it caused
+        # is part of why this cut exists. State what happened, and state that
+        # re-approval is not on its own sufficient.
+        #
+        # M-1: the shared consequence is emitted as TOP-LEVEL bullets AFTER the
+        # per-file loop, never indented under it. Indented, it read as a
+        # sub-bullet of whichever file happened to be last.
         lines += ["", "## Files this upgrade updated for you", ""]
         for relpath in adapter_source_edits:
             lines.append(
                 f"- **{relpath}**: this is the part that actually talks to the "
                 "outside system for one of your capabilities. This upgrade added "
-                "what the new safety rule needs to it.")
+                "the place where someone has to record whether undoing a change "
+                "puts things back exactly as they were, and left it set to the "
+                "safe answer: not yet checked.")
         lines.append(
-            "  - Your approval for a capability is tied to the exact contents of "
-            "this file, so an approval you already gave no longer covers what is "
-            "now on disk. Your system will report that capability as changed since "
-            "you approved it, and it will be switched off again the next time this "
-            "check runs. That is deliberate: the safety rule it was approved "
-            "against changed, so the proof has to be earned again.")
+            "- That answer is still owed, and nothing automatic can give it. "
+            "Someone who can read the undo step for the file(s) above has to work "
+            "out whether it really does put things back exactly as they were, and "
+            "record that. Until it is recorded, the capability cannot be tried out "
+            "under supervision, so it cannot be approved for live use -- approving "
+            "it again on its own is not enough.")
         lines.append(
-            "  - Nothing was deleted and no saved access (credentials) was "
-            "touched. To put it back on, tell your assistant you want to try that "
-            "capability again and approve it again.")
+            "- Your approval is also tied to the exact contents of those file(s), "
+            "so an approval you already gave no longer covers what is now on disk. "
+            "Your system will report that capability as changed since you approved "
+            "it, and it will be switched off again the next time this check runs. "
+            "That is deliberate: the safety rule it was approved against changed, "
+            "so the proof has to be earned again.")
+        lines.append(
+            "- Nothing was deleted and no saved access (credentials) was touched.")
 
     non_live = [m for m in mechanisms
                 if _writer_state_of(m) == _WRITER_STATE_NON_LIVE]
@@ -3829,9 +3867,10 @@ def render_impact_notice(
         # and nothing was paused here -- claiming it was would be a false alarm on
         # the surface that exists to prevent them.
         lines.append(
-            "- Nothing was paused and nothing was deleted. The only thing that "
-            "needs anything from you is trying the capability that uses the file "
-            "above and approving it again.")
+            "- Nothing was paused and nothing was deleted. What is outstanding is "
+            "the answer described above, recorded in the file by someone who can "
+            "read that undo step -- and only after that can the capability be "
+            "tried out and approved again.")
     elif len(non_live) == len(mechanisms):
         # Nothing was switched off, so the reassurance below would be describing
         # something that never happened.
@@ -4373,10 +4412,17 @@ def render_reconcile_result(result: ReconcileResult) -> str:
                 "that checked and recorded (this is an adapter change, not a "
                 "rebuild of the capability)")
     for relpath in result.adapter_source_edits:
+        # Read FIRST, before the notice file. It has to make the same honest claim
+        # the notice does: what landed is the PLACE to record the answer, and the
+        # answer is still owed by a person. Saying only "approve it again" here
+        # while the notice says otherwise would hand the operator a contradictory
+        # pair, which is the specific way this surface has gone wrong before.
         lines.append(
-            f"  - {relpath}: this upgrade updated it for you, so any approval you "
-            "had already given for the capability that uses it no longer covers it "
-            "-- you will be asked to try it and approve it again")
+            f"  - {relpath}: this upgrade added the place to record whether undoing "
+            "a change puts things back exactly as they were, left as not yet "
+            "checked. Someone has to read that undo step and record the answer "
+            "before this capability can be tried out or approved -- and any "
+            "approval you had already given no longer covers this file")
     for capability_id in result.same_id_twins_healed:
         lines.append(
             f"  - {capability_id}: duplicate entries sharing this id were found "
