@@ -107,8 +107,8 @@ _INELIGIBLE_STATE_REASONS = {
         # one declaration is what keeps that an exemption instead of a second copy.
         + _core.BYPASS_UNREPAIRED_REPAIR
         + " and it clears on its own; if you believe it genuinely cannot be "
-        "rebuilt, ask your assistant to go through what the safety check recorded "
-        "for it with you"),
+        "rebuilt, "
+        + _core.ROUTE_TO_A_PERSON_CLAUSE),
     # remediation-monopoly-exempt: same structural reason as the entry above, and this
     # one prescribes nothing at all -- it states that there is no risk to accept for a
     # test file, which is a disposition rather than a repair. The registry's sentence
@@ -124,9 +124,15 @@ _INELIGIBLE_STATE_REASONS = {
 #: only reachable if a state is added to the vocabulary without this map being
 #: updated. It refuses, and says who can tell the operator what to do about it, so
 #: the refusal is never a dead end.
+#:
+#: The route clause is BOUND from the core's single declaration, not re-spelled: it
+#: was written out here AND inside the map above, byte-identically, in the same
+#: module. Two spellings of one clause in one file is the plainest form of the defect
+#: this package's remediation gate exists to prevent, and the same bind-plus-declare
+#: remedy the repair clause uses removes it with no layering change at all.
 _UNRECOGNISED_STATE_REASON = (
     "`{relpath}` is not in a state where accepting the risk is the way forward -- "
-    "ask your assistant to go through what the safety check recorded for it with you")
+    + _core.ROUTE_TO_A_PERSON_CLAUSE)
 
 
 def _ineligible_reason(writer_relpath: str, states: Sequence[str]) -> str:

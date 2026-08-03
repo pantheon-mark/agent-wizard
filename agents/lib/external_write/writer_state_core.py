@@ -583,6 +583,23 @@ BYPASS_UNREPAIRED_REPAIR = (
 BYPASS_UNREPAIRED_TEMPLATE = (
     BYPASS_UNREPAIRED_DIAGNOSIS + " -- " + BYPASS_UNREPAIRED_REPAIR)
 
+#: THE ROUTE TO A PERSON, for a writer the accepted-risk decision does not apply to.
+#: Declared here for the same reason as the repair clause above and by the same
+#: remedy: the command layer needs it in two of its own refusals -- one for a state
+#: the decision is not the exit from, one for a state it has no sentence for at all
+#: -- and it spelled the clause twice, byte-identically, in one module. One
+#: declaration, both sites bind it.
+#:
+#: Deliberately NOT the same sentence as the state->action registry's own
+#: route-to-a-person, which answers a different question: the registry's is for a
+#: state it has no recorded way out of AT ALL, this one is for a state that has a way
+#: out which simply is not "accept the risk". Collapsing them would be wrong rather
+#: than tidy, and a test asserts they stay different.
+#:
+#: Carries no placeholder, so either consumer concatenates it into its own sentence.
+ROUTE_TO_A_PERSON_CLAUSE = (
+    "ask your assistant to go through what the safety check recorded for it with you")
+
 
 def describe_blocking_entry(entry: Dict[str, Any]) -> str:
     """One plain-language sentence DESCRIBING one open blocking entry. It says what

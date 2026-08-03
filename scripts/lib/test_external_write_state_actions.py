@@ -46,6 +46,7 @@ Run:
 import ast
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -1368,6 +1369,41 @@ class TheRepairSentenceIsAuthoredOnceTests(unittest.TestCase):
                        if self.CLAUSE in src)
         self.assertEqual(homes, ["writer_state_core.py"], homes)
 
+    def test_NO_action_instruction_has_a_second_author_in_the_package(self):
+        """The two hand-written one-home pins above cover the two sentences that were
+        already duplicated. This one is quantified over `ACTIONS`, so an action added
+        later is covered without anyone remembering -- and it exists because
+        `recover_interrupted_trial`'s instruction was pinned by nothing at all: it
+        carries no repair verb and no spelled path, so the sentence could have been
+        pasted into a second module and no text pin would have noticed.
+
+        The permitted homes are the registry itself plus any module the registry
+        provably reads a constant out of (today: the leaf layer's repair clause).
+        Derived from the registry's own imports, so it is not a blessed-file list."""
+        allowed = {"state_actions.py"}
+        registry_src = (_EXTERNAL_WRITE_DIR / "state_actions.py").read_text(
+            encoding="utf-8")
+        for path in sorted(_EXTERNAL_WRITE_DIR.glob("*.py")):
+            if path.name.startswith("test_") or path.name == "state_actions.py":
+                continue
+            if f"external_write.{path.stem}" in registry_src:
+                allowed.add(path.name)
+
+        sources = dict(self._production_sources())
+        for action in sa.ACTIONS:
+            fragments = [f for f in re.split(r"\{[^{}]*\}", action.instruction)
+                         if len(f.strip()) >= 40]
+            with self.subTest(action=action.action_id):
+                self.assertTrue(fragments,
+                                "an instruction with no substantial fixed fragment "
+                                "cannot be pinned this way -- say so if that happens")
+                homes = {name for name, src in sources.items()
+                         if any(f in src for f in fragments)}
+                self.assertTrue(
+                    homes <= allowed,
+                    "a second author of this action's instruction: {}".format(
+                        sorted(homes - allowed)))
+
     def test_the_registrys_instruction_is_composed_from_that_one_declaration(self):
         self.assertIn(core.BYPASS_UNREPAIRED_REPAIR,
                       sa.instruction_for_state(
@@ -1412,6 +1448,12 @@ class TheIneligibleRefusalBindsTheOneDeclarationTests(unittest.TestCase):
         from external_write import writer_commands
         return writer_commands
 
+    def _production_sources(self):
+        for path in sorted(_EXTERNAL_WRITE_DIR.glob("*.py")):
+            if path.name.startswith("test_"):
+                continue
+            yield path.name, path.read_text(encoding="utf-8")
+
     def test_the_refusal_contains_the_registrys_own_repair_clause(self):
         commands = self._commands()
         text = commands._INELIGIBLE_STATE_REASONS[
@@ -1446,6 +1488,40 @@ class TheIneligibleRefusalBindsTheOneDeclarationTests(unittest.TestCase):
         names = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
         self.assertIn("BYPASS_UNREPAIRED_REPAIR", names,
                       "the refusal no longer binds the one declaration")
+
+    def test_the_route_to_a_person_clause_ALSO_has_exactly_one_home(self):
+        """The same remedy, applied to the clause this task originally left
+        duplicated. It was spelled twice, BYTE-IDENTICALLY, in this one module -- once
+        inside the ineligible-state map and once as the unrecognised-state reason --
+        which is a plain re-spelling under "single source, never re-spelled", and the
+        bind-plus-pin fix for the repair clause defeats the layering blocker by
+        construction. There was no reason for the second copy to survive."""
+        clause = ("ask your assistant to go through what the safety check recorded "
+                  "for it with you")
+        self.assertEqual(core.ROUTE_TO_A_PERSON_CLAUSE, clause)
+        homes = sorted(name for name, src in self._production_sources()
+                       if clause in src)
+        self.assertEqual(homes, ["writer_state_core.py"], homes)
+
+    def test_both_refusals_bind_that_clause_and_still_read_the_same(self):
+        commands = self._commands()
+        ineligible = commands._INELIGIBLE_STATE_REASONS[
+            core.WriterState.BLOCKING_LIVE_ENABLE].format(relpath=WRITER)
+        unrecognised = commands._UNRECOGNISED_STATE_REASON.format(relpath=WRITER)
+        for text in (ineligible, unrecognised):
+            self.assertIn(core.ROUTE_TO_A_PERSON_CLAUSE, text)
+        self.assertIn(WRITER, unrecognised)
+        self.assertIn("not in a state where accepting the risk", unrecognised)
+
+    def test_the_registrys_own_route_is_deliberately_a_DIFFERENT_sentence(self):
+        """Not everything that mentions a person is the same clause, and collapsing
+        them would be wrong rather than tidy. The registry's route answers "this state
+        has no recorded way out at all"; the command's answers "this state is not one
+        a recorded decision applies to". Different claims, so they stay separate --
+        and this asserts they are genuinely different rather than an oversight."""
+        registry_route = sa.route_for_unclassified_state(WRITER)
+        self.assertNotIn(core.ROUTE_TO_A_PERSON_CLAUSE, registry_route)
+        self.assertIn("no recorded way out", registry_route)
 
     def test_the_refusal_still_refuses_and_records_nothing(self):
         """The behaviour the binding must not change."""

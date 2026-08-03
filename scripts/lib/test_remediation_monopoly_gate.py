@@ -50,15 +50,46 @@ visible to a text search:
     ``%``, ``"...".format(...)`` -- with every literal part inside it joined. So
     splitting a banned sentence over two literals, or switching away from an
     f-string, is not a way around this.
-  * A SANCTIONED SENTENCE IS RECOGNISED BY DERIVATION, NOT BY AN ALLOWLIST. A
-    literal is permitted when the registry ITSELF declares that text (checked
-    against the registry's own declared and rendered instructions at run time) AND
-    it lives in a module the registry imports -- i.e. the registry provably binds
-    it rather than a second author having re-spelled it. Nothing is exempted for
-    being in a particular file.
 
-THE FOUR BANNED SHAPES
+    STATED EXACTLY, because a looser version of this claim was defeated by a
+    five-line probe: the *literal* parts are always joined, and for the command
+    rule the text is additionally resolved through ONE HOP over module-level
+    string constants (``resolved_text``), so naming a path constant instead of
+    spelling the path is caught in the three forms an author actually reaches for
+    -- ``+ REL``, ``f"…{REL}"`` and ``"…{}".format(REL)``. That list is
+    ILLUSTRATIVE, NOT EXHAUSTIVE. What is NOT resolved: a value arriving as a
+    function parameter, a local variable, the return of a call, an attribute of an
+    object, or a name reached through two hops of anything other than
+    module-level constants. There is no data-flow analysis here and none is
+    intended. The perverse edge is worth naming: the standing "single source,
+    never re-spelled" rule pushes an author toward indirection, which is exactly
+    the direction this hop had to be added to cover, and it covers one hop only.
+  * A SANCTIONED SENTENCE IS RECOGNISED BY DERIVATION, NOT BY AN ALLOWLIST. A
+    literal outside the registry is permitted only when BOTH hold: the registry
+    itself declares that text (checked against its own declared and rendered
+    instructions at run time), AND the registry's own source reads that text out
+    of THIS module by name (``registry_bound_constants``). Membership in the
+    imported set is deliberately not sufficient -- it was, in the first version of
+    this gate, and a verbatim second copy of any declared instruction template
+    then passed in five different modules. Nothing is exempted for being in a
+    particular file.
+
+THE FIVE BANNED SHAPES
 ----------------------
+  ``copied_registry_text``         an authored text that CARRIES a whole sentence
+                                   the registry declares, where the registry does
+                                   not read that text out of this module. The
+                                   mirror image of the permit rule above, and it is
+                                   here because the two containment directions
+                                   catch different things: a literal that is PART
+                                   of a declared sentence may be the one clause the
+                                   registry composes from, while a literal that
+                                   CONTAINS one is a copy. Without it the TEMPLATE
+                                   form of an action whose instruction carries
+                                   neither a repair verb nor a spelled path -- the
+                                   accept-the-risk and recover-a-trial ones -- was
+                                   invisible to every other signature, which is
+                                   exactly the form a second author would paste.
   ``authored_repair_directive``    an authored text carrying a repair imperative
                                    with an object (``rebuild it`` / ``rebuild the
                                    ...``) together with the sanctioned write
@@ -191,7 +222,7 @@ import re
 import sys
 import unittest
 from pathlib import Path
-from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
 _WIZARD = Path(__file__).resolve().parents[2]
 _AGENTS_LIB = _WIZARD / "agents" / "lib"
@@ -230,6 +261,14 @@ _SANCTIONED_DESTINATIONS = ("sanctioned", "safe write path",
 
 #: Placeholder used when rendering a declared instruction for comparison.
 _PLACEHOLDER_SUBJECT = "{subject}"
+
+#: How much of a registry-declared sentence a literal must carry before it counts as
+#: a COPY of it. A short fragment of a long sentence is a coincidence -- "no action
+#: is needed for it" appears in several unrelated places -- while forty normalised
+#: characters of one is not. Disclosed bound: a copy of a declared sentence shorter
+#: than this is not seen as a copy, and the shortest sentence the registry declares
+#: is asserted to be longer than it.
+_COPY_MIN_CHARS = 40
 
 
 # ---------------------------------------------------------------------------
@@ -501,6 +540,54 @@ def _joined_literal_text(node: ast.AST, docstrings: frozenset) -> str:
     return " ".join(parts)
 
 
+def _referenced_name(node: ast.AST) -> Optional[str]:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def resolved_text(node: ast.AST, constants: Mapping[str, str]) -> str:
+    """``node``'s text with its parts IN SOURCE ORDER, substituting the text of any
+    module-level string constant it names.
+
+    Order matters: a constant composed as ``DIAGNOSIS + " -- " + REPAIR`` has almost
+    no literal content of its own, and joining its parts out of order would make a
+    containment test against it meaningless.
+
+    ONE HOP, and the bound is disclosed rather than discovered: ``constants`` holds
+    module-level string constants only, so a value that arrives as a function
+    parameter, as a local, from a call, or through a name this map does not carry is
+    NOT substituted. There is no data-flow analysis here.
+    """
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else ""
+    if isinstance(node, ast.JoinedStr):
+        return "".join(resolved_text(part, constants) for part in node.values)
+    if isinstance(node, ast.FormattedValue):
+        return resolved_text(node.value, constants)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return (resolved_text(node.left, constants)
+                + resolved_text(node.right, constants))
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+        # The template, then whatever is interpolated into it. Appended rather than
+        # substituted into the placeholders: this text is only ever tested for
+        # CONTAINMENT, and appending can only ever add, never lose.
+        return (resolved_text(node.left, constants) + " "
+                + resolved_text(node.right, constants))
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+            and node.func.attr == "format":
+        parts = [resolved_text(node.func.value, constants)]
+        parts.extend(resolved_text(a, constants) for a in node.args)
+        parts.extend(resolved_text(k.value, constants) for k in node.keywords)
+        return " ".join(p for p in parts if p)
+    name = _referenced_name(node)
+    if name is not None:
+        return constants.get(name, "")
+    return ""
+
+
 def authored_texts_in(roots: Sequence[ast.AST],
                       docstrings: frozenset) -> List[Tuple[ast.AST, str]]:
     """Every MAXIMAL string-valued expression under ``roots``, paired with its
@@ -532,11 +619,6 @@ def authored_texts_in(roots: Sequence[ast.AST],
             if text.strip():
                 out.append((node, text))
     return out
-
-
-def authored_texts(tree: ast.Module) -> List[Tuple[ast.AST, str]]:
-    """The module's authored texts."""
-    return authored_texts_in([tree], _docstring_nodes(tree))
 
 
 # ---------------------------------------------------------------------------
@@ -585,14 +667,181 @@ def module_level_string_constants(tree: ast.Module,
                 continue
             if not _is_string_expression(value):
                 continue
-            parts = [_joined_literal_text(value, docstrings)]
-            for sub in ast.walk(value):
-                name = sub.id if isinstance(sub, ast.Name) else (
-                    sub.attr if isinstance(sub, ast.Attribute) else None)
-                if name and name in bound:
-                    parts.append(bound[name])
-            bound[target] = " ".join(p for p in parts if p)
+            if id(value) in docstrings:
+                continue
+            bound[target] = resolved_text(value, bound)
     return bound
+
+
+def _module_constants(module_stem: str) -> Dict[str, str]:
+    """One module's module-level string constants, resolved."""
+    path = _EMITTED_LIB / (module_stem + ".py")
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, SyntaxError):
+        return {}
+    return module_level_string_constants(tree, _docstring_nodes(tree))
+
+
+def _registry_sibling_aliases() -> Dict[str, str]:
+    """``local name -> sibling module stem`` for every sibling the registry imports,
+    in either import form. This is how ``_core.BYPASS_UNREPAIRED_REPAIR`` is known to
+    be a reference into ``writer_state_core`` rather than a bare attribute."""
+    tree = ast.parse((_EMITTED_LIB / "state_actions.py").read_text(encoding="utf-8"))
+    aliases: Dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = alias.name.split(".")
+                if "external_write" in parts:
+                    index = parts.index("external_write")
+                    if index + 1 < len(parts):
+                        aliases[alias.asname or parts[index + 1]] = parts[index + 1]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            parts = node.module.split(".")
+            if "external_write" in parts and parts[-1] == "external_write":
+                for alias in node.names:
+                    aliases[alias.asname or alias.name] = alias.name
+    return aliases
+
+
+def registry_bound_constants() -> Mapping[str, Mapping[str, str]]:
+    """``module stem -> {constant name -> its resolved text}`` for every sibling
+    string constant the REGISTRY'S OWN SOURCE references.
+
+    This is the difference between a module the registry *imports* and a module the
+    registry *binds a sentence out of*, and the first version of this gate conflated
+    them: it permitted any declared text anywhere in an imported module, so a
+    verbatim second copy of a declared instruction could be written into any of five
+    modules and stay green. Membership is not binding. What is checked now is that
+    the registry reads THIS text out of THIS module by name.
+
+    Read off the registry's own AST, so laundering a copy means adding a visible
+    reference to the registry itself.
+    """
+    global _BOUND_CONSTANTS_CACHE
+    if _BOUND_CONSTANTS_CACHE is None:
+        aliases = _registry_sibling_aliases()
+        tree = ast.parse((_EMITTED_LIB / "state_actions.py").read_text(
+            encoding="utf-8"))
+        wanted: Dict[str, set] = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Attribute):
+                continue
+            base = node.value
+            if isinstance(base, ast.Name) and base.id in aliases:
+                wanted.setdefault(aliases[base.id], set()).add(node.attr)
+        resolved: Dict[str, Dict[str, str]] = {}
+        for stem, names in wanted.items():
+            constants = _module_constants(stem)
+            found = {n: constants[n] for n in names if n in constants}
+            if found:
+                resolved[stem] = found
+        _BOUND_CONSTANTS_CACHE = resolved
+    return _BOUND_CONSTANTS_CACHE
+
+
+_BOUND_CONSTANTS_CACHE = None
+
+
+def entrypoint_declaring_modules() -> Mapping[str, frozenset]:
+    """``module stem -> the declared entrypoint relpath(s) it DECLARES as a
+    module-level string constant``.
+
+    The declaring module is allowed to spell its own path in prose -- its usage line
+    is not a second author of anything. Joined on the DECLARED constant value, never
+    on the module's filename: inferring "this is your entrypoint" from a name match
+    is the shape this package has shipped five variants of.
+    """
+    global _DECLARING_CACHE
+    if _DECLARING_CACHE is None:
+        entrypoints = registry_entrypoint_relpaths()
+        out: Dict[str, set] = {}
+        for path in _scanned_files():
+            stem = path.stem
+            for _name, text in _module_constants(stem).items():
+                for relpath in entrypoints:
+                    if text.strip() == relpath:
+                        out.setdefault(stem, set()).add(relpath)
+        _DECLARING_CACHE = {k: frozenset(v) for k, v in out.items()}
+    return _DECLARING_CACHE
+
+
+_DECLARING_CACHE = None
+
+
+def registry_rendering_surfaces() -> frozenset:
+    """Every module in the scanned set that RENDERS from the registry -- it imports
+    the registry and calls one of its renderers.
+
+    Derived rather than listed because these are the modules whose operator-facing
+    text must stay finding-free, and the population grows: this task added two to it.
+    A hardcoded sample would keep proving the property for the two surfaces least
+    likely to regress.
+    """
+    renderers = {"instruction_for_state", "route_for_unclassified_state",
+                 "route_for_unidentified_record", "render_action"}
+    found = set()
+    for path in _scanned_files():
+        if path.stem == "state_actions":
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        source_names = {_referenced_name(n) for n in ast.walk(tree)
+                        if isinstance(n, (ast.Name, ast.Attribute))}
+        if "state_actions" not in {a for a in _sibling_imports(tree)}:
+            continue
+        if source_names & renderers:
+            found.add(path.stem)
+    return frozenset(found)
+
+
+def _sibling_imports(tree: ast.Module) -> frozenset:
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = alias.name.split(".")
+                if "external_write" in parts:
+                    index = parts.index("external_write")
+                    if index + 1 < len(parts):
+                        found.add(parts[index + 1])
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            parts = node.module.split(".")
+            if "external_write" in parts:
+                index = parts.index("external_write")
+                if index + 1 < len(parts):
+                    found.add(parts[index + 1])
+                else:
+                    found.update(a.name for a in node.names)
+    return frozenset(found)
+
+
+def entrypoint_constant_texts() -> Mapping[str, str]:
+    """``constant name -> its resolved text``, for every module-level string constant
+    in the scanned set that CARRIES a declared entrypoint relpath.
+
+    This is the one-hop alias map the command rule substitutes through. Deliberately
+    narrow -- only entrypoint-bearing names -- so the hop closes the measured evasion
+    and changes nothing else. Keyed by NAME, so a name used for two different paths
+    in two modules would collide; there is exactly one declaring module per path
+    today, asserted by test.
+    """
+    global _ENTRYPOINT_CONST_CACHE
+    if _ENTRYPOINT_CONST_CACHE is None:
+        entrypoints = registry_entrypoint_relpaths()
+        out: Dict[str, str] = {}
+        for path in _scanned_files():
+            for name, text in _module_constants(path.stem).items():
+                if any(relpath in text for relpath in entrypoints):
+                    out[name] = text
+        _ENTRYPOINT_CONST_CACHE = out
+    return _ENTRYPOINT_CONST_CACHE
+
+
+_ENTRYPOINT_CONST_CACHE = None
 
 
 def repair_bearing_constant_names() -> frozenset:
@@ -725,10 +974,18 @@ def scan_source(source: str, relpath: str) -> List[Finding]:
 
     module_stem = relpath.rsplit("/", 1)[-1][:-3]
     declared = registry_declared_texts()
-    bound_modules = registry_bound_modules()
     entrypoints = registry_entrypoint_relpaths()
     spans = _symbol_spans(tree)
     docstrings = _docstring_nodes(tree)
+    local_constants = module_level_string_constants(tree, docstrings)
+    # The one-hop alias map for the command rule: this module's own module-level
+    # string constants, plus every entrypoint-bearing constant name in the scanned
+    # set (a path is usually declared in the module that owns the entrypoint and
+    # referenced from elsewhere).
+    command_constants = dict(entrypoint_constant_texts())
+    command_constants.update(local_constants)
+    declares_own = entrypoint_declaring_modules().get(module_stem, frozenset())
+    bound_here = registry_bound_constants().get(module_stem, {})
     found: List[Finding] = []
 
     def add(node: ast.AST, kind: str, detail: str) -> None:
@@ -738,12 +995,37 @@ def scan_source(source: str, relpath: str) -> List[Finding]:
             kind, _symbol_at(spans, node.lineno), detail))
 
     def registry_declares(text: str) -> bool:
-        """The registry itself declares this text, and this module is one the
-        registry imports -- so the registry is the binder, not a second author."""
-        if module_stem not in bound_modules:
-            return False
+        """The registry declares this text AND reads it out of THIS module by name --
+        so the registry is provably the binder, not a second author who happens to sit
+        in a module the registry imports.
+
+        Membership in the imported set is deliberately NOT sufficient: it was, in the
+        first version of this gate, and a verbatim second copy of any declared
+        instruction template then passed in five different modules.
+        """
+        if module_stem == "state_actions":
+            return True          # the registry is the author, by construction
         low = _normalise(text)
-        return any(low in whole for whole in declared)
+        if not any(low in whole for whole in declared):
+            return False
+        return any(low in _normalise(value) for value in bound_here.values())
+
+    def copied_declared_text(text: str) -> Optional[str]:
+        """A registry-declared sentence this text CARRIES, if any.
+
+        The mirror image of `registry_declares`, and it exists because the two
+        containment directions catch different things. A literal that is PART of a
+        declared sentence may be the single clause the registry composes from; a
+        literal that CONTAINS a whole declared sentence is a copy of it. Without this,
+        the template form of an action whose instruction carries no repair verb and no
+        spelled path -- the accept-the-risk and recover-a-trial ones -- was invisible
+        to every other signature, which is precisely the form a second author copies.
+        """
+        low = _normalise(text)
+        for whole in declared:
+            if len(whole) >= _COPY_MIN_CHARS and whole in low:
+                return whole
+        return None
 
     for node, text in authored_texts_in([tree], docstrings):
         verb = repair_imperative(text)
@@ -752,8 +1034,23 @@ def scan_source(source: str, relpath: str) -> List[Finding]:
             add(node, "authored_repair_directive",
                 "directs a repair ({!r}) onto the {!r} write path in words the "
                 "registry does not declare".format(verb, dest))
+        copied = copied_declared_text(text)
+        if copied and not registry_declares(text):
+            add(node, "copied_registry_text",
+                "carries a sentence the registry declares, verbatim, without the "
+                "registry binding it from here: {!r}".format(
+                    copied[:60] + ("..." if len(copied) > 60 else "")))
+        # The command rule reads the ONE-HOP resolved text, because keying on the
+        # path being spelled meant that naming it evaded the rule -- and the standing
+        # "single source, never re-spelled" rule pushes an author toward exactly that
+        # indirection.
+        command_text = resolved_text(node, command_constants) or text
         for entrypoint in entrypoints:
-            if entrypoint in text and not _is_bare_command(text, entrypoint) \
+            if entrypoint in declares_own:
+                continue     # its own usage line; the path is declared here
+            if entrypoint in command_text \
+                    and not _is_bare_command(command_text, entrypoint) \
+                    and not registry_declares(command_text) \
                     and not registry_declares(text):
                 add(node, "authored_registry_command",
                     "hands the operator a command for {!r} in prose".format(
@@ -1102,6 +1399,105 @@ class TheGateDetectsAPlantedViolationTests(unittest.TestCase):
                          "a verbatim copy in a module the registry does not import "
                          "must still be a violation")
 
+    def test_a_verbatim_TEMPLATE_COPY_is_flagged_in_every_module_the_registry_does_not_bind_it_from(self):
+        """Being a module the registry IMPORTS is not being the module the registry
+        binds the sentence FROM, and the first version of this gate conflated them:
+        a verbatim copy of any declared instruction template passed in all five
+        imported modules. Measured per module x per action, so the property is pinned
+        for every bound module rather than demonstrated on one pair.
+
+        The one legitimate case is the single clause the registry genuinely composes
+        its own instruction from -- that clause, in the module the registry reads it
+        out of. Everything else, including the FULL template of the very action that
+        clause belongs to, is a second copy."""
+        bound = sorted(registry_bound_modules() - {"state_actions"})
+        self.assertGreaterEqual(len(bound), 4, bound)
+        for action in state_actions.ACTIONS:
+            for module in bound:
+                with self.subTest(action=action.action_id, module=module):
+                    source = "COPY = {!r}\n".format(action.instruction)
+                    kinds = self._kinds(
+                        source, "agents/lib/external_write/{}.py".format(module))
+                    self.assertNotEqual(
+                        kinds, [],
+                        "a verbatim copy of a declared instruction template is a "
+                        "second, independently-maintained author of the same "
+                        "guidance, wherever it sits")
+
+    def test_the_ONE_clause_the_registry_binds_is_still_clean_at_its_own_home(self):
+        """The other direction, and the reason the check is containment rather than
+        equality: the clause the registry reads out of the leaf layer must stay
+        clean there, or the gate bans the single-declaration pattern it depends on --
+        and it must NOT be clean in a module the registry does not read it from."""
+        source = "CLAUSE = {!r}\n".format(writer_state_core.BYPASS_UNREPAIRED_REPAIR)
+        self.assertEqual(
+            scan_source(source,
+                        "agents/lib/external_write/writer_state_core.py"), [])
+        for elsewhere in ("scan", "trial_journal", "trial_recovery",
+                          "writer_acknowledgement", "lifecycle_state"):
+            with self.subTest(module=elsewhere):
+                self.assertNotEqual(
+                    self._kinds(source,
+                                "agents/lib/external_write/{}.py".format(elsewhere)),
+                    [], "the registry does not read this clause out of that module")
+
+    def test_a_declared_command_reached_through_a_CONSTANT_is_still_a_command(self):
+        """The rule keyed on the path being SPELLED, so naming it evaded -- and the
+        standing "single source, never re-spelled" rule actively pushes an author
+        toward exactly that indirection. One alias hop over module-level string
+        constants closes the three forms an author would actually reach for."""
+        relpath = registry_entrypoint_relpaths()[0]
+        forms = {
+            "spelled inline (the control)":
+                'MSG = "Put it right by running this: python3 {}"\n'.format(relpath),
+            "pulled from a module-level constant":
+                'REL = "{}"\nMSG = "Put it right by running this: python3 " + REL\n'.format(relpath),
+            "interpolated from a constant in an f-string":
+                'REL = "{}"\nMSG = f"Put it right by running this: python3 {{REL}}"\n'.format(relpath),
+            "interpolated from a constant via .format":
+                'REL = "{}"\nMSG = "Put it right by running this: python3 {{}}".format(REL)\n'.format(relpath),
+        }
+        for label, source in forms.items():
+            with self.subTest(form=label):
+                self.assertIn(
+                    "authored_registry_command",
+                    self._kinds(source,
+                                "agents/lib/external_write/lifecycle_state.py"),
+                    "naming the entrypoint is not a way around this rule")
+
+    def test_the_module_that_DECLARES_an_entrypoint_may_spell_its_own_usage(self):
+        """The over-firing direction of the alias hop, and it is not hypothetical:
+        the acknowledgement entrypoint's own module renders a usage line that
+        interpolates its declared path. That module is where the path is declared,
+        so it is not a second author of anything -- joined on the DECLARED constant,
+        never on the filename."""
+        for module, relpaths in entrypoint_declaring_modules().items():
+            for relpath in sorted(relpaths):
+                with self.subTest(module=module, relpath=relpath):
+                    source = ('REL = "{}"\n'
+                              'USAGE = f"Usage: python3 {{REL}} --flag <value>"\n'
+                              ).format(relpath)
+                    self.assertEqual(
+                        [f.kind for f in scan_source(
+                            source,
+                            "agents/lib/external_write/{}.py".format(module))],
+                        [], "the declaring module's own usage line was flagged")
+
+    def test_every_declared_entrypoint_has_exactly_one_declaring_module(self):
+        """The carve-out above is only safe if the declaring module is unambiguous:
+        two modules declaring the same path would each be excused for the other's
+        prose."""
+        owners: Dict[str, List[str]] = {}
+        for module, relpaths in entrypoint_declaring_modules().items():
+            for relpath in relpaths:
+                owners.setdefault(relpath, []).append(module)
+        for relpath in registry_entrypoint_relpaths():
+            with self.subTest(relpath=relpath):
+                self.assertEqual(
+                    len(owners.get(relpath, [])), 1,
+                    "a declared entrypoint must have exactly one declaring module; "
+                    "got {}".format(owners.get(relpath)))
+
     def test_the_enclosing_symbol_distinguishes_two_findings_in_one_file(self):
         source = ("class Spec:\n"
                   "    @property\n"
@@ -1171,23 +1567,51 @@ class TheSignatureIsBoundToTheRegistryTests(unittest.TestCase):
         self.assertIn("state_actions", registry_bound_modules())
         self.assertIn("writer_state_core", registry_bound_modules())
 
+    def test_every_declared_sentence_is_long_enough_to_be_seen_as_a_COPY(self):
+        """`_COPY_MIN_CHARS` is a disclosed bound, so it has to be checked against the
+        producer rather than assumed comfortable: a declared sentence shorter than it
+        could be pasted anywhere and the copy rule would not see it."""
+        shortest = min(len(t) for t in registry_declared_texts())
+        self.assertGreater(
+            shortest, _COPY_MIN_CHARS,
+            "the registry now declares a sentence short enough to slip under the "
+            "copy rule's floor; lower the floor or say which sentence is unseen")
+
+    def test_the_registry_binds_the_leaf_layers_clause_BY_NAME(self):
+        """The permit rule's whole basis. If the registry stopped reading this
+        constant, the clause would no longer be permitted at its own home -- which is
+        the correct consequence, and the reason the check is a derivation rather than
+        a list of blessed modules."""
+        bound = registry_bound_constants()
+        self.assertIn("writer_state_core", bound)
+        self.assertIn("BYPASS_UNREPAIRED_TEMPLATE", bound["writer_state_core"])
+        self.assertIn(writer_state_core.BYPASS_UNREPAIRED_REPAIR,
+                      bound["writer_state_core"]["BYPASS_UNREPAIRED_TEMPLATE"])
+
 
 class ASurfaceThatRendersFromTheRegistryPassesTests(unittest.TestCase):
     """The over-firing direction, and the reason it is a test rather than a hope: a
     fail-closed check that refuses a legitimate surface refuses every build."""
 
-    #: The two surfaces that already render every state-dependent instruction from
-    #: the registry. They are full of operator-facing text, and none of it may be a
-    #: finding.
-    RENDERING_SURFACES = ("capability_health.py", "operator_acceptance.py")
-
     def test_a_registry_rendering_surface_has_no_findings_at_all(self):
-        for name in self.RENDERING_SURFACES:
-            with self.subTest(module=name):
-                path = _EMITTED_LIB / name
+        """The sample is DERIVED, not listed: every module in the scanned set that
+        actually calls the registry's renderer. A hardcoded pair would silently stop
+        covering the third and fourth surfaces that started rendering from the
+        registry in this very task, and those are the population most likely to
+        regress. Asserted non-empty and asserted to have grown past the original two,
+        so the derivation cannot quietly resolve to nothing."""
+        surfaces = registry_rendering_surfaces()
+        self.assertGreaterEqual(len(surfaces), 2, sorted(surfaces))
+        for name in ("capability_health", "operator_acceptance"):
+            self.assertIn(name, surfaces,
+                          "a surface known to render from the registry is not "
+                          "being detected as one, so this sample proves nothing")
+        for stem in sorted(surfaces):
+            with self.subTest(module=stem):
+                path = _EMITTED_LIB / (stem + ".py")
                 findings = scan_source(
                     path.read_text(encoding="utf-8"),
-                    "{}/{}".format(_EMITTED_LIB_REL, name))
+                    "{}/{}.py".format(_EMITTED_LIB_REL, stem))
                 self.assertEqual([f.render() for f in findings], [])
 
     def test_the_registry_itself_has_no_findings(self):
