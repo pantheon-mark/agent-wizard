@@ -1910,15 +1910,46 @@ def _quarantined_violations(
 # Public API
 # ---------------------------------------------------------------------------
 
+#: Why no rule was applied to a file, when none was. Stable tokens so a caller
+#: can key on the answer instead of recomputing it — see ``FileScan``.
+SKIPPED_NOT_PYTHON = "not_python"
+SKIPPED_ADAPTER_PROFILE_ZONE = "adapter_profile_zone"
+SKIPPED_UNREADABLE = "unreadable"
+
+
+class FileScan(NamedTuple):
+    """What the scanner DID with one file, not only what it found.
+
+    ``violations`` is what every existing caller already consumed. ``skipped``
+    is the fact that used to be unrecoverable: ``None`` when every rule was
+    applied, otherwise one of the ``SKIPPED_*`` tokens saying why none was.
+
+    The distinction exists because an empty ``violations`` list answers two
+    different questions identically — "no rule objected" and "no rule ran" —
+    and a surface that issues a per-file verdict has to tell them apart. This
+    module is the only thing that knows which happened, so it says so rather
+    than leaving each caller to re-derive it from a suffix or a path. Two places
+    deciding the same fact is the failure this package keeps paying for.
+    """
+
+    skipped: Optional[str]
+    violations: List[Violation]
+
+
 def _scan_file(
     file_path: Path,
     kernel_anchor: Path,
     sealed_kernel_paths: FrozenSet[str],
     adapter_profile_paths: FrozenSet[str],
     project_root: Optional[Path] = None,
-) -> List[Violation]:
+) -> FileScan:
     if file_path.suffix != ".py":
-        return []
+        # Exactly ``.py``, and deliberately case-sensitive even where the
+        # filesystem is not: on a case-insensitive volume ``X.PY`` opens the
+        # same bytes as ``x.py`` and is still not a name this scanner reads.
+        # Reporting that as SKIPPED rather than as an empty result is what stops
+        # the two spellings of one file getting opposite verdicts.
+        return FileScan(SKIPPED_NOT_PYTHON, [])
     zone = classify_zone(
         file_path,
         kernel_anchor,
@@ -1931,7 +1962,7 @@ def _scan_file(
         # membership itself is never "anything under this path" (classify_zone
         # requires an explicit relative-path listing), so this exemption
         # cannot be obtained merely by location.
-        return []
+        return FileScan(SKIPPED_ADAPTER_PROFILE_ZONE, [])
     try:
         source = file_path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
@@ -1953,7 +1984,7 @@ def _scan_file(
         # rather than minting a second one: every consumer already handles it,
         # and what it means to a reader -- this file could not be statically
         # verified, look at it -- is exactly right for this case.
-        return [Violation(path=str(file_path), lineno=1, kind="unparseable")]
+        return FileScan(None, [Violation(path=str(file_path), lineno=1, kind="unparseable")])
     except OSError:
         # An ACCESS failure, which is a different question and is deliberately
         # NOT treated as a violation here. A permission-denied or transiently
@@ -1964,16 +1995,45 @@ def _scan_file(
         # Tracked as a known gap with a named clearing authority; the entry-point
         # readers that MUST distinguish absent from inaccessible already do so on
         # their own read's exception type rather than relying on this one.
-        return []
+        #
+        # It IS reported as SKIPPED, which changes nothing about what this
+        # function REPORTS -- the violation list is empty exactly as before, so
+        # every gate behaves identically and the recorded known gap is neither
+        # closed nor pre-empted. It only stops a per-file surface from calling
+        # this outcome a clean bill of health.
+        return FileScan(SKIPPED_UNREADABLE, [])
     try:
         tree = ast.parse(source, filename=str(file_path))
     except SyntaxError:
         # An unparseable file cannot be statically verified safe. For a trust
         # gate, treat that as a violation so the build does not pass blind.
-        return [Violation(path=str(file_path), lineno=1, kind="unparseable")]
+        return FileScan(None, [Violation(path=str(file_path), lineno=1, kind="unparseable")])
     scanner = _Scanner(str(file_path), zone)
     scanner.visit(tree)
-    return _quarantined_violations(file_path, project_root, scanner.violations)
+    return FileScan(
+        None, _quarantined_violations(file_path, project_root, scanner.violations))
+
+
+def _resolved_scan_inputs(
+    allowed_root: Optional[Union[str, Path]],
+    sealed_kernel_paths: Optional[FrozenSet[str]],
+    adapter_profile_paths: Optional[FrozenSet[str]],
+    project_root: Optional[Union[str, Path]],
+):
+    """The four resolved arguments ``_scan_file`` takes, from the optional ones
+    its two public entrypoints accept. One implementation, so a single-file scan
+    and a whole-tree scan can never resolve the same inputs differently — see
+    ``scan_paths``'s docstring for what each of them means and why the defaults
+    are what they are."""
+    return (
+        Path(allowed_root).resolve() if allowed_root is not None
+        else _default_kernel_anchor(),
+        sealed_kernel_paths if sealed_kernel_paths is not None
+        else SEALED_KERNEL_MODULE_PATHS,
+        adapter_profile_paths if adapter_profile_paths is not None
+        else ADAPTER_PROFILE_MODULE_PATHS,
+        Path(project_root) if project_root is not None else None,
+    )
 
 
 def _iter_py_files(path: Path):
@@ -2047,36 +2107,39 @@ def scan_paths(
     Returns a list of :class:`Violation`, ordered by file path then line number.
     An empty list means the build passes this gate.
     """
-    anchor = (
-        Path(allowed_root).resolve()
-        if allowed_root is not None
-        else _default_kernel_anchor()
-    )
-    resolved_sealed_kernel_paths = (
-        sealed_kernel_paths if sealed_kernel_paths is not None
-        else SEALED_KERNEL_MODULE_PATHS
-    )
-    resolved_adapter_profile_paths = (
-        adapter_profile_paths if adapter_profile_paths is not None
-        else ADAPTER_PROFILE_MODULE_PATHS
-    )
-    resolved_project_root = (
-        Path(project_root) if project_root is not None else None
-    )
+    resolved = _resolved_scan_inputs(
+        allowed_root, sealed_kernel_paths, adapter_profile_paths, project_root)
     violations: List[Violation] = []
     for raw in paths:
         p = Path(raw)
         for f in _iter_py_files(p):
-            violations.extend(
-                _scan_file(
-                    f, anchor,
-                    resolved_sealed_kernel_paths,
-                    resolved_adapter_profile_paths,
-                    resolved_project_root,
-                )
-            )
+            violations.extend(_scan_file(f, *resolved).violations)
     violations.sort(key=lambda v: (v.path, v.lineno, v.kind))
     return violations
+
+
+def scan_one_file(
+    path: Union[str, Path],
+    allowed_module: str = "agents.lib.external_write",
+    allowed_root: Optional[Union[str, Path]] = None,
+    adapter_profile_paths: Optional[FrozenSet[str]] = None,
+    sealed_kernel_paths: Optional[FrozenSet[str]] = None,
+    project_root: Optional[Union[str, Path]] = None,
+) -> FileScan:
+    """The scanner's full answer about ONE file: what it found, AND whether it
+    analysed the file at all (see :class:`FileScan`).
+
+    Same rules, same zone classification, same quarantine as ``scan_paths`` —
+    both resolve their inputs through ``_resolved_scan_inputs`` and both run
+    ``_scan_file``, so there is no second implementation of anything here. This
+    exists because ``scan_paths`` aggregates over many files and so cannot carry
+    a per-file "was it analysed" answer, and a surface that issues a verdict
+    about one named file needs exactly that.
+    """
+    return _scan_file(
+        Path(path),
+        *_resolved_scan_inputs(allowed_root, sealed_kernel_paths,
+                               adapter_profile_paths, project_root))
 
 
 # ---------------------------------------------------------------------------
@@ -2251,12 +2314,18 @@ ELSEWHERE_MARKER = "[elsewhere]"
 
 
 def writer_target_refusal(writer: str):
-    """Why this ``--writer`` target cannot be confirmed, or ``None`` if it can.
+    """Why this ``--writer`` target cannot even be OPENED, or ``None`` if it can.
 
-    Returns ``(exit_code, message)``. A per-file surface may never issue a
-    positive per-file verdict about a file it did not read: "this file is clean"
-    is a claim about one file, and it is false the moment the file was not
-    opened. The likeliest way in is mundane — the rendered command run from the
+    Returns ``(exit_code, message)``. The invariant this serves is that a
+    per-file surface may never issue a positive per-file verdict about a file no
+    rule looked at — and READABLE IS ONLY HALF OF THAT. This function proves the
+    bytes are reachable; it does not and cannot prove the scanner will analyse
+    them. The other half is ``FileScan.skipped``, decided by the scanner itself
+    and consumed at the verdict, because a file can open perfectly and still be
+    seen by no rule (a name that is not ``.py``, an exempt zone). Both halves are
+    required; neither is sufficient.
+
+    The likeliest way in here is mundane — the rendered command run from the
     wrong folder, the relative path resolving to nothing.
 
     ABSENT and INACCESSIBLE are deliberately different answers, and the read is
@@ -2297,15 +2366,26 @@ def writer_target_refusal(writer: str):
 
 
 def parse_cli_args(argv: Sequence[str]):
-    """Strict, fail-closed parse of this entrypoint's argv.
+    """Strict, fail-closed parse of this entrypoint's argv SHAPE.
 
     Returns ``(writer, paths, error)``: exactly one of ``writer`` / ``paths`` is
-    set on success, and ``error`` is a message on any other input.
+    set when the shape is recognised, and ``error`` is a message for any shape
+    that is not.
 
-    DENY BY DEFAULT, following this package's CLI convention: there is no branch
-    that ignores an argument it does not recognise and proceeds anyway. Mixing
-    ``--writer`` with positional paths is refused rather than resolved, because
-    the two shapes ask for different things and there is no correct guess.
+    DENY BY DEFAULT within its own remit, following this package's CLI
+    convention: no branch here ignores an argument it does not recognise and
+    proceeds anyway. Mixing ``--writer`` with positional paths is refused rather
+    than resolved, because the two shapes ask for different things and there is
+    no correct guess.
+
+    ★ The remit is SHAPE ONLY, and the split is deliberate: whether the named
+    ``--writer`` target is a file this scanner can actually answer about is a
+    question for the filesystem, not for argv, and it is decided by
+    ``writer_target_refusal`` (existence, readability, ordinariness) plus the
+    scanner's own ``FileScan.skipped`` (whether any rule ran). A directory
+    therefore passes THIS function and is refused one layer up. Read the
+    deny-by-default claim above as being about argv shape; the rest of the
+    refusal genuinely happens, just not here.
     """
     args = list(argv)
     if not args:
@@ -2323,22 +2403,31 @@ def parse_cli_args(argv: Sequence[str]):
 
 
 def cli_findings(writer: Optional[str], paths: Sequence[str], project_root: Path):
-    """``(blocking, elsewhere)`` for one invocation.
+    """``(blocking, elsewhere, skipped)`` for one invocation.
 
     ``blocking`` decides the exit status. ``elsewhere`` is the project-wide
     consent finding that a per-writer confirmation must report without failing
     on -- always empty for the build gate, which blocks on everything.
+    ``skipped`` is the scanner's own answer about the ``--writer`` target: not
+    ``None`` when NO rule was applied to it, in which case there is no verdict
+    to give and the caller must refuse rather than report an empty result as a
+    clean one. Always ``None`` for the gate, which quantifies over a set and
+    makes no claim about any individual file.
 
     The argument the gate is given is relative and the sweep's paths are
     absolute, so both the deduplication and the is-this-my-target test compare
     RESOLVED file identity rather than the raw ``path`` string.
     """
     if writer is not None:
-        blocking = scan_paths([writer], project_root=project_root)
+        # scan_one_file, not scan_paths: the per-file answer INCLUDES whether
+        # the file was analysed, and scan_paths cannot carry that. Same rules,
+        # same resolution, same quarantine -- see scan_one_file's docstring.
+        outcome = scan_one_file(writer, project_root=project_root)
         target = str(Path(writer).resolve())
         elsewhere = [v for v in consent_sweep(project_root)
                      if str(Path(v.path).resolve()) != target]
-        return blocking, elsewhere
+        return sorted(outcome.violations,
+                      key=lambda v: (v.path, v.lineno, v.kind)), elsewhere, outcome.skipped
 
     blocking = list(scan_paths(list(paths), project_root=project_root))
     seen = {(str(Path(v.path).resolve()), v.lineno, v.kind) for v in blocking}
@@ -2348,7 +2437,27 @@ def cli_findings(writer: Optional[str], paths: Sequence[str], project_root: Path
             seen.add(key)
             blocking.append(v)
     blocking.sort(key=lambda v: (v.path, v.lineno, v.kind))
-    return blocking, []
+    return blocking, [], None
+
+
+#: Why there is no verdict to give about a named target, per ``FileScan.skipped``.
+#: Each one says what was NOT done and how to get an answer; none of them is a
+#: pass, because none of them is a result.
+_NOT_ANALYSED_REASONS = {
+    SKIPPED_NOT_PYTHON: (
+        "was not analysed: this scanner reads files whose name ends in '.py', "
+        "spelled exactly that way. Nothing about this one was checked, so this "
+        "is not a confirmation. If the file IS Python, check how its name is "
+        "spelled -- on a filesystem that ignores capitals the file still opens "
+        "under a name the scanner does not read."),
+    SKIPPED_ADAPTER_PROFILE_ZONE: (
+        "was not analysed: it is in the declared adapter-profile zone, which "
+        "this scan exempts from every rule. Nothing about it was checked, so "
+        "this is not a confirmation."),
+    SKIPPED_UNREADABLE: (
+        "was not analysed: its contents could not be read. Nothing about it was "
+        "checked, so this is not a confirmation."),
+}
 
 
 _CONSENT_NOTE = (
@@ -2404,7 +2513,15 @@ if __name__ == "__main__":  # pragma: no cover
     # capability_health.py, acceptance_ceremony.py, coverage_gate.py) omits
     # project_root and keeps its existing strict, unconditional behavior --
     # see scan_paths's own docstring for why that is deliberate.
-    _violations, _elsewhere = cli_findings(_writer, _paths, Path.cwd())
+    _violations, _elsewhere, _skipped = cli_findings(_writer, _paths, Path.cwd())
+
+    if _skipped is not None:
+        # No rule was applied to the named file, so there is no verdict to give
+        # about it. Being able to OPEN a file does not make it analysed, and an
+        # empty result is not a clean one -- the scanner said which happened
+        # rather than leaving this layer to guess from the name.
+        print(f"{_writer} {_NOT_ANALYSED_REASONS[_skipped]}", file=_sys.stderr)
+        _sys.exit(2)
 
     for _v in _violations:
         print(f"{_v.path}:{_v.lineno}: {_v.kind}")

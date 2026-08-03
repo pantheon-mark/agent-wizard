@@ -2083,6 +2083,96 @@ class TestPerWriterRepairConfirmation(unittest.TestCase):
                 self.assertEqual(proc.returncode, 2, f"args={args!r}")
 
 
+class TestPerWriterTargetMustBeScanned(unittest.TestCase):
+    """Readable is necessary and NOT sufficient. The verdict line claims a rule
+    looked at this file; being able to open it does not make that true.
+
+    The demonstration is not the benign "operator named a text file" case. On a
+    case-insensitive filesystem ``DIRTY.PY`` opens the very same bytes as
+    ``dirty.py``, and the suffix the scanner requires is exactly ``.py`` -- so
+    the same file at the same instant got opposite verdicts, decided by nothing
+    but which case was typed.
+
+    The scanner is the one that knows whether it analysed a file, so it says so
+    and this surface consumes that answer. Re-deriving "was this scanned?" from
+    the suffix at the command layer would put the same decision in two places,
+    which is the shape this package keeps paying for.
+    """
+
+    def _run(self, proj, *args, timeout=60):
+        import subprocess
+        return subprocess.run(
+            [sys.executable, str(_ADAPTER_DIR / "scan.py"), *args],
+            cwd=str(proj), capture_output=True, text=True, timeout=timeout)
+
+    def _project(self, td):
+        proj = Path(td)
+        (proj / "agents" / "inbox").mkdir(parents=True)
+        (proj / "agents" / "inbox" / "dirty.py").write_text(
+            "import requests\n\ndef main():\n    return requests\n",
+            encoding="utf-8")
+        return proj
+
+    def test_the_argv_parse_does_not_claim_a_check_it_does_not_make(self):
+        doc = (scan.parse_cli_args.__doc__ or "").lower()
+        # It parses SHAPE. Whether the named target is a file this scanner can
+        # answer about is decided later, against the filesystem, and the
+        # docstring may not imply otherwise.
+        self.assertIn("shape", doc)
+        self.assertIn("writer_target_refusal", doc,
+                      "the docstring must name where the rest of the refusal "
+                      "lives rather than implying it all happens here")
+        # And the split has to be real: a directory passes the parse.
+        self.assertEqual(scan.parse_cli_args([scan.FLAG_WRITER, "some_dir"]),
+                         ("some_dir", [], None))
+
+    def test_the_same_file_cannot_get_opposite_verdicts_by_typed_case(self):
+        with TemporaryDirectory() as td:
+            proj = self._project(td)
+            lower = self._run(proj, scan.FLAG_WRITER, "agents/inbox/dirty.py")
+            self.assertEqual(lower.returncode, 1, "premise: it is dirty")
+            upper = self._run(proj, scan.FLAG_WRITER, "agents/inbox/DIRTY.PY")
+            if upper.returncode == 1 and "forbidden_import" in upper.stdout:
+                self.skipTest("case-sensitive filesystem: the two names are "
+                              "different files and this case cannot arise")
+            self.assertNotEqual(
+                upper.returncode, 0,
+                f"the same bytes must not be called clean under another "
+                f"spelling; stdout={upper.stdout!r} stderr={upper.stderr!r}")
+            self.assertNotIn("clean", upper.stdout.lower())
+
+    def test_a_file_no_rule_looked_at_is_never_reported_clean(self):
+        with TemporaryDirectory() as td:
+            proj = self._project(td)
+            (proj / "agents" / "inbox" / "notes.txt").write_text(
+                "not python\n", encoding="utf-8")
+            proc = self._run(proj, scan.FLAG_WRITER, "agents/inbox/notes.txt")
+            self.assertNotEqual(proc.returncode, 0,
+                                f"stdout={proc.stdout!r} stderr={proc.stderr!r}")
+            self.assertNotIn("clean", proc.stdout.lower())
+            self.assertIn("not analysed", (proc.stdout + proc.stderr).lower())
+
+    def test_the_scanner_itself_reports_whether_it_analysed_a_file(self):
+        # The single source of that answer. If this ever has to be recomputed by
+        # a caller, the caller and the scanner become two paths that must agree.
+        with TemporaryDirectory() as td:
+            proj = self._project(td)
+            py = scan.scan_one_file(proj / "agents" / "inbox" / "dirty.py")
+            self.assertIsNone(py.skipped)
+            self.assertTrue(py.violations)
+            txt_path = proj / "agents" / "inbox" / "notes.txt"
+            txt_path.write_text("not python\n", encoding="utf-8")
+            txt = scan.scan_one_file(txt_path)
+            self.assertEqual(txt.skipped, scan.SKIPPED_NOT_PYTHON)
+            self.assertEqual(txt.violations, [])
+
+    def test_the_scanned_set_reported_by_the_gate_is_unchanged(self):
+        # The scanner's answer gained a field; what it REPORTS must not move.
+        v = scan_paths([_FIXTURES / "capability_bakes_operator_confirmation.py"])
+        self.assertEqual([x.kind for x in v], ["baked_operator_confirmation"])
+        self.assertEqual(scan_paths([_ADAPTER_DIR]), [])
+
+
 class TestPerWriterTargetMustBeReadable(unittest.TestCase):
     """A per-file surface may never issue a positive per-file verdict about a
     file it did not read.
@@ -2100,11 +2190,11 @@ class TestPerWriterTargetMustBeReadable(unittest.TestCase):
     not a directory walk, so nothing about that argument applies.
     """
 
-    def _run(self, proj, *args):
+    def _run(self, proj, *args, timeout=60):
         import subprocess
         return subprocess.run(
             [sys.executable, str(_ADAPTER_DIR / "scan.py"), *args],
-            cwd=str(proj), capture_output=True, text=True)
+            cwd=str(proj), capture_output=True, text=True, timeout=timeout)
 
     def _project(self, td):
         proj = Path(td)
@@ -2157,6 +2247,40 @@ class TestPerWriterTargetMustBeReadable(unittest.TestCase):
             # once as the target's and once as being somewhere other than the
             # target it is actually inside.
             self.assertNotIn("finish_setup.py", proc.stdout)
+
+    def test_the_folder_refusal_hands_back_the_way_out(self):
+        # The only actionable instruction on that path, and it was asserted by
+        # nothing. A refusal without a way out is a state nobody can leave.
+        with TemporaryDirectory() as td:
+            proj = self._project(td)
+            (proj / "scripts").mkdir()
+            proc = self._run(proj, scan.FLAG_WRITER, "scripts")
+            self.assertEqual(proc.returncode, 2)
+            said = proc.stdout + proc.stderr
+            self.assertIn("is a folder", said)
+            self.assertIn("with no flag", said,
+                          "the operator needs to be told the whole-project form")
+
+    def test_a_target_that_is_not_an_ordinary_file_is_refused_not_opened(self):
+        # `S_ISREG` sits BEFORE the open(), and removing it is not inert: open()
+        # on a FIFO with no writer blocks forever. The timeout is the assertion
+        # -- without it that regression is a hang, which no suite reports.
+        import subprocess
+        if not hasattr(os, "mkfifo"):  # pragma: no cover - non-POSIX
+            self.skipTest("no mkfifo on this platform")
+        with TemporaryDirectory() as td:
+            proj = self._project(td)
+            fifo = proj / "agents" / "inbox" / "pipe.py"
+            os.mkfifo(str(fifo))
+            try:
+                proc = self._run(proj, scan.FLAG_WRITER, "agents/inbox/pipe.py",
+                                 timeout=20)
+            except subprocess.TimeoutExpired:
+                self.fail("the probe blocked on a FIFO: the not-an-ordinary-file "
+                          "refusal must come BEFORE the open()")
+            self.assertEqual(proc.returncode, 2,
+                             f"stdout={proc.stdout!r} stderr={proc.stderr!r}")
+            self.assertIn("not an ordinary file", proc.stdout + proc.stderr)
 
     def test_a_readable_file_is_still_confirmed(self):
         with TemporaryDirectory() as td:
