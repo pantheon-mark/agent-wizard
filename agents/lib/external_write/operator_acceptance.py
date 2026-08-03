@@ -1151,13 +1151,25 @@ if __name__ == "__main__":  # pragma: no cover
         _proof_ref = _opts["--copy-run-proof"] or copy_run_proof_path(
             _opts["--capability-id"])
         if not os.path.exists(_proof_ref):
-            from external_write.trial_executor import trial_command
-            print(
-                "There is no evidence file yet at "
-                f"{_proof_ref}. Acceptance needs one: a run that makes one real "
-                "change, checks it landed, puts it back, and checks it came back. "
-                "To produce it, put your own words in place of the last part and "
-                "run this from your project's top folder:\n"
-                + trial_command(_opts["--capability-id"]),
-                file=_sys.stderr)
+            # Through the render-OR-SAY-WHY entry, never the raising renderer: the
+            # id here comes straight from argv, so this surface does not own it,
+            # and a hint that cannot be built must not take the refusal above it
+            # down. When no command can be offered, this says so in plain language
+            # and offers none -- the same shape this CLI already uses for a
+            # confirmation it cannot safely interpolate, rather than emitting a
+            # command that wraps.
+            from external_write.trial_executor import trial_command_or_reason
+            _hint, _hint_problem = trial_command_or_reason(
+                _opts["--capability-id"])
+            _preamble = (
+                f"There is no evidence file yet at {_proof_ref}. Acceptance needs "
+                "one: a run that makes one real change, checks it landed, puts it "
+                "back, and checks it came back.")
+            if _hint is None:
+                print(f"{_preamble} No command can be offered for this one: "
+                      f"{_hint_problem}", file=_sys.stderr)
+            else:
+                print(f"{_preamble} To produce it, put your own words in place of "
+                      "the last part and run this from your project's top "
+                      "folder:\n" + _hint, file=_sys.stderr)
         _sys.exit(1)

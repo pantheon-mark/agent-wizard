@@ -331,6 +331,42 @@ def trial_command(capability_id: str, *,
     return " ".join(shlex.quote(p) for p in parts)
 
 
+def trial_command_or_reason(
+        capability_id: str, *,
+        operator_approval: Optional[str] = None) -> Tuple[Optional[str],
+                                                          Optional[str]]:
+    """`(command, None)`, or `(None, reason)` when no paste-ready command can be
+    built for these values.
+
+    THE ONE PLACE that decides whether a hint is renderable, and the only entry a
+    surface RENDERING GUIDANCE should use. `trial_command` raises, which is right
+    for a caller that owns its inputs -- but a surface offering the command as an
+    affordance beside a refusal does not own them: the acceptance CLI takes the
+    capability id straight from argv. Calling the raising renderer there printed
+    the refusal correctly and then a raw Python traceback underneath it, which is
+    the one thing this package's CLIs are not allowed to show an operator. The
+    refusal is load-bearing and the hint is an affordance; a hint that cannot be
+    built must never take the refusal down with it.
+
+    A REASON, not merely `None`: a caller handed only `None` would have to invent
+    the sentence explaining it, and inventing operator-facing text about a value it
+    did not validate is how a wrong sentence gets written. Returned as a pair,
+    matching this package's own idiom for a question whose failure the caller has
+    to be able to describe (`parse_trial_args`, and recovery's facade step).
+
+    The reason is deliberately a SINGLE LINE -- it is printed where a one-line
+    command would otherwise sit.
+    """
+    try:
+        return trial_command(capability_id,
+                             operator_approval=operator_approval), None
+    except ValueError:
+        return None, (
+            f"a ready-to-paste command cannot be built for `{capability_id!r}` "
+            "because it contains a line break -- a command that wraps does not "
+            "run when pasted. Use a name that is a single line.")
+
+
 def parse_trial_args(argv: Any) -> Tuple[Optional[Dict[str, Optional[str]]],
                                          Optional[str]]:
     """Strict, fail-closed parse of a trial invocation's argv.

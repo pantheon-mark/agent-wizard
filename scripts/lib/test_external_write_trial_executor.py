@@ -1703,6 +1703,33 @@ class TheRenderedTrialCommandTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     tx.trial_command(bad, operator_approval=APPROVAL)
 
+    def test_the_render_or_say_why_helper_answers_BOTH_ways(self):
+        """`(command, None)` or `(None, reason)` -- this package's own idiom for a
+        question whose failure a caller has to be able to describe rather than
+        merely detect. A caller that got only `None` would have to invent the
+        reason, and inventing operator-facing text about a value it did not
+        validate is how a wrong sentence gets written."""
+        command, reason = tx.trial_command_or_reason("acme_crm_sync")
+        self.assertIsNone(reason)
+        self.assertEqual(command, tx.trial_command("acme_crm_sync"))
+
+        command, reason = tx.trial_command_or_reason("acme\ncrm_sync")
+        self.assertIsNone(command, "a command that cannot be one line was built")
+        self.assertIn("single line", reason.lower())
+        self.assertNotIn("\n", reason,
+                         "the reason a command cannot be one line must itself be "
+                         "one line")
+
+    def test_the_helper_carries_the_operators_words_through_when_it_can(self):
+        command, reason = tx.trial_command_or_reason(
+            "acme_crm_sync", operator_approval=APPROVAL)
+        self.assertIsNone(reason)
+        self.assertIn(APPROVAL, shlex.split(command))
+        self.assertIsNone(
+            tx.trial_command_or_reason("acme_crm_sync",
+                                       operator_approval="yes\nplease")[0],
+            "a multi-line approval must not render either")
+
     def test_every_rendered_command_is_ONE_line_for_every_interpolated_part(self):
         """Quantified over the parts rather than asserted for one of them: the
         guarantee is about the rendered line, and a check on a single field is how
@@ -2172,6 +2199,51 @@ class TheACCEPTANCERefusalNamesTheProducerTests(unittest.TestCase):
                       "the operator's own words must be left as a blank for them "
                       "to fill in, never invented")
         self.assertNotIn("Traceback", message)
+
+    def test_a_MALFORMED_capability_id_keeps_the_refusal_and_offers_no_command(self):
+        """THE REGRESSION THIS TEST EXISTS FOR: the refusal is load-bearing and the
+        hint is an affordance, so a hint that cannot be rendered must never take
+        the refusal down with it.
+
+        Making the renderer refuse a line break anywhere in the command was right
+        -- quoting preserves a newline and a wrapped command is the paste hazard
+        this package has paid for -- but the acceptance CLI called it with an id
+        straight from argv and no guard, so a newline-bearing id printed the
+        refusal correctly and then a raw Python traceback underneath it. The
+        existing test here drove only a well-formed id, which is how it got
+        through.
+
+        The ratified shape for this CLI's sibling field is the one followed: plain
+        language, and NO command offered rather than a broken one."""
+        _root, descriptors, capability_id = self._project("acme\ncrm_sync")
+        result, message = self._run_acceptance(descriptors, capability_id)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Traceback", message,
+                         "a non-technical operator reads this output")
+        self.assertIn("REFUSED", message,
+                      "the refusal is the load-bearing half and must survive a "
+                      "hint that could not be built")
+        self.assertNotIn(tx.TRIAL_ENTRYPOINT_REL, message,
+                         "a command was offered for a name that cannot render as "
+                         "one physical line")
+        self.assertIn("single line", message.lower(),
+                      "the operator is told nothing about why no command was "
+                      "offered")
+
+    def test_the_hint_decision_has_exactly_ONE_home(self):
+        """One place decides whether a hint is renderable. The acceptance CLI must
+        reach the renderer only through the render-or-say-why helper -- a second
+        call site would be a second place deciding, and the first of the two would
+        be the one that raised."""
+        tree = ast.parse((_EXTERNAL_WRITE_DIR / "operator_acceptance.py").read_text(
+            encoding="utf-8"))
+        called = [getattr(node.func, "id", getattr(node.func, "attr", ""))
+                  for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        self.assertIn("trial_command_or_reason", called)
+        self.assertNotIn(
+            "trial_command", called,
+            "the raw renderer is called directly, so this surface decides for "
+            "itself whether a command is renderable -- and it raises")
 
     def test_the_hint_is_absent_when_a_proof_IS_present(self):
         """Keyed on the FILE, not on the refusal wording -- so a refusal for some
