@@ -965,6 +965,82 @@ class TheWriterWhoseOnlyExitNoSurfaceNamedTests(unittest.TestCase, _Observing):
             status["open_external_write_bypass"]["blocking_writer_relpaths"])
 
 
+class ARecordedDecisionIsNeverHONOUREDForARebuildableWriterTests(
+        unittest.TestCase, _Observing):
+    """The historical defect that made the eligibility rule necessary, reproduced
+    from RAW ARTIFACTS ALONE.
+
+    What happened: the state service tested the recorded decision FIRST, ahead of
+    every other state, and the command gated only on there being an open entry. A
+    decision recorded against a fully REBUILDABLE writer therefore took it out of
+    the blocking set, so the rebuild never had to happen -- with the operator's
+    entirely genuine consent, which is why no consent check could have caught it.
+    The consent was real; the QUESTION was wrong.
+
+    Reproducing that needs a VALID decision on a writer that is rebuildable, and
+    this gets there without forging anything: the operator records a decision about
+    a writer the check found needs a person, and a later re-scan records a different
+    set of violation kinds for the same file -- every one of them now covered by our
+    own remediator. The writer's BYTES never change, so the operator's decision is
+    still hash-valid and still on file. It simply must stop applying.
+
+    This is the one shape a round-trip cannot reach on its own, because a decision
+    for an ineligible writer cannot be created through the public command at all.
+    It is reachable through the queue, which is an ordinary project artifact the
+    upgrade reconcile rewrites."""
+
+    def setUp(self):
+        self.project, self.subject = _build_needs_person(self)
+        result = self.run_command(
+            self.project, _render(_action("record_accepted_risk"), self.subject,
+                                  with_confirmation=True))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.observe(self.project, self.subject),
+            (sa.writer_state_key(core.WriterState.ACKNOWLEDGED_RISK),),
+            "fixture precondition: a real, recorded decision")
+
+    def _rescan_records_remediable_kinds(self):
+        """The same file, re-scanned, recording only kinds our own remediator
+        covers. The writer's bytes are untouched, so the decision stays valid."""
+        self.project.queue([_queue_entry(self.subject, ["sealed_kernel_import"],
+                                        _sha256(_UNREPAIRABLE_SRC))])
+
+    def test_the_decision_stops_applying_once_the_writer_is_rebuildable(self):
+        self._rescan_records_remediable_kinds()
+        self.assertEqual(
+            self.observe(self.project, self.subject),
+            (sa.writer_state_key(core.WriterState.BLOCKING_LIVE_ENABLE),),
+            "a recorded decision released a writer whose every violation our own "
+            "remediator covers, so its rebuild never had to happen")
+
+    def test_the_decision_is_still_on_file_and_simply_NOT_honoured(self):
+        """It is not deleted, revoked or hidden -- the operator said what they
+        said. It is INERT for this state, which is a different thing, and the
+        difference matters because deleting it would be rewriting their words."""
+        self._rescan_records_remediable_kinds()
+        self.assertIn(self.subject,
+                      store.active_acknowledgements(str(self.project.root)),
+                      "the record was destroyed rather than left unapplied")
+
+    def test_the_writer_goes_back_to_HOLDING_LIVE_ENABLE_BACK(self):
+        self._rescan_records_remediable_kinds()
+        status = health.overall_status(str(self.project.root))
+        block = status["open_external_write_bypass"]
+        self.assertIn(self.subject, block["blocking_writer_relpaths"])
+        self.assertFalse(status["normal_status_allowed"])
+
+    def test_the_surface_then_names_the_REBUILD_and_not_the_decision(self):
+        self._rescan_records_remediable_kinds()
+        block = health.overall_status(
+            str(self.project.root))["open_external_write_bypass"]
+        self.assertIn(core.BYPASS_UNREPAIRED_REPAIR, block["actions"][self.subject])
+        self.assertNotIn("no action is needed",
+                         block["actions"][self.subject].lower(),
+                         "an operator whose rebuild is still owed was told there "
+                         "was nothing to do")
+
+
 class TheCompliantWriterThatCouldNotProveItCompliesTests(unittest.TestCase,
                                                           _Observing):
     """The second dead end, sanitized: a hand-rolled bulk write loop that CAN be
