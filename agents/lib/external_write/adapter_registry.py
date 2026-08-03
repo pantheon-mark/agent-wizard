@@ -195,6 +195,15 @@ class Adapter(Protocol):
                  INTENDED, so recovery runs ``undo_one`` without knowing
                  whether the mutation landed, and may run it more than once
                  (``trial_eligibility.py`` carries the full rationale).
+                 SCOPED TO THE ``undo_one`` IT DESCRIBES, unlike every other
+                 optional hook here: an ordinary MRO lookup would let a subclass
+                 that declares NOTHING and replaces ``undo_one`` with a relative
+                 compensating action inherit its parent's consent silently. See
+                 ``_resolve_undo_declaration`` below for the exact rule — a
+                 declaration authored at or BELOW the class that defines
+                 ``undo_one`` is honoured; one authored ABOVE an OVERRIDING
+                 ``undo_one`` is SUPERSEDED, and the adapter must re-declare on
+                 the overriding class.
                  Consumed ONLY by ``trial_eligibility.check_trial_eligibility``
                  — the trial-eligibility preflight — never by this module's
                  dispatch path, and deliberately NOT required at proof time
@@ -287,6 +296,81 @@ _REGISTRY: Dict[str, Adapter] = {}
 # name in a second module is how a fix-step instruction drifts from the thing
 # it instructs.
 UNDO_IDEMPOTENCY_DECLARATION_ATTR = "UNDO_IS_ABSOLUTE_STATE_RESTORE"
+
+# The method the declaration above makes a claim ABOUT. Named here because
+# `_resolve_undo_declaration` has to reason about WHICH class in the MRO defines
+# it, not merely resolve it.
+_UNDO_METHOD_ATTR = "undo_one"
+
+
+class _SupersededUndoDeclaration:
+    """The captured value when a declaration exists in the class hierarchy but
+    an OVERRIDING ``undo_one`` was defined BELOW it (see
+    ``_resolve_undo_declaration``). Distinct from ``None`` (never declared at
+    all) so the trial-eligibility preflight can tell an author the actionable
+    thing — "your base declared this, your subclass replaced ``undo_one``,
+    re-declare it here if the replacement is still an absolute-state restore" —
+    rather than the misleading "nothing declared it"."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - cosmetic, for messages
+        return "<superseded by an undo_one override>"
+
+
+UNDO_DECLARATION_SUPERSEDED = _SupersededUndoDeclaration()
+
+
+def _resolve_undo_declaration(cls: type) -> Any:
+    """Resolve `cls`'s absolute-state-restore declaration, SCOPED to the
+    ``undo_one`` implementation it is a claim about.
+
+    A plain ``getattr(cls, ATTR, None)`` walks the MRO, so a subclass that
+    declares NOTHING and replaces ``undo_one`` with a relative compensating
+    action (delete what was created) silently inherits its parent's consent —
+    the declaration stops describing the code that will actually run. That is
+    the "an adapter that declares nothing is accepted" hole, and it is the
+    production mirror of a fixture defect found in this clause's own test suite.
+
+    The rule, in MRO terms. Let ``d_undo`` be the index of the first class whose
+    OWN ``vars()`` defines ``undo_one`` (that is the implementation that will
+    run), and ``d_decl`` the index of the first class whose OWN ``vars()``
+    carries the declaration. The declaration is honoured iff
+    ``d_decl <= d_undo`` — i.e. it was authored at or BELOW the level that
+    defines ``undo_one``, so its author could see the implementation being
+    vouched for. Otherwise the declaration is SUPERSEDED.
+
+    That admits both legitimate shapes and refuses the dangerous one:
+      * a base defining BOTH, inherited by a subclass that overrides neither
+        (``d_decl == d_undo``) — honoured;
+      * a subclass declaring for an ``undo_one`` it inherits unchanged
+        (``d_decl < d_undo``) — honoured, because the declaring author is
+        vouching for code that already existed;
+      * a subclass OVERRIDING ``undo_one`` without re-declaring
+        (``d_decl > d_undo``) — SUPERSEDED, because the base's claim cannot
+        describe an implementation written after it.
+
+    Returns the declared value, ``UNDO_DECLARATION_SUPERSEDED``, or ``None``
+    when nothing in the hierarchy declares it (or nothing defines ``undo_one``
+    in a ``vars()`` this can see — e.g. an attribute synthesized by a metaclass
+    ``__getattr__``; that resolves to None, the fail-closed direction).
+    """
+    mro = getattr(cls, "__mro__", None) or (cls,)
+    undo_at: Optional[int] = None
+    decl_at: Optional[int] = None
+    for index, klass in enumerate(mro):
+        own = vars(klass)
+        if undo_at is None and _UNDO_METHOD_ATTR in own:
+            undo_at = index
+        if decl_at is None and UNDO_IDEMPOTENCY_DECLARATION_ATTR in own:
+            decl_at = index
+    if decl_at is None:
+        return None
+    if undo_at is None:
+        return None
+    if decl_at > undo_at:
+        return UNDO_DECLARATION_SUPERSEDED
+    return vars(mro[decl_at])[UNDO_IDEMPOTENCY_DECLARATION_ATTR]
 
 
 @dataclass(frozen=True)
@@ -398,8 +482,8 @@ class AdapterDispatch:
                never as a false "not granted".
     undo_is_absolute_state_restore
                (Cut 1.9 Task 1 — v0.23.0, the trial-eligibility contract
-               clause): `getattr(type(adapter),
-               UNDO_IDEMPOTENCY_DECLARATION_ATTR, None)` — the adapter's OWN
+               clause): `_resolve_undo_declaration(type(adapter))` — the
+               adapter's OWN
                declaration that its `undo_one` restores absolute prior state
                (see the `Adapter` protocol docstring's
                UNDO_IS_ABSOLUTE_STATE_RESTORE clause for the semantics, the
@@ -414,11 +498,13 @@ class AdapterDispatch:
                Typed `Any`, not `bool`, deliberately: a MALFORMED declaration
                (`"yes"`, `1`, a list) must reach the preflight intact so it can
                be refused as malformed rather than silently coerced to True
-               here. Defaults to None (never declared) so every adapter
-               registered before this task, and any hand-built
-               `AdapterDispatch` in a test, keeps working unchanged — and
-               resolves to a REFUSAL at the preflight, which is the
-               fail-closed direction.
+               here. Three non-value outcomes, all of which the preflight
+               REFUSES: None (nothing in the hierarchy declares it — also the
+               back-compat default, so every adapter registered before this
+               task and any hand-built `AdapterDispatch` in a test keeps
+               working unchanged), `UNDO_DECLARATION_SUPERSEDED` (declared
+               ABOVE an overriding `undo_one`), and any value that is not the
+               boolean True.
     """
 
     instance: Any
@@ -475,8 +561,7 @@ def register_adapter(op_kind: str, adapter: Adapter) -> None:
         verify_undo_restored=getattr(cls, "verify_undo_restored", None),
         verify_durability=getattr(cls, "verify_durability", None),
         grant_preflight=getattr(cls, "grant_preflight", None),
-        undo_is_absolute_state_restore=getattr(
-            cls, UNDO_IDEMPOTENCY_DECLARATION_ATTR, None),
+        undo_is_absolute_state_restore=_resolve_undo_declaration(cls),
     )
 
 

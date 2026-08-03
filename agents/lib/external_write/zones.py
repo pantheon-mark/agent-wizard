@@ -319,10 +319,15 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         # `adapter_registry` (for `get_dispatch` + the canonical declaration
         # attribute name) and `evidence` (for the canonical required-predicate
         # set) as ordinary internal kernel wiring -- which is precisely the
-        # CAPABILITY-zone-ONLY bans: scanned as CAPABILITY it reports four
-        # violations (adapter_module_import, adapter_registry_reference x2,
-        # sealed_kernel_import) and zero as SEALED_KERNEL, so this membership is
-        # load-bearing, not decorative (proved by
+        # CAPABILITY-zone-ONLY bans: scanned as CAPABILITY it trips the kind set
+        # {adapter_module_import, adapter_registry_reference,
+        # sealed_kernel_import} and scans clean as SEALED_KERNEL, so this
+        # membership is load-bearing, not decorative. Deliberately no violation
+        # COUNT here: the count tracks how many times the module happens to name
+        # a kernel symbol (an added type annotation changes it), so a number
+        # recorded in a permanent comment is a code-structure measurement that
+        # goes stale silently -- the KIND SET is the durable fact, and it is what
+        # the pinned counterfactual asserts (proved by
         # SealedKernelZoneMembershipTests in
         # test_external_write_trial_eligibility.py, which asserts BOTH
         # directions). It is the same class as capability_invariants.py's entry

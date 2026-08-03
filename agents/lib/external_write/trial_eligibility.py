@@ -45,6 +45,12 @@ The four clauses (all must pass), plus the plan-integrity precondition
       action (delete what was created, subtract what was added) does not:
       repeating it can destroy state the trial never touched. So a relative
       undo is refused a trial rather than trusted with one.
+      The declaration is SCOPED to the `undo_one` it describes (see
+      `adapter_registry._resolve_undo_declaration`): a subclass that overrides
+      `undo_one` without re-declaring is refused, because an inherited claim
+      cannot vouch for replacement code. This clause also requires `undo_one`
+      itself to be CALLABLE — the registry captures it unchecked, and a
+      non-callable one raises mid-trial, after the mutation landed.
 
   (d) CLAUSE_RECOVERY_CAPSULE_SERIALIZABLE — every planned unit has a recovery
       capsule that survives a real `json.dumps` round trip. The journal is JSON
@@ -52,6 +58,17 @@ The four clauses (all must pass), plus the plan-integrity precondition
       (or cannot be read back faithfully) means a crash leaves a unit that
       nothing can restore. Checked by actually serializing — never by an
       isinstance guess — and never with pickle.
+      EXACTLY three things are checked, and nothing else: the capsule is
+      PRESENT (a `None` capsule counts as absent); every mapping key in it, at
+      any depth, is a string (json silently coerces other key types, so the
+      capsule would not read back with the keys a resumed executor looks up);
+      and it survives `json.dumps(..., allow_nan=False)` -> `json.loads`. The
+      capsule's SHAPE and CONTENT are deliberately NOT checked — the format
+      belongs to the journal task, not to this gate — so a DEGENERATE capsule
+      (`{}`, `""`, `0`, `False`, `[]`) is ACCEPTED here. A consumer must not
+      read this clause as a guarantee that a capsule carries anything usable;
+      it guarantees only that whatever it carries survives the disk round
+      trip.
 
   CLAUSE_PLAN_INTEGRITY (precondition) — the plan is non-empty and every unit
       is a real `EffectUnit` with a unique, usable `unit_id`. Without this,
@@ -108,7 +125,8 @@ from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 from external_write import evidence
 from external_write.adapter_registry import (
-    UNDO_IDEMPOTENCY_DECLARATION_ATTR, AdapterDispatch, get_dispatch,
+    UNDO_DECLARATION_SUPERSEDED, UNDO_IDEMPOTENCY_DECLARATION_ATTR,
+    AdapterDispatch, get_dispatch,
 )
 from external_write.operations import EffectUnit
 
@@ -317,13 +335,52 @@ def _check_absolute_state_restore(op_kind: str,
             f"{UNDO_IDEMPOTENCY_DECLARATION_ATTR} = True. Fix step: register an "
             "adapter for this operation kind.")]
 
+    refusals: List[ClauseRefusal] = []
+
+    # `undo_one` must be CALLABLE, not merely present. `register_adapter`
+    # captures `cls.undo_one` unchecked, so `undo_one = True` — a plain class
+    # attribute — registers successfully and satisfies every other clause. This
+    # is byte-for-byte the hole clause (b) closes for the evidence predicates,
+    # on the ONE symbol the entire trial protocol depends on, and the failure
+    # mode is the worst one this gate exists to prevent: the trial applies to
+    # the live surface, then the undo raises TypeError and the surface is
+    # mutated with no way back. (A `raise NotImplementedError` stub IS callable
+    # and is deliberately NOT caught here — that one belongs to the trial's own
+    # post-condition, which observes it before any proof is emitted.)
+    if not callable(dispatch.undo_one):
+        refusals.append(ClauseRefusal(
+            CLAUSE_UNDO_ABSOLUTE_STATE_RESTORE,
+            f"Absolute-state undo: the registered adapter for {op_kind!r} does not "
+            f"define undo_one as a callable method (the registry captured "
+            f"{dispatch.undo_one!r}). A trial applies to the real surface and then "
+            "calls undo_one; a non-callable one raises mid-trial, AFTER the "
+            "mutation landed, leaving the surface changed with no way back. Fix "
+            "step: define undo_one(self, raw_client, unit) as a method on the "
+            "adapter class."))
+
     declared = dispatch.undo_is_absolute_state_restore
     # Strict identity against the boolean True. A truthy non-boolean ("yes", 1,
     # a non-empty list) is a MALFORMED declaration, and a malformed declaration
     # at a gate that authorizes an external write is not consent — there is no
     # latitude here.
     if declared is True:
-        return []
+        return refusals
+    if declared is UNDO_DECLARATION_SUPERSEDED:
+        # Distinct from "never declared": something in the hierarchy DID declare
+        # it, but an overriding `undo_one` was defined below that declaration, so
+        # the claim cannot describe the implementation that will run. The author
+        # needs to hear that specifically — telling them "nothing declared it"
+        # would send them looking in the wrong class.
+        return refusals + [ClauseRefusal(
+            CLAUSE_UNDO_ABSOLUTE_STATE_RESTORE,
+            f"Absolute-state undo: the registered adapter for {op_kind!r} inherits "
+            f"{UNDO_IDEMPOTENCY_DECLARATION_ATTR} = True from a base class, but it "
+            "OVERRIDES undo_one below that declaration — so the base's claim "
+            "describes an implementation that will not run. An inherited claim is "
+            "not consent for replacement code. Fix step: if this class's own "
+            "undo_one restores the recorded PRIOR state absolutely, declare "
+            f"{UNDO_IDEMPOTENCY_DECLARATION_ATTR} = True on THIS class, next to "
+            "the undo_one it describes.")]
     if declared is None:
         observed = (f"the adapter class declares no "
                     f"{UNDO_IDEMPOTENCY_DECLARATION_ATTR} at all")
@@ -334,7 +391,7 @@ def _check_absolute_state_restore(op_kind: str,
         observed = (f"the adapter class declares "
                     f"{UNDO_IDEMPOTENCY_DECLARATION_ATTR} = {declared!r}, which is "
                     "not the boolean True")
-    return [ClauseRefusal(
+    return refusals + [ClauseRefusal(
         CLAUSE_UNDO_ABSOLUTE_STATE_RESTORE,
         f"Absolute-state undo: {observed}, so the kernel must assume undo_one is "
         "a relative, compensating action (delete what was created, subtract what "
@@ -407,8 +464,8 @@ def _check_recovery_capsules(op_kind: str, units: Sequence[Any],
                 f"Recovery capsule: no recovery capsule was supplied for unit "
                 f"{unit.unit_id!r} of {op_kind!r}. The journal must be able to "
                 "reconstruct that unit's undo from disk alone after a crash, so a "
-                "unit with no capsule cannot be trialled. Fix step: supply one "
-                "non-empty capsule per planned unit_id."))
+                "unit with no capsule cannot be trialled. Fix step: supply a "
+                "capsule for every planned unit_id."))
             continue
         try:
             bad_key = _first_non_string_mapping_key(capsule)
@@ -470,9 +527,12 @@ def check_trial_eligibility(
         units this gate actually checked rather than re-deriving a plan.
     recovery_capsules:
         Mapping of unit_id -> recovery capsule. The capsule FORMAT is owned by
-        the journal task, not by this gate: clause (d) checks only that each
-        capsule survives a real JSON round trip. A `None` capsule is treated as
-        absent (it carries nothing a resumed trial could use).
+        the journal task, not by this gate: clause (d) checks presence, string
+        mapping keys, and a real JSON round trip — nothing about shape or
+        content, so a DEGENERATE capsule (`{}`, `""`, `0`, `False`, `[]`) is
+        accepted. A `None` capsule is treated as absent. See clause (d) in the
+        module docstring for the exact, and exactly limited, guarantee this
+        gives a downstream consumer.
 
     Returns a `TrialEligibility` verdict. NEVER raises for bad input: malformed
     units, a malformed declaration, or non-mapping capsules all resolve to a

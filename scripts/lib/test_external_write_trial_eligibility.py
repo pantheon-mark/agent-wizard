@@ -462,6 +462,103 @@ class AbsoluteStateRestoreClauseTests(_Base):
         self.assertRefusedOn(self.verdict_for(op, adapter),
                              te.CLAUSE_UNDO_ABSOLUTE_STATE_RESTORE)
 
+    def test_a_subclass_that_overrides_undo_one_without_redeclaring_refuses(self):
+        """THE inheritance hole. An ordinary MRO lookup hands a subclass its
+        parent's consent: declare nothing, replace undo_one with a RELATIVE
+        delete, and the parent's `True` is captured for code the parent never
+        saw. The declaration is a claim about a specific undo_one, so it does not
+        survive that undo_one being replaced."""
+        op = "fixture.subclass.overrides_undo_one"
+
+        class _RelativeSubclass(InboxShapedAdapter):
+            # Declares NOTHING itself; inherits UNDO_IS_ABSOLUTE_STATE_RESTORE
+            # = True from InboxShapedAdapter while replacing undo_one with a
+            # compensating delete.
+            def undo_one(self, raw_client, unit):
+                raw_client.delete(unit.undo_ref["message_id"])
+
+        self.assertNotIn(UNDO_IDEMPOTENCY_DECLARATION_ATTR,
+                         vars(_RelativeSubclass))
+        self.assertIs(getattr(_RelativeSubclass,
+                              UNDO_IDEMPOTENCY_DECLARATION_ATTR), True,
+                      "precondition: a plain MRO getattr DOES see the parent's "
+                      "True, which is exactly why the capture must be scoped")
+
+        adapter = self.register(op, _RelativeSubclass())
+        verdict = self.verdict_for(op, adapter)
+        self.assertRefusedOn(verdict, te.CLAUSE_UNDO_ABSOLUTE_STATE_RESTORE)
+        self.assertIn("OVERRIDES undo_one", verdict.reason_text())
+
+    def test_a_subclass_that_overrides_undo_one_and_redeclares_is_eligible(self):
+        op = "fixture.subclass.overrides_and_redeclares"
+
+        class _RedeclaringSubclass(InboxShapedAdapter):
+            UNDO_IS_ABSOLUTE_STATE_RESTORE = True
+
+            def undo_one(self, raw_client, unit):
+                raw_client.set_exact_labels(unit.undo_ref["message_id"],
+                                            unit.undo_ref["prior_label_ids"])
+
+        adapter = self.register(op, _RedeclaringSubclass())
+        self.assertTrue(self.verdict_for(op, adapter).eligible)
+
+    def test_a_base_declaring_and_defining_both_is_inherited_legitimately(self):
+        """A family base that defines undo_one AND declares it, subclassed by a
+        child that overrides neither, stays eligible: the claim still describes
+        the code that will run."""
+        op = "fixture.base.declares_and_defines"
+
+        class _AbsoluteFamilyBase(_InboxPlanBase):
+            UNDO_IS_ABSOLUTE_STATE_RESTORE = True
+            verify_apply_landed = _label_apply_landed
+            verify_undo_restored = _label_undo_restored
+
+            def undo_one(self, raw_client, unit):
+                raw_client.set_exact_labels(unit.undo_ref["message_id"],
+                                            unit.undo_ref["prior_label_ids"])
+
+        class _InheritsEverything(_AbsoluteFamilyBase):
+            pass
+
+        adapter = self.register(op, _InheritsEverything())
+        self.assertTrue(self.verdict_for(op, adapter).eligible,
+                        self.verdict_for(op, adapter).reason_text())
+
+    def test_declaring_for_an_undo_one_inherited_unchanged_is_eligible(self):
+        """The fourth shape, and the reason the scoping rule is an MRO-ORDER
+        comparison rather than a strict same-class test: a subclass may declare
+        for an undo_one it inherits UNCHANGED, because the declaring author can
+        see the implementation being vouched for. `InboxShapedAdapter` itself is
+        this shape, so a strict same-class rule would refuse the compliant
+        fixture the whole suite is built on."""
+        op = "fixture.declares.for_inherited_undo_one"
+        self.assertNotIn("undo_one", vars(InboxShapedAdapter))
+        self.assertIn(UNDO_IDEMPOTENCY_DECLARATION_ATTR,
+                      vars(InboxShapedAdapter))
+        adapter = self.register(op, InboxShapedAdapter())
+        self.assertTrue(self.verdict_for(op, adapter).eligible)
+
+    def test_a_non_callable_undo_one_refuses(self):
+        """`register_adapter` captures `cls.undo_one` unchecked, so a plain class
+        ATTRIBUTE named undo_one registers successfully. The trial would apply to
+        the live surface and then raise calling it — the exact "mutated with no
+        way back" outcome this gate exists to prevent. Same hole clause (b)
+        closes for the evidence predicates, on the one symbol the whole protocol
+        depends on."""
+        op = "fixture.undo_one.not_callable"
+
+        class _NonCallableUndo(InboxShapedAdapter):
+            UNDO_IS_ABSOLUTE_STATE_RESTORE = True
+            undo_one = True  # not a method
+
+        adapter = self.register(op, _NonCallableUndo())
+        self.assertIs(get_dispatch(op).undo_one, True,
+                      "precondition: the registry captured a non-callable, so "
+                      "every other clause would pass")
+        verdict = self.verdict_for(op, adapter)
+        self.assertRefusedOn(verdict, te.CLAUSE_UNDO_ABSOLUTE_STATE_RESTORE)
+        self.assertIn("callable", verdict.reason_text())
+
     def test_reason_states_why_a_relative_undo_is_unsafe_for_a_trial(self):
         """The refusal must be actionable in plain language: the recovery path
         may run undo_one when apply was merely INTENDED, and may run it more
@@ -630,6 +727,21 @@ class RecoveryCapsuleClauseTests(_Base):
         verdict = te.check_trial_eligibility(op, self.inbox_units(adapter),
                                              {"m1": capsule})
         self.assertRefusedOn(verdict, te.CLAUSE_RECOVERY_CAPSULE_SERIALIZABLE)
+
+    def test_a_degenerate_capsule_is_ACCEPTED_and_that_is_the_documented_bound(self):
+        """Locks the exactly-limited guarantee clause (d) gives. The capsule
+        FORMAT belongs to the journal task, so this gate does not judge content:
+        `{}` / `""` / `0` / `False` / `[]` all pass. Recorded as a test, not just
+        prose, so a downstream consumer cannot infer a non-emptiness guarantee
+        this clause never made — and so that tightening it later is a visible,
+        deliberate change to a pinned expectation."""
+        op = "fixture.capsule.degenerate"
+        adapter = self.register(op, InboxShapedAdapter())
+        for degenerate in ({}, "", 0, False, []):
+            with self.subTest(capsule=degenerate):
+                verdict = te.check_trial_eligibility(
+                    op, self.inbox_units(adapter), {"m1": degenerate})
+                self.assertTrue(verdict.eligible, verdict.reason_text())
 
     def test_a_tuple_valued_capsule_is_accepted(self):
         """JSON's type lattice is narrower than Python's: a tuple comes back as
