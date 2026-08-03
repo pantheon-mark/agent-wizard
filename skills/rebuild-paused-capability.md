@@ -75,6 +75,14 @@ The order here runs the other way round from how it used to. Acceptance does **n
 
 If the refusal says the file **cannot be fixed automatically and needs a person**, that is a different situation: the flagged file does something no rebuild of ours can rewrite for it (for example, it also sends the operator's daily email or phone alert). Do not pretend to fix it and do not weaken the check. Explain plainly what it does and why it cannot be rewritten automatically, and let the operator decide whether to accept the risk of leaving it as it is — that decision is recorded, stays visible, and is asked again the moment the file changes.
 
+**Only if the operator says yes to that**, record their decision with this one command, run from the project root. Use their answer word for word in place of the last part — never write it for them, and never run this on their behalf without asking:
+
+```
+python3 agents/lib/external_write/writer_acknowledgement.py --writer '<the flagged file, exactly as the check named it>' --operator-confirmation '<what you said, word for word>'
+```
+
+It exits `0` when the decision is recorded, and `1` with a plain-language reason when it refuses. It refuses for every file except one the safety check has established needs a person — so if it refuses, the file is not in that situation and the answer is the repair above, not this command. Recording the decision does not make the file safe and does not switch anything on; it stops that one file holding up the rest of the system, stays visible in `capability_health`, and comes back the moment the file changes. The refusal you read a moment ago also prints this exact command, so you never have to assemble it yourself.
+
 If it declines, tell the operator plainly what is not yet satisfied and treat the capability as still not accepted until it succeeds — never claim it is live when the acceptance step refused.
 
 ## Step 5 — Confirm it's live and healthy again

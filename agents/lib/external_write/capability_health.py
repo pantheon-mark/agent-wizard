@@ -226,6 +226,15 @@ if __package__ in (None, ""):  # pragma: no cover - only true when run as a scri
 
 from external_write import scan  # noqa: E402
 from external_write import run_envelope  # noqa: E402
+# DISCOVERY, and the single home of every instruction this surface hands over.
+#
+# `trial_journal` carries the read-only scan of the durable trial records a killed
+# process leaves behind; `state_actions` carries the declared way out of each state
+# it (and the bespoke-writer view below) can report. Neither instruction is written
+# here: two independently-authored copies of the same operator-facing guidance is a
+# recorded finding in this package, and this surface held one of them.
+from external_write import state_actions  # noqa: E402
+from external_write import trial_journal  # noqa: E402
 # (Cut 1.5 / v0.19.0, Task A -- V15-3 keystone) the ONE canonical open-bespoke-writer-bypass
 # predicate, consumed by overall_status below to forbid normal status PROJECT-WIDE on any open
 # bespoke-writer entry. Stdlib-only, imports nothing from this package -- no import cycle.
@@ -1110,6 +1119,7 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
     bypass_blocking_relpaths: List[str] = []
     bypass_writer_states: Dict[str, str] = {}
     bypass_descriptions: Dict[str, str] = {}
+    bypass_actions: Dict[str, str] = {}
     bypass_read_error = False
     try:
         bypass_writer_relpaths = _ext_write_state.open_bespoke_writer_relpaths(str(project_root))
@@ -1118,6 +1128,21 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
             for _e in _entries:
                 _relpath = str(_e.get("writer_relpath"))
                 bypass_writer_states[_relpath] = _state
+                # The declared WAY OUT of this writer's state, rendered from the
+                # state->action registry -- including the exact command, which is
+                # the whole point: the accept-the-risk route for a writer that
+                # needs a person was real, tested and named by NOTHING an operator
+                # or their assistant reads, so it was leavable only by someone who
+                # already knew to look.
+                #
+                # A DIFFERENT QUESTION from `descriptions` below, which is why both
+                # exist rather than one replacing the other: `descriptions` says
+                # what the entry IS (kind-aware -- this queue carries entries that
+                # are not bespoke writers at all), and `actions` says what to DO
+                # about the state the writer is in (state-keyed). Neither answers
+                # the other, and neither is authored here.
+                bypass_actions[_relpath] = state_actions.instruction_for_state(
+                    state_actions.writer_state_key(_state), _relpath)
                 # Kind-aware TEXT only -- every key above this one keys on the same
                 # attribution- and kind-free predicate as always, unaffected. This queue is
                 # shared by entries that are not a bespoke-writer bypass at all (for example,
@@ -1135,7 +1160,80 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
     bypass_blocking = bypass_read_error or bool(bypass_blocking_relpaths)
     any_open_bypass = bypass_read_error or bool(bypass_writer_relpaths)
 
-    normal_ok = (not red) and (not orphaned) and (not any_open_bypass)
+    # ---------------------------------------------------------------------
+    # AN INTERRUPTED TRIAL, DISCOVERED FROM DURABLE STATE ALONE
+    #
+    # Why this is here rather than left to whoever was watching. Process-kill
+    # fault injection over the trial protocol measured that at 100% of trial-side
+    # kill points the killed process emits ZERO bytes on stdout and stderr --
+    # including kills that leave a live, unreversed mutation on the operator's real
+    # record. The recovery command works and the refusal that NAMES it is real, but
+    # both are produced by code the kill prevented from running, and the trial id
+    # survives only as the name of a file in a directory nothing read. So the state
+    # was leavable only by someone who already knew to look -- the same shape as the
+    # original finding, reproduced inside the new machinery.
+    #
+    # This is the surface an agent reads at session start, so this is where the scan
+    # belongs. It reads the files; it never depends on anything having been printed.
+    #
+    # FAIL-CLOSED, AND BOUNDED SO IT CANNOT BRICK ANYTHING. Its whole input set is
+    # one directory's own .json files. An ABSENT directory (every project that never
+    # ran a trial -- the overwhelming majority, including every fresh build) reports
+    # nothing outstanding, because a check that fires on every deployment is worse
+    # than no check. A directory or record that exists and cannot be READ reports
+    # `scan_error`/`unreadable` and withholds the all-clear, because nothing can be
+    # established about it. Any unexpected failure of the scan itself is caught here
+    # for the same reason: a read-only health probe must degrade to "cannot verify",
+    # never crash the orientation step.
+    trial_scan: Dict[str, Any]
+    try:
+        trial_scan = trial_journal.scan_outstanding_trials(
+            journal_dir=os.path.join(str(project_root),
+                                     trial_journal.DEFAULT_TRIAL_JOURNAL_DIR))
+    except Exception as _exc:  # noqa: BLE001 -- reported, never swallowed.
+        trial_scan = {
+            "trials": [], "unreadable": [],
+            "scan_error": ("the record of trial runs could not be examined "
+                           f"({_exc!r}), so it is not possible to tell whether a "
+                           "trial was interrupted with a change still outstanding"),
+        }
+    interrupted_trials = [
+        {
+            "trial_id": _t["trial_id"],
+            "path": _t["path"],
+            "op_kind": _t["op_kind"],
+            "outstanding_unit_ids": _t["outstanding_unit_ids"],
+            "unit_states": _t["unit_states"],
+            # The declared way out, rendered from the registry with this trial's
+            # real id in it. Deduplicated across the outstanding units' states
+            # because every state a resumed trial must drive reaches the same
+            # action -- one command for the trial, not one per unit.
+            "action": " ".join(sorted({
+                state_actions.instruction_for_state(
+                    state_actions.trial_unit_state_key(
+                        _t["unit_states"][_unit_id]), _t["trial_id"])
+                for _unit_id in _t["outstanding_unit_ids"]
+                if _unit_id in _t["unit_states"]})),
+        }
+        for _t in trial_scan["trials"]
+    ]
+    unreadable_trials = [
+        {
+            "path": _u["path"],
+            "reason": _u["reason"],
+            # No command can be rendered: the trial cannot be identified from a
+            # record that will not parse. The route is a person, and it claims
+            # nothing about whether anything is outstanding -- an unreadable
+            # recovery record is precisely the thing that cannot establish that.
+            "action": state_actions.route_for_unidentified_record(_u["path"]),
+        }
+        for _u in trial_scan["unreadable"]
+    ]
+    trial_outstanding = bool(interrupted_trials or unreadable_trials
+                             or trial_scan["scan_error"])
+
+    normal_ok = ((not red) and (not orphaned) and (not any_open_bypass)
+                 and (not trial_outstanding))
     return {
         "overall": "green" if normal_ok else "red",
         "normal_status_allowed": normal_ok,
@@ -1158,7 +1256,25 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
             # its rebuild wording; anything else recorded on this same shared queue speaks in
             # its own words instead (``_ext_write_state.describe_blocking_entry``).
             "descriptions": bypass_descriptions,
+            # The declared WAY OUT per relpath, rendered from the state->action
+            # registry and carrying the exact command to run. Read this to tell the
+            # operator what to DO; read `descriptions` to tell them what the entry
+            # IS. Never hand-author either sentence at a call site.
+            "actions": bypass_actions,
             "read_error": bypass_read_error,
+        },
+        # An interrupted trial -- discovered by READING THE DURABLE RECORDS, because
+        # a killed trial prints nothing at all and its id survives only as a
+        # filename. `outstanding` True means a change a trial made may still be live
+        # on the operator's real record, so it also forbids normal status above.
+        # Each entry carries the exact recovery command for that trial, rendered from
+        # the registry; `unreadable` carries records that could not be parsed at all,
+        # each with a route to a person rather than a command that cannot be built.
+        "interrupted_trial": {
+            "outstanding": trial_outstanding,
+            "trials": interrupted_trials,
+            "unreadable": unreadable_trials,
+            "scan_error": trial_scan["scan_error"],
         },
     }
 
@@ -1179,11 +1295,25 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":  # pragma: no cover
+    # `--overall` is recognized ANYWHERE in argv, not only first.
+    #
+    # It used to be tested as `_argv[0] == "--overall"` only, so the invocation the
+    # rebuild skill documents -- `capability_health.py . --overall` -- fell through
+    # to the else branch and printed the per-capability list, silently. Nothing
+    # errored and nothing was missing; the caller simply never received the composite
+    # status, so `normal_status_allowed` and everything that hangs off it (an open
+    # bypass, an interrupted trial and the way out of either) were invisible to a
+    # command that asked for them. A discovery surface nothing reaches is not a
+    # discovery surface, which is exactly this task's premise applied to itself.
+    #
+    # Positional parsing is otherwise unchanged: the first non-flag argument is the
+    # project root, and the default stays ".".
     _argv = sys.argv[1:]
-    if _argv and _argv[0] == "--overall":
-        _root = _argv[1] if len(_argv) > 1 else "."
+    _overall = "--overall" in _argv
+    _positional = [a for a in _argv if not a.startswith("--")]
+    _root = _positional[0] if _positional else "."
+    if _overall:
         print(json.dumps(overall_status(_root), indent=2, sort_keys=True))
     else:
-        _root = _argv[0] if _argv else "."
         print(json.dumps(check_capabilities_with_self_heal(_root),
                          indent=2, sort_keys=True))

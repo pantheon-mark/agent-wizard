@@ -549,6 +549,23 @@ def is_bypass_writer_entry(entry: Dict[str, Any]) -> bool:
     return kind is None or kind in _BYPASS_WRITER_KINDS
 
 
+#: The ONE spelling of the sentence that describes an unrepaired bespoke-writer
+#: bypass, and the repair it names. It was spelled twice -- once here, inside
+#: ``describe_blocking_entry``, and once in the acceptance refusal that groups
+#: blocking entries by state -- and two independently-authored copies of the same
+#: operator-facing guidance is a recorded finding in this package. Declared here,
+#: in the deepest layer of the writer-state cluster, because that is the only home
+#: every consumer can reach: the state->action registry (which renders the
+#: refusal) imports this module, and this module imports no sibling at all.
+#:
+#: ``{relpath}`` is the only field. A consumer that needs the template rather than
+#: the finished sentence formats it with ``relpath="{subject}"`` and gets the
+#: template back with the registry's own placeholder in place -- no re-spelling.
+BYPASS_UNREPAIRED_TEMPLATE = (
+    "an external-write bypass is unrepaired: `{relpath}` -- rebuild it so it "
+    "routes through the sanctioned bulk path")
+
+
 def describe_blocking_entry(entry: Dict[str, Any]) -> str:
     """One plain-language sentence for ONE open blocking entry.
 
@@ -565,8 +582,7 @@ def describe_blocking_entry(entry: Dict[str, Any]) -> str:
     """
     if is_bypass_writer_entry(entry):
         relpath = str(entry.get("writer_relpath"))
-        return (f"an external-write bypass is unrepaired: `{relpath}` -- rebuild "
-                "it so it routes through the sanctioned bulk path")
+        return BYPASS_UNREPAIRED_TEMPLATE.format(relpath=relpath)
     next_step = entry.get("suggested_next_step") or entry.get("reason")
     if not next_step:
         relpath = str(entry.get("writer_relpath"))

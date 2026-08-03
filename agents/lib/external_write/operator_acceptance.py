@@ -46,7 +46,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # sys.path bootstrap (mirrors acceptance_ceremony.py / capability_registration.py): make the
 # package parent importable when run as a direct script from the project root, so the sibling
@@ -88,7 +88,18 @@ from external_write.proof_hash import (
     compute_implementation_hash,
     ProofHashError,
 )
+# The State->Action registry: for every state a project can be stuck in, the
+# declared way out. This module's live-enable refusal renders ITS instruction from
+# there rather than spelling one here -- two independently-authored copies of the
+# same operator-facing guidance is a recorded finding in this package, and one of
+# the copies (the accept-the-risk route) named no command at all.
+from external_write import state_actions
 from external_write.write_gate import load_descriptor_set
+# The ONE declaration of which structural writer state a recorded operator decision
+# is the exit from. Bound here, not re-decided: this module is the surface that
+# ADVERTISES that route, so a second implementation of the question would let the
+# guard accept a state this surface never offered the route for.
+from external_write.writer_state_core import ACKNOWLEDGEABLE_WRITER_STATES
 
 # Task 7 (A4 / F-37, v0.13.0 Slice 2): importing this ONE module fires every
 # shipped AND every capability-added adapter module's module-scope
@@ -787,34 +798,65 @@ def record_operator_acceptance(
         _bypass_entries = [e for e in _open_bypasses if is_bypass_writer_entry(e)]
         _other_entries = [e for e in _open_bypasses if not is_bypass_writer_entry(e)]
 
-        # Split the bypass refusal by STATE. Telling a non-technical operator to "rebuild it"
-        # when the file cannot be repaired by any tooling we ship is a dead end -- it is exactly
-        # what stalled the real estate, where the flagged file also delivered the operator's
-        # daily alert and could be neither made scan-clean nor deleted. Each group gets the next
-        # step that is actually available to it.
-        _needs_person, _rebuildable = [], []
+        # Split the bypass refusal by STATE, and RENDER EACH GROUP FROM THE
+        # STATE->ACTION REGISTRY. Telling a non-technical operator to "rebuild it"
+        # when the file cannot be repaired by any tooling we ship is a dead end --
+        # it is exactly what stalled the real estate, where the flagged file also
+        # delivered the operator's daily alert and could be neither made scan-clean
+        # nor deleted. Each group gets the next step that is actually available to
+        # it, and the exact command that performs (or confirms) it.
+        #
+        # TWO THINGS CHANGED HERE, and both were defects rather than infelicities.
+        #
+        # (1) THE SPLIT WAS AN `else`-CATCH-ALL ON THE PERMISSIVE SIDE. It read
+        #     `(_needs_person if state == NEEDS_PERSON else _rebuildable)`, which is
+        #     a SECOND implementation of the eligibility question -- and this is the
+        #     surface that ADVERTISES the accept-the-risk route, so the two must
+        #     agree or the guard accepts a state this surface never offered the
+        #     route for. It now binds the one declaration,
+        #     `ACKNOWLEDGEABLE_WRITER_STATES`, positively; a state added to the
+        #     vocabulary later lands in `_unclassified`, which routes to a person
+        #     instead of inheriting "rebuild it". A blocking state nobody thought
+        #     about must never be handed a repair that does not apply to it.
+        #
+        # (2) THE WORDING WAS A SECOND COPY. Both sentences existed here AND -- the
+        #     rebuild one verbatim -- in `writer_state_core.describe_blocking_entry`,
+        #     and the accept-the-risk one named no command at all, which is the whole
+        #     finding this task closes: the route existed and nothing named it. Both
+        #     now come from `state_actions`, which is the single home, and the
+        #     acknowledgement sentence now carries the exact command.
+        #
+        # Rendered per relpath rather than per group, because the commands are
+        # per-file: one paste-ready line per writer beats one sentence listing three
+        # files and no way to act on any of them.
+        _unclassified: List[str] = []
+        _by_state: Dict[str, List[str]] = {}
         for _e in _bypass_entries:
             _rel = str(_e.get("writer_relpath"))
             try:
                 _state = classify_bespoke_writer_entry(identity_root, _e)
             except Exception:
-                _state = WriterState.BLOCKING_LIVE_ENABLE   # unclassifiable -> treat as rebuildable.
-            (_needs_person if _state == WriterState.NEEDS_PERSON else _rebuildable).append(_rel)
+                # Unclassifiable -> treat as rebuildable, unchanged: it is the
+                # fail-closed direction for the BLOCK (it still refuses), and the
+                # rebuild is the repair with the widest applicability.
+                _state = WriterState.BLOCKING_LIVE_ENABLE
+            if (_state in ACKNOWLEDGEABLE_WRITER_STATES
+                    or _state == WriterState.BLOCKING_LIVE_ENABLE):
+                _by_state.setdefault(_state, []).append(_rel)
+            else:
+                _unclassified.append(_rel)
 
         _parts = []
-        if _rebuildable:
-            _parts.append(
-                "an external-write bypass is unrepaired: "
-                + ", ".join(f"`{r}`" for r in sorted(_rebuildable))
-                + " -- rebuild it so it routes through the sanctioned bulk path")
-        if _needs_person:
-            _parts.append(
-                "this cannot be fixed automatically and needs a person: "
-                + ", ".join(f"`{r}`" for r in sorted(_needs_person))
-                + " -- it does something the rebuild flow cannot rewrite for you, so either "
-                "change it by hand until it passes the check, or record that you accept the "
-                "risk of leaving it as it is (that decision is kept on file and shown again "
-                "whenever the file changes)")
+        # Rebuildable first, then acknowledgeable, then anything unclassified --
+        # the order this refusal has always used, so a project with both kinds
+        # reads the same way it did.
+        for _state in (WriterState.BLOCKING_LIVE_ENABLE,
+                       *sorted(ACKNOWLEDGEABLE_WRITER_STATES)):
+            for _rel in sorted(_by_state.get(_state, [])):
+                _parts.append(state_actions.instruction_for_state(
+                    state_actions.writer_state_key(_state), _rel))
+        for _rel in sorted(_unclassified):
+            _parts.append(state_actions.route_for_unclassified_state(_rel))
         for _e in sorted(_other_entries, key=lambda e: str(e.get("writer_relpath"))):
             _parts.append(describe_blocking_entry(_e))
         return _refuse("; ".join(_parts) + "; then re-run acceptance; nothing was accepted")

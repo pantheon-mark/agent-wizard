@@ -209,6 +209,7 @@ Stdlib only — no third-party dependencies.
 
 import json
 import os
+import stat
 import tempfile
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -1149,3 +1150,151 @@ def load_trial_journal(trial_id: str, *,
     journal = TrialJournal(trial_id, journal_dir=journal_dir)
     journal.read_record()
     return journal
+
+
+# ---------------------------------------------------------------------------
+# DISCOVERY FROM DURABLE STATE
+#
+# Why this is here, and why it may not depend on anything having been printed.
+# Process-kill fault injection over this protocol measured that at 100% of
+# trial-side kill points the killed process emits ZERO bytes on stdout and
+# stderr -- including kills that leave a live, unreversed mutation on the
+# operator's real record. The command that puts such a unit back works, and the
+# refusal that NAMES that command is real, but both are produced by code the kill
+# prevented from running. After the kill the trial id survives in exactly one
+# place: the name of a file in this directory.
+#
+# So the only honest way to discover an interrupted trial is to READ THE FILES,
+# and that is what this section does. It is a read-only observer: it never writes,
+# never locks, and never self-heals anything it finds. A self-healing read path is
+# a WRITE path, and the record it would be repairing is the only evidence that a
+# real mutation is outstanding.
+# ---------------------------------------------------------------------------
+
+#: The `.json` files in the journal directory that are NOT a published journal:
+#: the atomic-write temp files a killed process leaves behind (which carry a
+#: partial record and were never published) and the advisory lock files. Skipped
+#: by name because that is what they are -- the temp prefix and the lock suffix
+#: are this module's own, declared in `_atomic_write_record` / `TrialJournal`.
+_TEMP_RECORD_PREFIX = ".trial_journal."
+_LOCK_SUFFIX = ".lock"
+
+
+def outstanding_unit_ids(record: Any) -> Tuple[str, ...]:
+    """Every unit id in `record` that may STILL be outstanding on the operator's
+    live record, resolved through `recovery_disposition` rather than by re-listing
+    the driven states here.
+
+    FAIL-CLOSED IN THE DIRECTION THAT MATTERS. A state the disposition map does
+    not carry counts as OUTSTANDING. That is the whole reason this is a function
+    and not an `in RECOVERY_DRIVEN_STATES` test at the call site: a consumer that
+    resolved the question negatively -- "anything not driven and not settled was
+    never applied" -- absorbs any state added later into the benign bucket, and a
+    unit holding a live unreversed mutation would then be reported as never
+    applied. `recovery_disposition` returns None for exactly that case, and None
+    resolves here to "still outstanding", never to "nothing to do".
+
+    Takes the record rather than a journal handle so the branch above is
+    reachable in a test: the validated read path cannot produce an unclassified
+    state today, and a fail-closed branch nothing exercises is a latent failure.
+    """
+    units = (record or {}).get("units") or []
+    outstanding = []
+    for entry in units:
+        if not isinstance(entry, Mapping):
+            # An entry shape this module did not write. Cannot establish that
+            # nothing is outstanding for it, so it counts as outstanding.
+            outstanding.append("<unreadable unit entry>")
+            continue
+        state = entry.get("state")
+        disposition = recovery_disposition(state) if isinstance(state, str) else None
+        if disposition in (RECOVERY_DISPOSITION_NEVER_APPLIED,
+                           RECOVERY_DISPOSITION_SETTLED):
+            continue
+        outstanding.append(str(entry.get("unit_id")))
+    return tuple(outstanding)
+
+
+def scan_outstanding_trials(*, journal_dir: Optional[str] = None) -> Dict[str, Any]:
+    """Every trial journal on disk that may still hold an outstanding change.
+
+    Returns a plain, JSON-serializable dict::
+
+        {"trials":     [{"trial_id", "path", "op_kind",
+                         "outstanding_unit_ids", "unit_states"}, ...],
+         "unreadable": [{"path", "reason"}, ...],
+         "scan_error": None or a plain-language reason}
+
+    IDENTITY IS JOINED ON THE DECLARED VALUE. A filename is a CANDIDATE id, never
+    the identity: each candidate is loaded through this module's own validated
+    read, which refuses a record whose declared `trial_id` disagrees with the name
+    it was loaded as. A disagreement lands in `unreadable` -- it is reported, never
+    resolved by picking one of the two.
+
+    ABSENT IS NOT INACCESSIBLE. A project that has never run a trial has no
+    directory, and that is the overwhelmingly common case: it must report nothing
+    outstanding, because a check that fires on every deployment is worse than no
+    check. A directory that EXISTS but cannot be read is the opposite -- nothing
+    can be established about it -- and sets `scan_error`. The two are distinguished
+    with `os.stat`, not `os.path.isdir`, because `isdir` answers False for both.
+
+    FAIL-CLOSED, AND BOUNDED. Anything unreadable is reported rather than skipped,
+    so the caller can withhold an all-clear. The input set is exactly this one
+    directory's own `.json` files, which is what keeps a fail-closed answer from
+    being able to brick anything else.
+    """
+    directory = journal_dir if journal_dir else DEFAULT_TRIAL_JOURNAL_DIR
+    result: Dict[str, Any] = {"trials": [], "unreadable": [], "scan_error": None}
+
+    try:
+        mode = os.stat(directory).st_mode
+    except FileNotFoundError:
+        # Never ran a trial. Nothing outstanding, and nothing to say about it.
+        return result
+    except OSError as exc:
+        result["scan_error"] = (
+            f"the record of trial runs at {directory!r} could not be examined "
+            f"({exc.strerror or exc!r}), so it is not possible to tell whether a "
+            "trial was interrupted with a change still outstanding")
+        return result
+    if not stat.S_ISDIR(mode):
+        result["scan_error"] = (
+            f"{directory!r} is where the record of trial runs belongs, but it is "
+            "not a folder, so it is not possible to tell whether a trial was "
+            "interrupted with a change still outstanding")
+        return result
+
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError as exc:
+        result["scan_error"] = (
+            f"the record of trial runs at {directory!r} could not be listed "
+            f"({exc.strerror or exc!r}), so it is not possible to tell whether a "
+            "trial was interrupted with a change still outstanding")
+        return result
+
+    for name in names:
+        if name.startswith(_TEMP_RECORD_PREFIX) or name.endswith(_LOCK_SUFFIX):
+            continue
+        if not name.endswith(".json"):
+            continue
+        candidate_id = name[: -len(".json")]
+        path = os.path.join(directory, name)
+        try:
+            record = TrialJournal(candidate_id,
+                                  journal_dir=directory).read_record()
+        except Exception as exc:  # noqa: BLE001 -- reported, never swallowed.
+            result["unreadable"].append({"path": path, "reason": str(exc)})
+            continue
+        ids = outstanding_unit_ids(record)
+        if not ids:
+            continue
+        result["trials"].append({
+            "trial_id": record["trial_id"],
+            "path": path,
+            "op_kind": record["op_kind"],
+            "outstanding_unit_ids": list(ids),
+            "unit_states": {u["unit_id"]: u["state"] for u in record["units"]},
+        })
+    result["trials"].sort(key=lambda t: t["trial_id"])
+    return result

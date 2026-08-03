@@ -343,6 +343,19 @@ _EXTERNAL_WRITE_LIB_FILES = (
     "writer_state_core.py",
     "writer_ack_store.py",
     "writer_commands.py",
+    # state_actions.py (Cut 1.9 Task 9) — the State->Action registry: for every
+    # state the project can be stuck in, the declared way out, and the single home
+    # every operator-facing surface renders that instruction from. Three modules
+    # hard-import it at MODULE SCOPE — `capability_health.py` (the session-start
+    # health read, which is also where an interrupted trial is discovered from
+    # durable state), `operator_acceptance.py` (the acceptance refusal that
+    # advertises the accept-the-risk route), and nothing else — so omitting it is a
+    # raw ModuleNotFoundError on the operator's first orientation, not a degraded
+    # feature. Worse in kind than that, though: this registry is the ONLY thing
+    # that names the two exits this cut made reachable, so a project that received
+    # them without it would have both blocking states back exactly as they were —
+    # a real, working repair that no surface the operator reads ever names.
+    "state_actions.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

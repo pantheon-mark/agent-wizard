@@ -211,6 +211,29 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         "writer_state_core.py",
         "write_gate.py",
         "zones.py",
+        # state_actions.py: the State->Action registry -- for every state a
+        # project can be stuck in, the declared way out, and the one place any
+        # operator-facing surface renders that instruction from. It imports the
+        # sibling kernels that OWN each command it names (the acknowledgement
+        # entrypoint, the recovery entrypoint, the bypass scanner) plus the two
+        # modules that declare the state vocabularies, as ordinary internal
+        # kernel wiring -- which is precisely the CAPABILITY-zone-ONLY
+        # sealed_kernel_import ban, so this membership is load-bearing rather
+        # than decorative and the counterfactual is asserted in
+        # test_external_write_state_actions.py. Deliberately no violation COUNT
+        # recorded here: a count tracks how many times the module happens to name
+        # a kernel symbol, so an added annotation makes a recorded number stale
+        # silently -- the KIND SET is the durable fact. It imports no vendor SDK,
+        # constructs or obtains no credential, performs no vendor mutation, writes
+        # nothing to disk, reads nothing from disk or from the environment (it is
+        # a SEALED registry -- closed to operator and to agent authorship, which
+        # is asserted structurally over its own source), and never calls
+        # run_operation. Membership does NOT grant a capability the right to
+        # import it (that allowlist is the independent
+        # scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES set): what this
+        # registry hands an operator is a command to run, so capability code has
+        # no business authoring or reaching it.
+        "state_actions.py",
         # standing_automation.py (Task 9 / B2 / F-42 — v0.13.0 Slice 2): the safe
         # standing-automation entrypoint primitive. Its --check/--dry-run path
         # legitimately calls raw `run_operation(..., target="dry_run")` — reusing

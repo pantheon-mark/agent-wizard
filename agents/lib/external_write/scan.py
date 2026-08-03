@@ -666,6 +666,38 @@ from external_write.zones import (  # noqa: E402
 )
 
 
+# ---------------------------------------------------------------------------
+# The operator-invocable entrypoint, and the ONE renderer of the command that
+# names it.
+#
+# Spelled once, here, because two surfaces outside this module have to name the
+# same command: the operator-invocable command manifest, and the state->action
+# registry, which renders the check that CONFIRMS a rebuilt writer now routes
+# through the sanctioned path. A re-spelling is how a named repair comes to name a
+# path that no longer exists; the manifest's own agreement with this constant is
+# pinned by a build-time test rather than by an import, because the module the
+# PreToolUse hook loads must not pull this scanner in for a string.
+# ---------------------------------------------------------------------------
+
+SCAN_ENTRYPOINT_REL = "agents/lib/external_write/scan.py"
+
+
+def scan_command(path: str) -> str:
+    """The exact, paste-ready command that scans `path` for bypasses.
+
+    Deliberately a single physical line with the argument `shlex.quote`'d: a
+    writer relpath is data from a queue entry on disk, and an unquoted path
+    containing a space would silently split into two arguments so the
+    "paste-ready" command would scan the wrong thing (or nothing).
+
+    It CONFIRMS a repair; it never performs one. The caller that renders it into
+    operator-facing text is responsible for saying so -- see the registry's own
+    instruction text for the rebuildable state.
+    """
+    import shlex as _shlex
+    return f"python3 {SCAN_ENTRYPOINT_REL} {_shlex.quote(path)}"
+
+
 class Violation(NamedTuple):
     """One detected bypass.
 

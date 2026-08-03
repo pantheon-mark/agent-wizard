@@ -328,6 +328,44 @@ class TestEveryOperatorInvocableEntrypointIsAccountedFor(unittest.TestCase):
         self.assertFalse(is_allowlist_eligible(entry),
                          "a live write must never be auto-approved")
 
+    def test_the_acknowledgement_entrypoint_is_enrolled_and_never_auto_approved(self):
+        """The operator's only sanctioned exit from a needs-a-person writer is now a
+        real command. It records the operator's OWN WORDS as their consent, so it is
+        the one command that must never be auto-approved: an allowlisted entry would
+        let an agent record an operator's decision without asking them, which is the
+        forged-consent class, not a convenience.
+
+        The manifest has no class for "writes a local consent record and must never
+        be auto-approved", so LIVE_WRITE is the conservative fit -- and it is the
+        same reasoning `operator-acceptance` is already enrolled under: that command
+        performs no vendor mutation either, and is a live write because of what it
+        authorizes."""
+        entry = find_command("acknowledge-writer")
+        self.assertIsNotNone(
+            entry, "the acknowledgement command is operator-invocable and must be "
+                   "classified")
+        self.assertEqual(entry.command_class, LIVE_WRITE)
+        self.assertTrue(entry.writes_external)
+        self.assertFalse(is_allowlist_eligible(entry),
+                         "an agent must never be able to record an operator's "
+                         "accepted-risk decision without asking them")
+
+    def test_the_acknowledgement_prefix_agrees_with_the_modules_own_constant(self):
+        from external_write.writer_acknowledgement import (
+            ACKNOWLEDGEMENT_ENTRYPOINT_REL,
+        )
+        entry = find_command("acknowledge-writer")
+        self.assertEqual(entry.command_prefix,
+                         f"python3 {ACKNOWLEDGEMENT_ENTRYPOINT_REL}")
+
+    def test_the_bulk_review_prefix_agrees_with_the_scanners_own_constant(self):
+        """The scanner's prefix is the command the state->action registry renders to
+        CONFIRM a rebuilt writer, so the manifest entry and the registry's renderer
+        must name the same file."""
+        from external_write.scan import SCAN_ENTRYPOINT_REL
+        entry = find_command("bulk-review")
+        self.assertEqual(entry.command_prefix, f"python3 {SCAN_ENTRYPOINT_REL}")
+
     def test_the_enrolled_prefix_agrees_with_the_modules_own_constant(self):
         """The manifest hand-spells its prefixes (five entries already do, and
         importing the recovery stack into a module the PreToolUse hook loads would

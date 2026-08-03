@@ -201,6 +201,25 @@ def is_allowlist_eligible(entry) -> bool:
 # by-intent reasoning this manifest exists to replace with by-behaviour
 # reasoning.
 #
+# `acknowledge-writer` is the operator's only sanctioned exit from a flagged writer
+# the rebuild flow cannot rewrite -- a file that needs a person. Until this entry
+# existed the exit existed only as a Python function, so a real, tested way out was
+# named by nothing an operator or their assistant reads. It is LIVE_WRITE /
+# writes_external=True, so it is never allow-eligible and always prompts.
+#
+# That classification needs stating precisely, because taken literally the command
+# performs NO external write: it appends a record to a local JSON file under
+# security/. It is classified live-write for the same reason `operator-acceptance`
+# above is -- what it does is on the AUTHORIZATION path: it removes the last thing
+# holding live-enable back for the whole project. And there is a second reason that
+# applies to this command alone: the record it writes IS the operator's consent, in
+# their own words. An allow-eligible entry would let an agent record an operator's
+# accepted-risk decision without ever asking them, which is forged consent, not a
+# convenience. This manifest has no fourth class for "writes a local consent record
+# and must never be auto-approved"; LIVE_WRITE is the conservative fit, and
+# over-stating RISK is the safe direction here (it costs a prompt), where
+# understating it would cost the operator's authority.
+#
 # The prefix is hand-spelled here, like the five above, rather than imported from
 # `trial_recovery.RECOVERY_ENTRYPOINT_REL`: this module is loaded by the
 # settings-allowlist build and the PreToolUse hook, and importing it from here
@@ -265,6 +284,13 @@ BASELINE_COMMANDS: Tuple[CommandEntry, ...] = (
     CommandEntry(
         name="trial-recovery",
         command_prefix="python3 agents/lib/external_write/trial_recovery.py",
+        command_class=LIVE_WRITE,
+        writes_external=True,
+        allowed_outputs=(),
+    ),
+    CommandEntry(
+        name="acknowledge-writer",
+        command_prefix="python3 agents/lib/external_write/writer_acknowledgement.py",
         command_class=LIVE_WRITE,
         writes_external=True,
         allowed_outputs=(),

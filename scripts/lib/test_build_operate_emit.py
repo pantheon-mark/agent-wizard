@@ -1856,7 +1856,23 @@ class TestS253ContractDelta(unittest.TestCase):
         # acknowledge_writer itself. Enrollment is also enforced structurally by
         # test_topology_enrollment.test_every_emitted_lib_module_is_listed and
         # per-module in test_external_write_writer_state_layers.py.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 51)
+        # (Count updated to 52 by Cut 1.9 Task 9, which additionally enrolled
+        # state_actions.py -- the State->Action registry. It is the only thing that
+        # NAMES the two exits this cut made reachable, and both `capability_health`
+        # and `operator_acceptance` hard-import it at module scope, so omitting it
+        # is a ModuleNotFoundError on the operator's first orientation -- and, if it
+        # somehow were not, would put both blocking states back exactly as they
+        # were: a real, working repair no surface the operator reads ever names.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 52)
+
+    def test_emit_set_lists_the_cut19_state_action_registry(self):
+        # Cut 1.9 Task 9: state_actions.py must be enrolled, or the operator project
+        # receives two blocking states whose exits exist and whose exits nothing
+        # names -- which is the shape this cut exists to close, recreated by an
+        # emit-set omission.
+        import agent_emitter
+        self.assertIn("state_actions.py",
+                      agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def test_emit_set_lists_the_cut19_trial_recovery_file(self):
         # Cut 1.9 Task 5: trial_recovery.py must be enrolled, or the operator

@@ -1021,6 +1021,26 @@ class _Project:
             [sys.executable] + argv[1:], capture_output=True, text=True,
             cwd=str(self.root), env=self._env(), timeout=120)
 
+    def run_health(self):
+        """SURFACE 4 -- DISCOVERY. The session-start health read, in its
+        production form, run from the project root in a FRESH process that has
+        been told nothing.
+
+        This is the surface that answers the question the other three cannot: an
+        operator whose machine died mid-trial has no output to read (measured: a
+        killed process emits zero bytes on both streams at every trial-side kill
+        point) and no trial id to type. Whatever this returns is the whole of what
+        they can find.
+        """
+        result = subprocess.run(
+            [sys.executable, "agents/lib/external_write/capability_health.py",
+             ".", "--overall"],
+            capture_output=True, text=True, cwd=str(self.root),
+            env=self._env(), timeout=120)
+        self.case.assertEqual(result.returncode, 0,
+                              f"{result.stdout!r} {result.stderr!r}")
+        return json.loads(result.stdout), result
+
 
 class _FaultInjectionCase(unittest.TestCase):
     """The shared assertions. Every kill point goes through them."""
@@ -2560,6 +2580,96 @@ def _shadow_publish(directory, payload):
         testing a protocol nobody may run."""
         self.assertIn("UNDO_IS_ABSOLUTE_STATE_RESTORE = True",
                       _FIXTURE_ADAPTER_SOURCE)
+
+
+# ===========================================================================
+# DISCOVERY AFTER THE KILL -- the state is leavable by someone who was TOLD
+# NOTHING
+# ===========================================================================
+
+class DiscoveryFromDurableStateAloneTests(_FaultInjectionCase):
+    """The measurement this file already carries -- a killed process emits ZERO
+    bytes on stdout and stderr at every trial-side kill point -- has a consequence
+    the rest of the file does not test: every resume above starts from a trial id
+    the TEST already knows.
+
+    A real operator does not know it. Their machine died, nothing printed, and the
+    id survives in exactly one place: the name of a file in a directory nothing
+    reads. So the state was leavable only by someone who already knew to look --
+    which is the same shape as the finding this cut exists to close, reproduced
+    inside the cut's own new machinery.
+
+    These tests take nothing from the kill but the fact that it happened. Every
+    identifier used to recover comes out of the discovery surface.
+    """
+
+    def test_the_killed_process_printed_nothing_at_all(self):
+        """The premise, measured here rather than cited, because everything below
+        depends on it: there is no output to discover anything from."""
+        result = self.kill_at("apply.after_mutation")
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_an_interrupted_trial_is_discoverable_and_recoverable_blind(self):
+        """The whole obligation, end to end, with the test forbidden from using
+        anything the operator would not have."""
+        self.kill_at("apply.after_mutation")
+        # The mutation IS live on the record, and nothing printed it.
+        self.assertNotEqual(self.proj.surface(), self.proj.prior_surface(),
+                            "the fixture must leave a real unreversed mutation")
+        self.proj.set_spec({})              # the discovery read is not interfered with
+
+        status, health = self.proj.run_health()
+
+        block = status["interrupted_trial"]
+        self.assertTrue(
+            block["outstanding"],
+            f"the one surface an operator can reach found nothing: {status!r}")
+        self.assertFalse(
+            status["normal_status_allowed"],
+            "a live unreversed change on the operator's record must never read "
+            "as everything running normally")
+        self.assertEqual(len(block["trials"]), 1, block)
+        discovered = block["trials"][0]
+
+        # Every identifier from here on comes from the discovery surface.
+        self.assertEqual(discovered["trial_id"], self.the_only_trial(),
+                         "the discovered id must be the real one")
+        command = trc.recovery_command(discovered["trial_id"])
+        self.assertIn(command, discovered["action"],
+                      "a discovered blocking state with no command attached is a "
+                      "verdict the operator cannot act on")
+        self.assertNotIn("Traceback", health.stdout + health.stderr)
+
+        # And the command it named, run exactly as printed, actually finishes.
+        argv = shlex.split(command)
+        result = subprocess.run(
+            [sys.executable] + argv[1:], capture_output=True, text=True,
+            cwd=str(self.proj.root), env=self.proj._env(), timeout=120)
+        self.assertClaimMatchesSurface(result)
+        self.assertEqual(self.proj.surface(), self.proj.prior_surface())
+
+        # After the repair the same surface says so -- the discovery is not sticky.
+        after, _ = self.proj.run_health()
+        self.assertFalse(after["interrupted_trial"]["outstanding"], after)
+
+    def test_a_completed_trial_is_not_reported_as_interrupted(self):
+        """The over-firing direction. A check that fires on a trial that finished
+        cleanly trains an operator to ignore it."""
+        result = self.run_to_completion()
+        self.assertEqual(result.returncode, 0,
+                         f"{result.stdout!r} {result.stderr!r}")
+        status, _ = self.proj.run_health()
+        self.assertFalse(status["interrupted_trial"]["outstanding"], status)
+
+    def test_a_project_that_never_ran_a_trial_is_not_reported_as_interrupted(self):
+        """The commonest project state of all. A check that fires on every fresh
+        build is the trap this package has corrected three times."""
+        import shutil
+        shutil.rmtree(self.proj.root / "security" / "trial_runs")
+        status, _ = self.proj.run_health()
+        self.assertFalse(status["interrupted_trial"]["outstanding"], status)
+        self.assertEqual(status["interrupted_trial"]["trials"], [])
 
 
 if __name__ == "__main__":  # pragma: no cover

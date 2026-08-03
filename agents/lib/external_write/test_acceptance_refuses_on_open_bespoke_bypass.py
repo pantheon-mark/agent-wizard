@@ -39,6 +39,10 @@ from external_write import acceptance_ceremony  # noqa: E402
 from external_write import copy_run_proof  # noqa: E402
 from external_write import verifiers  # noqa: E402
 from external_write import proof_hash  # noqa: E402
+from external_write import scan  # noqa: E402
+from external_write import state_actions  # noqa: E402
+from external_write import writer_acknowledgement  # noqa: E402
+from external_write import _ext_write_state  # noqa: E402
 
 record_operator_acceptance = operator_acceptance.record_operator_acceptance
 OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA = acceptance_ceremony.OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA
@@ -342,6 +346,87 @@ class AcceptanceRefusesOnOpenBespokeBypassTest(unittest.TestCase):
         self.assertEqual(self._accepted_flag(), False)
         self.assertFalse(self.receipt_path.exists())
         self.assertFalse(self.audit_path.exists())
+
+    # -- The refusal ADVERTISES the way out, and it renders it from ONE place ------------------
+
+    def test_the_needs_person_refusal_names_the_exact_command(self):
+        """The original finding, closed at the surface that advertises the route.
+        This refusal has always told the operator they may "record that you accept
+        the risk" -- and named no way to do it. A route nothing names is a route only
+        someone who already knew to look can take, which is the same shape as no
+        route at all."""
+        self._write_file(
+            "agents/upkeep/runner.py",
+            '"""Daily upkeep -- also delivers the phone alert."""\n'
+            "import urllib.request\n")
+        self._write_queue([{
+            "mechanism_id": "agents_upkeep_runner",
+            "writer_relpath": "agents/upkeep/runner.py",
+            "status": "pending",
+            "paused_content_sha256": "deadbeef",
+            "violations": [{"kind": "forbidden_import", "line": 2,
+                            "path": "agents/upkeep/runner.py"}],
+        }])
+
+        res = self._call()
+
+        self.assertFalse(res.accepted)
+        self.assertIn("cannot be fixed automatically and needs a person", res.reason)
+        self.assertIn(
+            writer_acknowledgement.acknowledgement_command("agents/upkeep/runner.py"),
+            res.reason,
+            f"the surface that advertises the route must NAME the command: {res.reason}")
+        self.assertNotIn("Traceback", res.reason)
+
+    def test_the_rebuildable_refusal_names_the_check_that_confirms_it(self):
+        """Unchanged sentence, now with the command that confirms the rebuild
+        actually landed -- the entry clears on its own once that check passes, so an
+        operator who cannot run the check cannot tell whether they are done."""
+        self._write_open_bespoke_queue()
+
+        res = self._call()
+
+        self.assertFalse(res.accepted)
+        self.assertIn(scan.scan_command(BESPOKE_WRITER_RELPATH), res.reason)
+
+    def test_the_refusal_is_rendered_by_the_state_action_registry(self):
+        """Not "text that happens to match": the exact string the registry renders.
+        The wording used to exist here AND in the writer-state core, and the copies
+        drifted -- one of them naming a repair the other did not."""
+        self._write_open_bespoke_queue()
+
+        res = self._call()
+
+        self.assertIn(
+            state_actions.instruction_for_state(
+                state_actions.writer_state_key(
+                    _ext_write_state.WriterState.BLOCKING_LIVE_ENABLE),
+                BESPOKE_WRITER_RELPATH),
+            res.reason)
+
+    def test_a_blocking_state_nobody_classified_is_not_told_to_rebuild_it(self):
+        """The `else`-catch-all's real consequence, driven rather than argued.
+
+        The split used to read `needs_person if state == NEEDS_PERSON else
+        rebuildable`, so a blocking state added to the vocabulary later would be
+        handed the rebuild instruction by nobody having thought about it -- on the
+        very surface that advertises the accept-the-risk route. It now classifies by
+        POSITIVE membership, and anything else routes to a person."""
+        self._write_open_bespoke_queue()
+        original = operator_acceptance.classify_bespoke_writer_entry
+        try:
+            operator_acceptance.classify_bespoke_writer_entry = (
+                lambda root, entry: "invented_blocking_state")
+            res = self._call()
+        finally:
+            operator_acceptance.classify_bespoke_writer_entry = original
+
+        self.assertFalse(res.accepted, "it must still refuse")
+        self.assertNotIn("rebuild it so it routes through the sanctioned bulk path",
+                         res.reason)
+        self.assertIn("ask your assistant", res.reason.lower())
+        self.assertIn(BESPOKE_WRITER_RELPATH, res.reason)
+        self.assertEqual(self._accepted_flag(), False)
 
 
 if __name__ == "__main__":  # pragma: no cover
