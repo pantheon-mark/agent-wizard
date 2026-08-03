@@ -342,10 +342,27 @@ Bypass classes CAUGHT at v0
                          Constant node invisible to this attribute-NAME check,
                          the same disclosed residual as ``build_write_client`` /
                          the registry symbols, not closed here.
+  baked_operator_confirmation -- a command line built in code that carries the
+                         operator-confirmation flag with a STRING LITERAL as its
+                         value: the words that get recorded as the operator's own
+                         acceptance were written by the machine. ANTI-DRIFT ONLY,
+                         NOT A CONSENT ORACLE — see the bound disclosed below and
+                         ``_Scanner._check_baked_operator_confirmation``.
 
 ------------------------------------------------------------------------------
 Bounds NOT covered at v0 (disclosed — no silent caps)
 ------------------------------------------------------------------------------
+  * A COMPUTED operator confirmation. ``baked_operator_confirmation`` sees one
+    thing: a string literal sitting next to the confirmation flag in a list or
+    tuple the source spells out. A variable, a module constant, an f-string, a
+    ``join``, a ``format``, a value read from a file, or any other computation
+    reaches the same command carrying the same manufactured words and is NOT
+    flagged. Nothing static can decide whether text a program computed came from
+    a person, so this rule does not attempt it and must never be read as having
+    closed consent forgery. What it closes is DRIFT: the shape an agent or a
+    convenience script actually reaches for first, caught before it spreads.
+    The deeper point — that a consent model whose consent is a command-line flag
+    is weak by construction — is a design question this check does not answer.
   * Cross-FILE call-graph. Reachability is computed WITHIN a single file. A
     forbidden op physically lives in some file and is reported THERE, so a
     bypass cannot hide merely by being called from another file — the op's own
@@ -664,6 +681,13 @@ from external_write.zones import (  # noqa: E402
     Zone,
     classify_zone,
 )
+# The ONE declaration in this package of "directory names that are never
+# operator code" — vendored dependency trees, VCS internals, derived caches.
+# Imported rather than re-spelled: the consent sweep below needs exactly that
+# set to bound its own input, and a second copy is how two sweeps that must
+# agree drift apart. ``writer_state_core`` imports no sibling here, so this edge
+# adds no cycle; its own docstring records why it stays a leaf.
+from external_write.writer_state_core import NON_PROJECT_DIRS  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -680,6 +704,20 @@ from external_write.zones import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 SCAN_ENTRYPOINT_REL = "agents/lib/external_write/scan.py"
+
+#: The command-line flag that carries the operator's own words into the two
+#: commands that record a consent decision. This is the ONE thing the
+#: baked-consent rule keys on, and it is the declared value, not an inference
+#: from a filename or a directory.
+#:
+#: Spelled here rather than imported from the module that declares it, for the
+#: same reason the command manifest hand-spells the entrypoint paths it names:
+#: the acknowledgement facade reaches the writer-state service, which imports
+#: THIS module, so an import would close a cycle. The agreement is pinned at
+#: build time instead — see ``test_external_write_scan``'s
+#: ``test_the_flag_is_the_one_the_consent_command_itself_declares``, which fails
+#: if the two ever diverge.
+OPERATOR_CONFIRMATION_FLAG = "--operator-confirmation"
 
 
 def scan_command(path: str) -> str:
@@ -709,7 +747,8 @@ class Violation(NamedTuple):
               'credential_construction', 'credential_provider_reference',
               'adapter_module_import', 'adapter_registry_reference',
               'introspection_escape_hatch', 'raw_run_operation_reference',
-              'sealed_kernel_import', 'unparseable'.
+              'sealed_kernel_import', 'baked_operator_confirmation',
+              'unparseable'.
             Specific enough that a build-failure message tells the operator or
             agent WHAT to fix.
     """
@@ -1465,6 +1504,61 @@ class _Scanner(ast.NodeVisitor):
         # detection path and no double-count.
         self.generic_visit(node)
 
+    # --- sequences ----------------------------------------------------------
+    #
+    # Checked at the LIST/TUPLE node rather than at a Call, so the argv does not
+    # have to be spelled inline at the call site: ``CMD = [...]`` followed by
+    # ``subprocess.run(CMD)`` is the same defect and is caught the same way, and
+    # nothing here depends on WHICH function eventually receives the sequence.
+    # Keying on the callee would be inferring identity from incidental structure
+    # — ``run`` vs ``Popen`` vs ``check_call`` vs a local ``_sh`` helper are all
+    # the same argv.
+
+    def visit_List(self, node: ast.List) -> None:
+        self._check_baked_operator_confirmation(node.elts)
+        self.generic_visit(node)
+
+    def visit_Tuple(self, node: ast.Tuple) -> None:
+        self._check_baked_operator_confirmation(node.elts)
+        self.generic_visit(node)
+
+    def _check_baked_operator_confirmation(self, elts: List[ast.expr]) -> None:
+        """A literal sitting where the operator's own words belong.
+
+        The shape: a sequence the source spells out, one element of which is the
+        confirmation flag, with a STRING LITERAL immediately after it. That is a
+        command line built to record an acceptance the operator never gave — a
+        machine manufacturing the one thing only a person can supply.
+
+        ★ CEILING — ANTI-DRIFT, NOT A CONSENT ORACLE. This is an AST literal
+        check and nothing more. A variable, a module constant, an f-string, a
+        ``join``, a ``format``, a value read off disk, or any other computed
+        expression delivers the identical manufactured words to the identical
+        command and is NOT flagged, by construction: nothing static can decide
+        whether text a program computed originated with a person. Those
+        evasions are DISCLOSED RESIDUALS of this rule, not gaps someone forgot
+        to close, and they are asserted as such by a fixture rather than only
+        described here. Read a clean result as "no literal confirmation is
+        spelled in this file", never as "the consent here is genuine".
+
+        Unconditional across trust zones. The kernel renders this command from
+        operator text and never from a literal, so it has nothing to fear from
+        the rule; a literal appearing INSIDE the kernel would be the worse
+        version of the same defect, and zone-scoping the check would exempt
+        exactly the code with the most authority.
+        """
+        for i in range(len(elts) - 1):
+            if _leading_str(elts[i]) != OPERATOR_CONFIRMATION_FLAG:
+                continue
+            # ``_leading_str`` is this module's ONE reader of "the literal text
+            # this expression starts with" — reused rather than re-implemented,
+            # so a left-literal concatenation (``"yes, " + suffix``) is treated
+            # here exactly as it is everywhere else in this scanner. A value
+            # whose leading part is not a literal at all yields None and is the
+            # disclosed residual above.
+            if _leading_str(elts[i + 1]) is not None:
+                self._add(elts[i + 1].lineno, "baked_operator_confirmation")
+
     def visit_Attribute(self, node: ast.Attribute) -> None:
         self._check_surface_mutation(node)
         self._check_credential_attribute(node)
@@ -1934,6 +2028,105 @@ def scan_paths(
 
 
 # ---------------------------------------------------------------------------
+# The whole-project consent sweep
+#
+# The baked-consent rule above is only as useful as the set of files it is
+# pointed at, and the one real instance of this defect did NOT live under
+# ``agents/`` — it was a top-level maintenance script. A sweep scoped to the
+# directory the build gate happens to be invoked with would have been green and
+# blind to the exact file it exists for; that is this family's signature
+# failure and it is the reason this sweep is whole-project.
+#
+# Whole-project is not the same as unbounded, and an unbounded fail-closed check
+# is its own failure mode — one unreadable vendored module and every build in
+# the project fails. The input set is bounded twice over:
+#
+#   1. By the DECLARED value. A file can only trip the rule by spelling
+#      ``OPERATOR_CONFIRMATION_FLAG`` as a literal, so a file whose bytes do not
+#      contain that flag cannot be a violation and is never parsed. The bound is
+#      derived from the rule itself, not from a guess about where code lives.
+#   2. By ``NON_PROJECT_DIRS`` — this package's one declaration of the directory
+#      names that are never the project's own code (imported, not re-spelled).
+#      Real case: a ``.venv`` carrying third-party modules that are
+#      intentionally unparseable.
+#
+# The prefilter reads BYTES and may only EXCLUDE a file it positively read and
+# positively found clean. A file it cannot read stays a candidate and goes to
+# the scanner, which answers for it. Anything else would rebuild, one layer up,
+# the "could not read it" == "it passes" conflation the read path already fixed.
+# ---------------------------------------------------------------------------
+
+#: What the consent sweep is scoped to ask, and therefore all it may report.
+#: A candidate file is in the sweep because it names the confirmation flag;
+#: reporting every OTHER bypass class found in it would quantify the sweep over
+#: a question no caller asked it — and would silently turn one narrow check into
+#: a second, wider scan of files the build gate was never pointed at.
+#: ``unparseable`` is in the set because silence must not read as clean: a
+#: candidate that cannot be statically verified is reported, not skipped.
+CONSENT_SWEEP_KINDS = frozenset({"baked_operator_confirmation", "unparseable"})
+
+
+def consent_sweep_candidates(project_root: Union[str, Path]) -> List[Path]:
+    """Every ``.py`` under ``project_root`` that could carry a baked operator
+    confirmation — see this section's header for how the bound is derived.
+
+    Over-inclusion is safe here (an extra clean file yields no violation);
+    under-inclusion is the whole failure this sweep exists to prevent, so a file
+    that cannot be read is INCLUDED rather than quietly dropped.
+
+    To be exact about what that buys, since it would be easy to over-read: an
+    INACCESSIBLE candidate is handed to ``_scan_file``, which answers ``[]`` for
+    an access failure — the package's recorded, deliberately deferred gap, not
+    something this function closes. What including it does buy is that the
+    prefilter contributes NO SECOND fail-open of its own, and that the sweep
+    becomes correct for free on the day that gap is discharged.
+    """
+    root = Path(project_root)
+    token = OPERATOR_CONFIRMATION_FLAG.encode("ascii")
+    out: List[Path] = []
+    for p in sorted(root.rglob("*.py")):
+        try:
+            rel_parts = p.relative_to(root).parts
+        except ValueError:  # pragma: no cover - defensive
+            continue
+        if set(rel_parts) & NON_PROJECT_DIRS:
+            continue
+        try:
+            raw = p.read_bytes()
+        except OSError:
+            # Not positively cleared. Stays in, and the scanner decides.
+            out.append(p)
+            continue
+        # Bytes, not text: the flag is pure ASCII, so its bytes are identical
+        # under utf-8, latin-1 and cp1252 alike. Decoding here would make a
+        # perfectly ordinary non-utf-8 source invisible to the sweep — which is
+        # the same fail-open, one layer earlier, that the read path already had.
+        if token in raw:
+            out.append(p)
+    return out
+
+
+def consent_sweep(project_root: Union[str, Path]) -> List[Violation]:
+    """Scan the project for manufactured operator confirmations.
+
+    Runs the SAME ``_scan_file`` every other caller runs — there is no second
+    implementation of the rule, of zone classification, or of the migration
+    quarantine — and reports only the kinds this sweep is scoped to ask about
+    (``CONSENT_SWEEP_KINDS``).
+
+    ``project_root`` is both the tree that is swept and the anchor for the
+    hash-bound migration quarantine, because for this function they are the same
+    directory by definition: the scanned project's own root.
+    """
+    root = Path(project_root)
+    candidates = consent_sweep_candidates(root)
+    if not candidates:
+        return []
+    return [v for v in scan_paths(candidates, project_root=root)
+            if v.kind in CONSENT_SWEEP_KINDS]
+
+
+# ---------------------------------------------------------------------------
 # CLI entrypoint — run from its installed location inside the operator project
 # so that the __file__-anchored allowed-module exemption is correct.
 #
@@ -1943,7 +2136,41 @@ def scan_paths(
 # Scans the given paths (files or directories) for external-write bypasses.
 # Exits 0 if no violations are found (build passes this gate).
 # Exits 1 and prints each violation if any are found (build FAILS).
+#
+# The consent sweep runs IN ADDITION to the named paths, over the whole project,
+# every time — see "The whole-project consent sweep" above. It is deliberately
+# NOT bounded by the argument: the documented invocation of this gate names
+# ``agents/``, and the one real manufactured-consent script lived outside it.
+#
+# Its root is the CWD, the same anchor this entrypoint already uses for the
+# migration quarantine and for the same reason: the documented invocation is run
+# from the operator project's top folder. Deliberately NOT ``__file__``-derived,
+# even though that would be cwd-independent — this scanner also lives inside the
+# toolkit that BUILDS operator projects, whose tree necessarily contains the
+# rule's own fixtures, and a gate that fires on its own fixture in 100% of runs
+# is a gate nobody can keep. Measured cost on a ~1000-file tree: well under two
+# seconds, since only files whose bytes carry the flag are ever parsed.
 # ---------------------------------------------------------------------------
+
+def _cli_violations(paths: Sequence[str], project_root: Path) -> List[Violation]:
+    """What the CLI below reports: the named paths, plus the whole-project
+    consent sweep, deduplicated on the RESOLVED file identity.
+
+    Split out of the ``__main__`` block so the composition is reachable from a
+    test. The block itself stays a two-line shim; the argument the gate is given
+    is relative and the sweep's paths are absolute, so deduplicating on the raw
+    ``path`` string would report a file under ``agents/`` twice.
+    """
+    found = list(paths and scan_paths(list(paths), project_root=project_root) or [])
+    seen = {(str(Path(v.path).resolve()), v.lineno, v.kind) for v in found}
+    for v in consent_sweep(project_root):
+        key = (str(Path(v.path).resolve()), v.lineno, v.kind)
+        if key not in seen:
+            seen.add(key)
+            found.append(v)
+    found.sort(key=lambda v: (v.path, v.lineno, v.kind))
+    return found
+
 
 if __name__ == "__main__":  # pragma: no cover
     import sys as _sys
@@ -1962,18 +2189,35 @@ if __name__ == "__main__":  # pragma: no cover
     # capability_health.py, acceptance_ceremony.py, coverage_gate.py) omits
     # project_root and keeps its existing strict, unconditional behavior --
     # see scan_paths's own docstring for why that is deliberate.
-    _violations = scan_paths(_paths, project_root=Path.cwd())
+    _violations = _cli_violations(_paths, Path.cwd())
     if _violations:
         for _v in _violations:
             print(f"{_v.path}:{_v.lineno}: {_v.kind}")
-        print(
-            f"\n{len(_violations)} violation(s) found. "
-            "Every external write must route through the approved adapters "
-            "in agents/lib/external_write/. "
-            "The phase FAILS and cannot be accepted until every flagged write "
-            "is routed through the approved external-write operations.",
-            file=_sys.stderr,
-        )
+        _baked = [_v for _v in _violations
+                  if _v.kind == "baked_operator_confirmation"]
+        if len(_baked) != len(_violations):
+            print(
+                f"\n{len(_violations) - len(_baked)} violation(s) found. "
+                "Every external write must route through the approved adapters "
+                "in agents/lib/external_write/. "
+                "The phase FAILS and cannot be accepted until every flagged write "
+                "is routed through the approved external-write operations.",
+                file=_sys.stderr,
+            )
+        if _baked:
+            print(
+                f"\n{len(_baked)} of these hardcode an operator confirmation: the "
+                "words that get recorded as the operator's own acceptance are "
+                "written into the file, not said by them. Text a file supplies is "
+                "not the operator's, whatever it says. The phase FAILS while any "
+                "of them stands, and it clears once the file no longer carries "
+                "that text and the operator gives the confirmation themselves. "
+                "Note the reach of this check honestly: it sees only a "
+                "confirmation spelled out as a literal, so a clean result here "
+                "means no literal was found -- it is not evidence that the "
+                "acceptances in this project are genuine.",
+                file=_sys.stderr,
+            )
         _sys.exit(1)
     else:
         print("Bypass scan passed — no violations found.")

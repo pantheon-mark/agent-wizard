@@ -1762,5 +1762,204 @@ class TestQuarantineComposesWithMarkerResidueCheck(unittest.TestCase):
             )
 
 
+class TestBakedOperatorConfirmationRule(unittest.TestCase):
+    """A script that hands the acceptance command a LITERAL confirmation is a
+    machine manufacturing the one thing only a person can give.
+
+    The rule is anti-drift, not a consent oracle -- see the negative case below,
+    which asserts the disclosed residual rather than leaving it as prose.
+    """
+
+    def test_a_literal_confirmation_in_an_argv_list_is_flagged(self):
+        v = scan_paths([_FIXTURES / "capability_bakes_operator_confirmation.py"])
+        self.assertIn("baked_operator_confirmation", _kinds(v),
+                      f"a hardcoded operator confirmation must be flagged; got {v}")
+
+    def test_the_flag_is_the_one_the_consent_command_itself_declares(self):
+        # Single source: the scanner spells the flag itself (importing the
+        # acknowledgement facade from here would close an import cycle through
+        # the writer-state service, which already imports this scanner), so the
+        # agreement is pinned at build time instead -- the same arrangement the
+        # command manifest uses for the entrypoint paths it names.
+        from external_write import writer_acknowledgement
+        self.assertEqual(scan.OPERATOR_CONFIRMATION_FLAG,
+                         writer_acknowledgement.FLAG_CONFIRMATION)
+
+    def test_a_computed_confirmation_is_a_disclosed_residual_not_a_catch(self):
+        v = scan_paths([_FIXTURES / "capability_computed_operator_confirmation.py"])
+        self.assertEqual(
+            [x for x in v if x.kind == "baked_operator_confirmation"], [],
+            "a variable / module constant / f-string / join confirmation is "
+            "outside an AST literal check's reach, and the rule's docstring "
+            "discloses exactly that -- it must not silently start claiming them")
+
+    def test_the_shipped_package_carries_no_baked_confirmation(self):
+        v = scan_paths([_ADAPTER_DIR])
+        self.assertEqual([x for x in v if x.kind == "baked_operator_confirmation"], [],
+                         "the emitted package renders that command from operator "
+                         "text, never from a literal")
+
+    def test_the_kind_is_named_in_the_violation_contract(self):
+        self.assertIn("baked_operator_confirmation", scan.Violation.__doc__ or "")
+
+
+class TestBakedConsentProjectSweep(unittest.TestCase):
+    """The sweep, which is the half that decides whether the rule can ever see
+    the file it exists for. The one real instance lived OUTSIDE ``agents/``.
+    """
+
+    def _project(self, td, relpath, fixture="capability_bakes_operator_confirmation.py"):
+        proj = Path(td)
+        target = proj / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text((_FIXTURES / fixture).read_text(encoding="utf-8"),
+                          encoding="utf-8")
+        return proj, target
+
+    def test_a_baked_confirmation_outside_agents_is_swept(self):
+        # THE case this rule exists for: the real instance lived in a top-level
+        # scripts/ directory. A sweep that only ever looks under agents/ is
+        # green and blind to it.
+        with TemporaryDirectory() as td:
+            proj, target = self._project(td, "scripts/finish_setup.py")
+            v = scan.consent_sweep(proj)
+            self.assertEqual([x.kind for x in v], ["baked_operator_confirmation"],
+                             f"a baked confirmation in scripts/ must be swept; got {v}")
+            self.assertEqual(Path(v[0].path).resolve(), target.resolve())
+
+    def test_the_candidate_set_is_bounded_away_from_vendored_trees(self):
+        # A fail-closed check with an unbounded input set is its own failure
+        # mode: a vendored dependency tree is not operator code, and scanning
+        # one is how a check comes to fail every build it runs in.
+        with TemporaryDirectory() as td:
+            proj, _ = self._project(td, ".venv/lib/pkg/setup_helper.py")
+            self.assertEqual(scan.consent_sweep_candidates(proj), [])
+            self.assertEqual(scan.consent_sweep(proj), [])
+
+    def test_a_file_that_never_names_the_flag_is_not_a_candidate(self):
+        with TemporaryDirectory() as td:
+            proj = Path(td)
+            (proj / "scripts").mkdir(parents=True)
+            (proj / "scripts" / "ordinary.py").write_text(
+                "def main():\n    return 1\n", encoding="utf-8")
+            self.assertEqual(scan.consent_sweep_candidates(proj), [])
+
+    def test_the_prefilter_reads_bytes_so_a_non_utf8_source_is_still_a_candidate(self):
+        # The prefilter may only EXCLUDE a file it positively read and positively
+        # found clean. A latin-1 source is ordinary Python and its ASCII bytes
+        # still spell the flag; dropping it here would rebuild, one layer up, the
+        # "could not read it" == "it passes" conflation the read path already fixed.
+        with TemporaryDirectory() as td:
+            proj = Path(td)
+            (proj / "scripts").mkdir(parents=True)
+            target = proj / "scripts" / "latin1.py"
+            target.write_bytes(
+                (_FIXTURES / "capability_bakes_operator_confirmation.py")
+                .read_text(encoding="utf-8")
+                .replace("inbox-tidy", "café-tidy")
+                .encode("latin-1"))
+            self.assertIn(target.resolve(),
+                          [p.resolve() for p in scan.consent_sweep_candidates(proj)])
+            self.assertEqual([x.kind for x in scan.consent_sweep(proj)], ["unparseable"])
+
+    def test_a_candidate_that_cannot_be_parsed_is_reported_not_read_as_clean(self):
+        with TemporaryDirectory() as td:
+            proj = Path(td)
+            (proj / "scripts").mkdir(parents=True)
+            (proj / "scripts" / "broken.py").write_text(
+                'CMD = ["--operator-confirmation", "yes, accept it"\n',
+                encoding="utf-8")
+            self.assertEqual([x.kind for x in scan.consent_sweep(proj)], ["unparseable"])
+
+    def test_the_sweep_reports_only_what_it_was_scoped_to_ask(self):
+        # Quantify over the DECLARED question. A candidate file that also trips
+        # some unrelated rule must not turn the consent sweep into a second,
+        # wider bypass scan over files no caller asked it to scan.
+        with TemporaryDirectory() as td:
+            proj, target = self._project(td, "scripts/finish_setup.py")
+            target.write_text(
+                target.read_text(encoding="utf-8") + "\nimport requests\n",
+                encoding="utf-8")
+            self.assertEqual([x.kind for x in scan.consent_sweep(proj)],
+                             ["baked_operator_confirmation"])
+
+    def test_the_documented_gate_invocation_reaches_a_file_outside_agents(self):
+        """Through the REAL entrypoint, invoked exactly as the operator's own
+        build gate is documented to invoke it: ``scan.py agents/`` from the
+        project root. Proving the sweep function works while the shipped command
+        never calls it would leave the mechanism with no caller -- and the
+        documented argument is precisely the one that cannot see the file."""
+        import subprocess
+        with TemporaryDirectory() as td:
+            proj, target = self._project(td, "scripts/finish_setup.py")
+            (proj / "agents").mkdir()
+            (proj / "agents" / "clean.py").write_text(
+                "def main():\n    return 0\n", encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(_ADAPTER_DIR / "scan.py"), "agents/"],
+                cwd=str(proj), capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 1,
+                             f"gate must FAIL; stdout={proc.stdout!r} "
+                             f"stderr={proc.stderr!r}")
+            self.assertIn("baked_operator_confirmation", proc.stdout)
+            self.assertIn("finish_setup.py", proc.stdout)
+            self.assertNotIn("must route through the approved adapters",
+                             proc.stderr,
+                             "the write-bypass sentence is not true of this "
+                             "violation and must not be printed for it alone")
+
+    def test_the_documented_gate_invocation_still_passes_a_clean_project(self):
+        import subprocess
+        with TemporaryDirectory() as td:
+            proj = Path(td)
+            (proj / "agents").mkdir()
+            (proj / "agents" / "clean.py").write_text(
+                "def main():\n    return 0\n", encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(_ADAPTER_DIR / "scan.py"), "agents/"],
+                cwd=str(proj), capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0,
+                             f"stdout={proc.stdout!r} stderr={proc.stderr!r}")
+
+    def test_a_freshly_emitted_project_sweeps_clean(self):
+        # The other direction, and the one this family keeps getting wrong: a
+        # gate that fires on every deployment including its own fresh build.
+        import copy as _copy
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from operator_system_emitter import emit_operator_system
+        from emission_plan import load_contract, default_contract_path, validate_emission_plan
+        from test_emission_plan import _valid_plan
+
+        # A writes-back plan on a bundle that actually carries the lib -- the
+        # default fixture plan is read-only on an early bundle and emits ZERO
+        # Python files, so asserting "clean" against it would be a green that
+        # measures nothing. The bundle is DERIVED (newest one whose templates
+        # carry the package) rather than pinned, so the next bundle cut does not
+        # quietly return this test to that vacuous state.
+        bundles = _REPO_ROOT / "wizard" / "foundation-bundles"
+        carriers = [d for d in bundles.iterdir()
+                    if (d / "templates" / "agents" / "lib" / "external_write").is_dir()]
+        self.assertTrue(carriers, "no cut bundle carries the external-write package")
+        newest = max(carriers, key=lambda d: [
+            int(part) for part in d.name.lstrip("v").split(".")])
+
+        raw = _copy.deepcopy(_valid_plan())
+        raw["bundle_version"] = newest.name
+        raw["foundation_doc_inputs"]["EXTERNAL_DEPENDENCY_IDENTITY"] = json.dumps(
+            [{"id": "t", "name": "company_tracker", "type": "Sheet",
+              "roles": ["boundary_output"], "owner_agent_id": "researcher"}])
+        plan = validate_emission_plan(raw, load_contract(default_contract_path()))
+
+        with TemporaryDirectory() as td:
+            staging = Path(td)
+            emit_operator_system(plan, staging, _REPO_ROOT)
+            self.assertTrue(
+                scan.consent_sweep_candidates(staging),
+                "the emitted tree must contain at least one file the sweep "
+                "actually looks at, or this assertion proves nothing")
+            v = scan.consent_sweep(staging)
+            self.assertEqual(v, [], f"a fresh build must sweep clean; got {v}")
+
+
 if __name__ == "__main__":
     unittest.main()

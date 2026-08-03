@@ -256,7 +256,14 @@ _LIVE_SURFACE_RELPATHS = (
 #: from the reference scan entirely. (Real estate case 2026-07-25: `.venv`
 #: carried third-party pycparser modules that are INTENTIONALLY unparseable,
 #: and scanning them fail-closed every non_live classification in the project.)
-_NON_PROJECT_DIRS = frozenset({
+#:
+#: PUBLIC, and deliberately so: it is the package's ONE answer to "which
+#: directories are not this project's own code", and the bypass scanner's
+#: whole-project consent sweep bounds its input with the same set rather than
+#: keeping a second copy that has to be kept in step. Exporting it does not
+#: cost this module its leaf status -- a name read out of here is not an import
+#: made from here.
+NON_PROJECT_DIRS = frozenset({
     ".venv", "venv", ".git", "__pycache__", "node_modules",
     ".mypy_cache", ".pytest_cache", "site-packages", "build", "dist",
 })
@@ -363,7 +370,7 @@ def _referenced_by_live_surface(root: Path, writer_relpath: str) -> bool:
         if "/lib/external_write/" in "/" + rel_posix:
             continue          # the sealed kernel is not an invocation surface
         parts = set(Path(rel_posix).parts)
-        if parts & _NON_PROJECT_DIRS:
+        if parts & NON_PROJECT_DIRS:
             continue          # vendored/derived trees are not invocation surfaces.
         try:
             text = p.read_text(encoding="utf-8")

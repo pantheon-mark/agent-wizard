@@ -1245,10 +1245,22 @@ class ScanCliEntrypointTests(unittest.TestCase):
 
     def setUp(self):
         import sys
+        import tempfile
         self._agents_lib = str(REPO_ROOT / "wizard" / "agents" / "lib")
         self._scan_module = str(REPO_ROOT / "wizard" / "agents" / "lib" / "external_write" / "scan.py")
         self._fixtures = REPO_ROOT / "wizard" / "test_fixtures" / "external_write_scan"
         self._adapter_dir = str(REPO_ROOT / "wizard" / "agents" / "lib" / "external_write")
+        # The CLI anchors its whole-project work -- the migration quarantine and
+        # the manufactured-consent sweep -- on the CWD, because the documented
+        # invocation is run from the operator project's top folder. Running these
+        # from THIS repository's root would point both at a tree that is not an
+        # operator project at all, and each assertion below would then be
+        # measuring the wrong thing (the non-zero one in particular would pass
+        # whether or not its own fixture was ever detected). An empty directory
+        # is the honest stand-in: it isolates the assertion to the named path.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self._cwd = tmp.name
 
     def test_cli_exits_nonzero_on_violation(self):
         """scan.py CLI exits non-zero when given a file with a violation."""
@@ -1256,7 +1268,7 @@ class ScanCliEntrypointTests(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, self._scan_module,
              str(self._fixtures / "direct_api_call.py")],
-            capture_output=True,
+            capture_output=True, cwd=self._cwd,
         )
         self.assertNotEqual(
             result.returncode, 0,
@@ -1269,7 +1281,7 @@ class ScanCliEntrypointTests(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, self._scan_module,
              str(self._fixtures / "legal_through_adapter.py")],
-            capture_output=True,
+            capture_output=True, cwd=self._cwd,
         )
         self.assertEqual(
             result.returncode, 0,
@@ -1282,7 +1294,7 @@ class ScanCliEntrypointTests(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, self._scan_module,
              str(self._fixtures / "direct_api_call.py")],
-            capture_output=True, text=True,
+            capture_output=True, text=True, cwd=self._cwd,
         )
         combined = result.stdout + result.stderr
         self.assertTrue(
