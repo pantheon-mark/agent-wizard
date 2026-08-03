@@ -2166,6 +2166,15 @@ class TestPerWriterTargetMustBeScanned(unittest.TestCase):
             self.assertEqual(txt.skipped, scan.SKIPPED_NOT_PYTHON)
             self.assertEqual(txt.violations, [])
 
+    def test_an_exempt_zone_is_reported_as_skipped_not_as_a_clean_result(self):
+        # The other way a file gets an empty result without a rule running. An
+        # exemption is a decision not to look, which is not the same statement
+        # as "we looked and found nothing" -- and only the first is true here.
+        profile = _ADAPTER_DIR / sorted(scan.ADAPTER_PROFILE_MODULE_PATHS)[0]
+        outcome = scan.scan_one_file(profile)
+        self.assertEqual(outcome.skipped, scan.SKIPPED_ADAPTER_PROFILE_ZONE)
+        self.assertEqual(outcome.violations, [])
+
     def test_the_scanned_set_reported_by_the_gate_is_unchanged(self):
         # The scanner's answer gained a field; what it REPORTS must not move.
         v = scan_paths([_FIXTURES / "capability_bakes_operator_confirmation.py"])
