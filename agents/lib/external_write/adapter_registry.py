@@ -63,7 +63,24 @@ class Adapter(Protocol):
                  registry only counts units from plan().
     undo_one   — reverse exactly one previously-applied EffectUnit, if the unit is
                  reversible (undo_ref is not None). Not invoked by this
-                 module's dispatch path; reserved for a later rollback/undo task.
+                 module's dispatch path; the journaled TRIAL executor (Cut 1.9)
+                 is the caller.
+                 TRIAL contract clause (Cut 1.9 Task 1, v0.23.0): for an
+                 op_kind to be eligible for a journaled trial, whatever
+                 ``undo_one`` needs in order to restore a unit must survive a
+                 crash — which means it must be reconstructable from a
+                 JSON-serializable RECOVERY CAPSULE written to disk BEFORE the
+                 mutation. ``undo_ref`` is contractually "opaque,
+                 adapter-defined" (operations.py) and therefore not
+                 contractually serializable, so this is a real obligation on an
+                 adapter that wants to be trialled, checked by
+                 ``trial_eligibility.check_trial_eligibility`` via a real
+                 ``json.dumps`` round trip (never pickle, and never an
+                 isinstance guess). An adapter that keeps the only reversal
+                 handle in INSTANCE state — as
+                 ``adapters_gmail.GmailFilterCreateAdapter`` does with
+                 ``_created_filter_ids`` — cannot satisfy this: the handle dies
+                 with the process.
     verify_one — READ-ONLY OBSERVER (Task 3, A2 run-time — v0.12.0 Slice 1):
                  given a READ-ONLY facade/client (never the write-capable
                  `raw_client` handed to apply_one/undo_one), observe exactly
@@ -162,6 +179,44 @@ class Adapter(Protocol):
                  builds the capture + the evidence type + proves the
                  predicate signature is sound against ≥2 divergent op_kinds.
 
+    UNDO_IS_ABSOLUTE_STATE_RESTORE (OPTIONAL declaration — Cut 1.9 Task 1,
+                 v0.23.0 — the TRIAL-ELIGIBILITY contract clause) — an adapter
+                 MAY additionally declare the CLASS attribute
+                 ``UNDO_IS_ABSOLUTE_STATE_RESTORE = True`` (the exact name is
+                 ``UNDO_IDEMPOTENCY_DECLARATION_ATTR``, below), asserting that
+                 its ``undo_one`` is an ABSOLUTE-STATE restore: it writes the
+                 recorded PRIOR state (the prior cell value; the exact prior
+                 label set), never a RELATIVE compensating action (delete what
+                 was created, subtract what was added). Absolute-state restores
+                 are idempotent — running one twice, or running one when the
+                 apply never landed, converges to the same prior state — which
+                 is precisely what the journaled TRIAL protocol's recovery path
+                 requires: after a crash the journal can only say the apply was
+                 INTENDED, so recovery runs ``undo_one`` without knowing
+                 whether the mutation landed, and may run it more than once
+                 (``trial_eligibility.py`` carries the full rationale).
+                 Consumed ONLY by ``trial_eligibility.check_trial_eligibility``
+                 — the trial-eligibility preflight — never by this module's
+                 dispatch path, and deliberately NOT required at proof time
+                 (``copy_run_proof``) or by the self-QA battery
+                 (``capability_invariants``): requiring it there would
+                 retroactively refuse capabilities already accepted under the
+                 prior contract. ABSENT (the back-compat default) means the
+                 adapter is SILENT about the property, which the preflight
+                 treats as "not declared" and REFUSES — silence is never
+                 consent, and a relative undo repeated after a crash can
+                 destroy state the trial never touched. Captured off the CLASS
+                 at registration, exactly like every optional hook above, so
+                 the declaration is frozen before any capability code runs.
+                 DISCLOSED BOUND, stated plainly because the honest scope
+                 matters: idempotency is DECLARED, not PROVEN. Nothing here (or
+                 in the preflight) can verify that a declaring adapter's
+                 ``undo_one`` really is absolute-state — that is a property of
+                 the vendor call it makes. A false declaration surfaces as a
+                 trial that cannot verify restoration (the trial's
+                 ``verify_undo_restored`` post-condition, and the recovery
+                 path's ``recovery_required`` outcome), never as a silent pass.
+
     grant_preflight (OPTIONAL — Task 11, B3 / F-52,F-47 — v0.13.0 Slice 2, the
                  OFFLINE SCOPE-PREFLIGHT primitive) — an adapter MAY additionally
                  define ``grant_preflight(self, token_info) -> bool``: a SAFE,
@@ -218,6 +273,20 @@ class Adapter(Protocol):
 # module docstring) — populated by import of adapter modules, not built dynamically
 # at request time.
 _REGISTRY: Dict[str, Adapter] = {}
+
+
+# The CLASS-attribute name an adapter uses to declare that its `undo_one` is an
+# absolute-state (therefore idempotent) restore — the Cut 1.9 trial-eligibility
+# contract clause; see the `Adapter` protocol docstring above for the full
+# semantics and the disclosed "declared, not proven" bound.
+#
+# ONE canonical spelling, in one place: `register_adapter` resolves the class
+# attribute through this constant, and `trial_eligibility.py` renders it into
+# the plain-language refusal it hands an operator/agent ("declare
+# UNDO_IS_ABSOLUTE_STATE_RESTORE = True on the adapter class"). Re-spelling the
+# name in a second module is how a fix-step instruction drifts from the thing
+# it instructs.
+UNDO_IDEMPOTENCY_DECLARATION_ATTR = "UNDO_IS_ABSOLUTE_STATE_RESTORE"
 
 
 @dataclass(frozen=True)
@@ -327,6 +396,29 @@ class AdapterDispatch:
                basic / cookie — or for any adapter registered before this task);
                `check_scope_grant` (below) treats a None here as GRANT_STATUS_NA,
                never as a false "not granted".
+    undo_is_absolute_state_restore
+               (Cut 1.9 Task 1 — v0.23.0, the trial-eligibility contract
+               clause): `getattr(type(adapter),
+               UNDO_IDEMPOTENCY_DECLARATION_ATTR, None)` — the adapter's OWN
+               declaration that its `undo_one` restores absolute prior state
+               (see the `Adapter` protocol docstring's
+               UNDO_IS_ABSOLUTE_STATE_RESTORE clause for the semantics, the
+               reason the trial protocol needs it, and the disclosed
+               "declared, not proven" bound). Captured off the CLASS at
+               registration time for the same monkey-patch-inert reason as
+               every hook above, and — because this record is frozen — the
+               declaration is fixed before any capability code could reassign
+               it on the instance OR on the class. That matters more here than
+               for a hook: this field is read by a GATE that authorizes an
+               external write, so late mutation would be an authority surface.
+               Typed `Any`, not `bool`, deliberately: a MALFORMED declaration
+               (`"yes"`, `1`, a list) must reach the preflight intact so it can
+               be refused as malformed rather than silently coerced to True
+               here. Defaults to None (never declared) so every adapter
+               registered before this task, and any hand-built
+               `AdapterDispatch` in a test, keeps working unchanged — and
+               resolves to a REFUSAL at the preflight, which is the
+               fail-closed direction.
     """
 
     instance: Any
@@ -340,6 +432,7 @@ class AdapterDispatch:
     verify_undo_restored: Optional[Callable]
     verify_durability: Optional[Callable]
     grant_preflight: Optional[Callable]
+    undo_is_absolute_state_restore: Any = None
 
 
 # op_kind -> AdapterDispatch. Populated alongside _REGISTRY by register_adapter;
@@ -364,7 +457,10 @@ def register_adapter(op_kind: str, adapter: Adapter) -> None:
     the Task 3 (A2 run-time) `provision_read_only_client` (from
     `build_read_only_client`, if the class defines it) the same way. Also
     auto-captures the Task 11 (B3 / F-52,F-47) `grant_preflight` off the
-    class the identical way."""
+    class the identical way, and the Cut 1.9 Task 1 trial-eligibility
+    declaration (`UNDO_IDEMPOTENCY_DECLARATION_ATTR`) the identical way —
+    frozen here, at registration, so nothing that runs later can grant an
+    op_kind trial eligibility it did not declare at import time."""
     _REGISTRY[op_kind] = adapter
     cls = type(adapter)
     _DISPATCH_REGISTRY[op_kind] = AdapterDispatch(
@@ -379,6 +475,8 @@ def register_adapter(op_kind: str, adapter: Adapter) -> None:
         verify_undo_restored=getattr(cls, "verify_undo_restored", None),
         verify_durability=getattr(cls, "verify_durability", None),
         grant_preflight=getattr(cls, "grant_preflight", None),
+        undo_is_absolute_state_restore=getattr(
+            cls, UNDO_IDEMPOTENCY_DECLARATION_ATTR, None),
     )
 
 
