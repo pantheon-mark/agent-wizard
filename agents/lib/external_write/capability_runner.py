@@ -109,40 +109,123 @@ def _import_capability_module(project_root: Path, capability_id: str) -> Any:
             "it needs to be rebuilt before it can run") from exc
 
 
+class ReadFacadeDeclarationError(Exception):
+    """The declaring module for an op_kind's read facade was located but could
+    not be turned into a usable facade class.
+
+    Carries the facts a caller needs to say something specific rather than
+    generic, because the two ways this happens want different sentences and a
+    caller that could not tell them apart would have to emit one vaguer message
+    for both:
+
+      relpath           — the file the declaration topology named.
+      cause_class_name  — the exception class raised by IMPORTING that file, or
+                          None when the file imported cleanly and simply
+                          registered nothing for the op_kind.
+
+    Deliberately NOT a `CapabilityRunnerError`: this is raised by the shared,
+    op_kind-keyed resolver, which has callers that are not running a capability
+    at all (the trial recovery entrypoint resolves a facade from a journal's
+    op_kind, with no capability in the picture). A capability-flavoured exception
+    type escaping into those callers would make them either re-word it or leak
+    "this capability needs to be rebuilt" at an operator who never named one.
+    """
+
+    def __init__(self, message: str, *, relpath: str,
+                 cause_class_name: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.relpath = relpath
+        self.cause_class_name = cause_class_name
+
+
+def import_declared_read_facade(op_kind: str, *,
+                                lib_dir: Optional[Any] = None) -> type:
+    """Resolve, IMPORT and return the registered ReadFacade subclass for
+    ``op_kind`` — the single implementation of that resolution.
+
+    Three steps, in this order, none of them substitutable:
+
+      1. the DECLARATION TOPOLOGY names which module declares a read facade for
+         ``op_kind``. A filename is never an input and never a fallback: two
+         files claiming the same op_kind, an unreadable file, and nothing
+         declaring it at all are three different answers, and they surface as a
+         ``TopologyError`` carrying which one it was.
+      2. that ONE module is imported, inside its own try/except, matching
+         `registered_adapters.py`'s per-module isolation.
+      3. the class comes from ``read_facade.get_read_facade_class`` — the SAME
+         registry accessor ``register_read_facade`` populates, and only populates
+         after checking ``issubclass(..., ReadFacade)``. So whatever this returns
+         is already a validated ReadFacade subclass. The declaration's ``symbol``
+         is advisory (it names things in messages) and is never the source of the
+         returned object: a declaration that can be located but whose symbol
+         cannot be read plainly must still never hand back an unvalidated value.
+
+    WHY THIS IS A SHARED FUNCTION rather than a step inside the capability-facing
+    resolver where it started. It now has two callers with genuinely different
+    inputs — a capability id, and a crashed trial's journal — and step 1's
+    op_kind → module resolution is a classification. A second copy of it would be
+    two paths that have to agree about which file provides read-only access for
+    an operation, which is this package's most expensive recurring defect shape.
+    The capability-facing wrapper keeps its own operator-facing wording; only the
+    resolution is shared.
+
+    ``lib_dir`` defaults to THIS module's own directory, and that default is
+    load-bearing rather than a convenience: the resolved module is imported as
+    ``external_write.<module_stem>``, so the directory scanned for declarations
+    has to be the same directory that import will actually load from. Deriving it
+    from a project root instead risks scanning one directory while importing from
+    another — which would itself be a two-paths-must-agree defect.
+
+    Raises ``TopologyError`` (nothing declares it / conflicting declarations /
+    unreadable candidate) or ``ReadFacadeDeclarationError`` (the declaring module
+    would not import, or imported and registered nothing).
+    """
+    from external_write.read_facade import get_read_facade_class
+    from external_write.topology import build_topology
+
+    anchor = Path(lib_dir) if lib_dir is not None \
+        else Path(__file__).resolve().parent
+    declaration = build_topology(anchor).find_read_facade(op_kind)
+
+    try:
+        importlib.import_module(f"{EXTERNAL_WRITE_PKG}.{declaration.module_stem}")
+    except Exception as exc:  # noqa: BLE001 -- isolation, and it is REPORTED.
+        raise ReadFacadeDeclarationError(
+            f"{declaration.relpath} could not be loaded "
+            f"({exc.__class__.__name__})",
+            relpath=declaration.relpath,
+            cause_class_name=exc.__class__.__name__) from exc
+
+    facade_cls = get_read_facade_class(op_kind)
+    if facade_cls is None:
+        raise ReadFacadeDeclarationError(
+            f"{declaration.relpath} loaded, but registered no read-only reader "
+            f"for {op_kind!r}",
+            relpath=declaration.relpath)
+    return facade_cls
+
+
 def resolve_read_facade_class(project_root: Any, capability_id: str) -> type:
     """Resolve the ReadFacade subclass for ``capability_id``'s op_kind by
     reading what the modules DECLARE, never by deriving a filename from the
     id -- and never by pulling an unvalidated object out of the declaring
     module's namespace.
 
-    Declaration topology is the mandatory authority for WHICH module to
-    import (``declaration.module_stem`` -- filenames are still never an
-    input). The OBJECT itself always comes from
-    ``read_facade.get_read_facade_class``, the SAME registry accessor that
-    ``register_read_facade`` populates, and only populates after checking
-    ``isinstance(x, type) and issubclass(x, ReadFacade)`` -- so anything this
-    function returns is guaranteed to already be a validated ReadFacade
-    subclass. ``declaration.symbol`` is advisory only (naming things in a
-    message); it is never the source of the returned object, because a
-    declaration this module can locate but cannot read a plain symbol name
-    for -- or one naming something that turns out not to be a ReadFacade --
-    must still never be able to hand back an unvalidated value.
+    THE RESOLUTION ITSELF LIVES IN ONE PLACE, ``import_declared_read_facade``
+    above: declaration topology names the module, that module is imported, and
+    the class comes from the read-facade registry. This function is the
+    CAPABILITY-FACING wrapper around it -- it supplies the op_kind by asking the
+    capability module what it declares, and it translates each failure into the
+    plain, operator-actionable sentence a capability's operator needs. It carries
+    no second copy of the lookup, because "which file provides read-only access
+    for this operation" is a classification and two implementations of one
+    classification is this package's most expensive recurring defect.
 
-    Imports exactly one module -- the one that declares the op_kind --
-    inside its own try/except, matching registered_adapters.py's
-    per-module isolation.
-
-    The directory scanned for declarations is this kernel module's OWN
-    location, not anything derived from ``project_root``. The resolved
-    module is subsequently imported as ``external_write.<module_stem>``, so
-    the directory scanned here has to be the same directory that import will
-    actually load from -- deriving it from ``project_root`` instead risks
-    scanning one directory while importing from another, which would just be
-    a second copy of the "two paths that have to agree" defect this is
-    fixing.
+    The directory scanned for declarations is the KERNEL module's OWN location,
+    not anything derived from ``project_root`` -- see the shared resolver's
+    docstring for why that is load-bearing rather than incidental.
     """
-    from external_write.topology import build_topology, TopologyError
-    from external_write.read_facade import get_read_facade_class
+    from external_write.topology import TopologyError
 
     root = Path(project_root)
     module = _import_capability_module(root, capability_id)
@@ -152,10 +235,8 @@ def resolve_read_facade_class(project_root: Any, capability_id: str) -> type:
             f"`{capability_id}` does not declare what kind of operation it "
             "performs, so it cannot be run safely -- it needs to be rebuilt")
 
-    lib_dir = Path(__file__).resolve().parent
-    topology = build_topology(lib_dir)
     try:
-        declaration = topology.find_read_facade(op_kind)
+        return import_declared_read_facade(op_kind)
     except TopologyError as exc:
         # Translate the build-time-audience topology message into plain,
         # operator-actionable language -- the detail stays available via
@@ -192,23 +273,21 @@ def resolve_read_facade_class(project_root: Any, capability_id: str) -> type:
             f"`{capability_id}` cannot look at the outside system in "
             "read-only mode yet, so it cannot safely work out what to "
             "change -- it needs to be rebuilt") from exc
-
-    try:
-        importlib.import_module(f"{EXTERNAL_WRITE_PKG}.{declaration.module_stem}")
-    except Exception as exc:  # noqa: BLE001 -- isolation, and it is REPORTED.
+    except ReadFacadeDeclarationError as exc:
+        # Two distinct facts, two distinct sentences, and the shared resolver
+        # carries the classification rather than this branch re-deriving it: a
+        # file that would not import needs fixing for a different reason than a
+        # file that imported and registered nothing.
+        if exc.cause_class_name is not None:
+            raise CapabilityRunnerError(
+                f"the file that provides read-only access for `{capability_id}` "
+                f"({exc.relpath}) could not be loaded "
+                f"({exc.cause_class_name}). It needs to be fixed before this "
+                "can run.") from exc
         raise CapabilityRunnerError(
-            f"the file that provides read-only access for `{capability_id}` "
-            f"({declaration.relpath}) could not be loaded "
-            f"({exc.__class__.__name__}). It needs to be fixed before this "
-            "can run.") from exc
-
-    facade_cls = get_read_facade_class(op_kind)
-    if facade_cls is None:
-        raise CapabilityRunnerError(
-            f"{declaration.relpath} loaded, but did not provide a working "
+            f"{exc.relpath} loaded, but did not provide a working "
             f"reader for `{capability_id}`. It needs to be fixed before "
-            "this can run.")
-    return facade_cls
+            "this can run.") from exc
 
 
 def build_capability_read_facade(project_root: Any, capability_id: str) -> Any:

@@ -306,6 +306,14 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # that runs it -- acceptance stays exactly as unreachable as it was before the
     # protocol existed, which is the defect this cut is closing.
     "trial_executor.py",
+    # trial_recovery.py (Cut 1.9 Task 5) — the recovery driver, and the operator's
+    # one exit from an interrupted trial. Its omission is worse than a missing
+    # feature: the journal can durably record a unit as needing attention, and this
+    # module is the only thing that can bring that unit back and clear the record.
+    # A project that received the trial protocol without it would have a real
+    # blocking state with no performable repair — the dead-end shape this cut
+    # exists to remove, recreated by an emit-set omission.
+    "trial_recovery.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

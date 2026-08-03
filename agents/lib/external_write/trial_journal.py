@@ -72,6 +72,31 @@ adapter to declare `undo_one` an ABSOLUTE-state restore. `apply_intent ->
 undo_intent` is therefore a LEGAL transition, not an anomaly.
 
 ------------------------------------------------------------------------------
+`recovery_required` is durable, and it is LEAVABLE — by exactly one route
+------------------------------------------------------------------------------
+`recovery_required` means a unit could not be established back at its prior state,
+so it may still be changed on the operator's live record. It is durable and
+outlives the process that wrote it; nothing here clears it as a side effect of
+anything.
+
+It is nonetheless not a dead end, and that is deliberate. A durable blocking
+record whose named repair cannot actually clear it is a state the operator cannot
+get out of — which is the class of failure this protocol was built to remove, so
+opening one here would defeat it. The state therefore has exactly ONE successor:
+`undo_intent`. A unit a prior attempt could not verify is reversed AGAIN under a
+fresh, durable intent record, and only an observed post-condition then moves it to
+`restored_verified`.
+
+The two exits the table deliberately does NOT offer are the two wrong ones:
+
+  * `recovery_required -> restored_verified` — a unit marked resolved with no
+    fresh write-ahead record and no observation behind it. That is the quiet
+    clearing this state exists to prevent, and it stays impossible.
+  * `recovery_required -> apply_intent` — a RE-APPLY. `apply_intent` is reachable
+    only from `planned`, so no resumed or recovering process can issue a second
+    apply for a unit through this journal at all. Recovery converges by reversing.
+
+------------------------------------------------------------------------------
 What `apply_confirmed` and `restored_verified` do and do not mean
 ------------------------------------------------------------------------------
 `apply_confirmed` records that the adapter's `apply_one` RETURNED for this unit.
@@ -166,12 +191,13 @@ What this module does NOT do
     advances a unit past an action whose authorizing record is not already
     durable.
 
-Caller: the journaled trial executor, which consumes the same `AuthorizedPlan`
-this module requires. Until that executor lands, this module has no production
-caller — the same convention the trial-eligibility preflight and `evidence.py`
-both used when they shipped one task ahead of the kernel wiring that consumes
-them. It is complete and functional as it stands: there are no stubs here and
-nothing to wire up later inside this file.
+Callers, both in production, and they use different entrypoints on purpose. The
+journaled TRIAL EXECUTOR opens a journal (`open_trial_journal`) from the same
+`AuthorizedPlan` this module requires, and it is the only thing that creates one.
+The RECOVERY driver loads an existing one (`load_trial_journal`) and creates
+nothing — a resumed run must never be able to bring a second journal into
+existence for a trial that already has one, which is why the write-once open and
+the load are separate functions rather than one function with a flag.
 
 Zone: SEALED_KERNEL (enumerated in `zones.py`). It reads the sibling kernel
 submodules `write_authorization` (the authorization carrier) and `operations`
@@ -257,20 +283,49 @@ OUTCOME_STATES: Tuple[str, ...] = (
     STATE_APPLY_CONFIRMED, STATE_RESTORED_VERIFIED, STATE_RECOVERY_REQUIRED,
 )
 
-# Terminal: this journal never transitions a unit out of one. `recovery_required`
-# is deliberately terminal HERE so nothing can quietly mark it resolved -- the
-# durable record that a unit needs attention outlives the process that wrote it.
+# Terminal: this journal never transitions a unit out of one. `restored_verified`
+# is the settled end of the protocol -- the unit was observed back at its prior
+# state, and there is nothing further to establish about it.
+#
+# `recovery_required` is deliberately NOT in this set, and the reason is a
+# correction of this module's own first shape rather than a loosening of it. It
+# WAS terminal here, on the reasoning that nothing should be able to quietly mark
+# a unit resolved. That reasoning is right about "quietly" and wrong about
+# "terminal": a blocking record with no performable repair is a state the operator
+# cannot get out of, which is precisely the class of defect the trial protocol was
+# built to remove rather than to add. So the state remains durable and outlives
+# the process that wrote it, but it has exactly ONE exit and that exit re-earns
+# the guarantee from scratch -- see `LEGAL_TRANSITIONS` immediately below and
+# `record_recovery_required`.
 TERMINAL_STATES: Tuple[str, ...] = (
-    STATE_RESTORED_VERIFIED, STATE_RECOVERY_REQUIRED,
+    STATE_RESTORED_VERIFIED,
 )
 
-# The transition table, read-only. Two entries carry the whole write-ahead
-# guarantee and must not be widened without re-deciding it:
+# The transition table, read-only. Three entries carry load-bearing guarantees and
+# must not be widened without re-deciding them:
 #   * `apply_confirmed` appears ONLY as a successor of `apply_intent`;
-#   * `restored_verified` appears ONLY as a successor of `undo_intent`.
+#   * `restored_verified` appears ONLY as a successor of `undo_intent`;
+#   * `apply_intent` appears ONLY as a successor of `planned`.
+# The first two are the write-ahead guarantee (an outcome is recordable only from
+# the intent that authorized the action it reports). The third is the NEVER
+# RE-APPLY guarantee, and it is structural rather than a rule a driver has to
+# remember: no state a resumed or recovering process can find a unit in leads back
+# to `apply_intent`, so nothing can issue a second apply for a unit through this
+# journal at all. A trial that re-applied after a crash would be a live write the
+# operator never consented to at that moment.
+#
 # `apply_intent -> undo_intent` is legal on purpose: after a crash in the
 # ambiguous window the safe resolution reverses the unit anyway rather than
 # trying to reconstruct whether the mutation landed.
+#
+# `recovery_required -> undo_intent` is legal for the same reason, one layer out:
+# it is the ONLY exit from `recovery_required`, so a unit a prior attempt could
+# not verify is reachable again -- and reachable only by reversing it again under
+# a fresh, durable undo intent and then re-establishing the observed
+# post-condition. The two exits this deliberately does NOT offer are the two wrong
+# ones: `restored_verified` directly (that would mark a unit resolved with no
+# fresh write-ahead record and no observation behind it -- the quiet clearing) and
+# `apply_intent` (a re-apply).
 LEGAL_TRANSITIONS: Dict[str, Tuple[str, ...]] = {
     STATE_PLANNED: (STATE_APPLY_INTENT, STATE_RECOVERY_REQUIRED),
     STATE_APPLY_INTENT: (STATE_APPLY_CONFIRMED, STATE_UNDO_INTENT,
@@ -278,8 +333,25 @@ LEGAL_TRANSITIONS: Dict[str, Tuple[str, ...]] = {
     STATE_APPLY_CONFIRMED: (STATE_UNDO_INTENT, STATE_RECOVERY_REQUIRED),
     STATE_UNDO_INTENT: (STATE_RESTORED_VERIFIED, STATE_RECOVERY_REQUIRED),
     STATE_RESTORED_VERIFIED: (),
-    STATE_RECOVERY_REQUIRED: (),
+    STATE_RECOVERY_REQUIRED: (STATE_UNDO_INTENT,),
 }
+
+# The states in which a unit may STILL be outstanding on the operator's live
+# record, and which a resumed trial must therefore drive to a verdict. DECLARED
+# here, next to the table, rather than re-derived by each consumer: a recovery
+# driver that enumerated these itself would be a second copy of a classification,
+# and a state added later without being classified would silently fall out of
+# every driver's scope.
+#
+# `planned` is EXCLUDED deliberately, and it is the one exclusion worth stating:
+# the `apply_intent` record is fsynced -- contents and directory entry -- before
+# `apply_one` is called, so a unit still recorded `planned` was provably never
+# applied and has nothing outstanding. `restored_verified` is excluded because it
+# is settled and terminal.
+RECOVERY_DRIVEN_STATES: Tuple[str, ...] = (
+    STATE_APPLY_INTENT, STATE_APPLY_CONFIRMED, STATE_UNDO_INTENT,
+    STATE_RECOVERY_REQUIRED,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -654,7 +726,15 @@ class TrialJournal:
         MUST be called before `undo_one` for this unit. Legal from
         `apply_intent` as well as from `apply_confirmed`: after a crash in the
         ambiguous window the safe resolution reverses the unit regardless of
-        whether the apply landed.
+        whether the apply landed. Legal from `recovery_required` too, and that is
+        the whole of that state's exit -- a unit a prior attempt could not verify
+        is reversed again under a fresh, durable intent record.
+
+        A unit ALREADY at `undo_intent` is a distinct case a resumed driver must
+        handle rather than call this for: the transition is refused, correctly,
+        because the intent record it would write is already on disk. That is what
+        write-ahead means, so the driver's obligation is to confirm the durable
+        state IS `undo_intent` and then issue the reversal -- not to re-record.
         """
         self._transition(unit_id, STATE_UNDO_INTENT)
 
@@ -683,9 +763,19 @@ class TrialJournal:
         needs attention.
 
         `reason` is mandatory and must be non-blank: a durable blocking record
-        that does not say what is wrong cannot be acted on. Terminal in this
-        journal -- nothing here clears it, so the record outlives the process
-        that wrote it.
+        that does not say what is wrong cannot be acted on. The record outlives
+        the process that wrote it -- nothing in this module clears it, and no
+        stateless reaper can.
+
+        NOT terminal, and the distinction matters. The state has exactly ONE exit
+        (`LEGAL_TRANSITIONS`): a fresh, durable `undo_intent`, then
+        `restored_verified` once the observed post-condition is re-established. So
+        it cannot be cleared QUIETLY -- there is no route to the settled state
+        that skips the write-ahead record or the observation -- but it can be
+        cleared, by doing the reversal again and observing that it worked. A
+        blocking record whose repair cannot actually clear it is a state the
+        operator cannot get out of, which is the failure this protocol exists to
+        remove.
         """
         if not (isinstance(reason, str) and reason.strip()):
             raise TrialJournalError(
@@ -738,6 +828,18 @@ class TrialJournal:
                        "write-ahead record is not on disk, and recording it "
                        "would claim a durability this journal does not have."
                        if new_state in OUTCOME_STATES else
+                       # Checked BEFORE the terminal clause: a unit that has been
+                       # applied once is never applied again, and that is a
+                       # stronger, more specific fact than "this state is
+                       # terminal" -- it is the reason recovery converges by
+                       # reversing. Saying it plainly is what stops a future
+                       # driver author reading the generic ordering sentence and
+                       # concluding a re-apply is merely out of sequence.
+                       "a unit is applied at most ONCE. Recovery from an "
+                       "interrupted trial converges by REVERSING the unit, never "
+                       "by re-applying it: re-applying would be a live write "
+                       "nobody consented to at that moment."
+                       if new_state == STATE_APPLY_INTENT else
                        f"{current!r} is terminal."
                        if current in TERMINAL_STATES else
                        "The trial protocol's states advance in one order only."))

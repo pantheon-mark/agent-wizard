@@ -1836,7 +1836,25 @@ class TestS253ContractDelta(unittest.TestCase):
         # operator's project. See that file's own enrollment comment in
         # agent_emitter.py, and
         # test_emit_set_lists_the_cut19_trial_executor_file below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 47)
+        # (Count updated to 48 by Cut 1.9 Task 5, which additionally enrolled
+        # trial_recovery.py -- the recovery driver. The journal can durably record
+        # a unit as still changed on the operator's live record, and this module is
+        # the ONLY thing that can bring it back and clear that record. Omitting it
+        # therefore ships a real blocking state with no performable repair, which
+        # is the dead-end shape this cut exists to remove. See that file's own
+        # enrollment comment in agent_emitter.py, and
+        # test_emit_set_lists_the_cut19_trial_recovery_file below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 48)
+
+    def test_emit_set_lists_the_cut19_trial_recovery_file(self):
+        # Cut 1.9 Task 5: trial_recovery.py must be enrolled, or the operator
+        # project receives a trial protocol that can durably record "this unit may
+        # still be changed on your live record" with nothing able to act on it --
+        # a blocking state with no exit, in the cut whose purpose is closing two of
+        # those.
+        import agent_emitter
+        self.assertIn("trial_recovery.py",
+                      agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def test_emit_set_lists_the_cut19_trial_executor_file(self):
         # Cut 1.9 Task 4: trial_executor.py must be enrolled, or the operator

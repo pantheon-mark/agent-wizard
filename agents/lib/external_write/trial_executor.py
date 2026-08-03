@@ -80,8 +80,13 @@ instant.
     nothing observed the apply land.
   * `undo_one` raises, the surface cannot be observed afterwards, or
     `verify_undo_restored` is False over what was observed: the unit is recorded
-    `recovery_required` with a stated cause, and no proof is emitted. That state
-    is terminal in the journal and outlives this process.
+    `recovery_required` with a stated cause, and no proof is emitted. That record
+    is durable and outlives this process, and it is not a dead end: its ONE exit
+    is `trial_recovery.recover_trial`, which reverses the unit again under a fresh
+    write-ahead intent and clears the state only on an observed restore. The
+    refusal this function returns NAMES that command, single-sourced from
+    `trial_recovery.recovery_command`, so the surface that announces the blocking
+    state and the surface that performs the repair cannot drift apart.
   * In every failing case the run STOPS: units after the failure stay at
     `planned` and are never applied. Once a proof can no longer be earned,
     further live mutations are pure cost to the operator.
@@ -95,8 +100,12 @@ independently of whether the trial succeeded.
 What this module does NOT do
 ------------------------------------------------------------------------------
   * It does not RESUME a crashed trial, and it does not try to determine whether
-    a crashed apply landed. That is a separate concern with its own module;
-    there is deliberately no stub, hook or placeholder for it here.
+    a crashed apply landed. That is `trial_recovery`'s concern, in its own module,
+    and it does not try to determine it either: it converges on the invariant
+    instead. There is deliberately no stub, hook or placeholder for it here — the
+    one thing this module borrows from it is the operator command its own refusal
+    has to name, imported at the point of use so neither module has to import the
+    other at module scope.
   * It does not re-implement authorization, eligibility, the blast-radius cap,
     the invocation ledger, receipt validation, the journal's state machine, or
     the proof validator. It CALLS each of them. In particular it validates the
@@ -528,14 +537,24 @@ def _recovery_capsules(op_kind: str,
 # Observation — always through the read-only facade
 # ---------------------------------------------------------------------------
 
-def _observe(dispatch: Any, facade: Any, unit: Any,
-             op_kind: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def observe_unit(dispatch: Any, unit: Any, op_kind: str, *,
+                 facade: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Observe `unit`'s CURRENT state on the real surface through `facade` — the
     READ-ONLY facade, never the write-capable client — and return
     `(poststate, None)` or `(None, reason)`.
 
     Returns rather than raises so the caller can reverse the unit and record an
     honest outcome; a raised exception here would abandon a mutated unit.
+
+    PUBLIC, and `facade` is KEYWORD-ONLY, for one reason each. Public because the
+    trial protocol now has two kernel drivers — this module and `trial_recovery`
+    — and this is the ONLY place either of them calls `verify_one`. A second
+    observation site would be a second place the write-capable client could reach
+    an observer, which is exactly the boundary violation the credential split
+    exists to prevent; there is one site, so there is one thing to audit.
+    Keyword-only because the mistake with real consequences here is passing the
+    write client where the facade belongs, and as a keyword-only parameter the
+    interpreter refuses the transposition instead of a test catching it later.
     """
     try:
         poststate = dispatch.verify_one(dispatch.instance, facade, unit)
@@ -550,7 +569,7 @@ def _observe(dispatch: Any, facade: Any, unit: Any,
     return poststate, None
 
 
-def _evidence(op_kind: str, unit_id: str, poststate: Dict[str, Any],
+def unit_evidence(op_kind: str, unit_id: str, poststate: Dict[str, Any],
               lineage: SourceLineage) -> AdapterEvidence:
     """Kernel-constructed, lineage-typed evidence over what was ACTUALLY
     observed. The predicate that evaluates it takes no path or ref argument, so
@@ -564,7 +583,7 @@ def _evidence(op_kind: str, unit_id: str, poststate: Dict[str, Any],
     )
 
 
-def _evaluate(dispatch: Any, predicate_name: str,
+def evaluate_evidence_predicate(dispatch: Any, predicate_name: str,
               evidence: AdapterEvidence) -> Tuple[Optional[bool], Optional[str]]:
     """Ask the adapter's own captured evidence predicate. A predicate that RAISES
     yields None (unanswered), never False: 'the question could not be asked' and
@@ -650,13 +669,14 @@ def _drive_unit(journal: Any, dispatch: Any, op: Operation, unit: Any,
     apply_landed: Optional[bool] = None
     apply_poststate: Optional[Dict[str, Any]] = None
     if not apply_failed:
-        apply_poststate, reason = _observe(dispatch, facade, unit, op_kind)
+        apply_poststate, reason = observe_unit(dispatch, unit, op_kind,
+                                               facade=facade)
         if reason is not None:
             reasons.append(reason)
         else:
-            apply_landed, reason = _evaluate(
+            apply_landed, reason = evaluate_evidence_predicate(
                 dispatch, APPLY_PREDICATE_NAME,
-                _evidence(op_kind, unit_id, apply_poststate, lineage))
+                unit_evidence(op_kind, unit_id, apply_poststate, lineage))
             if reason is not None:
                 reasons.append(reason)
             elif apply_landed is False:
@@ -686,7 +706,7 @@ def _drive_unit(journal: Any, dispatch: Any, op: Operation, unit: Any,
                 reason=" | ".join(reasons)),
             apply_poststate=apply_poststate)
 
-    undo_poststate, reason = _observe(dispatch, facade, unit, op_kind)
+    undo_poststate, reason = observe_unit(dispatch, unit, op_kind, facade=facade)
     if reason is not None:
         reasons.append(reason)
         journal.record_recovery_required(unit_id, reason=reason)
@@ -697,9 +717,9 @@ def _drive_unit(journal: Any, dispatch: Any, op: Operation, unit: Any,
                 reason=" | ".join(reasons)),
             apply_poststate=apply_poststate)
 
-    undo_restored, reason = _evaluate(
+    undo_restored, reason = evaluate_evidence_predicate(
         dispatch, UNDO_PREDICATE_NAME,
-        _evidence(op_kind, unit_id, undo_poststate, lineage))
+        unit_evidence(op_kind, unit_id, undo_poststate, lineage))
     if undo_restored is not True:
         reason = reason or (
             f"the observed evidence does not show unit {unit_id!r} of "
@@ -1092,6 +1112,13 @@ def run_trial(op: Operation, receipt: Any, *,
     planned_ids = tuple(u.unit_id for u in plan.units)
     unrestored = _units_not_restored_on_disk(journal, planned_ids)
     if unrestored:
+        # NAME the repair, do not merely report the state. A durable blocking
+        # record with no command attached hands the operator a verdict; the
+        # command is single-sourced from the module that performs it, imported
+        # here at the point of use so the two modules need no module-scope
+        # dependency on each other, and so a later declarative registry has ONE
+        # function to bind rather than two hand-written sentences to reconcile.
+        from external_write.trial_recovery import recovery_command
         return TrialOutcome(
             ok=base.ok, trial_id=base.trial_id, journal_path=base.journal_path,
             units=outcomes, recovery_required_unit_ids=recovery_required,
@@ -1100,7 +1127,9 @@ def run_trial(op: Operation, receipt: Any, *,
                 "every unit it applied is recorded back at its prior state, and "
                 f"{REFUSAL_MARKER_NOT_RESTORED} — these are not: {unrestored}. "
                 "Those units may still be changed on the real surface. The "
-                f"durable record of what happened to each unit is {journal.path}."))
+                f"durable record of what happened to each unit is {journal.path}. "
+                "To bring them back and have the result checked, run:\n"
+                + recovery_command(journal.trial_id, journal_dir=journal_dir)))
     # Post-condition 2 of 2 — the EVIDENCE question, which is a different fact
     # with a different consequence: nothing is outstanding on the surface, but the
     # round trip was not OBSERVED end to end for every unit, so there is nothing

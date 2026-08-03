@@ -437,6 +437,34 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         # writes it proposed is the exact inversion the whole authorization split
         # exists to prevent.
         "trial_executor.py",
+        # trial_recovery.py (Cut 1.9 Task 5): the RECOVERY driver -- the resumable
+        # operator-invocable path that brings an interrupted trial's units back to
+        # their prior state and confirms it by reading the real surface. It is the
+        # ONE exit from the journal's `recovery_required` state, so a project that
+        # shipped without it would have a durable blocking state with no
+        # performable repair -- the exact class of dead end this cut exists to
+        # close.
+        #
+        # Like trial_executor.py it DOES perform a vendor mutation, and the same
+        # reasoning applies with one narrowing worth stating: the only adapter
+        # method it can reach is the registered adapter's own captured `undo_one`,
+        # through the frozen dispatch record. It has no `apply_one` call site at
+        # all, imports no vendor SDK, and resolves the write-capable client through
+        # `adapter_registry.resolve_write_client` -- the shared resolver keyed by
+        # the adapter's OWN provisioner -- rather than constructing a credential.
+        # What it needs exemption from is the CAPABILITY-zone-ONLY module-boundary
+        # ban: scanned as CAPABILITY it trips {adapter_module_import,
+        # adapter_registry_reference, sealed_kernel_import} on its ordinary
+        # internal kernel imports, and scans clean as SEALED_KERNEL. No violation
+        # COUNT is recorded, for the reason the two entries above give: a count
+        # goes stale silently, the KIND SET is the durable fact.
+        #
+        # SEALED_KERNEL membership does NOT grant a capability the right to import
+        # it (the independent scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES
+        # set governs that, and this module is absent from it): a capability
+        # reversing the external writes it proposed is the same inversion the
+        # authorization split exists to prevent.
+        "trial_recovery.py",
     }
 )
 

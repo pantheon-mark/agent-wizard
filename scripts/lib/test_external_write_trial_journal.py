@@ -451,6 +451,66 @@ class StateClassificationTests(unittest.TestCase):
         for state in tj.TERMINAL_STATES:
             self.assertEqual(tj.LEGAL_TRANSITIONS[state], ())
 
+    def test_recovery_requireds_ONLY_exit_is_a_fresh_write_ahead_undo_intent(self):
+        """`recovery_required` must be LEAVABLE and leavable exactly one way.
+
+        Two separate obligations meet here and this is the assertion that keeps
+        both. It must be leavable at all, because a blocking state with no
+        performable repair is a state the operator cannot get out of. And it must
+        be leavable ONLY through `undo_intent`, because that is what forbids the
+        two wrong exits: a direct hop to `restored_verified` would let something
+        mark a unit resolved with no fresh write-ahead record and no observed
+        post-condition behind it, and a hop to `apply_intent` would be a RE-APPLY
+        — a live write the operator never consented to at that moment.
+        """
+        self.assertEqual(tj.LEGAL_TRANSITIONS[tj.STATE_RECOVERY_REQUIRED],
+                         (tj.STATE_UNDO_INTENT,))
+        self.assertNotIn(tj.STATE_RESTORED_VERIFIED,
+                         tj.LEGAL_TRANSITIONS[tj.STATE_RECOVERY_REQUIRED],
+                         "nothing may mark a unit resolved without a fresh "
+                         "write-ahead undo intent behind it")
+        self.assertNotIn(tj.STATE_APPLY_INTENT,
+                         tj.LEGAL_TRANSITIONS[tj.STATE_RECOVERY_REQUIRED],
+                         "recovery converges by reversing, NEVER by re-applying")
+
+    def test_apply_intent_is_reachable_only_from_planned(self):
+        """The structural half of "recovery never re-applies": no state other
+        than `planned` may advance to `apply_intent`, so no resumed or recovering
+        process can issue a second apply for a unit through this journal at
+        all."""
+        self.assertEqual(_predecessors(tj.STATE_APPLY_INTENT),
+                         {tj.STATE_PLANNED})
+
+    def test_the_states_a_resumed_trial_must_drive_are_declared(self):
+        """A resumed trial needs to know which units may still be outstanding.
+        That set is DECLARED here rather than re-derived by each consumer, and it
+        is exactly the states in which a mutation may have been issued and no
+        verified restore has been recorded:
+
+          * `apply_intent`     — the ambiguous window; the apply may have landed
+          * `apply_confirmed`  — `apply_one` returned
+          * `undo_intent`      — the reversal was issued, its outcome unrecorded
+          * `recovery_required`— a prior attempt did not establish restoration
+
+        `planned` is deliberately EXCLUDED: the apply-intent record is fsynced
+        before `apply_one` is called, so a unit still at `planned` was provably
+        never applied and has nothing outstanding. `restored_verified` is excluded
+        because it is terminal and settled.
+        """
+        self.assertEqual(
+            set(tj.RECOVERY_DRIVEN_STATES),
+            {tj.STATE_APPLY_INTENT, tj.STATE_APPLY_CONFIRMED,
+             tj.STATE_UNDO_INTENT, tj.STATE_RECOVERY_REQUIRED})
+        self.assertNotIn(tj.STATE_PLANNED, tj.RECOVERY_DRIVEN_STATES)
+        self.assertNotIn(tj.STATE_RESTORED_VERIFIED, tj.RECOVERY_DRIVEN_STATES)
+        # Every driven state must be able to reach `undo_intent`, or a unit in it
+        # could not be reversed at all.
+        for state in tj.RECOVERY_DRIVEN_STATES:
+            if state == tj.STATE_UNDO_INTENT:
+                continue
+            self.assertIn(tj.STATE_UNDO_INTENT, tj.LEGAL_TRANSITIONS[state],
+                          f"a unit at {state!r} must be reversible")
+
 
 def _predecessors(state):
     return {src for src, targets in tj.LEGAL_TRANSITIONS.items()
@@ -504,6 +564,44 @@ class StateMachineRefusalTests(_Base):
         self.journal.record_apply_intent("m2")
         self.journal.record_recovery_required("m2", reason="undo raised")
         self.assertEqual(self.journal.unit_state("m2"),
+                         tj.STATE_RECOVERY_REQUIRED)
+
+    def test_a_recovery_required_unit_can_be_driven_back_out_and_verified(self):
+        """The operator exit, at the journal layer. A unit that a prior attempt
+        left `recovery_required` must be able to reach `restored_verified` — and
+        only by the route that re-establishes the guarantee: a fresh, durable
+        `undo_intent` first, then the observed restore."""
+        self.journal.record_apply_intent("m1")
+        self.journal.record_apply_confirmed("m1")
+        self.journal.record_undo_intent("m1")
+        self.journal.record_recovery_required("m1", reason="could not observe")
+        self.assertEqual(self.journal.unit_state("m1"),
+                         tj.STATE_RECOVERY_REQUIRED)
+
+        # A direct hop to the settled state is refused -- no quiet clearing.
+        with self.assertRaises(tj.TrialJournalError):
+            self.journal.record_restored_verified("m1")
+        self.assertEqual(self.journal.unit_state("m1"),
+                         tj.STATE_RECOVERY_REQUIRED)
+
+        self.journal.record_undo_intent("m1")
+        self.journal.record_restored_verified("m1")
+        self.assertEqual(self.journal.unit_state("m1"),
+                         tj.STATE_RESTORED_VERIFIED)
+
+    def test_a_recovery_required_unit_can_never_be_re_applied(self):
+        """The absolute half of the recovery rule, held by the transition table
+        rather than by a driver remembering not to: a trial that re-applied after
+        a crash would be a live write the operator never consented to at that
+        moment, so the journal refuses to record the intent for it."""
+        self.journal.record_apply_intent("m1")
+        self.journal.record_recovery_required("m1", reason="undo raised")
+        with self.assertRaises(tj.TrialJournalError) as ctx:
+            self.journal.record_apply_intent("m1")
+        self.assertIn("re-appl", str(ctx.exception).lower(),
+                      "the refusal must say WHY -- recovery reverses, it never "
+                      "re-applies")
+        self.assertEqual(self.journal.unit_state("m1"),
                          tj.STATE_RECOVERY_REQUIRED)
 
     def test_recovery_required_demands_a_reason(self):
