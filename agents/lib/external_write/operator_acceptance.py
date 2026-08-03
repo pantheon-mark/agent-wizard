@@ -836,10 +836,17 @@ def record_operator_acceptance(
             try:
                 _state = classify_bespoke_writer_entry(identity_root, _e)
             except Exception:
-                # Unclassifiable -> treat as rebuildable, unchanged: it is the
-                # fail-closed direction for the BLOCK (it still refuses), and the
-                # rebuild is the repair with the widest applicability.
-                _state = WriterState.BLOCKING_LIVE_ENABLE
+                # An entry the classifier could not classify AT ALL. It used to be
+                # ASSIGNED `blocking_live_enable` here, on the reasoning that the
+                # rebuild is the repair with the widest applicability -- which is an
+                # INFERENCE FROM A FAILURE, and the same reasoning the `else`
+                # catch-all above was removed for. What we know is that we do not
+                # know, so it routes to a person. The BLOCK direction is unaffected
+                # and was never in doubt: the entry is in the blocking set, so this
+                # refuses either way. What changes is that the operator is no longer
+                # told to perform a repair nothing established applies to.
+                _unclassified.append(_rel)
+                continue
             if (_state in ACKNOWLEDGEABLE_WRITER_STATES
                     or _state == WriterState.BLOCKING_LIVE_ENABLE):
                 _by_state.setdefault(_state, []).append(_rel)

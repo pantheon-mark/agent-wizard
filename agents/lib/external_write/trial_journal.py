@@ -1197,15 +1197,17 @@ def outstanding_unit_ids(record: Any) -> Tuple[str, ...]:
     Takes the record rather than a journal handle so the branch above is
     reachable in a test: the validated read path cannot produce an unclassified
     state today, and a fail-closed branch nothing exercises is a latent failure.
+
+    Takes a record that has already been through `_validated_record`, so the SHAPE
+    is not re-checked here. A malformed unit entry raises, and the caller catches
+    it per-record -- see `scan_outstanding_trials`. It deliberately does NOT carry
+    a shape fallback of its own: the only one that would fit is a synthetic unit id
+    nothing can act on, and a discovered outstanding unit with no actionable id is
+    the dead end this protocol exists to remove. Refusing the whole record is
+    honest; inventing an id for it is not.
     """
-    units = (record or {}).get("units") or []
     outstanding = []
-    for entry in units:
-        if not isinstance(entry, Mapping):
-            # An entry shape this module did not write. Cannot establish that
-            # nothing is outstanding for it, so it counts as outstanding.
-            outstanding.append("<unreadable unit entry>")
-            continue
+    for entry in (record or {})["units"]:
         state = entry.get("state")
         disposition = recovery_disposition(state) if isinstance(state, str) else None
         if disposition in (RECOVERY_DISPOSITION_NEVER_APPLIED,
@@ -1280,21 +1282,27 @@ def scan_outstanding_trials(*, journal_dir: Optional[str] = None) -> Dict[str, A
             continue
         candidate_id = name[: -len(".json")]
         path = os.path.join(directory, name)
+        # Everything derived from this record is inside the try, deliberately: a
+        # record whose shape defeats any step of it is reported as UNREADABLE and
+        # the sweep continues. Deriving outside would let one malformed file abort
+        # the whole scan and take every other trial's discoverability with it --
+        # which is fail-closed in the narrow sense and useless in the real one.
         try:
             record = TrialJournal(candidate_id,
                                   journal_dir=directory).read_record()
+            entry = {
+                "trial_id": record["trial_id"],
+                "path": path,
+                "op_kind": record["op_kind"],
+                "outstanding_unit_ids": list(outstanding_unit_ids(record)),
+                "unit_states": {u["unit_id"]: u["state"]
+                                for u in record["units"]},
+            }
         except Exception as exc:  # noqa: BLE001 -- reported, never swallowed.
             result["unreadable"].append({"path": path, "reason": str(exc)})
             continue
-        ids = outstanding_unit_ids(record)
-        if not ids:
+        if not entry["outstanding_unit_ids"]:
             continue
-        result["trials"].append({
-            "trial_id": record["trial_id"],
-            "path": path,
-            "op_kind": record["op_kind"],
-            "outstanding_unit_ids": list(ids),
-            "unit_states": {u["unit_id"]: u["state"] for u in record["units"]},
-        })
+        result["trials"].append(entry)
     result["trials"].sort(key=lambda t: t["trial_id"])
     return result

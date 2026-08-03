@@ -42,6 +42,7 @@ for _p in (str(_AGENTS_LIB), str(_SCRIPTS_LIB)):
 
 from external_write import lifecycle_state  # noqa: E402
 from external_write import capability_health  # noqa: E402
+from external_write import scan  # noqa: E402
 
 # Reuse the REAL full-ceremony fixture mixin -- never a hand-authored accepted/audit stand-in.
 import test_lifecycle_state as _ls_fixtures  # noqa: E402
@@ -234,8 +235,25 @@ class GlobalBespokeWriterBlockTests(_ls_fixtures._CheckCompletionFixtureMixin, u
             self.assertIn("wizard reconcile", description)
 
     def test_a_genuine_bypass_descriptions_wording_is_unchanged(self):
-        """Regression guard: a REAL bespoke-writer bypass entry must keep the exact rebuild
-        wording it has always had in the new ``descriptions`` field too."""
+        """A REAL bespoke-writer bypass entry keeps the exact rebuild wording it has always
+        had in ``descriptions`` -- and now also names the check that CONFIRMS the rebuild.
+
+        RETARGETED, not weakened (Cut 1.9 Task 9 review, I-1). This was an ``assertEqual``
+        against the historical sentence alone. ``descriptions`` was state-BLIND: it branched
+        on the entry's kind and never on the writer's state, so a writer that needs a person
+        was described as "rebuild it" -- the one instruction that cannot work for a file no
+        rebuild of ours can rewrite -- while the same returned object's ``actions`` field
+        carried the route that does work. The equality assertion was pinning that blindness
+        in place: any state-aware correction had to break it.
+
+        It is retargeted at three things that are all real and none of which the old
+        assertion covered: the historical sentence is still present VERBATIM (the substring
+        below is byte-identical to the old expected value); the sentence additionally names
+        the confirming check, because an operator who cannot run the check cannot tell whether
+        the rebuild cleared the entry; and ``descriptions`` and ``actions`` are the SAME
+        string, which is the property that makes the two fields unable to drift -- they are
+        rendered from one source.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._accept_real_capability(root, CAP_ID)
@@ -244,12 +262,16 @@ class GlobalBespokeWriterBlockTests(_ls_fixtures._CheckCompletionFixtureMixin, u
 
             overall = capability_health.overall_status(str(root))
 
-            description = overall["open_external_write_bypass"]["descriptions"][
-                BESPOKE_WRITER_RELPATH]
-            self.assertEqual(
-                description,
+            bypass = overall["open_external_write_bypass"]
+            description = bypass["descriptions"][BESPOKE_WRITER_RELPATH]
+            self.assertIn(
                 "an external-write bypass is unrepaired: `agents/inbox/runner.py` -- rebuild "
-                "it so it routes through the sanctioned bulk path")
+                "it so it routes through the sanctioned bulk path",
+                description)
+            self.assertIn(scan.scan_command(BESPOKE_WRITER_RELPATH), description)
+            self.assertEqual(description,
+                             bypass["actions"][BESPOKE_WRITER_RELPATH],
+                             "one source, so the two fields cannot diverge")
 
 
 if __name__ == "__main__":

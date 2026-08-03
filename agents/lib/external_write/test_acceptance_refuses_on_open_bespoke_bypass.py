@@ -428,6 +428,33 @@ class AcceptanceRefusesOnOpenBespokeBypassTest(unittest.TestCase):
         self.assertIn(BESPOKE_WRITER_RELPATH, res.reason)
         self.assertEqual(self._accepted_flag(), False)
 
+    def test_a_classifier_that_RAISES_routes_to_a_person_not_to_a_rebuild(self):
+        """An entry the classifier cannot classify at all. It used to be ASSIGNED
+        `blocking_live_enable` and handed the rebuild instruction -- an inference
+        from a failure, on the surface that advertises the accept-the-risk route,
+        and the last permissive-direction assignment left after the `else`-catch-all
+        was removed. It must still refuse (the block direction was never in doubt)
+        and it must route to a person."""
+        self._write_open_bespoke_queue()
+        original = operator_acceptance.classify_bespoke_writer_entry
+
+        def _raises(root, entry):
+            raise RuntimeError("the classifier could not read the writer")
+
+        try:
+            operator_acceptance.classify_bespoke_writer_entry = _raises
+            res = self._call()
+        finally:
+            operator_acceptance.classify_bespoke_writer_entry = original
+
+        self.assertFalse(res.accepted, "it must still refuse")
+        self.assertEqual(self._accepted_flag(), False)
+        self.assertNotIn("rebuild it so it routes through the sanctioned bulk path",
+                         res.reason)
+        self.assertIn("ask your assistant", res.reason.lower())
+        self.assertIn(BESPOKE_WRITER_RELPATH, res.reason)
+        self.assertNotIn("Traceback", res.reason)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

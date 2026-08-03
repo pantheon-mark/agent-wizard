@@ -1091,10 +1091,27 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
     them genuinely blocks: this queue is shared with sibling remediations that
     record a different kind of fact on the same non-empty-``writer_relpath`` +
     ``pending`` shape (for example, a safety check that itself could not
-    finish). ``open_external_write_bypass["descriptions"]`` carries the
-    accurate, ready-to-relay sentence per relpath -- read from there, not from
-    the "hand-rolled write path" framing above, when presenting a specific
-    entry to the operator.
+    finish).
+
+    WHICH FIELD TO RELAY, and this is the whole answer: read
+    ``open_external_write_bypass["actions"]``. It is rendered from the
+    state->action registry (``state_actions.instruction_for_state``), so it is
+    keyed on the state the writer is actually in and carries the exact command
+    that leaves it. Never relay the "hand-rolled write path" framing above, and
+    never compose an instruction at a call site.
+
+    ``descriptions`` is the same registry-derived sentence for a real
+    bespoke-writer bypass -- by construction, from one source, so the two cannot
+    drift -- and for any OTHER entry on this shared queue it is that entry's own
+    recorded next step instead (``_ext_write_state.describe_blocking_entry``),
+    which is the one thing the registry cannot know. That is the only difference
+    between the two fields. This field used to be state-BLIND: it branched on the
+    entry's kind and never on the writer's state, so for a writer that needs a
+    person it printed "rebuild it" -- the one instruction that cannot work for a
+    file no rebuild of ours can rewrite -- while ``actions`` printed the route
+    that does. One object carried a right answer and a wrong one.
+
+    ``interrupted_trial`` is a separate discovery: see its own key below.
     """
     caps = check_capabilities_with_self_heal(project_root)
     red = sorted({c["capability_id"] for c in caps if c.get("health") != "green"})
@@ -1135,23 +1152,34 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
                 # or their assistant reads, so it was leavable only by someone who
                 # already knew to look.
                 #
-                # A DIFFERENT QUESTION from `descriptions` below, which is why both
-                # exist rather than one replacing the other: `descriptions` says
-                # what the entry IS (kind-aware -- this queue carries entries that
-                # are not bespoke writers at all), and `actions` says what to DO
-                # about the state the writer is in (state-keyed). Neither answers
-                # the other, and neither is authored here.
+                # THE FIELD TO RELAY. See `overall_status`'s docstring.
                 bypass_actions[_relpath] = state_actions.instruction_for_state(
                     state_actions.writer_state_key(_state), _relpath)
-                # Kind-aware TEXT only -- every key above this one keys on the same
-                # attribution- and kind-free predicate as always, unaffected. This queue is
-                # shared by entries that are not a bespoke-writer bypass at all (for example,
-                # a safety check that itself could not finish), and describing one of those
-                # with the bypass wording ("rebuild it so it routes through the sanctioned
-                # bulk path") tells the operator to do something impossible to a file that
-                # was never the problem -- so an agent presenting this status reads THIS
-                # field for the sentence, not the relpath list alone.
-                bypass_descriptions[_relpath] = _ext_write_state.describe_blocking_entry(_e)
+                # `descriptions`: the ready-to-relay sentence per relpath. Kind-aware
+                # TEXT only -- every key above this one keys on the same attribution-
+                # and kind-free predicate as always, unaffected.
+                #
+                # A REAL bespoke-writer bypass now gets the SAME registry-derived
+                # sentence `actions` carries, from one source, so the two cannot
+                # diverge. That is a correction, not a tidy: this field used to
+                # branch on the entry's KIND and never on the writer's STATE, so a
+                # writer that needs a person -- the state this whole cut exists to
+                # make leavable -- was described as "rebuild it", the one instruction
+                # that cannot work for a file no rebuild of ours can rewrite. The
+                # object carried its own correct answer in `actions` at the same
+                # time, and the docstring recommended this one. A `non_live` entry
+                # was mis-described the same way.
+                #
+                # ANY OTHER entry on this shared queue keeps its own recorded next
+                # step, which is the one thing the registry cannot know: describing
+                # a safety check that could not finish with the bypass wording tells
+                # the operator to rebuild the queue file itself, which is meaningless.
+                # That branch is `describe_blocking_entry`'s non-bypass half, and it
+                # is state-independent by construction.
+                bypass_descriptions[_relpath] = (
+                    bypass_actions[_relpath]
+                    if _ext_write_state.is_bypass_writer_entry(_e)
+                    else _ext_write_state.describe_blocking_entry(_e))
         bypass_blocking_relpaths = sorted({
             str(e.get("writer_relpath"))
             for e in _ext_write_state.blocking_bespoke_writer_migrations(str(project_root))})
@@ -1197,26 +1225,34 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
                            f"({_exc!r}), so it is not possible to tell whether a "
                            "trial was interrupted with a change still outstanding"),
         }
-    interrupted_trials = [
-        {
+    interrupted_trials = []
+    for _t in trial_scan["trials"]:
+        # The declared way out, rendered from the registry with this trial's real id
+        # in it. Deduplicated across the outstanding units' states because every
+        # state a resumed trial must drive reaches the same action -- one command for
+        # the trial, not one per unit.
+        _instructions = sorted({
+            state_actions.instruction_for_state(
+                state_actions.trial_unit_state_key(_t["unit_states"][_unit_id]),
+                _t["trial_id"])
+            for _unit_id in _t["outstanding_unit_ids"]
+            if _unit_id in _t["unit_states"]})
+        interrupted_trials.append({
             "trial_id": _t["trial_id"],
             "path": _t["path"],
             "op_kind": _t["op_kind"],
             "outstanding_unit_ids": _t["outstanding_unit_ids"],
             "unit_states": _t["unit_states"],
-            # The declared way out, rendered from the registry with this trial's
-            # real id in it. Deduplicated across the outstanding units' states
-            # because every state a resumed trial must drive reaches the same
-            # action -- one command for the trial, not one per unit.
-            "action": " ".join(sorted({
-                state_actions.instruction_for_state(
-                    state_actions.trial_unit_state_key(
-                        _t["unit_states"][_unit_id]), _t["trial_id"])
-                for _unit_id in _t["outstanding_unit_ids"]
-                if _unit_id in _t["unit_states"]})),
-        }
-        for _t in trial_scan["trials"]
-    ]
+            # NEVER EMPTY. An outstanding unit whose state the record does not carry
+            # would otherwise be filtered out above and leave this blank -- a trial
+            # the operator is told about and cannot act on, which is the exact shape
+            # this cut exists to remove. It cannot arise through the validated read
+            # today; the fallback is here because "cannot arise today" is not a
+            # property, and it routes to a person rather than inventing a command.
+            "action": (" ".join(_instructions) if _instructions
+                       else state_actions.route_for_unclassified_state(
+                           _t["trial_id"])),
+        })
     unreadable_trials = [
         {
             "path": _u["path"],
@@ -1252,14 +1288,16 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
             # unrepairable file is a dead end.
             "blocking_writer_relpaths": bypass_blocking_relpaths,
             "writer_states": bypass_writer_states,
-            # One ready-to-relay, plain-language sentence per relpath -- a real bypass keeps
-            # its rebuild wording; anything else recorded on this same shared queue speaks in
-            # its own words instead (``_ext_write_state.describe_blocking_entry``).
+            # One ready-to-relay, plain-language sentence per relpath. For a real
+            # bespoke-writer bypass this is the SAME registry-derived sentence as
+            # `actions` (one source, so no drift); anything else recorded on this
+            # same shared queue speaks in its own words instead
+            # (``_ext_write_state.describe_blocking_entry``).
             "descriptions": bypass_descriptions,
-            # The declared WAY OUT per relpath, rendered from the state->action
-            # registry and carrying the exact command to run. Read this to tell the
-            # operator what to DO; read `descriptions` to tell them what the entry
-            # IS. Never hand-author either sentence at a call site.
+            # ★ THE FIELD TO RELAY: the declared WAY OUT per relpath, rendered from
+            # the state->action registry, keyed on the state the writer is actually
+            # in, and carrying the exact command that leaves it. Never hand-author
+            # an instruction at a call site.
             "actions": bypass_actions,
             "read_error": bypass_read_error,
         },
@@ -1282,38 +1320,85 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # CLI entrypoint -- an agent's orientation step (T5) reads this composite
 # status to decide whether to invite the operator into a capability; this
-# lets it be checked ad hoc from a shell too. Exits 0 regardless of findings
-# (this is a REPORT, not a gate the process itself enforces) -- prints one
-# JSON array to stdout.
+# lets it be checked ad hoc from a shell too. Exits 0 regardless of FINDINGS
+# (this is a REPORT, not a gate the process itself enforces) and 2 on a usage
+# error -- prints one JSON document to stdout.
 #
 # (Task A2) Self-heals first (``check_capabilities_with_self_heal``, see module docstring's
 # "Reconcile-on-read" section) — this IS the read path an agent runs before inviting the operator
 # into a capability, so this is where the self-heal is intended to act.
-#
-# Usage:
-#   python3 agents/lib/external_write/capability_health.py [<project_root>]
 # ---------------------------------------------------------------------------
 
+EXIT_REPORT = 0
+EXIT_BAD_ARGS = 2
+
+CLI_FLAG_OVERALL = "--overall"
+
+CLI_USAGE = (
+    "Usage: python3 agents/lib/external_write/capability_health.py "
+    f"[<project root>] [{CLI_FLAG_OVERALL}]\n"
+    f"  with {CLI_FLAG_OVERALL}: the composite session-start status "
+    "(normal_status_allowed, any open external-write bypass, any interrupted "
+    "trial, and the exact way out of each).\n"
+    f"  without {CLI_FLAG_OVERALL}: the per-capability health list.\n"
+    "The project root defaults to the current directory. The two may be given in "
+    "either order.\n"
+    f"Exit codes: {EXIT_REPORT} = a report was printed (findings and all); "
+    f"{EXIT_BAD_ARGS} = the command was not understood, and nothing was printed."
+)
+
+
+def parse_health_cli_args(argv: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Strict, fail-closed parse of this CLI's argv.
+
+    Returns ``(options, None)`` for a recognized shape, or ``(None, message)`` for
+    ANY other input. DENY BY DEFAULT, and that is a correction rather than a
+    nicety.
+
+    Two defects sat here, one behind the other. The first was positional: only
+    ``argv[0]`` was tested against ``--overall``, so the invocation the rebuild
+    skill documents -- ``capability_health.py . --overall`` -- fell through and
+    printed the per-capability list. Nothing errored and nothing was missing; the
+    caller simply never received the composite status, so ``normal_status_allowed``
+    and everything hanging off it were invisible to a command that asked for them.
+    The second is why the first was not enough: an unrecognized flag was silently
+    DROPPED, so ``--overal`` (one keystroke) and ``--json`` both produced a clean,
+    empty, exit-0 success -- from the one surface whose whole job is to say when
+    something is outstanding. That is the silently-dropped-flag class this package
+    has already shipped once, where an unrecognized probe flag was ignored and the
+    wrapper ran a full live job anyway.
+
+    So: an unrecognized flag REFUSES, and a second positional REFUSES rather than
+    silently picking one project root to answer about.
+    """
+    args = list(argv or ())
+    overall = False
+    positional: List[str] = []
+    for arg in args:
+        if arg.startswith("-"):
+            if arg != CLI_FLAG_OVERALL:
+                return None, (f"unrecognized argument {arg!r}.\n\n{CLI_USAGE}")
+            overall = True
+        else:
+            positional.append(arg)
+    if len(positional) > 1:
+        return None, (
+            f"more than one project root was given ({positional!r}); this "
+            f"command reports on exactly one.\n\n{CLI_USAGE}")
+    return {"overall": overall,
+            "project_root": positional[0] if positional else "."}, None
+
+
 if __name__ == "__main__":  # pragma: no cover
-    # `--overall` is recognized ANYWHERE in argv, not only first.
-    #
-    # It used to be tested as `_argv[0] == "--overall"` only, so the invocation the
-    # rebuild skill documents -- `capability_health.py . --overall` -- fell through
-    # to the else branch and printed the per-capability list, silently. Nothing
-    # errored and nothing was missing; the caller simply never received the composite
-    # status, so `normal_status_allowed` and everything that hangs off it (an open
-    # bypass, an interrupted trial and the way out of either) were invisible to a
-    # command that asked for them. A discovery surface nothing reaches is not a
-    # discovery surface, which is exactly this task's premise applied to itself.
-    #
-    # Positional parsing is otherwise unchanged: the first non-flag argument is the
-    # project root, and the default stays ".".
-    _argv = sys.argv[1:]
-    _overall = "--overall" in _argv
-    _positional = [a for a in _argv if not a.startswith("--")]
-    _root = _positional[0] if _positional else "."
-    if _overall:
-        print(json.dumps(overall_status(_root), indent=2, sort_keys=True))
-    else:
-        print(json.dumps(check_capabilities_with_self_heal(_root),
+    _options, _error = parse_health_cli_args(sys.argv[1:])
+    if _error is not None:
+        print(_error, file=sys.stderr)
+        sys.exit(EXIT_BAD_ARGS)
+    if _options["overall"]:
+        print(json.dumps(overall_status(_options["project_root"]),
                          indent=2, sort_keys=True))
+    else:
+        print(json.dumps(
+            check_capabilities_with_self_heal(_options["project_root"]),
+            indent=2, sort_keys=True))
+    sys.exit(EXIT_REPORT)

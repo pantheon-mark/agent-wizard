@@ -1033,5 +1033,307 @@ class TheEmittedSkillsNameTheCommandsTests(unittest.TestCase):
         self.assertIn("--overall", text)
 
 
+# ===========================================================================
+# 12. THE GATE BODIES THEMSELVES -- each one must fail when hollowed out
+# ===========================================================================
+
+class TheGateBodiesAreFalsifiableTests(unittest.TestCase):
+    """The gates above prove the registry agrees with the two upstream
+    vocabularies. These prove the GATES: each body is driven to a NON-EMPTY answer,
+    so replacing it with `return ()` reds a test.
+
+    Why this is not belt-and-braces. A review measured that all four bodies could be
+    stubbed with the suite still green, and found a COMBINED mutation -- stub
+    `unclassified_state_keys` AND add a state that is terminal by omission -- that
+    went green and undetected. Terminal-by-omission is the one property this task's
+    brief singled out, and it rested on the return value of a function nothing
+    forced to compute anything. A gate that cannot fail is the fifth green-and-blind
+    gate in this family.
+    """
+
+    def _patch(self, name, value):
+        original = getattr(sa, name)
+        setattr(sa, name, value)
+        self.addCleanup(setattr, sa, name, original)
+
+    def test_unactionable_gated_state_keys_reports_a_real_gap(self):
+        key = sa.trial_unit_state_key(tj.STATE_PLANNED)   # declared, no action
+        self._patch("GATED_STATE_KEYS", frozenset(sa.GATED_STATE_KEYS | {key}))
+        self.assertIn(key, sa.unactionable_gated_state_keys())
+
+    def test_unclassified_state_keys_reports_a_real_gap(self):
+        key = sa.state_key(sa.DOMAIN_TRIAL_UNIT, "added_without_a_disposition")
+        self._patch("DECLARED_STATE_KEYS",
+                    frozenset(sa.DECLARED_STATE_KEYS | {key}))
+        self.assertIn(key, sa.unclassified_state_keys())
+
+    def test_doubly_classified_state_keys_reports_a_real_overlap(self):
+        key = sa.writer_state_key(core.WriterState.RESOLVED)   # a disposition
+        self.assertIn(key, sa.INTENTIONAL_DISPOSITIONS)
+        self._patch("GATED_STATE_KEYS", frozenset(sa.GATED_STATE_KEYS | {key}))
+        self.assertIn(key, sa.doubly_classified_state_keys())
+
+    def test_actions_landing_in_a_dead_end_reports_a_real_dead_end(self):
+        from types import MappingProxyType
+        self._patch("INTENTIONAL_DISPOSITIONS", MappingProxyType({}))
+        stuck = sa.actions_landing_in_a_dead_end()
+        self.assertEqual(sorted(stuck),
+                         sorted(a.action_id for a in sa.ACTIONS),
+                         "with nothing declared settled, every action's "
+                         "post-condition is a state with no exit")
+
+
+class TheSamePropertiesComputedHereTests(unittest.TestCase):
+    """A SECOND, independent path to the three properties whose gate bodies had
+    none: the arithmetic is done in the test, over the module's own declared sets,
+    so a hollowed-out gate body cannot hide a real violation.
+
+    `test_every_gated_state_has_at_least_one_action` already had this shape (a
+    subTest loop calling `actions_for_state`), which is exactly why it survived the
+    review's combined mutation while the other three did not. These mirror it.
+    """
+
+    def test_every_declared_state_is_classified_computed_HERE(self):
+        """THE terminal-by-omission assertion, without asking the module for the
+        answer. A state added to either vocabulary and placed in neither the gated
+        set nor the declared dispositions fails here even if
+        `unclassified_state_keys` is replaced with `return ()`."""
+        for key in sorted(sa.DECLARED_STATE_KEYS):
+            with self.subTest(state=key):
+                self.assertTrue(
+                    key in sa.GATED_STATE_KEYS
+                    or key in sa.INTENTIONAL_DISPOSITIONS,
+                    f"{key} is terminal BY OMISSION -- it blocks nothing and "
+                    "nobody wrote down why it needs no action")
+
+    def test_nothing_is_doubly_classified_computed_HERE(self):
+        self.assertTrue(
+            sa.GATED_STATE_KEYS.isdisjoint(set(sa.INTENTIONAL_DISPOSITIONS)),
+            "a state cannot both block and need no action")
+
+    def test_no_action_lands_in_a_dead_end_computed_HERE(self):
+        for action in sa.ACTIONS:
+            with self.subTest(action=action.action_id):
+                target = action.expected_state
+                self.assertTrue(
+                    target in sa.INTENTIONAL_DISPOSITIONS
+                    or sa.actions_for_state(target),
+                    f"{action.action_id} lands in {target}, which has no exit")
+
+
+# ===========================================================================
+# 13. ONE ANSWER PER OBJECT -- `descriptions` must never be state-blind-wrong
+# ===========================================================================
+
+class TheHealthSurfaceCarriesNoWrongAnswerTests(unittest.TestCase):
+    """A review measured the same returned object carrying BOTH answers for a
+    `needs_person` writer: `actions` named the acknowledgement route, and
+    `descriptions` said "rebuild it" -- the one instruction that cannot work for a
+    file no rebuild can rewrite -- while the docstring recommended `descriptions`.
+    That is the two-independently-authored-copies divergence this cut recorded as a
+    finding, sitting on one object, with the in-code guidance pointing at the wrong
+    field."""
+
+    def setUp(self):
+        from external_write import capability_health as ch
+        self.ch = ch
+        self.p = _Project(self)
+
+    def _bypass(self, src, kinds):
+        self.p.write(WRITER, src)
+        self.p.queue([_entry_with_kinds(WRITER, kinds)])
+        return self.ch.overall_status(
+            str(self.p.root))["open_external_write_bypass"]
+
+    def test_the_docstring_names_the_registry_derived_field(self):
+        doc = self.ch.overall_status.__doc__
+        self.assertIn('open_external_write_bypass["actions"]', doc)
+
+    def test_a_needs_person_writer_is_never_described_as_rebuildable(self):
+        block = self._bypass(_UNREPAIRABLE_SRC, ["forbidden_import"])
+        self.assertEqual(block["writer_states"][WRITER],
+                         core.WriterState.NEEDS_PERSON)
+        self.assertNotIn("rebuild it so it routes through the sanctioned bulk path",
+                         block["descriptions"][WRITER],
+                         "the one instruction that cannot work for this state")
+        self.assertIn(ack.acknowledgement_command(WRITER),
+                      block["descriptions"][WRITER])
+
+    def test_a_rebuildable_writer_keeps_the_wording_it_has_always_had(self):
+        block = self._bypass(_REBUILDABLE_SRC, ["adapter_module_import"])
+        self.assertIn(
+            f"an external-write bypass is unrepaired: `{WRITER}` -- rebuild it "
+            "so it routes through the sanctioned bulk path",
+            block["descriptions"][WRITER])
+
+    def test_the_two_fields_cannot_diverge_for_a_bespoke_writer(self):
+        """Derived from ONE source, so drift is not possible rather than merely
+        unlikely. They stay distinct fields because for a NON-bypass entry
+        `descriptions` carries that entry's own recorded next step and `actions`
+        carries the way out of the writer's state -- see the test below."""
+        for src, kinds in ((_UNREPAIRABLE_SRC, ["forbidden_import"]),
+                           (_REBUILDABLE_SRC, ["adapter_module_import"])):
+            with self.subTest(kinds=kinds):
+                p = _Project(self)
+                p.write(WRITER, src)
+                p.queue([_entry_with_kinds(WRITER, kinds)])
+                block = self.ch.overall_status(
+                    str(p.root))["open_external_write_bypass"]
+                self.assertEqual(block["descriptions"][WRITER],
+                                 block["actions"][WRITER])
+
+    def test_a_non_bypass_entry_still_speaks_in_its_OWN_words(self):
+        """The kind-aware half, unchanged: this queue carries entries that are not
+        bespoke writers at all, and describing one with the rebuild sentence tells
+        the operator to do something impossible to a file that was never the
+        problem."""
+        queue_entry = {
+            "mechanism_id": "upgrade_safety_check",
+            "writer_relpath": "agents/handoffs/pending_migrations.json",
+            "kind": "reconcile_incomplete",
+            "status": "pending",
+            "reason": "the upgrade safety check could not finish",
+            "suggested_next_step": "Ask your assistant to run `wizard reconcile`.",
+        }
+        self.p.queue([queue_entry])
+        block = self.ch.overall_status(
+            str(self.p.root))["open_external_write_bypass"]
+        rel = "agents/handoffs/pending_migrations.json"
+        self.assertIn("wizard reconcile", block["descriptions"][rel])
+        self.assertNotIn("rebuild it so it routes through the sanctioned bulk path",
+                         block["descriptions"][rel])
+
+
+# ===========================================================================
+# 14. THE HEALTH CLI PARSES DENY-BY-DEFAULT
+# ===========================================================================
+
+class TheHealthCliRefusesAnUnrecognisedFlagTests(unittest.TestCase):
+    """A review measured `--overal` (one keystroke) and `--json` both yielding `[]`
+    and exit 0: a clean empty success from the one surface whose whole job is saying
+    when something is outstanding. That is the silently-dropped-flag class this
+    package has already shipped once, and the class the acknowledgement CLI in this
+    same commit was given a strict parse for. This one had not been."""
+
+    def setUp(self):
+        import shutil
+        self.p = _Project(self)
+        lib = self.p.root / "agents" / "lib" / "external_write"
+        lib.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(_EXTERNAL_WRITE_DIR, lib,
+                        ignore=shutil.ignore_patterns("test_*.py",
+                                                      "__pycache__"))
+        (lib / "__init__.py").touch(exist_ok=True)
+        (self.p.root / "agents" / "lib" / "__init__.py").touch(exist_ok=True)
+
+    def _run(self, *args):
+        env = dict(os.environ)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return subprocess.run(
+            [sys.executable, "agents/lib/external_write/capability_health.py",
+             *args], capture_output=True, text=True, cwd=str(self.p.root),
+            env=env, timeout=120)
+
+    def test_a_mistyped_overall_flag_never_returns_a_clean_empty_success(self):
+        result = self._run(".", "--overal")
+        self.assertNotEqual(
+            result.returncode, 0,
+            "a mistyped flag must never read as a successful report: "
+            f"{result.stdout!r}")
+        self.assertEqual(result.stdout, "",
+                         "a refusal must print no report at all")
+        self.assertIn("--overall", result.stderr)
+
+    def test_an_unrecognised_flag_refuses_and_names_the_accepted_forms(self):
+        result = self._run("--json")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("--json", result.stderr)
+        self.assertIn("--overall", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_a_second_project_root_refuses_rather_than_picking_one(self):
+        result = self._run(".", "..")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_both_accepted_orderings_still_report(self):
+        for args in ((".", "--overall"), ("--overall", "."), ("--overall",)):
+            with self.subTest(args=args):
+                result = self._run(*args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("normal_status_allowed", json.loads(result.stdout))
+
+    def test_the_per_capability_form_still_reports(self):
+        result = self._run(".")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), [])
+
+
+# ===========================================================================
+# 15. A DISCOVERED TRIAL ALWAYS CARRIES AN ACTIONABLE INSTRUCTION
+# ===========================================================================
+
+class ADiscoveredTrialNeverRendersAnEmptyActionTests(unittest.TestCase):
+    """A discovered outstanding trial with an empty `action` is precisely the shape
+    this cut exists to remove -- a blocking state the operator is told about and
+    cannot act on. Asserted positively, and driven for the degenerate input that
+    would otherwise produce it."""
+
+    def setUp(self):
+        from external_write import capability_health as ch
+        self.ch = ch
+        self.p = _Project(self)
+
+    def test_a_real_discovered_trial_carries_a_command(self):
+        self.p.put_journal("t-77", {"r1": tj.STATE_APPLY_INTENT})
+        trial, = self.ch.overall_status(
+            str(self.p.root))["interrupted_trial"]["trials"]
+        self.assertTrue(trial["action"].strip())
+        self.assertIn(trc.recovery_command("t-77"), trial["action"])
+
+    def test_a_record_whose_units_do_not_resolve_still_routes_to_a_person(self):
+        """The degenerate case: an outstanding unit id the state map does not cover.
+        It cannot arise through the validated read today, which is why it is driven
+        here directly -- the answer must be a route, never an empty string."""
+        from external_write import trial_journal as real_tj
+        original = real_tj.scan_outstanding_trials
+        self.addCleanup(setattr, real_tj, "scan_outstanding_trials", original)
+        real_tj.scan_outstanding_trials = lambda **kw: {
+            "trials": [{"trial_id": "t-9", "path": "p", "op_kind": "k",
+                        "outstanding_unit_ids": ["ghost"], "unit_states": {}}],
+            "unreadable": [], "scan_error": None}
+        trial, = self.ch.overall_status(
+            str(self.p.root))["interrupted_trial"]["trials"]
+        self.assertTrue(trial["action"].strip(),
+                        "a discovered trial with no instruction is the dead end "
+                        "this cut exists to remove")
+        self.assertIn("ask your assistant", trial["action"].lower())
+
+
+class TheScanReportsAMalformedUnitEntryPerRecordTests(unittest.TestCase):
+    """A unit entry that is not an object cannot survive the validated read, so it
+    can only arrive on a record this scan is already going to refuse. What matters
+    is that it refuses THAT RECORD and keeps scanning, rather than aborting the
+    whole sweep and losing every other trial with it."""
+
+    def setUp(self):
+        self.p = _Project(self)
+
+    def test_a_malformed_unit_entry_is_reported_and_the_other_trials_survive(self):
+        self.p.put_journal("t-good", {"r1": tj.STATE_APPLY_INTENT})
+        d = self.p.root / tj.DEFAULT_TRIAL_JOURNAL_DIR
+        (d / "t-bad.json").write_text(json.dumps({
+            "schema": tj.TRIAL_JOURNAL_SCHEMA, "trial_id": "t-bad",
+            "op_kind": "k", "units": ["not an object"]}), encoding="utf-8")
+
+        result = tj.scan_outstanding_trials(journal_dir=str(d))
+
+        self.assertEqual([t["trial_id"] for t in result["trials"]], ["t-good"],
+                         "one bad record must not lose the others")
+        self.assertEqual(len(result["unreadable"]), 1, result)
+        self.assertIn("t-bad.json", result["unreadable"][0]["path"])
+        self.assertIsNone(result["scan_error"])
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
