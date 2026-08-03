@@ -1483,6 +1483,25 @@ class TheGateDetectsAPlantedViolationTests(unittest.TestCase):
                             "agents/lib/external_write/{}.py".format(module))],
                         [], "the declaring module's own usage line was flagged")
 
+    def test_resolved_text_preserves_SOURCE_ORDER(self):
+        """Order is the whole basis of the containment checks: a constant composed as
+        ``DIAGNOSIS + " -- " + REPAIR`` has almost no literal content of its own, so a
+        resolution that returned its parts in any other order would make a containment
+        test against it meaningless -- it would match texts that are not in it and
+        miss texts that are. Asserted directly, for each form, because a mutation that
+        scrambled the f-string order left every other test in this file green."""
+        constants = {"REL": "path/to/thing.py", "A": "alpha", "B": "beta"}
+        self.assertEqual(
+            resolved_text(ast.parse('f"go {REL} now"').body[0].value, constants),
+            "go path/to/thing.py now")
+        self.assertEqual(
+            resolved_text(ast.parse('A + " -- " + B').body[0].value, constants),
+            "alpha -- beta")
+        self.assertEqual(
+            resolved_text(ast.parse('"head {} tail".format(REL)').body[0].value,
+                          constants),
+            "head {} tail path/to/thing.py")
+
     def test_every_declared_entrypoint_has_exactly_one_declaring_module(self):
         """The carve-out above is only safe if the declaring module is unambiguous:
         two modules declaring the same path would each be excused for the other's
@@ -1613,6 +1632,40 @@ class ASurfaceThatRendersFromTheRegistryPassesTests(unittest.TestCase):
                     path.read_text(encoding="utf-8"),
                     "{}/{}.py".format(_EMITTED_LIB_REL, stem))
                 self.assertEqual([f.render() for f in findings], [])
+
+    def test_the_derived_sample_is_the_same_set_computed_a_SECOND_way(self):
+        """The derivation's own falsifiability. The test above CONSUMES it, so a
+        stubbed derivation would merely shrink the sample and stay green; this asks the
+        same question independently and compares. It is also what would catch the
+        sample being narrowed back to a hardcoded pair -- the population grew by two in
+        the very task that derived it."""
+        renderers = {"instruction_for_state", "route_for_unclassified_state",
+                     "route_for_unidentified_record", "render_action"}
+        independently = set()
+        for path in _scanned_files():
+            if path.stem == "state_actions":
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            imports_registry = any(
+                isinstance(n, ast.Import)
+                and any(a.name.endswith(".state_actions") for a in n.names)
+                for n in ast.walk(tree)) or any(
+                isinstance(n, ast.ImportFrom)
+                and (n.module or "").endswith("external_write")
+                and any(a.name == "state_actions" for a in n.names)
+                for n in ast.walk(tree))
+            calls_renderer = any(
+                isinstance(n, ast.Attribute) and n.attr in renderers
+                for n in ast.walk(tree))
+            if imports_registry and calls_renderer:
+                independently.add(path.stem)
+        self.assertEqual(registry_rendering_surfaces(), frozenset(independently),
+                         "the derivation and the same question asked here disagree")
+        self.assertGreater(
+            len(independently), 2,
+            "two modules rendered from the registry before this gate existed and two "
+            "more do now; a sample that has stopped growing with the population is no "
+            "longer proving the over-firing property for the modules at risk")
 
     def test_the_registry_itself_has_no_findings(self):
         path = _EMITTED_LIB / "state_actions.py"
