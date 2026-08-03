@@ -89,14 +89,27 @@ def _evidence_predicate_migration(source: str,
     return plan_missing_evidence_predicates(source, context)
 
 
+def _undo_declaration_migration(source: str,
+                                context: MigrationContext) -> TransformResult:
+    # Imported lazily for the same reason as the two above: that module imports
+    # the shared AST resolver from capability_code_scaffold, which imports this
+    # module's value types.
+    from undo_declaration_migration import plan_undo_declaration_migration
+    return plan_undo_declaration_migration(source, context)
+
+
 #: The declared set, applied IN ORDER to one in-memory copy of each adapter
 #: module. Order is deliberate and load-bearing: the evidence-predicate stub
 #: inserts at the registered class's end_lineno, and moving the read-client
 #: builder onto that same class also changes where the class ends. Running the
 #: predicate stub first preserves the behaviour that shipped before the two were
 #: composed, and the engine re-parses between migrations so the second one sees
-#: the first one's real line numbers.
+#: the first one's real line numbers. The undo-restore declaration (Cut 1.9) goes
+#: LAST for that same reason -- it also inserts at a class's end_lineno, and
+#: running it after the other two means it sees the class boundaries they left
+#: behind rather than the ones they found.
 ADAPTER_MIGRATIONS: Tuple[AdapterMigration, ...] = (
     AdapterMigration("missing_evidence_predicates", _evidence_predicate_migration),
     AdapterMigration("module_level_provisioner", _provisioner_migration),
+    AdapterMigration("undo_absolute_state_declaration", _undo_declaration_migration),
 )

@@ -67,6 +67,13 @@ from external_write.verifiers import POSTWRITE_VERIFICATION_SCHEMA  # noqa: E402
 from external_write.acceptance_ceremony import (  # noqa: E402
     accept_capability_for_live_use, OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA,
 )
+from external_write.adapter_registry import (  # noqa: E402
+    UNDO_IDEMPOTENCY_DECLARATION_ATTR, get_dispatch,
+)
+from external_write.trial_eligibility import (  # noqa: E402
+    CLAUSE_UNDO_ABSOLUTE_STATE_RESTORE, CLAUSE_UNDO_REF_PRESENT,
+    check_trial_eligibility,
+)
 
 _ADAPTER_MODULE_PATH = Path(adapters_gmail.__file__).resolve()
 _ADAPTER_ANCHOR = _ADAPTER_MODULE_PATH.parent  # agents/lib/external_write
@@ -772,6 +779,143 @@ class TestInvariantEightPositiveControl(unittest.TestCase):
 
             entries = json.loads(set_path.read_text(encoding="utf-8"))
             self.assertTrue(entries[0]["accepted"])
+
+
+# ---------------------------------------------------------------------------
+# 8. The Cut 1.9 trial-eligibility contract clause (c) -- delivered to the
+#    SHIPPED reference adapter, per op_kind, ONLY where the undo is PROVABLY an
+#    absolute-state restore.
+#
+#    Clause (c) shipped with Task 1 and NOTHING declared it, so every op_kind
+#    here was trial-INELIGIBLE. These tests pin the per-op_kind verdict AND the
+#    reason for it, because the two undeclared op_kinds are undeclared for two
+#    different reasons and a later "tidy-up" that declares either of them is a
+#    false declaration at a gate that authorizes an external write.
+# ---------------------------------------------------------------------------
+
+class TestUndoAbsoluteStateDeclaration(unittest.TestCase):
+    """Per-op_kind, with the source evidence named in each test.
+
+    ``_set_exact_labels`` (adapters_gmail.py) reads the message's CURRENT label
+    set and applies the minimal delta to make it EXACTLY the target set. Handed
+    the RECORDED PRIOR label set, that is an absolute-state restore: run it
+    twice and the second run computes an empty delta; run it when the apply
+    never landed and it computes an empty delta too. Both are the convergence
+    the journaled trial's recovery path needs, because after a crash the journal
+    can only say the apply was INTENDED.
+
+    ``_trash_labels`` is the opposite shape: a FIXED delta (add TRASH, remove
+    INBOX) that never consults a recorded prior state.
+    """
+
+    _DECLARING = {
+        # op_kind -> the class whose OWN undo_one is the absolute-state restore.
+        OP_TRASH: GmailMessageTrashAdapter,
+        OP_MODIFY_LABELS: GmailMessageModifyLabelsAdapter,
+    }
+    _NOT_DECLARING = {
+        OP_UNTRASH: GmailMessageUntrashAdapter,
+        OP_FILTER_CREATE: GmailFilterCreateAdapter,
+    }
+
+    def _units_and_capsules(self, adapter, params):
+        units = adapter.plan(params)
+        return units, {u.unit_id: {"unit_id": u.unit_id} for u in units}
+
+    def test_the_declaration_is_spelled_with_the_kernels_own_constant(self):
+        """A re-spelled literal is this codebase's most-shipped defect: the
+        adapter would carry an attribute the registry never looks for."""
+        for op_kind, cls in self._DECLARING.items():
+            with self.subTest(op_kind=op_kind):
+                self.assertIn(UNDO_IDEMPOTENCY_DECLARATION_ATTR, vars(cls))
+                self.assertIs(vars(cls)[UNDO_IDEMPOTENCY_DECLARATION_ATTR], True)
+
+    def test_the_declaration_sits_on_the_class_that_defines_undo_one(self):
+        """Task 1 fix round F1 scoped the declaration to the ``undo_one`` it
+        describes (MRO-order rule). Both declaring classes define their own
+        ``undo_one``, so ``d_decl == d_undo`` -- the honoured shape."""
+        for op_kind, cls in self._DECLARING.items():
+            with self.subTest(op_kind=op_kind):
+                self.assertIn("undo_one", vars(cls))
+                self.assertIn(UNDO_IDEMPOTENCY_DECLARATION_ATTR, vars(cls))
+
+    def test_the_registry_captured_the_declaration_for_the_declaring_op_kinds(self):
+        """Declared on the class is not the same as CAPTURED on the frozen
+        dispatch record the gate actually reads."""
+        for op_kind in self._DECLARING:
+            with self.subTest(op_kind=op_kind):
+                dispatch = get_dispatch(op_kind)
+                self.assertIsNotNone(dispatch)
+                self.assertIs(dispatch.undo_is_absolute_state_restore, True)
+
+    def test_undeclared_op_kinds_have_no_declaration_captured(self):
+        for op_kind, cls in self._NOT_DECLARING.items():
+            with self.subTest(op_kind=op_kind):
+                self.assertNotIn(UNDO_IDEMPOTENCY_DECLARATION_ATTR, vars(cls))
+                self.assertIsNone(
+                    get_dispatch(op_kind).undo_is_absolute_state_restore)
+
+    def test_trash_passes_clause_c_through_the_real_gate(self):
+        """The delivery half: at least one shipped op_kind is now eligible as
+        far as clause (c) is concerned. Asserted through
+        ``check_trial_eligibility`` -- the gate itself -- never by reading the
+        attribute back."""
+        adapter = get_adapter(OP_TRASH)
+        units, capsules = self._units_and_capsules(adapter, {
+            "messages": [{"message_id": "m1",
+                          "prior_label_ids": ["INBOX", "IMPORTANT"]}]})
+        verdict = check_trial_eligibility(OP_TRASH, units, capsules)
+        self.assertNotIn(CLAUSE_UNDO_ABSOLUTE_STATE_RESTORE,
+                         verdict.failed_clauses, verdict.reason_text())
+        self.assertTrue(verdict.eligible, verdict.reason_text())
+
+    def test_modify_labels_passes_clause_c_through_the_real_gate(self):
+        adapter = get_adapter(OP_MODIFY_LABELS)
+        units, capsules = self._units_and_capsules(adapter, {
+            "messages": [{"message_id": "m1", "add_label_ids": ["Label_1"],
+                          "remove_label_ids": [], "prior_label_ids": ["INBOX"]}]})
+        verdict = check_trial_eligibility(OP_MODIFY_LABELS, units, capsules)
+        self.assertNotIn(CLAUSE_UNDO_ABSOLUTE_STATE_RESTORE,
+                         verdict.failed_clauses, verdict.reason_text())
+
+    def test_untrash_is_still_refused_because_its_undo_is_a_fixed_delta(self):
+        """Source evidence: ``GmailMessageUntrashAdapter.undo_one`` calls
+        ``_trash_labels`` -- add TRASH, remove INBOX -- and never reads a
+        recorded prior state. Its apply may have ADDED labels (it sets the full
+        pre-trash set); re-trashing leaves those in place, so the undo does not
+        return the message to the state the trial found it in. Not provable as
+        absolute-state, therefore left undeclared and refused."""
+        adapter = get_adapter(OP_UNTRASH)
+        units, capsules = self._units_and_capsules(adapter, {
+            "messages": [{"message_id": "m1", "prior_label_ids": ["INBOX"]}]})
+        verdict = check_trial_eligibility(OP_UNTRASH, units, capsules)
+        self.assertIn(CLAUSE_UNDO_ABSOLUTE_STATE_RESTORE, verdict.failed_clauses)
+        self.assertFalse(verdict.eligible)
+
+    def test_filter_create_stays_refused_on_BOTH_independent_grounds(self):
+        """Two bans must keep agreeing on it: ``plan()`` carries
+        ``undo_ref=None`` (clause (a)) and its undo deletes the filter it
+        created -- relative, and non-idempotent besides (the second call raises,
+        because ``undo_one`` deletes its own recorded id). Declaring clause (c)
+        here would be a false declaration."""
+        adapter = get_adapter(OP_FILTER_CREATE)
+        units, capsules = self._units_and_capsules(adapter, {
+            "filters": [{"client_ref": "f1", "criteria": {"from": "x@y.z"},
+                         "action": {"addLabelIds": ["Label_1"]}}]})
+        verdict = check_trial_eligibility(OP_FILTER_CREATE, units, capsules)
+        self.assertIn(CLAUSE_UNDO_REF_PRESENT, verdict.failed_clauses)
+        self.assertIn(CLAUSE_UNDO_ABSOLUTE_STATE_RESTORE, verdict.failed_clauses)
+
+    def test_the_declaration_is_never_added_to_the_undeclared_classes_by_a_base(self):
+        """These adapter classes are standalone by design. If a future refactor
+        gives them a shared base carrying the declaration, an op_kind whose undo
+        is a fixed delta would inherit consent silently."""
+        for op_kind, cls in self._NOT_DECLARING.items():
+            with self.subTest(op_kind=op_kind):
+                self.assertFalse(
+                    hasattr(cls, UNDO_IDEMPOTENCY_DECLARATION_ATTR),
+                    "an undeclared adapter must not inherit the declaration "
+                    "from anywhere in its hierarchy")
 
 
 if __name__ == "__main__":

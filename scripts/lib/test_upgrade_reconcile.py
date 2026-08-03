@@ -4147,12 +4147,22 @@ class AdapterMigrationRefusalRoutingTests(_Base):
         # Also declares both required evidence predicates -- otherwise the
         # SEPARATE missing_evidence_predicates migration would legitimately
         # scaffold a stub and queue its own (unrelated, correct) entry, which
-        # would confound this test's "truly nothing left to do" assertion.
+        # would confound this test's "truly nothing left to do" assertion. For the
+        # same reason it carries an ``undo_one`` and the Cut 1.9 clause-(c)
+        # declaration next to it: without them the undo-declaration migration and
+        # its post-condition would each have real, correct work to report on a
+        # fixture whose whole point is that there is none left. (An adapter with
+        # no ``undo_one`` at all is not a realistic shape anyway --
+        # ``register_adapter`` captures ``cls.undo_one`` unconditionally, so such
+        # an adapter cannot even register.)
         hand_repaired = _LEGACY_MODULE_LEVEL.replace(
             "class InboxLabelsAdapter:\n",
             "class InboxLabelsAdapter:\n"
+            "    UNDO_IS_ABSOLUTE_STATE_RESTORE = True\n\n"
             "    def build_read_only_client(self, op):\n"
             "        return object()\n\n"
+            "    def undo_one(self, raw_client, unit):\n"
+            "        return None\n\n"
             "    def verify_apply_landed(self, evidence):\n"
             "        return True\n\n"
             "    def verify_undo_restored(self, evidence):\n"
@@ -4235,6 +4245,394 @@ class ReconcileIncompleteMarkerTests(_Base):
             .read_text(encoding="utf-8"))
         self.assertEqual(
             [e for e in queue if e.get("kind") == "reconcile_incomplete"], [])
+
+
+# ===================================================================================
+# The UNDO-DECLARATION conformance POST-CONDITION (Cut 1.9 Task 1b) — the same
+# end-state shape as the read-provisioner one above, for the trial-eligibility
+# contract clause Task 1 added. Quantified over CAPABILITY-DECLARED op_kinds only:
+# the shipped baseline registers op_kinds no capability declares and legitimately
+# has no absolute-state undo, so quantifying over every registration would fire on
+# 100% of deployments, fresh builds and this suite's own fixtures included.
+# ===================================================================================
+
+_UNDO_DECL = "UNDO_IS_ABSOLUTE_STATE_RESTORE"
+
+
+def _undo_adapter(*, declaration="", undo_on="class", op_kind="inbox.labels.modify",
+                  registered="InboxLabelsAdapter"):
+    """An operator-shaped adapter registering `op_kind`.
+
+    ``undo_on``: "class" (the registered class defines undo_one), "base" (an
+    in-module base defines it), "override" (a base defines it AND the registered
+    class overrides it), or "none".
+    ``declaration``: "" | "class" | "base" -- where the clause-(c) attribute sits.
+    """
+    undo = ("    def undo_one(self, raw_client, unit):\n        return None\n")
+    base_body = ""
+    class_body = "    def apply_one(self, raw_client, unit):\n        return None\n"
+    if undo_on == "class":
+        class_body += undo
+    elif undo_on == "base":
+        base_body += undo
+    elif undo_on == "override":
+        base_body += undo
+        class_body += undo
+    if declaration == "class":
+        class_body = f"    {_UNDO_DECL} = True\n" + class_body
+    elif declaration == "base":
+        base_body = f"    {_UNDO_DECL} = True\n" + base_body
+    bases = ""
+    if base_body:
+        bases = "(BaseAdapter)"
+        base_block = "class BaseAdapter:\n" + base_body + "\n\n"
+    else:
+        base_block = ""
+    return (
+        "from external_write.adapter_registry import register_adapter\n"
+        "\n"
+        f"OP_KIND = {op_kind!r}\n"
+        "\n"
+        "\n"
+        + base_block
+        + f"class {registered}{bases}:\n"
+        + class_body
+        + "\n"
+        "\n"
+        f"register_adapter(OP_KIND, {registered}())\n"
+    )
+
+
+class UndoDeclarationConformanceTests(_Base):
+
+    def test_it_fires_on_a_capability_declared_op_kind_with_no_declaration(self):
+        """The motivating case, reproduced: the capability declares the op_kind,
+        the adapter defines undo_one, and nothing declares clause (c) -- so the
+        trial preflight refuses and no copy_run_proof can ever be produced."""
+        from upgrade_reconcile import check_undo_declaration_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_undo_adapter())
+        violations = check_undo_declaration_conformance(root)
+        self.assertEqual(len(violations), 1, violations)
+        self.assertEqual(violations[0].kind, "undo_declaration_missing")
+        self.assertEqual(violations[0].op_kind, "inbox.labels.modify")
+        self.assertEqual(violations[0].adapter_relpath,
+                         "agents/lib/external_write/adapters_inbox.py")
+
+    def test_it_does_not_fire_once_the_declaration_is_on_the_class(self):
+        from upgrade_reconcile import check_undo_declaration_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_undo_adapter(declaration="class"))
+        self.assertEqual(check_undo_declaration_conformance(root), [])
+
+    def test_a_base_declaring_for_an_undo_one_it_defines_is_accepted(self):
+        """``d_decl == d_undo``: inheriting a base that defines BOTH is a
+        legitimate shape and flagging it would be a false red."""
+        from upgrade_reconcile import check_undo_declaration_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_undo_adapter(declaration="base", undo_on="base"))
+        self.assertEqual(check_undo_declaration_conformance(root), [])
+
+    def test_it_fires_when_the_declaration_is_SUPERSEDED_by_an_override(self):
+        """The declaration exists in the file, so a presence-anywhere check
+        would pass -- but the registered class OVERRIDES undo_one below it, so
+        the kernel reports SUPERSEDED and the op_kind is still ineligible. The
+        distinct kind matters: the fix is to re-declare on the overriding class,
+        not to add a declaration that is already there."""
+        from upgrade_reconcile import check_undo_declaration_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_undo_adapter(declaration="base", undo_on="override"))
+        violations = check_undo_declaration_conformance(root)
+        self.assertEqual([v.kind for v in violations],
+                         ["undo_declaration_superseded"], violations)
+        self.assertIn("InboxLabelsAdapter", violations[0].reason)
+
+    def test_it_joins_on_the_declared_op_kind_never_on_a_filename(self):
+        """Filename inference is forbidden. The adapter's stem does not match
+        the capability's canonical id and the enrolment manifest is deleted --
+        the check must still find it, because it globs and reads registrations."""
+        from upgrade_reconcile import check_undo_declaration_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_totally_unrelated_name.py",
+            adapter_source=_undo_adapter())
+        (root / "agents" / "lib" / "external_write"
+         / "operator_adapters.json").unlink()
+        violations = check_undo_declaration_conformance(root)
+        self.assertEqual(len(violations), 1, violations)
+        self.assertEqual(
+            violations[0].adapter_relpath,
+            "agents/lib/external_write/adapters_totally_unrelated_name.py")
+
+    def test_it_does_not_fire_on_shipped_op_kinds_no_capability_declares(self):
+        """The over-firing guard (the capability-declared scope-correction). The shipped
+        reference adapter registers four op_kinds and only two of them can
+        legitimately declare clause (c) -- untrash's undo is a fixed delta and
+        filter-create's is a delete. A check over every REGISTERED op_kind would
+        flag them in every project including every fresh build, and a guard that
+        always fires is a guard people learn to click past."""
+        from upgrade_reconcile import check_undo_declaration_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_undo_adapter(declaration="class"))
+        lib = root / "agents" / "lib" / "external_write"
+        (lib / "adapters_gmail.py").write_text(
+            _undo_adapter(op_kind="gmail.message.untrash",
+                          registered="GmailMessageUntrashAdapter"),
+            encoding="utf-8")
+        self.assertEqual(check_undo_declaration_conformance(root), [],
+                         "a registered op_kind that no capability declares must "
+                         "not be flagged")
+
+    def test_it_does_not_double_report_a_capability_with_no_registered_adapter(self):
+        """The read-provisioner post-condition already reports that fact under
+        ``no_registered_adapter``. Two blocking entries for one cause is noise
+        the operator has to disentangle."""
+        from upgrade_reconcile import (
+            check_read_provisioner_conformance, check_undo_declaration_conformance,
+        )
+        root = self._project_with_capability(
+            canonical_id="orphan", op_kind="orphan.op",
+            adapter_name="adapters_orphan.py",
+            adapter_source="# no registration at all\n")
+        self.assertEqual([v.kind for v in check_read_provisioner_conformance(root)],
+                         ["no_registered_adapter"])
+        self.assertEqual(check_undo_declaration_conformance(root), [])
+
+    def test_a_declaration_only_reachable_from_a_second_module_is_accepted(self):
+        """Two adapter MODULES may register the same op_kind; the runtime
+        resolves last-registered-wins, which a static pass cannot reproduce. A
+        violation is reported only when NONE of the candidates is conformant."""
+        from upgrade_reconcile import check_undo_declaration_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_aaa.py",
+            adapter_source=_undo_adapter(registered="AaaAdapter"))
+        (root / "agents" / "lib" / "external_write" / "adapters_zzz.py").write_text(
+            _undo_adapter(declaration="class", registered="ZzzAdapter"),
+            encoding="utf-8")
+        self.assertEqual(check_undo_declaration_conformance(root), [])
+
+    def test_a_violation_names_an_operator_editable_module(self):
+        from upgrade_reconcile import check_undo_declaration_conformance
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_undo_adapter())
+        (root / "agents" / "lib" / "external_write" / "adapters_gmail.py").write_text(
+            _undo_adapter(registered="GmailShadowAdapter"), encoding="utf-8")
+        violations = check_undo_declaration_conformance(root)
+        self.assertEqual(len(violations), 1, violations)
+        self.assertEqual(violations[0].adapter_relpath,
+                         "agents/lib/external_write/adapters_inbox.py",
+                         "must name the operator-editable module, never the "
+                         "shipped adapters_gmail.py")
+
+    def test_it_does_not_fire_on_a_FRESH_BUILD(self):
+        """The gate must not be blind to its own motivating case AND must not
+        fire on a project that never had the defect. This emits the adapter and
+        the capability through the REAL emitter (``capability_code_scaffold``),
+        exactly as ``add-capability`` does, and asserts a clean verdict -- so the
+        emitter and this post-condition can never disagree about what conformant
+        means."""
+        from capability_code_scaffold import (
+            CapabilityCodeSpec, render_adapter_module,
+        )
+        from upgrade_reconcile import check_undo_declaration_conformance
+        spec = CapabilityCodeSpec(
+            capability_id="fresh_demo", display_name="Fresh Demo",
+            surface="demo_surface", op_kind="fresh.demo.op",
+            read_only_scope="demo.readonly", blast_radius_cap=5,
+            writes=("Status",), read_methods=("get_item",))
+        root = self.tmp / "fresh_build"
+        lib = root / "agents" / "lib" / "external_write"
+        caps = root / "agents" / "capabilities"
+        lib.mkdir(parents=True, exist_ok=True)
+        caps.mkdir(parents=True, exist_ok=True)
+        (lib / f"{spec.adapter_module_stem}.py").write_text(
+            render_adapter_module(spec), encoding="utf-8")
+        (caps / "fresh_demo_capability.py").write_text(
+            "OP_KIND = 'fresh.demo.op'\n\n\n"
+            "def propose_operations(facade, batch_id):\n    return []\n",
+            encoding="utf-8")
+        self.assertEqual(check_undo_declaration_conformance(root), [],
+                         "a freshly emitted capability must be conformant with "
+                         "the clause the emitter itself writes")
+
+
+class UndoDeclarationConformanceRecordingTests(_Base):
+
+    def _queue(self, root):
+        path = root / "agents" / "handoffs" / "pending_migrations.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+
+    def _project(self, **kwargs):
+        return self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_undo_adapter(**kwargs))
+
+    def test_a_violation_becomes_a_blocking_queue_entry(self):
+        from upgrade_reconcile import (
+            check_undo_declaration_conformance, record_undo_declaration_conformance,
+        )
+        root = self._project()
+        record_undo_declaration_conformance(
+            root, check_undo_declaration_conformance(root),
+            from_version="v0.22.0", to_version="v0.23.0")
+        entries = [e for e in self._queue(root)
+                   if e.get("kind") == "undo_declaration_missing"]
+        self.assertEqual(len(entries), 1, self._queue(root))
+        entry = entries[0]
+        self.assertTrue(entry["writer_relpath"])
+        self.assertEqual(entry["status"], "pending")
+        self.assertTrue(entry["reason"])
+        self.assertTrue(entry["suggested_next_step"])
+
+    def test_the_entry_records_no_content_hash(self):
+        """Deliberate omission (the no-content-hash rule): with a hash recorded, an
+        unrelated edit to the adapter would satisfy the stateless auto-reaper and
+        un-block a project whose op_kind is still trial-ineligible."""
+        from upgrade_reconcile import (
+            check_undo_declaration_conformance, record_undo_declaration_conformance,
+        )
+        root = self._project()
+        record_undo_declaration_conformance(
+            root, check_undo_declaration_conformance(root),
+            from_version="v0.22.0", to_version="v0.23.0")
+        entry = [e for e in self._queue(root)
+                 if e.get("kind") == "undo_declaration_missing"][0]
+        self.assertIsNone(entry.get("paused_content_sha256"))
+
+    def test_recording_is_set_reconciled_not_append_only(self):
+        from upgrade_reconcile import (
+            check_undo_declaration_conformance, record_undo_declaration_conformance,
+        )
+        root = self._project()
+        for _ in range(3):
+            record_undo_declaration_conformance(
+                root, check_undo_declaration_conformance(root),
+                from_version="v0.22.0", to_version="v0.23.0")
+        self.assertEqual(
+            len([e for e in self._queue(root)
+                 if e.get("kind") == "undo_declaration_missing"]), 1,
+            "must replace, never duplicate")
+        record_undo_declaration_conformance(
+            root, [], from_version="v0.22.0", to_version="v0.23.0")
+        self.assertEqual(
+            [e for e in self._queue(root)
+             if e.get("kind", "").startswith("undo_declaration")], [],
+            "a repaired project must be unblocked -- an append-only recorder "
+            "here would be a permanent block")
+
+    def test_recording_never_touches_another_entry_kind(self):
+        from upgrade_reconcile import (
+            check_undo_declaration_conformance, record_undo_declaration_conformance,
+        )
+        root = self._project()
+        queue_path = root / "agents" / "handoffs" / "pending_migrations.json"
+        queue_path.parent.mkdir(parents=True, exist_ok=True)
+        foreign = {
+            "mechanism_id": "agents_inbox_runner",
+            "writer_relpath": "agents/inbox/runner.py",
+            "kind": "external_write_bypass", "status": "pending",
+            "paused_content_sha256": "deadbeef",
+        }
+        queue_path.write_text(json.dumps([foreign]), encoding="utf-8")
+        violations = check_undo_declaration_conformance(root)
+        self.assertTrue(violations, "fixture must produce a real violation")
+        record_undo_declaration_conformance(
+            root, violations, from_version="v0.22.0", to_version="v0.23.0")
+        queue = self._queue(root)
+        self.assertIn(foreign, queue, "a foreign entry must survive untouched")
+        self.assertTrue([e for e in queue
+                         if e.get("kind") == "undo_declaration_missing"])
+
+    def test_the_superseded_kind_gets_its_own_repair_instruction(self):
+        """"Add the declaration" is the wrong instruction for a file that
+        already has one -- the operator would look in the wrong class."""
+        from upgrade_reconcile import (
+            check_undo_declaration_conformance, record_undo_declaration_conformance,
+        )
+        root = self._project(declaration="base", undo_on="override")
+        record_undo_declaration_conformance(
+            root, check_undo_declaration_conformance(root),
+            from_version="v0.22.0", to_version="v0.23.0")
+        entry = [e for e in self._queue(root)
+                 if e.get("kind") == "undo_declaration_superseded"][0]
+        self.assertIn("InboxLabelsAdapter", entry["suggested_next_step"])
+
+
+class UndoDeclarationEndToEndTests(_Base):
+    """The migration and the post-condition, through the REAL upgrade entry
+    point -- not through either function called directly."""
+
+    def _queue(self, root):
+        path = root / "agents" / "handoffs" / "pending_migrations.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+
+    def test_the_real_upgrade_migrates_the_adapter_and_clears_the_block(self):
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_undo_adapter())
+        adapter = (root / "agents" / "lib" / "external_write" / "adapters_inbox.py")
+        reconcile_upgrade(root, _REAL_REPO,
+                          from_version="v0.22.0", to_version="v0.23.0")
+        migrated = adapter.read_text(encoding="utf-8")
+        self.assertIn(f"{_UNDO_DECL} = False", migrated,
+                      "the declared migration set must have delivered the "
+                      "clause-(c) declaration site")
+        self.assertEqual(
+            [e for e in self._queue(root)
+             if e.get("kind", "").startswith("undo_declaration")], [],
+            "the post-condition runs AFTER the migration, so a successfully "
+            "migrated adapter must not also be blocked")
+
+    def test_the_real_upgrade_blocks_when_the_migration_cannot_help(self):
+        """A SUPERSEDED declaration on a class the migration refuses to guess at
+        must still leave durable blocking state -- the post-condition is what
+        makes an enumeration or migration gap non-fatal."""
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_undo_adapter(undo_on="none"))
+        reconcile_upgrade(root, _REAL_REPO,
+                          from_version="v0.22.0", to_version="v0.23.0")
+        self.assertTrue(
+            [e for e in self._queue(root)
+             if e.get("kind") == "undo_declaration_missing"],
+            "an adapter the migration left alone must still be blocked")
+
+    def test_the_impact_notice_states_the_re_acceptance_consequence(self):
+        """``adapters_*.py`` is UNIONED into the hashed dependency set for its
+        op_kind (``effects_manifest.resolve_dependency_files``), so editing an
+        operator adapter moves that capability's ``implementation_hash`` and
+        stales any prior acceptance. Correct and desired for a contract change --
+        and the operator must be told, not left to discover it."""
+        root = self._project_with_capability(
+            canonical_id="inbox_management", op_kind="inbox.labels.modify",
+            adapter_name="adapters_inbox.py",
+            adapter_source=_undo_adapter())
+        result = reconcile_upgrade(root, _REAL_REPO,
+                                  from_version="v0.22.0", to_version="v0.23.0")
+        self.assertIsNotNone(result.notice_path,
+                             "an upgrade that edited an operator adapter must "
+                             "leave a notice, even with nothing scanner-flagged")
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertIn("adapters_inbox.py", notice)
+        self.assertIn("approve it again", notice)
+        self.assertIn("it will be switched off again the next time this check runs",
+                      notice)
 
 
 if __name__ == "__main__":

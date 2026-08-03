@@ -1365,5 +1365,55 @@ class TestMissingEvidencePredicateStubScaffoldMultiClass(unittest.TestCase):
                 ["verify_apply_landed", "verify_undo_restored"])
 
 
+class TestEmittedAdapterCarriesTheUndoDeclarationSite(unittest.TestCase):
+    """Cut 1.9 clause (c), fresh-emit channel.
+
+    The trial-eligibility preflight refuses an op_kind whose adapter is SILENT
+    about whether its ``undo_one`` restores absolute prior state. A freshly
+    emitted adapter must therefore carry the declaration SITE -- so the
+    conformance post-condition does not fire on every fresh build (the
+    over-firing trap the capability-declared scope-correction names) -- while its VALUE
+    stays ``False``, because nothing the emitter knows can vouch for a
+    ``undo_one`` it emitted as a ``NotImplementedError`` stub.
+    """
+
+    def test_the_declaration_site_is_emitted_with_the_kernels_own_spelling(self):
+        from external_write.adapter_registry import UNDO_IDEMPOTENCY_DECLARATION_ATTR
+        from undo_declaration_migration import UNDO_DECLARATION_ATTR
+        self.assertEqual(UNDO_DECLARATION_ATTR,
+                         UNDO_IDEMPOTENCY_DECLARATION_ATTR)
+        source = render_adapter_module(_sample_spec())
+        self.assertIn(f"{UNDO_IDEMPOTENCY_DECLARATION_ATTR} = False", source)
+
+    def test_it_is_never_emitted_as_True(self):
+        source = render_adapter_module(_sample_spec())
+        self.assertNotIn("UNDO_IS_ABSOLUTE_STATE_RESTORE = True", source)
+
+    def test_it_sits_on_the_registered_class_that_defines_undo_one(self):
+        """The MRO-order rule ``adapter_registry._resolve_undo_declaration``
+        enforces: the declaration must be at or below the class defining
+        ``undo_one``. The emitted adapter defines both on one class."""
+        from undo_declaration_migration import (
+            UNDO_DECLARATION_DECLARED, resolve_undo_declaration_site,
+        )
+        spec = _sample_spec()
+        tree = ast.parse(render_adapter_module(spec))
+        site = resolve_undo_declaration_site(tree, f"{spec.class_prefix}Adapter")
+        self.assertEqual(site.status, UNDO_DECLARATION_DECLARED)
+        self.assertEqual(site.declaring_class, f"{spec.class_prefix}Adapter")
+        self.assertEqual(site.undo_defining_class, f"{spec.class_prefix}Adapter")
+
+    def test_the_migration_finds_nothing_to_do_on_a_freshly_emitted_adapter(self):
+        """Fresh emit and the migration must agree, or the first upgrade after a
+        fresh build would rewrite a file that was already correct."""
+        from adapter_migrations import MigrationContext
+        from undo_declaration_migration import plan_undo_declaration_migration
+        result = plan_undo_declaration_migration(
+            render_adapter_module(_sample_spec()),
+            MigrationContext(required_predicates=()))
+        self.assertFalse(result.changed, result.reason)
+        self.assertTrue(result.benign, result.reason)
+
+
 if __name__ == "__main__":
     unittest.main()

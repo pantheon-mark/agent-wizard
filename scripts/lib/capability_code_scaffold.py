@@ -338,6 +338,15 @@ taking the ``AdapterEvidence`` ``verify_one`` observed and returning bool --
 see adapters_gmail.py's own ``verify_apply_landed``/``verify_undo_restored``
 for the reference shape -- BEFORE a copy-run proof for this capability can
 validate and operator-acceptance can accept it for live use.
+
+TODO (also next-phase / a human decision): the
+``${undo_declaration_attr} = False`` line on ${class_prefix}Adapter below is
+the TRIAL-ELIGIBILITY declaration ``trial_eligibility.check_trial_eligibility``
+reads (clause (c)). While it is False this op_kind is refused a journaled trial,
+and a journaled trial is the only thing that produces the copy_run_proof
+acceptance requires. Set it True ONLY IF the ``undo_one`` you write restores the
+exact recorded PRIOR state -- see the comment above that line for the full
+reasoning and the failure mode a false True causes.
 """
 
 from typing import Any, List, Optional
@@ -414,6 +423,25 @@ class ${class_prefix}Adapter:
             "TODO: perform the one real ${surface} mutation for "
             f"{unit.unit_id!r} against raw_client here.")
 
+    # TRIAL-ELIGIBILITY CONTRACT CLAUSE -- NOT YET REVIEWED, and deliberately
+    # emitted as False rather than left out. A journaled trial (apply -> verify
+    # -> undo -> verify the prior state came back) is the only thing that can
+    # produce the proof needed to approve this capability for live use, and it is
+    # allowed ONLY when undo_one restores the recorded PRIOR state absolutely --
+    # because after a crash the trial cannot know whether the change landed, so
+    # it runs undo_one anyway and may run it more than once.
+    #
+    # This emitter cannot vouch for that: undo_one below is a stub. Set this to
+    # True ONLY IF the undo_one you write restores the exact prior state (write
+    # back the recorded prior value / set the exact prior label set). If it undoes
+    # by compensating -- deleting what it created, subtracting what it added --
+    # leave it False; repeated after a crash, that can destroy state the trial
+    # never touched. False means this operation kind is refused a trial, which is
+    # the safe outcome. It must sit on the class that DEFINES undo_one: a
+    # subclass overriding undo_one has to re-declare it (see
+    # adapter_registry._resolve_undo_declaration).
+    ${undo_declaration_attr} = False
+
     def undo_one(self, raw_client: Any, unit: EffectUnit) -> None:
         raise NotImplementedError(
             "TODO: reverse the mutation for "
@@ -472,7 +500,16 @@ _READ_METHOD_BODY_TEMPLATE = Template('''    def ${method_name}(self, *args: Any
 def render_adapter_module(spec: CapabilityCodeSpec) -> str:
     """Render the ADAPTER_PROFILE-zone module source for `spec`. Pure string
     rendering -- no filesystem I/O, no import of the rendered code."""
+    # Imported lazily: `undo_declaration_migration` imports this module's shared
+    # AST resolver at module scope, so a module-scope import here would be
+    # circular (the same lazy-import shape `adapter_migrations` uses for the same
+    # reason). The name is read from that ONE constant -- itself cross-tree-pinned
+    # to `adapter_registry.UNDO_IDEMPOTENCY_DECLARATION_ATTR` -- rather than
+    # spelled again in the template, so a fresh emit and the migration that
+    # retrofits existing adapters can never write a different attribute name.
+    from undo_declaration_migration import UNDO_DECLARATION_ATTR
     return _ADAPTER_MODULE_TEMPLATE.substitute(
+        undo_declaration_attr=UNDO_DECLARATION_ATTR,
         display_name=spec.display_name,
         capability_id=spec.capability_id,
         surface=spec.surface,

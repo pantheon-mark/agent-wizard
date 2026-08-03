@@ -179,8 +179,17 @@ class Adapter(Protocol):
                  builds the capture + the evidence type + proves the
                  predicate signature is sound against ≥2 divergent op_kinds.
 
-    UNDO_IS_ABSOLUTE_STATE_RESTORE (OPTIONAL declaration — Cut 1.9 Task 1,
-                 v0.23.0 — the TRIAL-ELIGIBILITY contract clause) — an adapter
+    UNDO_IS_ABSOLUTE_STATE_RESTORE (OPTIONAL FOR REGISTRATION, REQUIRED FOR A
+                 TRIAL — Cut 1.9 Task 1, v0.23.0 — the TRIAL-ELIGIBILITY
+                 contract clause. Stated that way deliberately: "optional"
+                 alone reads as fail-open, and this is not. Omitting it does
+                 not stop the adapter registering or running, and nothing
+                 already accepted is retroactively refused — but its ABSENCE
+                 makes the op_kind trial-INELIGIBLE, and since a journaled
+                 trial is the only thing that produces the `copy_run_proof`
+                 operator acceptance requires, an adapter that stays silent
+                 about this cannot reach acceptance through the trial path at
+                 all) — an adapter
                  MAY additionally declare the CLASS attribute
                  ``UNDO_IS_ABSOLUTE_STATE_RESTORE = True`` (the exact name is
                  ``UNDO_IDEMPOTENCY_DECLARATION_ATTR``, below), asserting that

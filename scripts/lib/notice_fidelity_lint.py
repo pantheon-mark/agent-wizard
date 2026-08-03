@@ -54,9 +54,20 @@ DEFAULT_NOTICE_RELPATH = "wizard/scripts/lib/upgrade_reconcile.py"
 # is the same class of misdirection this lint exists to prevent. Both are pinned, so
 # neither branch can be softened, dropped, or quietly collapsed into the other.
 # A NEW closing clause needs a NEW entry here -- that is the point.
+#
+# The THIRD entry is the re-acceptance consequence of an upgrade rewriting an
+# operator adapter (Cut 1.9 Task 1b). `adapters_*.py` is unioned into its
+# op_kind's hashed dependency set, so the edit moves the capability's
+# implementation_hash and the prior approval stops covering it. That is correct
+# and desired for a contract change -- but an operator who discovers it as an
+# unexplained switch-off has been failed by the notice. Pinned here for the same
+# reason as the two above: this is the sentence a summarizing agent would soften
+# or drop first, and softening it would let a non-technical operator assume their
+# approval still stands when it does not.
 REQUIRED_CAVEAT_SUBSTRINGS: Sequence[str] = (
     "do not rely on it being blocked until it is rebuilt",
     "do not rely on it being blocked until it is fixed",
+    "it will be switched off again the next time this check runs",
 )
 
 

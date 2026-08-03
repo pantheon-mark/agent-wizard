@@ -56,6 +56,16 @@ class MigrationSetIsReachableFromTheRealEntryPoint(unittest.TestCase):
                       "the post-condition's verdict must be recorded durably, "
                       "not merely computed")
 
+    def test_reconcile_upgrade_calls_the_undo_declaration_post_condition(self):
+        """Cut 1.9's clause-(c) post-condition. Bound at the ENTRY POINT for the
+        same reason as the one above: a check the entry point stopped calling is
+        indistinguishable from a check that does not exist."""
+        source = inspect.getsource(upgrade_reconcile.reconcile_upgrade)
+        self.assertIn("check_undo_declaration_conformance", source)
+        self.assertIn("record_undo_declaration_conformance", source,
+                      "the post-condition's verdict must be recorded durably, "
+                      "not merely computed")
+
     def test_the_upgrade_cli_calls_the_engine_entry_point(self):
         """One funnel. Every CLI path goes through this helper, so binding here
         covers apply, re-apply, and the standalone reconcile command."""
@@ -193,6 +203,62 @@ class UnreachableMechanismRule(unittest.TestCase):
             [e for e in self._queue(root)
              if e.get("kind") == "adapter_migration_refused"],
             "the refusal-routing branch has never executed")
+
+    def test_the_undo_declaration_blocking_branch_executes(self):
+        """Cut 1.9 clause (c). The producer creates a capability-declared op_kind
+        whose adapter declares nothing AND defines no in-module ``undo_one``, so
+        the migration correctly leaves it alone (declaring next to an undo step
+        that is not there would be a guess); the REAL entry point runs; the
+        consumer proves a durable blocking entry landed. That division of labour
+        IS the design -- the migration is best-effort delivery, the
+        post-condition is the fail-closed keystone."""
+        root = self._project(
+            "from external_write.adapter_registry import register_adapter\n"
+            "\n"
+            "OP_KIND = 'probe.op'\n"
+            "\n"
+            "\n"
+            "class A:\n"
+            "    def build_read_only_client(self, op):\n"
+            "        return object()\n"
+            "\n"
+            "\n"
+            "register_adapter(OP_KIND, A())\n")
+        upgrade_reconcile.reconcile_upgrade(
+            root, _WIZARD.parent, from_version="v0.22.0", to_version="v0.23.0")
+        self.assertTrue(
+            [e for e in self._queue(root)
+             if e.get("kind", "").startswith("undo_declaration")],
+            "the undo-declaration post-condition's blocking branch has never "
+            "executed")
+
+    def test_the_undo_declaration_migration_branch_executes(self):
+        """The other half: an adapter that CAN be migrated must actually be
+        migrated by the real entry point, and must then not also be blocked."""
+        root = self._project(
+            "from external_write.adapter_registry import register_adapter\n"
+            "\n"
+            "OP_KIND = 'probe.op'\n"
+            "\n"
+            "\n"
+            "class A:\n"
+            "    def build_read_only_client(self, op):\n"
+            "        return object()\n"
+            "\n"
+            "    def undo_one(self, raw_client, unit):\n"
+            "        return None\n"
+            "\n"
+            "\n"
+            "register_adapter(OP_KIND, A())\n")
+        upgrade_reconcile.reconcile_upgrade(
+            root, _WIZARD.parent, from_version="v0.22.0", to_version="v0.23.0")
+        migrated = (root / "agents" / "lib" / "external_write"
+                    / "adapters_probe.py").read_text(encoding="utf-8")
+        self.assertIn("UNDO_IS_ABSOLUTE_STATE_RESTORE = False", migrated)
+        self.assertEqual(
+            [e for e in self._queue(root)
+             if e.get("kind", "").startswith("undo_declaration")], [],
+            "a successfully migrated adapter must not also be blocked")
 
     def test_the_unreadable_enrolment_blocking_branch_executes(self):
         root = self._project(

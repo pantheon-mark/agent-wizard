@@ -121,6 +121,12 @@ from capability_code_scaffold import (
 )
 from adapter_migrations import ADAPTER_MIGRATIONS, MigrationContext
 from provisioner_migration import PROVISIONER_NAME
+from undo_declaration_migration import (
+    UNDO_DECLARATION_DECLARED,
+    UNDO_DECLARATION_MISSING,
+    UNDO_DECLARATION_SUPERSEDED_STATUS,
+    resolve_undo_declaration_site,
+)
 import topology
 
 
@@ -518,6 +524,19 @@ class ReconcileResult:
         reconcile once the manifest is repaired. Must be surfaced by
         ``render_reconcile_result``: it names a durable, blocking queue entry, and a field that
         writes blocking state but renders nothing is a silent switch-off.
+
+    undo_declaration_violations: (Cut 1.9 Task 1b) one entry per capability-declared op_kind
+        whose adapter does not carry the trial-eligibility declaration where the runtime reads
+        it, checked against the END STATE after the migrations have run. Same durable-blocking
+        contract as ``read_provisioner_violations``. See
+        ``check_undo_declaration_conformance``.
+
+    adapter_source_edits: relpaths of operator adapter modules whose SOURCE this pass rewrote
+        (any declared migration reporting ``changed``). Load-bearing for the impact notice, not
+        cosmetic: ``adapters_*.py`` is unioned into its op_kind's hashed dependency set
+        (``effects_manifest.resolve_dependency_files``), so an edit here moves that capability's
+        ``implementation_hash`` and stales any prior acceptance -- correct for a contract change,
+        and something the operator must be TOLD rather than left to discover.
     """
     operator_project_path: str
     from_version: str
@@ -531,6 +550,9 @@ class ReconcileResult:
     read_provisioner_violations: List["ReadProvisionerViolation"] = field(
         default_factory=list)
     adapter_enrolment_blocking_reason: Optional[str] = None
+    undo_declaration_violations: List["UndoDeclarationViolation"] = field(
+        default_factory=list)
+    adapter_source_edits: List[str] = field(default_factory=list)
 
     @property
     def any_affected(self) -> bool:
@@ -1975,54 +1997,65 @@ def _class_or_in_module_base_defines(tree: ast.Module, class_name: str,
     return False
 
 
-def check_read_provisioner_conformance(
-    operator_project_dir: Path,
-) -> List[ReadProvisionerViolation]:
-    """Assert every capability-declared op_kind has a usable read-client builder.
+def _adapter_registration_candidates(
+    root: Path,
+) -> Dict[str, List[Tuple[str, str, ast.Module]]]:
+    """op_kind -> every ``(adapter_relpath, class_name, parsed module)`` in this
+    project that registers it -- ALL candidates, never just the first one found.
 
-    Static, never an import. Globs the adapter directory rather than resolving by
-    filename or manifest, which is what makes it immune to a resolution bug in
-    the migration's own target enumeration.
+    Globs the adapter directory rather than resolving by filename or manifest,
+    which is what makes every post-condition built on it immune to a resolution
+    bug in the migration's own target enumeration.
 
-    Returns one violation per capability whose read path cannot work. An empty
-    list means the property holds.
+    More than one adapter MODULE can register the SAME op_kind -- the runtime
+    registry resolves that as LAST-registered-wins, an ordering this static pass
+    has no reliable way to reproduce (it depends on the operator project's own
+    import order, not on this glob's alphabetical sort). So every candidate is
+    returned and a caller reports a violation only when NONE of them is
+    compliant; binding to any ONE candidate can go wrong in BOTH directions (a
+    shipped module that sorts early shadowing a compliant operator module, or a
+    compliant module that sorts first shadowing a non-compliant one).
 
-    More than one adapter MODULE can register the SAME op_kind
-    -- the runtime registry resolves that as LAST-registered-wins, an ordering
-    this static pass has no reliable way to reproduce (it depends on the
-    operator project's own import order, not on this glob's alphabetical
-    sort). Binding to any ONE candidate module here -- picking the
-    alphabetically-first, as an earlier version of this function did via
-    ``dict.setdefault`` -- can go wrong in BOTH directions: a shipped module
-    with no builder (e.g. ``adapters_gmail.py``, which sorts early) can shadow
-    a compliant operator module and produce a FALSE violation naming a file
-    migration deliberately excludes; symmetrically, a compliant module that
-    happens to sort first can shadow a non-compliant one and produce a FALSE
-    all-clear. So every candidate module registering a given op_kind is
-    collected, and a violation is reported only when NONE of them defines the
-    builder -- never guessing which one the runtime would actually pick.
+    ONE enumeration shared by every conformance post-condition below, rather than
+    a copy per check -- two checks each re-deriving "which adapter serves this
+    op_kind" is how they end up disagreeing.
     """
-    root = Path(operator_project_dir)
-    lib_dir = root / DEFAULT_EXTERNAL_WRITE_REL
-    caps_dir = root / DEFAULT_CAPABILITIES_REL
-
-    # op_kind -> every (adapter_relpath, class_name, parsed module) that
-    # registers it -- ALL candidates, never just the first one found.
     registry: Dict[str, List[Tuple[str, str, ast.Module]]] = {}
-    if lib_dir.is_dir():
-        for adapter_path in sorted(lib_dir.glob("adapters*.py")):
-            try:
-                tree = ast.parse(adapter_path.read_text(encoding="utf-8"))
-            except (OSError, SyntaxError):
-                continue
-            relpath = adapter_path.relative_to(root).as_posix()
-            for op_kind, class_name in _registered_op_kind_classes(tree).items():
-                registry.setdefault(op_kind, []).append((relpath, class_name, tree))
+    lib_dir = root / DEFAULT_EXTERNAL_WRITE_REL
+    if not lib_dir.is_dir():
+        return registry
+    for adapter_path in sorted(lib_dir.glob("adapters*.py")):
+        try:
+            tree = ast.parse(adapter_path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError):
+            continue
+        relpath = adapter_path.relative_to(root).as_posix()
+        for op_kind, class_name in _registered_op_kind_classes(tree).items():
+            registry.setdefault(op_kind, []).append((relpath, class_name, tree))
+    return registry
 
-    violations: List[ReadProvisionerViolation] = []
+
+def _capability_declared_op_kinds(root: Path) -> List[Tuple[str, str]]:
+    """Every ``(capability_id, op_kind)`` this project's capabilities DECLARE.
+
+    The quantifier every conformance post-condition below is scoped to. NOT every
+    REGISTERED op_kind: the wizard ships baseline adapters that register op_kinds
+    no capability declares and that legitimately do not satisfy these checks, so
+    the wider quantifier would fire in every project -- fresh builds and this
+    suite's own fixtures included -- and a guard that always fires is a guard
+    people learn to click past (the capability-declared scope-correction, and the
+    many-to-one lesson that followed it).
+
+    Skips, never guesses: a capability module that will not parse, or that
+    declares no ``OP_KIND``, is refused elsewhere and contributes nothing here.
+
+    ONE reader shared by every check, so the exempt identity surface below stays
+    a single site rather than one per post-condition.
+    """
+    caps_dir = root / DEFAULT_CAPABILITIES_REL
+    declared: List[Tuple[str, str]] = []
     if not caps_dir.is_dir():
-        return violations
-
+        return declared
     for cap_path in sorted(caps_dir.glob(f"*{CAPABILITY_MODULE_SUFFIX}.py")):
         # resolver-monopoly-exempt: a CAPABILITY module's stem is not a guess at
         # its identity -- it IS the canonical identity, by definition (see
@@ -2038,7 +2071,28 @@ def check_read_provisioner_conformance(
         op_kind = _module_level_string_constants(cap_tree).get("OP_KIND", "")
         if not op_kind:
             continue  # a capability declaring no op_kind is refused elsewhere
+        declared.append((capability_id, op_kind))
+    return declared
 
+
+def check_read_provisioner_conformance(
+    operator_project_dir: Path,
+) -> List[ReadProvisionerViolation]:
+    """Assert every capability-declared op_kind has a usable read-client builder.
+
+    Static, never an import. See ``_adapter_registration_candidates`` for how
+    candidates are enumerated (and why every candidate is considered rather than
+    one) and ``_capability_declared_op_kinds`` for why the quantifier is
+    capability-declared op_kinds rather than every registration.
+
+    Returns one violation per capability whose read path cannot work. An empty
+    list means the property holds.
+    """
+    root = Path(operator_project_dir)
+    registry = _adapter_registration_candidates(root)
+
+    violations: List[ReadProvisionerViolation] = []
+    for capability_id, op_kind in _capability_declared_op_kinds(root):
         candidates = registry.get(op_kind)
         if not candidates:
             violations.append(ReadProvisionerViolation(
@@ -2129,6 +2183,225 @@ def record_read_provisioner_conformance(
                 f"in {v.adapter_relpath}. This is a change to the adapter, not to "
                 f"`{v.capability_id}` itself -- rebuilding the capability will "
                 "not fix it.")
+        kept.append({
+            "mechanism_id": v.capability_id,
+            "writer_relpath": v.adapter_relpath or (
+                f"{DEFAULT_CAPABILITIES_REL.as_posix()}/"
+                f"{v.capability_id}{CAPABILITY_MODULE_SUFFIX}.py"),
+            "entrypoint_relpath": None,
+            "requested_at": _utcnow_iso(),
+            "from_version": from_version,
+            "to_version": to_version,
+            "kind": v.kind,
+            "op_kind": v.op_kind,
+            "reason": v.reason,
+            "suggested_next_step": next_step,
+            "status": "pending",
+        })
+
+    if kept == existing:
+        return
+    _atomic_write(path, json.dumps(kept, indent=2, ensure_ascii=False,
+                                   sort_keys=True) + "\n")
+
+
+# ===== The UNDO-DECLARATION conformance POST-CONDITION =========================
+#
+# Cut 1.9 clause (c). Same shape, same reasoning, and the same two scope decisions
+# as the read-provisioner post-condition above -- see that section's header
+# comment; everything it says about capability-declared quantification and about
+# being static rather than importing operator code applies here unchanged.
+#
+# The question it asks of the END STATE, after the migrations have run: for every
+# op_kind a capability in this project declares, does the adapter class that
+# actually defines `undo_one` carry the trial-eligibility declaration where
+# `adapter_registry._resolve_undo_declaration` will find it?
+#
+# What it deliberately does NOT check: the declaration's VALUE. `True` is a
+# semantic claim about what a vendor call does, and only a human reading
+# `undo_one` can make it -- an upgrade that set it True on the operator's behalf
+# would be forging consent at a gate that authorizes an external write. So the
+# division is: this post-condition guards DELIVERY of the contract clause (the
+# declaration site exists, in the class the runtime reads), and
+# `trial_eligibility.check_trial_eligibility` guards CONSENT (the value is
+# actually True). A freshly emitted adapter is conformant here and still refused
+# a trial there, which is correct on both counts.
+
+
+@dataclass(frozen=True)
+class UndoDeclarationViolation:
+    """One capability-declared op_kind whose clause-(c) declaration is not where
+    the runtime resolver reads it.
+
+    ``kind`` distinguishes the two causes because the REPAIR differs: a missing
+    declaration is added, whereas a SUPERSEDED one already exists in the file and
+    must be re-declared on the overriding class. Telling an operator to "add the
+    declaration" to a file that already has one sends them looking in the wrong
+    class -- which is exactly why the kernel has a distinct
+    ``UNDO_DECLARATION_SUPERSEDED`` sentinel rather than reporting both as
+    "nothing declared it".
+    """
+
+    capability_id: str
+    op_kind: str
+    adapter_relpath: Optional[str]
+    adapter_class: str
+    kind: str
+    reason: str
+
+
+_UNDO_DECLARATION_MISSING_KIND = "undo_declaration_missing"
+_UNDO_DECLARATION_SUPERSEDED_KIND = "undo_declaration_superseded"
+
+
+def check_undo_declaration_conformance(
+    operator_project_dir: Path,
+) -> List[UndoDeclarationViolation]:
+    """Assert every capability-declared op_kind carries the clause-(c)
+    declaration where the runtime will read it.
+
+    Resolution is delegated ENTIRELY to
+    ``undo_declaration_migration.resolve_undo_declaration_site`` -- the SAME
+    resolver the migration uses to decide where to write. A detector and an
+    inserter that each decide for themselves which class they mean is the exact
+    F-1 shared-resolver defect; there is one algorithm, so they cannot drift.
+
+    A capability whose op_kind has NO registered adapter is deliberately NOT
+    reported here: ``check_read_provisioner_conformance`` already reports that
+    same fact as ``no_registered_adapter``, and two blocking entries for one cause
+    is noise an operator has to disentangle.
+
+    Returns one violation per non-conformant capability-declared op_kind. An empty
+    list means the property holds.
+    """
+    root = Path(operator_project_dir)
+    registry = _adapter_registration_candidates(root)
+
+    violations: List[UndoDeclarationViolation] = []
+    for capability_id, op_kind in _capability_declared_op_kinds(root):
+        candidates = registry.get(op_kind)
+        if not candidates:
+            continue  # already reported by the read-provisioner post-condition
+
+        sites = [(relpath, class_name,
+                  resolve_undo_declaration_site(tree, class_name))
+                 for relpath, class_name, tree in candidates]
+
+        # Compliant when ANY candidate is compliant -- the runtime resolves
+        # last-registered-wins and this static pass cannot reproduce that
+        # ordering, so it never guesses which module would have won.
+        if any(site.status == UNDO_DECLARATION_DECLARED
+               for _relpath, _class_name, site in sites):
+            continue
+
+        # None are compliant. Name one an operator can actually act on: prefer a
+        # candidate that is NOT a wizard-shipped module (those are excluded from
+        # migration and editing one would do nothing), and prefer a SUPERSEDED
+        # candidate over a missing one, because that is the more specific repair.
+        reportable = [s for s in sites
+                      if Path(s[0]).name not in _SHIPPED_ADAPTER_MODULE_NAMES]
+        pool = reportable or sites
+        superseded = [s for s in pool
+                      if s[2].status == UNDO_DECLARATION_SUPERSEDED_STATUS]
+        relpath, class_name, site = (superseded or pool)[0]
+
+        if site.status == UNDO_DECLARATION_SUPERSEDED_STATUS:
+            violations.append(UndoDeclarationViolation(
+                capability_id=capability_id, op_kind=op_kind,
+                adapter_relpath=relpath, adapter_class=class_name,
+                kind=_UNDO_DECLARATION_SUPERSEDED_KIND,
+                reason=(
+                    f"`{capability_id}` can only be proved safe by a supervised "
+                    "trial run that makes the change and then puts everything "
+                    f"back. `{class_name}` in {relpath} writes its own version of "
+                    "the undo step, but the note saying the undo puts things back "
+                    "exactly as they were is attached further up, to code this "
+                    "class replaced -- so it does not count for the version that "
+                    "actually runs, and the trial cannot go ahead"),
+            ))
+            continue
+
+        detail = ("has no note saying whether its undo step puts things back "
+                  "exactly as they were"
+                  if site.status == UNDO_DECLARATION_MISSING else
+                  "has no undo step in that file at all, so there is nothing "
+                  "recording whether a change it makes can be put back")
+        violations.append(UndoDeclarationViolation(
+            capability_id=capability_id, op_kind=op_kind,
+            adapter_relpath=relpath, adapter_class=class_name,
+            kind=_UNDO_DECLARATION_MISSING_KIND,
+            reason=(
+                f"`{capability_id}` can only be proved safe by a supervised trial "
+                "run that makes the change and then puts everything back, and "
+                f"`{class_name}` in {relpath} {detail} -- so that trial cannot go "
+                "ahead and this capability cannot be approved for live use"),
+        ))
+    return violations
+
+
+def record_undo_declaration_conformance(
+    operator_project_dir: Path,
+    violations: Sequence[UndoDeclarationViolation],
+    *,
+    from_version: str,
+    to_version: str,
+) -> None:
+    """Persist the clause-(c) post-condition's verdict as durable, blocking,
+    visible state.
+
+    Mirrors ``record_read_provisioner_conformance`` exactly, for the same reasons
+    -- read that function's docstring for the full account. In particular:
+
+      * the EXISTING pending-migrations queue, no new blocking channel and no new
+        persisted source of truth. The project-wide safety predicate selects every
+        entry with a non-empty ``writer_relpath`` and ``pending`` status
+        regardless of kind or attribution, so an entry written here is already
+        blocking, already named in the operator-facing state report, and already
+        withholds the all-clear;
+      * NO content hash (``paused_content_sha256`` deliberately omitted): with one
+        recorded, editing an unrelated line in the adapter would satisfy the
+        stateless auto-reaper and un-block a project whose op_kind is still
+        trial-ineligible. This kind is cleared by re-running the check -- which
+        happens on every upgrade and every ``reconcile`` -- and by nothing else;
+      * SET-RECONCILED, not append-only. Call this UNCONDITIONALLY: passing an
+        empty ``violations`` is what clears entries once the adapters are fixed.
+        An append-only recorder here would be a permanent block.
+
+    Single authority: only the two kinds this check owns are added or removed.
+    Every other entry is left exactly as found.
+    """
+    owned_kinds = {_UNDO_DECLARATION_MISSING_KIND,
+                   _UNDO_DECLARATION_SUPERSEDED_KIND}
+    path = Path(operator_project_dir) / MIGRATION_QUEUE_REL
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        if not isinstance(existing, list):
+            existing = []
+    except (json.JSONDecodeError, OSError):
+        existing = []
+
+    kept = [e for e in existing
+            if not (isinstance(e, dict) and e.get("kind") in owned_kinds)]
+
+    for v in violations:
+        if v.kind == _UNDO_DECLARATION_SUPERSEDED_KIND:
+            next_step = (
+                f"Ask your assistant to move the note about undoing onto "
+                f"`{v.adapter_class}` in {v.adapter_relpath} -- the class that "
+                "writes its own undo step -- rather than leaving it on the code "
+                "that class replaced. This is a change to the adapter, not to "
+                f"`{v.capability_id}` itself; rebuilding the capability will not "
+                "fix it.")
+        else:
+            next_step = (
+                f"Ask your assistant to check the undo step on "
+                f"`{v.adapter_class}` in {v.adapter_relpath} and record whether "
+                "it puts things back exactly as they were. It must only say yes "
+                "if that is genuinely what the undo does -- saying yes when the "
+                "undo works by removing what was added is worse than leaving it "
+                "as it is. This is a change to the adapter, not to "
+                f"`{v.capability_id}` itself; rebuilding the capability will not "
+                "fix it.")
         kept.append({
             "mechanism_id": v.capability_id,
             "writer_relpath": v.adapter_relpath or (
@@ -3334,9 +3607,19 @@ def _pause_notice_lines(m: MechanismReport) -> List[str]:
 
 def render_impact_notice(
     mechanisms: List[MechanismReport], from_version: str, to_version: str,
+    *,
+    adapter_source_edits: Sequence[str] = (),
 ) -> str:
     """A plain-language, non-technical impact notice: what changed, which
     capability is affected, what happens next. No jargon.
+
+    ``adapter_source_edits`` (Cut 1.9 Task 1b) names the operator adapter modules
+    THIS pass rewrote, and is what makes the notice state the re-acceptance
+    consequence. It is a separate argument rather than something derived from
+    ``mechanisms`` because the two are independent: a fully gate-conformant
+    project with nothing scanner-flagged can still have an adapter rewritten by a
+    contract-change migration, which is exactly the case that previously produced
+    no notice at all.
 
     F-43 fix: there is no unconditional "keeps running exactly as before" line
     any more (see ``_pause_notice_lines``) — a continuity claim is only ever
@@ -3384,12 +3667,21 @@ def render_impact_notice(
         "",
         opener,
         "",
-        "While applying that check, it found something built before this rule existed "
-        "that does not yet follow it.",
-        "",
-        "## What's affected",
-        "",
     ]
+    if mechanisms:
+        lines += [
+            "While applying that check, it found something built before this rule "
+            "existed that does not yet follow it.",
+            "",
+            "## What's affected",
+            "",
+        ]
+    else:
+        # Nothing was scanner-flagged. Saying "it found something that does not
+        # follow the rule" would be false here -- the only thing that happened is
+        # that this upgrade updated an adapter file, which is what the section
+        # below is about.
+        lines += ["Nothing in your project was found to be breaking that check."]
     for m in mechanisms:
         if _writer_state_of(m) == _WRITER_STATE_NON_LIVE:
             # Replaces the bullet outright -- every sentence below would be
@@ -3483,6 +3775,47 @@ def render_impact_notice(
     # "What happens next" is assembled from what is actually in this
     # notice, never from a fixed template: a bullet that names a file, or offers
     # a route, must be true of a file that is really present.
+    if adapter_source_edits:
+        # THE RE-ACCEPTANCE CONSEQUENCE, stated rather than left to be discovered.
+        # `adapters_*.py` is UNIONED into its op_kind's hashed dependency set
+        # (`effects_manifest.resolve_dependency_files`), so rewriting one moves
+        # that capability's `implementation_hash` and every acceptance record
+        # bound to the old value stops matching. That is CORRECT and DESIRED for a
+        # contract change -- a changed contract should re-require proof -- but an
+        # operator who finds their approved capability switched off with no
+        # explanation has been failed by this notice, not protected by it.
+        #
+        # The timing claim is deliberately precise. The staleness pass that
+        # actually flips the approval back off runs earlier in this same
+        # reconcile, so it has not seen the edit made below it; the health surface
+        # recomputes the hash on every read and will report the change
+        # immediately, and the approval is withdrawn by the next run of this
+        # check. Saying "has been switched off" here would be an overclaim about
+        # this exact moment, which is the class of thing this notice keeps getting
+        # corrected for.
+        #
+        # The consequence sentence is ONE contiguous string literal, with no
+        # interpolated placeholder inside it, because `notice_fidelity_lint` pins
+        # it verbatim -- a sentence split across an f-string placeholder is a
+        # sentence a verbatim check can no longer see.
+        lines += ["", "## Files this upgrade updated for you", ""]
+        for relpath in adapter_source_edits:
+            lines.append(
+                f"- **{relpath}**: this is the part that actually talks to the "
+                "outside system for one of your capabilities. This upgrade added "
+                "what the new safety rule needs to it.")
+        lines.append(
+            "  - Your approval for a capability is tied to the exact contents of "
+            "this file, so an approval you already gave no longer covers what is "
+            "now on disk. Your system will report that capability as changed since "
+            "you approved it, and it will be switched off again the next time this "
+            "check runs. That is deliberate: the safety rule it was approved "
+            "against changed, so the proof has to be earned again.")
+        lines.append(
+            "  - Nothing was deleted and no saved access (credentials) was "
+            "touched. To put it back on, tell your assistant you want to try that "
+            "capability again and approve it again.")
+
     non_live = [m for m in mechanisms
                 if _writer_state_of(m) == _WRITER_STATE_NON_LIVE]
     needs_person = [m for m in mechanisms
@@ -3490,7 +3823,16 @@ def render_impact_notice(
     rebuildable = [m for m in mechanisms
                    if _writer_state_of(m) == _WRITER_STATE_BLOCKING_LIVE_ENABLE]
     lines += ["", "## What happens next", ""]
-    if mechanisms and len(non_live) == len(mechanisms):
+    if not mechanisms:
+        # Adapter-edit-only notice. The "only the part that changes things was
+        # switched off" line below is about a scanner-flagged writer being paused,
+        # and nothing was paused here -- claiming it was would be a false alarm on
+        # the surface that exists to prevent them.
+        lines.append(
+            "- Nothing was paused and nothing was deleted. The only thing that "
+            "needs anything from you is trying the capability that uses the file "
+            "above and approving it again.")
+    elif len(non_live) == len(mechanisms):
         # Nothing was switched off, so the reassurance below would be describing
         # something that never happened.
         lines.append(
@@ -3759,22 +4101,22 @@ def reconcile_upgrade(
             paused_op_kinds=paused_op_kinds,
         ))
 
-    notice_path: Optional[Path] = None
     if mechanisms:
         # ONE classification pass, through the SAME classifier the
         # operator's health surface reads, so the notice and the health surface
-        # can never disagree about the same file. Runs HERE and not inside the
-        # renderer for two reasons: every entry this pass queued is already on
-        # disk (``_append_migration_request``, in the loop above), which is what
-        # the classifier reads; and it keeps ``render_impact_notice`` a pure
-        # function of its arguments. Fail-safe -- an empty result leaves each
-        # ``writer_state`` unset, which renders the pre-existing cautious
-        # wording. See ``_writer_states_by_relpath``.
+        # can never disagree about the same file. Runs HERE -- not inside the
+        # renderer, and not later alongside the render call below -- for three
+        # reasons: every entry the scanner loop queued is already on disk
+        # (``_append_migration_request``, in the loop above), which is what the
+        # classifier reads; nothing queued AFTER this point is a bespoke writer
+        # this classifier has an opinion about, so moving it later would change
+        # nothing except the risk of it seeing half-written state; and it keeps
+        # ``render_impact_notice`` a pure function of its arguments. Fail-safe --
+        # an empty result leaves each ``writer_state`` unset, which renders the
+        # pre-existing cautious wording. See ``_writer_states_by_relpath``.
         writer_states = _writer_states_by_relpath(operator_project_dir, build_repo_root)
         for m in mechanisms:
             m.writer_state = writer_states.get(m.writer_relpath, "")
-        text = render_impact_notice(mechanisms, from_version, to_version)
-        notice_path = write_impact_notice(operator_project_dir, upgrade_id, text)
 
     # (Task 4, F-2) Heal same-id descriptor twins FIRST, before any of the passes below read
     # the descriptor set again -- a corrupted registry (two rows sharing an id) is cleaned up
@@ -3801,17 +4143,34 @@ def reconcile_upgrade(
         from_version=from_version, to_version=to_version,
     )
 
+    # Which operator adapter modules this pass actually REWROTE. Derived from the
+    # migration outcomes rather than re-read off disk, so it names exactly what
+    # changed. Load-bearing for the notice below: an edit here moves the
+    # capability's implementation_hash and therefore stales any prior acceptance.
+    adapter_source_edits = sorted({o.relpath for o in adapter_migration_outcomes
+                                   if o.changed})
+
     # A completed run clears any marker a previous crashed run left behind --
     # otherwise a one-off failure would block the project permanently.
     _clear_reconcile_incomplete(operator_project_dir)
 
-    # THE POST-CONDITION. Runs after the migrations, against the end state, so a
-    # gap in what they enumerated cannot produce a green upgrade with a broken
-    # read path. Its verdict is durable and blocking, never a printed note.
+    # THE POST-CONDITIONS. Both run after the migrations, against the end state,
+    # so a gap in what they enumerated cannot produce a green upgrade with a
+    # broken read path or a capability that can never be proved. Their verdicts
+    # are durable and blocking, never a printed note.
     read_provisioner_violations = check_read_provisioner_conformance(
         operator_project_dir)
     record_read_provisioner_conformance(
         operator_project_dir, read_provisioner_violations,
+        from_version=from_version, to_version=to_version,
+    )
+    # (Cut 1.9 Task 1b) The clause-(c) post-condition. UNCONDITIONAL recording,
+    # for the same set-reconciled reason as every recorder here: passing an empty
+    # list is what clears a previously written entry once the adapter is fixed.
+    undo_declaration_violations = check_undo_declaration_conformance(
+        operator_project_dir)
+    record_undo_declaration_conformance(
+        operator_project_dir, undo_declaration_violations,
         from_version=from_version, to_version=to_version,
     )
     # UNCONDITIONAL call: passing None when there is no
@@ -3823,6 +4182,19 @@ def reconcile_upgrade(
         operator_project_dir, adapter_targets_blocking_reason,
         from_version=from_version, to_version=to_version,
     )
+
+    # The impact notice is written LAST, after the migration pass, so it can state
+    # the re-acceptance consequence of an adapter edit this same pass made. It is
+    # written whenever there is something to say -- a scanner-flagged mechanism OR
+    # an adapter this pass rewrote. Gating it on `mechanisms` alone meant an
+    # upgrade could rewrite an operator's adapter, stale their acceptance, and
+    # leave no notice at all. `writer_state` was already stamped above, against
+    # the queue state the classifier is meant to read.
+    notice_path: Optional[Path] = None
+    if mechanisms or adapter_source_edits:
+        text = render_impact_notice(mechanisms, from_version, to_version,
+                                    adapter_source_edits=adapter_source_edits)
+        notice_path = write_impact_notice(operator_project_dir, upgrade_id, text)
 
     return ReconcileResult(
         operator_project_path=str(operator_project_dir),
@@ -3837,7 +4209,8 @@ def reconcile_upgrade(
             # migration queue, so pointing at the queue file for it would name
             # the wrong file.
             if (mechanisms or stale_acceptance_reset or predicate_stubs_scaffolded
-                or read_provisioner_violations or adapter_targets_blocking_reason)
+                or read_provisioner_violations or adapter_targets_blocking_reason
+                or undo_declaration_violations)
             else None
         ),
         stale_acceptance_reset=stale_acceptance_reset,
@@ -3845,6 +4218,8 @@ def reconcile_upgrade(
         same_id_twins_healed=same_id_twins_healed,
         read_provisioner_violations=read_provisioner_violations,
         adapter_enrolment_blocking_reason=adapter_targets_blocking_reason,
+        undo_declaration_violations=undo_declaration_violations,
+        adapter_source_edits=adapter_source_edits,
     )
 
 
@@ -3869,14 +4244,17 @@ def render_reconcile_result(result: ReconcileResult) -> str:
     every field on ``ReconcileResult`` that can carry something to report,
     rather than naming a subset of them: ``mechanisms``, ``stale_acceptance_reset``,
     ``predicate_stubs_scaffolded``, ``read_provisioner_violations``,
-    ``same_id_twins_healed``, and ``adapter_enrolment_blocking_reason``. If a
+    ``same_id_twins_healed``, ``adapter_enrolment_blocking_reason``,
+    ``undo_declaration_violations``, and ``adapter_source_edits``. If a
     future field is added to ``ReconcileResult`` that a caller can observe, add
     it here too, in both the guard and the render loop below -- not just one."""
     if not (result.mechanisms or result.stale_acceptance_reset
             or result.predicate_stubs_scaffolded
             or result.read_provisioner_violations
             or result.same_id_twins_healed
-            or result.adapter_enrolment_blocking_reason):
+            or result.adapter_enrolment_blocking_reason
+            or result.undo_declaration_violations
+            or result.adapter_source_edits):
         return ""
     lines = ["", "Upgrade safety check found something to review:"]
     for m in result.mechanisms:
@@ -3980,6 +4358,25 @@ def render_reconcile_result(result: ReconcileResult) -> str:
                 f"system in read-only mode yet -- the adapter in "
                 f"{violation.adapter_relpath} needs a read-only reader added to "
                 "it (this is an adapter change, not a rebuild of the capability)")
+    for violation in result.undo_declaration_violations:
+        if violation.kind == _UNDO_DECLARATION_SUPERSEDED_KIND:
+            lines.append(
+                f"  - {violation.capability_id}: the note saying its undo puts "
+                f"things back exactly as they were is attached to the wrong place "
+                f"in {violation.adapter_relpath}, so it cannot be tried out safely "
+                "yet (this is an adapter change, not a rebuild of the capability)")
+        else:
+            lines.append(
+                f"  - {violation.capability_id}: nothing records whether its undo "
+                f"puts things back exactly as they were, so it cannot be tried out "
+                f"safely yet -- the adapter in {violation.adapter_relpath} needs "
+                "that checked and recorded (this is an adapter change, not a "
+                "rebuild of the capability)")
+    for relpath in result.adapter_source_edits:
+        lines.append(
+            f"  - {relpath}: this upgrade updated it for you, so any approval you "
+            "had already given for the capability that uses it no longer covers it "
+            "-- you will be asked to try it and approve it again")
     for capability_id in result.same_id_twins_healed:
         lines.append(
             f"  - {capability_id}: duplicate entries sharing this id were found "

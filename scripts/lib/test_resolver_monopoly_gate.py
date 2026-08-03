@@ -867,8 +867,12 @@ class ResolverMonopolyGateTests(unittest.TestCase):
             # DEFINED to carry.
             "scripts/lib/upgrade_reconcile.py"
             "::interpolated_sibling_prefix::resolve_adapter_migration_targets": 1,
+            # Moved (not added) when a SECOND conformance post-condition needed
+            # the same quantifier: the capability-declared-op_kind reader was
+            # extracted so both checks share it, which keeps this surface at ONE
+            # entry instead of one per post-condition.
             "scripts/lib/upgrade_reconcile.py"
-            "::filename_stem_used_as_id::check_read_provisioner_conformance": 1,
+            "::filename_stem_used_as_id::_capability_declared_op_kinds": 1,
         }
         actual: Dict[str, int] = {}
         unjustified = []

@@ -230,6 +230,23 @@ class GmailMessageTrashAdapter:
         "reverse_op_kind": OP_UNTRASH,
     }
 
+    # TRIAL-ELIGIBILITY CONTRACT CLAUSE (Cut 1.9, v0.23.0 -- see
+    # adapter_registry.py's Adapter protocol docstring for the semantics and
+    # trial_eligibility.py clause (c) for why the trial protocol needs it).
+    # DECLARED HERE BECAUSE IT IS PROVABLE FROM THIS CLASS'S OWN undo_one:
+    # `undo_one` below calls `_set_exact_labels(..., undo_ref["prior_label_ids"])`,
+    # which reads the message's CURRENT label set and applies the minimal delta
+    # to make it EXACTLY the RECORDED PRIOR set. That is an absolute-state
+    # restore, not a compensating action: run it twice and the second run
+    # computes an empty delta; run it when the apply never landed and it also
+    # computes an empty delta. Both are the convergence the recovery path needs,
+    # because after a crash the journal can only say the apply was INTENDED.
+    # Deliberately declared on THIS class, next to the `undo_one` it describes --
+    # `adapter_registry._resolve_undo_declaration` honours a declaration only at
+    # or below the class defining `undo_one`, so a subclass that overrode
+    # `undo_one` would have to re-declare rather than inherit this claim.
+    UNDO_IS_ABSOLUTE_STATE_RESTORE = True
+
     def plan(self, params: Optional[dict]) -> List[EffectUnit]:
         params = params or {}
         units: List[EffectUnit] = []
@@ -307,6 +324,25 @@ class GmailMessageUntrashAdapter:
         "reverse_op_kind": OP_TRASH,
     }
 
+    # TRIAL-ELIGIBILITY CONTRACT CLAUSE (Cut 1.9, v0.23.0): DELIBERATELY NOT
+    # DECLARED. Do not "tidy this up" by adding
+    # UNDO_IS_ABSOLUTE_STATE_RESTORE = True here -- that would be a FALSE
+    # declaration at a gate that authorizes an external write.
+    # Evidence, from this class's own `undo_one` below: it calls
+    # `_trash_labels(...)`, a FIXED delta (add TRASH, remove INBOX) that never
+    # reads a recorded prior state. Its `apply_one` sets the message's labels to
+    # the full pre-trash set, which may ADD labels the message did not carry
+    # while trashed; re-trashing removes INBOX and adds TRASH but leaves those
+    # additions in place, so the message does not return to the state the trial
+    # found it in. Repeating the undo is harmless for the two labels it names and
+    # says nothing about the rest -- which is exactly the "declared, not proven"
+    # bound the kernel cannot check for us. Undeclared is the fail-closed
+    # outcome: `trial_eligibility` clause (c) refuses this op_kind a journaled
+    # trial, and it must reach acceptance another way.
+    # (This op_kind is independently refused today for a second reason: it
+    # declares neither `verify_apply_landed` nor `verify_undo_restored`, so
+    # clause (b) refuses it too. That gap predates this cut.)
+
     def plan(self, params: Optional[dict]) -> List[EffectUnit]:
         params = params or {}
         units: List[EffectUnit] = []
@@ -359,6 +395,17 @@ class GmailMessageModifyLabelsAdapter:
         "prestate_requirement": "prior_label_ids",
         "reverse_op_kind": OP_MODIFY_LABELS,
     }
+
+    # TRIAL-ELIGIBILITY CONTRACT CLAUSE (Cut 1.9, v0.23.0). DECLARED, and
+    # provable from this class's own `undo_one` for the same reason
+    # GmailMessageTrashAdapter's is: it calls `_set_exact_labels(...,
+    # undo_ref["prior_label_ids"])`, restoring the FULL recorded prior label set
+    # rather than reversing the specific add/remove pair -- which is what this
+    # class's own docstring already gives as the reason for that choice ("a later
+    # concurrent edit could otherwise make a naive swap land on the wrong state;
+    # restoring the full prestate is exact regardless"). Exact-and-absolute is
+    # precisely the idempotency the journaled trial's recovery path requires.
+    UNDO_IS_ABSOLUTE_STATE_RESTORE = True
 
     def plan(self, params: Optional[dict]) -> List[EffectUnit]:
         params = params or {}
@@ -423,6 +470,20 @@ class GmailFilterCreateAdapter:
         "prestate_requirement": None,
         "reverse_op_kind": None,  # no native "un-create"; delete is the reverse.
     }
+
+    # TRIAL-ELIGIBILITY CONTRACT CLAUSE (Cut 1.9, v0.23.0): DELIBERATELY NOT
+    # DECLARED, and this one must stay refused on TWO INDEPENDENT GROUNDS that
+    # have to keep agreeing.
+    #   (1) Clause (a): `plan()` below carries `undo_ref=None` for every unit, so
+    #       there is nothing to reverse a unit WITH -- see the UNDO_DESCRIPTOR's
+    #       own `"reverse_op_kind": None` above ("no native un-create").
+    #   (2) Clause (c), this one: `undo_one` DELETES the filter it created. That
+    #       is the textbook relative compensating action, and it is not even
+    #       idempotent -- it reads the created id from instance state and `del`s
+    #       it, so a second call raises. Repeating it after a crash could delete
+    #       something the trial never created.
+    # Declaring the clause here would break the agreement between the two bans
+    # and would be a false declaration besides.
 
     def __init__(self) -> None:
         self._created_filter_ids: Dict[str, str] = {}
