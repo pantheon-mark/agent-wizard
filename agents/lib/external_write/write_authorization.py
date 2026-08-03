@@ -47,13 +47,15 @@ earn. A DECLARATION is still mandatory, and so is everything else.
 
 The trial intent additionally NARROWS what is permitted, in two ways:
 
-  * The target the gate will actually act on must be one of
-    `write_gate.LIVE_BOUNDED_TEST_TARGETS`. Every other value is refused, each
-    for its own reason: `dry_run` performs no write at all, so a restoration
-    proof derived from it would be evidence of nothing; `copy` lands on a
-    separated surface, which cannot produce evidence about the operator's live
-    record; an affirmative live target requires the very acceptance a trial
-    exists to earn; and an absent signal is refused, as it is everywhere else.
+  * The target the gate will actually act on must be exactly `TRIAL_TARGET`.
+    Every other value is refused, each for its own reason: `dry_run` performs no
+    write at all, so a restoration proof derived from it would be evidence of
+    nothing; `copy` lands on a separated surface, which cannot produce evidence
+    about the operator's live record; an affirmative live target requires the
+    very acceptance a trial exists to earn; `bounded_sample` is the OTHER
+    live-bounded target and is refused for a reason of its own, given at
+    `TRIAL_TARGET`'s own definition below; and an absent signal is refused, as it
+    is everywhere else.
     The check is made against the target the GATE resolves
     (`write_gate.resolve_effective_target`), never the requested string — an
     operation on the copy-surface convention resolves to `copy` no matter what
@@ -74,10 +76,23 @@ structural facts, not one convention, put the preflight on the path:
      trial executor is handed one; it has no other source of the units to apply,
      the dispatch to apply them through, or the audit to record.
 
-  2. Constructing an `AuthorizedPlan` requires this module's private
-     construction token. Every other construction — from any other module, with
-     any arguments whatsoever — raises `AuthorizationRequiredError` before the
-     object exists. The token is passed at exactly one place in this package.
+  2. Bringing an `AuthorizedPlan` into existence requires this module's private
+     construction token, and "bringing into existence" is meant to cover every
+     route Python offers, not just `AuthorizedPlan(...)`:
+       * a direct construction without the token raises;
+       * the token is an `InitVar`, so it is NOT retained as a field — it cannot
+         be read back off a plan you were legitimately handed, and
+         `dataclasses.replace` cannot carry it forward, so `replace` raises
+         (this is the route that made an earlier version of this docstring
+         false: while the token was an ordinary field, `replace` inherited it and
+         could swap the units, the dispatch, the target, or escalate an ordinary
+         plan to a trial plan, all while holding no token);
+       * `__copy__` / `__deepcopy__` / `__reduce__` / `__replace__` all raise, so
+         copying, deep-copying, pickling and (on interpreters that have it) the
+         `copy.replace` protocol cannot yield a carrier that skipped
+         `__post_init__`. An authorization is not a portable document: reviving
+         one in another process, at another time, with the registry in another
+         state, is not something the gate ever authorized.
 
   3. A trial-intent plan re-validates its own preconditions in
      `__post_init__`, so the invariants hold at CONSUMPTION time, not merely at
@@ -85,9 +100,12 @@ structural facts, not one convention, put the preflight on the path:
      `trial_eligibility.TrialEligibility`, eligible, with no refusals, for THIS
      operation kind; the plan's units must be byte-equal to the units that
      verdict blessed (a check-then-swap cannot substitute a different plan after
-     the blessing); the resolved target must be live-bounded; a dispatch must
-     exist; and the recovery capsules must be a mapping. An ordinary plan is
-     forbidden from carrying a trial verdict at all.
+     the blessing); the resolved target must be the trial target; a dispatch must
+     exist AND be the one the registry currently holds for this operation kind
+     (`dispatch is None` alone was not enough — a plan carrying a DIFFERENT
+     adapter's dispatch would apply the blessed units through someone else's
+     `apply_one`); and the recovery capsules must be a mapping. An ordinary plan
+     is forbidden from carrying a trial verdict at all.
 
   4. `authorize_operation` calls the preflight UNCONDITIONALLY on the trial
      branch — there is no flag, no argument and no early exit that skips it —
@@ -95,13 +113,19 @@ structural facts, not one convention, put the preflight on the path:
      operation never consumes a blast-radius slot it was never entitled to.
 
 DISCLOSED BOUND — the ceiling is unchanged: build-time enforcement plus
-operator-as-approver. This is not a runtime sandbox and not an OS-level control.
-An author who deliberately imports this module's private token AND hand-builds an
-eligible-looking verdict can forge a trial authorization, exactly as an author
-could always mis-implement `undo_one`. What is structurally true is narrower and
-is the thing that matters: no path through this package's own production code
-yields a trial authorization without the preflight having returned an eligible
-verdict for exactly the units that will be applied.
+operator-as-approver. This is not a runtime sandbox and not an OS-level control,
+and the bound is stated as what it actually is rather than as the strongest thing
+that could be said. Two forgeries remain available to an author who sets out to
+commit one: reaching into this module for the private `_ISSUED_BY_AUTHORIZE`
+sentinel AND hand-building an eligible-looking verdict (nothing can check a
+verdict's provenance — it is an ordinary frozen record); or rewriting a genuine
+plan in place with `object.__setattr__`, which no Python object can prevent.
+Both are exactly as available as mis-implementing `undo_one` has always been.
+What is structurally true is narrower and is the thing the design rests on: no
+path through this package's own production code, and no ordinary
+reconstruction of a plan a consumer was handed, yields a trial authorization
+without the preflight having returned an eligible verdict for exactly the units
+that will be applied.
 
 ------------------------------------------------------------------------------
 What this module does NOT do
@@ -134,7 +158,7 @@ Stdlib only — no third-party dependencies.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
@@ -161,6 +185,27 @@ EXECUTION_INTENTS: Tuple[str, ...] = (EXECUTION_INTENT_ORDINARY,
 # the convention `write_gate` already established with "write_gate_v1".
 AUTHORIZATION_GATE_NAME = "write_authorization_v1"
 
+# The ONE target a trial may run against — deliberately narrower than the gate's
+# `LIVE_BOUNDED_TEST_TARGETS`, which this does NOT redefine.
+#
+# Why one and not both. The two live-bounded targets are not interchangeable:
+# the gate's own branch distinguishes them as perform-then-revert
+# (`native_undo`) versus a bounded live sample (`bounded_sample`), and only the
+# first describes what a trial does. A trial ALWAYS reverts — that is the whole
+# point of `apply -> verify -> undo -> verify-restored`. So permitting
+# `bounded_sample` would mean a capability whose operator-DECLARED test target
+# says "a bounded sample, which persists" instead undergoes a reverting trial:
+# the system doing something other than what the declaration describes. That is
+# the declaration-fidelity failure this safety machinery exists to prevent, so
+# it is refused here rather than shipped inside the mechanism meant to close it.
+#
+# Fail-closed and deliberately narrow: `bounded_sample` remains perfectly legal
+# for its own, non-trial purpose (an ordinary write against a bounded-sample
+# declaration is unaffected — only the TRIAL intent is narrowed). Widening this
+# later is a one-line, reviewable change; an over-wide enforcement vocabulary
+# shipped silently is not.
+TRIAL_TARGET = "native_undo"
+
 
 class AuthorizationRequiredError(Exception):
     """Raised when something attempts to bring an `AuthorizedPlan` into
@@ -179,6 +224,13 @@ class AuthorizationRequiredError(Exception):
 # `authorize_operation`). A plain sentinel object, in the same idiom
 # `trial_eligibility._NO_BAD_KEY` uses: nothing about it is guessable or
 # reconstructible, because identity is the whole check.
+#
+# It is declared on the carrier as an `InitVar`, which is load-bearing in two
+# ways beyond documentation: the token is NOT retained as a field, so it cannot
+# be read back off a plan a consumer was legitimately handed; and
+# `dataclasses.replace` therefore cannot carry it forward, so a `replace` call
+# reaches `__post_init__` with the default `None` and is refused. Both matter
+# because a trial executor IS handed a plan.
 _ISSUED_BY_AUTHORIZE = object()
 
 
@@ -200,7 +252,9 @@ class AuthorizedPlan:
                  or None for the legacy field-write path (no registered
                  adapter). Carried so an executor uses the same captured record
                  authorization resolved, never a fresh lookup that could have
-                 changed underneath it.
+                 changed underneath it — and validated below to BE the record the
+                 registry currently holds for this operation kind, so a plan
+                 cannot carry a different adapter's dispatch.
     units:       the planned effect units, as a tuple — or None for the legacy
                  field-write path and for a dry_run (which never plans).
     gate_audit:  the gate's audit dict to merge into a successful result (e.g.
@@ -214,8 +268,11 @@ class AuthorizedPlan:
                  the per-unit recovery capsules the preflight checked, carried
                  through to whatever writes the journal. Present for the trial
                  intent; None otherwise.
-    issued_by:   must be this module's private construction token. See the
-                 module docstring's "The preflight is UNAVOIDABLE" section.
+    issued_by:   an `InitVar`, NOT a retained field: it must be this module's
+                 private construction token, and because it is not kept it can
+                 neither be read back off a plan nor carried forward by
+                 `dataclasses.replace`. See the module docstring's "The preflight
+                 is UNAVOIDABLE" section.
 
     Every invariant below is re-validated HERE rather than only at the moment
     authorization computed it, so the guarantees hold at consumption time.
@@ -230,10 +287,10 @@ class AuthorizedPlan:
     gate_audit: Optional[Dict[str, Any]]
     trial_verdict: Any = None
     recovery_capsules: Any = None
-    issued_by: Any = None
+    issued_by: InitVar[Any] = None
 
-    def __post_init__(self) -> None:
-        if self.issued_by is not _ISSUED_BY_AUTHORIZE:
+    def __post_init__(self, issued_by: Any) -> None:
+        if issued_by is not _ISSUED_BY_AUTHORIZE:
             raise AuthorizationRequiredError(
                 "an AuthorizedPlan can only be produced by "
                 "write_authorization.authorize_operation -- it is the single "
@@ -243,6 +300,24 @@ class AuthorizedPlan:
             raise AuthorizationRequiredError(
                 f"unrecognized execution intent {self.intent!r}; must be one of "
                 f"{list(EXECUTION_INTENTS)}")
+
+        # The carried dispatch must BE the record the registry holds for this
+        # operation kind. Checking only `is None` (as an earlier version did) let
+        # a plan carry a DIFFERENT adapter's dispatch, so the preflight-blessed
+        # units would be applied through someone else's `apply_one`. Identity
+        # against the registry is the same resolution both the preflight and
+        # `authorize_operation` performed, so a legitimately-issued plan always
+        # passes; a plan whose op_kind was re-registered since it was authorized
+        # correctly stops being valid, which is the fail-closed direction. The
+        # legacy field-write path has no adapter, so both sides are None and this
+        # is satisfied by agreement rather than by exemption.
+        if self.dispatch is not get_dispatch(self.op.op_kind):
+            raise AuthorizationRequiredError(
+                "this plan's adapter dispatch is not the one currently "
+                f"registered for operation kind {self.op.op_kind!r} -- a plan "
+                "may not carry another adapter's dispatch, and a plan whose "
+                "adapter was re-registered after it was authorized is no longer "
+                "the plan that was authorized")
 
         if self.intent != EXECUTION_INTENT_TRIAL:
             if self.trial_verdict is not None:
@@ -273,12 +348,12 @@ class AuthorizedPlan:
             raise AuthorizationRequiredError(
                 f"operation kind {self.op.op_kind!r} has no registered adapter, "
                 "so there is no undo_one to reverse a trial with")
-        if self.resolved_target not in LIVE_BOUNDED_TEST_TARGETS:
+        if self.resolved_target != TRIAL_TARGET:
             raise AuthorizationRequiredError(
-                f"a trial resolves to target {self.resolved_target!r}, which is "
-                "not one of the live-bounded test targets "
-                f"{sorted(LIVE_BOUNDED_TEST_TARGETS)} -- only those run the "
-                "shared live-enforcement funnel a trial's proof depends on")
+                f"a trial resolves to target {self.resolved_target!r}, but a "
+                f"trial may only run against {TRIAL_TARGET!r} -- see that "
+                "constant's own definition for why the other live-bounded target "
+                "is not interchangeable with it")
         if not self.units or tuple(self.units) != tuple(verdict.units):
             raise AuthorizationRequiredError(
                 "a trial-intent AuthorizedPlan must carry EXACTLY the units the "
@@ -289,6 +364,55 @@ class AuthorizedPlan:
                 "a trial-intent AuthorizedPlan must carry the per-unit recovery "
                 "capsules the preflight checked, as a mapping of unit_id -> "
                 f"capsule; got {type(self.recovery_capsules).__name__}")
+
+    # -- Reconstruction is not authorization ---------------------------------
+    #
+    # A guard that only covers `AuthorizedPlan(...)` is not a construction
+    # guard. `copy`, `deepcopy` and `pickle` all rebuild an instance WITHOUT
+    # running `__post_init__` at all, so each of them silently produced a
+    # carrier that had never been validated; and `copy.replace` (on the
+    # interpreters that have it) reconstructs through `__replace__`. Every one
+    # of those routes refuses here. The `InitVar` token already closes
+    # `dataclasses.replace` on every interpreter — a `replace` call cannot
+    # supply the token, so it reaches `__post_init__` with the default and is
+    # refused there — and `__replace__` closes the newer protocol explicitly
+    # rather than relying on a hook that older interpreters do not call.
+    #
+    # There is a substantive reason beyond guarding, not just a mechanical one:
+    # an authorization is not a portable document. It is a decision about ONE
+    # operation, taken against the descriptor set, the ledger and the adapter
+    # registry as they were AT THAT MOMENT. Reviving one in another process, at
+    # another time, or after the registry moved is not something the gate ever
+    # authorized — so a copy is refused rather than quietly honoured.
+
+    def __copy__(self) -> "AuthorizedPlan":
+        raise AuthorizationRequiredError(
+            "an AuthorizedPlan cannot be copied: a copy would be a second "
+            "authorization that no gate issued. Authorize the operation again "
+            "if it needs to run again.")
+
+    def __deepcopy__(self, memo: Any) -> "AuthorizedPlan":
+        raise AuthorizationRequiredError(
+            "an AuthorizedPlan cannot be deep-copied: a copy would be a second "
+            "authorization that no gate issued. Authorize the operation again "
+            "if it needs to run again.")
+
+    def __replace__(self, /, **changes: Any) -> "AuthorizedPlan":
+        # Called by `copy.replace` / `dataclasses.replace` on interpreters that
+        # implement the replace protocol. On older ones `dataclasses.replace`
+        # goes through `__init__` instead and is refused by the InitVar token.
+        raise AuthorizationRequiredError(
+            "an AuthorizedPlan cannot be rebuilt with altered fields: that is "
+            f"exactly the check-then-swap the carrier exists to prevent (asked "
+            f"to change {sorted(changes)}). Authorize the operation you actually "
+            "intend to run.")
+
+    def __reduce__(self) -> Any:
+        raise AuthorizationRequiredError(
+            "an AuthorizedPlan cannot be serialized: an authorization is a "
+            "decision about one operation against the descriptor set, ledger and "
+            "adapter registry as they were at that moment, and reviving it "
+            "elsewhere or later would not be that decision.")
 
 
 @dataclass(frozen=True)
@@ -493,22 +617,26 @@ def authorize_operation(op: Operation, receipt: Any, *,
     # unchecked plan.
     verdict = None
     if intent == EXECUTION_INTENT_TRIAL:
-        if resolved not in LIVE_BOUNDED_TEST_TARGETS:
+        if resolved != TRIAL_TARGET:
             # Refused immediately rather than reported alongside the preflight's
             # own grounds: the target is chosen by the kernel-driven trial
             # protocol, not by an operator, so a wrong one is a caller error to
             # correct rather than an eligibility fact about the operation.
+            other_live_bounded = sorted(LIVE_BOUNDED_TEST_TARGETS - {TRIAL_TARGET})
             return _refuse(
-                "trial refused: a trial must run as a real write to a bounded "
-                "subset of the live resource, so its target must be one of "
-                f"{sorted(LIVE_BOUNDED_TEST_TARGETS)}; this operation resolves "
-                f"to {resolved!r}. A dry run performs no write, so nothing "
-                "could be observed as restored; a copy surface is not the "
-                "operator's live record; an affirmative live target requires "
-                "the acceptance a trial exists to earn; and an absent target "
-                "never defaults to anything.",
+                "trial refused: a trial performs a real write to a bounded "
+                "subset of the live resource and then REVERTS it, so its target "
+                f"must be exactly {TRIAL_TARGET!r}; this operation resolves to "
+                f"{resolved!r}. A dry run performs no write, so nothing could be "
+                "observed as restored; a copy surface is not the operator's live "
+                "record; an affirmative live target requires the acceptance a "
+                "trial exists to earn; an absent target never defaults to "
+                f"anything; and {other_live_bounded} declares a bounded live "
+                "sample that PERSISTS, so running a reverting trial under that "
+                "declaration would do something other than what the declaration "
+                "describes.",
                 op_kind=op.op_kind, requested_target=target,
-                resolved_target=resolved)
+                resolved_target=resolved, trial_target=TRIAL_TARGET)
 
         verdict = trial_eligibility.check_trial_eligibility(
             op.op_kind, planned_units or (), recovery_capsules)

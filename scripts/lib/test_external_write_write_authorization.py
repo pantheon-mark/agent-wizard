@@ -40,6 +40,9 @@ ambient `.wizard/paused-mechanisms` state.
 """
 
 import ast
+import copy
+import dataclasses
+import pickle
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -70,6 +73,9 @@ from external_write.write_gate import (  # noqa: E402
 )
 
 _EXTERNAL_WRITE_DIR = _AGENTS_LIB / "external_write"
+# The module under test, spelled as the guards below report paths: relative to
+# the `wizard/` distribution root, so a same-named file elsewhere is distinct.
+_WA_REL = "agents/lib/external_write/write_authorization.py"
 
 
 # ---------------------------------------------------------------------------
@@ -265,11 +271,39 @@ class _Base(unittest.TestCase):
 # 1. THE PREFLIGHT IS UNAVOIDABLE — structural, not behavioural
 # ---------------------------------------------------------------------------
 
+_WIZARD_ROOT = _AGENTS_LIB.parents[1]
+_PARSED_PRODUCTION_MODULES = None
+
+
 def _production_modules():
-    """Every non-test Python module in the real emitted package."""
-    return sorted(p for p in _EXTERNAL_WRITE_DIR.glob("*.py")
-                  if not p.name.startswith("test_")
-                  and p.name != "lifecycle_test_fixtures.py")
+    """Every production Python module under `wizard/` — the WHOLE distribution
+    subtree, recursively, not just the emitted package directory.
+
+    Two exclusions, both deliberate and both narrow:
+      * `foundation-bundles/` — released bundle templates are FROZEN copies of a
+        past cut. They legitimately still contain the pre-split
+        `adapters._validate_receipt` and their own gate call, and rewriting a
+        released bundle is exactly what must never happen.
+      * `test_*.py` — a test may legitimately construct or call anything.
+
+    Everything else is in scope, including build-side scripts and scan fixtures:
+    the single-implementation property is a claim about the whole subtree, and a
+    guard scoped to one directory would not notice a second gate call, preflight
+    call or carrier construction placed anywhere else. Returns `(relpath, tree)`
+    pairs, parsed once and reused.
+    """
+    global _PARSED_PRODUCTION_MODULES
+    if _PARSED_PRODUCTION_MODULES is None:
+        parsed = []
+        for path in sorted(_WIZARD_ROOT.rglob("*.py")):
+            rel = path.relative_to(_WIZARD_ROOT).as_posix()
+            if rel.startswith("foundation-bundles/") or path.name.startswith("test_"):
+                continue
+            # A file that cannot be parsed is a FAILURE of the guard, never a
+            # silently skipped module: skipping is how a scanner goes blind.
+            parsed.append((rel, ast.parse(path.read_text(encoding="utf-8"))))
+        _PARSED_PRODUCTION_MODULES = parsed
+    return _PARSED_PRODUCTION_MODULES
 
 
 def _called_names(tree):
@@ -288,12 +322,8 @@ def _called_names(tree):
 
 
 def _modules_calling(name):
-    hits = []
-    for path in _production_modules():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        if name in _called_names(tree):
-            hits.append(path.name)
-    return hits
+    return [rel for rel, tree in _production_modules()
+            if name in _called_names(tree)]
 
 
 def _modules_naming(identifier):
@@ -301,14 +331,11 @@ def _modules_naming(identifier):
     Attribute node — i.e. actually references the symbol, not merely mentions it
     in a docstring or comment."""
     hits = []
-    for path in _production_modules():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    for rel, tree in _production_modules():
         for node in ast.walk(tree):
-            if isinstance(node, ast.Name) and node.id == identifier:
-                hits.append(path.name)
-                break
-            if isinstance(node, ast.Attribute) and node.attr == identifier:
-                hits.append(path.name)
+            if (isinstance(node, ast.Name) and node.id == identifier) or \
+                    (isinstance(node, ast.Attribute) and node.attr == identifier):
+                hits.append(rel)
                 break
     return hits
 
@@ -322,7 +349,7 @@ class SingleAuthorizationImplementationTests(unittest.TestCase):
         # authorization implementations that must agree, however similar they
         # looked on the day they were written.
         self.assertEqual(_modules_calling("evaluate_write_gate"),
-                         ["write_authorization.py"])
+                         [_WA_REL])
 
     def test_the_trial_preflight_has_exactly_one_production_caller(self):
         # The anti-zero-caller assertion: the preflight shipped with NO
@@ -330,19 +357,18 @@ class SingleAuthorizationImplementationTests(unittest.TestCase):
         # defect shape. This asserts both directions — it is called, and it is
         # called from exactly one place.
         self.assertEqual(_modules_calling("check_trial_eligibility"),
-                         ["write_authorization.py"])
+                         [_WA_REL])
 
     def test_receipt_validation_has_exactly_one_implementation(self):
         # It used to live in adapters.py, where only run_operation could reach
         # it; a trial executor would have needed its own copy.
         defs = []
-        for path in _production_modules():
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+        for rel, tree in _production_modules():
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef) and "receipt" in node.name \
                         and "valid" in node.name:
-                    defs.append(f"{path.name}:{node.name}")
-        self.assertEqual(defs, ["write_authorization.py:validate_receipt"])
+                    defs.append(f"{rel}:{node.name}")
+        self.assertEqual(defs, [f"{_WA_REL}:validate_receipt"])
 
     def test_the_authorization_carrier_is_constructed_in_exactly_one_place(self):
         tree = ast.parse((_EXTERNAL_WRITE_DIR / "write_authorization.py")
@@ -361,12 +387,10 @@ class SingleAuthorizationImplementationTests(unittest.TestCase):
                          "AuthorizedPlan is constructed somewhere other than "
                          "inside authorize_operation")
         # And nowhere else in the package at all.
-        self.assertEqual(_modules_naming("AuthorizedPlan"),
-                         ["write_authorization.py"])
+        self.assertEqual(_modules_naming("AuthorizedPlan"), [_WA_REL])
 
     def test_the_construction_token_is_named_in_exactly_one_module(self):
-        self.assertEqual(_modules_naming("_ISSUED_BY_AUTHORIZE"),
-                         ["write_authorization.py"])
+        self.assertEqual(_modules_naming("_ISSUED_BY_AUTHORIZE"), [_WA_REL])
 
     def test_authorization_re_implements_no_cap_and_no_ledger(self):
         tree = ast.parse((_EXTERNAL_WRITE_DIR / "write_authorization.py")
@@ -515,7 +539,8 @@ class CarrierCannotBeForgedTests(_Base):
     def test_a_trial_plan_on_a_non_live_bounded_target_cannot_exist(self):
         self.register()
         op = self.op()
-        for bad in ("live", "copy", "dry_run", None, "native_undo "):
+        for bad in ("live", "copy", "dry_run", "bounded_sample", None,
+                    "native_undo "):
             with self.subTest(resolved_target=bad):
                 with self.assertRaises(wa.AuthorizationRequiredError):
                     wa.AuthorizedPlan(**self._plan_kwargs(op, resolved_target=bad))
@@ -546,6 +571,129 @@ class CarrierCannotBeForgedTests(_Base):
                 with self.assertRaises(wa.AuthorizationRequiredError):
                     wa.AuthorizedPlan(**self._plan_kwargs(op, intent=bad,
                                                           trial_verdict=None))
+
+
+class CarrierCannotBeRECONSTRUCTEDTests(_Base):
+    """A construction guard that only covers `Cls(...)` is not a construction
+    guard. Python offers several other ways to bring a dataclass instance into
+    existence from one that already exists, and a legitimately-authorized plan
+    WILL be handed to a trial executor — so every one of those routes has to
+    refuse rather than silently yield an unblessed carrier.
+
+    Each test here corresponds to a route that worked before this round.
+    """
+
+    def _authorized_ordinary_plan(self, *, n=1):
+        self.register()
+        op = self.op(n=n)
+        authorization = wa.authorize_operation(
+            op, _receipt(op), target="native_undo", descriptor_set=[_entry()],
+            cap_ledger=self.ledger)
+        self.assertTrue(authorization.authorized)
+        return op, authorization.plan
+
+    def test_a_plan_never_exposes_the_construction_token(self):
+        """The most direct route of all: read the token off a plan you were
+        legitimately handed, then construct anything. A holder of a plan must
+        not be able to recover the token from it."""
+        _op, plan = self._authorized_ordinary_plan()
+        self.assertIsNot(getattr(plan, "issued_by", None), wa._ISSUED_BY_AUTHORIZE)
+        self.assertNotIn(wa._ISSUED_BY_AUTHORIZE, vars(plan).values())
+        # It is not a retained FIELD either, which is what stops
+        # `dataclasses.replace` carrying it forward (see the next test).
+        self.assertNotIn("issued_by", [f.name for f in dataclasses.fields(plan)])
+
+    def test_dataclasses_replace_cannot_swap_a_plans_contents(self):
+        """`replace` builds a NEW instance from an existing one's fields. While
+        the token was an ordinary field it was carried forward automatically, so
+        the identity check passed for a caller holding no token at all."""
+        _op, plan = self._authorized_ordinary_plan(n=2)
+        forged = EffectUnit(unit_id="not-reviewed", target_ref={}, undo_ref={})
+        for label, changes in (
+            ("units", {"units": (forged,)}),
+            ("dispatch", {"dispatch": object()}),
+            ("resolved_target", {"resolved_target": "live"}),
+            ("op", {"op": self.op(op_kind="fixture.authorization.other_kind")}),
+        ):
+            with self.subTest(swapped=label):
+                with self.assertRaises(wa.AuthorizationRequiredError):
+                    dataclasses.replace(plan, **changes)
+
+    def test_dataclasses_replace_cannot_escalate_an_ordinary_plan_to_a_trial(self):
+        """The worst of the routes: an ordinary authorization — which never runs
+        the preflight — turned into a trial authorization, with a hand-built
+        verdict and no token held."""
+        op, plan = self._authorized_ordinary_plan()
+        dispatch = get_dispatch(op.op_kind)
+        units = tuple(dispatch.plan(dispatch.instance, op.params))
+        hand_built = te.TrialEligibility(op_kind=op.op_kind, eligible=True,
+                                        refusals=(), units=units)
+        with self.assertRaises(wa.AuthorizationRequiredError):
+            dataclasses.replace(
+                plan, intent=wa.EXECUTION_INTENT_TRIAL, trial_verdict=hand_built,
+                units=units, resolved_target="native_undo",
+                recovery_capsules=self.capsules(op))
+
+    def test_copy_and_deepcopy_cannot_produce_a_plan(self):
+        """`copy` reconstructs without running `__post_init__` at all, so it
+        produced a carrier that had never been validated — and, combined with
+        `object.__setattr__`, one that could then be rewritten freely."""
+        _op, plan = self._authorized_ordinary_plan()
+        with self.assertRaises(wa.AuthorizationRequiredError):
+            copy.copy(plan)
+        with self.assertRaises(wa.AuthorizationRequiredError):
+            copy.deepcopy(plan)
+
+    def test_pickling_cannot_produce_a_plan(self):
+        """An authorization is not a portable document. Serializing one would
+        let it be revived in another process, at another time, with the
+        registry in another state — none of which the gate ever saw."""
+        _op, plan = self._authorized_ordinary_plan()
+        with self.assertRaises(wa.AuthorizationRequiredError):
+            pickle.dumps(plan)
+
+    def test_a_plans_dispatch_must_be_the_one_the_registry_holds(self):
+        """`dispatch is None` was not enough: a plan carrying a DIFFERENT
+        adapter's dispatch would apply the preflight-blessed units through
+        someone else's `apply_one`."""
+        self.register()
+        other = "fixture.authorization.other_kind"
+        self.register(op_kind=other)
+        op = self.op()
+        verdict = te.check_trial_eligibility(
+            op.op_kind,
+            get_dispatch(op.op_kind).plan(get_dispatch(op.op_kind).instance,
+                                          op.params),
+            self.capsules(op))
+        self.assertTrue(verdict.eligible, verdict.reason_text())
+        for label, bad in (("another adapter's dispatch", get_dispatch(other)),
+                           ("an arbitrary object", object())):
+            with self.subTest(dispatch=label):
+                with self.assertRaises(wa.AuthorizationRequiredError):
+                    wa.AuthorizedPlan(
+                        op=op, intent=wa.EXECUTION_INTENT_TRIAL,
+                        target="native_undo", resolved_target="native_undo",
+                        dispatch=bad, units=tuple(verdict.units),
+                        gate_audit=None, trial_verdict=verdict,
+                        recovery_capsules=self.capsules(op),
+                        issued_by=wa._ISSUED_BY_AUTHORIZE)
+
+    def test_a_trial_plan_for_an_op_kind_with_no_adapter_at_all_cannot_exist(self):
+        # The reachable shape of the dispatch-absent branch: nothing registered,
+        # so the registry and the plan agree on None, and the trial is still
+        # refused because there is no undo_one to reverse it with.
+        op = self.op(op_kind="fixture.authorization.never_registered")
+        verdict = te.TrialEligibility(
+            op_kind=op.op_kind, eligible=True, refusals=(),
+            units=(EffectUnit(unit_id="m1", target_ref={}, undo_ref={}),))
+        with self.assertRaises(wa.AuthorizationRequiredError) as ctx:
+            wa.AuthorizedPlan(
+                op=op, intent=wa.EXECUTION_INTENT_TRIAL, target="native_undo",
+                resolved_target="native_undo", dispatch=None,
+                units=verdict.units, gate_audit=None, trial_verdict=verdict,
+                recovery_capsules={"m1": {}},
+                issued_by=wa._ISSUED_BY_AUTHORIZE)
+        self.assertIn("no registered adapter", str(ctx.exception))
 
 
 class PreflightIsOnTheEnforcedPathTests(_Base):
@@ -709,19 +857,69 @@ class TrialTargetMustBeLiveBoundedTests(_Base):
         self.assertEqual(refusal.detail["resolved_target"], "copy")
         self.assertEqual(self.ledger.count(f"{COPY_SURFACE}::{op.op_kind}"), 0)
 
-    def test_both_live_bounded_targets_are_accepted(self):
+    def test_native_undo_is_the_ONLY_target_a_trial_accepts(self):
         self.register()
-        for target in sorted(LIVE_BOUNDED_TEST_TARGETS):
-            with self.subTest(target=target):
-                op = self.op()
-                authorization = self.authorize_trial(
-                    op, target=target,
-                    descriptor_set=[_entry(declared_test_target=target)],
-                    cap_ledger=InvocationLedger())
-                self.assertTrue(authorization.authorized,
-                                authorization.refusal.detail if
-                                authorization.refusal else "")
-                self.assertEqual(authorization.plan.resolved_target, target)
+        op = self.op()
+        authorization = self.authorize_trial(
+            op, target=wa.TRIAL_TARGET,
+            descriptor_set=[_entry(declared_test_target=wa.TRIAL_TARGET)],
+            cap_ledger=InvocationLedger())
+        self.assertTrue(authorization.authorized,
+                        authorization.refusal.detail if authorization.refusal else "")
+        self.assertEqual(authorization.plan.resolved_target, wa.TRIAL_TARGET)
+        self.assertEqual(wa.TRIAL_TARGET, "native_undo")
+
+    def test_a_bounded_sample_DECLARATION_is_refused_a_trial_specifically(self):
+        """The declaration-fidelity property, and the reason the trial accepts one
+        target rather than both live-bounded ones.
+
+        The two live-bounded targets are not interchangeable: the gate's own
+        branch distinguishes them as perform-then-revert (`native_undo`) versus a
+        bounded live sample (`bounded_sample`). A trial ALWAYS reverts. So running
+        a trial under a capability whose operator-declared test target says "a
+        bounded sample that persists" would be the system doing something other
+        than what the declaration describes — which is the failure family this
+        work exists to close, not to add an instance of.
+
+        Both halves are asserted: refused for a TRIAL, and still perfectly legal
+        for its own non-trial purpose.
+        """
+        self.register()
+        op = self.op()
+        declared_sample = [_entry(declared_test_target="bounded_sample")]
+
+        refusal = self.assertRefused(
+            self.authorize_trial(op, target="bounded_sample",
+                                 descriptor_set=declared_sample))
+        self.assertEqual(refusal.detail["resolved_target"], "bounded_sample")
+        self.assertEqual(refusal.detail["trial_target"], "native_undo")
+        # The reason must say WHY the other live-bounded target is not
+        # interchangeable, not merely that it was rejected.
+        self.assertIn("REVERTS", refusal.detail["reason"])
+        self.assertIn("PERSISTS", refusal.detail["reason"])
+        # Nothing was reserved: the refusal is ahead of the funnel.
+        self.assertEqual(self.ledger.count(f"{op.surface}::{op.op_kind}"), 0)
+
+        # ... and the SAME operation, SAME declaration, ordinary intent: legal.
+        authorization = wa.authorize_operation(
+            op, _receipt(op), intent=wa.EXECUTION_INTENT_ORDINARY,
+            target="bounded_sample", descriptor_set=declared_sample,
+            cap_ledger=self.ledger)
+        self.assertTrue(authorization.authorized,
+                        authorization.refusal.detail if authorization.refusal else "")
+        self.assertEqual(authorization.plan.resolved_target, "bounded_sample")
+        self.assertEqual(self.ledger.count(f"{op.surface}::{op.op_kind}"), 1)
+
+    def test_the_live_bounded_VOCABULARY_itself_is_not_narrowed(self):
+        """Only what a TRIAL accepts was tightened. The gate's own live-bounded
+        vocabulary is untouched, and `TRIAL_TARGET` is a member of it — so this
+        is a narrowing of one consumer, never a redefinition of the shared
+        vocabulary (widening it later stays a one-line, reviewable change)."""
+        self.assertEqual(LIVE_BOUNDED_TEST_TARGETS,
+                         frozenset({"bounded_sample", "native_undo"}))
+        self.assertIn(wa.TRIAL_TARGET, LIVE_BOUNDED_TEST_TARGETS)
+        self.assertEqual(LIVE_BOUNDED_TEST_TARGETS - {wa.TRIAL_TARGET},
+                         frozenset({"bounded_sample"}))
 
 
 class TrialTraversesTheSharedLiveFunnelTests(_Base):
