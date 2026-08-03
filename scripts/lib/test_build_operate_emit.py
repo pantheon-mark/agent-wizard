@@ -1820,7 +1820,24 @@ class TestS253ContractDelta(unittest.TestCase):
         # down with it. See that file's own enrollment comment in
         # agent_emitter.py, and
         # test_emit_set_lists_the_write_authorization_file below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 45)
+        # (Count updated to 46 by Cut 1.9 Task 3, which additionally enrolled
+        # trial_journal.py -- the trial write-ahead journal. A trial runs in the
+        # OPERATOR's project against their live resource, so an unenrolled journal
+        # means the trial runs there with no per-unit write-ahead record: a
+        # mid-plan failure would leave real external mutations that nothing on
+        # disk knows about. See that file's own enrollment comment in
+        # agent_emitter.py, and
+        # test_emit_set_lists_the_cut19_trial_journal_file below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 46)
+
+    def test_emit_set_lists_the_cut19_trial_journal_file(self):
+        # Cut 1.9 Task 3: trial_journal.py must be enrolled, or the trial
+        # protocol's durability record never physically reaches an operator
+        # project -- and a trial that partially applies without a durable
+        # per-unit record cannot undo itself, cannot emit an honest proof, and
+        # leaves real mutations on the operator's live resource.
+        import agent_emitter
+        self.assertIn("trial_journal.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def test_emit_set_lists_the_write_authorization_file(self):
         # The authorize/execute split: write_authorization.py must be enrolled,

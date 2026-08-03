@@ -17,6 +17,7 @@
 | `/security/acceptance_receipts/` | Operational (local-only) | Minted receipts recording your acceptance of an external-write action | Local runtime record, not something you decide to commit — regenerated as the system operates |
 | `/security/run_envelopes/` | Operational (local-only) | Persisted per-run consent envelopes for external-write actions | Local runtime record, not something you decide to commit — regenerated as the system operates |
 | `/security/invocation_ledgers/` | Operational (local-only) | Per-run blast-radius invocation ledgers | Local runtime record, not something you decide to commit — regenerated as the system operates |
+| `/security/trial_runs/` | Privacy | Per-trial write-ahead records for a supervised test of a new capability against your live account | Each record holds what the system needs to put a record back exactly as it was — which means it holds copies of your real data (the prior value of a cell, the exact labels a message had). Local only, never committed |
 | `/security/capability_acceptance_log.jsonl` | Operational (local-only) | Append-only log of capability acceptance decisions | Local runtime record, not something you decide to commit — regenerated as the system operates |
 
 ---

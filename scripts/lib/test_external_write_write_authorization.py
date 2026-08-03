@@ -340,6 +340,27 @@ def _modules_naming(identifier):
     return hits
 
 
+def _modules_constructing(identifier):
+    """Every production module that CONSTRUCTS `identifier` — i.e. names it in a
+    call position (`AuthorizedPlan(...)`), by AST.
+
+    Distinct from `_modules_naming` on purpose. Referencing the carrier (an
+    `isinstance` fail-closed check, a type annotation) is what a consumer of an
+    authorization does; CONSTRUCTING it is what only the authorizer may do.
+    """
+    hits = []
+    for rel, tree in _production_modules():
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if (isinstance(func, ast.Name) and func.id == identifier) or \
+                    (isinstance(func, ast.Attribute) and func.attr == identifier):
+                hits.append(rel)
+                break
+    return hits
+
+
 class SingleAuthorizationImplementationTests(unittest.TestCase):
     """Review focus: is there exactly ONE authorization implementation? Every
     assertion here is made by parsing the real package source."""
@@ -386,8 +407,22 @@ class SingleAuthorizationImplementationTests(unittest.TestCase):
         self.assertEqual(whole_module, 1,
                          "AuthorizedPlan is constructed somewhere other than "
                          "inside authorize_operation")
-        # And nowhere else in the package at all.
-        self.assertEqual(_modules_naming("AuthorizedPlan"), [_WA_REL])
+        # And constructed nowhere else in the package at all.
+        #
+        # RETARGETED (Cut 1.9 Task 3), not weakened. This was
+        # `_modules_naming("AuthorizedPlan") == [_WA_REL]` -- "no other module
+        # NAMES the carrier" -- which was a workable proxy for "no other module
+        # constructs it" only while nothing consumed the carrier. The carrier
+        # exists precisely to be consumed, and a consumer handed one must be able
+        # to refuse anything else: the trial write-ahead journal opens only from
+        # an `isinstance(plan, AuthorizedPlan)` that passes. That reference is a
+        # fail-closed check, not a second construction site, and forbidding it
+        # would push consumers toward duck-typing whatever they are handed --
+        # the opposite of what this guard is for. The property that was always
+        # meant is asserted directly now.
+        # What makes construction elsewhere IMPOSSIBLE rather than merely absent
+        # is the token, which no other module may even name -- the next test.
+        self.assertEqual(_modules_constructing("AuthorizedPlan"), [_WA_REL])
 
     def test_the_construction_token_is_named_in_exactly_one_module(self):
         self.assertEqual(_modules_naming("_ISSUED_BY_AUTHORIZE"), [_WA_REL])

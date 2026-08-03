@@ -25,11 +25,12 @@ node_modules/
 
 # Consent/runtime artifacts — written automatically when the system performs
 # external-write actions (acceptance receipts, run envelopes, invocation
-# ledgers, the capability acceptance log). Local operational records, not
-# something you need to decide about committing.
+# ledgers, trial run records, the capability acceptance log). Local operational
+# records, not something you need to decide about committing.
 /security/acceptance_receipts/
 /security/run_envelopes/
 /security/invocation_ledgers/
+/security/trial_runs/
 /security/capability_acceptance_log.jsonl
 
 {{ADDITIONAL_GITIGNORE_ENTRIES}}

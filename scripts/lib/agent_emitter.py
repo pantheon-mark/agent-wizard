@@ -281,6 +281,17 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # ModuleNotFoundError regression class this file's own docstring documents for
     # every prior entry above.
     "write_authorization.py",
+    # trial_journal.py (Cut 1.9 Task 3): the trial WRITE-AHEAD JOURNAL -- the
+    # durable per-unit record under `security/trial_runs/` that makes a journaled
+    # trial survivable across a crash, plus the JSON-only per-unit
+    # recovery-capsule format the trial protocol's later stages read. A trial runs
+    # in the OPERATOR's project against their live resource, so omitting this
+    # module does not merely disable a feature: the trial would run there with no
+    # write-ahead record at all, which is the state the bare apply loop is in
+    # today -- a mid-plan failure leaving real external mutations that nothing on
+    # disk knows about. The journal is a precondition of the trial's correctness,
+    # not a robustness extra, so it must physically reach the project.
+    "trial_journal.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

@@ -66,6 +66,7 @@ _CLEAN_GITIGNORE = (
     "/security/acceptance_receipts/\n"
     "/security/run_envelopes/\n"
     "/security/invocation_ledgers/\n"
+    "/security/trial_runs/\n"
     "/security/capability_acceptance_log.jsonl\n"
 )
 
@@ -73,6 +74,7 @@ _BROKEN_GITIGNORE = (
     # run_envelopes token dropped
     "/security/acceptance_receipts/\n"
     "/security/invocation_ledgers/\n"
+    "/security/trial_runs/\n"
     "/security/capability_acceptance_log.jsonl\n"
 )
 
@@ -192,10 +194,14 @@ class CheckGitignoreCoverageUnitTests(unittest.TestCase):
         # SOURCE template; C1's test_emit_gitignore.py checks the EMITTED
         # .gitignore) -- not a refactor target. This just pins that the two
         # independently-defined token sets stay in agreement.
+        # `trial_runs` joined the set with the trial write-ahead journal (Cut 1.9
+        # Task 3). Tightening this pin, never relaxing it: a trial journal holds
+        # the prior state of the operator's real records, so it must be covered
+        # in the source template AND in the emitted .gitignore.
         self.assertEqual(
             set(REQUIRED_GITIGNORE_TOKENS),
             {"security/acceptance_receipts", "run_envelopes", "invocation_ledgers",
-             "capability_acceptance_log"},
+             "trial_runs", "capability_acceptance_log"},
         )
 
 

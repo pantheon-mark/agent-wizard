@@ -43,13 +43,20 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # the current dev tree below).
 FIXTURE_BUNDLE_VERSION = "v0.13.1"
 
-# The four consent/runtime artifact-path tokens the plan requires .gitignore
-# coverage for (see DEFAULT_RECEIPT_DIR / DEFAULT_ENVELOPE_DIR / DEFAULT_LEDGER_DIR
-# / DEFAULT_AUDIT_LOG_PATH in wizard/agents/lib/external_write/).
+# The consent/runtime artifact-path tokens the plan requires .gitignore coverage
+# for (see DEFAULT_RECEIPT_DIR / DEFAULT_ENVELOPE_DIR / DEFAULT_LEDGER_DIR /
+# DEFAULT_TRIAL_JOURNAL_DIR / DEFAULT_AUDIT_LOG_PATH in
+# wizard/agents/lib/external_write/).
+#
+# `trial_runs` (the trial write-ahead journal, Cut 1.9 Task 3) is the one entry
+# here that is a PRIVACY exposure rather than only an operational-noise one: a
+# trial journal holds each unit's recovery capsule, and a capsule carries the
+# adapter's rendering of that record's prior state -- the operator's own data.
 REQUIRED_TOKENS = (
     "security/acceptance_receipts",
     "run_envelopes",
     "invocation_ledgers",
+    "trial_runs",
     "capability_acceptance_log",
 )
 

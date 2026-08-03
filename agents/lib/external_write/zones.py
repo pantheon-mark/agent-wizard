@@ -371,6 +371,42 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         # scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES set): a capability
         # has no business authorizing its own external write.
         "write_authorization.py",
+        # trial_journal.py (Cut 1.9 Task 3): the trial WRITE-AHEAD JOURNAL --
+        # the durable per-unit record (`security/trial_runs/<trial_id>.json`)
+        # that makes a journaled trial survivable across a crash, plus the
+        # JSON-only per-unit recovery-capsule format. It imports the sibling
+        # kernel `write_authorization` (the AuthorizedPlan carrier a trial is
+        # opened from, and the trial intent/target constants) as ordinary
+        # internal kernel wiring -- which is precisely the CAPABILITY-zone-ONLY
+        # module-boundary ban: scanned as CAPABILITY it trips the kind set
+        # {sealed_kernel_import} and scans clean as SEALED_KERNEL, so this
+        # membership is load-bearing, not decorative (both directions pinned by
+        # ZoneMembershipTests in test_external_write_trial_journal.py).
+        # Deliberately no violation COUNT recorded here: a count tracks how many
+        # times the module happens to NAME a kernel symbol, so an added
+        # annotation makes a recorded number stale silently -- the KIND SET is
+        # the durable fact.
+        #
+        # It DOES write to disk, unlike the two entries above -- that is the
+        # entire point of the module -- but disk I/O is not one of the checks
+        # scan.py enforces in any zone, and the file it writes is its own
+        # gitignored record under `security/`, never a vendor mutation. It
+        # imports no vendor SDK, constructs/obtains no write-capable credential
+        # (it cannot even accept one), performs no vendor mutation, and never
+        # calls run_operation -- so it passes every UNIVERSAL bypass check on its
+        # own merits and needs exemption only from the CAPABILITY-zone-only
+        # rules. Leaving it CAPABILITY (the fail-closed default) would be the
+        # wrong classification for the same reason dependency_enrollment.py's
+        # entry above gives: the next tightening of the CAPABILITY-zone rules
+        # would make trusted kernel machinery look like an ungated capability
+        # bypass.
+        #
+        # SEALED_KERNEL membership does NOT grant a capability the right to
+        # import it (that is the independent
+        # scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES set): the trial
+        # protocol is kernel-driven, and capability code has no business writing
+        # the record that authorizes its own external mutations.
+        "trial_journal.py",
     }
 )
 

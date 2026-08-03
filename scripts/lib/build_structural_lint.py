@@ -44,15 +44,24 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # -- this module does not touch or refactor C1's test.
 GITIGNORE_TEMPLATE_RELPATH = "wizard/templates/root/gitignore_template"
 
-# The four consent/runtime artifact-path tokens required in the source template,
-# substring-matched (leading-slash-agnostic) -- same four locations C1's test
+# The consent/runtime artifact-path tokens required in the source template,
+# substring-matched (leading-slash-agnostic) -- the same locations C1's test
 # checks in the emitted output: /security/acceptance_receipts/,
 # /security/run_envelopes/, /security/invocation_ledgers/,
-# /security/capability_acceptance_log.jsonl.
+# /security/trial_runs/, /security/capability_acceptance_log.jsonl.
+#
+# `trial_runs` was added by Cut 1.9 Task 3 (the trial write-ahead journal). It
+# needs coverage more urgently than its siblings, not less: a trial journal holds
+# each unit's recovery capsule, and a capsule carries the adapter's rendering of
+# that record's PRIOR STATE -- real operator data (a cell's prior value, a
+# message's exact prior label set). Without ignore coverage the commit-hygiene
+# guard surfaces it as a git decision, which is a decision a non-technical
+# operator should never be handed about a file holding their own data.
 REQUIRED_GITIGNORE_TOKENS: Sequence[str] = (
     "security/acceptance_receipts",
     "run_envelopes",
     "invocation_ledgers",
+    "trial_runs",
     "capability_acceptance_log",
 )
 
