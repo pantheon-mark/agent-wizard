@@ -220,6 +220,23 @@ def is_allowlist_eligible(entry) -> bool:
 # over-stating RISK is the safe direction here (it costs a prompt), where
 # understating it would cost the operator's authority.
 #
+# `trial-run` is the operator's way IN to the trial protocol (`trial_executor.py`'s
+# CLI): it carries one change a capability proposes through on the operator's real
+# record, checks it landed, puts it back, checks it came back, and writes what it
+# observed as the evidence the acceptance step requires. LIVE_WRITE /
+# writes_external=True, for the same reason `trial-recovery` is -- it issues the
+# registered adapter's own `apply_one` and `undo_one` against the operator's real
+# record, so it is never allow-eligible and always prompts.
+#
+# That classification needs stating precisely for this one, because the argument
+# for a softer class is available and wrong: a trial ALWAYS reverts, so its net
+# effect on the record is nothing. What it does on the way there is two real
+# external writes per unit, each consuming a rate/ledger slot and each appearing
+# in the vendor's own audit log -- and between them a window in which the
+# operator's record IS changed. Classifying it by its intended net effect instead
+# of its behaviour is precisely the by-intent reasoning this manifest exists to
+# replace, and it is the same call already made for `trial-recovery`'s restore.
+#
 # The prefix is hand-spelled here, like the five above, rather than imported from
 # `trial_recovery.RECOVERY_ENTRYPOINT_REL`: this module is loaded by the
 # settings-allowlist build and the PreToolUse hook, and importing it from here
@@ -284,6 +301,13 @@ BASELINE_COMMANDS: Tuple[CommandEntry, ...] = (
     CommandEntry(
         name="trial-recovery",
         command_prefix="python3 agents/lib/external_write/trial_recovery.py",
+        command_class=LIVE_WRITE,
+        writes_external=True,
+        allowed_outputs=(),
+    ),
+    CommandEntry(
+        name="trial-run",
+        command_prefix="python3 agents/lib/external_write/trial_executor.py",
         command_class=LIVE_WRITE,
         writes_external=True,
         allowed_outputs=(),

@@ -366,6 +366,45 @@ class TestEveryOperatorInvocableEntrypointIsAccountedFor(unittest.TestCase):
         entry = find_command("bulk-review")
         self.assertEqual(entry.command_prefix, f"python3 {SCAN_ENTRYPOINT_REL}")
 
+    def test_the_trial_run_entrypoint_is_enrolled(self):
+        """The operator's way IN to the trial protocol issues the registered
+        adapter's own `apply_one` and `undo_one` against their real record. It
+        always reverts, and that is NOT an argument for a softer class: the net
+        effect is nothing, the behaviour is two real external writes per unit with
+        a window between them in which the record IS changed. Classifying by
+        intended net effect is the by-intent reasoning this manifest replaces."""
+        entry = find_command("trial-run")
+        self.assertIsNotNone(
+            entry, "the trial command is operator-invocable and performs a live "
+                   "external write; it must be classified")
+        self.assertEqual(entry.command_class, LIVE_WRITE)
+        self.assertTrue(entry.writes_external)
+        self.assertFalse(is_allowlist_eligible(entry),
+                         "a live write must never be auto-approved")
+
+    def test_the_trial_run_prefix_agrees_with_the_modules_own_constant(self):
+        from external_write.trial_executor import TRIAL_ENTRYPOINT_REL
+        entry = find_command("trial-run")
+        self.assertEqual(entry.command_prefix,
+                         f"python3 {TRIAL_ENTRYPOINT_REL}")
+
+    def test_the_two_trial_entrypoints_are_BOTH_inside_the_pinned_inventory(self):
+        """POSITIVELY, not by subtraction. The inventory test above passes as long
+        as `discovered - enrolled` equals the declared list -- which it does both
+        when a module is enrolled and when the AST sweep stops finding its
+        `__main__` at all. A trial entrypoint that lost its `__main__` (or was
+        renamed) would leave that test green and the protocol unreachable, which
+        is the failure this cut exists to end, so the membership is asserted."""
+        discovered = self._modules_with_a_main_block()
+        enrolled = self._modules_the_manifest_enrolls(discovered)
+        for name in ("trial_executor.py", "trial_recovery.py"):
+            with self.subTest(module=name):
+                self.assertIn(name, discovered,
+                              "this module ships no command-line entrypoint")
+                self.assertIn(name, enrolled,
+                              "this module ships an operator-invocable "
+                              "entrypoint the manifest does not classify")
+
     def test_the_enrolled_prefix_agrees_with_the_modules_own_constant(self):
         """The manifest hand-spells its prefixes (five entries already do, and
         importing the recovery stack into a module the PreToolUse hook loads would

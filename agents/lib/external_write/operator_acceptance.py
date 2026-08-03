@@ -1134,4 +1134,30 @@ if __name__ == "__main__":  # pragma: no cover
         _sys.exit(0)
     else:
         print(f"REFUSED: {_res.reason}", file=_sys.stderr)
+        # A refusal with no way forward is the dead end this package has already
+        # paid for twice. THE one refusal cause an operator can act on directly is
+        # a proof that is not there: acceptance requires a validated copy-run proof
+        # and, until the trial protocol had an operator-invocable way in, nothing
+        # an operator could run produced one -- a capability could be made fully
+        # compliant and still never be acceptable.
+        #
+        # Keyed on the FILE, not on the refusal text: whether the artifact exists
+        # at the deterministic path is a fact this CLI can establish itself, and
+        # matching on the ceremony's wording would be a second, drifting copy of
+        # its decision. The command is rendered by the module that OWNS the
+        # entrypoint, with the operator's own approval left as a blank for them to
+        # fill in -- a machine that filled it in would be forging the approval a
+        # live write rests on.
+        _proof_ref = _opts["--copy-run-proof"] or copy_run_proof_path(
+            _opts["--capability-id"])
+        if not os.path.exists(_proof_ref):
+            from external_write.trial_executor import trial_command
+            print(
+                "There is no evidence file yet at "
+                f"{_proof_ref}. Acceptance needs one: a run that makes one real "
+                "change, checks it landed, puts it back, and checks it came back. "
+                "To produce it, put your own words in place of the last part and "
+                "run this from your project's top folder:\n"
+                + trial_command(_opts["--capability-id"]),
+                file=_sys.stderr)
         _sys.exit(1)

@@ -82,21 +82,28 @@ open entry for a subject that had one, and that is what `observe` reports. A sec
 resolution rule implemented here would be a second authority over one fact, which
 is the duplicated-inference defect this package refuses everywhere else.
 
-One action's round-trip cannot run yet, and it is declared rather than skipped
------------------------------------------------------------------------------
-`recover_interrupted_trial` leaves the trial-unit states. Its command is real,
-public, enrolled and covered end to end by the trial recovery suite. What does not
-exist is an operator-invocable way to START a trial, so a trial-unit state is not
-reachable in a freshly emitted project through any sanctioned path -- the fixture
-would have to author a driver script standing in for the entrypoint that is still
-to be built, and a round-trip that passes only because the gate faked its own
-starting conditions is precisely the green-and-blind failure this gate exists to
-end. So the action is DECLARED blocked, with its blocker named, and the blocker is
-itself asserted to still hold: the moment an operator-invocable trial driver
-lands, `TheBlockerIsAssertedNotAssumedTests` goes red and the declaration must be
-discharged. The observable half of that domain -- that the production reader sees
-each driven state in a durable record a killed process leaves behind -- is
-exercised here anyway, to keep the deferral as narrow as it can honestly be.
+EVERY declared action's round-trip runs, and the one that could not is DISCHARGED
+--------------------------------------------------------------------------------
+`recover_interrupted_trial` leaves the trial-unit states, and its round-trip was
+DECLARED not-yet-runnable here for one precisely-stated reason: the trial had a
+public RECOVERY entrypoint and no public way to START one, so reaching a driven
+state in a fixture would have meant authoring a driver standing in for an
+entrypoint that did not exist -- and a round-trip that passes because the gate
+faked its own starting conditions is the green-and-blind failure this gate exists
+to end.
+
+That entrypoint now exists and is enrolled in the operator-invocable command
+manifest, so the declaration is discharged rather than relaxed: every trial-unit
+fixture below reaches its state by RUNNING that public command against a project
+carrying the operator-side adapter contracts, and being killed (`os._exit`, no
+unwinding, nothing on either stream) at the point its state names. Nothing writes
+a durable trial record by hand. The recovery command is then run as a real
+subprocess and the state both trial surfaces report -- the production reader and
+the health projection -- must be the settled state the action declares.
+
+One state in that vocabulary cannot be the whole state of a fixture, and it is
+declared with its structural reason rather than omitted: see
+`_STATES_WITH_NO_WHOLE_FIXTURE`.
 
 Enforcement ceiling (disclosure): build-time. Executing a repair in a fixture
 proves the repair works; it does not police the operator's project at runtime, and
@@ -132,6 +139,7 @@ from external_write import capability_health as health            # noqa: E402
 from external_write import command_manifest as manifest           # noqa: E402
 from external_write import scan                                    # noqa: E402
 from external_write import state_actions as sa                     # noqa: E402
+from external_write import trial_executor as tx                   # noqa: E402
 from external_write import trial_journal as tj                     # noqa: E402
 from external_write import writer_ack_store as store               # noqa: E402
 from external_write import writer_state_core as core               # noqa: E402
@@ -212,6 +220,177 @@ def propose_operations(facade, batch_id):
 
 HARNESS_CAPABILITY_ID = "harness"
 
+#: The operator-side adapter contracts a trial needs, reproduced over a FILE so
+#: the state survives the process that changes it -- which is the whole point: a
+#: killed trial and the recovery command that follows it are two processes, and a
+#: fixture holding its surface in memory could not model the thing being tested.
+#:
+#: The fault is read off a file at the moment of use, not baked in, because the
+#: same adapter has to fail in the trial process and work in the recovery process
+#: that repairs it. `os._exit` is the kill: no unwinding, no cleanup, nothing on
+#: either stream -- what a crashed operator run actually leaves behind.
+_TRIAL_ADAPTER_SRC = '''"""Fixture adapter -- the operator-side trial contracts over a file."""
+import json
+import os
+from pathlib import Path
+
+from external_write.adapter_registry import register_adapter
+from external_write.contracts import (
+    OperationContract, WRITE_AFFECTING_MODULES, register_contract,
+)
+from external_write.operations import EffectUnit
+from external_write.read_facade import ReadFacade, register_read_facade
+
+OP_KIND = "fixture.trial.set_exact_labels"
+SURFACE_REL = "security/fixture_surface.json"
+FAULT_REL = "security/fixture_fault.txt"
+APPLIED_LABEL = "ARCHIVED"
+
+FAULT_APPLY_EXIT = "apply_exit"
+FAULT_VERIFY_EXIT = "verify_exit"
+FAULT_UNDO_EXIT = "undo_exit"
+FAULT_UNDO_NOOP = "undo_noop"
+
+_KILL_STATUS = 137
+
+
+def _read_surface():
+    path = Path.cwd() / SURFACE_REL
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_surface(state):
+    path = Path.cwd() / SURFACE_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def _fault():
+    path = Path.cwd() / FAULT_REL
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8").strip()
+
+
+class _WriteClient:
+    def set_labels(self, unit_id, labels):
+        state = _read_surface()
+        state[unit_id] = list(labels)
+        _write_surface(state)
+
+
+class _ReadOnlyClient:
+    def get_state(self, unit_id):
+        return {"unit_id": unit_id,
+                "labels": sorted(_read_surface().get(unit_id, ()))}
+
+
+class FixtureTrialReadFacade(ReadFacade):
+    read_methods = ("get_state",)
+
+    def get_state(self, unit_id):
+        return self._read("get_state", unit_id)
+
+
+class FixtureTrialAdapter:
+    """Absolute-state undo, both evidence predicates, both clients provisioned
+    on the adapter -- the shape the trial-eligibility preflight requires."""
+
+    UNDO_IS_ABSOLUTE_STATE_RESTORE = True
+
+    def __init__(self):
+        self._observations = 0
+
+    def plan(self, params):
+        return [
+            EffectUnit(unit_id=r["unit_id"],
+                       target_ref={"unit_id": r["unit_id"]},
+                       undo_ref={"unit_id": r["unit_id"],
+                                 "prior_labels": list(r.get("prior_labels", ()))})
+            for r in (params or {}).get("records", [])
+        ]
+
+    def build_write_client(self, op):
+        return _WriteClient()
+
+    def build_read_only_client(self, op):
+        return _ReadOnlyClient()
+
+    def apply_one(self, raw_client, unit):
+        raw_client.set_labels(unit.target_ref["unit_id"], [APPLIED_LABEL])
+        if _fault() == FAULT_APPLY_EXIT:
+            os._exit(_KILL_STATUS)
+
+    def undo_one(self, raw_client, unit):
+        fault = _fault()
+        if fault == FAULT_UNDO_EXIT:
+            os._exit(_KILL_STATUS)
+        if fault == FAULT_UNDO_NOOP:
+            return None
+        raw_client.set_labels(unit.undo_ref["unit_id"],
+                              unit.undo_ref["prior_labels"])
+
+    def verify_one(self, observer, unit):
+        self._observations += 1
+        if _fault() == FAULT_VERIFY_EXIT and self._observations == 1:
+            os._exit(_KILL_STATUS)
+        observed = observer.get_state(unit.unit_id)["labels"]
+        prior = sorted((unit.undo_ref or {}).get("prior_labels", ()))
+        return {"unit_id": unit.unit_id, "observed_labels": observed,
+                "applied": observed == [APPLIED_LABEL],
+                "matches_prestate": observed == prior}
+
+    def verify_apply_landed(self, evidence):
+        return bool(evidence.poststate.get("applied"))
+
+    def verify_undo_restored(self, evidence):
+        return bool(evidence.poststate.get("matches_prestate"))
+
+
+register_adapter(OP_KIND, FixtureTrialAdapter())
+register_contract(OperationContract(
+    op_kind=OP_KIND, writes=("labels",), produces=(),
+    dependency_set=WRITE_AFFECTING_MODULES,
+    verifier_set=("prestate_snapshot_diff_v1",),
+    introduces_persistent_binding=False, risk_class="sensitive_data",
+    requires_accepted_phase=True, blast_radius_cap=25,
+    read_only_scope="fixture.readonly"))
+register_read_facade(OP_KIND, FixtureTrialReadFacade)
+'''
+
+#: The capability the trial is run FOR. It proposes; it never holds a client and
+#: never touches the adapter -- the kernel-as-runner injects the read-only view.
+_TRIAL_CAPABILITY_SRC = '''"""Fixture capability -- proposes what the trial carries through."""
+from external_write.operations import Operation
+
+OP_KIND = "fixture.trial.set_exact_labels"
+SURFACE = "fixture_surface"
+
+
+def describe():
+    return "fixture trial capability"
+
+
+def propose_operations(facade, batch_id):
+    return [Operation(surface=SURFACE, object_id="r1", field="labels",
+                      new_value="ARCHIVED", op_kind=OP_KIND, batch_id=batch_id,
+                      params={"records": [%s]})]
+'''
+
+TRIAL_CAPABILITY_ID = "fixture_trial"
+TRIAL_SURFACE = "fixture_surface"
+TRIAL_OP_KIND = "fixture.trial.set_exact_labels"
+TRIAL_ADAPTER_STEM = "adapters_trialfixture"
+FIXTURE_SURFACE_REL = "security/fixture_surface.json"
+FIXTURE_FAULT_REL = "security/fixture_fault.txt"
+DESCRIPTOR_SET_REL = "security/capability_descriptors.json"
+
+#: What the operator says to approve a bounded trial on their own record. One
+#: physical line, no quoting hazard.
+TRIAL_APPROVAL = "Yes -- try one change on my real record and put it back."
+
 #: Writer relpaths, chosen to match the shapes the two historical dead ends had.
 UPKEEP_WRITER = "agents/upkeep/runner.py"
 INBOX_WRITER = "agents/inbox/runner.py"
@@ -283,6 +462,55 @@ class _Project:
         if raw is not None:
             path.write_text(raw, encoding="utf-8")
             return path
+        return self._put_validated_shape_record(path, trial_id, unit_states,
+                                                op_kind)
+
+    # -- the trial fixture: an operator project a real trial can run in --------
+
+    def install_trial_fixture(self, units=("r1",), cap=25):
+        """Everything a trial needs, as the bytes a real project carries: the
+        adapter enrolled the way an operator-added adapter is enrolled (a sibling
+        JSON manifest the kernel unions in at import, never an edit to a
+        bundle-copied file), the reader DECLARED in the lib the kernel resolves
+        declarations from, the capability that proposes the change, the descriptor
+        entry that declares a native-undo test target, and the surface itself."""
+        lib = self.root / "agents" / "lib" / "external_write"
+        (lib / f"{TRIAL_ADAPTER_STEM}.py").write_text(_TRIAL_ADAPTER_SRC,
+                                                      encoding="utf-8")
+        (lib / "operator_adapters.json").write_text(
+            json.dumps([TRIAL_ADAPTER_STEM]), encoding="utf-8")
+        records = ", ".join(
+            '{"unit_id": "%s", "prior_labels": ["OPEN"]}' % unit for unit in units)
+        self.write(f"agents/capabilities/{TRIAL_CAPABILITY_ID}_capability.py",
+                   _TRIAL_CAPABILITY_SRC % records)
+        self.write(DESCRIPTOR_SET_REL, json.dumps([{
+            "id": TRIAL_SURFACE, "name": TRIAL_SURFACE, "action_class": "modify",
+            "risk_class": "sensitive_data", "recovery_profile_ref": None,
+            "declared_test_target": "native_undo", "blast_radius_cap": cap,
+            "accepted": False}], indent=2))
+        self.write(FIXTURE_SURFACE_REL,
+                   json.dumps({unit: ["OPEN"] for unit in units}, indent=2))
+        return tuple(units)
+
+    def set_fault(self, fault):
+        self.write(FIXTURE_FAULT_REL, fault)
+
+    def clear_fault(self):
+        path = self.root / FIXTURE_FAULT_REL
+        if path.exists():
+            path.unlink()
+
+    def surface(self):
+        return json.loads((self.root / FIXTURE_SURFACE_REL).read_text(
+            encoding="utf-8"))
+
+    def trial_ids(self):
+        directory = self.root / tj.DEFAULT_TRIAL_JOURNAL_DIR
+        if not directory.is_dir():
+            return []
+        return sorted(p.stem for p in directory.glob("*.json"))
+
+    def _put_validated_shape_record(self, path, trial_id, unit_states, op_kind):
         record = {
             "schema": tj.TRIAL_JOURNAL_SCHEMA,
             "trial_id": trial_id,
@@ -318,9 +546,27 @@ class _Observing:
     way to invoke a command, is a second thing that has to agree with the first,
     and that is the shape of this package's worst defects."""
 
-    def observe(self, project, subject, allow_ambiguity=False):
+    def observe(self, project, subject, allow_ambiguity=False,
+                domain=sa.DOMAIN_BESPOKE_WRITER):
         """Every state the production machinery reports for `subject`, as registry
         KEYS, in sorted order.
+
+        `domain` selects the VOCABULARY the subject belongs to, and it is the
+        FIXTURE's domain rather than the action's: an action invoked against a
+        subject of the other vocabulary must leave that subject where it was, and
+        that property is only observable in the subject's own vocabulary. Both
+        branches read two surfaces and require them to agree, for the same reason:
+        the two have diverged before.
+
+        THE TRIAL BRANCH. The production reader is `scan_outstanding_trials` -- the
+        same one the health projection is built over -- and the surfaces are that
+        reader and the projection. A trial with nothing outstanding is reported by
+        NEITHER, exactly as a writer with no open entry is: for those, the settled
+        per-unit states come from the trial's own durable record through the same
+        validated read the recovery command performs. That is not a third
+        classifier -- there is nothing to classify. A unit's state is a value the
+        record carries, and the reader above is that read plus an
+        outstanding-or-not filter.
 
         Reads BOTH surfaces, in the order a real session reads them: the health
         projection first (it is the session-start read path, and it self-heals
@@ -340,6 +586,27 @@ class _Observing:
         which assert the safety properties rather than the agreement.
         """
         status = health.overall_status(str(project.root))
+        if domain == sa.DOMAIN_TRIAL_UNIT:
+            journal_dir = str(project.root / tj.DEFAULT_TRIAL_JOURNAL_DIR)
+            projected = tuple(sorted(
+                {state for trial in status["interrupted_trial"]["trials"]
+                 if trial["trial_id"] == subject
+                 for state in trial["unit_states"].values()}))
+            reported = tuple(sorted(
+                {state for trial in tj.scan_outstanding_trials(
+                    journal_dir=journal_dir)["trials"]
+                 if trial["trial_id"] == subject
+                 for state in trial["unit_states"].values()}))
+            self.assertEqual(
+                projected, reported,
+                "the health projection and the production reader report "
+                "different states for trial %r -- one of the two surfaces an "
+                "operator reads is wrong" % subject)
+            if not reported:
+                reported = tuple(sorted(set(tj.load_trial_journal(
+                    subject, journal_dir=journal_dir).unit_states().values())))
+            return tuple(sa.trial_unit_state_key(state) for state in reported)
+
         block = status["open_external_write_bypass"]
         health_states = tuple(sorted(
             {state for relpath, state in block["writer_states"].items()
@@ -470,6 +737,81 @@ def _build_resolved(case):
     return project, INBOX_WRITER
 
 
+# ---------------------------------------------------------------------------
+# THE TRIAL-UNIT BUILDERS. Every one reaches its state by RUNNING THE PUBLIC
+# TRIAL COMMAND against a project carrying the operator-side contracts, and then
+# being killed (or not) at the point the state names. Nothing writes a journal by
+# hand: a hand-authored durable record asserts that a trial did something no trial
+# did, which is the fixture faking its own starting conditions -- the failure this
+# gate exists to end, and the reason this domain's round-trip was declared
+# not-yet-runnable until the trial had an operator-invocable way in.
+# ---------------------------------------------------------------------------
+
+def _run_a_trial(case, fault=None, units=("r1",)):
+    """Run the public trial command once, with `fault` armed, and return
+    `(project, trial_id)`.
+
+    The fault file is REMOVED before returning: the same adapter has to fail in
+    the trial process and work in the recovery process that repairs it, which is
+    what a transient cause actually looks like."""
+    project = _Project(case)
+    project.install_trial_fixture(units=units)
+    if fault is not None:
+        project.set_fault(fault)
+    command = tx.trial_command(TRIAL_CAPABILITY_ID,
+                              operator_approval=TRIAL_APPROVAL)
+    case.assert_enrolled_operator_command(command)
+    result = case.run_command(project, command)
+    project.clear_fault()
+    if fault is None:
+        case.assertEqual(result.returncode, 0,
+                         "fixture precondition: the trial itself must run: %r %r"
+                         % (result.stdout, result.stderr))
+    else:
+        case.assertNotEqual(
+            result.returncode, 0,
+            "fixture precondition: this fixture models a KILLED trial, and the "
+            "command reported success")
+    ids = project.trial_ids()
+    case.assertEqual(
+        len(ids), 1,
+        "fixture precondition: exactly one durable trial record, found %r" % ids)
+    return project, ids[0]
+
+
+def _build_apply_intent(case):
+    """Killed the instant after the change was issued and before anything
+    confirmed it landed -- the ambiguous window the whole protocol is built
+    around. The change IS live on the surface."""
+    return _run_a_trial(case, fault="apply_exit")
+
+
+def _build_apply_confirmed(case):
+    """Killed after the change was issued and recorded, while it was being
+    checked."""
+    return _run_a_trial(case, fault="verify_exit")
+
+
+def _build_undo_intent(case):
+    """Killed after the reversal was recorded as intended and before it was
+    issued. The write-ahead record is already on disk, which is what write-ahead
+    means -- so recovery must not re-record it."""
+    return _run_a_trial(case, fault="undo_exit")
+
+
+def _build_recovery_required(case):
+    """Not killed: the reversal was issued and did not restore the surface, and
+    the trial recorded that truthfully rather than reporting a restore it could
+    not observe."""
+    return _run_a_trial(case, fault="undo_noop")
+
+
+def _build_restored_verified(case):
+    """The settled end of the protocol, reached by a trial that completed: every
+    unit observed back at its prior state, and the proof written."""
+    return _run_a_trial(case)
+
+
 #: State key -> the builder that puts a real project into it. Checked below to
 #: cover the ENTIRE round-trippable vocabulary: a state added upstream and left out
 #: of this map fails the gate rather than being silently untested.
@@ -481,6 +823,30 @@ _FIXTURE_BUILDERS = {
     sa.writer_state_key(core.WriterState.ACKNOWLEDGED_RISK):
         _build_acknowledged_risk,
     sa.writer_state_key(core.WriterState.RESOLVED): _build_resolved,
+    sa.trial_unit_state_key(tj.STATE_APPLY_INTENT): _build_apply_intent,
+    sa.trial_unit_state_key(tj.STATE_APPLY_CONFIRMED): _build_apply_confirmed,
+    sa.trial_unit_state_key(tj.STATE_UNDO_INTENT): _build_undo_intent,
+    sa.trial_unit_state_key(tj.STATE_RECOVERY_REQUIRED): _build_recovery_required,
+    sa.trial_unit_state_key(tj.STATE_RESTORED_VERIFIED): _build_restored_verified,
+}
+
+#: The one state in either vocabulary that CANNOT be the whole state of a fixture,
+#: with the structural reason -- declared POSITIVELY, because a state left out of
+#: the builder map for no recorded reason is exactly the silently-untested state
+#: this gate refuses everywhere else.
+#:
+#: A trial's journal is opened and its first unit is driven in the same call, with
+#: no adapter hook between the two: the write-ahead intent for unit one is fsynced
+#: before anything can interrupt the run. So `planned` is only ever reachable as a
+#: CO-STATE -- a later unit of a trial that stopped at an earlier one -- never as
+#: the state of every unit of a trial. It is exercised in that form, from a real
+#: killed run, by `TheStoppedTrialLeavesLaterUnitsUNTOUCHEDTests`, and the state's
+#: declared disposition (nothing was changed, so nothing is needed) is what the
+#: registry renders for it.
+_STATES_WITH_NO_WHOLE_FIXTURE = {
+    sa.trial_unit_state_key(tj.STATE_PLANNED): (
+        "a trial drives its first unit in the same call that opens the journal, "
+        "so no unit of a trial can be the only one left unattempted"),
 }
 
 
@@ -513,19 +879,22 @@ _ACTOR_WORK = {
 # a named blocker. A domain in neither fails the gate -- silence refuses.
 # ---------------------------------------------------------------------------
 
-_RUNNABLE_DOMAINS = frozenset({sa.DOMAIN_BESPOKE_WRITER})
+_RUNNABLE_DOMAINS = frozenset({sa.DOMAIN_BESPOKE_WRITER, sa.DOMAIN_TRIAL_UNIT})
 
-_BLOCKED_DOMAINS = {
-    sa.DOMAIN_TRIAL_UNIT: (
-        "no operator-invocable command can put a project into a trial-unit state: "
-        "the trial has a public RECOVERY entrypoint but no public way to START "
-        "one, so reaching a driven state in a fixture would mean authoring a "
-        "driver script standing in for the entrypoint that is still to be built. "
-        "A round-trip that passes because the gate faked its own starting "
-        "conditions is the failure this gate exists to end, so this action's "
-        "round-trip is DECLARED not-yet-runnable instead. The blocker is asserted "
-        "to still hold, so this declaration cannot outlive it."),
-}
+#: EMPTY, and that is the discharge rather than a tidy. The trial-unit domain was
+#: declared not-yet-runnable here for one stated reason: no operator-invocable
+#: command could put a project into a trial-unit state, because the trial had a
+#: public RECOVERY entrypoint and no public way to START one -- so reaching a driven
+#: state would have meant authoring a driver standing in for an entrypoint that did
+#: not exist, and a round-trip that passes because the gate faked its own starting
+#: conditions is the failure this gate exists to end.
+#:
+#: That entrypoint now exists, is enrolled in the operator-invocable command
+#: manifest, and is what every trial-unit fixture above runs. The declaration is
+#: therefore discharged: the round-trips RUN, from real killed runs. The mapping is
+#: kept (rather than deleted) so a future deferral has a declared home with the same
+#: obligations -- a domain in neither set still fails the partition test below.
+_BLOCKED_DOMAINS = {}
 
 
 def _domain_of(state_key):
@@ -563,6 +932,17 @@ def _runnable_actions():
 def _blocked_actions():
     return tuple(action for action in sa.ACTIONS
                  if _action_domain(action) in _BLOCKED_DOMAINS)
+
+
+def _runnable_vocabulary_keys():
+    """Every state key of every RUNNABLE domain, read off the declaring modules so
+    a state added to either vocabulary arrives here automatically."""
+    keys = set()
+    if sa.DOMAIN_BESPOKE_WRITER in _RUNNABLE_DOMAINS:
+        keys |= set(_writer_vocabulary_keys())
+    if sa.DOMAIN_TRIAL_UNIT in _RUNNABLE_DOMAINS:
+        keys |= {sa.trial_unit_state_key(s) for s in tj.TRIAL_UNIT_STATES}
+    return frozenset(keys)
 
 
 def _writer_vocabulary_keys():
@@ -616,6 +996,10 @@ class EveryDeclaredActionIsAccountedForTests(unittest.TestCase):
                          "a domain cannot be both runnable and blocked")
 
     def test_every_blocked_domain_states_a_blocker_that_names_the_obstacle(self):
+        """The obligation on a deferral, kept live for whoever declares the next
+        one. Nothing is deferred today, so the loop is empty -- which is why the
+        rule is also driven against a planted deferral below, rather than being a
+        vacuous pass nobody would notice had stopped checking."""
         for domain, blocker in sorted(_BLOCKED_DOMAINS.items()):
             with self.subTest(domain=domain):
                 self.assertTrue(blocker.strip())
@@ -623,11 +1007,20 @@ class EveryDeclaredActionIsAccountedForTests(unittest.TestCase):
                               "a deferral has to say what is missing, not that "
                               "it was hard")
 
-    def test_exactly_one_action_is_blocked_today(self):
-        """Pinned at ONE, so a second action quietly joining the blocked set is a
-        failure rather than a footnote."""
-        self.assertEqual([a.action_id for a in _blocked_actions()],
-                         ["recover_interrupted_trial"])
+    def test_the_deferral_rule_REJECTS_a_blocker_that_names_no_obstacle(self):
+        """Driven, so the rule above cannot quietly stop meaning anything."""
+        for blocker in ("", "   ", "this was hard to test"):
+            with self.subTest(blocker=blocker):
+                self.assertFalse(
+                    blocker.strip() and "no operator-invocable" in blocker,
+                    "a blocker naming no missing mechanism must not qualify")
+
+    def test_NO_action_is_blocked_today(self):
+        """Pinned at NONE. Every declared action's round-trip runs, so an action
+        joining the blocked set again is a failure rather than a footnote -- and
+        the one deferral this file ever carried is discharged, not relaxed."""
+        self.assertEqual([a.action_id for a in _blocked_actions()], [])
+        self.assertEqual(_BLOCKED_DOMAINS, {})
 
     def test_every_action_from_states_live_in_a_SINGLE_vocabulary(self):
         for action in sa.ACTIONS:
@@ -635,10 +1028,22 @@ class EveryDeclaredActionIsAccountedForTests(unittest.TestCase):
                 self.assertIn(_action_domain(action), sa.DOMAINS)
 
     def test_the_fixture_builders_cover_the_WHOLE_runnable_vocabulary(self):
-        """Quantified over the declaring class's own vocabulary. A state added
+        """Quantified over BOTH declaring modules' own vocabularies. A state added
         upstream and left out of the builder map fails here -- it does not become
-        an untested state nobody noticed."""
-        self.assertEqual(frozenset(_FIXTURE_BUILDERS), _writer_vocabulary_keys())
+        an untested state nobody noticed. A state that cannot be the whole state of
+        a fixture is covered only by being DECLARED so, with its structural reason,
+        which is the difference between a recorded bound and an omission."""
+        self.assertEqual(
+            frozenset(_FIXTURE_BUILDERS) | frozenset(_STATES_WITH_NO_WHOLE_FIXTURE),
+            _runnable_vocabulary_keys())
+        self.assertEqual(
+            frozenset(_FIXTURE_BUILDERS) & frozenset(_STATES_WITH_NO_WHOLE_FIXTURE),
+            frozenset(),
+            "a state cannot both have a fixture and be declared unfixturable")
+        for key, reason in sorted(_STATES_WITH_NO_WHOLE_FIXTURE.items()):
+            with self.subTest(state=key):
+                self.assertTrue(reason.strip(),
+                                "an exclusion with no reason is an omission")
 
     def test_an_assistant_action_declares_its_actor_work_and_an_operator_one_does_not(self):
         """Derived from the registry's `actor` field. An assistant action means the
@@ -662,11 +1067,17 @@ class EveryDeclaredActionIsAccountedForTests(unittest.TestCase):
 # 2. THE BLOCKER IS ASSERTED, NOT ASSUMED
 # ===========================================================================
 
-class TheBlockerIsAssertedNotAssumedTests(unittest.TestCase):
-    """The declared blocker above is only honest while it is TRUE. These assert it
-    against the shipped tree, so the moment an operator-invocable trial driver
-    lands, this class goes red and the blocked declaration must be discharged
-    rather than quietly outliving its own reason."""
+class TheDISCHARGEDBlockerIsAssertedNotASSUMEDTests(unittest.TestCase):
+    """The declared blocker this file used to carry is DISCHARGED, and the same
+    standard applies to the discharge as applied to the deferral: it is asserted
+    against the shipped tree, not recorded as done.
+
+    What was missing was named precisely -- an operator-invocable way to START a
+    trial -- and the assertions below are the mirror image of the ones that held
+    while it was missing: an entrypoint from which a trial start is reachable now
+    EXISTS, and it is one the operator-invocable command manifest declares. If
+    either stops being true, the round-trips above are running against a mechanism
+    no operator can reach, and this class is what says so."""
 
     def _production_modules(self):
         for path in sorted(_EXTERNAL_WRITE_DIR.glob("*.py")):
@@ -686,8 +1097,8 @@ class TheBlockerIsAssertedNotAssumedTests(unittest.TestCase):
         """Every bare callee name reachable in `node`, from `f(...)` and
         `x.f(...)` alike. Bare names, deliberately: resolving each call to its
         defining module would make this check MISS a driver assembled across
-        modules, and for an assertion whose whole job is to fire when something
-        appears, over-approximating is the safe direction."""
+        modules, and over-approximating is the safe direction for an assertion
+        about whether a start is reachable at all."""
         names = set()
         for inner in ast.walk(node):
             if not isinstance(inner, ast.Call):
@@ -721,13 +1132,7 @@ class TheBlockerIsAssertedNotAssumedTests(unittest.TestCase):
 
     def _names_that_reach_a_trial_start(self, parsed):
         """TRANSITIVE closure over the whole package: every function name from
-        which a trial start is reachable through any chain of calls.
-
-        Transitive on purpose. Requiring the entrypoint and the `run_trial` call to
-        sit in the SAME module was measured to be evadable by the most ordinary CLI
-        shape there is -- a wrapper function beside `run_trial` plus a separate
-        module carrying the `__main__` that calls the wrapper -- which would have
-        let the blocked declaration outlive the blocker it names."""
+        which a trial start is reachable through any chain of calls."""
         reaching = {"run_trial"}
         changed = True
         while changed:
@@ -739,41 +1144,28 @@ class TheBlockerIsAssertedNotAssumedTests(unittest.TestCase):
                         changed = True
         return reaching
 
-    def test_no_shipped_ENTRYPOINT_can_reach_a_trial_start_even_INDIRECTLY(self):
-        """AST, because this is a question about code structure: a module that
-        declares a command-line entrypoint from which a trial start is REACHABLE
-        would BE the operator-invocable trial driver whose absence is the declared
-        blocker -- whether it calls the trial directly or through any chain of
-        calls inside this package.
-
-        What this detects, stated precisely so the residual is not overstated: a
-        call chain expressible in this package's own source, joined on bare callee
-        names. It would not detect a start reached only through a runtime-computed
-        dispatch (`getattr`, a name looked up in a dict) or through a module outside
-        this package. Those are not shapes a normal entrypoint takes, and the
-        declaration this guards is also pinned by the two assertions below, but the
-        check is a strong detector rather than a proof."""
+    def test_a_shipped_ENTRYPOINT_can_now_reach_a_trial_start(self):
+        """AST, because this is a question about code structure. The same closure
+        that had to be EMPTY while the blocker held must now be non-empty, and the
+        module it names must be the one the fixtures above actually run."""
         parsed = self._package()
         reaching = self._names_that_reach_a_trial_start(parsed)
         drivers = sorted(name for name, (_functions, main_callees) in parsed.items()
                          if main_callees & reaching)
-        self.assertEqual(
-            drivers, [],
-            "an operator-invocable trial driver now exists (%s) -- the blocked "
-            "round-trip declaration for the trial domain is discharged and must "
-            "be replaced with a real round-trip" % drivers)
+        self.assertIn(
+            Path(tx.TRIAL_ENTRYPOINT_REL).name, drivers,
+            "no shipped command-line entrypoint can reach a trial start, so no "
+            "trial-unit state is reachable in a freshly emitted project and the "
+            "round-trips above are testing something an operator cannot do: %s"
+            % drivers)
 
-    def test_no_ENROLLED_OPERATOR_COMMAND_can_reach_a_trial_start(self):
-        """The property that actually matters, and the one an operator is exposed
-        to: nothing the command manifest declares invocable may start a trial.
-
-        Resolved from each entry's OWN declared `command_prefix` to the module it
-        names, then checked against the same transitive closure -- so this joins on
-        a declared value rather than re-spelling a module name as a literal, and it
-        keeps holding if a trial driver is enrolled under any name at all."""
+    def test_the_trial_start_is_an_ENROLLED_OPERATOR_COMMAND(self):
+        """The property an operator is exposed to. Resolved from each entry's OWN
+        declared `command_prefix` to the module it names, so this joins on a
+        declared value rather than re-spelling a module name as a literal."""
         parsed = self._package()
         reaching = self._names_that_reach_a_trial_start(parsed)
-        checked = []
+        enrolled = []
         for entry in manifest.BASELINE_COMMANDS:
             script = next((token for token in entry.command_prefix.split()
                            if token.endswith(".py")), None)
@@ -782,37 +1174,47 @@ class TheBlockerIsAssertedNotAssumedTests(unittest.TestCase):
             name = Path(script).name
             if name not in parsed:
                 continue      # a per-capability command, not a module we ship
-            checked.append(entry.name)
-            with self.subTest(command=entry.name):
-                self.assertFalse(
-                    parsed[name][1] & reaching,
-                    "enrolled operator command %r can start a trial -- the "
-                    "blocked round-trip declaration is discharged" % entry.name)
-        self.assertIn("trial-recovery", checked,
-                      "the resolution stopped reaching the trial commands, so "
-                      "this assertion has quietly stopped checking anything")
+            if parsed[name][1] & reaching:
+                enrolled.append(entry.name)
+        self.assertTrue(
+            enrolled,
+            "nothing the command manifest declares invocable can start a trial, "
+            "so the producer of the proof acceptance requires is unreachable to "
+            "the operator")
 
-    def test_the_acceptance_PROOF_half_still_has_no_producer_either(self):
-        """The second historical dead end had two halves. The bypass half is closed
-        and executed in this file; this is the half that is not. The proof module
-        exposes a VALIDATOR and nothing that produces a proof, and it declares no
-        entrypoint -- so a writer that has been made fully compliant still cannot
-        produce the fresh proof its own acceptance requires. Grounded on the
-        shipped source rather than recalled."""
-        path = _EXTERNAL_WRITE_DIR / "copy_run_proof.py"
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        public = sorted(node.name for node in tree.body
+    def test_the_proof_PRODUCER_is_reachable_and_the_validator_still_the_gate(self):
+        """The second historical dead end had two halves. The bypass half was
+        already closed; THIS is the half that was open -- a capability could be
+        made fully compliant and still not produce the fresh proof its own
+        acceptance requires, because nothing operator-invocable drove the
+        apply/undo/verify round trip.
+
+        What is asserted is the shape of the closure, not merely that something
+        changed: the proof module still exposes only a VALIDATOR and declares no
+        entrypoint of its own (a producer there would be the validator vouching
+        for its own output), while the producer sits in the journaled executor and
+        is reachable from an operator command. The round-trip above runs it and
+        puts the artifact through that same shipped validator."""
+        proof_module = ast.parse(
+            (_EXTERNAL_WRITE_DIR / "copy_run_proof.py").read_text(encoding="utf-8"))
+        public = sorted(node.name for node in proof_module.body
                         if isinstance(node, (ast.FunctionDef, ast.ClassDef))
                         and not node.name.startswith("_"))
         self.assertIn("validate_copy_run_proof", public)
         self.assertFalse(
-            self._has_main_block(tree),
-            "the proof module now declares an entrypoint -- revisit the declared "
-            "residual, it may be discharged")
+            self._has_main_block(proof_module),
+            "the validator module now declares an entrypoint of its own -- the "
+            "producer and the check on it must not be the same command")
         self.assertEqual(
             [name for name in public if name.startswith("produce")], [],
-            "a proof producer now exists -- the declared residual is discharged "
-            "and this assertion must be replaced with a real round-trip")
+            "the producer belongs in the journaled executor, on the enforced "
+            "path, not beside the validator that judges its output")
+
+        executor = ast.parse(
+            (_EXTERNAL_WRITE_DIR / Path(tx.TRIAL_ENTRYPOINT_REL).name).read_text(
+                encoding="utf-8"))
+        self.assertTrue(self._has_main_block(executor),
+                        "the producer ships no operator-invocable entrypoint")
 
 
 # ===========================================================================
@@ -846,11 +1248,12 @@ class TheDeclaredTransitionActuallyHappensTests(unittest.TestCase, _Observing):
     def _round_trip(self, action, from_state):
         builder = _FIXTURE_BUILDERS[from_state]
         project, subject = builder(self)
+        domain = _domain_of(from_state)
 
         # (2) THE PRODUCTION CLASSIFIER OBSERVES THE DECLARED PRE-STATE. Not the
         # fixture's intention -- the shipped machinery's answer.
         self.assertEqual(
-            self.observe(project, subject), (from_state,),
+            self.observe(project, subject, domain=domain), (from_state,),
             "the fixture is not in the state the action declares it leaves, so "
             "the round-trip would prove nothing")
 
@@ -874,7 +1277,8 @@ class TheDeclaredTransitionActuallyHappensTests(unittest.TestCase, _Observing):
         # (4) RE-READ THROUGH BOTH SURFACES, and the observed state must be the
         # declared post-condition.
         self.assertEqual(
-            self.observe(project, subject), (action.expected_state,),
+            self.observe(project, subject, domain=domain),
+            (action.expected_state,),
             "action %r declares it establishes %s, and it did not"
             % (action.action_id, action.expected_state))
 
@@ -937,7 +1341,8 @@ class AnActionDoesNothingFromAStateItDoesNotDeclareTests(unittest.TestCase,
 
     def _refuses_to_move(self, action, state):
         project, subject = _FIXTURE_BUILDERS[state](self)
-        self.assertEqual(self.observe(project, subject), (state,),
+        domain = _domain_of(state)
+        self.assertEqual(self.observe(project, subject, domain=domain), (state,),
                          "fixture precondition")
         before = frozenset(store.active_acknowledgements(str(project.root)))
 
@@ -947,7 +1352,7 @@ class AnActionDoesNothingFromAStateItDoesNotDeclareTests(unittest.TestCase,
         self.assertNotIn("Traceback", result.stdout + result.stderr)
 
         self.assertEqual(
-            self.observe(project, subject), (state,),
+            self.observe(project, subject, domain=domain), (state,),
             "action %r moved a subject out of %s, which it does not declare it "
             "leaves" % (action.action_id, state))
 
@@ -963,7 +1368,11 @@ class AnActionDoesNothingFromAStateItDoesNotDeclareTests(unittest.TestCase,
         """A refusal that names nothing leaves the operator exactly where the two
         historical dead ends left them."""
         action = _action("record_accepted_risk")
+        # Its own vocabulary: the refusal being asserted is the one an operator
+        # reads about a FILE, and a subject from the other vocabulary is covered by
+        # the cross-domain safety property above rather than by this wording.
         for state in sorted(frozenset(_FIXTURE_BUILDERS)
+                            & _writer_vocabulary_keys()
                             - frozenset(action.from_states)):
             with self.subTest(state=state):
                 project, subject = _FIXTURE_BUILDERS[state](self)
@@ -1145,11 +1554,13 @@ class TheCompliantWriterThatCouldNotProveItCompliesTests(unittest.TestCase,
     """The second dead end, sanitized: a hand-rolled bulk write loop that CAN be
     made fully compliant. Every violation recorded against it is one our own
     remediator covers, so the rebuild genuinely clears it -- and this file executes
-    that. What it also records, and grounds, is the half that is still open: after
-    the rebuild the writer's own capability still cannot produce the fresh proof
-    its acceptance requires, because nothing operator-invocable drives the
-    apply-undo-verify round-trip that would produce one. The bypass terminates
-    correctly; the acceptance path still terminates."""
+    that. Its second half -- that after the rebuild the writer's own capability
+    still could not produce the fresh proof its acceptance requires, because
+    nothing operator-invocable drove the apply/undo/verify round trip -- is closed
+    too, and closed by EXECUTION rather than by assertion: the trial-unit fixtures
+    in this file run that producer through its public command, and the artifact it
+    emits goes through the shipped validator. What remains asserted here is the
+    bypass half, which is this class's own subject."""
 
     def setUp(self):
         self.project, self.subject = _build_blocking_live_enable(self)
@@ -1762,6 +2173,8 @@ class NoFixtureReachesItsStateByNeverBeingFLAGGEDTests(unittest.TestCase,
 
     def test_every_builder_leaves_a_real_open_entry_naming_its_subject(self):
         for key, builder in sorted(_FIXTURE_BUILDERS.items()):
+            if _domain_of(key) != sa.DOMAIN_BESPOKE_WRITER:
+                continue
             with self.subTest(state=key):
                 project, subject = builder(self)
                 flagged = [str(e.get("writer_relpath")) for e in
@@ -1771,6 +2184,139 @@ class NoFixtureReachesItsStateByNeverBeingFLAGGEDTests(unittest.TestCase,
                     "the fixture for %s carries no open entry for %r, so its "
                     "state was reached by never being flagged rather than by "
                     "anything the product did" % (key, subject))
+
+
+class NoTrialFixtureReachesItsStateWithoutARealRUNTests(unittest.TestCase,
+                                                        _Observing):
+    """The trial-domain twin of the durability property above, and it is the one
+    that made this domain's round-trip un-runnable until now.
+
+    A hand-authored journal record can carry any state, any unit and any recovery
+    capsule -- so a fixture that wrote one would be asserting that a trial did
+    something no trial did, and the recovery round-trip would then be exercising
+    the fixture's imagination. What distinguishes a record a RUN produced is that
+    the product wrote its TRANSITIONS: a unit that reached a driven state passed
+    through `planned` first, and the history says so. Quantified over the builder
+    map, so a trial builder added later is covered without anyone remembering."""
+
+    def test_every_trial_builder_leaves_a_record_a_REAL_RUN_wrote(self):
+        for key, builder in sorted(_FIXTURE_BUILDERS.items()):
+            if _domain_of(key) != sa.DOMAIN_TRIAL_UNIT:
+                continue
+            with self.subTest(state=key):
+                project, subject = builder(self)
+                record = tj.load_trial_journal(
+                    subject,
+                    journal_dir=str(project.root / tj.DEFAULT_TRIAL_JOURNAL_DIR)
+                ).read_record()
+                self.assertEqual(record["op_kind"], TRIAL_OP_KIND)
+                histories = [len(unit.get("history") or ())
+                             for unit in record["units"]]
+                self.assertTrue(
+                    histories and min(histories) >= 2,
+                    "the record for %s carries no transition history, so it was "
+                    "not written by a run that moved through the states -- which "
+                    "is what a hand-authored record looks like" % key)
+
+    def test_the_trial_ID_is_never_chosen_by_the_fixture(self):
+        """The subject is read back off what the product wrote. A fixture that
+        named its own trial id would be free to name one for a record it also
+        wrote, which is the same thing in a different order."""
+        source = _THIS_FILE.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", getattr(node.func, "attr", ""))
+            if name == "trial_command":
+                for keyword in node.keywords:
+                    self.assertNotEqual(keyword.arg, "trial_id")
+                self.assertLessEqual(
+                    len(node.args), 1,
+                    "the trial command is rendered with the capability only")
+
+
+class TheStoppedTrialLeavesLaterUnitsUNTOUCHEDTests(unittest.TestCase,
+                                                    _Observing):
+    """`planned` in its only reachable form, from a REAL killed run -- the state
+    `_STATES_WITH_NO_WHOLE_FIXTURE` declares cannot be a whole fixture's state.
+
+    Two properties at once, and the second is the safety one: a trial that could
+    no longer earn a proof STOPS, so every unit after the failure stays where it
+    was written down and was never applied. If it did not stop, a proof that can
+    no longer be earned would keep buying live mutations at the operator's
+    expense."""
+
+    def test_a_unit_after_the_failure_is_recorded_planned_and_never_applied(self):
+        project, trial_id = _run_a_trial(self, fault="undo_noop",
+                                        units=("r1", "r2"))
+        states = tj.load_trial_journal(
+            trial_id,
+            journal_dir=str(project.root / tj.DEFAULT_TRIAL_JOURNAL_DIR)
+        ).unit_states()
+        self.assertEqual(states, {"r1": tj.STATE_RECOVERY_REQUIRED,
+                                  "r2": tj.STATE_PLANNED})
+        # The second unit's own surface value is untouched: it was written down
+        # and never applied, which is what makes its declared disposition true.
+        self.assertEqual(project.surface()["r2"], ["OPEN"])
+
+    def test_the_registry_tells_the_operator_that_unit_needs_nothing(self):
+        """The declared disposition for `planned`, rendered by the registry for a
+        real unit of a real stopped run -- not for a hypothetical one."""
+        project, trial_id = _run_a_trial(self, fault="undo_noop",
+                                        units=("r1", "r2"))
+        del project
+        instruction = sa.instruction_for_state(
+            sa.trial_unit_state_key(tj.STATE_PLANNED), "r2")
+        self.assertIn("no action is needed", instruction)
+        self.assertIn("r2", instruction)
+
+
+class TheOperatorCanFindTheirWayOutFromTheSURFACEAloneTests(unittest.TestCase,
+                                                            _Observing):
+    """The discoverability claim, end to end, at the standard this cut set for it:
+    the operator's own text has to be sufficient.
+
+    Nothing here uses a test-side trial id or a test-rendered command. The trial
+    is killed, the health projection an agent reads at session start is asked what
+    to do, the command is SLICED OUT of that sentence, and that command is what
+    runs. A repair an operator cannot find is the same shape as one that does not
+    exist."""
+
+    def test_the_command_sliced_out_of_the_health_report_actually_repairs_it(self):
+        project, trial_id = _run_a_trial(self, fault="apply_exit")
+        status = health.overall_status(str(project.root))
+        self.assertFalse(status["normal_status_allowed"])
+        trial, = status["interrupted_trial"]["trials"]
+        instruction = trial["action"]
+
+        command = None
+        for entry in manifest.BASELINE_COMMANDS:
+            index = instruction.find(entry.command_prefix)
+            if index != -1:
+                command = instruction[index:].split("\n")[0].strip()
+                break
+        self.assertIsNotNone(
+            command,
+            "the surface an agent reads names no runnable command for an "
+            "interrupted trial: %r" % instruction)
+        self.assertIn(trial_id, command,
+                      "the command the surface hands over does not name the trial "
+                      "it is about")
+
+        result = self.run_command(project, command)
+        self.assertEqual(result.returncode, 0,
+                         "the command the surface handed over did not work: %r %r"
+                         % (result.stdout, result.stderr))
+        self.assertEqual(
+            self.observe(project, trial_id, domain=sa.DOMAIN_TRIAL_UNIT),
+            (sa.trial_unit_state_key(tj.STATE_RESTORED_VERIFIED),))
+        self.assertEqual(project.surface()["r1"], ["OPEN"],
+                         "the operator's record is not back at its prior value")
+        self.assertTrue(
+            health.overall_status(str(project.root))["interrupted_trial"][
+                "trials"] == [],
+            "the surface still reports an interrupted trial after it was repaired")
 
 
 if __name__ == "__main__":  # pragma: no cover

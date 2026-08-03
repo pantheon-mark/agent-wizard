@@ -54,6 +54,8 @@ import dataclasses
 import hashlib
 import json
 import os
+import shlex
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -88,7 +90,8 @@ from external_write.lifecycle_test_fixtures import (  # noqa: E402
 )
 from external_write.operations import EffectUnit, Operation  # noqa: E402
 from external_write.read_facade import (  # noqa: E402
-    ReadFacade, register_read_facade, unregister_read_facade,
+    ReadFacade, get_read_facade_class, register_read_facade,
+    unregister_read_facade,
 )
 from external_write.write_gate import InvocationLedger  # noqa: E402
 
@@ -1543,6 +1546,461 @@ class EnrolmentTests(unittest.TestCase):
         fields = {f.name for f in dataclasses.fields(AdapterDispatch)}
         for name in (tx.APPLY_PREDICATE_NAME, tx.UNDO_PREDICATE_NAME):
             self.assertIn(name, fields)
+
+
+# ---------------------------------------------------------------------------
+# 10. THE OPERATOR-INVOCABLE ENTRYPOINT — the way IN to the protocol
+#
+# Until this existed, `run_trial` had zero production callers, no `__main__`, and
+# no manifest entry: the proof acceptance requires had a zone-legal producer that
+# no operator could start. A producer nobody can invoke is the same shape as a
+# repair nobody can find, which is the defect this whole cut exists to close.
+# ---------------------------------------------------------------------------
+
+class _SelfProvisioningGmailAdapter(GmailMessageTrashAdapter):
+    """The shipped trial-eligible adapter, provisioning BOTH of its own clients
+    the way an emitted adapter does -- which is what the entrypoint requires,
+    because an operator invocation supplies no client and must not.
+
+    Deliberately does NOT override `undo_one`: the absolute-state restore
+    declaration is scoped to the class that defines the `undo_one` it describes,
+    so inheriting the real one keeps the declaration truthful."""
+
+    def __init__(self, write_client, read_only_client):
+        super().__init__()
+        self._write_client = write_client
+        self._read_only_client = read_only_client
+
+    def build_write_client(self, op):
+        return self._write_client
+
+    def build_read_only_client(self, op):
+        return self._read_only_client
+
+
+_CAPABILITY_SRC = '''"""Fixture capability -- proposes ONE trial-eligible operation."""
+from external_write.operations import Operation
+
+OP_KIND = "{op_kind}"
+
+
+def describe():
+    return "fixture trial capability"
+
+
+def propose_operations(facade, batch_id):
+    return [Operation(surface="{surface}", object_id="{first}", field="labels",
+                      new_value="TRASH", op_kind=OP_KIND, batch_id=batch_id,
+                      params={{"messages": [{messages}]}})]
+'''
+
+
+class _EntrypointBase(_Base):
+    """A project on disk carrying a capability that proposes a trial-eligible
+    operation, with the SHIPPED adapter registered self-provisioning.
+
+    The shipped `gmail.message.trash` op_kind is used rather than a fixture
+    op_kind, and that is forced rather than preferred: the proposal step resolves
+    a read facade through the declaration topology over the KERNEL's own lib
+    directory, so an op_kind no shipped module declares a reader for cannot reach
+    a proposal at all in this process. The end-to-end operator path is therefore
+    exercised on the one fully trial-eligible shipped op_kind."""
+
+    GMAIL_SURFACE = "gmail_mailbox"
+    CAP_ID = "fixture_trial"
+
+    def setUp(self):
+        super().setUp()
+        self.service = MockGmailService({"m1": {"INBOX", "IMPORTANT"},
+                                         "m2": {"INBOX"}})
+        self.before = {mid: sorted(labels)
+                       for mid, labels in self.service.messages.items()}
+        self.adapter = _SelfProvisioningGmailAdapter(
+            self.service, _GmailReadOnlyClient(self.service))
+        register_adapter(OP_TRASH, self.adapter)
+        self.addCleanup(unregister_adapter, OP_TRASH)
+        self.write_capability(self.CAP_ID)
+
+    def write_capability(self, capability_id, op_kind=OP_TRASH):
+        messages = ", ".join(
+            '{"message_id": "%s", "prior_label_ids": %r}' % (mid, self.before[mid])
+            for mid in sorted(self.before))
+        path = self.root / "agents" / "capabilities" / f"{capability_id}_capability.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_CAPABILITY_SRC.format(
+            op_kind=op_kind, surface=self.GMAIL_SURFACE,
+            first=sorted(self.before)[0], messages=messages), encoding="utf-8")
+        # The capabilities directory goes on sys.path inside the runner and the
+        # module is imported by stem, so a same-named module from another test's
+        # temp tree would be served from the import cache.
+        self.addCleanup(sys.modules.pop, f"{capability_id}_capability", None)
+        return path
+
+    def start(self, capability_id=None, **kwargs):
+        kwargs.setdefault("operator_approval", APPROVAL)
+        kwargs.setdefault("descriptor_set", [_entry(id=self.GMAIL_SURFACE)])
+        kwargs.setdefault("cap_ledger", self.ledger)
+        kwargs.setdefault("paused_root", self.paused_root)
+        kwargs.setdefault("journal_dir", self.journal_dir)
+        kwargs.setdefault("proof_dir", self.proof_dir)
+        kwargs.setdefault("review_dir", str(self.root / "review"))
+        Path(kwargs["review_dir"]).mkdir(parents=True, exist_ok=True)
+        return tx.run_trial_for_capability(
+            capability_id or self.CAP_ID, project_root=str(self.root), **kwargs)
+
+
+APPROVAL = "Yes -- run a bounded trial on my real record and put it back."
+
+
+class TheRenderedTrialCommandTests(unittest.TestCase):
+    """The command is spelled in ONE place, and it is paste-ready. Every other
+    surface that has to name it renders it from here."""
+
+    def test_the_module_declares_its_own_entrypoint_path_once(self):
+        self.assertEqual(tx.TRIAL_ENTRYPOINT_REL,
+                         "agents/lib/external_write/trial_executor.py")
+        self.assertTrue((_AGENTS_LIB.parent.parent / tx.TRIAL_ENTRYPOINT_REL).is_file(),
+                        "the declared entrypoint path names a file this project "
+                        "does not ship")
+
+    def test_the_rendered_command_is_one_physical_line_naming_the_entrypoint(self):
+        command = tx.trial_command("acme_crm_sync")
+        self.assertEqual(len(command.splitlines()), 1,
+                         "a command that wraps is a paste hazard")
+        self.assertIn(tx.TRIAL_ENTRYPOINT_REL, command)
+        self.assertTrue(command.startswith("python3 "))
+        self.assertIn("acme_crm_sync", command)
+
+    def test_the_operators_words_are_a_PLACEHOLDER_when_nobody_has_said_them(self):
+        """A surface rendering this as guidance does not know what the operator
+        will say and must never invent it -- a machine-filled approval is forged
+        consent, not a convenience."""
+        self.assertIn(tx.APPROVAL_PLACEHOLDER, tx.trial_command("acme_crm_sync"))
+        self.assertNotIn(tx.APPROVAL_PLACEHOLDER,
+                         tx.trial_command("acme_crm_sync",
+                                          operator_approval=APPROVAL))
+
+    def test_the_operators_own_words_are_carried_verbatim_and_quoted(self):
+        command = tx.trial_command("acme_crm_sync", operator_approval=APPROVAL)
+        self.assertIn(APPROVAL, shlex.split(command))
+        self.assertEqual(len(command.splitlines()), 1)
+
+    def test_a_multi_line_approval_is_REFUSED_rather_than_wrapped(self):
+        with self.assertRaises(ValueError):
+            tx.trial_command("acme_crm_sync", operator_approval="yes\ngo ahead")
+
+    def test_the_rendered_command_parses_back_through_the_arg_parser(self):
+        """The renderer and the parser are two halves of one contract; a command
+        the parser refuses is not paste-ready however it reads."""
+        options, error = tx.parse_trial_args(
+            shlex.split(tx.trial_command(
+                "acme_crm_sync", operator_approval=APPROVAL))[2:])
+        self.assertIsNone(error, error)
+        self.assertEqual(options[tx.FLAG_CAPABILITY], "acme_crm_sync")
+        self.assertEqual(options[tx.FLAG_APPROVAL], APPROVAL)
+
+
+class TheTrialArgParserRefusesByDefaultTests(unittest.TestCase):
+    """DENY BY DEFAULT. This package has already shipped the other shape: an
+    unrecognized probe flag was silently dropped and the wrapper ran the live job
+    regardless. Here the payload is a live write to the operator's own record."""
+
+    def test_an_unrecognized_argument_refuses(self):
+        options, error = tx.parse_trial_args(
+            [tx.FLAG_CAPABILITY, "c", tx.FLAG_APPROVAL, APPROVAL, "--checkonly"])
+        self.assertIsNone(options)
+        self.assertIn("--checkonly", error)
+
+    def test_a_flag_with_no_value_refuses(self):
+        options, error = tx.parse_trial_args([tx.FLAG_CAPABILITY])
+        self.assertIsNone(options)
+        self.assertIn(tx.FLAG_CAPABILITY, error)
+
+    def test_a_missing_capability_refuses(self):
+        options, error = tx.parse_trial_args([tx.FLAG_APPROVAL, APPROVAL])
+        self.assertIsNone(options)
+        self.assertIn(tx.FLAG_CAPABILITY, error)
+
+    def test_a_missing_or_blank_approval_refuses(self):
+        for argv in ([tx.FLAG_CAPABILITY, "c"],
+                     [tx.FLAG_CAPABILITY, "c", tx.FLAG_APPROVAL, "   "]):
+            with self.subTest(argv=argv):
+                options, error = tx.parse_trial_args(argv)
+                self.assertIsNone(options)
+                self.assertIn(tx.FLAG_APPROVAL, error)
+
+    def test_every_refusal_carries_the_usage_line(self):
+        for argv in ([], ["--nope", "x"], [tx.FLAG_CAPABILITY, "c"]):
+            with self.subTest(argv=argv):
+                _options, error = tx.parse_trial_args(argv)
+                self.assertIn(tx.TRIAL_ENTRYPOINT_REL, error)
+
+
+class TheEntrypointDrivesARealTrialTests(_EntrypointBase):
+    """The done-condition of the whole task: an operator-invocable call drives a
+    trial-eligible operation to a proof the SHIPPED validator accepts, at the
+    path the acceptance command reads."""
+
+    def test_it_produces_a_validated_proof_where_acceptance_looks_for_it(self):
+        outcome = self.start()
+        self.assertTrue(outcome.ok, outcome.refusal)
+        self.assertEqual(outcome.proof_path,
+                         crp.copy_run_proof_path(self.CAP_ID,
+                                                 proof_dir=self.proof_dir))
+        with open(outcome.proof_path, encoding="utf-8") as f:
+            proof = json.load(f)
+        verdict = crp.validate_copy_run_proof(proof)
+        self.assertTrue(verdict.ok, verdict.reason)
+        self.assertEqual(proof["capability_id"], self.CAP_ID)
+
+    def test_the_operators_real_record_is_returned_to_its_prior_state(self):
+        self.assertTrue(self.start().ok)
+        self.assertEqual({mid: sorted(labels)
+                          for mid, labels in self.service.messages.items()},
+                         self.before,
+                         "a trial ALWAYS reverts")
+
+    def test_every_unit_is_recorded_restored_verified_in_the_durable_record(self):
+        outcome = self.start()
+        states = set(tj.load_trial_journal(
+            outcome.trial_id, journal_dir=self.journal_dir).unit_states().values())
+        self.assertEqual(states, {tj.STATE_RESTORED_VERIFIED})
+
+    def test_the_proof_names_the_capability_module_the_runner_actually_LOADED(self):
+        """The acceptance ceremony scans these files to establish that this
+        capability's write path is gated. A path this entrypoint invented would
+        send the ceremony to scan a file that is not the one that ran."""
+        outcome = self.start()
+        with open(outcome.proof_path, encoding="utf-8") as f:
+            proof = json.load(f)
+        self.assertEqual(list(proof["capability_module_paths"]),
+                         [f"agents/capabilities/{self.CAP_ID}_capability.py"])
+
+    def test_a_capability_that_proposes_NOTHING_is_refused_before_anything_runs(self):
+        path = self.write_capability("empty_trial")
+        path.write_text('OP_KIND = "%s"\n\n\ndef propose_operations(f, b):\n'
+                        "    return []\n" % OP_TRASH, encoding="utf-8")
+        with self.assertRaises(tx.TrialExecutorError) as raised:
+            self.start("empty_trial")
+        self.assertIn("nothing", str(raised.exception).lower())
+        self.assertEqual({mid: sorted(labels)
+                          for mid, labels in self.service.messages.items()},
+                         self.before)
+
+    def test_an_UNKNOWN_capability_is_refused_in_plain_language(self):
+        with self.assertRaises(Exception) as raised:
+            self.start("no_such_capability")
+        message = str(raised.exception)
+        self.assertIn("no_such_capability", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_a_capability_proposing_a_DIFFERENT_op_kind_than_it_declares_is_refused(self):
+        """Read isolation. The facade the proposal step built was resolved from
+        the capability's OWN declared op_kind; trialling an operation that names
+        another one would trial a surface this capability never declared."""
+        path = self.write_capability("mismatched")
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "op_kind=OP_KIND", 'op_kind="gmail.message.untrash"'),
+            encoding="utf-8")
+        with self.assertRaises(tx.TrialExecutorError) as raised:
+            self.start("mismatched")
+        self.assertIn("gmail.message.untrash", str(raised.exception))
+        self.assertEqual({mid: sorted(labels)
+                          for mid, labels in self.service.messages.items()},
+                         self.before)
+
+
+class TheEntrypointWorksInAFRESHProcessTests(_EntrypointBase):
+    """A freshly-invoked operator command has imported no read-facade module.
+    Nothing in production imports one at module scope, and the registry
+    `build_read_facade` resolves from is populated only by such an import -- so an
+    entrypoint that assumed a warm registry would refuse on EVERY real
+    invocation, which is what the recovery command already had to solve."""
+
+    def test_a_COLD_read_facade_registry_is_warmed_and_the_trial_still_proves(self):
+        registered = get_read_facade_class(OP_TRASH)
+        self.assertIsNotNone(registered, "fixture precondition")
+        unregister_read_facade(OP_TRASH)
+        self.addCleanup(register_read_facade, OP_TRASH, registered)
+        # THE FRESH-PROCESS CONDITION TAKES TWO STEPS, not one. Emptying the
+        # registry alone is not a fresh process: the declaring module is still in
+        # `sys.modules`, so re-importing it is a no-op and its module-scope
+        # registration never re-runs -- the resolver then reports "loaded, but
+        # registered nothing" and the test reads as a product defect when it is an
+        # unfaithful fixture. A real fresh interpreter has neither.
+        cached = sys.modules.pop("external_write.read_facades_gmail", None)
+        self.assertIsNotNone(cached, "fixture precondition: it was imported")
+        self.addCleanup(sys.modules.setdefault,
+                        "external_write.read_facades_gmail", cached)
+        self.assertIsNone(get_read_facade_class(OP_TRASH),
+                          "the registry must actually be cold for this to mean "
+                          "anything")
+
+        outcome = self.start()
+        self.assertTrue(outcome.ok, outcome.refusal)
+        self.assertIsNotNone(get_read_facade_class(OP_TRASH),
+                             "the entrypoint left the registry cold, so the "
+                             "observation it recorded came from somewhere else")
+
+    def test_the_resolution_goes_through_the_ONE_shared_resolver(self):
+        """Not a second copy of "which module provides read-only access for this
+        op_kind" -- that is a classification, and two implementations of one
+        classification is this package's most expensive recurring defect."""
+        tree = ast.parse(_MODULE_PATH.read_text())
+        called = {node.func.id for node in ast.walk(tree)
+                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+        self.assertIn("import_declared_read_facade", called)
+        self.assertNotIn("build_topology", called,
+                         "the topology lookup belongs to the one shared "
+                         "implementation")
+
+    def test_the_registry_is_NOT_warmed_at_module_scope(self):
+        """`trial_executor` is imported on every project that touches the health
+        surface (capability_health -> state_actions -> trial_recovery -> here, all
+        at module scope). Warming at module scope would fire read-facade module
+        imports on every health check in every project."""
+        tree = ast.parse(_MODULE_PATH.read_text())
+        for node in tree.body:
+            # Definitions do not RUN at import; every other module-level
+            # statement does, including the script bootstrap and the constants.
+            if isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef,
+                                 ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Call):
+                    name = getattr(inner.func, "id",
+                                   getattr(inner.func, "attr", ""))
+                    self.assertNotIn(name, ("import_declared_read_facade",
+                                            "get_read_facade_class",
+                                            "run_capability_proposal"))
+
+
+class TheEntrypointIsAnENROLLEDOperatorCommandTests(unittest.TestCase):
+    """A live-write command an operator runs. Enrolled, never allowlist-eligible
+    -- and the agreement between the manifest's hand-spelled prefix and this
+    module's own declared path is pinned, not hoped for."""
+
+    def test_it_is_enrolled_as_a_live_write_that_is_never_auto_approved(self):
+        from external_write import command_manifest as cm
+        entry = cm.find_command("trial-run")
+        self.assertIsNotNone(
+            entry, "the trial command performs a real external write to the "
+                   "operator's record; it must be classified")
+        self.assertEqual(entry.command_class, cm.LIVE_WRITE)
+        self.assertTrue(entry.writes_external)
+        self.assertFalse(cm.is_allowlist_eligible(entry))
+
+    def test_the_enrolled_prefix_agrees_with_this_modules_own_constant(self):
+        from external_write import command_manifest as cm
+        self.assertEqual(cm.find_command("trial-run").command_prefix,
+                         f"python3 {tx.TRIAL_ENTRYPOINT_REL}")
+
+    def test_the_module_declares_a_command_line_entrypoint(self):
+        tree = ast.parse(_MODULE_PATH.read_text())
+        self.assertTrue(
+            any(isinstance(node, ast.If) and isinstance(node.test, ast.Compare)
+                and isinstance(node.test.left, ast.Name)
+                and node.test.left.id == "__name__" for node in tree.body),
+            "the producer ships no operator-invocable entrypoint")
+
+
+class TheOperatorsOwnWordsAreTheApprovalTests(_EntrypointBase):
+    """A trial is a real live write to a bounded subset of the operator's own
+    record. Its approval is the operator's own words, minted through the
+    sanctioned broker path -- never a receipt this module invents for itself."""
+
+    def test_a_blank_approval_is_refused_and_nothing_is_written(self):
+        for approval in ("", "   ", None):
+            with self.subTest(approval=approval):
+                with self.assertRaises(tx.TrialExecutorError):
+                    self.start(operator_approval=approval)
+                self.assertEqual({mid: sorted(labels)
+                                  for mid, labels in self.service.messages.items()},
+                                 self.before)
+
+    def test_the_approval_is_minted_through_the_brokers_own_path(self):
+        tree = ast.parse(_MODULE_PATH.read_text())
+        names = {getattr(n.func, "id", getattr(n.func, "attr", ""))
+                 for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        self.assertIn("confirm", names,
+                      "the operator's approval must go through the broker that "
+                      "records their verbatim words, not a self-minted receipt")
+
+    def test_the_receipt_is_bound_to_the_EXACT_operation_that_is_trialled(self):
+        """A receipt for a different operation is not an approval of this one."""
+        outcome = self.start()
+        self.assertTrue(outcome.ok, outcome.refusal)
+
+
+class TheACCEPTANCERefusalNamesTheProducerTests(unittest.TestCase):
+    """The other half of reachability: a command nothing names is only reachable
+    by someone who already knows it exists.
+
+    Acceptance requires a validated copy-run proof, and the operator-facing
+    refusal for a missing one said what was wrong and nothing about what to do --
+    which is exactly the dead-end shape this cut exists to close, at the surface
+    where a capability that has been made fully compliant still cannot be
+    accepted. The refusal now names the producer, rendered by the module that owns
+    the entrypoint rather than spelled a second time."""
+
+    def _project(self, capability_id="acme_crm_sync"):
+        """A project with ONE pending descriptor entry -- enough that the CLI
+        reaches the ceremony rather than refusing earlier for want of a phase."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        descriptors = root / "security" / "capability_descriptors.json"
+        descriptors.parent.mkdir(parents=True, exist_ok=True)
+        descriptors.write_text(json.dumps([{
+            "id": capability_id, "name": capability_id, "phase_id": "phase_1",
+            "action_class": "modify", "risk_class": "sensitive_data",
+            "recovery_profile_ref": None, "declared_test_target": "native_undo",
+            "blast_radius_cap": 25, "accepted": False}]), encoding="utf-8")
+        return root, descriptors, capability_id
+
+    def _run_acceptance(self, descriptors, capability_id, proof_path=None):
+        """The acceptance CLI as a real process, from the repo's own emitted tree
+        -- which is where its `__main__` lives and the only way to observe what an
+        operator reads."""
+        argv = [sys.executable, "agents/lib/external_write/operator_acceptance.py",
+                "--capability-id", capability_id,
+                "--operator-confirmation", "yes go ahead",
+                "--descriptor-set", str(descriptors)]
+        if proof_path is not None:
+            argv += ["--copy-run-proof", str(proof_path)]
+        result = subprocess.run(
+            argv, capture_output=True, text=True,
+            cwd=str(_AGENTS_LIB.parent.parent),
+            env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1",
+                     PYTHONPATH=str(_AGENTS_LIB)),
+            timeout=300)
+        return result, result.stdout + result.stderr
+
+    def test_a_missing_proof_refusal_hands_over_the_producers_own_command(self):
+        _root, descriptors, capability_id = self._project()
+        result, message = self._run_acceptance(descriptors, capability_id)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("REFUSED", message)
+        self.assertIn(tx.trial_command(capability_id), message,
+                      "the acceptance refusal names no way to produce the "
+                      "evidence it requires: %r" % message)
+        self.assertIn(tx.APPROVAL_PLACEHOLDER, message,
+                      "the operator's own words must be left as a blank for them "
+                      "to fill in, never invented")
+        self.assertNotIn("Traceback", message)
+
+    def test_the_hint_is_absent_when_a_proof_IS_present(self):
+        """Keyed on the FILE, not on the refusal wording -- so a refusal for some
+        other reason does not tell the operator to produce evidence they have."""
+        root, descriptors, capability_id = self._project()
+        proof = root / crp.copy_run_proof_path(capability_id)
+        proof.parent.mkdir(parents=True, exist_ok=True)
+        proof.write_text("{}", encoding="utf-8")
+        result, message = self._run_acceptance(descriptors, capability_id,
+                                              proof_path=proof)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("REFUSED", message)
+        self.assertNotIn(tx.TRIAL_ENTRYPOINT_REL, message)
 
 
 if __name__ == "__main__":  # pragma: no cover

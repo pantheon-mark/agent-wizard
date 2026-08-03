@@ -169,14 +169,44 @@ an invitation: capability code may not import this module (the independent
 trial protocol is kernel-driven, and capability code has no business driving the
 external writes it proposes.
 
+------------------------------------------------------------------------------
+How a trial is STARTED — the operator-invocable entrypoint at the end of this
+module
+------------------------------------------------------------------------------
+`run_trial` is the library entry; `run_trial_for_capability` and this module's
+`__main__` are the operator's. Until they existed this module was a producer
+nobody could start: the proof acceptance requires had a zone-legal, journaled,
+crash-survivable producer, and no operator-invocable way to reach it — the same
+shape as a repair that exists only as a Python function, which is the defect this
+protocol's other half was built to close.
+
+The entrypoint is kernel-side, like every other operator entrypoint in this
+package and for the same reason: every place an operator project could put an
+emitted script is CAPABILITY-zoned, where obtaining a write client is a scan
+violation. It resolves nothing for itself — it asks the capability what it
+proposes (through the kernel-as-runner, so the capability never holds a client),
+takes the operator's own words as the approval and mints the write-gate receipt
+through the sanctioned broker, and hands the result to `run_trial`. See
+`run_trial_for_capability` for its own disclosed bounds.
+
 Stdlib only — no third-party dependencies.
 """
 
 import os
+import shlex
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+# sys.path bootstrap (mirrors `trial_journal.py` / `trial_recovery.py`): make the
+# package parent importable when this file is run as a direct script from the
+# project root, which is exactly how the operator invokes it.
+if __package__ in (None, ""):  # pragma: no cover - only true when run as a script
+    import sys as _bootstrap_sys
+    _pkg_parent = str(Path(__file__).resolve().parent.parent)
+    if _pkg_parent not in _bootstrap_sys.path:
+        _bootstrap_sys.path.insert(0, _pkg_parent)
 
 # Imported as a MODULE, not by name, for `open_trial_journal` and the state
 # constants: the journal is the mechanism this executor must be seen to go
@@ -214,6 +244,124 @@ from external_write.verifiers import POSTWRITE_VERIFICATION_SCHEMA
 from external_write.write_authorization import (
     EXECUTION_INTENT_TRIAL, TRIAL_TARGET, authorize_operation,
 )
+
+
+# ---------------------------------------------------------------------------
+# The operator-invocable entrypoint, named in exactly one place
+# ---------------------------------------------------------------------------
+
+# The project-relative path of THIS file in an emitted operator project. Spelled
+# once, here, because more than one surface has to point at it: this module's own
+# `trial_command`, the operator-invocable command manifest (which hand-spells its
+# prefixes and is pinned equal to this constant by a build-time test rather than
+# importing this module into the hook that loads the manifest), and the acceptance
+# CLI's own "no proof yet" next step. A re-spelling is how a named command comes
+# to name a path that no longer exists.
+TRIAL_ENTRYPOINT_REL = "agents/lib/external_write/trial_executor.py"
+
+# Process exit codes, following this package's existing CLI convention (0 =
+# succeeded, 1 = refused by domain logic, 2 = usage error). `EXIT_NOT_PROVED` is
+# the domain refusal: the command ran correctly and the honest answer is that no
+# proof could be earned. Non-zero so nothing monitoring the exit status can
+# mistake it for a proof that exists.
+EXIT_PROVED = 0
+EXIT_NOT_PROVED = 1
+EXIT_BAD_ARGS = 2
+
+FLAG_CAPABILITY = "--capability"
+FLAG_APPROVAL = "--operator-approval"
+FLAG_BATCH_ID = "--batch-id"
+
+# What a surface renders in place of the operator's words when nobody has said
+# them yet. A machine that filled this in would be forging the approval the whole
+# gate rests on, so the placeholder is visibly a blank to fill in -- the same rule
+# and the same shape as the acknowledgement command's own placeholder.
+APPROVAL_PLACEHOLDER = "<your own words approving a bounded trial>"
+
+#: The batch label a manual trial run records when the operator supplies none.
+DEFAULT_TRIAL_BATCH_ID = "trial"
+
+USAGE = (
+    f"Usage: python3 {TRIAL_ENTRYPOINT_REL} {FLAG_CAPABILITY} <capability name> "
+    f"{FLAG_APPROVAL} <your own words, on one line> [{FLAG_BATCH_ID} <label>]\n"
+    "Tries one thing this capability wants to do on your real record, checks it "
+    "landed, puts it straight back, and checks it came back.\n"
+    "It writes down what it observed as the evidence the acceptance step asks "
+    "for -- and writes nothing at all if it could not observe the whole round "
+    "trip.\n"
+    "Run it from your project's top folder.\n"
+    f"Exit codes: {EXIT_PROVED} = the round trip was proved and the evidence is "
+    f"written; {EXIT_NOT_PROVED} = no evidence was written (it says why); "
+    f"{EXIT_BAD_ARGS} = the command was not understood."
+)
+
+
+def trial_command(capability_id: str, *,
+                  operator_approval: Optional[str] = None) -> str:
+    """The exact, paste-ready command that runs a trial for ONE capability --
+    rendered in ONE place so every surface that has to name it names the same one.
+
+    `operator_approval` is optional on purpose, exactly as the acknowledgement
+    command's confirmation is: a surface rendering this command as guidance (an
+    acceptance refusal that has no proof to read, a skill) does not yet know what
+    the operator will say and must not invent it. Omitted, it renders as
+    `APPROVAL_PLACEHOLDER`, which is visibly a blank for the operator to replace.
+
+    A SINGLE PHYSICAL LINE, every interpolated value `shlex.quote`'d -- a command
+    that wraps is the paste hazard this package has already paid for once. Raises
+    on an approval containing a line break rather than emitting a "single line"
+    command that is not one: quoting escapes shell metacharacters but does not
+    strip an embedded newline.
+    """
+    approval = (APPROVAL_PLACEHOLDER if operator_approval is None
+                else operator_approval)
+    if "\n" in approval or "\r" in approval:
+        raise ValueError(
+            "refusing to build a trial command: the approval text contains a "
+            "line break, and quoting does not strip one -- the rendered command "
+            "would not be a single physical line. Use a single-line approval.")
+    parts = ["python3", TRIAL_ENTRYPOINT_REL,
+             FLAG_CAPABILITY, str(capability_id),
+             FLAG_APPROVAL, approval]
+    return " ".join(shlex.quote(p) for p in parts)
+
+
+def parse_trial_args(argv: Any) -> Tuple[Optional[Dict[str, Optional[str]]],
+                                         Optional[str]]:
+    """Strict, fail-closed parse of a trial invocation's argv.
+
+    Returns `(options, None)` for a recognized shape, or `(None, message)` for ANY
+    other input. DENY BY DEFAULT: there is no branch that ignores an argument it
+    does not recognize and proceeds anyway. This package has already shipped that
+    defect once -- an unrecognized `--checkonly` probe was silently dropped and
+    the wrapper ran the live job regardless -- and here the payload is a real
+    write to the operator's own record.
+
+    The operator's approval is REQUIRED here, not defaulted and not optional: a
+    trial is a live write, and the one thing this command may never do is supply
+    the words that authorize it.
+    """
+    args = list(argv or ())
+    options: Dict[str, Optional[str]] = {FLAG_CAPABILITY: None,
+                                         FLAG_APPROVAL: None,
+                                         FLAG_BATCH_ID: None}
+    index = 0
+    while index < len(args):
+        flag = args[index]
+        if flag not in options:
+            return None, f"unrecognized argument {flag!r}.\n\n{USAGE}"
+        if index + 1 >= len(args):
+            return None, f"{flag} needs a value.\n\n{USAGE}"
+        options[flag] = args[index + 1]
+        index += 2
+    if not (options[FLAG_CAPABILITY] or "").strip():
+        return None, f"missing required {FLAG_CAPABILITY}.\n\n{USAGE}"
+    if not (options[FLAG_APPROVAL] or "").strip():
+        return None, (
+            f"missing required {FLAG_APPROVAL} -- a trial makes a real change to "
+            "your own record and puts it back, so it runs only on your own "
+            f"words.\n\n{USAGE}")
+    return options, None
 
 
 # ---------------------------------------------------------------------------
@@ -1183,3 +1331,286 @@ def run_trial(op: Operation, receipt: Any, *,
         ok=True, trial_id=journal.trial_id, journal_path=journal.path,
         proof_path=path, units=outcomes,
         recovery_required_unit_ids=recovery_required)
+
+
+# ---------------------------------------------------------------------------
+# The OPERATOR's entry: what an invocation has to assemble, and what it may not
+# ---------------------------------------------------------------------------
+
+def _validated_operator_approval(approval: Any) -> str:
+    """The operator's own words, or a refusal.
+
+    Never defaulted, never generated, and blank is never accepted. A trial is a
+    real live write to a bounded subset of the operator's own record; the words
+    that approve it are the one thing this module must not be able to supply.
+    """
+    if not (isinstance(approval, str) and approval.strip()):
+        raise TrialExecutorError(
+            "a trial makes a real change to your own record and then puts it "
+            "back, so it runs only on your own words approving it -- nothing was "
+            f"proposed and nothing was changed. Got {approval!r}.")
+    return approval
+
+
+def _warmed_read_facade_registry(op_kind: str, *,
+                                 lib_dir: Optional[str] = None) -> None:
+    """POPULATE the read-facade registry for `op_kind` if it is not already.
+
+    The step a FRESH process needs and a warm one does not. Nothing in production
+    imports a read-facade module at module scope; the registry `build_read_facade`
+    resolves from is populated only by such an import, and this is an
+    operator-invoked command in a process where nothing has imported one.
+
+    The population goes through the ONE shared resolver
+    (`capability_runner.import_declared_read_facade`) -- the same one the recovery
+    entrypoint and the capability-facing resolver use. "Which module provides
+    read-only access for this operation" is a classification, and a second
+    implementation of it would be this package's most expensive recurring defect
+    shape.
+
+    DISCLOSED, because a guard whose value is overstated is worse than none: the
+    proposal step this entrypoint runs first resolves through that SAME shared
+    function (`capability_runner.resolve_read_facade_class`), so on the ordinary
+    path the registry is already warm by the time this runs and the guard
+    short-circuits. What this is for is that the facade `run_trial` resolves is
+    the one for the OPERATION being trialled, and this entrypoint does not depend
+    on another step's side effect for it. It is deliberately called from the
+    runtime path and NOT at module scope: `trial_executor` is imported at module
+    scope by every project that touches the health surface, and warming there
+    would fire read-facade module imports on every health check in every project.
+
+    Errors are not caught here. A reader that cannot be resolved means the trial
+    cannot observe the surface, and `run_trial` refuses on exactly that a moment
+    later -- swallowing it here would replace a specific refusal with a vaguer
+    one. (Recovery is in the opposite position and reports a reason instead: it
+    may have a unit outstanding on the live record right now, so it converges the
+    surface first and reports the unverifiable verdict second.)
+    """
+    from external_write.capability_runner import import_declared_read_facade
+    from external_write.read_facade import get_read_facade_class
+
+    if get_read_facade_class(op_kind) is None:
+        import_declared_read_facade(op_kind, lib_dir=lib_dir)
+
+
+def run_trial_for_capability(capability_id: str, *,
+                             operator_approval: Any,
+                             project_root: Any = ".",
+                             batch_id: Optional[str] = None,
+                             descriptor_set: Any = None,
+                             cap_ledger: Any = None,
+                             clock: Any = None,
+                             paused_root: Optional[str] = None,
+                             journal_dir: Optional[str] = None,
+                             proof_dir: Optional[str] = None,
+                             lib_dir: Optional[str] = None,
+                             review_dir: Optional[str] = None,
+                             trial_id: Optional[str] = None) -> TrialOutcome:
+    """Run a trial of what `capability_id` proposes, on the operator's own words.
+
+    The operator-facing half of `run_trial`, and the only thing this module's
+    `__main__` calls. It assembles what a trial needs and resolves NOTHING for
+    itself:
+
+      * WHAT to trial comes from the capability, through the kernel-as-runner
+        (`capability_runner.run_capability_proposal`), so the capability is CALLED
+        with a kernel-built read-only facade and never holds a client of its own.
+      * THE APPROVAL is the operator's own words, minted into a write-gate receipt
+        through the sanctioned broker (`broker.ApprovalBroker`), which records
+        those words verbatim and binds the receipt to the exact operation's
+        digest. This module never invents one: `run_trial` documents that it never
+        mints a receipt, and an entrypoint that minted its own would be forging
+        the consent the whole gate rests on.
+      * EVERY enforcement step is `run_trial`'s and `authorize_operation`'s,
+        unchanged: the trial-eligibility preflight, the mandatory blast-radius
+        cap, the invocation ledger, the recovery floor, the declared-test-target
+        requirement and receipt validation. Nothing here relaxes any of them and
+        there is no flag that could.
+
+    Parameters
+    ----------
+    capability_id:
+        the capability to trial. Its module is `agents/capabilities/
+        <capability_id>_capability.py` -- the canonical identity the scaffold
+        owns, not a guess at a filename.
+    operator_approval:
+        the operator's own words approving a bounded trial on their real record.
+        Required; blank refuses.
+    project_root / batch_id:
+        where the capability lives, and the label recorded for this run.
+    descriptor_set / cap_ledger / clock / paused_root / journal_dir / proof_dir /
+    lib_dir / review_dir / trial_id:
+        overrides for callers (tests above all) that must not depend on ambient
+        project state. Every default is the production convention.
+
+    Returns a `TrialOutcome` -- `ok` is True only when a proof was written and the
+    SHIPPED validator accepted it.
+
+    Raises `TrialExecutorError` when the trial cannot be set up at all (nothing
+    proposed, nothing applied, nothing written), and lets
+    `capability_runner.CapabilityRunnerError` propagate unchanged: it already says
+    in plain language what about the capability could not be run, and re-wrapping
+    it would hide which mechanism refused.
+
+    DISCLOSED BOUND -- ONE proposed operation is trialled: the FIRST the capability
+    proposes, stated here rather than left to be inferred. A trial earns evidence
+    about a write path, and the `copy_run_proof-v1` schema carries one operation's
+    observed apply/undo evidence; trialling every proposal would multiply live
+    writes without adding anything the proof can assert. The count is reported to
+    the operator so a capability proposing several is not silently narrowed. Every
+    proposed operation must name the op_kind the capability DECLARES -- the facade
+    the proposal step was given was built for that op_kind, so an operation naming
+    another one would trial a surface this capability never declared.
+    """
+    # The private importer is REUSED rather than reimplemented (the same
+    # discipline the acceptance record's own existence check is shared under): it
+    # resolves the capability module by the identity invariant, and reading the
+    # op_kind the module DECLARES off it is what makes the check below a
+    # comparison against a declared value rather than against a guess.
+    from external_write.broker import ApprovalBroker
+    from external_write.capability_runner import (
+        CAPABILITIES_DIR_REL, CAPABILITY_MODULE_SUFFIX,
+        _import_capability_module, run_capability_proposal,
+    )
+    from external_write.write_gate import InvocationLedger
+
+    approval = _validated_operator_approval(operator_approval)
+    cid = _validated_capability_id(capability_id)
+    module_stem = f"{cid}{CAPABILITY_MODULE_SUFFIX}"
+    module_paths = (f"{CAPABILITIES_DIR_REL}/{module_stem}.py",)
+
+    operations = run_capability_proposal(
+        project_root, cid, batch_id=batch_id or DEFAULT_TRIAL_BATCH_ID)
+    if not operations:
+        raise TrialExecutorError(
+            f"`{cid}` proposed nothing to change, so there is nothing to try. A "
+            "trial earns its evidence by carrying one real change through and "
+            "putting it back; with nothing proposed there is nothing to carry. "
+            "Nothing was changed and nothing was written.")
+
+    declared_op_kind = getattr(
+        _import_capability_module(Path(project_root), cid), "OP_KIND", None)
+    for candidate in operations:
+        if candidate.op_kind != declared_op_kind:
+            raise TrialExecutorError(
+                f"`{cid}` says it works on {declared_op_kind!r} but proposed "
+                f"{candidate.op_kind!r}. The read-only view it was given was "
+                "built for what it declares, so this would try a change against "
+                "something it never said it works on. Fix step: this capability "
+                "needs to be rebuilt so what it proposes matches what it "
+                "declares. Nothing was changed and nothing was written.")
+
+    op = operations[0]
+    _warmed_read_facade_registry(op.op_kind, lib_dir=lib_dir)
+
+    # The sanctioned approval path, not a self-issued receipt: the broker records
+    # the operator's verbatim words and binds one receipt per operation to that
+    # operation's own digest, which is what `validate_receipt` checks. The proof
+    # gate stays OFF here, deliberately and necessarily -- it exists to stop the
+    # first LIVE use of unproven write logic, and a trial is how that logic earns
+    # its proof. Enabling it would make the evidence a precondition of producing
+    # the evidence.
+    broker = ApprovalBroker(review_dir=review_dir)
+    proposal = broker.propose([op])
+    receipt = broker.confirm(proposal.pending_token, approval)
+
+    # THE BLAST-RADIUS WINDOW, and it is the shipped ledger rather than anything
+    # of this module's own: the gate REFUSES a live-bounded operation with no
+    # ledger, because the cap cannot be enforced without one. The window is the
+    # caller's to choose, and one invocation is one window here -- which is the
+    # honest choice rather than a convenient one, because each invocation carries
+    # its own FRESH operator approval, freshly typed. That is what makes this
+    # unlike the defect a persistent ledger exists to stop: there, ONE approved
+    # run was subdivided into chunks and each chunk minted its own window, so a
+    # single approval bought an unbounded number of capped windows. Here the cap
+    # bounds the units of THIS approval, and a second window costs a second
+    # approval. Disclosed rather than implied, because the trade is real: nothing
+    # accumulates a count ACROSS trials, so the cap is a per-approval bound and
+    # not a lifetime one -- and a lifetime one would eventually leave a capability
+    # that can never be trialled again, with no operator-facing way to clear it.
+    return run_trial(
+        op, receipt.op_receipts[op.digest()],
+        capability_id=cid, capability_module_paths=module_paths,
+        descriptor_set=descriptor_set,
+        cap_ledger=cap_ledger if cap_ledger is not None else InvocationLedger(),
+        clock=clock, paused_root=paused_root, journal_dir=journal_dir,
+        proof_dir=proof_dir, lib_dir=lib_dir, trial_id=trial_id)
+
+
+def trial_summary(outcome: TrialOutcome, *, capability_id: str,
+                  proposed: int = 1) -> str:
+    """The operator-facing sentence for a completed trial.
+
+    A trial that could not earn a proof already carries the gate's own
+    plain-language reason (`TrialOutcome.refusal`), and that text is surfaced
+    verbatim rather than re-described: the two refusals mean opposite things to
+    the person reading them -- one says a change may still be live on their
+    record, the other says nothing is outstanding -- and a second wording here
+    would be a second chance to say the wrong one.
+    """
+    if not outcome.ok:
+        return str(outcome.refusal)
+    extra = ("" if proposed <= 1 else
+             f" `{capability_id}` proposed {proposed} things to change; a trial "
+             "carries one of them through, so this covers the first.")
+    return (
+        f"The trial for `{capability_id}` carried one change through on your real "
+        "record, checked it landed, put it back, and checked it came back. Your "
+        f"record is as it was.{extra}\nThe evidence the acceptance step asks for "
+        f"is written to {outcome.proof_path}.\nThe durable record of the run "
+        f"itself is {outcome.journal_path}.")
+
+
+# ---------------------------------------------------------------------------
+# CLI -- the operator-invocable way IN to the trial protocol.
+#
+# Kernel-side, like every other operator entrypoint in this package, and for the
+# same reason: every place an operator project could put an emitted script is
+# CAPABILITY-zoned, where obtaining a write client is a scan violation. The kernel
+# already holds the only legitimate wiring, so it holds the entrypoint too.
+#
+# Never prints a traceback -- a non-technical operator reads this output.
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":  # pragma: no cover
+    import sys as _sys
+
+    # A freshly-invoked process has imported no adapter module, so `get_dispatch`
+    # would resolve None for an op_kind whose adapter IS enrolled. Importing this
+    # module fires every shipped and every operator-enrolled adapter module's
+    # registration. Done HERE, inside `__main__`, and not at this module's top
+    # level: this module is imported as a library by the health surface's own
+    # import chain, which must not eagerly register every adapter as a side
+    # effect. Same placement, for the same reason, as the recovery CLI's own
+    # import of it.
+    import external_write.registered_adapters  # noqa: E402,F401
+    from external_write.capability_runner import (  # noqa: E402
+        CapabilityRunnerError,
+    )
+    from external_write.topology import TopologyError  # noqa: E402
+    from external_write.trial_journal import TrialJournalError  # noqa: E402
+
+    _options, _error = parse_trial_args(_sys.argv[1:])
+    if _error is not None:
+        print(_error, file=_sys.stderr)
+        _sys.exit(EXIT_BAD_ARGS)
+
+    _capability_id = _options[FLAG_CAPABILITY]
+    try:
+        _outcome = run_trial_for_capability(
+            _capability_id,
+            operator_approval=_options[FLAG_APPROVAL],
+            batch_id=_options[FLAG_BATCH_ID])
+    except (TrialExecutorError, TrialJournalError, CapabilityRunnerError,
+            TopologyError) as _exc:
+        # A refusal, in plain language, and never an all-clear: no evidence was
+        # written. Exit 1, so nothing checking the status reads it as a proof.
+        print(str(_exc), file=_sys.stderr)
+        _sys.exit(EXIT_NOT_PROVED)
+
+    _message = trial_summary(_outcome, capability_id=_capability_id)
+    if _outcome.ok:
+        print(_message)
+        _sys.exit(EXIT_PROVED)
+    print(_message, file=_sys.stderr)
+    _sys.exit(EXIT_NOT_PROVED)
