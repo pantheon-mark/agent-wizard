@@ -676,6 +676,8 @@ underlying paused state.
 import ast
 import hashlib
 import json
+import os
+import stat as _stat
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, NamedTuple, Optional, Sequence, Union
 
@@ -2240,6 +2242,59 @@ def consent_sweep(project_root: Union[str, Path]) -> List[Violation]:
 #: not wrong, and this gate's own text said it to every kind until now.
 _ROUTING_REPAIR_EXEMPT_KINDS = frozenset({"baked_operator_confirmation", "unparseable"})
 
+#: Prefix on a finding line that does NOT decide this invocation's result. Two
+#: classes of line on one stream that look identical are two classes of line an
+#: operator cannot tell apart, and the whole point of the per-writer surface is
+#: that they can. Only the per-writer surface emits marked lines; the gate
+#: blocks on everything it finds, so nothing there is unmarked-by-contrast.
+ELSEWHERE_MARKER = "[elsewhere]"
+
+
+def writer_target_refusal(writer: str):
+    """Why this ``--writer`` target cannot be confirmed, or ``None`` if it can.
+
+    Returns ``(exit_code, message)``. A per-file surface may never issue a
+    positive per-file verdict about a file it did not read: "this file is clean"
+    is a claim about one file, and it is false the moment the file was not
+    opened. The likeliest way in is mundane — the rendered command run from the
+    wrong folder, the relative path resolving to nothing.
+
+    ABSENT and INACCESSIBLE are deliberately different answers, and the read is
+    a POSITIVE one (``os.stat`` for the shape, then an actual ``open``+read for
+    the permission), because a stat that succeeds proves nothing about whether
+    the bytes can be got at.
+
+    This does NOT touch, and does not need, the package's carried access-failure
+    gap in ``_scan_file``. That gap is deferred because refusing inside a
+    whole-DIRECTORY walk would fail every build containing one unreadable file;
+    a single named target is not a directory walk, so none of that argument
+    applies here and the deferral is left exactly as it is.
+    """
+    try:
+        st = os.stat(writer)
+    except (FileNotFoundError, NotADirectoryError):
+        return (2, f"there is no file at {writer!r}, so nothing was checked. "
+                   "Check the path, and run this from your project's top folder "
+                   "— the path is read relative to where you are.")
+    except OSError as exc:
+        return (1, f"{writer!r} could not be read ({exc.strerror}), so NOTHING "
+                   "about it was checked. This is not a clean result. It clears "
+                   "once the file can be read, then run this again.")
+    if _stat.S_ISDIR(st.st_mode):
+        return (2, f"{FLAG_WRITER} confirms ONE repaired file, and {writer!r} is "
+                   "a folder. Name the file, or run the whole-project check "
+                   "instead by giving the folder with no flag.")
+    if not _stat.S_ISREG(st.st_mode):
+        return (2, f"{writer!r} is not an ordinary file, so nothing was checked.")
+    try:
+        with open(writer, "rb") as _fh:
+            _fh.read(1)
+    except OSError as exc:
+        return (1, f"{writer!r} could not be read ({exc.strerror}), so NOTHING "
+                   "about it was checked. This is not a clean result. It clears "
+                   "once the file can be read, then run this again.")
+    return None
+
 
 def parse_cli_args(argv: Sequence[str]):
     """Strict, fail-closed parse of this entrypoint's argv.
@@ -2299,7 +2354,8 @@ def cli_findings(writer: Optional[str], paths: Sequence[str], project_root: Path
 _CONSENT_NOTE = (
     "hardcode an operator confirmation: the words that get recorded as the "
     "operator's own acceptance are written into the file, not said by them. "
-    "Text a file supplies is not the operator's, whatever it says. Each one "
+    "Text a file supplies is not the operator's, whatever it says. "
+    "The phase FAILS while any of them stands, and each one "
     "clears once its file no longer carries that text and the operator gives "
     "the confirmation themselves. Note the reach of this check honestly: it "
     "sees only a confirmation spelled out as a literal in a Python file, so a "
@@ -2309,7 +2365,8 @@ _CONSENT_NOTE = (
 
 _UNPARSEABLE_NOTE = (
     "could not be read as Python at all, so nothing about them was checked. "
-    "There is no write to reroute here; each one clears when its file parses."
+    "There is no write to reroute here. The phase FAILS while any of them "
+    "stands, and each one clears when its file parses."
 )
 
 
@@ -2327,6 +2384,16 @@ if __name__ == "__main__":  # pragma: no cover
             "Run it from your project's top folder.",
             file=_sys.stderr)
         _sys.exit(2)
+
+    if _writer is not None:
+        # Before any verdict about this one file, prove it IS one file and that
+        # its bytes can actually be got at. A positive per-file claim about a
+        # file nobody opened is the failure this surface exists to avoid.
+        _refusal = writer_target_refusal(_writer)
+        if _refusal is not None:
+            _code, _why = _refusal
+            print(_why, file=_sys.stderr)
+            _sys.exit(_code)
 
     # (F-3B) This standalone CLI invocation IS the anti-deadlock target the
     # hash-bound migration quarantine exists for -- the operator's real
@@ -2366,20 +2433,35 @@ if __name__ == "__main__":  # pragma: no cover
         # say just as plainly that it is not about the file being confirmed --
         # an operator who repaired exactly what they were told to repair must
         # never read this as their repair having failed.
+        #
+        # Every reference here is to a MARKER or to a named line, never to a
+        # position. These lines go to stdout and the note goes to stderr; stderr
+        # is unbuffered, so "above" and "below" describe an order that does not
+        # survive a pipe, and when the target is itself dirty there is no
+        # "below" at all.
         for _v in _elsewhere:
-            print(f"{_v.path}:{_v.lineno}: {_v.kind}")
+            print(f"{ELSEWHERE_MARKER} {_v.path}:{_v.lineno}: {_v.kind}")
         print(
             f"\nSeparately, and NOT about {_writer}: {len(_elsewhere)} finding(s) "
-            "elsewhere in this project, listed above. The result for "
-            f"{_writer} is the one reported below and is unaffected by them. "
-            "They still need attention in their own right.",
+            f"elsewhere in this project, each on a line marked "
+            f"{ELSEWHERE_MARKER}. They do not change the result for {_writer}, "
+            f"which is given on its own line starting '{_writer}: '. They still "
+            "need attention in their own right.",
             file=_sys.stderr,
         )
 
+    if _writer is not None:
+        # Exactly one result line about the target, whichever way it went. The
+        # note above promises one; a promise kept only on the passing branch is
+        # the branch an operator never sees when it matters.
+        _own = len(_violations)
+        if _own:
+            print(f"{_writer}: NOT clean -- {_own} finding(s) in this file.")
+        else:
+            print(f"{_writer}: clean -- no findings in this file.")
+        _sys.exit(1 if _own else 0)
+
     if _violations:
         _sys.exit(1)
-    if _writer is not None:
-        print(f"{_writer} is clean -- no violations found in it.")
-    else:
-        print("Bypass scan passed — no violations found.")
+    print("Bypass scan passed — no violations found.")
     _sys.exit(0)

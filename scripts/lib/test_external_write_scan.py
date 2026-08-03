@@ -2083,6 +2083,163 @@ class TestPerWriterRepairConfirmation(unittest.TestCase):
                 self.assertEqual(proc.returncode, 2, f"args={args!r}")
 
 
+class TestPerWriterTargetMustBeReadable(unittest.TestCase):
+    """A per-file surface may never issue a positive per-file verdict about a
+    file it did not read.
+
+    The project-wide gate can say "no violations found" without naming anything;
+    this surface says "THIS file is clean", which is a claim about one file, and
+    it is false the moment that file was never opened. The likeliest trigger is
+    ordinary: the registry renders the command, the operator runs it from the
+    wrong folder, the relative path resolves to nothing, and they are told the
+    file they repaired is fine.
+
+    Refusing here needs no change to the package's carried access-failure gap:
+    that gap is deferred because refusing inside a whole-DIRECTORY walk would
+    fail every build containing one unreadable file. A single named target is
+    not a directory walk, so nothing about that argument applies.
+    """
+
+    def _run(self, proj, *args):
+        import subprocess
+        return subprocess.run(
+            [sys.executable, str(_ADAPTER_DIR / "scan.py"), *args],
+            cwd=str(proj), capture_output=True, text=True)
+
+    def _project(self, td):
+        proj = Path(td)
+        (proj / "agents" / "inbox").mkdir(parents=True)
+        (proj / "agents" / "inbox" / "runner.py").write_text(
+            "def main():\n    return 0\n", encoding="utf-8")
+        return proj
+
+    def test_a_nonexistent_writer_is_never_reported_clean(self):
+        with TemporaryDirectory() as td:
+            proj = self._project(td)
+            proc = self._run(proj, scan.FLAG_WRITER, "agents/inbox/typo.py")
+            self.assertNotEqual(proc.returncode, 0,
+                                f"stdout={proc.stdout!r} stderr={proc.stderr!r}")
+            self.assertNotIn("clean", proc.stdout.lower(),
+                             "a file that was never read must never be called "
+                             "clean")
+
+    def test_a_writer_that_cannot_be_read_is_never_reported_clean(self):
+        if os.geteuid() == 0:  # pragma: no cover - root ignores the mode bits
+            self.skipTest("running as root; the mode bits would not deny a read")
+        with TemporaryDirectory() as td:
+            proj = self._project(td)
+            target = proj / "agents" / "inbox" / "runner.py"
+            os.chmod(str(target), 0o000)
+            try:
+                proc = self._run(proj, scan.FLAG_WRITER, "agents/inbox/runner.py")
+            finally:
+                # Inside the temp dir's lifetime -- a chmod deferred to
+                # addCleanup would run after the directory is already gone.
+                os.chmod(str(target), 0o644)
+            self.assertNotEqual(proc.returncode, 0,
+                                f"stdout={proc.stdout!r} stderr={proc.stderr!r}")
+            self.assertNotIn("clean", proc.stdout.lower())
+            self.assertIn("could not be read", (proc.stdout + proc.stderr).lower(),
+                          "absent and inaccessible are different answers and the "
+                          "operator needs to know which one they got")
+
+    def test_a_directory_is_refused_rather_than_scanned_as_a_writer(self):
+        with TemporaryDirectory() as td:
+            proj = self._project(td)
+            (proj / "scripts").mkdir()
+            (proj / "scripts" / "finish_setup.py").write_text(
+                (_FIXTURES / "capability_bakes_operator_confirmation.py")
+                .read_text(encoding="utf-8"), encoding="utf-8")
+            proc = self._run(proj, scan.FLAG_WRITER, "scripts")
+            self.assertEqual(proc.returncode, 2,
+                             f"stdout={proc.stdout!r} stderr={proc.stderr!r}")
+            # The shape this refusal prevents: the same finding reported twice,
+            # once as the target's and once as being somewhere other than the
+            # target it is actually inside.
+            self.assertNotIn("finish_setup.py", proc.stdout)
+
+    def test_a_readable_file_is_still_confirmed(self):
+        with TemporaryDirectory() as td:
+            proj = self._project(td)
+            proc = self._run(proj, scan.FLAG_WRITER, "agents/inbox/runner.py")
+            self.assertEqual(proc.returncode, 0,
+                             f"stdout={proc.stdout!r} stderr={proc.stderr!r}")
+            self.assertIn("clean", proc.stdout.lower())
+
+
+class TestSeparationNoticeSaysWhatItMeans(unittest.TestCase):
+    """The notice that keeps an unrelated finding from reading as a failed
+    repair is only as good as its referents. Positional words do not survive two
+    streams: stderr is unbuffered, so "listed above" and "reported below" point
+    at whatever the terminal happened to interleave -- and when the writer is
+    itself dirty, the result line "below" is never printed at all.
+    """
+
+    def _run(self, proj, *args):
+        import subprocess
+        return subprocess.run(
+            [sys.executable, str(_ADAPTER_DIR / "scan.py"), *args],
+            cwd=str(proj), capture_output=True, text=True)
+
+    def _project(self, td, writer_source="def main():\n    return 0\n"):
+        proj = Path(td)
+        (proj / "agents" / "inbox").mkdir(parents=True)
+        (proj / "agents" / "inbox" / "runner.py").write_text(
+            writer_source, encoding="utf-8")
+        (proj / "scripts").mkdir()
+        (proj / "scripts" / "finish_setup.py").write_text(
+            (_FIXTURES / "capability_bakes_operator_confirmation.py")
+            .read_text(encoding="utf-8"), encoding="utf-8")
+        return proj, "agents/inbox/runner.py"
+
+    def test_the_notice_carries_no_positional_reference(self):
+        with TemporaryDirectory() as td:
+            proj, rel = self._project(td)
+            proc = self._run(proj, scan.FLAG_WRITER, rel)
+            for phrase in ("listed above", "reported below", "printed above"):
+                self.assertNotIn(phrase, proc.stderr.lower(),
+                                 "two streams do not have an 'above'")
+
+    def test_an_unrelated_finding_line_is_visibly_marked_as_such(self):
+        with TemporaryDirectory() as td:
+            proj, rel = self._project(td)
+            proc = self._run(proj, scan.FLAG_WRITER, rel)
+            marked = [ln for ln in proc.stdout.splitlines()
+                      if "finish_setup.py" in ln]
+            self.assertTrue(marked, f"stdout={proc.stdout!r}")
+            for ln in marked:
+                self.assertIn(scan.ELSEWHERE_MARKER, ln,
+                              "a finding that does not block must not look "
+                              "byte-identical to one that does")
+
+    def test_the_targets_own_finding_line_is_not_marked(self):
+        with TemporaryDirectory() as td:
+            proj, rel = self._project(
+                td, "import requests\n\ndef main():\n    return requests\n")
+            proc = self._run(proj, scan.FLAG_WRITER, rel)
+            own = [ln for ln in proc.stdout.splitlines() if "runner.py" in ln]
+            self.assertTrue(own, f"stdout={proc.stdout!r}")
+            for ln in own:
+                self.assertNotIn(scan.ELSEWHERE_MARKER, ln)
+
+    def test_a_dirty_writer_gets_an_explicit_result_line_of_its_own(self):
+        with TemporaryDirectory() as td:
+            proj, rel = self._project(
+                td, "import requests\n\ndef main():\n    return requests\n")
+            proc = self._run(proj, scan.FLAG_WRITER, rel)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn(f"{rel}: NOT clean", proc.stdout,
+                          "the notice promises a result for this file; there "
+                          "must be one whichever way it went")
+
+    def test_a_clean_writer_gets_an_explicit_result_line_of_its_own(self):
+        with TemporaryDirectory() as td:
+            proj, rel = self._project(td)
+            proc = self._run(proj, scan.FLAG_WRITER, rel)
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn(f"{rel}: clean", proc.stdout)
+
+
 class TestCliMessageMatchesTheKindItReports(unittest.TestCase):
     """A remediation instruction that does not fit the finding is worse than
     none: it sends the operator to repair something that is not wrong."""
@@ -2108,6 +2265,33 @@ class TestCliMessageMatchesTheKindItReports(unittest.TestCase):
                              proc.stderr,
                              "nothing is being routed anywhere: the file could "
                              "not be read as Python at all")
+
+    def test_a_baked_only_run_still_states_the_consequence(self):
+        # The routing sentence used to be the only carrier of "the phase FAILS",
+        # and suppressing it for these two kinds silently took the consequence
+        # with it. Exit 1 alone is not an operator-facing statement.
+        with TemporaryDirectory() as td:
+            proj = Path(td)
+            (proj / "agents").mkdir()
+            (proj / "scripts").mkdir()
+            (proj / "scripts" / "finish_setup.py").write_text(
+                (_FIXTURES / "capability_bakes_operator_confirmation.py")
+                .read_text(encoding="utf-8"), encoding="utf-8")
+            proc = self._run(proj, "agents/")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("phase FAILS", proc.stderr)
+
+    def test_an_unparseable_only_run_still_states_the_consequence(self):
+        with TemporaryDirectory() as td:
+            proj = Path(td)
+            (proj / "agents").mkdir()
+            (proj / "scripts").mkdir()
+            (proj / "scripts" / "broken.py").write_text(
+                'CMD = ["--operator-confirmation", "yes, accept it"\n',
+                encoding="utf-8")
+            proc = self._run(proj, "agents/")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("phase FAILS", proc.stderr)
 
     def test_a_real_write_bypass_still_gets_the_routing_sentence(self):
         with TemporaryDirectory() as td:
