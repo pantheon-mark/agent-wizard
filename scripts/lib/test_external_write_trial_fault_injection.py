@@ -1,10 +1,13 @@
 """PROCESS-KILL FAULT INJECTION over the trial protocol (Cut 1.9 Task 6).
 
-This file is not test coverage. It is the EVIDENCE that stands in place of another
-round of design review: the review ladder's stop rule required a method change
-rather than a fourth round, and the named change was empirical replay against the
-historical estate plus process-kill fault injection at every trial persistence and
-external-call boundary. This is the fault-injection half.
+This file kills the process for real -- `os._exit`, no unwinding, no cleanup
+handlers -- at every point where the trial protocol makes something durable or
+calls out to the operator's live account, and then asserts what an operator would
+find afterwards. It is empirical evidence about crash behaviour rather than
+coverage of code paths: the question at each point is not "did this line run" but
+"if the machine died exactly here, is the operator's record intact, does the
+durable record say what actually happened, and is the operator told the truth
+about it".
 
 ------------------------------------------------------------------------------
 The pass condition, and it is the only one
@@ -34,6 +37,28 @@ anchored on the SURFACE, never on the journal: `assertClaimMatchesSurface` deriv
 what the output is ALLOWED to claim from the surface file's own contents, and a
 run that tells the operator nothing is outstanding while the surface is still
 changed FAILS -- whatever the journal says.
+
+WHICH KILL POINTS CARRY WHICH SURFACES, stated exactly rather than as "all three
+everywhere", because this file's output is evidence and an overstated scope is the
+one defect it cannot afford:
+
+  * Every kill point that leaves a journal on disk carries all three: surfaces 1
+    and 2 at the instant of the kill, then the resume, then all three again
+    (`assertResumesToTerminal`).
+  * The six PRE-JOURNAL kill points (`read_client.build`, `write_client.build`,
+    the two `ledger.*`, and the two journal-open instants before the publish)
+    carry surfaces 1 and 2 only, and cannot carry the third: there is no journal
+    to resume from, so no operator-facing producer exists to read. Their coverage
+    is `assertNothingWasMutatedAndNoJournalExists` — nothing mutated, no durable
+    record — plus `test_an_absent_journal_is_never_read_as_nothing_was_applied`,
+    which drives the real command against a non-existent trial and requires a
+    fail-closed refusal that does NOT claim an all-clear. That is the correct
+    coverage for a state with no record, not a weaker version of the other one.
+  * A killed process emits nothing on either stream, so at every trial-side kill
+    point surface 3 is produced by the RESUME rather than by the killed run. The
+    trial executor's own refusal is asserted separately, by
+    `test_the_TRIALS_OWN_refusal_text_is_true_when_a_unit_is_left_changed`, which
+    reaches it the only way a killed run cannot: by letting the trial finish.
 
 ------------------------------------------------------------------------------
 The kill is a real kill
@@ -103,11 +128,35 @@ The enumeration is CODE, not prose
 ------------------------------------------------------------------------------
 `BoundaryEnumerationTests` derives every persistence and external-call boundary
 in the three modules from their own ASTs and requires the declared enumeration
-below to match it exactly, and requires every declared boundary to have at least
-one kill point that this file actually exercises. A later task that adds an
-`apply_one` call site, a `record_*` site or a second atomic writer fails that
-test until it declares the boundary and kills at it. "The brief didn't list it"
-stops being available as an answer.
+below to match it exactly, and requires every declared boundary to carry one of
+four DECLARED dispositions — killed at, bracketed by instants that are killed at,
+excluded by a contract property, or untested with a stated reason. A later task
+that adds an `apply_one` call site, a `record_*` site or a second atomic writer
+lands in no disposition and fails until it declares the boundary and kills at it.
+
+WHAT THAT GUARD DOES AND DOES NOT CATCH, scoped honestly, because an earlier
+version of this claim was broader than the mechanism:
+
+  * CAUGHT: any call to a filesystem mutator in the declared surface of the
+    modules this code may import — `os`, `shutil`, `tempfile`, `pathlib`, `json`,
+    `io` — whether or not the protocol uses that name today. The vocabulary is
+    drawn from those modules' mutating surface, not from observed usage, and
+    `test_a_second_durable_writer_BUILT_FROM_UNUSED_NAMES_is_caught` proves it by
+    injecting a whole second durable writer spelled with three names the protocol
+    never calls. `open` and `os.open` are classified by mode and by flags rather
+    than by name, so the lock file's creating `open` is a boundary and the
+    journal's read-mode one is not.
+  * CAUGHT, fail-closed: any call rooted at one of those modules whose member is
+    classified as neither mutating nor read-only. Silence refuses rather than
+    defaulting to harmless.
+  * NOT CAUGHT: a mutation reached through a callable resolved at run time
+    (`getattr`, a name bound from a table) or through a module outside the
+    declared import allowlist. Static derivation cannot see either. What bounds
+    the first is that these modules are stdlib-only and kernel-zoned; what would
+    catch the second is the zone scanner, not this file.
+
+"The brief didn't list it" stops being available as an answer. "No name I
+recognised" is now also unavailable.
 
 Uses a file-backed fixture adapter in a real operator-project layout; no network.
 Every test writes into its own temp directory.
@@ -187,14 +236,21 @@ DECLARED_PERSISTENCE_BOUNDARIES = frozenset({
     "trial_journal:_fsync_directory:fsync",
     # -- the cross-process lock every transition and the open take ---------
     "trial_journal:_exclusive:makedirs",
+    # `open(self._lock_path, "w")` CREATES AND TRUNCATES a real file. Derived
+    # because `open` is classified by its mode, which is also what keeps
+    # `read_record`'s read-mode `open` correctly out of this set.
+    "trial_journal:_exclusive:open",
     "trial_journal:_exclusive:flock",
     # -- recovery's writes -------------------------------------------------
+    # `record_recovery_required` sits in the NESTED `_blocked`, and the
+    # attribution says so rather than merging it into its outer function.
     "trial_recovery:_converge_unit:record_undo_intent",
     "trial_recovery:_converge_unit:record_restored_verified",
-    "trial_recovery:_converge_unit:record_recovery_required",
+    "trial_recovery:_converge_unit._blocked:record_recovery_required",
 })
 
 DECLARED_EXTERNAL_CALL_BOUNDARIES = frozenset({
+    "trial_executor:_planned_units:plan",
     "trial_executor:run_trial:resolve_read_only_client",
     "trial_executor:run_trial:resolve_write_client",
     "trial_executor:_drive_unit:apply_one",
@@ -301,9 +357,25 @@ KILL_POINT_COVERAGE = {
     "rec_restored_verified.after_replace": (
         "trial_recovery:_converge_unit:record_restored_verified",),
     "rec_recovery_required.before_replace": (
-        "trial_recovery:_converge_unit:record_recovery_required",),
+        "trial_recovery:_converge_unit._blocked:record_recovery_required",),
     "rec_recovery_required.after_replace": (
-        "trial_recovery:_converge_unit:record_recovery_required",),
+        "trial_recovery:_converge_unit._blocked:record_recovery_required",),
+}
+
+# Boundaries excluded by a CONTRACT PROPERTY rather than by a coverage argument.
+# Recorded so a later reader can tell a judged exclusion from a miss: the callee is
+# derived, so its absence from the kill points is a declared decision with a
+# reason, not silence.
+BOUNDARIES_EXCLUDED_BY_CONTRACT = {
+    "trial_executor:_planned_units:plan":
+        "`plan()` is contractually PURE -- no reads and no writes -- which "
+        "`_planned_units` states in its own docstring and relies on: it is called "
+        "before authorization precisely because calling it touches no surface. So "
+        "it is not an external-call boundary, and a kill there is indistinguishable "
+        "from a kill anywhere else before the journal exists, which "
+        "`read_client.build` already covers. If `plan()` ever became impure the "
+        "trial protocol has a much larger problem than this enumeration, and the "
+        "journal's capsule-set match at open is what would catch it.",
 }
 
 # Boundaries NOT killed at individually, because the whole set of states a kill
@@ -319,6 +391,16 @@ BOUNDARIES_BRACKETED_BY_KILLED_POINTS = {
     "trial_journal:_exclusive:makedirs":
         "same instant as above, one layer out; `apply_intent.before_replace` also "
         "kills INSIDE the exclusive section it guards",
+    "trial_journal:_exclusive:open":
+        "creates and truncates the `.lock` file, and every kill inside the "
+        "exclusive section is downstream of it, so both sides are already "
+        "observed: `read_client.build` dies before any journal work and leaves NO "
+        "lock file, while `journal.before_mkstemp` and "
+        "`apply_intent.before_replace` die after it and leave one -- and "
+        "`test_the_stale_lock_file_a_killed_process_leaves_blocks_nothing` asserts "
+        "the file is present AND that the next process is not blocked by it. It "
+        "carries no operator data and no durable record, so there is no third "
+        "state to find",
     "trial_executor:_atomic_write_json:makedirs":
         "as above, for the proof writer; `proof.before_mkstemp` kills immediately "
         "after it",
@@ -1634,8 +1716,13 @@ class TheProofEmissionTests(_FaultInjectionCase):
 
     def test_killed_before_the_proof_contents_are_synced(self):
         self.kill_at("proof.before_fsync")
+        trial_id = self.the_only_trial()
         self.assertEqual(self.proj.proofs(), [])
         self.assertEqual(len(self.proj.proof_temp_files()), 1)
+        self.assertResumesToTerminal(
+            trial_id,
+            expect_states={"r1": tj.STATE_RESTORED_VERIFIED},
+            expect_surface=self.proj.prior_surface())
 
     def test_killed_immediately_before_the_proof_is_published(self):
         self.kill_at("proof.before_replace")
@@ -1665,8 +1752,14 @@ class TheProofEmissionTests(_FaultInjectionCase):
 
     def test_killed_after_the_proofs_directory_entry_is_synced(self):
         self.kill_at("proof.after_dir_fsync")
+        trial_id = self.the_only_trial()
         self.assertEqual(self.proj.proofs(),
                          ["fixture_capability.copy_run_proof.json"])
+        self.assertResumesToTerminal(
+            trial_id,
+            expect_states={"r1": tj.STATE_RESTORED_VERIFIED},
+            expect_surface=self.proj.prior_surface(),
+            final_states={"r1": tj.STATE_RESTORED_VERIFIED})
 
     def test_a_published_proof_is_whole_and_never_a_torn_one(self):
         """What fault injection uniquely establishes about the proof: the artifact
@@ -1684,6 +1777,7 @@ class TheProofEmissionTests(_FaultInjectionCase):
             COPY_RUN_PROOF_SCHEMA, _REQUIRED_FIELDS,
         )
         self.kill_at("proof.after_dir_fsync")
+        trial_id = self.the_only_trial()
         payload = json.loads(
             (self.proj.root / "agents" / "handoffs"
              / "fixture_capability.copy_run_proof.json")
@@ -1694,6 +1788,10 @@ class TheProofEmissionTests(_FaultInjectionCase):
             "the published artifact is missing required fields, so the publish "
             "was not atomic")
         self.assertEqual(self.proj.proof_temp_files(), [])
+        self.assertResumesToTerminal(
+            trial_id,
+            expect_states={"r1": tj.STATE_RESTORED_VERIFIED},
+            expect_surface=self.proj.prior_surface())
 
 
 # ===========================================================================
@@ -1978,48 +2076,211 @@ class BoundaryEnumerationTests(unittest.TestCase):
     until it declares the boundary and kills at it.
     """
 
-    # Every call that MUTATES the filesystem, plus the two calls that order those
-    # mutations (`fsync`, `flock`). Wider than the plan's list on purpose: the
-    # question is what the code does, not what a brief remembered.
-    PERSISTENCE_CALLEES = frozenset({
+    # ------------------------------------------------------------------
+    # The vocabulary. Drawn from the filesystem-MUTATING SURFACE of the
+    # modules this code is allowed to import, NOT from the names it happens
+    # to call today.
+    #
+    # The distinction is the whole point and it was learned the hard way: an
+    # allowlist of observed usage is green-and-blind against any future writer
+    # spelled differently. A complete second durable writer built from
+    # `Path.write_text` + `os.rename` + `os.unlink` passed an earlier version of
+    # this guard 8/8, because none of those three names was in use anywhere in
+    # the protocol and so none of them was listed. Every name below is here
+    # because the underlying module can mutate the filesystem with it, whether
+    # or not this code has ever used it -- and
+    # `test_a_second_durable_writer_BUILT_FROM_UNUSED_NAMES_is_caught` injects
+    # exactly that writer and requires the derivation to catch it.
+    # ------------------------------------------------------------------
+
+    # Mutators reachable as a plain attribute or name call, wherever they appear.
+    # `pathlib`'s writers are the reason this is name-based rather than
+    # receiver-based: a `Path` arrives in a variable, so `some_path.write_text(...)`
+    # has no import root to key on.
+    FS_MUTATING_NAMES = frozenset({
+        # os
+        "replace", "rename", "renames", "remove", "unlink", "rmdir",
+        "removedirs", "mkdir", "makedirs", "truncate", "ftruncate", "chmod",
+        "fchmod", "lchmod", "chown", "fchown", "lchown", "link", "symlink",
+        "utime", "mkfifo", "mknod", "write", "writev", "pwrite", "sendfile",
+        "copy_file_range", "fsync", "fdatasync", "fdopen", "startfile",
+        # tempfile
+        "mkstemp", "mkdtemp", "NamedTemporaryFile", "TemporaryFile",
+        "SpooledTemporaryFile", "TemporaryDirectory",
+        # shutil
+        "copy", "copy2", "copyfile", "copyfileobj", "copymode", "copystat",
+        "copytree", "move", "rmtree", "make_archive", "unpack_archive",
+        # pathlib.Path writers
+        "write_text", "write_bytes", "touch", "symlink_to", "hardlink_to",
+        # file objects + json
+        "writelines", "flush", "dump",
+    })
+
+    # Ordering primitives: they mutate nothing themselves but they are what makes
+    # a mutation durable or exclusive, so a kill around them is a real instant.
+    FS_ORDERING_NAMES = frozenset({"flock"})
+
+    # The protocol's own durable-write entry points.
+    PROTOCOL_PERSISTENCE_NAMES = frozenset({
         "_atomic_write_record", "_atomic_write_json", "open_trial_journal",
         "record_apply_intent", "record_apply_confirmed", "record_undo_intent",
         "record_restored_verified", "record_recovery_required",
-        "replace", "fsync", "mkstemp", "flock", "makedirs", "remove",
-        "fdopen", "write", "flush",
     })
+
+    # `open` / `os.open` are classified by MODE, not by name: the same call is a
+    # read or a mutation depending on its arguments. This is what makes the lock
+    # file's `open(..., "w")` a derived boundary while `read_record`'s
+    # `open(path, encoding=...)` and `_fsync_directory`'s `os.open(dir, O_RDONLY)`
+    # correctly are not.
+    MODE_CLASSIFIED_NAMES = frozenset({"open"})
+    _WRITE_MODE_CHARS = frozenset("wxa+")
+    _WRITE_OPEN_FLAGS = frozenset({
+        "O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_APPEND", "O_EXCL",
+    })
+
     EXTERNAL_CALLEES = frozenset({
         "apply_one", "undo_one", "verify_one", "observe_unit",
         "resolve_write_client", "resolve_read_only_client",
+        # `plan` is DERIVED so that its exclusion is a recorded judgment rather
+        # than an absence a later reader cannot tell from a miss. See
+        # BOUNDARIES_EXCLUDED_BY_CONTRACT.
+        "plan",
     })
+
+    # Modules whose members can touch the filesystem. Any call rooted at one of
+    # these must be classified (below) -- that is the fail-closed half.
+    FS_CAPABLE_ROOTS = frozenset({"os", "shutil", "tempfile", "json", "io",
+                                  "pathlib"})
+
+    # The READ-ONLY members of those modules that this code legitimately calls.
+    # Declared POSITIVELY: a member in neither this set nor the mutating set is a
+    # member nobody classified, and the test REFUSES rather than assuming it is
+    # harmless.
+    FS_READ_ONLY_MEMBERS = frozenset({
+        "os.path.dirname", "os.path.abspath", "os.path.join", "os.path.exists",
+        "os.path.basename", "os.path.isdir", "os.path.isfile",
+        "os.path.normpath", "os.path.relpath", "os.path.split",
+        "os.path.splitext", "os.getcwd", "os.close", "os.lstat", "os.stat",
+        "os.fstat", "os.listdir", "os.scandir", "os.readlink", "os.fspath",
+        "json.load", "json.loads", "json.dumps",
+    })
+
     MODULES = ("trial_executor", "trial_journal", "trial_recovery")
 
-    @classmethod
-    def _derive(cls, callees):
-        found = set()
-        for module in cls.MODULES:
-            source = (_EXTERNAL_WRITE_DIR / f"{module}.py").read_text(
-                encoding="utf-8")
-            tree = ast.parse(source)
-            enclosing = {}
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    for child in ast.walk(node):
-                        if hasattr(child, "lineno"):
-                            enclosing.setdefault(child.lineno, node.name)
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
+    # ------------------------------------------------------------------
+    # Derivation helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _dotted(func):
+        """The dotted name of a call target when it is a pure attribute chain on
+        a bare name (`os.path.dirname`), else None. Never guesses through a
+        subscript, a call result or a variable."""
+        parts = []
+        node = func
+        while isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+            node = node.value
+        if isinstance(node, ast.Name):
+            parts.append(node.id)
+            return ".".join(reversed(parts))
+        return None
+
+    @staticmethod
+    def _calls_with_innermost_scope(tree):
+        """Every Call paired with its INNERMOST enclosing function, qualified with
+        its parents (`_converge_unit._blocked`).
+
+        Innermost rather than outermost, and qualified rather than bare, because
+        both alternatives lose information the enumeration depends on: an
+        outermost attribution would merge a nested call site with an outer one of
+        the same callee into a single declared boundary, and a bare innermost name
+        would not say where the nested function lives.
+        """
+        found = []
+
+        def walk(node, scope):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    inner = f"{scope}.{child.name}" if scope != "<module>" \
+                        else child.name
+                    walk(child, inner)
                     continue
+                if isinstance(child, ast.Call):
+                    found.append((child, scope))
+                walk(child, scope)
+
+        walk(tree, "<module>")
+        return found
+
+    @classmethod
+    def _open_is_a_write(cls, node, dotted):
+        """Does this `open` / `os.open` call mutate the filesystem?"""
+        if dotted == "os.open":
+            flags = ast.dump(node.args[1]) if len(node.args) > 1 else ""
+            return any(flag in flags for flag in cls._WRITE_OPEN_FLAGS)
+        mode = None
+        if len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
+            mode = node.args[1].value
+        for keyword in node.keywords:
+            if keyword.arg == "mode" and isinstance(keyword.value, ast.Constant):
+                mode = keyword.value.value
+        if not isinstance(mode, str):
+            return False        # no mode is "r" -- a read
+        return bool(cls._WRITE_MODE_CHARS & frozenset(mode))
+
+    @classmethod
+    def _sources(cls):
+        return [(module,
+                 (_EXTERNAL_WRITE_DIR / f"{module}.py").read_text(
+                     encoding="utf-8"))
+                for module in cls.MODULES]
+
+    @classmethod
+    def _derive_persistence(cls, sources=None):
+        """Every persistence boundary, derived from source text.
+
+        Takes sources rather than reading them itself so the guard can be aimed at
+        a PROBE -- a synthetic module carrying an injected writer -- and shown to
+        catch it. A guard that can only ever be pointed at code that already
+        passes is not a guard anyone has tested.
+        """
+        wanted = (cls.FS_MUTATING_NAMES | cls.FS_ORDERING_NAMES
+                  | cls.PROTOCOL_PERSISTENCE_NAMES)
+        found = set()
+        for module, source in (sources if sources is not None
+                               else cls._sources()):
+            for node, scope in cls._calls_with_innermost_scope(
+                    ast.parse(source)):
                 func = node.func
                 name = (func.attr if isinstance(func, ast.Attribute)
                         else func.id if isinstance(func, ast.Name) else None)
-                if name in callees:
-                    where = enclosing.get(node.lineno, "<module>")
-                    found.add(f"{module}:{where}:{name}")
+                if name is None:
+                    continue
+                if name in cls.MODE_CLASSIFIED_NAMES:
+                    if not cls._open_is_a_write(node, cls._dotted(func)):
+                        continue
+                elif name not in wanted:
+                    continue
+                found.add(f"{module}:{scope}:{name}")
+        return found
+
+    @classmethod
+    def _derive_external(cls, sources=None):
+        found = set()
+        for module, source in (sources if sources is not None
+                               else cls._sources()):
+            for node, scope in cls._calls_with_innermost_scope(
+                    ast.parse(source)):
+                func = node.func
+                name = (func.attr if isinstance(func, ast.Attribute)
+                        else func.id if isinstance(func, ast.Name) else None)
+                if name in cls.EXTERNAL_CALLEES:
+                    found.add(f"{module}:{scope}:{name}")
         return found
 
     def test_every_persistence_boundary_in_the_code_is_declared(self):
-        derived = self._derive(self.PERSISTENCE_CALLEES)
+        derived = self._derive_persistence()
         self.assertEqual(
             derived, set(DECLARED_PERSISTENCE_BOUNDARIES),
             "the persistence boundaries in the code and the declared "
@@ -2028,11 +2289,165 @@ class BoundaryEnumerationTests(unittest.TestCase):
             "kill point, not to widen this assertion.")
 
     def test_every_external_call_boundary_in_the_code_is_declared(self):
-        derived = self._derive(self.EXTERNAL_CALLEES)
+        derived = self._derive_external()
         self.assertEqual(
             derived, set(DECLARED_EXTERNAL_CALL_BOUNDARIES),
             "the external-call boundaries in the code and the declared "
             "enumeration disagree.")
+
+    # ------------------------------------------------------------------
+    # Proving the guard, rather than asserting that it guards
+    # ------------------------------------------------------------------
+
+    # A complete second durable writer, spelled with names the trial protocol
+    # does not use ANYWHERE: `Path.write_text`, `os.rename`, `os.unlink`. This is
+    # the construction that defeated the first version of this guard, kept here as
+    # its permanent probe.
+    _INJECTED_SECOND_WRITER = '''
+import os
+from pathlib import Path
+
+
+def _shadow_publish(directory, payload):
+    tmp = Path(directory) / ".shadow.tmp"
+    tmp.write_text(payload, encoding="utf-8")
+    os.rename(str(tmp), os.path.join(directory, "shadow.json"))
+    if os.path.exists(str(tmp)):
+        os.unlink(str(tmp))
+'''
+
+    def test_a_second_durable_writer_BUILT_FROM_UNUSED_NAMES_is_caught(self):
+        """The guard's own falsification test, and the reason the vocabulary is
+        drawn from the mutating SURFACE rather than from observed usage.
+
+        `write_text`, `rename` and `unlink` appear nowhere in the trial protocol.
+        Under a vocabulary listing only the names in use, this writer is invisible
+        -- it adds three undeclared, unkilled-at persistence boundaries and the
+        enumeration test stays green, which is exactly the green-and-blind shape
+        the enumeration exists to prevent. Each of the three must be derived, and
+        each must then fail the declaration match, since none is declared.
+        """
+        probe = [("trial_recovery",
+                  (_EXTERNAL_WRITE_DIR / "trial_recovery.py").read_text(
+                      encoding="utf-8") + self._INJECTED_SECOND_WRITER)]
+        derived = self._derive_persistence(probe)
+        for name in ("write_text", "rename", "unlink"):
+            self.assertIn(
+                f"trial_recovery:_shadow_publish:{name}", derived,
+                f"an injected durable writer's {name!r} was NOT derived, so a "
+                "future writer spelled this way would add an undeclared "
+                "persistence boundary silently")
+        self.assertTrue(
+            derived - set(DECLARED_PERSISTENCE_BOUNDARIES),
+            "the injected writer produced no undeclared boundary, so the "
+            "declaration match could not have failed on it")
+
+    def test_the_guard_catches_a_write_mode_open_and_ignores_a_read_one(self):
+        """`open` is classified by MODE. Both directions, because a rule that
+        fired on every `open` would be noise and one that fired on none would
+        have missed the lock file this protocol really does create."""
+        probe = [("probe", 'def w(p):\n'
+                           '    open(p, "w").close()\n'
+                           'def a(p):\n'
+                           '    open(p, mode="a").close()\n'
+                           'def r(p):\n'
+                           '    open(p, encoding="utf-8").close()\n'
+                           'def rr(p):\n'
+                           '    open(p, "r").close()\n')]
+        derived = self._derive_persistence(probe)
+        self.assertIn("probe:w:open", derived)
+        self.assertIn("probe:a:open", derived)
+        self.assertNotIn("probe:r:open", derived)
+        self.assertNotIn("probe:rr:open", derived)
+
+    def test_the_guard_catches_a_write_flagged_os_open(self):
+        """`os.open` is classified by its FLAGS, so the read-only directory handle
+        the durability primitives take is not a boundary and a creating one is."""
+        probe = [("probe", 'import os\n'
+                           'def w(p):\n'
+                           '    os.open(p, os.O_WRONLY | os.O_CREAT)\n'
+                           'def r(p):\n'
+                           '    os.open(p, os.O_RDONLY)\n')]
+        derived = self._derive_persistence(probe)
+        self.assertIn("probe:w:open", derived)
+        self.assertNotIn("probe:r:open", derived)
+
+    def test_a_call_on_a_filesystem_module_MUST_be_classified(self):
+        """The fail-closed half, and the direction that closes the recall problem.
+
+        The mutating-name list can never be provably exhaustive over every future
+        library, so it is backed by a refusal: any call rooted at a module that
+        CAN touch the filesystem must be classified as mutating or as read-only,
+        both declared positively. A member in neither -- a newly-used `os.*` this
+        file has never seen -- fails here rather than being assumed harmless,
+        which is the same silence-must-refuse direction the protocol itself uses.
+        """
+        unclassified = []
+        for module, source in self._sources():
+            for node, scope in self._calls_with_innermost_scope(
+                    ast.parse(source)):
+                dotted = self._dotted(node.func)
+                if dotted is None:
+                    continue
+                root = dotted.split(".")[0]
+                if root not in self.FS_CAPABLE_ROOTS:
+                    continue
+                member = dotted.rsplit(".", 1)[-1]
+                if (dotted in self.FS_READ_ONLY_MEMBERS
+                        or member in self.FS_MUTATING_NAMES
+                        or member in self.MODE_CLASSIFIED_NAMES):
+                    continue
+                unclassified.append(f"{module}:{scope}:{dotted}")
+        self.assertEqual(
+            sorted(unclassified), [],
+            "these calls reach a module that can touch the filesystem and are "
+            "classified as neither mutating nor read-only. Classify each one -- "
+            "an unclassified filesystem call is one nothing can decide about, "
+            "and defaulting it to harmless is the fail-open direction.")
+
+    def test_that_fail_closed_check_REFUSES_an_unclassified_member(self):
+        """And it really refuses: the same logic over a probe using an `os` member
+        neither list carries."""
+        probe = [("probe", "import os\ndef f(p):\n    os.pathconf(p, 'x')\n")]
+        unclassified = []
+        for module, source in probe:
+            for node, scope in self._calls_with_innermost_scope(
+                    ast.parse(source)):
+                dotted = self._dotted(node.func)
+                if dotted is None or dotted.split(".")[0] \
+                        not in self.FS_CAPABLE_ROOTS:
+                    continue
+                member = dotted.rsplit(".", 1)[-1]
+                if (dotted in self.FS_READ_ONLY_MEMBERS
+                        or member in self.FS_MUTATING_NAMES
+                        or member in self.MODE_CLASSIFIED_NAMES):
+                    continue
+                unclassified.append(f"{module}:{scope}:{dotted}")
+        self.assertEqual(unclassified, ["probe:f:os.pathconf"])
+
+    def test_the_attribution_is_INNERMOST_and_qualified(self):
+        """A nested call site must not be merged into its outer function's.
+
+        `record_recovery_required` really is called from `_blocked`, nested inside
+        `_converge_unit`. An outermost attribution labels it `_converge_unit` and
+        would collapse it with any outer call of the same callee into one declared
+        boundary -- one boundary string covering two instants, with no way to tell
+        from the enumeration that two exist.
+        """
+        derived = self._derive_persistence()
+        self.assertIn(
+            "trial_recovery:_converge_unit._blocked:record_recovery_required",
+            derived)
+        self.assertNotIn(
+            "trial_recovery:_converge_unit:record_recovery_required", derived)
+        probe = [("probe", "def outer():\n"
+                           "    def inner():\n"
+                           "        os.replace(1, 2)\n"
+                           "    os.replace(3, 4)\n")]
+        self.assertEqual(
+            self._derive_persistence(probe),
+            {"probe:outer.inner:replace", "probe:outer:replace"},
+            "an outer and a nested call of the same callee are TWO boundaries")
 
     @staticmethod
     def _declared():
@@ -2047,8 +2462,8 @@ class BoundaryEnumerationTests(unittest.TestCase):
             covered.update(boundaries)
         return covered
 
-    def test_every_boundary_is_killed_at_bracketed_or_declared_untested(self):
-        """The three dispositions must PARTITION the declared set.
+    def test_every_boundary_is_killed_at_bracketed_excluded_or_untested(self):
+        """The FOUR dispositions must PARTITION the declared set.
 
         A boundary in none of them is a boundary nobody decided about, which is
         the shape this project has shipped before: the gap is invisible because
@@ -2058,27 +2473,33 @@ class BoundaryEnumerationTests(unittest.TestCase):
         killed = self._killed_at()
         bracketed = set(BOUNDARIES_BRACKETED_BY_KILLED_POINTS)
         untested = set(BOUNDARIES_NOT_KILL_TESTED)
+        excluded = set(BOUNDARIES_EXCLUDED_BY_CONTRACT)
         declared = self._declared()
+        groups = {"killed": killed, "bracketed": bracketed,
+                  "untested": untested, "excluded": excluded}
 
         self.assertEqual(
-            declared - (killed | bracketed | untested), set(),
+            declared - (killed | bracketed | untested | excluded), set(),
             "these boundaries are declared and fall into NO disposition -- "
             "nothing kills at them, nothing brackets them, and nothing records "
-            "them as untested")
+            "them as untested or as excluded by contract")
         self.assertEqual(
-            (killed | bracketed | untested) - declared, set(),
+            (killed | bracketed | untested | excluded) - declared, set(),
             "these are dispositioned and not declared")
-        self.assertEqual(killed & bracketed, set(),
-                         "a boundary cannot be both killed at and merely "
-                         "bracketed -- one of the two claims is wrong")
-        self.assertEqual(killed & untested, set())
-        self.assertEqual(bracketed & untested, set())
+        for first in groups:
+            for second in groups:
+                if first < second:
+                    self.assertEqual(
+                        groups[first] & groups[second], set(),
+                        f"a boundary cannot be both {first} and {second} -- one "
+                        "of the two claims is wrong")
 
-    def test_every_untested_and_bracketed_boundary_states_a_REASON(self):
-        """"Not tested" is only acceptable with a reason attached, and a blank
+    def test_every_excused_boundary_states_a_REASON(self):
+        """"Not killed at" is only acceptable with a reason attached, and a blank
         one is the same as no reason."""
         for group in (BOUNDARIES_NOT_KILL_TESTED,
-                      BOUNDARIES_BRACKETED_BY_KILLED_POINTS):
+                      BOUNDARIES_BRACKETED_BY_KILLED_POINTS,
+                      BOUNDARIES_EXCLUDED_BY_CONTRACT):
             for boundary, reason in group.items():
                 self.assertTrue(
                     isinstance(reason, str) and len(reason.strip()) > 40,
