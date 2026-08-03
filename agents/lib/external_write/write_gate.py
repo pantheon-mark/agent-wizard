@@ -555,6 +555,28 @@ def _resolve_target(op: Operation, target: Optional[str]) -> Optional[str]:
     return target
 
 
+def resolve_effective_target(op: Operation, target: Optional[str]) -> Optional[str]:
+    """Public accessor: the target signal this gate will ACTUALLY act on for `op`
+    — the caller's `target`, overridden by the copy-surface convention
+    (surface==COPY_SURFACE resolves to 'copy' whatever was requested). Returns
+    None when the signal is ABSENT, exactly as the gate itself resolves it.
+
+    Mirrors `resolve_effective_cap`'s role above: a public reader for a decision
+    this module owns, so a caller that must reason about the same value uses THIS
+    resolution rather than writing a second one. That matters at one place in
+    particular — a caller deciding whether an operation will traverse the
+    LIVE_BOUNDED funnel cannot read the REQUESTED target string to find out. An
+    operation on the copy-surface convention resolves to 'copy' however it was
+    asked for, and takes the isolated branch (no cap, no ledger); a caller
+    checking the request string would believe a live-bounded funnel had run when
+    none did.
+
+    Read-only and side-effect-free: it consults `op.surface` and the argument,
+    nothing else, and authorizes nothing on its own.
+    """
+    return _resolve_target(op, target)
+
+
 def _covering_entry(descriptor_set: Sequence[Dict[str, Any]], op: Operation,
                     risk_class: str) -> Optional[Dict[str, Any]]:
     """Return the first accepted descriptor entry that COVERS this op, or None.

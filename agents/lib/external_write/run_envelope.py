@@ -1791,7 +1791,7 @@ def report_run_recoverability(
 # single operator consent for the whole run is the envelope + its
 # ``run_consent_receipt-v1``, minted ONCE by this helper via
 # ``mint_run_envelope``. ``run_enveloped_operation``'s ``receipt`` argument is
-# a DISTINCT, non-consent artifact -- ``adapters._validate_receipt`` requires
+# a DISTINCT, non-consent artifact -- ``write_authorization.validate_receipt`` requires
 # ``receipt["approved_operation_digest"] == op.digest()`` for the EXACT op,
 # and every chunk is a distinct ``Operation`` (distinct digest), so this
 # write-gate receipt is necessarily per-chunk. ``_op_receipt`` below issues it
@@ -1823,7 +1823,7 @@ def new_bulk_run_id(run_label: str) -> str:
 def _op_receipt(op: Any) -> Dict[str, Any]:
     """Self-issue the per-chunk write-gate receipt (Decision 2). This is a
     MECHANICAL integrity binding to the exact ``Operation`` being applied --
-    ``adapters._validate_receipt`` requires ``approved_operation_digest ==
+    ``write_authorization.validate_receipt`` requires ``approved_operation_digest ==
     op.digest()``, and each chunk is a distinct Operation (distinct
     ``canonical_repr()`` -> distinct digest), so it cannot be one shared value
     across chunks. It carries NO ``operator_confirmation`` field and is NOT a

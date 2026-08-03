@@ -342,6 +342,35 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         # protocol is kernel-driven, and capability code has no business
         # deciding its own trial eligibility.
         "trial_eligibility.py",
+        # write_authorization.py: the split of AUTHORIZATION out of EXECUTION --
+        # the ONE implementation of "may this write proceed" (plan once, run the
+        # trial-eligibility preflight when the intent is a trial, run the
+        # deterministic pre-write gate, validate the receipt) and the single
+        # AuthorizedPlan carrier both the ordinary executor and a journaled trial
+        # executor consume. It imports the sibling kernel `adapter_registry`
+        # (`get_dispatch`), `write_gate` (the gate + the public target/cap
+        # resolvers), `trial_eligibility` (the preflight) and `operations` as
+        # ordinary internal kernel wiring -- which is precisely the
+        # CAPABILITY-zone-ONLY bans: scanned as CAPABILITY it trips the kind set
+        # {adapter_module_import, adapter_registry_reference,
+        # sealed_kernel_import} and scans clean as SEALED_KERNEL, so this
+        # membership is load-bearing, not decorative (both directions pinned by
+        # ZoneMembershipTests in test_external_write_write_authorization.py).
+        # Deliberately no violation COUNT recorded here: a count tracks how many
+        # times the module happens to NAME a kernel symbol, so an added
+        # annotation makes a recorded number stale silently -- the KIND SET is
+        # the durable fact. It imports no vendor SDK, constructs/obtains no
+        # write-capable credential (it cannot even accept one -- credential
+        # isolation keeps write-client resolution inside the adapter EXECUTION
+        # path), performs no vendor mutation, and writes nothing to disk itself
+        # (the gate it calls consumes the blast-radius ledger, which for a
+        # PERSISTENT ledger is a real write -- unchanged, and the ledger's own
+        # file reached through the shared funnel, not anything this module owns).
+        # SEALED_KERNEL membership does NOT grant a capability the right to
+        # import it (that is the independent
+        # scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES set): a capability
+        # has no business authorizing its own external write.
+        "write_authorization.py",
     }
 )
 

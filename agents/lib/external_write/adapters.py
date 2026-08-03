@@ -32,56 +32,24 @@ Stdlib only — no third-party dependencies.
 """
 
 import re
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from external_write.operations import Operation, Result
 from external_write.verifiers import validate_postwrite_verification
-from external_write.write_gate import evaluate_write_gate, InvocationLedger, resolve_effective_cap
+from external_write.write_gate import InvocationLedger, resolve_effective_cap
+from external_write.write_authorization import (
+    EXECUTION_INTENT_ORDINARY, authorize_operation,
+)
 from external_write.adapter_registry import get_dispatch, check_scope_grant, GRANT_STATUS_NOT_GRANTED
 from external_write.evidence import AdapterEvidence
 from external_write.contracts import SourceLineage, get_contract
 from external_write.read_facade import build_read_facade, ReadFacadeEligibilityError
 
 
-# ---------------------------------------------------------------------------
-# Receipt validation
-# ---------------------------------------------------------------------------
-
-def _validate_receipt(op: Operation, receipt: Any) -> Optional[str]:
-    """Return None if the receipt is valid for this op; return a reason string if not.
-
-    Receipt contract (minimal — the receipt-issuing side must produce conforming receipts):
-      {
-        "approved_operation_digest": "<sha256-hex>",
-        "expires_at": "<ISO-8601 UTC, Z suffix>"
-      }
-    """
-    if not receipt:
-        return "receipt is missing or empty"
-
-    digest = receipt.get("approved_operation_digest")
-    if not digest:
-        return "receipt is missing approved_operation_digest"
-
-    if digest != op.digest():
-        return "receipt digest does not match this operation"
-
-    expires_at_str = receipt.get("expires_at")
-    if not expires_at_str:
-        return "receipt is missing expires_at"
-
-    try:
-        expires_at = datetime.strptime(expires_at_str, "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=timezone.utc
-        )
-    except ValueError:
-        return f"receipt expires_at is not a valid ISO-8601 UTC timestamp: {expires_at_str!r}"
-
-    if datetime.now(timezone.utc) >= expires_at:
-        return "receipt has expired"
-
-    return None
+# Receipt validation lives with the rest of authorization, in
+# `write_authorization.validate_receipt` -- one implementation, binding on the
+# ordinary executor below and on any other executor that consumes an
+# AuthorizedPlan. It was MOVED there, not copied.
 
 
 # ---------------------------------------------------------------------------
@@ -515,7 +483,10 @@ def run_operation(op: Operation, receipt: Any, client: Any,
              comes from it. Defaults to the system clock; injected only for deterministic tests.
 
     n_units / plan-once: when op.op_kind has a
-             registered adapter AND target is not 'dry_run', this function resolves its CAPTURED
+             registered adapter AND target is not 'dry_run', the authorization step this
+             function delegates to (write_authorization.authorize_operation — which owns
+             Steps -1/0/1 and is the ONE implementation of them; see the comment at the top of
+             the body) resolves the CAPTURED
              dispatch (adapter_registry.get_dispatch — see AdapterDispatch's docstring for why
              this is captured off the class rather than the mutable instance) and
              calls `dispatch.plan(dispatch.instance, op.params)` ONCE, before Step 0's gate —
@@ -525,7 +496,8 @@ def run_operation(op: Operation, receipt: Any, client: Any,
              The resulting `len(units)` is passed into evaluate_write_gate as n_units, so the
              shared InvocationLedger's aggregate window is consumed in UNITS, not in one slot per
              invocation regardless of fan-out (the fan-out gap this closes — see write_gate.py's
-             _enforce_live_funnel). The SAME already-planned `units` list is then passed
+             _enforce_live_funnel). The SAME already-planned `units` list — read off the
+             returned AuthorizedPlan, never re-planned here — is then passed
              straight into _run_adapter_operation, which does NOT call plan() again (avoiding a
              redundant, if harmless, second pure call). An op_kind with no registered adapter
              plans nothing and uses n_units=1, exactly like the legacy field-write path.
@@ -559,76 +531,50 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     Result with status in {'written', 'needs_operator_choice', 'refused'}.
     """
 
-    # Step -1: resolve the adapter and plan ONCE, before the gate. plan() is
-    # contractually PURE (no reads/writes), so calling it here — ahead of Step 0 — does not
-    # touch the surface; it exists solely to compute n_units for the gate's unit-aware window
-    # (write_gate._enforce_live_funnel). None planned (no registered adapter) => n_units=1,
-    # matching the legacy field-write path exactly.
+    # Steps -1 / 0 / 1 — plan ONCE, run the deterministic pre-write gate, validate
+    # the receipt — are AUTHORIZATION, and they now live in the ONE place that
+    # implements it: `write_authorization.authorize_operation`. They were MOVED
+    # there, never copied. The reason is a journaled TRIAL (a real, bounded live
+    # `apply -> verify -> undo -> verify-restored`): it cannot call THIS function,
+    # because this function enters the apply loop in `_run_adapter_operation`
+    # immediately and the adapter layer writes nothing to disk, so a partial
+    # application would leave real mutations with no record of them anywhere. A
+    # trial therefore needs the same authorization — and a second implementation
+    # of it, however faithful on the day it was written, is two paths that must
+    # agree.
     #
-    # Disclosed: this hoist runs plan() BEFORE the write gate, so plan()'s
-    # purity is load-bearing — a plan() that performed a write would execute it before the
-    # gate ever ran. That purity is an adapter-author invariant verified by operator review
-    # of the trusted adapter module, NOT machine-enforced by scan.py (ADAPTER_PROFILE modules,
-    # where every plan() implementation lives, are exempt from every scanner check — see
-    # scan.py's "Bounds NOT covered" docstring section for the full disclosure).
+    # Nothing about this path's behaviour moved with it. That module still plans
+    # once AHEAD of the gate (plan() is contractually PURE, so the hoist touches
+    # no surface — and that purity is load-bearing, an adapter-author invariant
+    # verified by review of the trusted adapter module, NOT machine-enforced by
+    # scan.py, whose ADAPTER_PROFILE modules are exempt from every check; see
+    # scan.py's "Bounds NOT covered" section); it still exempts `dry_run` from
+    # planning entirely (dry_run consumes no window, short-circuits at Step 1.5
+    # below before Step 1.75's dispatch, and planning malformed params is a crash
+    # risk because plan() is pure but NOT total); it still converts a plan()
+    # failure into a clean refused Result rather than propagating it, preserving
+    # the "always returns a Result" contract; and it still validates the receipt
+    # AFTER the gate and before anything touches the surface, with the same
+    # refusal text in every case.
     #
-    # Two fail-safe exemptions/guards address a regression found in review of the
-    # plan-hoist change — plan() is PURE but NOT TOTAL: seeded adapters index directly
-    # into params, e.g. `m["message_id"]`, and raise on malformed input):
-    #   1. `dry_run` never plans at all. dry_run consumes no window (it short-circuits at Step
-    #      1.5, below, before Step 1.75's adapter dispatch even runs) and needs no `units`, so
-    #      skipping the hoisted plan() here preserves dry_run's no-crash, no-op preview guarantee
-    #      even for malformed params. n_units stays at the unused default of 1 for this path.
-    #   2. For every other path, a plan() failure is caught and converted into a clean refused
-    #      Result rather than propagated — so a malformed-params op is a fail-safe refusal
-    #      everywhere (an improvement over the earlier behavior, where such an op crashed later, inside
-    #      _run_adapter_operation's now-removed second plan() call), never an uncaught exception
-    #      breaking run_operation's "always returns a Result" contract.
-    dispatch = get_dispatch(op.op_kind)
-    _planned_units: Optional[list] = None
-    n_units = 1
-    if dispatch is not None and target != "dry_run":
-        try:
-            _planned_units = dispatch.plan(dispatch.instance, op.params)
-            # plan() is contractually a List[EffectUnit],
-            # but nothing upstream enforces that at the type level. Validate the
-            # shape INSIDE this guard — a plan() returning None (or any other
-            # non-list, e.g. a string, which is itself len()-able and iterable
-            # and would otherwise be silently misread as a sequence of
-            # one-character "units") must become a clean refusal here, not a
-            # TypeError/AttributeError raised later at `len(_planned_units)` or
-            # a silent-corruption bug from iterating the wrong thing.
-            if not isinstance(_planned_units, list):
-                raise TypeError(
-                    "plan() must return a list of EffectUnit; got "
-                    f"{type(_planned_units).__name__!r}"
-                )
-        except Exception as exc:
-            return Result(
-                status="refused",
-                detail={
-                    "reason": (
-                        "operation refused: could not plan effect units from the "
-                        f"operation params for op_kind {op.op_kind!r} — {exc!r}"
-                    ),
-                },
-            )
-        n_units = len(_planned_units)
-
-    # Step 0: the deterministic pre-write gate — the single chokepoint's fail-safe heart.
-    # Runs BEFORE receipt validation and before anything touches the surface. A no-op for the
-    # ungated seeded status ops; refuses fail-safe for every missing input on a gated op.
-    decision = evaluate_write_gate(
-        op, target=target, descriptor_set=descriptor_set,
-        cap_ledger=cap_ledger, clock=clock, n_units=n_units)
-    if not decision.permitted:
-        return decision.refusal
-    _gate_audit = decision.audit
-
-    # Step 1: receipt validation — refuse before touching the surface.
-    reason = _validate_receipt(op, receipt)
-    if reason:
-        return Result(status="refused", detail={"reason": reason})
+    # The gate call is unchanged and is the SAME call a trial makes. A trial
+    # reaches the shared live-enforcement funnel through the gate's own existing
+    # live-bounded branch; its only relaxation is the one that branch already
+    # grants every caller (acceptance not required pre-acceptance, a DECLARATION
+    # still is). See write_authorization.py's docstring.
+    authorization = authorize_operation(
+        op, receipt, intent=EXECUTION_INTENT_ORDINARY, target=target,
+        descriptor_set=descriptor_set, cap_ledger=cap_ledger, clock=clock)
+    if not authorization.authorized:
+        return authorization.refusal
+    authorized = authorization.plan
+    # Read straight off the authorized plan — never re-resolved and never
+    # re-planned here. A second `get_dispatch` / `plan()` call could return
+    # something the gate never saw.
+    dispatch = authorized.dispatch
+    _planned_units: Optional[list] = (
+        None if authorized.units is None else list(authorized.units))
+    _gate_audit = authorized.gate_audit
 
     # Step 1.5: dry_run no-mutation guarantee. The gate (Step 0) permits `dry_run`
     # UNCONDITIONALLY precisely because THIS adapter guarantees it never reaches

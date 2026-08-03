@@ -1811,7 +1811,27 @@ class TestS253ContractDelta(unittest.TestCase):
         # acceptance reachable) in a real operator project. See that file's own enrollment
         # comment in agent_emitter.py, and
         # test_emit_set_lists_the_cut19_trial_eligibility_file below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 44)
+        # (Count updated to 45 by the authorize/execute split, which additionally
+        # enrolled write_authorization.py -- the ONE implementation of "may this
+        # write proceed" and the single AuthorizedPlan carrier both the ordinary
+        # executor and a journaled trial executor consume. adapters.py imports it
+        # at MODULE SCOPE, so omitting it makes external_write.adapters
+        # unimportable in an emitted project and takes every writes-back path
+        # down with it. See that file's own enrollment comment in
+        # agent_emitter.py, and
+        # test_emit_set_lists_the_write_authorization_file below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 45)
+
+    def test_emit_set_lists_the_write_authorization_file(self):
+        # The authorize/execute split: write_authorization.py must be enrolled,
+        # or an emitted project ships an adapters.py whose module-scope import
+        # cannot resolve -- run_operation, and therefore every external write,
+        # dies at import time. It is also the module a journaled trial executor
+        # will consume, so omitting it would leave the trial protocol without
+        # the single authorization implementation it is built on.
+        import agent_emitter
+        self.assertIn("write_authorization.py",
+                      agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def test_emit_set_lists_the_cut19_trial_eligibility_file(self):
         # Cut 1.9 Task 1 / v0.23.0: trial_eligibility.py must be enrolled, or the journaled

@@ -271,6 +271,16 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # ModuleNotFoundError at import time, the same regression class this file's
     # own docstring documents for every prior entry above.
     "trial_eligibility.py",
+    # write_authorization.py: the split of AUTHORIZATION out of EXECUTION -- the
+    # ONE implementation of "may this write proceed" and the single AuthorizedPlan
+    # carrier both the ordinary executor and a journaled trial executor consume.
+    # `adapters.py` IMPORTS IT AT MODULE SCOPE (run_operation delegates its plan /
+    # gate / receipt steps to it), so omitting it here does not merely disable a
+    # feature -- it makes `external_write.adapters` unimportable in an emitted
+    # project, and with it every writes-back path in the system, exactly the
+    # ModuleNotFoundError regression class this file's own docstring documents for
+    # every prior entry above.
+    "write_authorization.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
