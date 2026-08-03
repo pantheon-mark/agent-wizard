@@ -407,6 +407,36 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         # protocol is kernel-driven, and capability code has no business writing
         # the record that authorizes its own external mutations.
         "trial_journal.py",
+        # trial_executor.py (Cut 1.9 Task 4): the journaled TRIAL EXECUTOR -- the
+        # driver that carries one authorized operation through
+        # apply -> observe -> undo -> observe against the operator's live record
+        # under the bounded trial target, and emits the `copy_run_proof` that
+        # acceptance requires. It is the production caller of BOTH
+        # `write_authorization`'s trial branch and `trial_journal`.
+        #
+        # This is the one entry in this set that DOES perform a vendor mutation,
+        # so its membership deserves more than the usual sentence. It does not
+        # weaken any UNIVERSAL bypass check: the mutation happens by calling the
+        # REGISTERED ADAPTER's own captured `apply_one`/`undo_one` through the
+        # frozen dispatch record -- the same chokepoint the ordinary write path
+        # uses -- never by reaching a vendor SDK, which it does not import, and
+        # never with a credential it constructs, since it resolves the
+        # write-capable client through `adapter_registry.resolve_write_client`,
+        # the shared resolver keyed by the adapter's OWN provisioner. What it
+        # needs exemption from is the CAPABILITY-zone-ONLY module-boundary ban:
+        # scanned as CAPABILITY it trips {adapter_module_import,
+        # adapter_registry_reference, sealed_kernel_import} on its ordinary
+        # internal kernel imports, and scans clean as SEALED_KERNEL. No violation
+        # COUNT is recorded, for the reason trial_journal.py's entry gives: a
+        # count goes stale silently, the KIND SET is the durable fact.
+        #
+        # SEALED_KERNEL membership emphatically does NOT grant a capability the
+        # right to import it (the independent
+        # scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES set governs that,
+        # and this module is absent from it): a capability driving the external
+        # writes it proposed is the exact inversion the whole authorization split
+        # exists to prevent.
+        "trial_executor.py",
     }
 )
 

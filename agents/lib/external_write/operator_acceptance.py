@@ -70,6 +70,9 @@ from external_write.capability_identity import (
     IdentityResolutionError,
 )
 from external_write.contracts import get_contract
+from external_write.copy_run_proof import (
+    COPY_RUN_PROOF_DIR, copy_run_proof_path,
+)
 from external_write.effects_manifest import unresolvable_adapter_seal_gap
 from external_write._ext_write_state import (
     open_bespoke_writer_migrations,
@@ -102,12 +105,17 @@ import external_write.registered_adapters  # noqa: E402,F401
 DEFAULT_RECEIPT_DIR = "security/acceptance_receipts"
 
 # Default on-disk home for the copy-run proof (project-root-relative; V15-2 fix). The proof's
-# location is deterministic from capability_id (convention: next-phase.md's Step 5), so the
-# operator-acceptance CLI can default the path instead of requiring it as a raw argument --
+# location is deterministic from capability_id (the next-phase supervised-trial convention), so
+# the operator-acceptance CLI can default the path instead of requiring it as a raw argument --
 # collapsing the documented command toward a single paste-safe line without weakening the
 # operator-authority requirement itself (the proof file at this path must still exist and
 # validate; see the default block in record_operator_acceptance below).
-DEFAULT_COPY_RUN_PROOF_DIR = "agents/handoffs"
+#
+# ALIAS, not a second spelling: the directory and the whole path-building rule now live in
+# `copy_run_proof.py`, the module that owns the artifact's schema, so that the journaled trial
+# executor that PRODUCES the proof and this consumer that READS it cannot drift apart. This name
+# is kept because callers already import it.
+DEFAULT_COPY_RUN_PROOF_DIR = COPY_RUN_PROOF_DIR
 
 # Duplicated from wizard/scripts/lib/upgrade_reconcile.MIGRATION_QUEUE_REL (D-B1-a boundary:
 # this module lives in the operator-emitted external_write package and must not import the
@@ -619,9 +627,10 @@ def record_operator_acceptance(
     # that does not exist still refuses at the pre-check a few lines down (nothing here weakens
     # the operator-authority requirement: the proof file must still exist and validate).
     if copy_run_proof_ref is None:
-        safe_id = capability_id.replace("/", "_").replace(os.sep, "_")
-        copy_run_proof_ref = os.path.join(
-            DEFAULT_COPY_RUN_PROOF_DIR, f"{safe_id}.copy_run_proof.json")
+        # Built by the SHARED builder the producer also uses -- see
+        # `copy_run_proof.copy_run_proof_path`. The path-separator substitution
+        # this used to perform inline lives there now, unchanged in behaviour.
+        copy_run_proof_ref = copy_run_proof_path(capability_id)
 
     if not (isinstance(copy_run_proof_ref, str) and copy_run_proof_ref.strip()):
         return _refuse("no copy_run_proof reference supplied")

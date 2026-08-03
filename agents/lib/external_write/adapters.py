@@ -40,8 +40,11 @@ from external_write.write_gate import InvocationLedger, resolve_effective_cap
 from external_write.write_authorization import (
     EXECUTION_INTENT_ORDINARY, authorize_operation,
 )
-from external_write.adapter_registry import get_dispatch, check_scope_grant, GRANT_STATUS_NOT_GRANTED
-from external_write.evidence import AdapterEvidence
+from external_write.adapter_registry import (
+    GRANT_STATUS_NOT_GRANTED, check_scope_grant, get_dispatch,
+    resolve_read_only_client, resolve_write_client,
+)
+from external_write.evidence import LIVE_READ_ONLY_FACADE_OBSERVATION, AdapterEvidence
 from external_write.contracts import SourceLineage, get_contract
 from external_write.read_facade import build_read_facade, ReadFacadeEligibilityError
 
@@ -155,13 +158,16 @@ def _verify_applied_units(op: Operation, dispatch: Any, units: list,
     # Fail-SAFE: the apply loop already ran; a provisioning failure here must
     # NEVER propagate (it would turn a successful write into an uncaught
     # exception), so any exception degrades to applied_not_verified, honest.
-    _provision_ro = dispatch.provision_read_only_client
+    # Resolved through `adapter_registry.resolve_read_only_client` -- the ONE
+    # implementation of the provisioner-else-fallback rule, shared with the
+    # journaled trial executor so a trial cannot read through a differently
+    # resolved client than production does. The try/except stays HERE, not in
+    # the helper: this path must degrade to `applied_not_verified` (the apply
+    # already happened), while a trial must refuse to start.
     effective_read_only_client = None
     try:
-        effective_read_only_client = (
-            _provision_ro(dispatch.instance, op) if _provision_ro is not None
-            else read_only_client
-        )
+        effective_read_only_client = resolve_read_only_client(
+            dispatch, op, fallback=read_only_client)
     except Exception as exc:
         facade_error = (
             f"could not obtain a read-only client for {op.op_kind!r} "
@@ -223,7 +229,10 @@ def _verify_applied_units(op: Operation, dispatch: Any, units: list,
             prestate=None,
             source_lineage=SourceLineage(
                 pre_write_sources=(),
-                post_write_sources=("live_read_only_facade_observation",),
+                # The ONE spelling of this token (`evidence.py`) -- the trial
+                # protocol's own observations declare the same source, and two
+                # spellings of a shared lineage name drift.
+                post_write_sources=(LIVE_READ_ONLY_FACADE_OBSERVATION,),
                 forbidden_verification_inputs=(),
             ),
         )
@@ -343,13 +352,13 @@ def _run_adapter_operation(op: Operation, raw_client: Any, dispatch: Any,
             },
         )
 
-    # Already captured off the class at registration time (adapter_registry.
-    # AdapterDispatch) — never re-read from the (possibly reassigned) instance.
-    _provision = dispatch.provision_write_client
-    effective_raw_client = (
-        _provision(dispatch.instance, op) if _provision is not None
-        else raw_client
-    )
+    # Resolved through `adapter_registry.resolve_write_client` — the ONE
+    # implementation of the provisioner-else-fallback precedence, reading the
+    # provisioner CAPTURED off the class at registration time and never
+    # re-reading the (possibly reassigned) instance. The journaled trial
+    # executor resolves its write client through the SAME function, so a trial
+    # writes through exactly the credential path production writes through.
+    effective_raw_client = resolve_write_client(dispatch, op, fallback=raw_client)
 
     for unit in units:
         dispatch.apply_one(dispatch.instance, effective_raw_client, unit)

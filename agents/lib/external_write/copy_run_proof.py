@@ -76,6 +76,7 @@ guarantee.
 Stdlib only — no third-party dependencies.
 """
 
+import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -89,6 +90,47 @@ from external_write.evidence import AdapterEvidence
 
 COPY_RUN_PROOF_SCHEMA = "copy_run_proof-v1"
 DURABILITY_ACTIONS = ("sort", "filter", "insert", "delete", "move")
+
+# ---------------------------------------------------------------------------
+# Where a capability's proof LIVES on disk — one spelling, one builder.
+#
+# The deterministic per-capability convention:
+# ``agents/handoffs/<capability_id>.copy_run_proof.json``. It is spelled here,
+# in the module that owns the artifact's SCHEMA, and both sides of the artifact
+# import it: the PRODUCER (`trial_executor`, the journaled trial that emits the
+# proof) and the CONSUMER (`operator_acceptance`, whose CLI defaults the
+# ``--copy-run-proof`` path from the capability id, and re-exports
+# ``DEFAULT_COPY_RUN_PROOF_DIR`` as an alias of the directory constant below so
+# nothing that already imports that name has to change).
+#
+# Why a shared builder rather than the same join written twice: a producer that
+# writes where the consumer does not look is the two-paths-that-must-agree
+# defect in its most expensive form — the proof exists, the trial really did
+# pass, and acceptance still refuses with "no proof". The join was written out
+# inline in exactly one place before this (the consumer), which was safe only
+# while nothing produced the artifact at all.
+# ---------------------------------------------------------------------------
+COPY_RUN_PROOF_DIR = "agents/handoffs"
+COPY_RUN_PROOF_FILE_SUFFIX = ".copy_run_proof.json"
+
+
+def copy_run_proof_path(capability_id: str, *,
+                        proof_dir: Optional[str] = None) -> str:
+    """The on-disk path of `capability_id`'s copy-run proof.
+
+    `proof_dir` defaults to `COPY_RUN_PROOF_DIR` (project-root-relative, the
+    convention this package's callers run under); a caller that must not depend
+    on ambient project state — a test above all — passes its own directory.
+
+    Path separators in `capability_id` are replaced, never honoured: the id is a
+    FILENAME STEM here, so a separator in it must not be able to redirect the
+    artifact out of the proof directory (nor, in the consumer's case, make the
+    acceptance command read something from another tree). This mirrors the
+    substitution the acceptance CLI already performed inline.
+    """
+    stem = str(capability_id).replace("/", "_").replace(os.sep, "_")
+    directory = proof_dir if proof_dir else COPY_RUN_PROOF_DIR
+    return os.path.join(directory, f"{stem}{COPY_RUN_PROOF_FILE_SUFFIX}")
 
 _REQUIRED_FIELDS = (
     "schema",

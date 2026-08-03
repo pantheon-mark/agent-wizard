@@ -104,6 +104,32 @@ REQUIRED_EVIDENCE_PREDICATES: Tuple[str, ...] = (
 )
 
 
+# ------------------------------------------------------------------------------
+# The lineage token for an observation made through a READ-ONLY FACADE
+# ------------------------------------------------------------------------------
+# The `post_write_sources` value every kernel-side observation of the real
+# surface declares: the poststate was read through a `read_facade.ReadFacade`
+# built from a read-only-scoped client, never through the write-capable client
+# the mutation used.
+#
+# It lives here, in ONE constant, because there are now two kernel paths that
+# observe a surface and must declare the same thing about where the observation
+# came from: the ordinary write path's post-apply verification
+# (`adapters._verify_applied_units`) and the journaled trial protocol's
+# per-unit apply/undo observations (`trial_executor`). The second one spelled
+# the string a second time before this constant existed, and a re-spelled
+# shared name is the defect class this package has shipped repeatedly -- two
+# spellings drift, and a drifted lineage token is one that no longer matches
+# anything a reader (or a lineage-sensitive predicate) joins on.
+#
+# It is deliberately NOT any op_kind's registered
+# `contracts.VerifierDef.forbidden_verification_inputs` member: an observation
+# read through a read-only facade is precisely the INDEPENDENT source the
+# Authority clause's lineage lock exists to require, not one of the writer's own
+# outputs it exists to forbid.
+LIVE_READ_ONLY_FACADE_OBSERVATION = "live_read_only_facade_observation"
+
+
 @dataclass(frozen=True)
 class AdapterEvidence:
     """A single, already-materialized observation an evidence predicate

@@ -613,6 +613,62 @@ def unregister_adapter(op_kind: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Client resolution — self-provisioned by the adapter, else the trusted
+# caller's fallback. ONE implementation, two kernel callers.
+#
+# The rule these two functions hold is small and its ORDER is the whole point:
+# if the registered adapter's class self-provisions, THAT is the client used,
+# and a caller-supplied one is never consulted. Reversing the precedence would
+# let a caller inject the client an adapter's own provisioner was meant to
+# supply, which is the credential-isolation property `build_write_client` exists
+# to establish.
+#
+# They live here, in the module that OWNS `AdapterDispatch` and its captured
+# provisioners, rather than being written out at each call site, because there
+# are now TWO kernel executors that must resolve clients identically: the
+# ordinary write path (`adapters._run_adapter_operation` for the write client,
+# `adapters._verify_applied_units` for the read-only one) and the journaled
+# trial protocol (`trial_executor`). Two copies of a precedence rule that must
+# agree is the shape of most of this package's expensive defects — and a trial
+# that resolved its write client differently from production would be trialling
+# a credential path the operator's real runs never take.
+#
+# Neither function catches anything. A provisioner that raises is a fact its
+# caller must decide about, and the two callers decide DIFFERENTLY on purpose:
+# the ordinary post-apply verification path degrades to the honest
+# `applied_not_verified` (the apply already happened; a read failure must never
+# turn a completed write into an uncaught exception), while a trial refuses to
+# start at all (a trial that cannot observe cannot earn a proof). Swallowing the
+# exception here would take that choice away from both.
+# ---------------------------------------------------------------------------
+
+def resolve_write_client(dispatch: AdapterDispatch, op: Any,
+                         *, fallback: Any) -> Any:
+    """The WRITE-CAPABLE client for this dispatch: the adapter's own captured
+    provisioner if its class defines ``build_write_client``, else `fallback`.
+
+    Read off the CAPTURED dispatch record, never off `dispatch.instance` — an
+    instance-level reassignment of `build_write_client`, however a capability
+    obtained a reference to that instance, cannot change what this resolves
+    (see `AdapterDispatch`'s docstring for the threat model).
+    """
+    provision = dispatch.provision_write_client
+    return provision(dispatch.instance, op) if provision is not None else fallback
+
+
+def resolve_read_only_client(dispatch: AdapterDispatch, op: Any,
+                             *, fallback: Any) -> Any:
+    """The READ-ONLY-scoped client for this dispatch: the adapter's own captured
+    provisioner if its class defines ``build_read_only_client``, else
+    `fallback`. The read-side mirror of `resolve_write_client`, resolved
+    entirely independently of it — the two never share a client, and this one is
+    what a `read_facade.ReadFacade` is built over.
+    """
+    provision = dispatch.provision_read_only_client
+    return provision(dispatch.instance, op) if provision is not None else fallback
+
+
+# ---------------------------------------------------------------------------
 # Offline scope grant-check + exercise-record vocabulary (Task 11, B3 /
 # F-52,F-47 — v0.13.0 Slice 2 — "scope provisioning at the non-technical
 # bar").

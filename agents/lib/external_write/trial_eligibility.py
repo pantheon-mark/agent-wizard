@@ -69,6 +69,14 @@ The four clauses (all must pass), plus the plan-integrity precondition
       read this clause as a guarantee that a capsule carries anything usable;
       it guarantees only that whatever it carries survives the disk round
       trip.
+      Deliberately NOT tightened into a second format checker: a degenerate
+      capsule cannot in fact reach a mutation, because
+      `trial_journal.open_trial_journal` validates every capsule against
+      `validate_recovery_capsule` (required keys, declared schema, declared
+      unit_id and op_kind, non-null undo reference) and refuses to open the
+      journal at all before anything is written. That refusal is structural and
+      it has ONE owner; duplicating it here would be a second implementation of
+      the same question, which is the defect class this cut is otherwise closing.
 
   CLAUSE_PLAN_INTEGRITY (precondition) — the plan is non-empty and every unit
       is a real `EffectUnit` with a unique, usable `unit_id`. Without this,

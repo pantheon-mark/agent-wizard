@@ -292,6 +292,20 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # disk knows about. The journal is a precondition of the trial's correctness,
     # not a robustness extra, so it must physically reach the project.
     "trial_journal.py",
+    # trial_executor.py (Cut 1.9 Task 4): the journaled TRIAL EXECUTOR -- the
+    # driver that carries one authorized operation through
+    # apply -> observe -> undo -> observe and emits the `copy_run_proof` at
+    # `agents/handoffs/<capability_id>.copy_run_proof.json` that the operator
+    # acceptance step reads. Nothing else in the lib imports it at module scope
+    # (it is the top of the trial protocol, not a dependency of it), but this is
+    # the entry whose omission would be worst of the whole set: the proof lives in
+    # the OPERATOR's project, is produced against the OPERATOR's live resource,
+    # and is the ONE artifact acceptance cannot proceed without. Ship the
+    # preflight, the authorization split and the journal without this module and
+    # the operator project has every piece of the trial protocol except the thing
+    # that runs it -- acceptance stays exactly as unreachable as it was before the
+    # protocol existed, which is the defect this cut is closing.
+    "trial_executor.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

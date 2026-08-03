@@ -1828,7 +1828,24 @@ class TestS253ContractDelta(unittest.TestCase):
         # disk knows about. See that file's own enrollment comment in
         # agent_emitter.py, and
         # test_emit_set_lists_the_cut19_trial_journal_file below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 46)
+        # (Count updated to 47 by Cut 1.9 Task 4, which additionally enrolled
+        # trial_executor.py -- the journaled trial executor. It is the module
+        # that actually RUNS the trial and writes the copy-run proof acceptance
+        # reads, so omitting it ships every other piece of the trial protocol and
+        # nothing that drives them: acceptance would stay unreachable in the
+        # operator's project. See that file's own enrollment comment in
+        # agent_emitter.py, and
+        # test_emit_set_lists_the_cut19_trial_executor_file below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 47)
+
+    def test_emit_set_lists_the_cut19_trial_executor_file(self):
+        # Cut 1.9 Task 4: trial_executor.py must be enrolled, or the operator
+        # project receives the trial-eligibility preflight, the authorization
+        # split and the write-ahead journal with nothing that drives them -- and
+        # the copy-run proof acceptance requires still cannot be produced there.
+        import agent_emitter
+        self.assertIn("trial_executor.py",
+                      agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def test_emit_set_lists_the_cut19_trial_journal_file(self):
         # Cut 1.9 Task 3: trial_journal.py must be enrolled, or the trial
