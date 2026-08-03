@@ -519,21 +519,21 @@ ACKNOWLEDGEABLE_WRITER_STATES = frozenset({
 
 
 #: Entry ``kind`` values that describe a real unrepaired external-write bypass in
-#: an operator-authored writer file -- the ONLY case the "rebuild it so it routes
-#: through the sanctioned bulk path" wording actually fits. The bespoke-writer
-#: bypass entries this machinery was originally built for carry NO ``kind`` field
-#: at all (see ``upgrade_reconcile._append_migration_request``, build-side); a
-#: missing kind is treated the same as membership here (see
-#: ``is_bypass_writer_entry``), so today's only real bypass entries keep the
-#: wording they have always had. This set exists for a future writer that wants
-#: to opt an explicitly-kinded entry INTO bypass wording on purpose.
+#: an operator-authored writer file -- the ONLY case the bypass DIAGNOSIS below
+#: actually fits. The bespoke-writer bypass entries this machinery was originally
+#: built for carry NO ``kind`` field at all (see
+#: ``upgrade_reconcile._append_migration_request``, build-side); a missing kind is
+#: treated the same as membership here (see ``is_bypass_writer_entry``), so today's
+#: only real bypass entries keep the wording they have always had. This set exists
+#: for a future writer that wants to opt an explicitly-kinded entry INTO bypass
+#: wording on purpose.
 _BYPASS_WRITER_KINDS = frozenset({"external_write_bypass"})
 
 
 def is_bypass_writer_entry(entry: Dict[str, Any]) -> bool:
     """True iff ``entry`` is a real, unrepaired external-write bypass in an
-    operator-authored writer file -- the only entry shape the rebuild-and-
-    route-through-the-sanctioned-path wording actually describes.
+    operator-authored writer file -- the only entry shape the bypass diagnosis
+    below actually describes.
 
     This queue (``agents/handoffs/pending_migrations.json``) is shared by every
     remediation this package's siblings record, not only bypass writers -- an
@@ -541,9 +541,13 @@ def is_bypass_writer_entry(entry: Dict[str, Any]) -> bool:
     write path (for example, that a safety check itself could not finish). Those
     entries are still real and still block (see ``open_bespoke_writer_migrations``
     / ``blocking_bespoke_writer_migrations``, both attribution- and kind-free by
-    design), but they must not be DESCRIBED as a bypass writer, because the fix
-    this wording names ("rebuild it so it routes through the sanctioned bulk
-    path") does not apply to them.
+    design), but they must not be DESCRIBED as a bypass writer, because neither the
+    diagnosis nor the repair the state->action registry renders for one applies to
+    them.
+
+    It is also what every caller must consult BEFORE asking the registry for a way
+    out: the registry answers for a writer's state, and an entry that is not a
+    writer at all has no writer state to answer for.
     """
     kind = entry.get("kind")
     return kind is None or kind in _BYPASS_WRITER_KINDS
