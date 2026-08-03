@@ -315,6 +315,8 @@ Then deliver CLOSE-14 immediately (the build prompt).
 >
 > If the scanner reports any violation, the phase FAILS. Fix every flagged write by routing it through the approved external-write operations before continuing. Do not proceed to the supervised run until the scanner exits clean.
 >
+> Two of the kinds it can report are not writes, and neither is repaired by routing anything -- so read the kind printed next to each file rather than looking for a write to reroute. A file that **hardcodes the operator's confirmation** is manufacturing the operator's acceptance in code; it clears only when that text is gone from the file and the operator gives the confirmation themselves, in their own words. A file the scanner **could not read as Python** was not checked at all; it clears only when it parses.
+>
 > If Phase 1 includes a guarded external write -- an irreversible, standing-automation, or sensitive-data action -- also run the descriptor-coverage gate alongside the scanner. It confirms every guarded external mutator is covered by a descriptor-declared, ACCEPTED phase of the right risk class:
 >
 > ```

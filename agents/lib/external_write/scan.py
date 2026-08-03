@@ -352,13 +352,30 @@ Bypass classes CAUGHT at v0
 ------------------------------------------------------------------------------
 Bounds NOT covered at v0 (disclosed — no silent caps)
 ------------------------------------------------------------------------------
-  * A COMPUTED operator confirmation. ``baked_operator_confirmation`` sees one
-    thing: a string literal sitting next to the confirmation flag in a list or
-    tuple the source spells out. A variable, a module constant, an f-string, a
-    ``join``, a ``format``, a value read from a file, or any other computation
-    reaches the same command carrying the same manufactured words and is NOT
-    flagged. Nothing static can decide whether text a program computed came from
-    a person, so this rule does not attempt it and must never be read as having
+  * A MANUFACTURED operator confirmation that is not spelled as a literal
+    element of a list or tuple. ``baked_operator_confirmation`` sees ONE shape,
+    and both halves of what escapes it need saying, because naming only the
+    first invites the wrong inference:
+
+      (a) COMPUTED values. A variable, a module constant, an f-string, a
+          ``join``, a ``format``, a value read from a file, or any other
+          computation reaches the same command carrying the same manufactured
+          words and is NOT flagged.
+      (b) LITERAL values in a container this rule does not inspect — and these
+          are literal to the last character, so "anything literal is caught" is
+          FALSE. A whole shell command line as one string
+          (``subprocess.run("… --operator-confirmation 'yes'", shell=True)``)
+          is not a list or tuple. Neither is a mapping of flag to value
+          (``{"--operator-confirmation": "yes"}``) later expanded into argv,
+          even though the flag and its value are spelled adjacently there too.
+      (c) A NON-PYTHON caller. This scanner reads ``.py`` files only, so the
+          same command in a shell script, a Makefile, a scheduler entry or a
+          notebook is invisible to it — the same "Non-Python entrypoints" bound
+          this list already discloses for every other rule, restated here
+          because for THIS rule a shell wrapper is the likeliest home.
+
+    Nothing static can decide whether text a program supplied came from a
+    person, so this rule does not attempt it and must never be read as having
     closed consent forgery. What it closes is DRIFT: the shape an agent or a
     convenience script actually reaches for first, caught before it spreads.
     The deeper point — that a consent model whose consent is a command-line flag
@@ -705,6 +722,19 @@ from external_write.writer_state_core import NON_PROJECT_DIRS  # noqa: E402
 
 SCAN_ENTRYPOINT_REL = "agents/lib/external_write/scan.py"
 
+#: Declares that an invocation is about ONE named writer, and is therefore the
+#: per-writer REPAIR CONFIRMATION rather than the project-wide build gate. The
+#: two surfaces share this entrypoint but owe the operator opposite things (see
+#: the CLI section at the bottom of this file), and they are told apart by this
+#: explicit declaration — never by guessing intent from whether the argument
+#: happens to be a file or a directory.
+#:
+#: Deliberately the SAME word the acknowledgement command uses for the same
+#: thing, so an operator meets one name for a flagged writer across both
+#: commands. Spelled here rather than imported for the reason the confirmation
+#: flag below gives; the agreement is pinned by a build-time test.
+FLAG_WRITER = "--writer"
+
 #: The command-line flag that carries the operator's own words into the two
 #: commands that record a consent decision. This is the ONE thing the
 #: baked-consent rule keys on, and it is the declared value, not an inference
@@ -731,9 +761,19 @@ def scan_command(path: str) -> str:
     It CONFIRMS a repair; it never performs one. The caller that renders it into
     operator-facing text is responsible for saying so -- see the registry's own
     instruction text for the rebuildable state.
+
+    Renders ``FLAG_WRITER`` rather than a bare positional path, because that is
+    what makes this the PER-WRITER surface and not the project-wide build gate.
+    The distinction is load-bearing and it is an operator-safety one: this
+    command's whole promise is "the file you just repaired is now clean", so a
+    finding somewhere else in the project must not come back as a failure of the
+    repair. Declared explicitly here rather than inferred downstream from
+    whether the argument happens to name a file -- the gate is invoked on a
+    single file too, and guessing between the two from argument shape is the
+    infer-identity-from-incidental-structure mistake this package refuses.
     """
     import shlex as _shlex
-    return f"python3 {SCAN_ENTRYPOINT_REL} {_shlex.quote(path)}"
+    return f"python3 {SCAN_ENTRYPOINT_REL} {FLAG_WRITER} {_shlex.quote(path)}"
 
 
 class Violation(NamedTuple):
@@ -1531,15 +1571,25 @@ class _Scanner(ast.NodeVisitor):
         machine manufacturing the one thing only a person can supply.
 
         ★ CEILING — ANTI-DRIFT, NOT A CONSENT ORACLE. This is an AST literal
-        check and nothing more. A variable, a module constant, an f-string, a
-        ``join``, a ``format``, a value read off disk, or any other computed
-        expression delivers the identical manufactured words to the identical
-        command and is NOT flagged, by construction: nothing static can decide
-        whether text a program computed originated with a person. Those
-        evasions are DISCLOSED RESIDUALS of this rule, not gaps someone forgot
-        to close, and they are asserted as such by a fixture rather than only
-        described here. Read a clean result as "no literal confirmation is
-        spelled in this file", never as "the consent here is genuine".
+        check on ONE container shape, and nothing more. What escapes it is not
+        only computation, and saying only "computation" would leave a reader
+        believing anything literal is caught. It is not:
+
+          * COMPUTED — a variable, a module constant, an f-string, a ``join``,
+            a ``format``, a value read off disk. Nothing static can decide
+            whether text a program computed originated with a person.
+          * LITERAL, WRONG CONTAINER — a whole shell command line passed as one
+            string (``shell=True``), or a mapping of flag to value later
+            expanded into argv. Every character of those is written in the
+            source, and neither is a list or tuple, so neither is seen here.
+          * NON-PYTHON — this scanner reads ``.py`` files only. The same
+            command in a shell wrapper, a Makefile or a scheduler entry is
+            invisible to it, and a shell wrapper is the likeliest home of all.
+
+        Those are DISCLOSED RESIDUALS of this rule, not gaps someone forgot to
+        close, and they are asserted by fixtures rather than only described
+        here. Read a clean result as "no literal confirmation is spelled in a
+        sequence in this Python file", never as "the consent here is genuine".
 
         Unconditional across trust zones. The kernel renders this command from
         operator text and never from a literal, so it has nothing to fear from
@@ -2050,10 +2100,18 @@ def scan_paths(
 #      Real case: a ``.venv`` carrying third-party modules that are
 #      intentionally unparseable.
 #
-# The prefilter reads BYTES and may only EXCLUDE a file it positively read and
-# positively found clean. A file it cannot read stays a candidate and goes to
-# the scanner, which answers for it. Anything else would rebuild, one layer up,
-# the "could not read it" == "it passes" conflation the read path already fixed.
+# The prefilter reads BYTES, and of the files the walk reaches it may only
+# EXCLUDE one it positively read and positively found clean. A FILE it cannot
+# read stays a candidate and goes to the scanner, which answers for it —
+# anything else would rebuild, one layer up, the "could not read it" == "it
+# passes" conflation the read path already fixed.
+#
+# Stated with its limit, because the absolute form of that claim is not true:
+# ``Path.rglob`` swallows a PermissionError on a DIRECTORY, so every ``.py``
+# under an unreadable directory is never offered to the prefilter at all and is
+# therefore excluded without being read. That is the existing behaviour of every
+# walk in this package rather than anything new here, and it is a disclosed
+# residual of this sweep, not a property it closes.
 # ---------------------------------------------------------------------------
 
 #: What the consent sweep is scoped to ask, and therefore all it may report.
@@ -2072,7 +2130,9 @@ def consent_sweep_candidates(project_root: Union[str, Path]) -> List[Path]:
 
     Over-inclusion is safe here (an extra clean file yields no violation);
     under-inclusion is the whole failure this sweep exists to prevent, so a file
-    that cannot be read is INCLUDED rather than quietly dropped.
+    the walk reaches but cannot READ is INCLUDED rather than quietly dropped. A
+    file under a directory the walk cannot ENTER is a different case and is not
+    reached at all — see this section's header.
 
     To be exact about what that buys, since it would be easy to over-read: an
     INACCESSIBLE candidate is handed to ``_scan_file``, which answers ``[]`` for
@@ -2130,54 +2190,142 @@ def consent_sweep(project_root: Union[str, Path]) -> List[Violation]:
 # CLI entrypoint — run from its installed location inside the operator project
 # so that the __file__-anchored allowed-module exemption is correct.
 #
+# TWO SURFACES, ONE ENTRYPOINT, OPPOSITE OBLIGATIONS
+# ---------------------------------------------------
 # Usage:
-#   python3 agents/lib/external_write/scan.py <path> [<path> ...]
+#   python3 agents/lib/external_write/scan.py <path> [<path> ...]   (build gate)
+#   python3 agents/lib/external_write/scan.py --writer <relpath>    (confirm one)
 #
-# Scans the given paths (files or directories) for external-write bypasses.
-# Exits 0 if no violations are found (build passes this gate).
-# Exits 1 and prints each violation if any are found (build FAILS).
+# BUILD GATE (positional paths). Scans them, AND sweeps the whole project for a
+# manufactured operator confirmation — see "The whole-project consent sweep"
+# above. Deliberately not bounded by the argument: the documented invocation of
+# this gate names ``agents/``, and the one real manufactured-consent script
+# lived outside it. Any violation, named-path or swept, FAILS (exit 1).
 #
-# The consent sweep runs IN ADDITION to the named paths, over the whole project,
-# every time — see "The whole-project consent sweep" above. It is deliberately
-# NOT bounded by the argument: the documented invocation of this gate names
-# ``agents/``, and the one real manufactured-consent script lived outside it.
+# PER-WRITER REPAIR CONFIRMATION (``--writer``). The command ``scan_command()``
+# renders into an acceptance refusal and into the state->action registry, run by
+# an operator who has just repaired ONE file and is asking whether that worked.
+# Its result reflects THAT FILE ONLY. A manufactured confirmation elsewhere in
+# the project is still reported, loudly and by name, but as a separate finding
+# that explicitly does not change the answer about the repaired file.
 #
-# Its root is the CWD, the same anchor this entrypoint already uses for the
-# migration quarantine and for the same reason: the documented invocation is run
-# from the operator project's top folder. Deliberately NOT ``__file__``-derived,
-# even though that would be cwd-independent — this scanner also lives inside the
-# toolkit that BUILDS operator projects, whose tree necessarily contains the
-# rule's own fixtures, and a gate that fires on its own fixture in 100% of runs
-# is a gate nobody can keep. Measured cost on a ~1000-file tree: well under two
-# seconds, since only files whose bytes carry the flag are ever parsed.
+# Why the split is not a hole: this project's safety doctrine is that a coarse
+# fail-closed gate blocks the dangerous TRANSITION, never the REPAIR. The
+# transition surfaces — the build gate here, acceptance, completion — all keep
+# the project-wide block. What this avoids is telling an operator their repair
+# failed because of a file they were not repairing, which is how a gate creates
+# a state nobody can leave. The hash-bound quarantine cannot absorb that case
+# by construction: it exempts only a violation already recorded in that entry,
+# and this kind did not exist when any entry was written.
+#
+# The two are told apart by the DECLARATION in the command, never by guessing
+# from whether the argument names a file or a directory — the gate is legitimately
+# run on a single file too.
+#
+# The sweep's root is the CWD, the same anchor this entrypoint already uses for
+# the migration quarantine and for the same reason: the documented invocation is
+# run from the operator project's top folder. Deliberately NOT ``__file__``-
+# derived, even though that would be cwd-independent — this scanner also lives
+# inside the toolkit that BUILDS operator projects, whose tree necessarily
+# contains the rule's own fixtures, and a gate that fires on its own fixture in
+# 100% of runs is a gate nobody can keep. Measured cost on a ~1000-file tree:
+# well under two seconds, since only files whose bytes carry the flag are parsed.
 # ---------------------------------------------------------------------------
 
-def _cli_violations(paths: Sequence[str], project_root: Path) -> List[Violation]:
-    """What the CLI below reports: the named paths, plus the whole-project
-    consent sweep, deduplicated on the RESOLVED file identity.
+#: Kinds for which "route this write through the approved adapters" is a TRUE
+#: instruction. It is false for the other two the scanner can report -- a
+#: manufactured confirmation has no write to route, and a file that would not
+#: parse has nothing to read. A remediation instruction that does not fit its
+#: finding is worse than none: it sends the operator to repair something that is
+#: not wrong, and this gate's own text said it to every kind until now.
+_ROUTING_REPAIR_EXEMPT_KINDS = frozenset({"baked_operator_confirmation", "unparseable"})
 
-    Split out of the ``__main__`` block so the composition is reachable from a
-    test. The block itself stays a two-line shim; the argument the gate is given
-    is relative and the sweep's paths are absolute, so deduplicating on the raw
-    ``path`` string would report a file under ``agents/`` twice.
+
+def parse_cli_args(argv: Sequence[str]):
+    """Strict, fail-closed parse of this entrypoint's argv.
+
+    Returns ``(writer, paths, error)``: exactly one of ``writer`` / ``paths`` is
+    set on success, and ``error`` is a message on any other input.
+
+    DENY BY DEFAULT, following this package's CLI convention: there is no branch
+    that ignores an argument it does not recognise and proceeds anyway. Mixing
+    ``--writer`` with positional paths is refused rather than resolved, because
+    the two shapes ask for different things and there is no correct guess.
     """
-    found = list(paths and scan_paths(list(paths), project_root=project_root) or [])
-    seen = {(str(Path(v.path).resolve()), v.lineno, v.kind) for v in found}
+    args = list(argv)
+    if not args:
+        return None, [], "no path given"
+    if args[0] == FLAG_WRITER:
+        if len(args) != 2 or args[1].startswith("--"):
+            return None, [], (
+                f"{FLAG_WRITER} takes exactly one file, and cannot be combined "
+                "with other paths")
+        return args[1], [], None
+    for a in args:
+        if a.startswith("--"):
+            return None, [], f"unrecognised option {a!r}"
+    return None, args, None
+
+
+def cli_findings(writer: Optional[str], paths: Sequence[str], project_root: Path):
+    """``(blocking, elsewhere)`` for one invocation.
+
+    ``blocking`` decides the exit status. ``elsewhere`` is the project-wide
+    consent finding that a per-writer confirmation must report without failing
+    on -- always empty for the build gate, which blocks on everything.
+
+    The argument the gate is given is relative and the sweep's paths are
+    absolute, so both the deduplication and the is-this-my-target test compare
+    RESOLVED file identity rather than the raw ``path`` string.
+    """
+    if writer is not None:
+        blocking = scan_paths([writer], project_root=project_root)
+        target = str(Path(writer).resolve())
+        elsewhere = [v for v in consent_sweep(project_root)
+                     if str(Path(v.path).resolve()) != target]
+        return blocking, elsewhere
+
+    blocking = list(scan_paths(list(paths), project_root=project_root))
+    seen = {(str(Path(v.path).resolve()), v.lineno, v.kind) for v in blocking}
     for v in consent_sweep(project_root):
         key = (str(Path(v.path).resolve()), v.lineno, v.kind)
         if key not in seen:
             seen.add(key)
-            found.append(v)
-    found.sort(key=lambda v: (v.path, v.lineno, v.kind))
-    return found
+            blocking.append(v)
+    blocking.sort(key=lambda v: (v.path, v.lineno, v.kind))
+    return blocking, []
+
+
+_CONSENT_NOTE = (
+    "hardcode an operator confirmation: the words that get recorded as the "
+    "operator's own acceptance are written into the file, not said by them. "
+    "Text a file supplies is not the operator's, whatever it says. Each one "
+    "clears once its file no longer carries that text and the operator gives "
+    "the confirmation themselves. Note the reach of this check honestly: it "
+    "sees only a confirmation spelled out as a literal in a Python file, so a "
+    "clean result means no such literal was found -- it is not evidence that "
+    "the acceptances in this project are genuine."
+)
+
+_UNPARSEABLE_NOTE = (
+    "could not be read as Python at all, so nothing about them was checked. "
+    "There is no write to reroute here; each one clears when its file parses."
+)
 
 
 if __name__ == "__main__":  # pragma: no cover
     import sys as _sys
 
-    _paths = _sys.argv[1:]
-    if not _paths:
-        print("Usage: python3 scan.py <path> [<path> ...]", file=_sys.stderr)
+    _writer, _paths, _err = parse_cli_args(_sys.argv[1:])
+    if _err is not None:
+        print(
+            f"{_err}\n"
+            "Usage: python3 scan.py <path> [<path> ...]      (check these paths, "
+            "and the whole project for a manufactured operator confirmation)\n"
+            f"   or: python3 scan.py {FLAG_WRITER} <file>    (confirm ONE repaired "
+            "file; its result is about that file only)\n"
+            "Run it from your project's top folder.",
+            file=_sys.stderr)
         _sys.exit(2)
 
     # (F-3B) This standalone CLI invocation IS the anti-deadlock target the
@@ -2189,36 +2337,49 @@ if __name__ == "__main__":  # pragma: no cover
     # capability_health.py, acceptance_ceremony.py, coverage_gate.py) omits
     # project_root and keeps its existing strict, unconditional behavior --
     # see scan_paths's own docstring for why that is deliberate.
-    _violations = _cli_violations(_paths, Path.cwd())
-    if _violations:
-        for _v in _violations:
+    _violations, _elsewhere = cli_findings(_writer, _paths, Path.cwd())
+
+    for _v in _violations:
+        print(f"{_v.path}:{_v.lineno}: {_v.kind}")
+
+    # Each note goes only to the findings it is TRUE of.
+    _routing = [_v for _v in _violations
+                if _v.kind not in _ROUTING_REPAIR_EXEMPT_KINDS]
+    _baked = [_v for _v in _violations if _v.kind == "baked_operator_confirmation"]
+    _broken = [_v for _v in _violations if _v.kind == "unparseable"]
+    if _routing:
+        print(
+            f"\n{len(_routing)} violation(s) found. "
+            "Every external write must route through the approved adapters "
+            "in agents/lib/external_write/. "
+            "The phase FAILS and cannot be accepted until every flagged write "
+            "is routed through the approved external-write operations.",
+            file=_sys.stderr,
+        )
+    if _baked:
+        print(f"\n{len(_baked)} of these {_CONSENT_NOTE}", file=_sys.stderr)
+    if _broken:
+        print(f"\n{len(_broken)} of these {_UNPARSEABLE_NOTE}", file=_sys.stderr)
+
+    if _elsewhere:
+        # A per-writer confirmation. Say the project-wide finding out loud, and
+        # say just as plainly that it is not about the file being confirmed --
+        # an operator who repaired exactly what they were told to repair must
+        # never read this as their repair having failed.
+        for _v in _elsewhere:
             print(f"{_v.path}:{_v.lineno}: {_v.kind}")
-        _baked = [_v for _v in _violations
-                  if _v.kind == "baked_operator_confirmation"]
-        if len(_baked) != len(_violations):
-            print(
-                f"\n{len(_violations) - len(_baked)} violation(s) found. "
-                "Every external write must route through the approved adapters "
-                "in agents/lib/external_write/. "
-                "The phase FAILS and cannot be accepted until every flagged write "
-                "is routed through the approved external-write operations.",
-                file=_sys.stderr,
-            )
-        if _baked:
-            print(
-                f"\n{len(_baked)} of these hardcode an operator confirmation: the "
-                "words that get recorded as the operator's own acceptance are "
-                "written into the file, not said by them. Text a file supplies is "
-                "not the operator's, whatever it says. The phase FAILS while any "
-                "of them stands, and it clears once the file no longer carries "
-                "that text and the operator gives the confirmation themselves. "
-                "Note the reach of this check honestly: it sees only a "
-                "confirmation spelled out as a literal, so a clean result here "
-                "means no literal was found -- it is not evidence that the "
-                "acceptances in this project are genuine.",
-                file=_sys.stderr,
-            )
+        print(
+            f"\nSeparately, and NOT about {_writer}: {len(_elsewhere)} finding(s) "
+            "elsewhere in this project, listed above. The result for "
+            f"{_writer} is the one reported below and is unaffected by them. "
+            "They still need attention in their own right.",
+            file=_sys.stderr,
+        )
+
+    if _violations:
         _sys.exit(1)
+    if _writer is not None:
+        print(f"{_writer} is clean -- no violations found in it.")
     else:
         print("Bypass scan passed — no violations found.")
-        _sys.exit(0)
+    _sys.exit(0)

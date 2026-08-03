@@ -1793,6 +1793,24 @@ class TestBakedOperatorConfirmationRule(unittest.TestCase):
             "outside an AST literal check's reach, and the rule's docstring "
             "discloses exactly that -- it must not silently start claiming them")
 
+    def test_a_literal_shell_string_or_mapping_also_escapes(self):
+        # The residual is NOT "computation". Two shapes here are literal to the
+        # last character and still escape, because neither is a sequence the
+        # rule inspects. Asserted rather than described, because the
+        # computed-only framing invites exactly the wrong inference.
+        v = scan_paths([_FIXTURES / "capability_literal_container_operator_confirmation.py"])
+        self.assertEqual(
+            [x for x in v if x.kind == "baked_operator_confirmation"], [],
+            "a shell-string command line and a mapping of flag->value are "
+            "disclosed literal escapes; if this starts firing, the disclosure "
+            "must be rewritten rather than the test relaxed")
+
+    def test_the_disclosure_names_the_literal_escapes_not_only_computed_ones(self):
+        doc = (scan._Scanner._check_baked_operator_confirmation.__doc__ or "").lower()
+        for phrase in ("shell", "mapping", "non-python"):
+            self.assertIn(phrase, doc,
+                          f"the ceiling docstring must name the {phrase} escape")
+
     def test_the_shipped_package_carries_no_baked_confirmation(self):
         v = scan_paths([_ADAPTER_DIR])
         self.assertEqual([x for x in v if x.kind == "baked_operator_confirmation"], [],
@@ -1959,6 +1977,180 @@ class TestBakedConsentProjectSweep(unittest.TestCase):
                 "actually looks at, or this assertion proves nothing")
             v = scan.consent_sweep(staging)
             self.assertEqual(v, [], f"a fresh build must sweep clean; got {v}")
+
+
+class TestPerWriterRepairConfirmation(unittest.TestCase):
+    """The SAME entrypoint serves two surfaces with opposite obligations.
+
+    As the build gate it must fail on a manufactured confirmation anywhere in the
+    project. As the per-writer repair confirmation -- the command
+    ``scan_command`` renders into an acceptance refusal and into the state->action
+    registry -- its whole promise is "this specific file is now clean", and
+    failing it for an unrelated file tells an operator their repair did not work
+    when it did. A repair that cannot be confirmed is a state nobody can leave.
+
+    The surfaces are told apart by an explicit DECLARATION in the rendered
+    command, never by guessing from the shape of the argument.
+    """
+
+    def _run(self, proj, *args):
+        import subprocess
+        return subprocess.run(
+            [sys.executable, str(_ADAPTER_DIR / "scan.py"), *args],
+            cwd=str(proj), capture_output=True, text=True)
+
+    def _project_with_unrelated_baked_confirmation(self, td):
+        proj = Path(td)
+        (proj / "agents" / "inbox").mkdir(parents=True)
+        writer = proj / "agents" / "inbox" / "runner.py"
+        writer.write_text("def main():\n    return 0\n", encoding="utf-8")
+        (proj / "scripts").mkdir()
+        (proj / "scripts" / "finish_setup.py").write_text(
+            (_FIXTURES / "capability_bakes_operator_confirmation.py")
+            .read_text(encoding="utf-8"), encoding="utf-8")
+        return proj, "agents/inbox/runner.py"
+
+    def test_the_rendered_confirmation_command_declares_its_single_target(self):
+        cmd = scan.scan_command("agents/inbox/runner.py")
+        self.assertIn(scan.FLAG_WRITER, cmd,
+                      "the per-writer confirmation must say so in the command "
+                      "itself; telling the two surfaces apart by the shape of "
+                      "the argument would be inferring intent from structure")
+
+    def test_the_writer_flag_is_the_word_the_other_command_uses_for_it(self):
+        from external_write import writer_acknowledgement
+        self.assertEqual(scan.FLAG_WRITER, writer_acknowledgement.FLAG_WRITER,
+                         "one operator-facing word for one thing across the two "
+                         "commands that name a flagged writer")
+
+    def test_a_confirmed_repair_is_not_failed_by_an_unrelated_baked_confirmation(self):
+        with TemporaryDirectory() as td:
+            proj, rel = self._project_with_unrelated_baked_confirmation(td)
+            proc = self._run(proj, scan.FLAG_WRITER, rel)
+            self.assertEqual(
+                proc.returncode, 0,
+                f"the repair to {rel} succeeded and must be confirmed as such; "
+                f"stdout={proc.stdout!r} stderr={proc.stderr!r}")
+
+    def test_the_unrelated_finding_is_still_surfaced_and_plainly_separated(self):
+        with TemporaryDirectory() as td:
+            proj, rel = self._project_with_unrelated_baked_confirmation(td)
+            proc = self._run(proj, scan.FLAG_WRITER, rel)
+            combined = proc.stdout + proc.stderr
+            self.assertIn("finish_setup.py", combined,
+                          "the project-wide finding must not vanish just "
+                          "because this invocation is about one file")
+            self.assertIn("elsewhere", combined.lower())
+            self.assertNotIn("must route through the approved adapters",
+                             combined)
+
+    def test_a_per_writer_run_still_fails_on_that_writers_own_violation(self):
+        with TemporaryDirectory() as td:
+            proj, rel = self._project_with_unrelated_baked_confirmation(td)
+            (proj / rel).write_text(
+                "import requests\n\ndef main():\n    return requests\n",
+                encoding="utf-8")
+            proc = self._run(proj, scan.FLAG_WRITER, rel)
+            self.assertEqual(proc.returncode, 1,
+                             f"stdout={proc.stdout!r} stderr={proc.stderr!r}")
+            self.assertIn("forbidden_import", proc.stdout)
+
+    def test_a_per_writer_run_fails_on_a_baked_confirmation_in_that_writer(self):
+        with TemporaryDirectory() as td:
+            proj, rel = self._project_with_unrelated_baked_confirmation(td)
+            (proj / rel).write_text(
+                (_FIXTURES / "capability_bakes_operator_confirmation.py")
+                .read_text(encoding="utf-8"), encoding="utf-8")
+            proc = self._run(proj, scan.FLAG_WRITER, rel)
+            self.assertEqual(proc.returncode, 1,
+                             f"stdout={proc.stdout!r} stderr={proc.stderr!r}")
+
+    def test_the_gate_invocation_is_unchanged_and_still_fails_project_wide(self):
+        with TemporaryDirectory() as td:
+            proj, _ = self._project_with_unrelated_baked_confirmation(td)
+            proc = self._run(proj, "agents/")
+            self.assertEqual(proc.returncode, 1,
+                             "the build gate must still fail for a manufactured "
+                             "confirmation anywhere in the project")
+
+    def test_an_unrecognised_argument_shape_is_refused_not_guessed_at(self):
+        with TemporaryDirectory() as td:
+            proj, rel = self._project_with_unrelated_baked_confirmation(td)
+            for args in ((scan.FLAG_WRITER,),
+                         (scan.FLAG_WRITER, rel, "agents/"),
+                         ("--not-a-flag", rel)):
+                proc = self._run(proj, *args)
+                self.assertEqual(proc.returncode, 2, f"args={args!r}")
+
+
+class TestCliMessageMatchesTheKindItReports(unittest.TestCase):
+    """A remediation instruction that does not fit the finding is worse than
+    none: it sends the operator to repair something that is not wrong."""
+
+    def _run(self, proj, *args):
+        import subprocess
+        return subprocess.run(
+            [sys.executable, str(_ADAPTER_DIR / "scan.py"), *args],
+            cwd=str(proj), capture_output=True, text=True)
+
+    def test_an_unparseable_candidate_does_not_print_the_routing_sentence(self):
+        with TemporaryDirectory() as td:
+            proj = Path(td)
+            (proj / "agents").mkdir()
+            (proj / "scripts").mkdir()
+            (proj / "scripts" / "broken.py").write_text(
+                'CMD = ["--operator-confirmation", "yes, accept it"\n',
+                encoding="utf-8")
+            proc = self._run(proj, "agents/")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("unparseable", proc.stdout)
+            self.assertNotIn("must route through the approved adapters",
+                             proc.stderr,
+                             "nothing is being routed anywhere: the file could "
+                             "not be read as Python at all")
+
+    def test_a_real_write_bypass_still_gets_the_routing_sentence(self):
+        with TemporaryDirectory() as td:
+            proj = Path(td)
+            (proj / "agents").mkdir()
+            (proj / "agents" / "bad.py").write_text(
+                "import requests\n\ndef main():\n    return requests\n",
+                encoding="utf-8")
+            proc = self._run(proj, "agents/")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("must route through the approved adapters",
+                          proc.stderr)
+
+
+class TestGateProseCoversTheNonRoutingKinds(unittest.TestCase):
+    """Every home that tells a reader what a scanner finding means.
+
+    The scanner's own failure text was corrected to stop promising a routing
+    repair for a finding that has no write to route. These three say the same
+    thing to the agent that runs the gate, and correcting the body while leaving
+    its target hooks is how a corrected claim keeps shipping.
+    """
+
+    HOMES = (
+        Path("wizard") / "agents" / "orchestrator_prompt.md",
+        Path("wizard") / "templates" / "root" / "project_instructions.md",
+        Path("wizard") / "interview" / "15_close.md",
+    )
+
+    def test_each_home_says_a_finding_is_not_always_a_write(self):
+        for rel in self.HOMES:
+            text = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+            with self.subTest(home=str(rel)):
+                # Premise check, phrased on the fragment all three share -- two
+                # say "routed through", one says "routing it through".
+                self.assertIn("through the approved external-write operations",
+                              text, "premise check: this home carries the claim")
+                self.assertIn("hardcodes the operator's confirmation", text,
+                              "the routing remedy does not exist for a "
+                              "manufactured confirmation, and this home tells "
+                              "the reader to keep going until it is applied")
+                self.assertIn("could not read as Python", text,
+                              "nor does it exist for a file that would not parse")
 
 
 if __name__ == "__main__":
