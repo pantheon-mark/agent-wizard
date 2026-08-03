@@ -116,16 +116,28 @@ try:
         # per-item PII record committed BEFORE its ignore rule existed would
         # otherwise have NO independent detection path once tracked (unlike the
         # `.csv`/`.jsonl`/etc. data extensions above, matched on extension alone
-        # regardless of directory). These three are the raw, un-redacted record
-        # dirs run_envelope.py / write_gate.py / operator_acceptance.py write to —
-        # DEFAULT_ENVELOPE_DIR, DEFAULT_LEDGER_DIR, DEFAULT_RECEIPT_DIR — always
-        # gitignored by the wizard's own emitted .gitignore in the normal flow, so
-        # this marker only ever fires for the abnormal case (a pre-tracked file),
-        # exactly mirroring how "logs/" / "session_cookies/" are already handled.
+        # regardless of directory). These are the raw, un-redacted record dirs
+        # run_envelope.py / write_gate.py / operator_acceptance.py /
+        # trial_journal.py write to — DEFAULT_ENVELOPE_DIR, DEFAULT_LEDGER_DIR,
+        # DEFAULT_RECEIPT_DIR, DEFAULT_TRIAL_JOURNAL_DIR — always gitignored by
+        # the wizard's own emitted .gitignore in the normal flow, so this marker
+        # only ever fires for the abnormal case (a pre-tracked file), exactly
+        # mirroring how "logs/" / "session_cookies/" are already handled.
         # Deliberately distinct from "security/audit/" (the REDACTED, committable
         # projection) — that path is NOT listed here and must keep auto-committing.
+        #
+        # "security/trial_runs/" is the trial write-ahead journal, and it is the
+        # member that needs this path MOST rather than least. Its per-unit
+        # recovery capsules carry the adapter's rendering of a record's PRIOR
+        # STATE — the prior value of a cell, the exact labels a message had — so
+        # it is privacy-bearing, not merely operational noise. And the window in
+        # which a file there can become tracked with no ignore rule is real: the
+        # emitted .gitignore is rendered from the frozen bundle, so between the
+        # journal module shipping and the bundle carrying the updated
+        # gitignore_template there is no ignore rule to rely on. That is exactly
+        # the case an ignore-state-agnostic marker exists for.
         "security/run_envelopes/", "security/invocation_ledgers/",
-        "security/acceptance_receipts/",
+        "security/acceptance_receipts/", "security/trial_runs/",
     )
 
     # (A) Positively-safe allowlist. A data format NEVER appears here.

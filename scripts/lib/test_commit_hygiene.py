@@ -509,11 +509,20 @@ class CommitHygieneBehaviorTests(unittest.TestCase):
         self._seed_security_dir()
         (self.repo / ".gitignore").write_text(
             "/security/run_envelopes/\n/security/invocation_ledgers/\n"
-            "/security/acceptance_receipts/\n/security/capability_acceptance_log.jsonl\n",
+            "/security/acceptance_receipts/\n/security/trial_runs/\n"
+            "/security/capability_acceptance_log.jsonl\n",
             encoding="utf-8")
         (self.repo / "security" / "run_envelopes").mkdir(parents=True)
         (self.repo / "security" / "run_envelopes" / "run-1.json").write_text(
             '{"raw_id": "msg-123-pii"}\n', encoding="utf-8")
+        # security/trial_runs/ -- the trial write-ahead journal. Its per-unit
+        # recovery capsules carry the adapter's rendering of a record's PRIOR
+        # STATE, so it is the most privacy-bearing member of this family, not
+        # the least.
+        (self.repo / "security" / "trial_runs").mkdir(parents=True)
+        (self.repo / "security" / "trial_runs" / "trial-1.json").write_text(
+            '{"units": [{"recovery_capsule": {"undo_ref_json": '
+            '{"prior_label_ids": ["INBOX"]}}}]}\n', encoding="utf-8")
         (self.repo / "security" / "invocation_ledgers").mkdir(parents=True)
         (self.repo / "security" / "invocation_ledgers" / "run-1.json").write_text(
             '{"raw_id": "msg-123-pii"}\n', encoding="utf-8")
@@ -532,6 +541,7 @@ class CommitHygieneBehaviorTests(unittest.TestCase):
             "security/run_envelopes/run-1.json",
             "security/invocation_ledgers/run-1.json",
             "security/acceptance_receipts/r.json",
+            "security/trial_runs/trial-1.json",
             "security/capability_acceptance_log.jsonl",
         ):
             self.assertNotIn(raw, tracked, f"raw gitignored security record was auto-committed: {raw}")
@@ -552,6 +562,15 @@ class CommitHygieneBehaviorTests(unittest.TestCase):
             "security/run_envelopes/run-1.json",
             "security/invocation_ledgers/run-1.json",
             "security/acceptance_receipts/r.json",
+            # The trial write-ahead journal. This member matters MOST to the
+            # ignore-state-agnostic path: the emitted `.gitignore` is rendered
+            # from the frozen bundle, so between the module shipping and the
+            # bundle carrying the updated template an operator project can hold
+            # `security/trial_runs/*.json` with no ignore rule at all -- and if
+            # one becomes tracked in that window, `git check-ignore` will never
+            # report it as ignored afterwards. A capsule carries the prior state
+            # of the operator's real records.
+            "security/trial_runs/trial-1.json",
         )
         for rel in raw_paths:
             p = self.repo / rel
@@ -565,7 +584,8 @@ class CommitHygieneBehaviorTests(unittest.TestCase):
         # The ignore rule arrives LATER (the F-30 illusory-protection shape).
         (self.repo / ".gitignore").write_text(
             "/security/run_envelopes/\n/security/invocation_ledgers/\n"
-            "/security/acceptance_receipts/\n", encoding="utf-8")
+            "/security/acceptance_receipts/\n/security/trial_runs/\n",
+            encoding="utf-8")
         r = self._run("SessionEnd")
         self.assertEqual(r.returncode, 0, r.stderr)  # never aborts
 
@@ -618,11 +638,13 @@ class CommitHygieneBehaviorTests(unittest.TestCase):
         self._seed_security_dir()
         (self.repo / ".gitignore").write_text(
             "/security/run_envelopes/\n/security/invocation_ledgers/\n"
-            "/security/acceptance_receipts/\n", encoding="utf-8")
+            "/security/acceptance_receipts/\n/security/trial_runs/\n",
+            encoding="utf-8")
         for rel in (
             "security/run_envelopes/run-1.json",
             "security/invocation_ledgers/run-1.json",
             "security/acceptance_receipts/r.json",
+            "security/trial_runs/trial-1.json",
         ):
             p = self.repo / rel
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -635,6 +657,7 @@ class CommitHygieneBehaviorTests(unittest.TestCase):
             "security/run_envelopes/run-1.json",
             "security/invocation_ledgers/run-1.json",
             "security/acceptance_receipts/r.json",
+            "security/trial_runs/trial-1.json",
         ):
             self.assertNotIn(rel, tracked, f"never-tracked gitignored raw record was committed: {rel}")
             self.assertNotIn(rel, out, f"never-tracked gitignored raw record was surfaced unnecessarily: {rel}")

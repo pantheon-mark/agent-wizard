@@ -361,6 +361,33 @@ def _modules_constructing(identifier):
     return hits
 
 
+def _modules_subclassing(identifier):
+    """Every production module that names `identifier` in a `ClassDef.bases`
+    position — i.e. SUBCLASSES it, by AST.
+
+    A subclass is the third route into existence, alongside a direct call and the
+    reconstruction protocols, and it is the nastiest of the three: an overriding
+    `__post_init__` never runs the token check at all, so the resulting object
+    carries none of the carrier's invariants while still satisfying
+    `isinstance(plan, AuthorizedPlan)` in every consumer. It is invisible to
+    `_modules_constructing` (a class base is not a call) and invisible to the
+    construction-token test (the token is never named). Hence its own probe.
+    """
+    hits = []
+    for rel, tree in _production_modules():
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for base in node.bases:
+                if (isinstance(base, ast.Name) and base.id == identifier) or \
+                        (isinstance(base, ast.Attribute) and base.attr == identifier):
+                    hits.append(rel)
+                    break
+            if hits and hits[-1] == rel:
+                break
+    return hits
+
+
 class SingleAuthorizationImplementationTests(unittest.TestCase):
     """Review focus: is there exactly ONE authorization implementation? Every
     assertion here is made by parsing the real package source."""
@@ -407,22 +434,58 @@ class SingleAuthorizationImplementationTests(unittest.TestCase):
         self.assertEqual(whole_module, 1,
                          "AuthorizedPlan is constructed somewhere other than "
                          "inside authorize_operation")
-        # And constructed nowhere else in the package at all.
+        # And brought into existence nowhere else in the package at all, by
+        # EITHER route.
         #
-        # RETARGETED (Cut 1.9 Task 3), not weakened. This was
-        # `_modules_naming("AuthorizedPlan") == [_WA_REL]` -- "no other module
-        # NAMES the carrier" -- which was a workable proxy for "no other module
-        # constructs it" only while nothing consumed the carrier. The carrier
-        # exists precisely to be consumed, and a consumer handed one must be able
-        # to refuse anything else: the trial write-ahead journal opens only from
-        # an `isinstance(plan, AuthorizedPlan)` that passes. That reference is a
-        # fail-closed check, not a second construction site, and forbidding it
-        # would push consumers toward duck-typing whatever they are handed --
-        # the opposite of what this guard is for. The property that was always
-        # meant is asserted directly now.
-        # What makes construction elsewhere IMPOSSIBLE rather than merely absent
-        # is the token, which no other module may even name -- the next test.
+        # RETARGETED (Cut 1.9 Task 3), and the retarget then CORRECTED after
+        # review. This was `_modules_naming("AuthorizedPlan") == [_WA_REL]` -- "no
+        # other module NAMES the carrier" -- which was a workable proxy for "no
+        # other module brings one into existence" only while nothing consumed the
+        # carrier. The carrier exists precisely to be consumed, and a consumer
+        # handed one must be able to refuse anything else: the trial write-ahead
+        # journal opens only from an `isinstance(plan, AuthorizedPlan)` that
+        # passes. That reference is a fail-closed check, not a construction site,
+        # and forbidding it would push consumers toward duck-typing whatever they
+        # are handed -- the opposite of what this guard is for.
+        #
+        # The first retarget replaced the naming check with the CALL check alone,
+        # which lost a shape the naming check had covered: a production module
+        # could subclass the carrier and override `__post_init__`, and a class
+        # base is not a call. Both routes are asserted now, separately, because
+        # they fail differently -- see `_modules_subclassing`.
         self.assertEqual(_modules_constructing("AuthorizedPlan"), [_WA_REL])
+        self.assertEqual(
+            _modules_subclassing("AuthorizedPlan"), [],
+            "a production module subclasses the authorization carrier. An "
+            "overriding __post_init__ never runs the token check, so the "
+            "subclass instance carries NONE of the carrier's invariants while "
+            "still satisfying isinstance() in every consumer")
+
+    def test_the_carrier_refuses_to_be_subclassed_at_all(self):
+        """The structural half of the subclass route: `__init_subclass__` removes
+        it rather than watching for it.
+
+        The AST assertion above is a detective control over this package's own
+        source. This one is the preventive control, and it holds for a subclass
+        defined anywhere -- including in code this repo never parses. Both are
+        kept: if a future author deletes `__init_subclass__`, the AST assertion
+        still trips on any in-package use of the reopened route.
+        """
+        with self.assertRaises(wa.AuthorizationRequiredError) as ctx:
+            class _ForgedPlan(wa.AuthorizedPlan):
+                def __post_init__(self, issued_by):
+                    return
+        self.assertIn("subclass", str(ctx.exception).lower())
+
+    def test_subclassing_is_refused_even_without_overriding_post_init(self):
+        """Refused at class-creation time, so it cannot depend on what the
+        subclass happens to override -- a subclass that merely adds a field would
+        also reach `__post_init__` with a token it does not hold, but a subclass
+        that overrides it would not, and the guard must not have to tell them
+        apart."""
+        with self.assertRaises(wa.AuthorizationRequiredError):
+            class _Extended(wa.AuthorizedPlan):
+                pass
 
     def test_the_construction_token_is_named_in_exactly_one_module(self):
         self.assertEqual(_modules_naming("_ISSUED_BY_AUTHORIZE"), [_WA_REL])

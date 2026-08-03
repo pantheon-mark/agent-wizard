@@ -695,6 +695,15 @@ class OpenRefusalTests(_Base):
         self.assertIn(wa.EXECUTION_INTENT_TRIAL, str(ctx.exception))
 
     def assertNoJournalWritten(self):
+        """Assert the journal directory holds NOTHING -- not even a lock file.
+
+        Deliberately stricter than "no `<trial_id>.json`", and it holds because
+        every refusal this helper is used for happens BEFORE `open_trial_journal`
+        enters its exclusive section, so no lock file has been created either. If
+        a future refusal is moved inside `_exclusive`, this will report a failure
+        naming the leftover `.lock` -- that is a signal to narrow the assertion to
+        the journal file for that one case, not a bug in the refusal.
+        """
         directory = Path(self.journal_dir)
         written = sorted(p.name for p in directory.iterdir()) \
             if directory.exists() else []
@@ -732,6 +741,57 @@ class OpenRefusalTests(_Base):
             tj.open_trial_journal(plan, journal_dir=self.journal_dir)
         self.assertIn(tj.CAPSULE_KEY_UNDO_REF, str(ctx.exception))
         self.assertNoJournalWritten()
+
+    def test_a_non_serializable_capsule_refuses_the_open_as_documented(self):
+        """The path that justifies NOT duplicating the preflight's
+        serializability check.
+
+        The argument for leaving that check with its single owner is that the
+        journal's own write IS the real round trip, performed before any mutation,
+        so a capsule that cannot be serialized fails the OPEN. That argument was
+        asserted nowhere, and the failure arrived as a bare `TypeError` from
+        `json.dumps` rather than the `TrialJournalError` this entrypoint
+        documents -- so a caller catching the documented exception would not have
+        caught it. Driven through the REAL entrypoint, with a capsule that is
+        format-valid (so the format validator passes it) and not JSON-safe.
+        """
+        op = self.op(n=2)
+        capsules = self.capsules(op)
+        capsules["m2"] = dict(capsules["m2"])
+        capsules["m2"][tj.CAPSULE_KEY_UNDO_REF] = {"prior_label_ids"}  # a set
+        plan = self.authorized_trial_plan(op)
+        object.__setattr__(plan, "recovery_capsules", capsules)
+        self.assertIsNone(
+            tj.validate_recovery_capsule(self.OP_KIND, "m2", capsules["m2"]),
+            "fixture precondition: the capsule must pass the FORMAT check, so "
+            "this test exercises the serialization refusal and not that one")
+        with self.assertRaises(tj.TrialJournalError) as ctx:
+            tj.open_trial_journal(plan, journal_dir=self.journal_dir)
+        self.assertIn("m2", str(ctx.exception))
+        self.assertNoJournalWritten()
+
+    def test_an_inaccessible_journal_path_refuses_rather_than_reading_as_absent(self):
+        """A fail-closed filesystem check must distinguish ABSENT from
+        INACCESSIBLE. `os.path.exists` answers False for both, so a permission
+        error at the write-once check would be read as 'no prior trial' and the
+        open would proceed to overwrite a record that may be the only thing that
+        knows a real mutation is outstanding."""
+        plan = self.authorized_trial_plan(self.op())
+        real_lstat = os.lstat
+
+        def denying_lstat(path, *args, **kwargs):
+            if str(path).endswith(".json"):
+                raise PermissionError(13, "Permission denied")
+            return real_lstat(path, *args, **kwargs)
+
+        with mock.patch.object(tj.os, "lstat", denying_lstat):
+            with self.assertRaises(tj.TrialJournalError) as ctx:
+                tj.open_trial_journal(plan, journal_dir=self.journal_dir)
+        message = str(ctx.exception).lower()
+        self.assertIn("inaccessible", message)
+        self.assertNotIn(".json", sorted(
+            p.suffix for p in Path(self.journal_dir).iterdir()
+            if p.suffix == ".json"), "nothing may be written past that refusal")
 
     def test_a_capsule_for_a_unit_not_in_the_plan_refuses(self):
         op = self.op()

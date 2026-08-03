@@ -926,12 +926,54 @@ def open_trial_journal(plan: Any, *, trial_id: Optional[str] = None,
         ],
     }
 
+    # The REAL JSON round trip, run here -- before any file, directory entry or
+    # lock exists. The capsules were checked for FORMAT above; serializability is
+    # not re-implemented anywhere (that check has one owner, the trial-eligibility
+    # preflight), and this is the actual write's own serializer, so a capsule that
+    # cannot be written refuses the OPEN rather than surfacing as a raw
+    # `json.dumps` error out of an entrypoint that documents `TrialJournalError` --
+    # or, far worse, at a transition after a mutation had already been issued.
+    # `_atomic_write_record` below re-serializes the same object with the same
+    # function and so cannot fail differently.
+    try:
+        serialize_journal_payload(record)
+    except (TypeError, ValueError) as exc:
+        raise TrialJournalError(
+            f"the trial journal for {op_kind!r} cannot be serialized to JSON "
+            f"({exc!r}), so it could not be written before the first mutation and "
+            "the trial does not start. The journal is JSON on disk and every "
+            "recovery capsule must survive the round trip; one that carries a "
+            "set, a custom object, NaN or Infinity cannot. Fix step: have the "
+            "adapter render JSON-representable values into "
+            f"{CAPSULE_KEY_TARGET_REF} / {CAPSULE_KEY_UNDO_REF}. Units in this "
+            f"plan: {unit_ids}.") from exc
+
     # The existence check lives INSIDE the exclusive section, so two processes
     # opening the same trial id cannot both pass it. `run_envelope`'s write-once
     # helper checks existence outside any lock; here the lock is already required
     # for every transition, so using it closes that race at no extra cost.
     with journal._exclusive():
-        if os.path.exists(journal.path):
+        # `os.lstat`, never `os.path.exists`: a fail-closed filesystem check must
+        # distinguish ABSENT from INACCESSIBLE. `os.path.exists` answers False for
+        # both (and for a dangling symlink), so a permission error here would be
+        # read as "no prior trial" and this open would proceed to overwrite a
+        # record that may be the only thing that knows a real mutation is
+        # outstanding. `lstat` rather than `stat` so a symlink at the journal path
+        # counts as PRESENT on its own terms -- a dangling one included, since
+        # that is not a state a write-ahead record should be published into.
+        try:
+            os.lstat(journal.path)
+        except FileNotFoundError:
+            pass  # genuinely absent -- the one state a new trial may open in
+        except OSError as exc:
+            raise TrialJournalError(
+                "could not determine whether a trial journal already exists at "
+                f"{journal.path!r} -- the path is INACCESSIBLE, not absent "
+                f"({exc!r}). Refusing rather than assuming there is nothing "
+                "there: treating an inaccessible path as empty is how a write-once "
+                "record gets overwritten. Fix step: make the trial-journal "
+                "directory readable, or open the trial under a fresh id.") from exc
+        else:
             raise TrialJournalError(
                 f"a trial journal already exists at {journal.path!r}. A trial id "
                 "is write-once: reusing one would overwrite a prior trial's "

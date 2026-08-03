@@ -93,6 +93,14 @@ structural facts, not one convention, put the preflight on the path:
          `__post_init__`. An authorization is not a portable document: reviving
          one in another process, at another time, with the registry in another
          state, is not something the gate ever authorized.
+       * SUBCLASSING raises, via `__init_subclass__`. This was the one route the
+         claim above did not actually cover, and it was the worst of them: a
+         subclass that OVERRIDES `__post_init__` never runs the token check at
+         all, so its instances carry NONE of the invariants below while still
+         satisfying `isinstance(plan, AuthorizedPlan)` in every consumer — and
+         the token is never named, so no guard watching the token could see it.
+         It is refused at class-creation time rather than instance-creation time,
+         so the refusal cannot depend on what the subclass happens to override.
 
   3. A trial-intent plan re-validates its own preconditions in
      `__post_init__`, so the invariants hold at CONSUMPTION time, not merely at
@@ -118,14 +126,26 @@ and the bound is stated as what it actually is rather than as the strongest thin
 that could be said. Two forgeries remain available to an author who sets out to
 commit one: reaching into this module for the private `_ISSUED_BY_AUTHORIZE`
 sentinel AND hand-building an eligible-looking verdict (nothing can check a
-verdict's provenance — it is an ordinary frozen record); or rewriting a genuine
-plan in place with `object.__setattr__`, which no Python object can prevent.
-Both are exactly as available as mis-implementing `undo_one` has always been.
+verdict's provenance — it is an ordinary frozen record); or reaching past a
+guard at runtime — rewriting a genuine plan in place with `object.__setattr__`,
+or deleting `__init_subclass__` off the class — neither of which any Python
+object can prevent. Both are exactly as available as mis-implementing `undo_one`
+has always been.
+
+This enumeration was previously WRONG rather than merely conservative: it said
+two, but subclassing-with-an-overriding-`__post_init__` was a third, undisclosed
+route, and the claim above that construction "covers every route Python offers"
+did not hold for it. `__init_subclass__` closes it, and a companion AST
+assertion over this package's own source
+(`test_external_write_write_authorization._modules_subclassing`) catches any
+in-package use of the route if that guard is ever removed. The count is two
+because the route was closed, not because it was overlooked again.
+
 What is structurally true is narrower and is the thing the design rests on: no
 path through this package's own production code, and no ordinary
-reconstruction of a plan a consumer was handed, yields a trial authorization
-without the preflight having returned an eligible verdict for exactly the units
-that will be applied.
+reconstruction, copy, revival or specialization of a plan a consumer was handed,
+yields a trial authorization without the preflight having returned an eligible
+verdict for exactly the units that will be applied.
 
 ------------------------------------------------------------------------------
 What this module does NOT do
@@ -413,6 +433,34 @@ class AuthorizedPlan:
             "decision about one operation against the descriptor set, ledger and "
             "adapter registry as they were at that moment, and reviving it "
             "elsewhere or later would not be that decision.")
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        # SUBCLASSING is the third route into existence, alongside a direct call
+        # and the reconstruction protocols above, and until this guard existed it
+        # was open: `class Forged(AuthorizedPlan): def __post_init__(self,
+        # issued_by): return` produces instances that never ran a single check
+        # here, hold no token, and still pass `isinstance(plan, AuthorizedPlan)`
+        # in every consumer. Nothing watching the token could catch it, because
+        # such a subclass never names the token.
+        #
+        # Refused at CLASS-creation time on purpose. Refusing at instance
+        # creation would have to reason about what the subclass overrode -- a
+        # subclass that merely adds a field still reaches `__post_init__` without
+        # a token and is refused there, but one that overrides `__post_init__`
+        # never arrives. Removing the route is the fail-closed direction; watching
+        # for its symptoms is not.
+        #
+        # This does not narrow any legitimate use. An adapter, an executor or a
+        # journal CONSUMES a plan; none of them has a reason to specialize the
+        # carrier, and a consumer that wants to carry extra state alongside an
+        # authorization holds the plan as a field rather than inheriting from it.
+        raise AuthorizationRequiredError(
+            f"AuthorizedPlan cannot be subclassed (attempted by "
+            f"{cls.__name__!r}): a subclass that overrides __post_init__ never "
+            "runs the construction-token check, so its instances would carry "
+            "none of the carrier's invariants while still passing isinstance() "
+            "in every consumer of an authorization. Hold a plan as a field "
+            "instead of inheriting from it.")
 
 
 @dataclass(frozen=True)
