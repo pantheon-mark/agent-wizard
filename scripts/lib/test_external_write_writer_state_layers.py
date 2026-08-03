@@ -299,6 +299,19 @@ _UNREPAIRABLE_SRC = '''"""Daily upkeep -- also delivers the operator's phone ale
 import urllib.request
 '''
 
+_REBUILDABLE_SRC = '''"""A hand-rolled per-chunk bulk write loop."""
+from external_write.adapters_thing import build_read_only_client
+'''
+
+_TEST_MODULE_SRC = '''"""Tests for the write path."""
+import unittest
+
+
+class TestWritePath(unittest.TestCase):
+    def test_apply(self):
+        self.assertTrue(True)
+'''
+
 
 class _Project:
     """A real project fixture at the real emitted relative paths."""
@@ -332,12 +345,18 @@ class _Project:
 def _needs_person_entry(relpath=WRITER):
     """A queue entry whose recorded violation kind no remediator of ours covers,
     which is what makes its structural state `needs_person`."""
+    return _entry_with_kinds(relpath, ["forbidden_import"])
+
+
+def _entry_with_kinds(relpath, kinds):
+    """A pending bespoke-writer entry in the reconcile's real on-disk shape. The
+    recorded violation KINDS are what drive the structural state."""
     return {
-        "mechanism_id": "agents_upkeep_runner",
+        "mechanism_id": (relpath or "").replace("/", "_").replace(".py", "") or None,
         "writer_relpath": relpath,
         "status": "pending",
         "paused_content_sha256": "0" * 64,
-        "violations": [{"kind": "forbidden_import", "line": 2, "path": relpath}],
+        "violations": [{"kind": k, "line": 2, "path": relpath} for k in kinds],
     }
 
 
@@ -509,6 +528,228 @@ class CommandRefusalOrderTests(unittest.TestCase):
         with self.assertRaises(core.ExternalWriteStateReadError):
             commands.acknowledge_writer(self.p.root_str(), WRITER,
                                         operator_confirmation=CONFIRMATION)
+
+
+# ---------------------------------------------------------------------------
+# ELIGIBILITY: ONE declaration of which structural state a recorded human
+# decision applies to, bound at BOTH enforced sites, and a PARTITION over the
+# whole declared vocabulary.
+#
+# The rule is spelled POSITIVELY -- membership in a one-element set -- so nothing
+# can reach the permissive side by being forgotten. A denylist of the states that
+# refuse would put a state invented later on the permissive side by omission, and
+# this cut has already shipped one classifier whose `else` branch quietly meant
+# "benign".
+#
+# The partition below is written out by hand rather than derived from
+# `core.ACKNOWLEDGEABLE_WRITER_STATES`, on purpose: a partition derived from the
+# constant it is meant to pin would follow that constant if it were widened, and
+# assert nothing at all.
+# ---------------------------------------------------------------------------
+
+#: The one state from which a recorded decision is the exit.
+_ELIGIBLE_STATES = (core.WriterState.NEEDS_PERSON,)
+
+#: Refused, and reachable from `structural_classification` -- so each of these
+#: gets a real fixture and a real refusal below.
+_REFUSED_AND_PRODUCIBLE = (
+    core.WriterState.BLOCKING_LIVE_ENABLE,
+    core.WriterState.NON_LIVE,
+)
+
+#: Refused, and NOT reachable from `structural_classification` at all: one needs a
+#: recorded human decision (which is the thing being authorized) and the other is
+#: the reaper's. Their refusal is proved by unproducibility rather than by fixture,
+#: and that unproducibility is asserted rather than assumed.
+_REFUSED_AND_NOT_PRODUCIBLE = (
+    core.WriterState.ACKNOWLEDGED_RISK,
+    core.WriterState.RESOLVED,
+)
+
+
+def _declared_states():
+    """The full state vocabulary, read off the declaring class rather than
+    re-listed here, so a state added to it shows up in the partition assertion."""
+    return {v for k, v in vars(core.WriterState).items()
+            if not k.startswith("_") and isinstance(v, str)}
+
+
+class EligibilityPartitionTests(unittest.TestCase):
+
+    def test_exactly_one_state_is_eligible(self):
+        """A literal pin. Widening the set -- the one edit that turns this rule
+        back into the bypass -- fails here first."""
+        self.assertEqual(core.ACKNOWLEDGEABLE_WRITER_STATES,
+                         frozenset(_ELIGIBLE_STATES))
+        self.assertEqual(len(core.ACKNOWLEDGEABLE_WRITER_STATES), 1)
+
+    def test_the_declared_vocabulary_is_partitioned_with_nothing_left_over(self):
+        """THE partition assertion. Every state in the vocabulary is placed on
+        exactly one side of this rule by name, so a state added later cannot land
+        on the permissive side by nobody having thought about it."""
+        flat = [s for group in (_ELIGIBLE_STATES, _REFUSED_AND_PRODUCIBLE,
+                                _REFUSED_AND_NOT_PRODUCIBLE) for s in group]
+        self.assertEqual(len(flat), len(set(flat)),
+                         "a state is placed on two sides of the rule at once")
+        self.assertEqual(
+            set(flat), _declared_states(),
+            "a state was added to the vocabulary without being placed on the "
+            "eligible or the refused side of the acknowledgement rule")
+
+    def test_the_eligible_and_blocking_sets_are_not_the_same_question(self):
+        """Both are policy sets over the vocabulary and they overlap, but they are
+        different rules: `needs_person` blocks AND is eligible, while
+        `blocking_live_enable` blocks and is NOT. Collapsing one into the other is
+        the shortcut that re-opens this."""
+        self.assertTrue(
+            core.ACKNOWLEDGEABLE_WRITER_STATES < core.BLOCKING_WRITER_STATES,
+            "every eligible state must also be a blocking one -- a decision that "
+            "releases nothing is not an exit")
+        self.assertNotEqual(core.ACKNOWLEDGEABLE_WRITER_STATES,
+                            core.BLOCKING_WRITER_STATES)
+
+
+class EveryRefusedStateIsRefusedTests(unittest.TestCase):
+    """Enumerated FROM the partition above, not from a hand-picked few cases."""
+
+    #: state -> (relpath, writer source, recorded violation kinds) that really
+    #: produces it. Asserted to produce it before the refusal is checked, so a
+    #: fixture that silently stopped producing its state cannot make a refusal
+    #: test pass for the wrong reason.
+    FIXTURES = {
+        core.WriterState.BLOCKING_LIVE_ENABLE: (
+            "agents/inbox/runner.py", _REBUILDABLE_SRC, ["sealed_kernel_import"]),
+        core.WriterState.NON_LIVE: (
+            "agents/inbox/test_bulk.py", _TEST_MODULE_SRC, ["sealed_kernel_import"]),
+        core.WriterState.NEEDS_PERSON: (
+            WRITER, _UNREPAIRABLE_SRC, ["forbidden_import"]),
+    }
+
+    def _project_in(self, state):
+        p = _Project()
+        self.addCleanup(p.close)
+        relpath, src, kinds = self.FIXTURES[state]
+        p.write(relpath, src)
+        p.queue([_entry_with_kinds(relpath, kinds)])
+        entry = core.open_bespoke_writer_migrations(p.root_str())[0]
+        self.assertEqual(core.structural_classification(p.root_str(), entry).state,
+                         state, "the fixture no longer produces the state it is for")
+        return p, relpath
+
+    def test_every_fixture_covers_a_state_in_the_partition(self):
+        """No fixture for a state that is not in the vocabulary, and a fixture for
+        every state the partition says is reachable."""
+        self.assertEqual(set(self.FIXTURES),
+                         set(_ELIGIBLE_STATES) | set(_REFUSED_AND_PRODUCIBLE))
+
+    def test_every_producible_refused_state_refuses(self):
+        for state in _REFUSED_AND_PRODUCIBLE:
+            with self.subTest(state=state):
+                p, relpath = self._project_in(state)
+                with self.assertRaises(store.WriterAcknowledgementError):
+                    commands.acknowledge_writer(p.root_str(), relpath,
+                                                operator_confirmation=CONFIRMATION)
+                self.assertFalse((p.root / store.ACKNOWLEDGEMENTS_REL).exists(),
+                                 "a refused decision must write nothing")
+
+    def test_every_eligible_state_is_accepted(self):
+        for state in _ELIGIBLE_STATES:
+            with self.subTest(state=state):
+                p, relpath = self._project_in(state)
+                commands.acknowledge_writer(p.root_str(), relpath,
+                                            operator_confirmation=CONFIRMATION)
+                self.assertIn(relpath, store.active_acknowledgements(p.root_str()))
+
+    def test_the_states_with_no_fixture_are_genuinely_unproducible(self):
+        """The other half of the enumeration: the two states with no fixture are
+        refused because the core cannot emit them, and that is asserted over every
+        entry shape that reaches the core rather than taken on trust."""
+        p = _Project()
+        self.addCleanup(p.close)
+        p.write(WRITER, _UNREPAIRABLE_SRC)
+        p.write("agents/inbox/test_bulk.py", _TEST_MODULE_SRC)
+        p.write("agents/inbox/runner.py", _REBUILDABLE_SRC)
+        shapes = [
+            _needs_person_entry(),
+            _entry_with_kinds("agents/inbox/runner.py", ["sealed_kernel_import"]),
+            _entry_with_kinds("agents/inbox/test_bulk.py", ["sealed_kernel_import"]),
+            _entry_with_kinds(WRITER, []),
+            _entry_with_kinds("", ["forbidden_import"]),
+            _entry_with_kinds("agents/gone/missing.py", ["forbidden_import"]),
+        ]
+        produced = {core.structural_classification(p.root_str(), s).state
+                    for s in shapes}
+        for state in _REFUSED_AND_NOT_PRODUCIBLE:
+            with self.subTest(state=state):
+                self.assertNotIn(state, produced)
+                self.assertNotIn(state, core.ACKNOWLEDGEABLE_WRITER_STATES)
+
+
+class BothEnforcedSitesBindTheOneDeclarationTests(unittest.TestCase):
+    """Structural anti-drift for the pair. Deleting either half leaves a working
+    mechanism that is wrong in a different way, so neither half may quietly go
+    missing: the command would record a decision the classifier ignores, or the
+    classifier would honour a record no command would have written."""
+
+    def _tree(self, stem):
+        return ast.parse((_EXTERNAL_WRITE_DIR / f"{stem}.py").read_text(encoding="utf-8"))
+
+    def _names(self, stem):
+        found = set()
+        for node in ast.walk(self._tree(stem)):
+            if isinstance(node, ast.Name):
+                found.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                found.add(node.attr)
+        return found
+
+    def test_the_declaration_has_exactly_one_home(self):
+        """Read off the real sources: only the core may DECLARE it. A second
+        assignment anywhere is a second source of the same authorization rule."""
+        declaring = []
+        for path in sorted(_EXTERNAL_WRITE_DIR.glob("*.py")):
+            if path.name.startswith("test_"):
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                targets = []
+                if isinstance(node, ast.Assign):
+                    targets = node.targets
+                elif isinstance(node, ast.AnnAssign):
+                    targets = [node.target]
+                for t in targets:
+                    if isinstance(t, ast.Name) and t.id == "ACKNOWLEDGEABLE_WRITER_STATES":
+                        declaring.append(path.name)
+        self.assertEqual(declaring, [f"{CORE}.py"])
+
+    def test_the_command_layer_binds_it(self):
+        self.assertIn("ACKNOWLEDGEABLE_WRITER_STATES", self._names(COMMANDS),
+                      "the command's eligibility guard is gone or no longer uses "
+                      "the single declaration")
+
+    def test_the_service_binds_it(self):
+        self.assertIn("ACKNOWLEDGEABLE_WRITER_STATES", self._names(SERVICE),
+                      "the classifier's restriction is gone or no longer uses the "
+                      "single declaration -- a record that reached the store some "
+                      "other way would be honoured for any state")
+
+    def test_neither_site_re_spells_the_state_value(self):
+        """The value has one spelling, in the core. An exact-value literal
+        anywhere else is a second copy that can drift; prose that mentions the
+        state by name is not, which is why this compares the whole value."""
+        for stem in (COMMANDS, SERVICE):
+            with self.subTest(module=stem):
+                for node in ast.walk(self._tree(stem)):
+                    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                        self.assertNotEqual(node.value.strip(),
+                                            core.WriterState.NEEDS_PERSON)
+
+    def test_the_command_layer_validates_through_the_core(self):
+        """It must ask the CORE for the state, not the service -- the service edge
+        is the one whose absence keeps the graph a DAG, and it would not show up as
+        a cycle."""
+        self.assertIn("structural_classification", self._names(COMMANDS))
+        self.assertIn(CORE, _sibling_imports(self._tree(COMMANDS)))
+        self.assertNotIn(SERVICE, _sibling_imports(self._tree(COMMANDS)))
 
 
 # ---------------------------------------------------------------------------

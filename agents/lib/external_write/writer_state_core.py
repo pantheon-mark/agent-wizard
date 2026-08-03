@@ -480,6 +480,44 @@ BLOCKING_WRITER_STATES = frozenset({
 })
 
 
+#: The states from which a RECORDED HUMAN DECISION is the exit -- exactly one, and
+#: deliberately spelled as the one-element POSITIVE set rather than as a check
+#: against the states that refuse.
+#:
+#: This is the SINGLE declaration of that authorization rule. Both layers above
+#: bind it: the command layer refuses to record a decision about a writer that is
+#: not in one of these states, and the state service applies a recorded decision
+#: only to an entry in one of them. Neither of those two is sufficient on its own,
+#: which is precisely why the rule may not be spelled twice -- "two paths that must
+#: agree" is the shape this package's worst defects have taken.
+#:
+#: WHY IT IS A POSITIVE SET. The rule used to be neither of those things: the
+#: command gated on membership in the OPEN set and the service tested the record
+#: FIRST, ahead of every other state. Between them, a decision recorded against a
+#: fully REBUILDABLE writer took it out of the blocking set, so the rebuild never
+#: had to happen -- with the operator's entirely genuine consent, which is why no
+#: consent check could have caught it. Spelled as a denylist of the states that
+#: refuse, a state added to the vocabulary later would land on the permissive side
+#: by nobody having thought about it; spelled positively, silence refuses.
+#:
+#: WHY needs_person AND NOTHING ELSE. It is the one state whose exit a person IS.
+#: A ``blocking_live_enable`` writer has a mechanical exit -- every violation
+#: recorded against it is one our own remediator covers, so the rebuild flow
+#: genuinely clears it -- and accepting the risk instead would simply skip that
+#: rebuild. A ``non_live`` writer is already out of the blocking set, so a decision
+#: would release nothing while putting an audit record on file about a non-event.
+#: The remaining two states are not reachable from ``structural_classification`` at
+#: all: ``acknowledged_risk`` needs the very decision being authorized, and
+#: ``resolved`` is the reaper's.
+#:
+#: Enforcement ceiling, restated because this constant sits at an authorization
+#: boundary: build-time + operator-as-approver. Refusing to record a decision does
+#: not disable anything at runtime, and recording one does not switch anything on.
+ACKNOWLEDGEABLE_WRITER_STATES = frozenset({
+    WriterState.NEEDS_PERSON,
+})
+
+
 #: Entry ``kind`` values that describe a real unrepaired external-write bypass in
 #: an operator-authored writer file -- the ONLY case the "rebuild it so it routes
 #: through the sanctioned bulk path" wording actually fits. The bespoke-writer

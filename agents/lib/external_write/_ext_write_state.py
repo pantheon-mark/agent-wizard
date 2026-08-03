@@ -472,31 +472,48 @@ def classify_bespoke_writer_entry(project_root: str,
     structural state from ``writer_state_core``, with a valid operator
     acknowledgement layered on top.
 
-    Deterministic and fail-closed: every path that cannot positively establish a
-    non-blocking state returns ``BLOCKING_LIVE_ENABLE``. Precedence:
+    Deterministic and fail-closed. The STRUCTURAL state is decided first, always,
+    and a recorded decision can only ever change ONE of its answers:
 
       1. writer file ABSENT/unreadable -> BLOCKING_LIVE_ENABLE (deliberately NOT
                                           RESOLVED: the reaper is the single
                                           authority on resolution -- see
                                           ``structural_classification``)
-      2. valid acknowledgement present -> ACKNOWLEDGED_RISK
-      3. test module, unreferenced     -> NON_LIVE   (3 signals, all required)
-      4. any non-remediable violation  -> NEEDS_PERSON  (STILL BLOCKING)
-      5. otherwise                     -> BLOCKING_LIVE_ENABLE
+      2. test module, unreferenced     -> NON_LIVE   (3 signals, all required)
+      3. any non-remediable violation  -> NEEDS_PERSON, and ONLY here does a valid
+                                          recorded decision apply, turning it into
+                                          ACKNOWLEDGED_RISK
+      4. otherwise                     -> BLOCKING_LIVE_ENABLE
 
-    The acknowledgement is applied ONLY when the core actually got to read the
-    writer's source (``source_readable``). That is the precedence this has always
-    had, and it is load-bearing rather than incidental: a file that reads as BYTES
-    but not as UTF-8 TEXT can carry a hash-matching record while being
-    unclassifiable, and such a writer must stay blocking. ``source_readable`` comes
-    back from the core's own single read rather than being re-derived here, so the
-    two can never disagree about a file that changed in between.
+    THE RECORD IS CHECKED LAST, NOT FIRST, AND THAT ORDER IS THE SAFETY PROPERTY.
+    It used to be checked first, ahead of every other state, so a record against a
+    fully REBUILDABLE writer took it straight out of the blocking set and its
+    rebuild never had to happen. The eligible set is
+    ``_core.ACKNOWLEDGEABLE_WRITER_STATES`` -- the SAME constant the command layer's
+    own guard binds, declared once in the core.
+
+    Both halves are needed. The command's guard stops an ineligible record being
+    WRITTEN; this stops one being HONOURED. A record can reach the store without
+    passing the command -- it is a plain JSON file in the project -- so this is what
+    makes such a record INERT rather than trusted, for every state but one.
+
+    The record is also applied only when the core actually got to read the writer's
+    source (``source_readable``). That is load-bearing rather than incidental: a
+    file that reads as BYTES but not as UTF-8 TEXT can carry a hash-matching record
+    while being unclassifiable, and such a writer must stay blocking.
+    ``source_readable`` comes back from the core's own single read rather than being
+    re-derived here, so the two can never disagree about a file that changed in
+    between.
 
     ``acknowledged`` may be supplied by a caller that already has the active set,
     so a report over N entries reads the store once rather than N times; ``None``
     means "look it up", and the lookup happens only where it can matter."""
     structural = _core.structural_classification(project_root, entry)
     if not structural.source_readable:
+        return structural.state
+    if structural.state not in _core.ACKNOWLEDGEABLE_WRITER_STATES:
+        # Nothing a record could say applies to this state, so it is not even
+        # consulted -- a record that named this writer is inert, not overridden.
         return structural.state
 
     writer_relpath = str(entry.get("writer_relpath") or "")
