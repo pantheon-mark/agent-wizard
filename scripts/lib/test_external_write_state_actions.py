@@ -292,6 +292,23 @@ class EveryBlockingStateHasAWayOutTests(unittest.TestCase):
         ids = [a.action_id for a in sa.ACTIONS]
         self.assertEqual(len(ids), len(set(ids)))
 
+    def test_every_action_names_an_entrypoint_that_ACTUALLY_EXISTS(self):
+        """"Declared action with an executable entrypoint" -- checked by resolving
+        the rendered command's script path against the shipped tree. A declared
+        repair naming a file nobody ships is the failure this cut is closing, not a
+        typo class."""
+        for action in sa.ACTIONS:
+            with self.subTest(action=action.action_id):
+                argv = shlex.split(action.command_builder("some-subject"))
+                self.assertEqual(argv[0], "python3", argv)
+                script = _WIZARD / argv[1]
+                self.assertTrue(script.is_file(),
+                                f"{action.action_id} names {argv[1]}, which is "
+                                "not a file this project ships")
+                self.assertEqual(len(action.command_builder(
+                    "some-subject").splitlines()), 1,
+                    "a command that wraps is a paste hazard")
+
 
 # ===========================================================================
 # 3. NAMESPACING -- identity by declared domain, never by a bare state string
@@ -424,6 +441,23 @@ class TheUnclassifiedRouteIsNotADeadEndTests(unittest.TestCase):
             sa.state_key(sa.DOMAIN_TRIAL_UNIT, "invented_later"), "t-9")
         self.assertIn("ask your assistant", text.lower())
         self.assertIn("t-9", text)
+        self.assertNotIn("no action is needed", text.lower())
+
+    def test_a_DECLARED_state_with_no_handling_routes_to_a_person_too(self):
+        """The other way into the same branch, driven separately: a state the
+        registry DOES declare but neither actions nor dispositions. Mutation-proved
+        by adding a state upstream, but the branch itself deserves its own test
+        rather than sharing the undeclared-key one -- a fail-closed fallback nothing
+        exercises is a latent failure, and this one is all that stands between a new
+        state and an operator with nothing to do."""
+        key = sa.state_key(sa.DOMAIN_TRIAL_UNIT, "declared_but_unhandled")
+        original = sa.DECLARED_STATE_KEYS
+        try:
+            sa.DECLARED_STATE_KEYS = frozenset(original | {key})
+            text = sa.instruction_for_state(key, "t-9")
+        finally:
+            sa.DECLARED_STATE_KEYS = original
+        self.assertIn("ask your assistant", text.lower())
         self.assertNotIn("no action is needed", text.lower())
 
     def test_an_unreadable_record_routes_to_a_person_and_claims_nothing(self):
@@ -700,6 +734,26 @@ class TheAcknowledgementCommandActuallyRunsTests(unittest.TestCase):
             WRITER, operator_confirmation=CONFIRMATION))
         self.assertEqual(result.returncode, 1)
         self.assertEqual(store.active_acknowledgements(str(self.p.root)), {})
+
+    def test_the_entrypoint_goes_through_the_GUARDED_command_structurally(self):
+        """AST over the entrypoint's own `__main__`: it must call the guarded
+        command, and must never reach the store's write primitive directly. The
+        behavioural half is the refusal above; this is the structural half, because
+        "it happens to refuse today" and "it cannot record without the guard" are
+        different properties."""
+        tree = ast.parse((_EXTERNAL_WRITE_DIR / "writer_acknowledgement.py")
+                         .read_text(encoding="utf-8"))
+        main = [n for n in tree.body
+                if isinstance(n, ast.If) and isinstance(n.test, ast.Compare)
+                and isinstance(n.test.left, ast.Name)
+                and n.test.left.id == "__name__"]
+        self.assertEqual(len(main), 1)
+        called = {n.func.id for n in ast.walk(main[0])
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        self.assertIn("acknowledge_writer", called)
+        self.assertNotIn("put_acknowledgement_record", called,
+                         "the entrypoint must never reach the write primitive "
+                         "around the eligibility guard")
 
     def test_a_usage_error_exits_two_and_prints_the_usage(self):
         result = self._run(
