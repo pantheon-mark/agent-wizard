@@ -19,6 +19,8 @@
 | `/security/invocation_ledgers/` | Operational (local-only) | Per-run blast-radius invocation ledgers | Local runtime record, not something you decide to commit — regenerated as the system operates |
 | `/security/trial_runs/` | Privacy | Per-trial write-ahead records for a supervised test of a new capability against your live account | Each record holds what the system needs to put a record back exactly as it was — which means it holds copies of your real data (the prior value of a cell, the exact labels a message had). Local only, never committed |
 | `/security/capability_acceptance_log.jsonl` | Operational (local-only) | Append-only log of capability acceptance decisions | Local runtime record, not something you decide to commit — regenerated as the system operates |
+| `/agents/handoffs/*.copy_run_proof.json` | Privacy | The record of a supervised test of a new capability against your live account | It has to name the exact records the test touched and what their state was before and after, so it holds real identifiers and real values from your own account. Local only, never committed. Note this is a pattern, not the whole folder: everything else in `agents/handoffs/` is ordinary system state and is still committed |
+| `/agents/handoffs/.copy_run_proof.*.tmp` | Privacy | A half-written trial proof, left behind only if the system is interrupted while saving one | It holds the same real data as the finished record above. Normally it is deleted the instant the record is saved; this line makes sure that if the machine is interrupted at exactly the wrong moment, what is left behind still stays local |
 
 ---
 

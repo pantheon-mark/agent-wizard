@@ -108,6 +108,37 @@ try:
         "*.sqlite", "*.sqlite3", "*.db", "*.parquet",
         "*.jsonl", "*.ndjson", "*.pkl", "*.pickle", "*.npy", "*.npz",
         "*.dat", "*.feather", "*.arrow", "*.avro", "*.h5", "*.hdf5",
+        # The journaled trial's PROOF record, and the temp file it is published
+        # from. A proof names the exact records a live trial touched and their
+        # observed state before and after — real identifiers, real values — because
+        # the proof validator rebuilds the evidence it re-checks from that captured
+        # content, so a producer cannot omit or blur it.
+        #
+        # It is matched HERE, on the basename regardless of directory, rather than
+        # in SENSITIVE_PATH_MARKERS below, and the reason is structural rather than
+        # stylistic. Those markers are PREFIX matches, so the only thing they can
+        # express is a whole directory — and this artifact's home,
+        # "agents/handoffs/", is a KNOWN_CONFIG_PREFIXES auto-commit path, because
+        # the rest of that directory is the system's own control-plane state and
+        # must keep being committed. A path marker would therefore have to choose
+        # between covering the proof and breaking the handoff state. A basename
+        # glob covers the proof ONLY, and still gives the ignore-state-agnostic
+        # guarantee the markers exist for: _matches_builtin is consulted FIRST in
+        # _is_safe_to_commit (so it beats the auto-commit prefix) and it is the
+        # non-gitignore half of _is_sensitive (so it fires for an ALREADY-TRACKED
+        # proof, which `git check-ignore` will never report as ignored).
+        #
+        # That already-tracked case is not hypothetical: the emitted .gitignore
+        # renders from the frozen bundle, so between the trial executor shipping
+        # and the bundle carrying the updated gitignore_template an operator
+        # project can hold a proof with no ignore rule at all.
+        #
+        # The temp glob matters on its own account: the proof is published via
+        # mkstemp + os.replace, and the temp file is removed on a best-effort basis
+        # inside an except block. A SIGKILL or power loss between those two steps
+        # leaves ".copy_run_proof.<random>.tmp" behind holding the same real data,
+        # and "*.copy_run_proof.json" does not match it.
+        "*.copy_run_proof.json", ".copy_run_proof.*.tmp",
     ]
     SENSITIVE_PATH_MARKERS = (
         "logs/", "security/session_cookies/",

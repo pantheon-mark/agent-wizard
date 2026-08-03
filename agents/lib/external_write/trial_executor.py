@@ -247,6 +247,32 @@ UNDO_PREDICATE_NAME = "verify_undo_restored"
 APPLY_EVIDENCE_REF = "copy_apply_proof.apply_evidence"
 UNDO_EVIDENCE_REF = "copy_undo_proof.undo_evidence"
 
+# ---------------------------------------------------------------------------
+# The two refusal DISCRIMINATORS — mutually exclusive by construction.
+#
+# `run_trial` can refuse a proof for two reasons that mean opposite things to the
+# person reading the sentence:
+#
+#   NOT-RESTORED  — a unit is still changed on the operator's live record. Their
+#                   data needs attention.
+#   ALL-RESTORED-UNPROVED — nothing is outstanding at all; the round trip simply
+#                   was not observed end to end, so nothing can be certified.
+#
+# Telling an operator the SECOND when the FIRST is true is a false operator-facing
+# safety claim — they stop looking at data that is still changed. That is the
+# failure class a continuity promise which was false when written already cost a
+# real operator nine days of silently suppressed output.
+#
+# Each marker appears in EXACTLY ONE of the two refusals, and the tests assert
+# both directions (present in its own, absent from the other). Single-sourced
+# here rather than pinned as prose fragments in a test, so a rewording moves one
+# string and the mutual-exclusivity assertion still binds — and a rewording that
+# put both markers in one message fails the assertion rather than passing it.
+# ---------------------------------------------------------------------------
+REFUSAL_MARKER_NOT_RESTORED = (
+    "not every unit is recorded back at its prior state")
+REFUSAL_MARKER_NOTHING_OUTSTANDING = "Nothing external is outstanding"
+
 
 class TrialExecutorError(Exception):
     """A fail-closed refusal to START a trial, raised before anything external
@@ -576,9 +602,18 @@ class _UnitRun:
                 and self.outcome.undo_restored is True)
 
 
-def _drive_unit(journal: Any, dispatch: Any, op: Operation, write_client: Any,
-                facade: Any, unit: Any, lineage: SourceLineage) -> _UnitRun:
+def _drive_unit(journal: Any, dispatch: Any, op: Operation, unit: Any,
+                lineage: SourceLineage, *, write_client: Any,
+                facade: Any) -> _UnitRun:
     """Apply, observe, reverse, observe — for exactly one unit.
+
+    The two clients are KEYWORD-ONLY, and that is a safety property rather than a
+    style choice. They were adjacent positional parameters, which means the one
+    mistake with real consequences here — transposing them, so the observer gets
+    the write-capable client and the mutations get a read-only facade — was a
+    call-site typo away, catchable only by a test. As keyword-only parameters the
+    transposition is not expressible: the interpreter refuses it. Removing the
+    route beats detecting it.
 
     `journal` is not optional and not defaulted: every state this function
     records is persisted and fsynced BEFORE the action it authorizes, and the
@@ -797,15 +832,24 @@ def _units_not_restored_on_disk(journal: Any,
     a unit in the journal that the plan does not contain (the journal is not this
     plan's journal). Absent is never read as restored.
 
-    DISCLOSED: at `run_trial`'s call site this check is REDUNDANT with the
-    observed-round-trip check that follows it — every failure this module can
-    itself produce leaves a unit unproved as well as unrestored, so no input can
-    make this the sole reason a proof is refused. It is kept, and its logic is
-    tested directly rather than only through a run, because the journal is the
-    authoritative record and a later change to the drive loop must not be able to
-    make the artifact emittable without the journal agreeing. The redundancy is
-    stated rather than left for a reader to discover and mistake for a load-
-    bearing guard.
+    WHAT THIS CHECK IS FOR, stated precisely because an earlier version of this
+    docstring got it wrong. The proof-blocking effect of this check is
+    over-determined at `run_trial`'s call site — a unit that is not restored is
+    also a unit whose round trip was not observed, so the check that follows would
+    refuse the proof too. What is NOT over-determined, and what this check alone
+    establishes, is the TRUTHFULNESS OF THE REFUSAL: without it the operator is
+    told "every unit came back to its prior state… nothing external is
+    outstanding" about a trial in which a unit is durably `recovery_required` on
+    their live record. That is a false operator-facing safety claim, and an
+    operator who reads it stops looking. `REFUSAL_MARKER_NOT_RESTORED` /
+    `REFUSAL_MARKER_NOTHING_OUTSTANDING` are the mutually-exclusive discriminators
+    that make the difference assertable, and the tests assert both directions.
+    Deleting this check does not merely lose a redundant guard; it ships the
+    false claim.
+
+    (A second reason, forward-looking: a RESUMED trial's in-memory run list will
+    not cover every planned unit, so the enumeration-side check will no longer be
+    able to stand in for this one at all.)
     """
     states = journal.unit_states()
     return sorted(unit_id for unit_id in set(planned_ids) | set(states)
@@ -1019,8 +1063,8 @@ def run_trial(op: Operation, receipt: Any, *,
 
     runs: List[_UnitRun] = []
     for unit in plan.units:
-        run = _drive_unit(journal, dispatch, op, write_client, facade, unit,
-                          lineage)
+        run = _drive_unit(journal, dispatch, op, unit, lineage,
+                          write_client=write_client, facade=facade)
         runs.append(run)
         if not run.proved:
             # Stop. A proof can no longer be earned, and every further unit
@@ -1039,9 +1083,12 @@ def run_trial(op: Operation, receipt: Any, *,
 
     # Post-condition 1 of 2 — the SAFETY question: is anything still changed on
     # the operator's surface? Read from the JOURNAL ON DISK, never from this
-    # function's bookkeeping. See `_units_not_restored_on_disk` for what it
-    # quantifies over and for the disclosed fact that this check is redundant with
-    # post-condition 2 at this call site.
+    # function's bookkeeping. It must be checked FIRST and it must win: post-
+    # condition 2 would also refuse the proof here, but it would refuse it while
+    # saying nothing is outstanding — which is false whenever this one fires, and
+    # is the sentence that makes an operator stop looking at data that is still
+    # changed. This check is what keeps that sentence true, so it is load-bearing
+    # for the CLAIM even where the refusal itself is over-determined.
     planned_ids = tuple(u.unit_id for u in plan.units)
     unrestored = _units_not_restored_on_disk(journal, planned_ids)
     if unrestored:
@@ -1050,15 +1097,18 @@ def run_trial(op: Operation, receipt: Any, *,
             units=outcomes, recovery_required_unit_ids=recovery_required,
             refusal=(
                 "no proof was written: the trial is only proof of anything when "
-                "EVERY unit it applied is recorded back at its prior state, and "
-                f"these are not: {unrestored}. The durable record of what "
-                f"happened to each unit is {journal.path}."))
+                "every unit it applied is recorded back at its prior state, and "
+                f"{REFUSAL_MARKER_NOT_RESTORED} — these are not: {unrestored}. "
+                "Those units may still be changed on the real surface. The "
+                f"durable record of what happened to each unit is {journal.path}."))
     # Post-condition 2 of 2 — the EVIDENCE question, which is a different fact
     # with a different consequence: nothing is outstanding on the surface, but the
     # round trip was not OBSERVED end to end for every unit, so there is nothing
     # a proof could truthfully assert. Kept separate from post-condition 1 so the
     # refusal says which of the two happened; an operator reading "it did not come
-    # back" must never be told that when everything did come back.
+    # back" must never be told that when everything did come back, and — the
+    # direction that actually cost someone something — must never be told that
+    # everything came back when it did not.
     unproved = [r.outcome.unit_id for r in runs if not r.proved]
     if unproved or len(runs) != len(planned_ids):
         return TrialOutcome(
@@ -1067,9 +1117,9 @@ def run_trial(op: Operation, receipt: Any, *,
             refusal=(
                 "no proof was written: every unit came back to its prior state, "
                 "but the round trip was not observed end to end for "
-                f"{unproved or list(planned_ids[len(runs):])}. Nothing external "
-                "is outstanding; the trial simply did not prove what a proof "
-                "asserts."))
+                f"{unproved or list(planned_ids[len(runs):])}. "
+                f"{REFUSAL_MARKER_NOTHING_OUTSTANDING}; the trial simply did not "
+                "prove what a proof asserts."))
 
     # The SAMPLED unit whose observed evidence the v1 schema's single
     # apply/undo evidence blocks carry -- the first in plan order, named in the
@@ -1092,8 +1142,11 @@ def run_trial(op: Operation, receipt: Any, *,
             refusal=(
                 "no proof was written: the trial completed and every unit came "
                 "back, but the proof this produced was not accepted by the same "
-                f"check the acceptance step runs -- {verdict.reason}. Nothing "
-                "external is outstanding."))
+                f"check the acceptance step runs -- {verdict.reason}. "
+                # Reached only AFTER both post-conditions passed, so this claim
+                # is true here — the same marker, single-sourced, rather than a
+                # second spelling of the same promise.
+                f"{REFUSAL_MARKER_NOTHING_OUTSTANDING}."))
 
     path = copy_run_proof_path(capability_id, proof_dir=proof_dir)
     _atomic_write_json(path, proof)

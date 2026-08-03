@@ -57,12 +57,24 @@ GITIGNORE_TEMPLATE_RELPATH = "wizard/templates/root/gitignore_template"
 # message's exact prior label set). Without ignore coverage the commit-hygiene
 # guard surfaces it as a git decision, which is a decision a non-technical
 # operator should never be handed about a file holding their own data.
+# `copy_run_proof` was added by Cut 1.9 Task 4 (the journaled trial executor, the
+# first thing that ever writes this artifact). It differs from every token above
+# in one way that matters: its home, `agents/handoffs/`, is a directory the
+# commit-hygiene guard AUTO-COMMITS by prefix, because the other things in it are
+# system control-plane state. So this artifact is the only member of the family
+# whose default fate was to be committed rather than merely surfaced -- and it
+# necessarily carries the real identifier and the observed before/after state of
+# each record the trial touched, because the proof validator rebuilds its
+# evidence from exactly that captured content. The token must therefore match the
+# PROOF, never the directory: ignoring `agents/handoffs/` wholesale would stop the
+# system's own handoff state from being committed.
 REQUIRED_GITIGNORE_TOKENS: Sequence[str] = (
     "security/acceptance_receipts",
     "run_envelopes",
     "invocation_ledgers",
     "trial_runs",
     "capability_acceptance_log",
+    "copy_run_proof",
 )
 
 

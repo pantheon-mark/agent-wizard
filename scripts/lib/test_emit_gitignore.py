@@ -52,12 +52,20 @@ FIXTURE_BUNDLE_VERSION = "v0.13.1"
 # here that is a PRIVACY exposure rather than only an operational-noise one: a
 # trial journal holds each unit's recovery capsule, and a capsule carries the
 # adapter's rendering of that record's prior state -- the operator's own data.
+#
+# `copy_run_proof` (the journaled trial executor's proof artifact, Cut 1.9 Task 4)
+# is the entry whose default fate was WORSE than the others': it lands in
+# `agents/handoffs/`, which the commit-hygiene guard auto-commits by prefix
+# because the rest of that directory is system control-plane state. It carries the
+# real identifiers and observed before/after state of every record a live trial
+# touched. Covered as a PATTERN, never as the directory.
 REQUIRED_TOKENS = (
     "security/acceptance_receipts",
     "run_envelopes",
     "invocation_ledgers",
     "trial_runs",
     "capability_acceptance_log",
+    "copy_run_proof",
 )
 
 

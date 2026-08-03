@@ -68,6 +68,10 @@ _CLEAN_GITIGNORE = (
     "/security/invocation_ledgers/\n"
     "/security/trial_runs/\n"
     "/security/capability_acceptance_log.jsonl\n"
+    # A PATTERN, not the directory: agents/handoffs/ also holds the system's own
+    # control-plane state, which must keep being committed.
+    "/agents/handoffs/*.copy_run_proof.json\n"
+    "/agents/handoffs/.copy_run_proof.*.tmp\n"
 )
 
 _BROKEN_GITIGNORE = (
@@ -76,6 +80,8 @@ _BROKEN_GITIGNORE = (
     "/security/invocation_ledgers/\n"
     "/security/trial_runs/\n"
     "/security/capability_acceptance_log.jsonl\n"
+    "/agents/handoffs/*.copy_run_proof.json\n"
+    "/agents/handoffs/.copy_run_proof.*.tmp\n"
 )
 
 
@@ -198,10 +204,16 @@ class CheckGitignoreCoverageUnitTests(unittest.TestCase):
         # Task 3). Tightening this pin, never relaxing it: a trial journal holds
         # the prior state of the operator's real records, so it must be covered
         # in the source template AND in the emitted .gitignore.
+        # `copy_run_proof` joined the set with the journaled trial executor (Cut
+        # 1.9 Task 4) -- the first producer of that artifact. Tightening this pin,
+        # never relaxing it: the proof names the real records a live trial touched
+        # and it lands in a directory the commit-hygiene guard otherwise
+        # auto-commits, so it must be covered in the source template AND in the
+        # emitted .gitignore.
         self.assertEqual(
             set(REQUIRED_GITIGNORE_TOKENS),
             {"security/acceptance_receipts", "run_envelopes", "invocation_ledgers",
-             "trial_runs", "capability_acceptance_log"},
+             "trial_runs", "capability_acceptance_log", "copy_run_proof"},
         )
 
 

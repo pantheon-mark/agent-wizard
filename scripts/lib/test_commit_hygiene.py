@@ -662,6 +662,131 @@ class CommitHygieneBehaviorTests(unittest.TestCase):
             self.assertNotIn(rel, tracked, f"never-tracked gitignored raw record was committed: {rel}")
             self.assertNotIn(rel, out, f"never-tracked gitignored raw record was surfaced unnecessarily: {rel}")
 
+    # ---- The journaled trial's PROOF record (Cut 1.9 Task 4). Its home,
+    # agents/handoffs/, is a KNOWN_CONFIG_PREFIXES AUTO-COMMIT path — the rest of
+    # that directory is the system's own control-plane state and must keep being
+    # committed (test_system_control_plane_state_paths_are_committed above). So
+    # unlike every raw record under security/, this artifact's DEFAULT fate was to
+    # be committed, and it necessarily carries the real identifiers and observed
+    # before/after state of every record a live trial touched. ------------------
+
+    def _seed_agents_handoffs(self):
+        """agents/ and agents/handoffs/ already tracked, matching real topology —
+        so `git status` reports new files inside at file granularity rather than
+        collapsing them into one untracked-directory entry."""
+        (self.repo / "agents" / "handoffs").mkdir(parents=True, exist_ok=True)
+        (self.repo / "agents" / "roster.md").write_text("roster\n", encoding="utf-8")
+        (self.repo / "agents" / "handoffs" / "builder_task1_handoff.json").write_text(
+            '{"task_id":"task1"}\n', encoding="utf-8")
+        _git(self.repo, "add", "agents/roster.md",
+             "agents/handoffs/builder_task1_handoff.json")
+        _git(self.repo, "commit", "-q", "-m", "seed agents/handoffs/ scaffolding")
+
+    # A proof body of the real shape: the unit id IS the operator's record
+    # identifier, and the poststate IS that record's observed state.
+    _PROOF_BODY = (
+        '{"schema": "copy_run_proof-v1", "op_kind": "gmail.message.trash",'
+        ' "copy_apply_proof": {"apply_evidence": {"unit_id": "18f2c9a1b7de",'
+        ' "poststate": {"current_label_ids": ["TRASH"], "is_trashed": true}}}}\n'
+    )
+
+    def test_trial_proof_is_never_auto_committed_despite_the_handoffs_prefix(self):
+        """The case the ignore rule alone does NOT cover, and the reason a
+        basename glob was needed rather than a path marker: with NO ignore rule
+        present at all, `agents/handoffs/` is an auto-commit prefix, so the proof
+        would be committed. `_matches_builtin` is consulted first, so it is not.
+
+        The window is real rather than theoretical: the emitted `.gitignore`
+        renders from the frozen bundle, so between the trial executor shipping and
+        the bundle carrying the updated template a project holds proofs with no
+        ignore rule."""
+        self._seed_agents_handoffs()
+        for rel in ("agents/handoffs/inbox_management.copy_run_proof.json",
+                    "agents/handoffs/.copy_run_proof.a1b2c3.tmp"):
+            (self.repo / rel).write_text(self._PROOF_BODY, encoding="utf-8")
+        # Deliberately NO .gitignore.
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        tracked = self._tracked()
+        for rel in ("agents/handoffs/inbox_management.copy_run_proof.json",
+                    "agents/handoffs/.copy_run_proof.a1b2c3.tmp"):
+            self.assertNotIn(
+                rel, tracked,
+                f"a trial proof holding real record identifiers was auto-committed "
+                f"by the agents/handoffs/ prefix: {rel}")
+
+    def test_trial_proof_does_not_stop_other_handoff_state_committing(self):
+        """The constraint on the fix: cover the PROOF, never the directory. The
+        system's own handoff state in the same directory, in the same session,
+        must still be committed."""
+        self._seed_agents_handoffs()
+        (self.repo / "agents" / "handoffs"
+         / "inbox_management.copy_run_proof.json").write_text(
+            self._PROOF_BODY, encoding="utf-8")
+        (self.repo / "agents" / "handoffs" / "builder_task2_handoff.json").write_text(
+            '{"task_id":"task2"}\n', encoding="utf-8")
+        (self.repo / "agents" / "handoffs" / "pending_migrations.json").write_text(
+            '{"entries":[]}\n', encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        tracked = self._tracked()
+        self.assertNotIn("agents/handoffs/inbox_management.copy_run_proof.json",
+                         tracked)
+        for rel in ("agents/handoffs/builder_task2_handoff.json",
+                    "agents/handoffs/pending_migrations.json"):
+            self.assertIn(rel, tracked,
+                          f"the proof glob widened into the directory and stopped "
+                          f"the system's own handoff state committing: {rel}")
+
+    def test_f30_pretracked_trial_proof_is_caught_and_untracked(self):
+        """The PRE-TRACKED case — the one an ignore rule structurally cannot
+        reach, because `git check-ignore` never reports an already-tracked path as
+        ignored. This is what the ignore-state-agnostic layer exists for, and it
+        is the case the bundle-lag window actually produces."""
+        self._seed_agents_handoffs()
+        proofs = ("agents/handoffs/inbox_management.copy_run_proof.json",
+                  "agents/handoffs/.copy_run_proof.a1b2c3.tmp")
+        for rel in proofs:
+            (self.repo / rel).write_text(self._PROOF_BODY, encoding="utf-8")
+        _git(self.repo, "add", *proofs)
+        _git(self.repo, "commit", "-q", "-m",
+             "trial proof tracked before an ignore rule existed")
+        for rel in proofs:
+            self.assertIn(rel, self._tracked(), f"precondition: {rel} not pre-tracked")
+
+        # The ignore rule arrives LATER (the F-30 illusory-protection shape).
+        (self.repo / ".gitignore").write_text(
+            "/agents/handoffs/*.copy_run_proof.json\n"
+            "/agents/handoffs/.copy_run_proof.*.tmp\n", encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)  # never aborts
+
+        tracked = self._tracked()
+        out = r.stdout + r.stderr
+        for rel in proofs:
+            self.assertNotIn(rel, tracked,
+                             f"F-30: pre-tracked trial proof left tracked: {rel}")
+            self.assertTrue((self.repo / rel).exists(),
+                            f"F-30 must not delete the operator's working file: {rel}")
+            self.assertIn(rel, out, f"pre-tracked trial proof not surfaced: {rel}")
+
+    def test_never_tracked_gitignored_trial_proof_is_not_surfaced(self):
+        """The normal flow: the ignore rule was there before the proof existed.
+        Neither committed nor surfaced — the marker must not turn the ordinary
+        case into a session-end question for the operator."""
+        self._seed_agents_handoffs()
+        (self.repo / ".gitignore").write_text(
+            "/agents/handoffs/*.copy_run_proof.json\n"
+            "/agents/handoffs/.copy_run_proof.*.tmp\n", encoding="utf-8")
+        rel = "agents/handoffs/inbox_management.copy_run_proof.json"
+        (self.repo / rel).write_text(self._PROOF_BODY, encoding="utf-8")
+        r = self._run("SessionEnd")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn(rel, self._tracked())
+        self.assertNotIn(rel, r.stdout + r.stderr,
+                         "an ordinarily-ignored trial proof was surfaced "
+                         "unnecessarily")
+
     def test_session_start_surfaces_pretracked_raw_record(self):
         self._seed_security_dir()
         raw = self.repo / "security" / "invocation_ledgers" / "run-1.json"

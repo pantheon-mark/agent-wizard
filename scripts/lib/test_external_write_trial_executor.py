@@ -50,6 +50,7 @@ directory, so nothing here touches the real project's `security/` or
 """
 
 import ast
+import dataclasses
 import hashlib
 import json
 import os
@@ -73,7 +74,7 @@ from external_write import trial_executor as tx  # noqa: E402
 from external_write import trial_journal as tj  # noqa: E402
 from external_write import write_authorization as wa  # noqa: E402
 from external_write.adapter_registry import (  # noqa: E402
-    get_dispatch, register_adapter, unregister_adapter,
+    AdapterDispatch, get_dispatch, register_adapter, unregister_adapter,
 )
 from external_write.adapters_gmail import (  # noqa: E402
     OP_TRASH, OP_UNTRASH, GmailMessageTrashAdapter,
@@ -489,6 +490,45 @@ class _Base(unittest.TestCase):
         return tj.load_trial_journal(
             outcome.trial_id, journal_dir=self.journal_dir).unit_states()
 
+    # -- the refusal DISCRIMINATOR ------------------------------------------
+    #
+    # `ok is False` + `assertNoProof()` are not enough, and asserting a unit id
+    # is in the refusal is not either: the id appears in BOTH refusal texts. The
+    # two refusals mean opposite things to the person reading them, and telling
+    # an operator that nothing is outstanding while a unit is durably
+    # `recovery_required` on their live record is a false safety claim -- they
+    # stop looking. So every refusal scenario asserts WHICH of the two it got,
+    # in both directions.
+
+    def assertRefusalSaysNotRestored(self, outcome, *unit_ids):
+        self.assertIsNotNone(outcome.refusal)
+        self.assertIn(
+            tx.REFUSAL_MARKER_NOT_RESTORED, outcome.refusal,
+            "a unit is not back at its prior state, so the refusal must SAY so")
+        self.assertNotIn(
+            tx.REFUSAL_MARKER_NOTHING_OUTSTANDING, outcome.refusal,
+            "the refusal must NOT tell the operator nothing is outstanding "
+            "while a unit is still changed on their live record -- that is the "
+            "false safety claim that makes an operator stop looking")
+        self.assertIn(outcome.journal_path, outcome.refusal,
+                      "the refusal must point at the durable record of what "
+                      "happened to each unit")
+        for unit_id in unit_ids:
+            self.assertIn(unit_id, outcome.refusal)
+
+    def assertRefusalSaysNothingOutstanding(self, outcome, *unit_ids):
+        self.assertIsNotNone(outcome.refusal)
+        self.assertIn(
+            tx.REFUSAL_MARKER_NOTHING_OUTSTANDING, outcome.refusal,
+            "everything came back, so the refusal must say the operator's data "
+            "is not left changed -- withholding that is its own dishonesty")
+        self.assertNotIn(
+            tx.REFUSAL_MARKER_NOT_RESTORED, outcome.refusal,
+            "nothing is outstanding, so the refusal must NOT claim a unit is "
+            "still changed")
+        for unit_id in unit_ids:
+            self.assertIn(unit_id, outcome.refusal)
+
 
 # ---------------------------------------------------------------------------
 # 1. THE HAPPY PATH — against the one fully trial-eligible SHIPPED op_kind
@@ -882,6 +922,24 @@ class CredentialSplitTests(_Base):
                 "the write-capable client are never interchangeable, and that "
                 "split is the whole reason a kernel-side trial is legitimate")
 
+    def test_the_two_clients_cannot_be_transposed_at_the_call_site(self):
+        """The source-level test above pins argument names as written INSIDE
+        `_drive_unit`, so a transposition at its call site would satisfy it while
+        handing the observer the write-capable client. Keyword-only parameters
+        make that unexpressible — asserted here so a future revert to positional
+        parameters, which would quietly reopen the route, fails."""
+        tree = ast.parse(_MODULE_PATH.read_text())
+        drive = next(n for n in ast.walk(tree)
+                     if isinstance(n, ast.FunctionDef) and n.name == "_drive_unit")
+        kwonly = {a.arg for a in drive.args.kwonlyargs}
+        positional = {a.arg for a in drive.args.args}
+        for name in ("write_client", "facade"):
+            self.assertIn(name, kwonly, f"{name} must be keyword-only")
+            self.assertNotIn(name, positional)
+        # And the interpreter genuinely refuses the positional form.
+        with self.assertRaises(TypeError):
+            tx._drive_unit(None, None, None, None, None, None, None)
+
     def test_the_ordinary_write_path_resolves_through_the_same_helpers(self):
         """The other half of the single-source claim: `adapters.py` -- the
         ordinary executor -- must call the SAME two functions, so there is one
@@ -913,6 +971,7 @@ class FailedUnitBlocksProofTests(_Base):
         self.assertEqual(outcome.recovery_required_unit_ids, ("r1",))
         self.assertTrue(outcome.units[0].reason.strip())
         self.assertIs(outcome.units[0].undo_restored, False)
+        self.assertRefusalSaysNotRestored(outcome, "r1")
 
     def test_the_recovery_required_record_states_a_cause(self):
         """A durable blocking record with no stated cause cannot be acted on."""
@@ -936,6 +995,7 @@ class FailedUnitBlocksProofTests(_Base):
         self.assertEqual(self.journal_states(outcome),
                          {"r1": tj.STATE_RESTORED_VERIFIED})
         self.assertIs(outcome.units[0].apply_landed, False)
+        self.assertRefusalSaysNothingOutstanding(outcome, "r1")
         self.assertEqual(self.surface.snapshot()["r1"], ["OPEN"])
 
     def test_an_apply_that_raises_is_still_reverted_and_blocks_the_proof(self):
@@ -955,6 +1015,7 @@ class FailedUnitBlocksProofTests(_Base):
         self.assertNoProof()
         self.assertEqual(self.journal_states(outcome),
                          {"r1": tj.STATE_RECOVERY_REQUIRED})
+        self.assertRefusalSaysNotRestored(outcome, "r1")
 
     def test_a_surface_that_cannot_be_observed_after_undo_is_never_read_as_restored(self):
         self.register(_UnobservableAfterUndoAdapter())
@@ -963,6 +1024,7 @@ class FailedUnitBlocksProofTests(_Base):
         self.assertNoProof()
         self.assertEqual(self.journal_states(outcome),
                          {"r1": tj.STATE_RECOVERY_REQUIRED})
+        self.assertRefusalSaysNotRestored(outcome, "r1")
 
     def test_no_later_unit_is_applied_once_an_earlier_unit_has_failed(self):
         """A trial exists to earn a proof. Once it cannot, issuing further live
@@ -975,6 +1037,7 @@ class FailedUnitBlocksProofTests(_Base):
         self.assertEqual(states["r2"], tj.STATE_PLANNED)
         self.assertEqual(states["r3"], tj.STATE_PLANNED)
         self.assertEqual([unit_id for unit_id, _ in self.client.writes], ["r1"])
+        self.assertRefusalSaysNotRestored(outcome, "r1", "r2", "r3")
 
     def test_a_LATER_units_failure_blocks_the_proof_the_sampled_unit_would_have_passed(self):
         """The case the rest of this class cannot reach, and the one that keeps
@@ -995,7 +1058,12 @@ class FailedUnitBlocksProofTests(_Base):
                           "r2": tj.STATE_RECOVERY_REQUIRED,
                           "r3": tj.STATE_PLANNED})
         self.assertEqual(outcome.recovery_required_unit_ids, ("r2",))
-        self.assertIn("r2", outcome.refusal)
+        # THE assertion the first version of this test was missing. `"r2"` alone
+        # appears in BOTH refusal texts, so asserting it proved nothing: with the
+        # end-state check deleted this same scenario reported "every unit came
+        # back to its prior state... Nothing external is outstanding" about a unit
+        # that is durably recovery_required on the operator's live record.
+        self.assertRefusalSaysNotRestored(outcome, "r2", "r3")
         # The sampled unit really would have passed on its own evidence -- so the
         # refusal above is the post-condition doing work, not a coincidence.
         self.assertIs(outcome.units[0].apply_landed, True)
@@ -1017,17 +1085,12 @@ class FailedUnitBlocksProofTests(_Base):
         self.assertEqual(outcome.recovery_required_unit_ids, ())
         self.assertIs(outcome.units[0].apply_landed, True)
         self.assertIs(outcome.units[1].apply_landed, False)
-        self.assertIn("r2", outcome.refusal)
+        self.assertRefusalSaysNothingOutstanding(outcome, "r2")
         self.assertEqual(self.surface.snapshot()["r2"], ["OPEN"])
 
     def test_the_end_state_read_answers_from_the_journal_in_both_directions(self):
-        """Tested DIRECTLY, and this test earns its place by saying why: at
-        `run_trial`'s call site the end-state read is redundant with the
-        observed-round-trip check that follows it — every failure this module can
-        produce leaves a unit unproved as well as unrestored — so no run can make
-        the end-state read the sole reason a proof is refused. Its LOGIC still has
-        to bind, because the journal is the authoritative record of what happened
-        to the operator's data.
+        """The end-state read's LOGIC, tested directly — alongside (not instead
+        of) the call-site assertions above, which are what catch its deletion.
 
         Both directions of disagreement, and absent is never read as restored."""
         self.register(_FailsOnOneUnitAdapter("r2"))
@@ -1465,6 +1528,21 @@ class EnrolmentTests(unittest.TestCase):
     def test_the_invariant_names_are_the_canonical_predicate_names(self):
         for name in (tx.APPLY_PREDICATE_NAME, tx.UNDO_PREDICATE_NAME):
             self.assertIn(name, ev.REQUIRED_EVIDENCE_PREDICATES)
+
+    def test_the_predicate_names_are_fields_the_dispatch_record_actually_has(self):
+        """The pin above joins the CONTRACT set (which names the adapter must
+        declare). `_evaluate` reads these names off the `AdapterDispatch` RECORD
+        with `getattr`, which is a DIFFERENT set that merely happens to agree.
+
+        Without this assertion, renaming an `AdapterDispatch` field leaves the
+        pin above green while `getattr` returns None for every adapter, every
+        evidence predicate reads as undeclared, and EVERY trial refuses forever
+        -- blaming the adapter author. That is permanently-unreachable acceptance
+        rebuilt inside the cut whose entire purpose is removing it, so the name
+        is pinned to what the code actually reads, not to a name that matches."""
+        fields = {f.name for f in dataclasses.fields(AdapterDispatch)}
+        for name in (tx.APPLY_PREDICATE_NAME, tx.UNDO_PREDICATE_NAME):
+            self.assertIn(name, fields)
 
 
 if __name__ == "__main__":  # pragma: no cover
