@@ -1804,7 +1804,17 @@ class TheEntrypointDrivesARealTrialTests(_EntrypointBase):
             encoding="utf-8")
         with self.assertRaises(tx.TrialExecutorError) as raised:
             self.start("mismatched")
-        self.assertIn("gmail.message.untrash", str(raised.exception))
+        message = str(raised.exception)
+        # BOTH op_kinds and the guard's own reason. Asserting only the proposed
+        # op_kind passed with the guard REMOVED -- a later refusal (the proposed
+        # op_kind has no read-only reader declared) raises the same exception type
+        # and names the same op_kind, so the test did not bind the thing it was
+        # written for. Measured, not assumed: the mutation survived.
+        self.assertIn("gmail.message.untrash", message)
+        self.assertIn(OP_TRASH, message,
+                      "the refusal must say what the capability DECLARES as well "
+                      "as what it proposed; without both it is not this check")
+        self.assertIn("never said it works on", message)
         self.assertEqual({mid: sorted(labels)
                           for mid, labels in self.service.messages.items()},
                          self.before)
@@ -1841,6 +1851,46 @@ class TheEntrypointWorksInAFRESHProcessTests(_EntrypointBase):
         self.assertIsNotNone(get_read_facade_class(OP_TRASH),
                              "the entrypoint left the registry cold, so the "
                              "observation it recorded came from somewhere else")
+
+    def test_the_warming_step_POPULATES_a_cold_registry_and_short_circuits_a_warm_one(self):
+        """The mechanism itself, driven in both directions.
+
+        Asserted here as well as end to end because of a MEASURED fact rather than
+        a suspected one: removing the warming call from the runtime path leaves the
+        end-to-end trial green, because the proposal step this entrypoint runs
+        first resolves through the SAME shared function. So the end-to-end test
+        cannot bind the call site, and the honest thing is to bind the mechanism
+        and say so rather than to claim a falsifiability that is not there."""
+        registered = get_read_facade_class(OP_TRASH)
+        self.assertIsNotNone(registered, "fixture precondition")
+        unregister_read_facade(OP_TRASH)
+        self.addCleanup(register_read_facade, OP_TRASH, registered)
+        cached = sys.modules.pop("external_write.read_facades_gmail", None)
+        self.assertIsNotNone(cached, "fixture precondition: it was imported")
+        self.addCleanup(sys.modules.setdefault,
+                        "external_write.read_facades_gmail", cached)
+        self.assertIsNone(get_read_facade_class(OP_TRASH))
+
+        tx._warmed_read_facade_registry(OP_TRASH)
+        self.assertIsNotNone(get_read_facade_class(OP_TRASH),
+                             "a cold registry was left cold")
+
+        # Warm: the declaring module is not imported again. Proven by removing it
+        # from the module cache and asserting the registry entry is untouched --
+        # an unconditional import would repopulate it from the module, so this
+        # distinguishes "short-circuited" from "did the work twice".
+        again = sys.modules.pop("external_write.read_facades_gmail", None)
+        tx._warmed_read_facade_registry(OP_TRASH)
+        self.assertNotIn("external_write.read_facades_gmail", sys.modules,
+                         "the declaring module was imported again for an op_kind "
+                         "whose reader is already registered")
+        if again is not None:
+            sys.modules.setdefault("external_write.read_facades_gmail", again)
+
+    def test_an_op_kind_with_no_declared_reader_is_REFUSED_not_silently_skipped(self):
+        with self.assertRaises(Exception) as raised:
+            tx._warmed_read_facade_registry("nothing.declares.this")
+        self.assertNotIsInstance(raised.exception, AssertionError)
 
     def test_the_resolution_goes_through_the_ONE_shared_resolver(self):
         """Not a second copy of "which module provides read-only access for this
