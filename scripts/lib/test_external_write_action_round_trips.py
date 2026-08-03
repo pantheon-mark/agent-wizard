@@ -116,6 +116,7 @@ Run:
 
 import ast
 import hashlib
+import inspect
 import json
 import os
 import shlex
@@ -374,10 +375,16 @@ def describe():
 
 
 def propose_operations(facade, batch_id):
-    return [Operation(surface=SURFACE, object_id="r1", field="labels",
-                      new_value="ARCHIVED", op_kind=OP_KIND, batch_id=batch_id,
-                      params={"records": [%s]})]
+    return [%s]
 '''
+
+#: ONE proposed operation, rendered into the template above. A capability may
+#: legitimately propose several, and the trial carries the first through -- so the
+#: fixture has to be able to build both shapes.
+_TRIAL_OPERATION_TEMPLATE = (
+    'Operation(surface=SURFACE, object_id="%(first)s", field="labels",\n'
+    '                  new_value="ARCHIVED", op_kind=OP_KIND, batch_id=batch_id,\n'
+    '                  params={"records": [%(records)s]})')
 
 TRIAL_CAPABILITY_ID = "fixture_trial"
 TRIAL_SURFACE = "fixture_surface"
@@ -467,7 +474,7 @@ class _Project:
 
     # -- the trial fixture: an operator project a real trial can run in --------
 
-    def install_trial_fixture(self, units=("r1",), cap=25):
+    def install_trial_fixture(self, units=("r1",), cap=25, operations=1):
         """Everything a trial needs, as the bytes a real project carries: the
         adapter enrolled the way an operator-added adapter is enrolled (a sibling
         JSON manifest the kernel unions in at import, never an edit to a
@@ -479,10 +486,20 @@ class _Project:
                                                       encoding="utf-8")
         (lib / "operator_adapters.json").write_text(
             json.dumps([TRIAL_ADAPTER_STEM]), encoding="utf-8")
-        records = ", ".join(
-            '{"unit_id": "%s", "prior_labels": ["OPEN"]}' % unit for unit in units)
+        # `operations` splits the units across that many proposed Operations, so a
+        # multi-proposal capability is a real one rather than a duplicated op: the
+        # trial carries the FIRST through and the rest are untouched.
+        groups = [units[i::operations] for i in range(operations)]
+        assert all(groups), "each proposed operation needs at least one unit"
+        proposals = ",\n            ".join(
+            _TRIAL_OPERATION_TEMPLATE % {
+                "first": group[0],
+                "records": ", ".join(
+                    '{"unit_id": "%s", "prior_labels": ["OPEN"]}' % unit
+                    for unit in group)}
+            for group in groups)
         self.write(f"agents/capabilities/{TRIAL_CAPABILITY_ID}_capability.py",
-                   _TRIAL_CAPABILITY_SRC % records)
+                   _TRIAL_CAPABILITY_SRC % proposals)
         self.write(DESCRIPTOR_SET_REL, json.dumps([{
             "id": TRIAL_SURFACE, "name": TRIAL_SURFACE, "action_class": "modify",
             "risk_class": "sensitive_data", "recovery_profile_ref": None,
@@ -747,7 +764,7 @@ def _build_resolved(case):
 # not-yet-runnable until the trial had an operator-invocable way in.
 # ---------------------------------------------------------------------------
 
-def _run_a_trial(case, fault=None, units=("r1",)):
+def _run_a_trial(case, fault=None, units=("r1",), operations=1):
     """Run the public trial command once, with `fault` armed, and return
     `(project, trial_id)`.
 
@@ -755,7 +772,7 @@ def _run_a_trial(case, fault=None, units=("r1",)):
     the trial process and work in the recovery process that repairs it, which is
     what a transient cause actually looks like."""
     project = _Project(case)
-    project.install_trial_fixture(units=units)
+    project.install_trial_fixture(units=units, operations=operations)
     if fault is not None:
         project.set_fault(fault)
     command = tx.trial_command(TRIAL_CAPABILITY_ID,
@@ -776,6 +793,7 @@ def _run_a_trial(case, fault=None, units=("r1",)):
     case.assertEqual(
         len(ids), 1,
         "fixture precondition: exactly one durable trial record, found %r" % ids)
+    case.last_trial_result = result
     return project, ids[0]
 
 
@@ -1181,6 +1199,10 @@ class TheDISCHARGEDBlockerIsAssertedNotASSUMEDTests(unittest.TestCase):
             "nothing the command manifest declares invocable can start a trial, "
             "so the producer of the proof acceptance requires is unreachable to "
             "the operator")
+        self.assertIn(
+            "trial-run", enrolled,
+            "some enrolled command can start a trial, but not the one this cut "
+            "added -- non-empty is not the property; the named command is")
 
     def test_the_proof_PRODUCER_is_reachable_and_the_validator_still_the_gate(self):
         """The second historical dead end had two halves. The bypass half was
@@ -2221,19 +2243,41 @@ class NoTrialFixtureReachesItsStateWithoutARealRUNTests(unittest.TestCase,
     def test_the_trial_ID_is_never_chosen_by_the_fixture(self):
         """The subject is read back off what the product wrote. A fixture that
         named its own trial id would be free to name one for a record it also
-        wrote, which is the same thing in a different order."""
-        source = _THIS_FILE.read_text(encoding="utf-8")
-        tree = ast.parse(source)
+        wrote, which is the same thing in a different order.
+
+        RETARGETED: the first version walked `trial_command` calls asserting no
+        `trial_id` keyword -- a clause that could never fail, because that renderer
+        has no such parameter. The call that DOES accept one is
+        `run_trial_for_capability(trial_id=...)`, so the guard is aimed there, at
+        every call in this module, and both halves are held non-vacuous: the
+        producer is asserted to still accept the argument (or the guard is aimed at
+        nothing), and this module is asserted to still render the command (or the
+        walk is scanning nothing)."""
+        self.assertIn(
+            "trial_id",
+            inspect.signature(tx.run_trial_for_capability).parameters,
+            "the producer no longer accepts a caller-chosen trial id, so this "
+            "guard is aimed at nothing and must be retargeted or dropped")
+        tree = ast.parse(_THIS_FILE.read_text(encoding="utf-8"))
+        rendered = 0
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             name = getattr(node.func, "id", getattr(node.func, "attr", ""))
             if name == "trial_command":
-                for keyword in node.keywords:
-                    self.assertNotEqual(keyword.arg, "trial_id")
-                self.assertLessEqual(
+                rendered += 1
+                self.assertEqual(
                     len(node.args), 1,
                     "the trial command is rendered with the capability only")
+            for keyword in node.keywords:
+                self.assertNotEqual(
+                    keyword.arg, "trial_id",
+                    "a fixture that names the trial id it will later assert about "
+                    "is naming both halves of its own evidence")
+        self.assertTrue(
+            rendered,
+            "this file no longer renders the trial command, so the walk above is "
+            "scanning nothing")
 
 
 class TheStoppedTrialLeavesLaterUnitsUNTOUCHEDTests(unittest.TestCase,
@@ -2270,6 +2314,46 @@ class TheStoppedTrialLeavesLaterUnitsUNTOUCHEDTests(unittest.TestCase,
             sa.trial_unit_state_key(tj.STATE_PLANNED), "r2")
         self.assertIn("no action is needed", instruction)
         self.assertIn("r2", instruction)
+
+
+class AMultiProposalCapabilityIsNotSilentlyNarrowedTests(unittest.TestCase,
+                                                          _Observing):
+    """The disclosed bound made good on the OPERATOR path, not only in a docstring.
+
+    A trial carries ONE proposed operation through -- the first -- because the
+    evidence artifact carries one operation's observed apply/undo evidence and
+    trialling every proposal would multiply live writes without adding anything
+    the proof can assert. That bound is only honest if the operator is told the
+    number: "carried one change through, your record is as it was" about a
+    capability that proposed five would be a true sentence doing the work of a
+    false one.
+
+    Driven through the real command in a real project, because the sentence is
+    rendered in `__main__` and nothing else reads it."""
+
+    def test_the_CLI_output_names_how_many_things_were_proposed(self):
+        project, trial_id = _run_a_trial(self, units=("r1", "r2"), operations=2)
+        message = self.last_trial_result.stdout + self.last_trial_result.stderr
+        self.assertIn(
+            "proposed 2", message,
+            "the operator was not told that more was proposed than was tried: %r"
+            % message)
+        states = tj.load_trial_journal(
+            trial_id,
+            journal_dir=str(project.root / tj.DEFAULT_TRIAL_JOURNAL_DIR)
+        ).unit_states()
+        self.assertEqual(
+            set(states), {"r1"},
+            "the trial covered more than the first proposed operation, so the "
+            "count the operator was given describes something else")
+
+    def test_a_SINGLE_proposal_run_says_nothing_about_a_count(self):
+        """The other direction: the sentence must not appear when there is nothing
+        to disclose, or it trains an operator to skip it."""
+        _project, _trial_id = _run_a_trial(self)
+        message = self.last_trial_result.stdout + self.last_trial_result.stderr
+        self.assertIn("carried one change through", message)
+        self.assertNotIn("proposed", message)
 
 
 class TheOperatorCanFindTheirWayOutFromTheSURFACEAloneTests(unittest.TestCase,

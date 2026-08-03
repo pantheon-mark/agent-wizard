@@ -52,6 +52,7 @@ directory, so nothing here touches the real project's `security/` or
 import ast
 import dataclasses
 import hashlib
+import inspect
 import json
 import os
 import shlex
@@ -1689,6 +1690,30 @@ class TheRenderedTrialCommandTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             tx.trial_command("acme_crm_sync", operator_approval="yes\ngo ahead")
 
+    def test_a_multi_line_CAPABILITY_ID_is_refused_too(self):
+        """The same guarantee on the sibling field. `shlex.quote` escapes shell
+        metacharacters and PRESERVES a newline, so an id carrying one would render
+        a wrapped command from the one surface an operator reads -- and the
+        acceptance CLI passes `--capability-id` straight from argv, so the value is
+        not this module's to trust."""
+        for bad in ("acme\nsync", "acme\rsync"):
+            with self.subTest(capability_id=bad):
+                with self.assertRaises(ValueError):
+                    tx.trial_command(bad)
+                with self.assertRaises(ValueError):
+                    tx.trial_command(bad, operator_approval=APPROVAL)
+
+    def test_every_rendered_command_is_ONE_line_for_every_interpolated_part(self):
+        """Quantified over the parts rather than asserted for one of them: the
+        guarantee is about the rendered line, and a check on a single field is how
+        the sibling field was missed."""
+        for capability_id, approval in (("c", APPROVAL), ("c", None),
+                                        ("with space", APPROVAL)):
+            with self.subTest(capability_id=capability_id):
+                command = tx.trial_command(capability_id,
+                                          operator_approval=approval)
+                self.assertEqual(len(command.splitlines()), 1)
+
     def test_the_rendered_command_parses_back_through_the_arg_parser(self):
         """The renderer and the parser are two halves of one contract; a command
         the parser refuses is not paste-ready however it reads."""
@@ -1980,6 +2005,115 @@ class TheOperatorsOwnWordsAreTheApprovalTests(_EntrypointBase):
         """A receipt for a different operation is not an approval of this one."""
         outcome = self.start()
         self.assertTrue(outcome.ok, outcome.refusal)
+
+
+class WhatTheOperatorIsTOLDAboutTheOutcomeTests(_EntrypointBase):
+    """`trial_summary` is the only sentence an operator reads about a completed
+    trial, so every claim in it has to be true when written and every branch of it
+    has to be reachable from the operator's own path."""
+
+    def test_the_proposal_COUNT_travels_with_the_outcome(self):
+        """The disclosed bound says a capability proposing several is not silently
+        narrowed. That is only deliverable if the count reaches the sentence, and
+        the only thing that crosses from the producer to the CLI is the outcome."""
+        outcome = self.start()
+        self.assertEqual(outcome.proposed_operation_count, 1)
+        self.assertEqual(
+            tj.load_trial_journal(
+                outcome.trial_id, journal_dir=self.journal_dir).unit_states(),
+            {"m1": tj.STATE_RESTORED_VERIFIED, "m2": tj.STATE_RESTORED_VERIFIED})
+
+    def test_the_summary_NAMES_the_count_when_more_was_proposed_than_tried(self):
+        outcome = dataclasses.replace(self.start(), proposed_operation_count=3)
+        message = tx.trial_summary(outcome, capability_id=self.CAP_ID)
+        self.assertIn("proposed 3", message)
+        self.assertIn(str(outcome.proof_path), message)
+
+    def test_the_summary_says_nothing_about_a_count_for_a_single_proposal(self):
+        message = tx.trial_summary(self.start(), capability_id=self.CAP_ID)
+        self.assertNotIn("proposed", message)
+
+    def test_the_summary_takes_the_count_from_the_OUTCOME_not_a_parameter(self):
+        """A count the caller has to remember to pass is a count the caller
+        forgets: the first version of this sentence had a `proposed` parameter and
+        the only caller -- the CLI -- never passed it, so the branch was
+        unreachable from the operator's path and the bound was a claim with no
+        code behind it."""
+        parameters = inspect.signature(tx.trial_summary).parameters
+        self.assertEqual(sorted(parameters), ["capability_id", "outcome"])
+
+    def test_a_refusal_with_NO_recorded_REASON_never_prints_the_word_None(self):
+        """`str(None)` is "None", and "None" is not a reason. An operator-facing
+        sentence must be true when written, and this branch must not claim the
+        thing that would make someone stop looking either: it says nothing can be
+        established about whether a change is still live, and routes to a person."""
+        message = tx.trial_summary(
+            tx.TrialOutcome(ok=False, trial_id="t-1", journal_path="p.json"),
+            capability_id="acme_crm_sync")
+        self.assertNotIn("None", message)
+        self.assertIn("p.json", message)
+        self.assertIn("ask your assistant", message.lower())
+        self.assertNotIn(tx.REFUSAL_MARKER_NOTHING_OUTSTANDING, message,
+                         "a run that recorded no reason cannot establish that "
+                         "nothing is outstanding")
+
+    def test_a_refusal_WITH_a_reason_is_surfaced_verbatim(self):
+        outcome = tx.TrialOutcome(ok=False, refusal="the gate said no, plainly")
+        self.assertEqual(tx.trial_summary(outcome, capability_id="c"),
+                         "the gate said no, plainly")
+
+
+class TheEntrypointNeverShowsAnOperatorATracebackTests(unittest.TestCase):
+    """The `__main__` block promises it, and the promise is only as good as the
+    exception types it names."""
+
+    def _main_handlers(self):
+        tree = ast.parse(_MODULE_PATH.read_text())
+        main = next(node for node in tree.body
+                    if isinstance(node, ast.If)
+                    and isinstance(node.test, ast.Compare)
+                    and getattr(node.test.left, "id", "") == "__name__")
+        names = set()
+        for node in ast.walk(main):
+            if not isinstance(node, ast.ExceptHandler) or node.type is None:
+                continue
+            for element in (node.type.elts if isinstance(node.type, ast.Tuple)
+                            else [node.type]):
+                found = getattr(element, "id", getattr(element, "attr", None))
+                if found:
+                    names.add(found)
+        return names
+
+    def test_every_refusal_the_runtime_path_can_raise_is_CAUGHT(self):
+        """`_warmed_read_facade_registry` calls the shared resolver directly, so it
+        raises that resolver's OWN types -- `TopologyError` and
+        `ReadFacadeDeclarationError` -- rather than the capability-flavoured
+        translation the capability-facing wrapper provides.
+
+        `ReadFacadeDeclarationError` being unreachable TODAY is a coupling, not a
+        guarantee: it is shadowed only because the proposal step resolves the same
+        op_kind first, which is the identical coupling that let the warming-call
+        mutation survive. The recovery entrypoint's own facade step already catches
+        it; this follows that precedent rather than relying on the shadow."""
+        handlers = self._main_handlers()
+        for required in ("TrialExecutorError", "TrialJournalError",
+                         "CapabilityRunnerError", "TopologyError",
+                         "ReadFacadeDeclarationError"):
+            with self.subTest(exception=required):
+                self.assertIn(
+                    required, handlers,
+                    "the entrypoint promises it never prints a traceback, and "
+                    "this is a refusal its own runtime path can raise")
+
+    def test_the_shared_resolver_still_declares_the_types_this_pins(self):
+        """Joined on what the resolver DOCUMENTS raising, so a rename upstream
+        fails here rather than leaving the tuple naming a type nothing raises."""
+        from external_write import capability_runner as cr
+        self.assertTrue(hasattr(cr, "ReadFacadeDeclarationError"))
+        self.assertIn("TopologyError",
+                      inspect.getdoc(cr.import_declared_read_facade))
+        self.assertIn("ReadFacadeDeclarationError",
+                      inspect.getdoc(cr.import_declared_read_facade))
 
 
 class TheACCEPTANCERefusalNamesTheProducerTests(unittest.TestCase):

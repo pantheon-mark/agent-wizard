@@ -195,7 +195,7 @@ Stdlib only — no third-party dependencies.
 import os
 import shlex
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as _dataclass_replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -315,14 +315,19 @@ def trial_command(capability_id: str, *,
     """
     approval = (APPROVAL_PLACEHOLDER if operator_approval is None
                 else operator_approval)
-    if "\n" in approval or "\r" in approval:
-        raise ValueError(
-            "refusing to build a trial command: the approval text contains a "
-            "line break, and quoting does not strip one -- the rendered command "
-            "would not be a single physical line. Use a single-line approval.")
     parts = ["python3", TRIAL_ENTRYPOINT_REL,
              FLAG_CAPABILITY, str(capability_id),
              FLAG_APPROVAL, approval]
+    # Over EVERY interpolated part, not only the approval. The guarantee is about
+    # the rendered LINE, and both values are data this module does not own: a
+    # capability id reaches the acceptance CLI straight from argv. A check on one
+    # field is how the sibling field goes unchecked.
+    for part in parts:
+        if "\n" in part or "\r" in part:
+            raise ValueError(
+                "refusing to build a trial command: a value interpolated into it "
+                f"contains a line break ({part!r}), and quoting does not strip "
+                "one -- the rendered command would not be a single physical line.")
     return " ".join(shlex.quote(p) for p in parts)
 
 
@@ -480,6 +485,16 @@ class TrialOutcome:
     proof_path: Optional[str] = None
     units: Tuple[TrialUnitOutcome, ...] = ()
     recovery_required_unit_ids: Tuple[str, ...] = ()
+    #: How many operations the capability PROPOSED, of which this trial carried
+    #: one through. Carried on the outcome rather than passed alongside it,
+    #: because the operator-facing sentence is rendered by a caller that would
+    #: otherwise have to remember to supply it -- and the first version of that
+    #: sentence had exactly that shape: a parameter the only caller never passed,
+    #: so a disclosed bound ("the count is reported, so a capability proposing
+    #: several is not silently narrowed") had no path to an operator at all.
+    #: Defaults to 1, which is the truth for every caller that hands over one
+    #: operation, including `run_trial` itself.
+    proposed_operation_count: int = 1
 
 
 # ---------------------------------------------------------------------------
@@ -1528,17 +1543,21 @@ def run_trial_for_capability(capability_id: str, *,
     # accumulates a count ACROSS trials, so the cap is a per-approval bound and
     # not a lifetime one -- and a lifetime one would eventually leave a capability
     # that can never be trialled again, with no operator-facing way to clear it.
-    return run_trial(
+    outcome = run_trial(
         op, receipt.op_receipts[op.digest()],
         capability_id=cid, capability_module_paths=module_paths,
         descriptor_set=descriptor_set,
         cap_ledger=cap_ledger if cap_ledger is not None else InvocationLedger(),
         clock=clock, paused_root=paused_root, journal_dir=journal_dir,
         proof_dir=proof_dir, lib_dir=lib_dir, trial_id=trial_id)
+    # The count travels ON the outcome, so the one sentence an operator reads
+    # cannot be rendered without it. `run_trial` is handed one operation and knows
+    # nothing about how many were proposed, which is why it is set here.
+    return _dataclass_replace(outcome,
+                              proposed_operation_count=len(operations))
 
 
-def trial_summary(outcome: TrialOutcome, *, capability_id: str,
-                  proposed: int = 1) -> str:
+def trial_summary(outcome: TrialOutcome, *, capability_id: str) -> str:
     """The operator-facing sentence for a completed trial.
 
     A trial that could not earn a proof already carries the gate's own
@@ -1547,9 +1566,28 @@ def trial_summary(outcome: TrialOutcome, *, capability_id: str,
     the person reading them -- one says a change may still be live on their
     record, the other says nothing is outstanding -- and a second wording here
     would be a second chance to say the wrong one.
+
+    A not-ok outcome carrying NO reason gets its own sentence rather than
+    `str(None)`: "None" is not a reason, and the honest thing to say about a run
+    that recorded nothing is that nothing can be established from it -- so this
+    branch claims neither that something is outstanding nor that nothing is, and
+    routes to a person. Every other refusal path in this module sets a reason;
+    this exists because "cannot happen today" is not a property.
+
+    The proposal count is read off the OUTCOME, never taken as a parameter. See
+    `TrialOutcome.proposed_operation_count`.
     """
     if not outcome.ok:
-        return str(outcome.refusal)
+        if outcome.refusal:
+            return outcome.refusal
+        return (
+            f"The trial for `{capability_id}` did not produce the evidence the "
+            "acceptance step asks for, and it did not record why. Nothing here "
+            "can tell you whether a change it made is still on your real record. "
+            f"The durable record of the run is {outcome.journal_path} -- ask your "
+            "assistant to look at that file with you before treating anything as "
+            "finished.")
+    proposed = outcome.proposed_operation_count
     extra = ("" if proposed <= 1 else
              f" `{capability_id}` proposed {proposed} things to change; a trial "
              "carries one of them through, so this covers the first.")
@@ -1585,7 +1623,7 @@ if __name__ == "__main__":  # pragma: no cover
     # import of it.
     import external_write.registered_adapters  # noqa: E402,F401
     from external_write.capability_runner import (  # noqa: E402
-        CapabilityRunnerError,
+        CapabilityRunnerError, ReadFacadeDeclarationError,
     )
     from external_write.topology import TopologyError  # noqa: E402
     from external_write.trial_journal import TrialJournalError  # noqa: E402
@@ -1602,7 +1640,7 @@ if __name__ == "__main__":  # pragma: no cover
             operator_approval=_options[FLAG_APPROVAL],
             batch_id=_options[FLAG_BATCH_ID])
     except (TrialExecutorError, TrialJournalError, CapabilityRunnerError,
-            TopologyError) as _exc:
+            TopologyError, ReadFacadeDeclarationError) as _exc:
         # A refusal, in plain language, and never an all-clear: no evidence was
         # written. Exit 1, so nothing checking the status reads it as a proof.
         print(str(_exc), file=_sys.stderr)
