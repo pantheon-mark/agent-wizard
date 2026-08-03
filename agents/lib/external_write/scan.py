@@ -1788,7 +1788,36 @@ def _scan_file(
         return []
     try:
         source = file_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    except UnicodeDecodeError:
+        # A file whose bytes are not valid UTF-8 cannot be statically verified
+        # safe, for exactly the reason the SyntaxError branch below gives. This
+        # used to share that branch's `return []`, and the two answers "this file
+        # passes" and "this file could not be read" were the same answer -- pure
+        # fail-open, inside the trust scanner, with silence passing.
+        #
+        # The trigger is ordinary, not adversarial: a source saved latin-1 or
+        # cp1252 (accented content, a Windows-authored file) is valid Python and
+        # was invisible here. A measured consequence was a forbidden import
+        # sitting in such a file and being reported by nothing, in either
+        # direction -- the build-side reconcile never FLAGGED the writer, and the
+        # reap treated "scan clean" as proof a flagged one had been fixed and
+        # CLOSED its entry.
+        #
+        # Reported as `unparseable`, deliberately reusing the existing kind
+        # rather than minting a second one: every consumer already handles it,
+        # and what it means to a reader -- this file could not be statically
+        # verified, look at it -- is exactly right for this case.
+        return [Violation(path=str(file_path), lineno=1, kind="unparseable")]
+    except OSError:
+        # An ACCESS failure, which is a different question and is deliberately
+        # NOT treated as a violation here. A permission-denied or transiently
+        # unreadable `.py` anywhere in a swept tree would fail every build that
+        # contains one, and this function is called with whole directories. That
+        # is the fail-closed-check-that-bricks-everything shape, so closing this
+        # half needs its input set scoped first rather than a matching `return`.
+        # Tracked as a known gap with a named clearing authority; the entry-point
+        # readers that MUST distinguish absent from inaccessible already do so on
+        # their own read's exception type rather than relying on this one.
         return []
     try:
         tree = ast.parse(source, filename=str(file_path))

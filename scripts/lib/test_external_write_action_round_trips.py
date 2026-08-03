@@ -130,6 +130,7 @@ if str(_WIZARD / "scripts" / "lib") not in sys.path:
 from external_write import _ext_write_state as service            # noqa: E402
 from external_write import capability_health as health            # noqa: E402
 from external_write import command_manifest as manifest           # noqa: E402
+from external_write import scan                                    # noqa: E402
 from external_write import state_actions as sa                     # noqa: E402
 from external_write import trial_journal as tj                     # noqa: E402
 from external_write import writer_ack_store as store               # noqa: E402
@@ -361,9 +362,17 @@ class _Observing:
         return tuple(sa.writer_state_key(state) for state in classifier_states)
 
     def run_command(self, project, command):
-        """Run `command` as the operator runs it: as a real process, from the
-        project root, exactly as rendered. Bytecode writing is off, so nothing a
-        previous run cached can answer for what the current source does."""
+        """Run `command` as a real process, from the project root, with the
+        arguments exactly as rendered. Bytecode writing is off in the child, so
+        nothing a previous run cached can answer for what the current source does.
+
+        ONE SUBSTITUTION, and it is not fidelity being traded away: the rendered
+        command starts with `python3` (asserted, because a rendered command that did
+        not would not be the paste-ready line it claims to be), and what actually
+        runs is `sys.executable` with the same arguments. That is what makes the
+        dual-interpreter run mean anything -- under py3.12 the child has to be
+        py3.12, and a literal `python3` would silently run the system 3.9.6 in both
+        halves and prove the second one nothing."""
         argv = shlex.split(command)
         self.assertEqual(argv[0], "python3", command)
         self.assertEqual(len(command.splitlines()), 1,
@@ -439,11 +448,25 @@ def _build_acknowledged_risk(case):
 def _build_resolved(case):
     """The rebuilt writer: it routes through the sanctioned path, its content
     differs from the recorded pause-time hash, and it passes the real scan -- so
-    the reaper closes its entry. Nothing here removes the entry by hand."""
+    the reaper closes its entry. Nothing here removes the entry by hand.
+
+    THE OPEN ENTRY IS ASSERTED BEFORE IT IS ALLOWED TO BE CLOSED, and that is
+    load-bearing rather than defensive. This is the one state observed as the
+    ABSENCE of an entry, so a fixture that never had one would be indistinguishable
+    from one the reaper cleared -- absence read as evidence of resolution, which is
+    the same silence-as-safety shape this file's own scanner finding turned on. A
+    hollowed-out builder must fail here, not pass quietly."""
     project = _Project(case)
     project.write(INBOX_WRITER, _SANCTIONED_SRC)
     project.queue([_queue_entry(INBOX_WRITER, ["sealed_kernel_import"],
                                _sha256(_REBUILDABLE_SRC))])
+    case.assertIn(
+        INBOX_WRITER,
+        [str(e.get("writer_relpath"))
+         for e in core.open_bespoke_writer_migrations(str(project.root))],
+        "this fixture reaches its state by having an entry CLOSED, so it must "
+        "start with one open -- a writer nothing ever flagged would look "
+        "identical and prove nothing")
     return project, INBOX_WRITER
 
 
@@ -659,39 +682,115 @@ class TheBlockerIsAssertedNotAssumedTests(unittest.TestCase):
             and node.test.left.id == "__name__"
             for node in tree.body)
 
-    def _calls(self, tree, function_name):
-        found = []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
+    def _called_names(self, node):
+        """Every bare callee name reachable in `node`, from `f(...)` and
+        `x.f(...)` alike. Bare names, deliberately: resolving each call to its
+        defining module would make this check MISS a driver assembled across
+        modules, and for an assertion whose whole job is to fire when something
+        appears, over-approximating is the safe direction."""
+        names = set()
+        for inner in ast.walk(node):
+            if not isinstance(inner, ast.Call):
                 continue
-            func = node.func
-            name = (func.id if isinstance(func, ast.Name)
-                    else func.attr if isinstance(func, ast.Attribute) else None)
-            if name == function_name:
-                found.append(node.lineno)
-        return found
+            func = inner.func
+            if isinstance(func, ast.Name):
+                names.add(func.id)
+            elif isinstance(func, ast.Attribute):
+                names.add(func.attr)
+        return names
 
-    def test_no_shipped_entrypoint_can_START_a_trial(self):
-        """AST, because this is a question about code structure: a module that
-        both declares a command-line entrypoint AND drives a trial would BE the
-        operator-invocable trial driver whose absence is the declared blocker."""
-        drivers = []
+    def _package(self):
+        """`{module name: (functions, main_block_callees)}` for the whole emitted
+        package, where `functions` maps each defined function to what it calls."""
+        parsed = {}
         for path in self._production_modules():
             tree = ast.parse(path.read_text(encoding="utf-8"))
-            if self._has_main_block(tree) and self._calls(tree, "run_trial"):
-                drivers.append(path.name)
+            functions = {}
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    functions.setdefault(node.name, set()).update(
+                        self._called_names(node))
+            main_callees = set()
+            for node in tree.body:
+                if (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)
+                        and isinstance(node.test.left, ast.Name)
+                        and node.test.left.id == "__name__"):
+                    main_callees |= self._called_names(node)
+            parsed[path.name] = (functions, main_callees)
+        return parsed
+
+    def _names_that_reach_a_trial_start(self, parsed):
+        """TRANSITIVE closure over the whole package: every function name from
+        which a trial start is reachable through any chain of calls.
+
+        Transitive on purpose. Requiring the entrypoint and the `run_trial` call to
+        sit in the SAME module was measured to be evadable by the most ordinary CLI
+        shape there is -- a wrapper function beside `run_trial` plus a separate
+        module carrying the `__main__` that calls the wrapper -- which would have
+        let the blocked declaration outlive the blocker it names."""
+        reaching = {"run_trial"}
+        changed = True
+        while changed:
+            changed = False
+            for functions, _main in parsed.values():
+                for name, callees in functions.items():
+                    if name not in reaching and (callees & reaching):
+                        reaching.add(name)
+                        changed = True
+        return reaching
+
+    def test_no_shipped_ENTRYPOINT_can_reach_a_trial_start_even_INDIRECTLY(self):
+        """AST, because this is a question about code structure: a module that
+        declares a command-line entrypoint from which a trial start is REACHABLE
+        would BE the operator-invocable trial driver whose absence is the declared
+        blocker -- whether it calls the trial directly or through any chain of
+        calls inside this package.
+
+        What this detects, stated precisely so the residual is not overstated: a
+        call chain expressible in this package's own source, joined on bare callee
+        names. It would not detect a start reached only through a runtime-computed
+        dispatch (`getattr`, a name looked up in a dict) or through a module outside
+        this package. Those are not shapes a normal entrypoint takes, and the
+        declaration this guards is also pinned by the two assertions below, but the
+        check is a strong detector rather than a proof."""
+        parsed = self._package()
+        reaching = self._names_that_reach_a_trial_start(parsed)
+        drivers = sorted(name for name, (_functions, main_callees) in parsed.items()
+                         if main_callees & reaching)
         self.assertEqual(
             drivers, [],
             "an operator-invocable trial driver now exists (%s) -- the blocked "
             "round-trip declaration for the trial domain is discharged and must "
             "be replaced with a real round-trip" % drivers)
 
-    def test_the_command_manifest_enrolls_no_trial_driver(self):
-        """The other half of the same question, joined on the manifest's own
-        declared prefixes rather than on any filename."""
+    def test_no_ENROLLED_OPERATOR_COMMAND_can_reach_a_trial_start(self):
+        """The property that actually matters, and the one an operator is exposed
+        to: nothing the command manifest declares invocable may start a trial.
+
+        Resolved from each entry's OWN declared `command_prefix` to the module it
+        names, then checked against the same transitive closure -- so this joins on
+        a declared value rather than re-spelling a module name as a literal, and it
+        keeps holding if a trial driver is enrolled under any name at all."""
+        parsed = self._package()
+        reaching = self._names_that_reach_a_trial_start(parsed)
+        checked = []
         for entry in manifest.BASELINE_COMMANDS:
+            script = next((token for token in entry.command_prefix.split()
+                           if token.endswith(".py")), None)
+            if script is None:
+                continue
+            name = Path(script).name
+            if name not in parsed:
+                continue      # a per-capability command, not a module we ship
+            checked.append(entry.name)
             with self.subTest(command=entry.name):
-                self.assertNotIn("trial_executor", entry.command_prefix)
+                self.assertFalse(
+                    parsed[name][1] & reaching,
+                    "enrolled operator command %r can start a trial -- the "
+                    "blocked round-trip declaration is discharged" % entry.name)
+        self.assertIn("trial-recovery", checked,
+                      "the resolution stopped reaching the trial commands, so "
+                      "this assertion has quietly stopped checking anything")
 
     def test_the_acceptance_PROOF_half_still_has_no_producer_either(self):
         """The second historical dead end had two halves. The bypass half is closed
@@ -1186,42 +1285,100 @@ class MalformedAndUnreadableStateNeverReadsAsAWayOutTests(unittest.TestCase,
             (sa.writer_state_key(core.WriterState.BLOCKING_LIVE_ENABLE),),
             "an unverifiable writer was granted a non-blocking state")
 
-    @unittest.expectedFailure
-    def test_KNOWN_DEFECT_an_undecodable_writer_has_its_entry_closed(self):
-        """A DEFECT THIS GATE FOUND, recorded here so it cannot be lost, and
-        deliberately recorded as an EXPECTED FAILURE so that fixing it turns this
-        into an unexpected success and forces this record to be discharged.
+    def test_an_UNDECODABLE_writer_never_has_its_entry_closed(self):
+        """A DEFECT THIS GATE FOUND, now CLOSED, and pinned here so it stays that
+        way.
 
-        NOT this task's to fix, and a naive fix is dangerous -- see the report that
-        accompanies this file. The clearing authority is the build lead.
+        What used to happen: the bypass scanner returned NO violations for a source
+        file it could not decode as UTF-8, so "this file passes the scan" and "this
+        file could not be read" were the same answer -- silence passing, inside the
+        trust scanner. The reaper's predicate is hash-changed AND scan-clean, so a
+        flagged writer whose bytes changed to something not decodable as UTF-8 had
+        its migration entry CLOSED and the project reported green over a bypass
+        that was still there. The structural classifier gets this right on its own
+        (see the two tests above); it never got asked, because the
+        reconcile-on-read reap runs first and removes the entry.
 
-        What happens: the bypass scanner returns NO violations for a source file it
-        cannot decode as UTF-8, so "the file passes the scan" and "the file could
-        not be read" are the same answer. The reaper's predicate is
-        hash-changed AND scan-clean, so a flagged writer whose bytes change to
-        something not decodable as UTF-8 has its migration entry CLOSED, and the
-        project reports green over a bypass that is still there. The structural
-        classifier gets this right on its own (see the two tests above); it never
-        gets asked, because the reconcile-on-read reap runs first and removes the
-        entry.
+        The trigger was ordinary, not adversarial: a source saved latin-1 or cp1252
+        -- accented content, a Windows-authored file -- is valid Python.
 
-        The scanner's own comment, two lines below the branch responsible, says an
-        unparseable file "cannot be statically verified safe" and must be treated
-        as a violation "so the build does not pass blind". The read-failure branch
-        immediately above it does the opposite.
-        """
+        Fixed by giving the decode failure its own clause, reporting the same
+        `unparseable` kind the scanner already raises for a file that will not
+        parse, on identical reasoning: a file that cannot be statically verified
+        must never read as verified. The ACCESS-failure half is a different
+        question and is still open by design -- see the record below."""
         project = _Project(self)
         path = project.root / UPKEEP_WRITER
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Valid Python in a non-UTF-8 encoding -- not adversarial, just a file
-        # saved as latin-1. Its bytes differ from the recorded pause-time hash.
-        path.write_bytes("X = 'caf\xe9'\n".encode("latin-1"))
+        # Valid Python in a non-UTF-8 encoding, still carrying the bypass it was
+        # flagged for. Its bytes differ from the recorded pause-time hash, so the
+        # reap reaches the scan branch rather than short-circuiting.
+        path.write_bytes(
+            "from external_write.run_envelope import mint_run_envelope  "
+            "# caf\xe9\n".encode("latin-1"))
         project.queue([_queue_entry(UPKEEP_WRITER, ["sealed_kernel_import"],
                                    "0" * 64)])
         self.assertEqual(
             self.observe(project, UPKEEP_WRITER),
             (sa.writer_state_key(core.WriterState.BLOCKING_LIVE_ENABLE),),
             "an undecodable writer's entry was closed as if it had been fixed")
+
+    def test_an_undecodable_source_is_REPORTED_by_the_scanner_itself(self):
+        """The upstream half, asserted directly, because the reap is not the only
+        consumer. The check that decides which operator writers get FLAGGED in the
+        first place sweeps whole directories through this same function, so a file
+        it cannot read reading as clean meant such a writer was never flagged at
+        all -- the more consequential direction of the same defect.
+
+        Driven as a directory sweep next to a byte-identical readable control, so
+        the assertion is that the sweep reports BOTH rather than that it reports
+        something."""
+        project = _Project(self, with_lib=False)
+        project.write("agents/x/__init__.py", "")
+        project.write("agents/x/control.py", "import urllib.request\n")
+        (project.root / "agents" / "x" / "bad.py").write_bytes(
+            "import urllib.request  # caf\xe9\n".encode("latin-1"))
+
+        found = {Path(v.path).name: v.kind
+                 for v in scan.scan_paths([str(project.root / "agents")])}
+        self.assertEqual(found.get("control.py"), "forbidden_import",
+                         "fixture precondition: the readable control is flagged")
+        self.assertIn("bad.py", found,
+                      "a source the scanner cannot read is passing silently")
+        self.assertEqual(found["bad.py"], "unparseable")
+
+    @unittest.expectedFailure
+    def test_KNOWN_GAP_an_inaccessible_source_still_reads_as_clean(self):
+        """THE REMAINING HALF of the defect above, and it is deliberately still
+        open. Recorded as an EXPECTED FAILURE so that closing it turns this into an
+        unexpected success -- a hard failure -- and forces this record to be
+        discharged rather than quietly outliving its reason.
+
+        The clearing authority is the build lead.
+
+        Why the two halves were split rather than fixed together. A DECODE failure
+        is a content problem: the file is right there and readable, it simply is not
+        valid UTF-8, so refusing to vouch for it costs nothing and was pure
+        fail-open. An ACCESS failure is a different question. This function is
+        called with whole DIRECTORIES -- by the build-time gate, by the check that
+        decides which writers get flagged at upgrade, and by four other read
+        surfaces -- so treating one permission-denied `.py` as a violation would
+        fail every build that contains one, anywhere in a swept tree. That is the
+        fail-closed-check-that-bricks-everything shape, and this cut exists partly
+        to stop opening states an operator cannot leave. Closing it needs the input
+        set scoped first, which is a design decision with cross-consumer reach.
+
+        What is NOT at risk in the meantime, and is pinned green above: the readers
+        that must distinguish an absent file from an inaccessible one already do so
+        on their own read's exception type, so an inaccessible writer's entry is
+        never closed."""
+        project = _Project(self, with_lib=False)
+        path = project.write("agents/y/locked.py", "import urllib.request\n")
+        os.chmod(path, 0o000)
+        self.addCleanup(os.chmod, path, 0o644)
+        self.assertTrue(
+            scan.scan_paths([str(path)]),
+            "a source the scanner could not open reported no violations")
 
 
 class DuplicateAndMixedEntriesNamingOneFileTests(unittest.TestCase, _Observing):
@@ -1256,6 +1413,63 @@ class DuplicateAndMixedEntriesNamingOneFileTests(unittest.TestCase, _Observing):
         self.assertIn("more than one open item names", message)
         self.assertEqual(store.active_acknowledgements(str(self.project.root)),
                          {})
+
+    def test_whatever_the_SURFACE_hands_over_is_not_a_DEAD_END(self):
+        """THE HARM, pinned without pinning the defect.
+
+        The defect: the health projection keys its per-writer state on the relpath,
+        so it structurally cannot represent two open entries naming one file in
+        different states and reports whichever was iterated last. For this fixture
+        it therefore hands the operator the accept-the-risk command -- which the
+        eligibility guard then refuses, because a decision is keyed on the path and
+        cannot say which entry it accepted.
+
+        That shape is deliberately NOT asserted. Pinning "the surface reports one of
+        two states, last one wins" would turn a defect into a contract, and the
+        eventual fix would have to break a passing test.
+
+        What IS asserted is the harm, in a form that stays true after any fix:
+        whatever the surface hands the operator must not be a dead end. Either the
+        command it names works, or the outcome routes the operator onward. What must
+        never happen is a command that fails while saying nothing about what to do
+        instead -- and that is exactly the shape both of this cut's historical dead
+        ends had."""
+        instruction = health.overall_status(
+            str(self.project.root))["open_external_write_bypass"][
+                "actions"][UPKEEP_WRITER]
+        self.assertTrue(instruction.strip(), "the surface handed over nothing")
+
+        command = None
+        for entry in manifest.BASELINE_COMMANDS:
+            index = instruction.find(entry.command_prefix)
+            if index != -1:
+                command = instruction[index:].split("\n")[0].strip()
+                break
+
+        if command is None:
+            # No command offered: then the text itself must route to a person.
+            self.assertIn("ask your assistant", instruction.lower(),
+                          "no command and no route is a dead end")
+            return
+
+        result = self.run_command(self.project, command)
+        self.assertNotIn("Traceback", result.stdout + result.stderr)
+        if result.returncode == 0:
+            self.assertNotIn(
+                sa.writer_state_key(core.WriterState.NEEDS_PERSON),
+                self.observe(self.project, UPKEEP_WRITER,
+                             allow_ambiguity=True),
+                "the command reported success and left the writer needing a "
+                "person")
+            return
+        message = (result.stdout + result.stderr).lower()
+        self.assertTrue(message.strip(),
+                        "the surface handed over a command that fails silently")
+        self.assertTrue(
+            "ask your assistant" in message
+            or core.BYPASS_UNREPAIRED_REPAIR in message,
+            "the surface handed the operator a command that is refused without "
+            "naming anything they can do instead: %r" % message)
 
     def test_both_entries_still_hold_live_enable_back(self):
         status = health.overall_status(str(self.project.root))
@@ -1491,11 +1705,25 @@ class ThisGateNeverInjectsAStateTests(unittest.TestCase):
                          "a hand-written consent record would make the fixture, "
                          "not the command, the thing under test")
 
-    def test_the_two_surfaces_are_read_in_exactly_ONE_place(self):
-        """A second reader is a second thing that has to agree. Both surface calls
-        must live inside the observation helper."""
+    def test_the_PRODUCTION_CLASSIFIER_is_read_in_exactly_ONE_place(self):
+        """The production classifier has exactly one reader in this file, so no
+        second place can form its own opinion about a state.
+
+        NARROWED ON PURPOSE, and the narrowing is the honest claim rather than the
+        flattering one. This does NOT say both surfaces are single-sourced: several
+        tests read the health projection directly to inspect specific fields of the
+        bypass block -- `blocking`, `read_error`, `writer_relpaths`,
+        `blocking_writer_relpaths`, `descriptions`, `actions` -- which is a
+        legitimate thing for a test to look at and is not a state read.
+
+        What this guard is still worth: a cross-surface state COMPARISON needs the
+        classifier, so guarding the classifier is what keeps every such comparison
+        inside `observe`, where the two surfaces are required to agree. A test that
+        wanted to decide a state for itself would have to call the classifier, and
+        it cannot."""
         tree = self._own_tree()
         readers = {"bespoke_writer_state_report"}
+        seen = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.FunctionDef):
                 continue
@@ -1503,11 +1731,11 @@ class ThisGateNeverInjectsAStateTests(unittest.TestCase):
                 if (isinstance(inner, ast.Call)
                         and isinstance(inner.func, ast.Attribute)
                         and inner.func.attr in readers):
-                    self.assertEqual(
-                        node.name, "observe",
-                        "%r reads the production classifier directly; every "
-                        "state read must go through the observation helper"
-                        % node.name)
+                    seen.append(node.name)
+        self.assertEqual(
+            sorted(set(seen)), ["observe"],
+            "the production classifier is read outside the observation helper, so "
+            "a second place can decide a state for itself")
 
     def test_every_fixture_builder_writes_raw_artifacts_and_returns_a_subject(self):
         for key, builder in sorted(_FIXTURE_BUILDERS.items()):
@@ -1516,6 +1744,33 @@ class ThisGateNeverInjectsAStateTests(unittest.TestCase):
                 self.assertEqual(builder.__code__.co_argcount, 1,
                                  "a builder takes the test case and nothing "
                                  "else -- it must not be handed a state")
+
+
+class NoFixtureReachesItsStateByNeverBeingFLAGGEDTests(unittest.TestCase,
+                                                        _Observing):
+    """The durability property the state set alone does not give.
+
+    Every one of these states is a state of an OPEN bespoke-writer entry, so every
+    fixture must actually have one. A builder that reached its state by never
+    putting an entry on the queue would be indistinguishable from a real one for the
+    state observed as an absence -- and it would then also stand in as the
+    "outside `from_states`" case for both actions' rejection runs, where the
+    property being asserted is that the state does not change. Nothing would notice.
+
+    Absence must never be evidence. Quantified over the builder map, so a builder
+    added later is covered without anyone remembering."""
+
+    def test_every_builder_leaves_a_real_open_entry_naming_its_subject(self):
+        for key, builder in sorted(_FIXTURE_BUILDERS.items()):
+            with self.subTest(state=key):
+                project, subject = builder(self)
+                flagged = [str(e.get("writer_relpath")) for e in
+                           core.open_bespoke_writer_migrations(str(project.root))]
+                self.assertIn(
+                    subject, flagged,
+                    "the fixture for %s carries no open entry for %r, so its "
+                    "state was reached by never being flagged rather than by "
+                    "anything the product did" % (key, subject))
 
 
 if __name__ == "__main__":  # pragma: no cover
