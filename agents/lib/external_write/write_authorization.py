@@ -76,9 +76,11 @@ structural facts, not one convention, put the preflight on the path:
      trial executor is handed one; it has no other source of the units to apply,
      the dispatch to apply them through, or the audit to record.
 
-  2. Bringing an `AuthorizedPlan` into existence requires this module's private
-     construction token, and "bringing into existence" is meant to cover every
-     route Python offers, not just `AuthorizedPlan(...)`:
+  2. Every ORDINARY route to an `AuthorizedPlan` runs this module's private
+     construction token check — not just `AuthorizedPlan(...)`. "Ordinary" is
+     doing real work in that sentence and is not a hedge: see the DISCLOSED
+     BOUND below for why a list of routes cannot be complete, and what these
+     guards therefore are.
        * a direct construction without the token raises;
        * the token is an `InitVar`, so it is NOT retained as a field — it cannot
          be read back off a plan you were legitimately handed, and
@@ -93,18 +95,18 @@ structural facts, not one convention, put the preflight on the path:
          `__post_init__`. An authorization is not a portable document: reviving
          one in another process, at another time, with the registry in another
          state, is not something the gate ever authorized.
-       * SUBCLASSING raises, via `__init_subclass__`. This was the one route the
-         claim above did not actually cover, and it was the worst of them: a
-         subclass that OVERRIDES `__post_init__` never runs the token check at
-         all, so its instances carry NONE of the invariants below while still
-         satisfying `isinstance(plan, AuthorizedPlan)` in every consumer — and
-         the token is never named, so no guard watching the token could see it.
-         It is refused at class-creation time rather than instance-creation time,
-         so the refusal cannot depend on what the subclass happens to override.
+       * SUBCLASSING raises, via `__init_subclass__`. This is the worst-behaved
+         of the ordinary routes: a subclass that OVERRIDES `__post_init__` never
+         runs the token check at all, so its instances carry NONE of the
+         invariants below while still satisfying
+         `isinstance(plan, AuthorizedPlan)` in every consumer — and the token is
+         never named, so a guard watching the token cannot see it. It is refused
+         at class-creation time rather than instance-creation time, so the
+         refusal cannot depend on what the subclass happens to override.
 
   3. A trial-intent plan re-validates its own preconditions in
-     `__post_init__`, so the invariants hold at CONSUMPTION time, not merely at
-     the moment they were checked: the carried verdict must be a real
+     `__post_init__`, so the invariants are re-established at CONSUMPTION time,
+     not merely at the moment they were computed: the carried verdict must be a real
      `trial_eligibility.TrialEligibility`, eligible, with no refusals, for THIS
      operation kind; the plan's units must be byte-equal to the units that
      verdict blessed (a check-then-swap cannot substitute a different plan after
@@ -120,32 +122,53 @@ structural facts, not one convention, put the preflight on the path:
      and it calls it BEFORE the live-enforcement funnel, so an ineligible
      operation never consumes a blast-radius slot it was never entitled to.
 
-DISCLOSED BOUND — the ceiling is unchanged: build-time enforcement plus
-operator-as-approver. This is not a runtime sandbox and not an OS-level control,
-and the bound is stated as what it actually is rather than as the strongest thing
-that could be said. Two forgeries remain available to an author who sets out to
-commit one: reaching into this module for the private `_ISSUED_BY_AUTHORIZE`
-sentinel AND hand-building an eligible-looking verdict (nothing can check a
-verdict's provenance — it is an ordinary frozen record); or reaching past a
-guard at runtime — rewriting a genuine plan in place with `object.__setattr__`,
-or deleting `__init_subclass__` off the class — neither of which any Python
-object can prevent. Both are exactly as available as mis-implementing `undo_one`
-has always been.
+------------------------------------------------------------------------------
+DISCLOSED BOUND — what the guards above are, and what they are not
+------------------------------------------------------------------------------
+The ceiling is unchanged: build-time enforcement plus operator-as-approver. It is
+NOT a runtime sandbox and not an operating-system-level control.
 
-This enumeration was previously WRONG rather than merely conservative: it said
-two, but subclassing-with-an-overriding-`__post_init__` was a third, undisclosed
-route, and the claim above that construction "covers every route Python offers"
-did not hold for it. `__init_subclass__` closes it, and a companion AST
-assertion over this package's own source
-(`test_external_write_write_authorization._modules_subclassing`) catches any
-in-package use of the route if that guard is ever removed. The count is two
-because the route was closed, not because it was overlooked again.
+Read the construction guards accordingly. They are a BUILD-TIME ANTI-DRIFT
+control: they stop a capability, or a future author of this package, from
+ACCIDENTALLY bringing a carrier into existence or mutating one outside the
+sanctioned path — an ordinary construction, an ordinary `replace`, an ordinary
+copy / deepcopy / pickle revival, an ordinary subclass. They are NOT a runtime
+integrity guarantee about the object, and they are not designed to defend against
+a determined, adversarial use of Python's own reflection machinery from inside the
+same process. In-process reflection defeats any of them by construction:
+allocating an instance through the base object-construction machinery so no
+initializer runs at all, reassigning fields by calling the built-in
+attribute-setting machinery directly instead of using ordinary
+attribute-assignment syntax, or removing a guard from the class at run time.
 
-What is structurally true is narrower and is the thing the design rests on: no
-path through this package's own production code, and no ordinary
+Those three are ILLUSTRATIVE, NOT EXHAUSTIVE, and that distinction is the whole
+point of this section. This bound has now been stated three times and was wrong
+twice: first it omitted a route (subclassing), then it asserted a closed COUNT of
+remaining routes, which a plain allocate-then-assign forgery falsifies. No list of
+in-process reflection paths can be complete, so this states the CEILING instead
+and stops enumerating. Do not replace it with a count again.
+
+This is the same framing, and the same honesty, that `scan.py`'s own
+enforcement-ceiling section states for the sibling AST bypass scanner: a
+deterministic check at build time, backed by a person approving the result, rather
+than a runtime or operating-system-level sandbox — with the reflection paths it
+cannot close disclosed plainly rather than left as silent gaps. The realistic
+failure being guarded against is the one this codebase has actually shipped: a
+mechanism drifting off the enforced path — a second construction site added in
+good faith, a consumer specializing the carrier for convenience, a `replace` that
+quietly escalates an ordinary plan to a trial plan. Not an author setting out to
+forge an authorization. Such an author is equally free to hand-build an
+eligible-looking verdict (nothing can check a verdict's provenance — it is an
+ordinary frozen record), mis-implement `undo_one`, or edit this module.
+
+What IS structurally true is narrower, and it is what the design rests on: no path
+through this package's own production code, and no ordinary construction,
 reconstruction, copy, revival or specialization of a plan a consumer was handed,
 yields a trial authorization without the preflight having returned an eligible
-verdict for exactly the units that will be applied.
+verdict for exactly the units that will be applied. Two AST assertions over this
+package's own source (`_modules_constructing` / `_modules_subclassing` in
+`test_external_write_write_authorization.py`) keep the first half of that honest
+as the package grows.
 
 ------------------------------------------------------------------------------
 What this module does NOT do
@@ -295,7 +318,10 @@ class AuthorizedPlan:
                  is UNAVOIDABLE" section.
 
     Every invariant below is re-validated HERE rather than only at the moment
-    authorization computed it, so the guarantees hold at consumption time.
+    authorization computed it, so an ordinarily-constructed plan re-establishes
+    them at consumption time. See the module docstring's DISCLOSED BOUND for what
+    that does and does not amount to -- these are build-time anti-drift checks,
+    not a runtime integrity guarantee about the object.
     """
 
     op: Operation
@@ -435,13 +461,16 @@ class AuthorizedPlan:
             "elsewhere or later would not be that decision.")
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
-        # SUBCLASSING is the third route into existence, alongside a direct call
+        # SUBCLASSING is an ORDINARY route into existence, alongside a direct call
         # and the reconstruction protocols above, and until this guard existed it
         # was open: `class Forged(AuthorizedPlan): def __post_init__(self,
         # issued_by): return` produces instances that never ran a single check
         # here, hold no token, and still pass `isinstance(plan, AuthorizedPlan)`
         # in every consumer. Nothing watching the token could catch it, because
-        # such a subclass never names the token.
+        # such a subclass never names the token. It is worth closing because it is
+        # a shape a future author could reach for in good faith -- not because
+        # closing it completes any set of routes; see the module docstring's
+        # DISCLOSED BOUND for why no such set can be enumerated.
         #
         # Refused at CLASS-creation time on purpose. Refusing at instance
         # creation would have to reason about what the subclass overrode -- a

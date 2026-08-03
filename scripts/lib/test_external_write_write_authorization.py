@@ -365,13 +365,17 @@ def _modules_subclassing(identifier):
     """Every production module that names `identifier` in a `ClassDef.bases`
     position — i.e. SUBCLASSES it, by AST.
 
-    A subclass is the third route into existence, alongside a direct call and the
-    reconstruction protocols, and it is the nastiest of the three: an overriding
-    `__post_init__` never runs the token check at all, so the resulting object
-    carries none of the carrier's invariants while still satisfying
+    A subclass is an ORDINARY route into existence, alongside a direct call and
+    the reconstruction protocols, and it is the worst-behaved of those: an
+    overriding `__post_init__` never runs the token check at all, so the resulting
+    object carries none of the carrier's invariants while still satisfying
     `isinstance(plan, AuthorizedPlan)` in every consumer. It is invisible to
     `_modules_constructing` (a class base is not a call) and invisible to the
     construction-token test (the token is never named). Hence its own probe.
+
+    Anti-drift over this package's own source, not a completeness claim: see
+    `write_authorization`'s DISCLOSED BOUND for why in-process reflection routes
+    cannot be enumerated, and why nothing here should try.
     """
     hits = []
     for rel, tree in _production_modules():
@@ -451,8 +455,16 @@ class SingleAuthorizationImplementationTests(unittest.TestCase):
         # The first retarget replaced the naming check with the CALL check alone,
         # which lost a shape the naming check had covered: a production module
         # could subclass the carrier and override `__post_init__`, and a class
-        # base is not a call. Both routes are asserted now, separately, because
-        # they fail differently -- see `_modules_subclassing`.
+        # base is not a call. Both of THOSE routes are asserted now, separately,
+        # because they fail differently -- see `_modules_subclassing`.
+        #
+        # Neither assertion is a completeness claim, and this pair must never be
+        # read as one. They are build-time ANTI-DRIFT checks over this package's
+        # own source: they catch a carrier brought into existence off the
+        # sanctioned path by a future author in good faith. In-process reflection
+        # defeats them by construction and is disclosed as a within-ceiling bound
+        # in `write_authorization`'s DISCLOSED BOUND -- which is also why no test
+        # here counts remaining routes.
         self.assertEqual(_modules_constructing("AuthorizedPlan"), [_WA_REL])
         self.assertEqual(
             _modules_subclassing("AuthorizedPlan"), [],
@@ -1272,6 +1284,91 @@ class ZoneMembershipTests(unittest.TestCase):
         # A capability has no business authorizing its own write.
         self.assertNotIn("write_authorization",
                          scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES)
+
+
+class CeilingHonestyTests(unittest.TestCase):
+    """The carrier's stated bound must be the CEILING, never a count of routes.
+
+    This is a trust-surface prose guard, and it exists because the prose was wrong
+    twice in two review rounds: first it omitted a route (subclassing), then it
+    asserted a closed COUNT of remaining forgeries, which a plain
+    allocate-then-assign reflection forgery falsifies. No enumeration of
+    in-process reflection paths can be complete, so the honest statement is the
+    enforcement ceiling this project already states for its sibling AST bypass
+    scanner: a build-time anti-drift check backed by operator-as-approver, never a
+    runtime sandbox, with the reflection paths it cannot close disclosed as
+    within-ceiling bounds rather than left as silent gaps.
+
+    Cheap by design — it reads the real docstrings, asserts no
+    completeness-claiming vocabulary appears in them, and asserts the ceiling and
+    the illustrative-not-exhaustive marker DO. That is enough to stop a third
+    attempt at a count without pinning any wording this guard would then own.
+    """
+
+    # Vocabulary that can only be doing one job in a bound like this: claiming
+    # completeness. Substring-matched, lowercased.
+    _COMPLETENESS_CLAIMING = (
+        "impossible", "exhaustive", "every route python offers",
+        "cannot be forged", "unforgeable", "tamper-proof", "tamperproof",
+    )
+
+    # The NEGATED forms are the opposite of a completeness claim -- they are the
+    # marker the bound is required to carry -- so they are removed before the ban
+    # is applied, rather than dropped from the ban. A bare "is exhaustive" still
+    # trips; "not exhaustive" is what the second test below insists on.
+    _NEGATED_FORMS = ("not exhaustive", "non-exhaustive", "nonexhaustive")
+
+    def setUp(self):
+        # Under `python -OO` docstrings are stripped, so there is no prose to
+        # check and every assertion below would be a confusing false red. Skipped
+        # explicitly rather than silently passing on an empty string: the guard is
+        # VACUOUS in that mode, not satisfied by it.
+        if wa.__doc__ is None or wa.AuthorizedPlan.__doc__ is None:
+            self.skipTest("docstrings stripped (-OO); there is no prose to check")
+
+    def _trust_prose(self):
+        """The module docstring plus the carrier's own class docstring — the two
+        places a reader looks to learn what the carrier guarantees."""
+        return "\n".join([wa.__doc__, wa.AuthorizedPlan.__doc__]).lower()
+
+    def _prose_without_negations(self):
+        prose = self._trust_prose()
+        for negated in self._NEGATED_FORMS:
+            prose = prose.replace(negated, "")
+        return prose
+
+    def test_the_bound_claims_no_completeness(self):
+        prose = self._prose_without_negations()
+        for phrase in self._COMPLETENESS_CLAIMING:
+            self.assertNotIn(
+                phrase, prose,
+                f"the carrier's stated bound uses {phrase!r}. In-process "
+                "reflection defeats every construction guard here by "
+                "construction, so a completeness claim is false however it is "
+                "phrased. State the ceiling instead")
+
+    def test_the_bound_states_the_ceiling_and_marks_its_examples_illustrative(self):
+        prose = self._trust_prose()
+        self.assertIn("not a runtime sandbox", prose,
+                      "the bound must name the enforcement ceiling explicitly")
+        self.assertIn("anti-drift", prose,
+                      "the bound must say what the guards ARE -- a build-time "
+                      "anti-drift control -- not only what they are not")
+        self.assertIn("not exhaustive", prose,
+                      "any reflection examples the bound gives must be marked "
+                      "illustrative, or the next reader will read them as the set")
+
+    def test_no_forgery_count_is_asserted(self):
+        """A bare count is the specific shape that was wrong. Catch it as a
+        count, not as a particular sentence, so a rephrased count trips too."""
+        prose = self._trust_prose()
+        for count in ("one forgery", "two forgeries", "three forgeries",
+                      "two remaining", "three remaining"):
+            self.assertNotIn(
+                count, prose,
+                f"the bound counts remaining forgeries ({count!r}). Any count is "
+                "a completeness claim about in-process reflection, which cannot "
+                "be enumerated -- this has already been wrong twice")
 
 
 if __name__ == "__main__":
