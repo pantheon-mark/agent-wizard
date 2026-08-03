@@ -247,5 +247,99 @@ class TestManifestAsDicts(unittest.TestCase):
             self.assertTrue(entry_dict["allowlist_eligible"], f"{name} should be eligible")
 
 
+class TestEveryOperatorInvocableEntrypointIsAccountedFor(unittest.TestCase):
+    """The manifest claims to classify **every** operator-invocable command this
+    project ships. Until now nothing checked that against the entrypoints that
+    actually exist: `test_allowlist_gate` and `test_operator_runnable_isolation`
+    both iterate `BASELINE_COMMANDS`, so a module that grew a `__main__` without
+    being enrolled left the claim quietly false and nothing red.
+
+    This test closes that by pinning the INVENTORY rather than by judging modules.
+    It discovers every non-test lib module with a `__main__` block (by AST, not by
+    text), derives the enrolled set from the manifest's own prefixes, and requires
+    the remainder to equal a declared list exactly. A module that grows a
+    `__main__` is then in neither set and fails here, and a module that later gets
+    enrolled has to be removed from the list — so either change is a visible,
+    deliberate diff instead of a silent drift.
+
+    `_NOT_MANIFEST_CLASSIFIED` is a factual record of what the manifest does not
+    classify today, **not an endorsement that none of them should be**. It is the
+    current state made visible; see this file's own history for why that is worth
+    more than an invisible gap.
+    """
+
+    _EXTERNAL_WRITE_DIR = _AGENTS_LIB / "external_write"
+
+    # Lib modules that ship a `__main__` and are NOT in the manifest today.
+    # Adding to this list is a decision a reviewer sees in the diff.
+    _NOT_MANIFEST_CLASSIFIED = frozenset({
+        "acceptance_ceremony.py",
+        "adapters.py",
+        "capability_registration.py",
+        "capability_runner.py",
+        "coverage_gate.py",
+        "dependency_enrollment.py",
+        "lifecycle_state.py",
+    })
+
+    def _modules_with_a_main_block(self):
+        import ast
+        found = set()
+        for path in sorted(self._EXTERNAL_WRITE_DIR.glob("*.py")):
+            if path.name.startswith("test_"):
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in tree.body:
+                if (isinstance(node, ast.If)
+                        and isinstance(node.test, ast.Compare)
+                        and isinstance(node.test.left, ast.Name)
+                        and node.test.left.id == "__name__"):
+                    found.add(path.name)
+                    break
+        return found
+
+    def _modules_the_manifest_enrolls(self, discovered):
+        return {name for name in discovered
+                if any(entry.command_prefix.endswith(f"/{name}")
+                       for entry in BASELINE_COMMANDS)}
+
+    def test_every_lib_entrypoint_is_either_enrolled_or_declared_unclassified(self):
+        discovered = self._modules_with_a_main_block()
+        self.assertTrue(discovered, "the AST sweep must find something")
+        enrolled = self._modules_the_manifest_enrolls(discovered)
+        self.assertEqual(
+            discovered - enrolled, self._NOT_MANIFEST_CLASSIFIED,
+            "a lib module that ships an operator-invocable `__main__` must be "
+            "classified in command_manifest.BASELINE_COMMANDS, or listed here "
+            "explicitly. Neither is not an option: the manifest's own claim is "
+            "that it covers every operator-invocable command, and its consumers "
+            "are the allowlist build and the PreToolUse hook.")
+
+    def test_the_trial_recovery_entrypoint_is_enrolled(self):
+        """The operator's only exit from an interrupted trial issues `undo_one`
+        against their real surface — the same class as the acceptance CLI, which is
+        enrolled as a live write for exactly that reason."""
+        entry = find_command("trial-recovery")
+        self.assertIsNotNone(
+            entry, "the recovery command is operator-invocable and performs a "
+                   "live external write; it must be classified")
+        self.assertEqual(entry.command_class, LIVE_WRITE)
+        self.assertTrue(entry.writes_external)
+        self.assertFalse(is_allowlist_eligible(entry),
+                         "a live write must never be auto-approved")
+
+    def test_the_enrolled_prefix_agrees_with_the_modules_own_constant(self):
+        """The manifest hand-spells its prefixes (five entries already do, and
+        importing the recovery stack into a module the PreToolUse hook loads would
+        be the wrong trade). So the agreement is pinned at build time instead: if
+        the emitted lib's location or this module's filename ever moves, the
+        prescribed repair command and the manifest entry move together or this
+        fails."""
+        from external_write.trial_recovery import RECOVERY_ENTRYPOINT_REL
+        entry = find_command("trial-recovery")
+        self.assertEqual(entry.command_prefix,
+                         f"python3 {RECOVERY_ENTRYPOINT_REL}")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

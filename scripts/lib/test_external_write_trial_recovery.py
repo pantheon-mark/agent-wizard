@@ -57,9 +57,12 @@ Uses stub clients only; no network. Every test writes into its own temp director
 """
 
 import ast
+import json
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -1000,6 +1003,76 @@ class UntouchedUnitsTests(_RecoveryBase):
         outcome = self.recover(trial_id)
         self.assertNotIn("r2", outcome.recovery_required_unit_ids)
 
+    def test_the_three_recovery_buckets_PARTITION_every_declared_unit_state(self):
+        """The buckets must be a TOTAL partition, checked structurally rather than
+        by inspection, because the alternative is a negative catch-all: "anything
+        not driven and not settled was never applied". A negative bucket silently
+        absorbs a state added later, and the state it absorbs is reported as
+        harmless. Mirrors `test_every_state_is_classified_exactly_once` one screen
+        away in the journal's own suite, for the same reason.
+        """
+        buckets = (tj.RECOVERY_DRIVEN_STATES,
+                   tj.RECOVERY_NEVER_APPLIED_STATES,
+                   tj.RECOVERY_SETTLED_STATES)
+        union = set()
+        for bucket in buckets:
+            self.assertEqual(union & set(bucket), set(),
+                             "a state may belong to exactly ONE bucket -- two "
+                             "dispositions for one state is two answers")
+            union |= set(bucket)
+        self.assertEqual(union, set(tj.TRIAL_UNIT_STATES),
+                         "every declared unit state must be classified; an "
+                         "unclassified state has no disposition, and a state "
+                         "with no disposition is one nobody decided about")
+
+    def test_an_UNCLASSIFIED_state_holding_a_live_mutation_REFUSES(self):
+        """The fail-open this closes, reproduced exactly.
+
+        A future state added to the journal and classified into `OUTCOME_STATES`
+        satisfies the journal's own exhaustiveness guard, so nothing there fires.
+        If recovery buckets by "not driven and not settled", a unit sitting in that
+        new state -- with a live, unreversed mutation on the operator's surface --
+        is reported as never applied, the run returns ok, and the operator is told
+        nothing is outstanding. Silence must REFUSE, not default to the benign
+        answer.
+        """
+        seventh = "undo_confirmed"
+        trial_id = self.crash(_KilledAfterTheMutationLanded())
+        self.assertEqual(self.surface.snapshot()["r1"], [APPLIED_LABEL],
+                         "fixture precondition: the mutation is live")
+
+        path = Path(self.journal_dir) / f"{trial_id}.json"
+        record = json.loads(path.read_text(encoding="utf-8"))
+        record["units"][0]["state"] = seventh
+        path.write_text(json.dumps(record), encoding="utf-8")
+
+        # The journal must ACCEPT the record, or this test would be measuring the
+        # record validator instead of the bucket. Classified as an outcome state,
+        # exactly as a real future addition would be.
+        with mock.patch.object(tj, "TRIAL_UNIT_STATES",
+                               tj.TRIAL_UNIT_STATES + (seventh,)), \
+             mock.patch.object(tj, "OUTCOME_STATES",
+                               tj.OUTCOME_STATES + (seventh,)), \
+             mock.patch.dict(tj.LEGAL_TRANSITIONS,
+                             {seventh: (tj.STATE_RESTORED_VERIFIED,)}):
+            self.assertEqual(
+                tj.load_trial_journal(
+                    trial_id, journal_dir=self.journal_dir).unit_states(),
+                {"r1": seventh}, "fixture precondition: the record validates")
+
+            with self.assertRaises(trc.TrialRecoveryError) as ctx:
+                self.recover(trial_id)
+
+        message = str(ctx.exception)
+        self.assertIn(seventh, message,
+                      "the refusal must NAME the state it does not recognize")
+        self.assertIn("r1", message)
+        self.assertNotIn(tx.REFUSAL_MARKER_NOTHING_OUTSTANDING, message,
+                         "a unit in an unrecognized state may be holding a live "
+                         "mutation, so nothing may claim otherwise")
+        self.assertEqual(self.surface.snapshot()["r1"], [APPLIED_LABEL],
+                         "and it refuses BEFORE touching anything")
+
 
 # ---------------------------------------------------------------------------
 # 11. The read-facade resolution is single-sourced, and works in a fresh process
@@ -1224,6 +1297,22 @@ class CliTests(unittest.TestCase):
         self.assertTrue(trc.RECOVERY_ENTRYPOINT_REL.endswith(
             "external_write/trial_recovery.py"))
 
+    def test_the_entrypoint_relpath_agrees_with_the_emitters_lib_destination(self):
+        """The `agents/lib/` half of the path was unpinned, and it is the half that
+        matters most: if the emitted lib destination ever moves, the command the
+        operator is told to run points at a file that does not exist — a named
+        repair that cannot be performed, which is the failure this whole state's
+        exit exists to avoid.
+
+        The kernel cannot import the build-side constant (it ships into the
+        operator's project, where `agent_emitter` does not exist), so the agreement
+        is pinned here at build time instead of coupled at run time."""
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import agent_emitter
+        self.assertEqual(
+            trc.RECOVERY_ENTRYPOINT_REL,
+            f"{agent_emitter._EXTERNAL_WRITE_LIB_REL}/trial_recovery.py")
+
 
 class TheEntrypointActuallyRunsTests(_RecoveryBase):
     """The difference between "an exit exists" and "an exit runs".
@@ -1274,6 +1363,316 @@ class TheEntrypointActuallyRunsTests(_RecoveryBase):
         self.assertEqual(result.returncode, trc.EXIT_BAD_ARGS)
         self.assertIn("--force", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
+
+
+# The fixture operator project's adapter module. File-backed on both sides, so the
+# "live surface" survives a hard process kill and a separate process can observe
+# it -- which is the whole point: an in-memory surface cannot model a crash.
+_FIXTURE_OP_KIND = "fixture.recovery.set_exact_labels"
+
+_FIXTURE_ADAPTER_SOURCE = '''\
+"""A trial-eligible adapter over a JSON file, for driving the real recovery
+entrypoint in a real operator project. Not a claim about any shipped or
+operator-authored adapter -- it reproduces the CONTRACT SHAPE only."""
+import json
+import os
+from pathlib import Path
+
+from external_write.adapter_registry import register_adapter
+from external_write.contracts import (
+    OPERATION_CONTRACTS, OperationContract, WRITE_AFFECTING_MODULES,
+    register_contract,
+)
+from external_write.operations import EffectUnit
+
+OP_KIND = "fixture.recovery.set_exact_labels"
+SURFACE_PATH = Path(__file__).resolve().parents[3] / "surface.json"
+KILL_MARKER = Path(__file__).resolve().parents[3] / "kill_on_apply"
+
+
+def _read():
+    return json.loads(SURFACE_PATH.read_text(encoding="utf-8"))
+
+
+def _write(state):
+    SURFACE_PATH.write_text(json.dumps(state), encoding="utf-8")
+
+
+class _FileWriteClient:
+    def set_labels(self, unit_id, labels):
+        state = _read()
+        state[unit_id] = list(labels)
+        _write(state)
+
+
+class _FileReadOnlyClient:
+    def get_state(self, unit_id):
+        return {"unit_id": unit_id, "labels": sorted(_read().get(unit_id, ()))}
+
+
+class FixtureRecoveryAdapter:
+    UNDO_IS_ABSOLUTE_STATE_RESTORE = True
+
+    def build_write_client(self, op):
+        return _FileWriteClient()
+
+    def build_read_only_client(self, op):
+        return _FileReadOnlyClient()
+
+    def plan(self, params):
+        return [
+            EffectUnit(unit_id=r["unit_id"],
+                       target_ref={"unit_id": r["unit_id"]},
+                       undo_ref={"unit_id": r["unit_id"],
+                                 "prior_labels": list(r["prior_labels"])})
+            for r in (params or {}).get("records", [])
+        ]
+
+    def apply_one(self, raw_client, unit):
+        raw_client.set_labels(unit.target_ref["unit_id"], ["ARCHIVED"])
+        if KILL_MARKER.exists():
+            # A HARD kill, not an exception: no handler runs, nothing unwinds,
+            # nothing is flushed. Exactly what the journal has to survive.
+            os._exit(137)
+
+    def undo_one(self, raw_client, unit):
+        raw_client.set_labels(unit.undo_ref["unit_id"],
+                              unit.undo_ref["prior_labels"])
+
+    def verify_one(self, observer, unit):
+        observed = observer.get_state(unit.unit_id)["labels"]
+        prior = sorted((unit.undo_ref or {}).get("prior_labels", ()))
+        return {"unit_id": unit.unit_id, "observed_labels": observed,
+                "applied": observed == ["ARCHIVED"],
+                "matches_prestate": observed == prior}
+
+    def verify_apply_landed(self, evidence):
+        return bool(evidence.poststate.get("applied"))
+
+    def verify_undo_restored(self, evidence):
+        return bool(evidence.poststate.get("matches_prestate"))
+
+
+if OP_KIND not in OPERATION_CONTRACTS:
+    register_contract(OperationContract(
+        op_kind=OP_KIND, writes=("labels",), produces=(),
+        dependency_set=WRITE_AFFECTING_MODULES,
+        verifier_set=("prestate_snapshot_diff_v1",),
+        introduces_persistent_binding=False,
+        risk_class="sensitive_data", requires_accepted_phase=True,
+        blast_radius_cap=25, read_only_scope="fixture.readonly"))
+
+register_adapter(OP_KIND, FixtureRecoveryAdapter())
+'''
+
+_FIXTURE_FACADE_SOURCE = '''\
+"""The read-only reader the declaration topology resolves for the fixture
+op_kind. Its own module, declaring at top level, exactly as the shipped readers
+do -- nothing imports it, which is the condition recovery has to survive."""
+from external_write.read_facade import ReadFacade, register_read_facade
+
+OP_KIND = "fixture.recovery.set_exact_labels"
+
+
+class FixtureRecoveryReadFacade(ReadFacade):
+    read_methods = ("get_state",)
+
+    def get_state(self, unit_id):
+        return self._read("get_state", unit_id)
+
+
+register_read_facade(OP_KIND, FixtureRecoveryReadFacade)
+'''
+
+_TRIAL_DRIVER_SOURCE = '''\
+"""Drives one real trial in the operator project, to be killed mid-apply."""
+import hashlib
+import json
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "agents" / "lib"))
+
+import external_write.registered_adapters  # noqa: F401
+
+# The TRIAL path needs a warm read-facade registry and does not warm it itself:
+# in the real flow the proposal step (`capability_runner`) has already imported
+# the declaring module by the time a trial runs. This driver stands in for that.
+# The RECOVERY entrypoint deliberately does NOT get this line -- it runs in a
+# fresh process where nothing has, which is the condition it has to survive.
+import external_write.read_facades_fixturerecovery  # noqa: F401
+from external_write import trial_executor as tx
+from external_write.lifecycle_test_fixtures import hermetic_paused_mechanisms
+from external_write.operations import Operation
+from external_write.write_gate import InvocationLedger
+
+OP_KIND = "fixture.recovery.set_exact_labels"
+op = Operation(surface="fixture_surface", object_id="r1", field="labels",
+               new_value="ARCHIVED", op_kind=OP_KIND, batch_id="b1",
+               params={"records": [{"unit_id": "r1", "prior_labels": ["OPEN"]}]})
+receipt = {
+    "approved_operation_digest":
+        hashlib.sha256(op.canonical_repr().encode()).hexdigest(),
+    "expires_at": (datetime.now(timezone.utc)
+                   + timedelta(seconds=900)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+}
+entry = {"id": "fixture_surface", "name": "fixture_surface",
+         "action_class": "modify", "risk_class": "sensitive_data",
+         "recovery_profile_ref": None, "declared_test_target": "native_undo",
+         "blast_radius_cap": 25, "accepted": False}
+
+with hermetic_paused_mechanisms() as paused_root:
+    outcome = tx.run_trial(
+        op, receipt, capability_id="fixture_capability",
+        capability_module_paths=("agents/capabilities/fixture_capability.py",),
+        descriptor_set=[entry], cap_ledger=InvocationLedger(),
+        paused_root=paused_root, journal_dir="security/trial_runs",
+        proof_dir="agents/handoffs")
+print(json.dumps({"ok": outcome.ok, "refusal": outcome.refusal,
+                  "trial_id": outcome.trial_id}))
+'''
+
+
+class TheOperatorProjectHappyPathTests(unittest.TestCase):
+    """The success branch of the operator's only repair, driven end to end.
+
+    Every other subprocess test here ends non-zero (a domain refusal, a usage
+    error), so the lines that print the success summary and exit `EXIT_RESTORED`
+    had no automated coverage — and a never-exercised path is a latent failure, on
+    this project's own standing lesson. This one is the happy path of the exit from
+    a blocking state, which is the last place a paste-safety or exit-code
+    regression should be allowed to hide.
+
+    It is a REAL operator project: the emitted lib copied into it, a file-backed
+    trial-eligible adapter enrolled through the shipped `operator_adapters.json`
+    mechanism (so a fresh process registers it, with no import this test controls),
+    a reader in its own module that nothing imports, and a hard `os._exit(137)`
+    from inside `apply_one` — not a `BaseException`, so no handler runs and nothing
+    unwinds. Then the production-form command, from the project root, with no
+    flags.
+    """
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        lib = self.root / "agents" / "lib" / "external_write"
+        shutil.copytree(
+            _EXTERNAL_WRITE_DIR, lib,
+            ignore=shutil.ignore_patterns("test_*.py", "__pycache__"))
+        (self.root / "agents" / "lib" / "external_write" / "__init__.py").touch(
+            exist_ok=True)
+        (lib / "adapters_fixturerecovery.py").write_text(
+            _FIXTURE_ADAPTER_SOURCE, encoding="utf-8")
+        (lib / "read_facades_fixturerecovery.py").write_text(
+            _FIXTURE_FACADE_SOURCE, encoding="utf-8")
+        (lib / "operator_adapters.json").write_text(
+            json.dumps(["adapters_fixturerecovery"]), encoding="utf-8")
+        (self.root / "drive_trial.py").write_text(
+            _TRIAL_DRIVER_SOURCE, encoding="utf-8")
+        (self.root / "surface.json").write_text(
+            json.dumps({"r1": ["OPEN"]}), encoding="utf-8")
+        (self.root / "security" / "trial_runs").mkdir(parents=True)
+        (self.root / "agents" / "handoffs").mkdir(parents=True)
+
+    def surface(self):
+        return json.loads(
+            (self.root / "surface.json").read_text(encoding="utf-8"))
+
+    def journal_states(self, trial_id):
+        record = json.loads(
+            (self.root / "security" / "trial_runs" / f"{trial_id}.json")
+            .read_text(encoding="utf-8"))
+        return {u["unit_id"]: u["state"] for u in record["units"]}
+
+    def run_recovery(self, trial_id):
+        """The command in its PRODUCTION FORM: rendered by the shipped function,
+        run from the project root, no flags the operator would have to understand."""
+        command = trc.recovery_command(trial_id)
+        self.assertNotIn("--journal-dir", command,
+                         "the production invocation must carry no extra flag")
+        argv = shlex.split(command)
+        return subprocess.run([sys.executable] + argv[1:], capture_output=True,
+                              text=True, cwd=str(self.root))
+
+    def test_the_rendered_command_restores_a_hard_killed_trial_and_exits_zero(self):
+        (self.root / "kill_on_apply").touch()
+        killed = subprocess.run([sys.executable, "drive_trial.py"],
+                                capture_output=True, text=True,
+                                cwd=str(self.root))
+        self.assertEqual(killed.returncode, 137,
+                         f"fixture precondition: a hard kill. {killed.stderr}")
+        trial_id = next(p.stem for p in
+                        (self.root / "security" / "trial_runs").glob("*.json"))
+        self.assertEqual(self.journal_states(trial_id),
+                         {"r1": "apply_intent"},
+                         "fixture precondition: the ambiguous window")
+        self.assertEqual(self.surface()["r1"], ["ARCHIVED"],
+                         "fixture precondition: the mutation is live on disk")
+
+        # The cause of the kill is gone, as it is for a real operator re-running.
+        (self.root / "kill_on_apply").unlink()
+
+        result = self.run_recovery(trial_id)
+
+        self.assertEqual(result.returncode, trc.EXIT_RESTORED,
+                         f"stdout={result.stdout} stderr={result.stderr}")
+        self.assertIn(tx.REFUSAL_MARKER_NOTHING_OUTSTANDING, result.stdout)
+        self.assertNotIn(tx.REFUSAL_MARKER_NOT_RESTORED, result.stdout)
+        self.assertNotIn("Traceback", result.stdout + result.stderr)
+        self.assertEqual(self.journal_states(trial_id),
+                         {"r1": "restored_verified"})
+        self.assertEqual(self.surface()["r1"], ["OPEN"],
+                         "the operator's real record is back at its prior state")
+        self.assertFalse(
+            (self.root / "agents" / "handoffs").glob("*.copy_run_proof.json")
+            and list((self.root / "agents" / "handoffs").iterdir()),
+            "a recovery must never write a proof")
+
+    def test_a_still_blocked_unit_exits_one_and_prints_the_same_command_again(self):
+        """The other direction, from the same real project: the state is entered,
+        the command is offered, and re-running it once the cause is gone CLEARS it.
+        Without this, exit 0 above could be a happy path that only ever runs on a
+        trial that was never blocked."""
+        (self.root / "kill_on_apply").touch()
+        subprocess.run([sys.executable, "drive_trial.py"], capture_output=True,
+                       text=True, cwd=str(self.root))
+        trial_id = next(p.stem for p in
+                        (self.root / "security" / "trial_runs").glob("*.json"))
+        (self.root / "kill_on_apply").unlink()
+
+        # Make the surface unreadable AND unwritable, so the reversal cannot be
+        # confirmed: the disclosed read-path residual, on a real file.
+        surface_path = self.root / "surface.json"
+        original_mode = surface_path.stat().st_mode
+        surface_path.chmod(0o000)
+        self.addCleanup(surface_path.chmod, original_mode)
+
+        blocked = self.run_recovery(trial_id)
+
+        self.assertEqual(blocked.returncode, trc.EXIT_RECOVERY_REQUIRED,
+                         f"stdout={blocked.stdout} stderr={blocked.stderr}")
+        output = blocked.stdout + blocked.stderr
+        self.assertIn(tx.REFUSAL_MARKER_NOT_RESTORED, output)
+        self.assertNotIn(tx.REFUSAL_MARKER_NOTHING_OUTSTANDING, output)
+        self.assertNotIn("Traceback", output)
+        self.assertIn(trc.recovery_command(trial_id), output,
+                      "the blocking output must offer the identical command")
+        self.assertEqual(self.journal_states(trial_id),
+                         {"r1": "recovery_required"})
+
+        # The operator resolves the cause and re-runs the command they were given.
+        surface_path.chmod(original_mode)
+        cleared = self.run_recovery(trial_id)
+
+        self.assertEqual(cleared.returncode, trc.EXIT_RESTORED,
+                         f"stdout={cleared.stdout} stderr={cleared.stderr}")
+        self.assertEqual(self.journal_states(trial_id),
+                         {"r1": "restored_verified"},
+                         "the state must actually CLEAR -- a repair that cannot "
+                         "clear the state it names is not a repair")
+        self.assertEqual(self.surface()["r1"], ["OPEN"])
 
 
 # ---------------------------------------------------------------------------

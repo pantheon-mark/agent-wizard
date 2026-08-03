@@ -225,8 +225,10 @@ from external_write.trial_executor import (
 )
 from external_write.trial_journal import (
     CAPSULE_KEY_TARGET_REF, CAPSULE_KEY_UNDO_REF, DEFAULT_TRIAL_JOURNAL_DIR,
-    RECOVERY_DRIVEN_STATES, STATE_RECOVERY_REQUIRED, STATE_RESTORED_VERIFIED,
-    STATE_UNDO_INTENT, TrialJournalError, load_trial_journal,
+    RECOVERY_DISPOSITION_DRIVEN, RECOVERY_DISPOSITION_NEVER_APPLIED,
+    RECOVERY_DISPOSITION_SETTLED, RECOVERY_DISPOSITIONS,
+    STATE_RECOVERY_REQUIRED, STATE_RESTORED_VERIFIED, STATE_UNDO_INTENT,
+    TrialJournalError, load_trial_journal, recovery_disposition,
 )
 from external_write.write_authorization import TRIAL_TARGET
 
@@ -577,14 +579,41 @@ def recover_trial(trial_id: str, *,
             "nothing else. This record was not produced by the trial protocol, "
             "so it is refused rather than acted on. Nothing was reversed.")
 
+    # Every unit is resolved into exactly ONE of the journal's three declared
+    # recovery dispositions, by POSITIVE membership, and a state in none of them
+    # REFUSES.
+    #
+    # The negative form this replaces -- "anything not driven and not settled was
+    # never applied" -- was a fail-open, and not a hypothetical one. A state added
+    # to the journal later and classified into `OUTCOME_STATES` satisfies the
+    # journal's own exhaustiveness guard completely, so nothing there fires; the
+    # negative bucket then absorbed it, and a unit holding a LIVE, UNREVERSED
+    # mutation was reported as never applied, with the run reporting success and
+    # the operator told nothing was outstanding. Silence must refuse, and it must
+    # refuse here rather than one layer down, because this is the only layer that
+    # knows the unit was not driven.
     states = journal.unit_states()
-    driven = [unit_id for unit_id in journal.unit_ids()
-              if states[unit_id] in RECOVERY_DRIVEN_STATES]
-    never_applied = tuple(unit_id for unit_id in journal.unit_ids()
-                          if states[unit_id] not in RECOVERY_DRIVEN_STATES
-                          and states[unit_id] != STATE_RESTORED_VERIFIED)
-    already_settled = tuple(unit_id for unit_id in journal.unit_ids()
-                            if states[unit_id] == STATE_RESTORED_VERIFIED)
+    grouped: Dict[str, List[str]] = {name: [] for name in RECOVERY_DISPOSITIONS}
+    unclassified: List[str] = []
+    for unit_id in journal.unit_ids():
+        disposition = recovery_disposition(states[unit_id])
+        if disposition is None:
+            unclassified.append(f"{unit_id} ({states[unit_id]})")
+        else:
+            grouped[disposition].append(unit_id)
+    if unclassified:
+        raise TrialRecoveryError(
+            f"the durable record at {journal.path!r} holds unit(s) in a state "
+            f"this recovery does not know how to dispose of: {unclassified}. "
+            "Refusing rather than guessing: an unrecognized state may be a unit "
+            "whose change is still live on the real surface, and reporting it as "
+            "never applied would tell you nothing is outstanding when something "
+            "may be. Nothing was reversed. Fix step: this toolkit is older than "
+            "the record it is reading -- update it, then run this command again.")
+
+    driven = grouped[RECOVERY_DISPOSITION_DRIVEN]
+    never_applied = tuple(grouped[RECOVERY_DISPOSITION_NEVER_APPLIED])
+    already_settled = tuple(grouped[RECOVERY_DISPOSITION_SETTLED])
 
     if not driven:
         return RecoveryOutcome(

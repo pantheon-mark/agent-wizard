@@ -187,6 +187,28 @@ def is_allowlist_eligible(entry) -> bool:
 # writes -- so it is never allow-eligible and always prompts. It is enumerated
 # here so the manifest covers the operator's real acceptance invocation, not
 # only the read-only self-QA tools; nothing needs to prefix-match it.
+#
+# `trial-recovery` is the operator's exit from an interrupted trial
+# (`trial_recovery.py`'s CLI): it brings every possibly-outstanding unit of a
+# crashed trial back to its prior state and confirms it by reading the real
+# surface. LIVE_WRITE / writes_external=True, for the same reason
+# `operator-acceptance` is -- it issues the registered adapter's own `undo_one`
+# against the operator's real record, so it is never allow-eligible and always
+# prompts. That is the correct posture even though the write it performs is a
+# RESTORE: an absolute-state restore is still a real external write, it consumes
+# a rate/ledger slot, and it appears in the vendor's own audit log. Classifying
+# a restore as read-only because its intent is benign is exactly the kind of
+# by-intent reasoning this manifest exists to replace with by-behaviour
+# reasoning.
+#
+# The prefix is hand-spelled here, like the five above, rather than imported from
+# `trial_recovery.RECOVERY_ENTRYPOINT_REL`: this module is loaded by the
+# settings-allowlist build and the PreToolUse hook, and importing it from here
+# would pull the whole recovery stack (the adapter registry, the read facade, the
+# trial executor) into those paths for a string. The agreement is pinned at build
+# time instead -- see test_command_manifest's
+# `test_the_enrolled_prefix_agrees_with_the_modules_own_constant`, which fails if
+# the two ever diverge.
 # ---------------------------------------------------------------------------
 BASELINE_COMMANDS: Tuple[CommandEntry, ...] = (
     CommandEntry(
@@ -236,6 +258,13 @@ BASELINE_COMMANDS: Tuple[CommandEntry, ...] = (
     CommandEntry(
         name="operator-acceptance",
         command_prefix="python3 agents/lib/external_write/operator_acceptance.py",
+        command_class=LIVE_WRITE,
+        writes_external=True,
+        allowed_outputs=(),
+    ),
+    CommandEntry(
+        name="trial-recovery",
+        command_prefix="python3 agents/lib/external_write/trial_recovery.py",
         command_class=LIVE_WRITE,
         writes_external=True,
         allowed_outputs=(),

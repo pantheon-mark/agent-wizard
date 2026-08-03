@@ -353,6 +353,57 @@ RECOVERY_DRIVEN_STATES: Tuple[str, ...] = (
     STATE_RECOVERY_REQUIRED,
 )
 
+# The other two dispositions a resumed run can reach, declared POSITIVELY beside
+# the driven set so that the three together are a TOTAL PARTITION of
+# `TRIAL_UNIT_STATES`. Each is a one-member tuple today and is a tuple anyway, so
+# a future state joins whichever disposition it belongs to rather than the tuples
+# having to change shape.
+#
+# WHY THE POSITIVE FORM IS LOAD-BEARING, and this is a correction of the first
+# version of this design rather than a decoration of it. A consumer that derived
+# this disposition negatively -- "anything not driven and not settled was never
+# applied" -- absorbs any state added later into the benign bucket. A unit holding
+# a LIVE, UNREVERSED mutation would then be reported as never applied, the run
+# would report success, and the operator would be told nothing is outstanding
+# while the change was still on their record. The journal's own exhaustiveness
+# guard cannot catch that: a new state classified into `OUTCOME_STATES` satisfies
+# it completely. So the partition is declared here, a consumer must resolve a
+# state into exactly one of the three, and a state in none of them must REFUSE
+# rather than default to the safe-looking answer.
+RECOVERY_NEVER_APPLIED_STATES: Tuple[str, ...] = (STATE_PLANNED,)
+RECOVERY_SETTLED_STATES: Tuple[str, ...] = (STATE_RESTORED_VERIFIED,)
+
+# The partition itself, so a consumer resolves a disposition by lookup over a
+# declared mapping rather than by re-listing the three tuples in an if/elif chain
+# that could drift from them. Keys are this module's vocabulary for the three
+# dispositions; a consumer that finds a state in none of them has found a state
+# nobody classified.
+RECOVERY_DISPOSITION_DRIVEN = "driven"
+RECOVERY_DISPOSITION_NEVER_APPLIED = "never_applied"
+RECOVERY_DISPOSITION_SETTLED = "settled"
+
+RECOVERY_DISPOSITIONS: Dict[str, Tuple[str, ...]] = {
+    RECOVERY_DISPOSITION_DRIVEN: RECOVERY_DRIVEN_STATES,
+    RECOVERY_DISPOSITION_NEVER_APPLIED: RECOVERY_NEVER_APPLIED_STATES,
+    RECOVERY_DISPOSITION_SETTLED: RECOVERY_SETTLED_STATES,
+}
+
+
+def recovery_disposition(state: str) -> Optional[str]:
+    """Which of the three recovery dispositions `state` belongs to, or **None** if
+    it belongs to none.
+
+    Returns None rather than raising, and rather than guessing: the caller is the
+    thing that knows what refusing costs and what to say about it, and the one
+    answer this function must never invent is a benign disposition for a state it
+    does not recognize. A `None` here means a unit whose situation nobody has
+    decided about, which may include holding a live unreversed mutation.
+    """
+    for disposition, states in RECOVERY_DISPOSITIONS.items():
+        if state in states:
+            return disposition
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Recovery capsule format
