@@ -1335,5 +1335,132 @@ class TheScanReportsAMalformedUnitEntryPerRecordTests(unittest.TestCase):
         self.assertIsNone(result["scan_error"])
 
 
+# ===========================================================================
+# 17. THE REPAIR SENTENCE IS AUTHORED ONCE, AND NO SURFACE STATE-BLINDLY
+#     PRESCRIBES IT
+#
+# The registry removed the copies that existed. What remained was a surface that
+# still PRESCRIBED the rebuild without knowing the writer's state -- the deepest
+# layer's own entry description -- and a command layer that RE-SPELLED the repair
+# clause because it cannot import the registry. Both are closed here: the
+# description now DIAGNOSES without prescribing, and the command layer BINDS the
+# one declaration instead of re-spelling it.
+# ===========================================================================
+
+class TheRepairSentenceIsAuthoredOnceTests(unittest.TestCase):
+
+    #: The clause the registry's rebuild instruction ends with. Spelled here on
+    #: purpose: a needle derived from the constant it is meant to pin would follow
+    #: that constant anywhere and assert nothing.
+    CLAUSE = "rebuild it so it routes through the sanctioned bulk path"
+
+    def _production_sources(self):
+        for path in sorted(_EXTERNAL_WRITE_DIR.glob("*.py")):
+            if path.name.startswith("test_"):
+                continue
+            yield path.name, path.read_text(encoding="utf-8")
+
+    def test_the_repair_clause_has_exactly_one_home_in_the_package(self):
+        """The property that makes the command layer's pinned exemption an
+        exemption rather than a hole: there is ONE spelling of the repair, so the
+        refusal and the registry's instruction cannot drift apart."""
+        homes = sorted(name for name, src in self._production_sources()
+                       if self.CLAUSE in src)
+        self.assertEqual(homes, ["writer_state_core.py"], homes)
+
+    def test_the_registrys_instruction_is_composed_from_that_one_declaration(self):
+        self.assertIn(core.BYPASS_UNREPAIRED_REPAIR,
+                      sa.instruction_for_state(
+                          sa.writer_state_key(core.WriterState.BLOCKING_LIVE_ENABLE),
+                          WRITER))
+        self.assertEqual(core.BYPASS_UNREPAIRED_REPAIR, self.CLAUSE)
+        self.assertIn(core.BYPASS_UNREPAIRED_DIAGNOSIS.format(relpath=WRITER),
+                      sa.instruction_for_state(
+                          sa.writer_state_key(core.WriterState.BLOCKING_LIVE_ENABLE),
+                          WRITER))
+
+    def test_the_entry_description_DIAGNOSES_a_bypass_and_prescribes_nothing(self):
+        """It cannot know the writer's state -- it is the leaf layer, and it imports
+        no sibling at all -- so prescribing was the defect. It described a file that
+        needs a person as "rebuild it", which is the one instruction that cannot
+        work for a file no rebuild of ours can rewrite. The diagnosis is true for
+        every state; the repair is not, and the repair now comes from the registry
+        only."""
+        text = core.describe_blocking_entry(_entry_with_kinds(WRITER, ["forbidden_import"]))
+        self.assertIn(WRITER, text)
+        self.assertIn("external-write bypass is unrepaired", text)
+        self.assertNotIn(self.CLAUSE, text,
+                         "the leaf layer prescribed a repair it cannot know applies")
+        self.assertNotIn("rebuild", text.lower())
+
+    def test_a_non_bypass_entry_still_speaks_in_its_own_recorded_words(self):
+        entry = {"mechanism_id": "m", "writer_relpath": QUEUE_REL,
+                 "kind": "reconcile_incomplete", "status": "pending",
+                 "suggested_next_step": "Ask your assistant to run `wizard reconcile`."}
+        self.assertIn("wizard reconcile", core.describe_blocking_entry(entry))
+
+
+class TheIneligibleRefusalBindsTheOneDeclarationTests(unittest.TestCase):
+    """The command layer that records an accepted-risk decision refuses a writer in
+    a state the decision does not apply to, and says why. It cannot render that from
+    the registry (the registry imports this layer's own facade, and reaches the trial
+    modules whose pre-existing cycle would then land inside the writer-state
+    cluster's proved acyclicity closure), so the refusal's FRAMING is authored here
+    and pinned as an exemption. What must NOT be authored here is the repair."""
+
+    def _commands(self):
+        from external_write import writer_commands
+        return writer_commands
+
+    def test_the_refusal_contains_the_registrys_own_repair_clause(self):
+        commands = self._commands()
+        text = commands._INELIGIBLE_STATE_REASONS[
+            core.WriterState.BLOCKING_LIVE_ENABLE].format(relpath=WRITER)
+        self.assertIn(core.BYPASS_UNREPAIRED_REPAIR, text)
+        self.assertIn(WRITER, text)
+
+    def test_the_refusal_BINDS_the_clause_rather_than_re_spelling_it(self):
+        """Structural, over the module's own source: no string literal in this
+        module may contain the clause. A text search cannot answer this -- the
+        module's docstring and comments discuss the clause at length."""
+        source = (_EXTERNAL_WRITE_DIR / "writer_commands.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(source)
+        docstrings = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                 ast.AsyncFunctionDef)):
+                body = getattr(node, "body", None)
+                if body and isinstance(body[0], ast.Expr) \
+                        and isinstance(body[0].value, ast.Constant) \
+                        and isinstance(body[0].value.value, str):
+                    docstrings.add(id(body[0].value))
+        offenders = [node.lineno for node in ast.walk(tree)
+                     if isinstance(node, ast.Constant)
+                     and isinstance(node.value, str)
+                     and id(node) not in docstrings
+                     and core.BYPASS_UNREPAIRED_REPAIR in node.value]
+        self.assertEqual(offenders, [],
+                         "the repair clause is re-spelled here instead of bound "
+                         "from its single declaration")
+        names = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+        self.assertIn("BYPASS_UNREPAIRED_REPAIR", names,
+                      "the refusal no longer binds the one declaration")
+
+    def test_the_refusal_still_refuses_and_records_nothing(self):
+        """The behaviour the binding must not change."""
+        p = _Project(self)
+        p.write(WRITER, _REBUILDABLE_SRC)
+        p.queue([_entry_with_kinds(WRITER, ["adapter_module_import"])])
+        commands = self._commands()
+        with self.assertRaises(store.WriterAcknowledgementError) as raised:
+            commands.acknowledge_writer(str(p.root), WRITER,
+                                        operator_confirmation=CONFIRMATION)
+        message = str(raised.exception)
+        self.assertIn("nothing was recorded", message)
+        self.assertIn(core.BYPASS_UNREPAIRED_REPAIR, message)
+        self.assertFalse((p.root / store.ACKNOWLEDGEMENTS_REL).exists())
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

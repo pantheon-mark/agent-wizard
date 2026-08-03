@@ -274,6 +274,124 @@ class GlobalBespokeWriterBlockTests(_ls_fixtures._CheckCompletionFixtureMixin, u
                              "one source, so the two fields cannot diverge")
 
 
+class TheCompletionMessageRendersEachStepFromTheRegistryTests(
+        _ls_fixtures._CheckCompletionFixtureMixin, unittest.TestCase):
+    """The completion gate's own conjunct explanation used to hand every flagged
+    file the SAME static repair -- "rebuild the flagged file(s) ... through the
+    sanctioned write path" -- written at this surface and blind to what the safety
+    check actually found. For a file no rebuild of ours can rewrite that is a dead
+    end presented as a next step, and it is the third independently-authored copy of
+    guidance the registry already owns.
+
+    The static explanation now says only that the step is per-file; the step itself
+    is rendered from the state->action registry, per relpath, keyed on the state the
+    writer is really in."""
+
+    _UNREPAIRABLE_RELPATH = "agents/upkeep/alerts.py"
+    _UNREPAIRABLE_SRC = ('"""Daily upkeep -- also delivers the operator\'s phone '
+                         'alert."""\nimport urllib.request\n')
+
+    def _needs_person_entry(self):
+        return {
+            "mechanism_id": "alerts",
+            "writer_relpath": self._UNREPAIRABLE_RELPATH,
+            "entrypoint_relpath": None,
+            "status": "pending",
+            "paused_content_sha256": "0" * 64,
+            "violations": [{"kind": "forbidden_import", "line": 2,
+                            "path": self._UNREPAIRABLE_RELPATH}],
+        }
+
+    def _message_for_a_needs_person_writer(self, root):
+        self._accept_real_capability(root, CAP_ID)
+        p = Path(root) / self._UNREPAIRABLE_RELPATH
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(self._UNREPAIRABLE_SRC, encoding="utf-8")
+        _write_pending_migrations(root, [self._needs_person_entry()])
+        result = lifecycle_state.check_completion(str(root), CAP_ID)
+        self.assertIn("open_external_write_bypass", result.failed_conjuncts,
+                      result.operator_message)
+        return result.operator_message
+
+    def test_a_needs_person_writer_is_not_told_to_rebuild_itself(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            message = self._message_for_a_needs_person_writer(Path(tmp))
+            self.assertNotIn("rebuild the flagged file", message.lower())
+            self.assertNotIn(
+                "rebuild it so it routes through the sanctioned bulk path", message)
+
+    def test_the_step_is_the_registrys_own_instruction_for_that_writers_state(self):
+        from external_write import state_actions
+        from external_write import writer_state_core
+        with tempfile.TemporaryDirectory() as tmp:
+            message = self._message_for_a_needs_person_writer(Path(tmp))
+            expected = state_actions.instruction_for_state(
+                state_actions.writer_state_key(
+                    writer_state_core.WriterState.NEEDS_PERSON),
+                self._UNREPAIRABLE_RELPATH)
+            self.assertIn(expected, message,
+                          "the completion message must carry the registry's own "
+                          "sentence, not text that merely resembles it")
+
+    def test_a_rebuildable_writer_still_gets_the_rebuild_step(self):
+        """The other direction: routing through the registry must not lose the
+        instruction that was always right for a rebuildable writer -- and it now
+        carries the check that confirms the rebuild."""
+        from external_write import state_actions
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._accept_real_capability(root, CAP_ID)
+            _write_bespoke_writer_file(root)
+            _write_pending_migrations(root, [_bespoke_entry()])
+            result = lifecycle_state.check_completion(str(root), CAP_ID)
+            expected = state_actions.instruction_for_state(
+                state_actions.writer_state_key("blocking_live_enable"),
+                BESPOKE_WRITER_RELPATH)
+            self.assertIn(expected, result.operator_message,
+                          result.operator_message)
+
+    def test_the_static_explanation_no_longer_authors_a_repair(self):
+        """Structural, over the shipped constant: the project-wide conjunct cannot
+        carry a per-file repair, because whether a rebuild applies depends on the
+        file. It may DESCRIBE what is open; it may not prescribe."""
+        _detail, next_step = lifecycle_state._CONJUNCT_EXPLANATIONS[
+            "open_external_write_bypass"]
+        self.assertNotIn("rebuild the", next_step.lower())
+        self.assertNotIn("sanctioned", next_step.lower())
+
+    def test_a_step_that_cannot_be_rendered_routes_to_a_person_not_to_a_rebuild(self):
+        """The fail-closed branch, driven rather than assumed. If the per-file step
+        cannot be produced for any reason, the file goes to a PERSON -- it must never
+        inherit the repair with the widest applicability, which is an inference from
+        a failure and the exact reasoning a permissive fallback on this family was
+        removed for. The block direction is untouched: the entry is in the blocking
+        set either way, and this branch is message enrichment only.
+
+        Driven by making the RENDER fail rather than the classifier: the classifier is
+        also what decides the blocking set, so breaking it would break the decision
+        this test needs intact."""
+        from external_write import state_actions
+        real = state_actions.instruction_for_state
+
+        def boom(*_a, **_k):
+            raise RuntimeError("the registry could not render this")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._accept_real_capability(root, CAP_ID)
+            _write_bespoke_writer_file(root)
+            _write_pending_migrations(root, [_bespoke_entry()])
+            state_actions.instruction_for_state = boom
+            try:
+                result = lifecycle_state.check_completion(str(root), CAP_ID)
+            finally:
+                state_actions.instruction_for_state = real
+            self.assertIn("open_external_write_bypass", result.failed_conjuncts)
+            self.assertIn(
+                state_actions.route_for_unclassified_state(BESPOKE_WRITER_RELPATH),
+                result.operator_message, result.operator_message)
+
+
 if __name__ == "__main__":
     unittest.main()
 

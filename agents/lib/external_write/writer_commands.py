@@ -78,13 +78,42 @@ import external_write.writer_state_core as _core
 #: return are here; anything else falls to ``_UNRECOGNISED_STATE_REASON``, which
 #: still REFUSES (an unrecognised state is the fail-closed direction, never a new
 #: reason to allow).
+#:
+#: THIS MAP IS AUTHORED HERE, AND THAT IS A STRUCTURAL EXCEPTION, NOT A CHOICE.
+#: Every other state-keyed operator-facing sentence in this package is rendered by
+#: the state->action registry, and a build-time gate enforces that. This layer
+#: cannot reach the registry: the registry imports this layer's own facade (for the
+#: command it hands the operator), so the reverse edge is a cycle -- and the
+#: registry also reaches the trial modules, whose pre-existing two-module cycle
+#: would then sit inside the writer-state cluster's acyclicity closure, an invariant
+#: proved separately and deliberately kept narrow. What is authored here is the
+#: REFUSAL'S OWN FRAMING (why nothing was recorded), which is this command's to say.
+#: The one clause it shares with the registry's rebuild instruction is BOUND from
+#: the single declaration both can reach, never re-spelled, so the refusal and the
+#: instruction cannot drift apart.
 _INELIGIBLE_STATE_REASONS = {
+    # remediation-monopoly-exempt: the refusal's own framing, keyed on the state the
+    # core found. Cannot render from the registry -- the registry imports this
+    # layer's facade, and its own reach into the trial modules would pull their
+    # pre-existing cycle into the writer-state cluster's acyclicity closure. The
+    # shared repair clause is bound below, not re-spelled, so nothing here can drift.
     _core.WriterState.BLOCKING_LIVE_ENABLE: (
         "the safety check has not established that `{relpath}` needs a person, and "
-        "accepting the risk is only for a file our own tooling cannot fix -- rebuild "
-        "it so it routes through the sanctioned bulk path and it clears on its own; "
-        "if you believe it genuinely cannot be rebuilt, ask your assistant to go "
-        "through what the safety check recorded for it with you"),
+        "accepting the risk is only for a file our own tooling cannot fix -- "
+        # remediation-monopoly-exempt: BOUND, never re-spelled -- this is the single
+        # declaration the registry's own instruction is composed from, so the refusal
+        # and the instruction cannot say different things. Rendering it here rather
+        # than asking the registry is forced by the cycle described above; binding the
+        # one declaration is what keeps that an exemption instead of a second copy.
+        + _core.BYPASS_UNREPAIRED_REPAIR
+        + " and it clears on its own; if you believe it genuinely cannot be "
+        "rebuilt, ask your assistant to go through what the safety check recorded "
+        "for it with you"),
+    # remediation-monopoly-exempt: same structural reason as the entry above, and this
+    # one prescribes nothing at all -- it states that there is no risk to accept for a
+    # test file, which is a disposition rather than a repair. The registry's sentence
+    # for this state says the same thing in its own words; neither is a repair, so
+    # there is no instruction here that could drift away from one.
     _core.WriterState.NON_LIVE: (
         "`{relpath}` was found to be a test file that nothing in your running system "
         "uses, so it is not holding anything back and there is no risk to accept -- "

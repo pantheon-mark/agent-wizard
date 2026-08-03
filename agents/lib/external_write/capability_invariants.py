@@ -142,6 +142,12 @@ if __package__ in (None, ""):  # pragma: no cover - only true when run as a scri
 
 from external_write import scan  # noqa: E402
 from external_write import write_gate  # noqa: E402
+# The ONE renderer of every operator-facing instruction about leaving a writer or
+# trial-unit state, plus the vocabulary it keys on. The routing check's repair comes
+# from here so there is exactly one author of that guidance in the package; a
+# build-time gate refuses a second one. No cycle: neither module reaches this one.
+from external_write import state_actions  # noqa: E402
+from external_write import writer_state_core  # noqa: E402
 from external_write.capability_identity import (  # noqa: E402
     assert_identity_coherent,
     build_capability_index,
@@ -329,11 +335,24 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
             )
         else:
             if any(v.kind == "raw_run_operation_reference" for v in scan_violations):
+                # The DIAGNOSIS is this check's own -- it names the exact primitive
+                # found and the exact sanctioned call that replaces it, which no
+                # generic sentence can. The REPAIR is rendered from the state->action
+                # registry, because it was a second, independently-worded copy of
+                # guidance the registry already owns for exactly this condition: a raw
+                # write reference is one of the violation kinds our own remediator
+                # covers, so the writer state it produces is the rebuildable one. The
+                # registry's instruction for that state also names the check that
+                # CONFIRMS the rebuild, which this sentence never did -- an operator
+                # who cannot confirm the repair cannot tell whether it worked.
                 failures.append(
                     f'Routing: capability "{canonical_id}" still reaches the raw internal write '
-                    "function directly instead of the safe, tracked write path. Have the coding "
-                    "agent rebuild this capability so every live write goes through "
-                    "capability_api.run_enveloped_operation, never raw run_operation."
+                    "function (run_operation) directly instead of the safe, tracked write path "
+                    "(capability_api.run_enveloped_operation). "
+                    + state_actions.instruction_for_state(
+                        state_actions.writer_state_key(
+                            writer_state_core.WriterState.BLOCKING_LIVE_ENABLE),
+                        f"{CAPABILITIES_DIR_REL}/{canonical_id}{CAPABILITY_FILE_SUFFIX}")
                 )
 
     # --- Shared: resolve this capability's identity (checks 2, 3, 5) -------

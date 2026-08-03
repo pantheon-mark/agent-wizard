@@ -549,40 +549,64 @@ def is_bypass_writer_entry(entry: Dict[str, Any]) -> bool:
     return kind is None or kind in _BYPASS_WRITER_KINDS
 
 
-#: The ONE spelling of the sentence that describes an unrepaired bespoke-writer
-#: bypass, and the repair it names. It was spelled twice -- once here, inside
-#: ``describe_blocking_entry``, and once in the acceptance refusal that groups
-#: blocking entries by state -- and two independently-authored copies of the same
-#: operator-facing guidance is a recorded finding in this package. Declared here,
-#: in the deepest layer of the writer-state cluster, because that is the only home
-#: every consumer can reach: the state->action registry (which renders the
-#: refusal) imports this module, and this module imports no sibling at all.
+#: WHAT WAS FOUND, with no repair in it. True of an unrepaired bespoke-writer
+#: bypass in EVERY state it can be in, which is exactly why it is separated from
+#: the repair below: this module is the deepest layer of the writer-state cluster
+#: and imports no sibling at all, so it cannot know which repair applies. It used
+#: to prescribe one anyway -- see ``describe_blocking_entry``.
+BYPASS_UNREPAIRED_DIAGNOSIS = "an external-write bypass is unrepaired: `{relpath}`"
+
+#: THE REPAIR, and the ONE spelling of it in this package. Two surfaces need this
+#: clause and cannot both render it from the state->action registry: the registry
+#: renders it for every state-keyed surface, and the accepted-risk command layer
+#: cannot import the registry at all (the registry imports that layer's own facade,
+#: and reaches the trial modules whose pre-existing cycle would then land inside
+#: the writer-state cluster's proved acyclicity closure). So the clause is declared
+#: HERE -- the only module both of them already import, and one that imports no
+#: sibling itself -- and both BIND it. Two independently-authored copies of the same
+#: operator-facing guidance is a recorded finding in this package, and the copies
+#: drifted; one declaration is what makes that impossible rather than unlikely.
 #:
-#: ``{relpath}`` is the only field. A consumer that needs the template rather than
-#: the finished sentence formats it with ``relpath="{subject}"`` and gets the
-#: template back with the registry's own placeholder in place -- no re-spelling.
+#: Carries NO placeholder, so it can be concatenated into either consumer's own
+#: sentence without either of them knowing the other's field names.
+BYPASS_UNREPAIRED_REPAIR = (
+    "rebuild it so it routes through the sanctioned bulk path")
+
+#: Diagnosis + repair, as the registry composes it. ``{relpath}`` is the only
+#: field: a consumer that needs the template rather than the finished sentence
+#: formats it with ``relpath="{subject}"`` and gets the template back with the
+#: registry's own placeholder in place -- no re-spelling.
 BYPASS_UNREPAIRED_TEMPLATE = (
-    "an external-write bypass is unrepaired: `{relpath}` -- rebuild it so it "
-    "routes through the sanctioned bulk path")
+    BYPASS_UNREPAIRED_DIAGNOSIS + " -- " + BYPASS_UNREPAIRED_REPAIR)
 
 
 def describe_blocking_entry(entry: Dict[str, Any]) -> str:
-    """One plain-language sentence for ONE open blocking entry.
+    """One plain-language sentence DESCRIBING one open blocking entry. It says what
+    was found; it never says what to do about it.
 
-    A bypass entry (``is_bypass_writer_entry``) keeps the rebuild wording it has
-    always had. Every other kind speaks for itself, because this queue carries
-    facts that are not bypasses -- describing those with the bypass sentence
-    tells the operator to do something impossible to a file that was never the
-    problem (rebuilding ``agents/handoffs/pending_migrations.json`` itself "so it
-    routes through the sanctioned bulk path" is meaningless; it is the queue, not
-    a writer).
+    A bypass entry (``is_bypass_writer_entry``) gets the diagnosis and nothing more.
+    It used to get the repair as well, and that was the defect: this module computes
+    a writer's STRUCTURAL state and deliberately knows nothing else, so the sentence
+    it produced was blind to which state the writer was actually in. A file the
+    safety check found needs a person was told to rebuild itself -- the one
+    instruction that cannot work for a file no rebuild of ours can rewrite. The
+    repair depends on the state, so it is rendered from the state->action registry,
+    which is the one place that knows both. This function's job is the half that is
+    true in every state.
 
-    Blocking is unaffected by any of this: what an entry BLOCKS is decided
-    without consulting its kind, and only what the operator READS is chosen here.
+    Every other kind speaks for itself, because this queue carries facts that are
+    not bypasses at all -- describing those with the bypass wording tells the
+    operator to do something impossible to a file that was never the problem
+    (rebuilding ``agents/handoffs/pending_migrations.json`` itself is meaningless;
+    it is the queue, not a writer). That recorded next step is authored where the
+    entry is written, which is the one thing the registry cannot know.
+
+    Blocking is unaffected by any of this: what an entry BLOCKS is decided without
+    consulting its kind, and only what the operator READS is chosen here.
     """
     if is_bypass_writer_entry(entry):
         relpath = str(entry.get("writer_relpath"))
-        return BYPASS_UNREPAIRED_TEMPLATE.format(relpath=relpath)
+        return BYPASS_UNREPAIRED_DIAGNOSIS.format(relpath=relpath)
     next_step = entry.get("suggested_next_step") or entry.get("reason")
     if not next_step:
         relpath = str(entry.get("writer_relpath"))

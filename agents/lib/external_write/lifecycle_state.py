@@ -203,6 +203,14 @@ from external_write.operator_acceptance import (  # noqa: E402
 # the predicate to make the gate go non-done PROJECT-WIDE on any open bespoke-writer entry, and
 # reconcile_state calls the reap fail-safe -- see their uses below.
 from external_write import _ext_write_state  # noqa: E402
+# The ONE renderer of every operator-facing instruction about leaving a writer or
+# trial-unit state. The completion message's per-file next step comes from here so
+# there is exactly one author of that guidance in the package; a build-time gate
+# refuses a second one. No cycle: the registry reaches neither this module nor
+# capability_health (verified over the real sources by the writer-state cluster's
+# own layering assertion, which requires the registry's closure to stay clear of
+# this module's).
+from external_write import state_actions  # noqa: E402
 from external_write.proof_hash import (  # noqa: E402
     compute_implementation_hash,
     ProofHashError,
@@ -1404,12 +1412,21 @@ _CONJUNCT_EXPLANATIONS: Dict[str, Tuple[str, str]] = {
     # skips the sanctioned, gated write surface), so nothing here can be called done -- INDEPENDENT
     # of whether the bypass resolves to THIS capability. The actual file(s) to fix are named on
     # their own line(s) by _completion_not_done_message (a static detail cannot carry them).
+    #
+    # THE NEXT STEP IS NOT WRITTEN HERE, AND THAT IS THE CORRECTION. This entry used to say
+    # "rebuild the flagged file(s) ... through the sanctioned write path" -- one static repair for
+    # every flagged file, authored at this surface, blind to what the safety check actually found.
+    # For a file no rebuild of ours can rewrite that is a dead end presented as a next step, and it
+    # was a third independently-worded copy of guidance the state->action registry already owns.
+    # A project-wide conjunct cannot carry a per-file repair, so it no longer claims to: the step
+    # for each file is rendered per relpath from the registry by _completion_not_done_message,
+    # keyed on the state that writer is really in.
     "open_external_write_bypass": (
         "this project has an open, hand-rolled file that writes to your external world by a path "
         "that bypasses the sanctioned, safety-gated write surface -- so it is not safe to call "
         "anything here done until that is rebuilt, regardless of this capability's own state.",
-        "Rebuild the flagged file(s) named below through the sanctioned write path (use the "
-        "rebuild-paused-capability flow), then run this check again.",
+        "What to do depends on what the safety check found for each file, so the step for each one "
+        "is named on its own line below. Once they are all settled, run this check again.",
     ),
 }
 
@@ -1425,7 +1442,12 @@ def _completion_not_done_message(
     bypass_writer_relpaths: Optional[List[str]] = None,
     bypass_read_error: bool = False,
     bypass_owning_capability_by_relpath: Optional[Dict[str, str]] = None,
+    bypass_next_step_by_relpath: Optional[Dict[str, str]] = None,
 ) -> str:
+    """``bypass_next_step_by_relpath`` carries the registry-rendered step for each
+    flagged file, keyed on the state that writer is actually in. It is passed in
+    rather than derived here so this function stays a pure renderer, and so the one
+    place that classifies a writer stays the one place that classifies a writer."""
     lines = [
         f"NOT FINISHED -- {canonical_id!r} is not yet confirmed safe/complete for live use.",
         "Safe state: treat this capability as NOT authorized for additional live writes based "
@@ -1457,6 +1479,15 @@ def _completion_not_done_message(
                     lines.append(f"  Fix this file: {relpath} (part of `{owner}`)")
                 else:
                     lines.append(f"  Fix this file: {relpath}")
+                # The step for THIS file, rendered from the state->action registry by
+                # whoever classified it -- never composed here. It differs per file:
+                # one that our own remediator covers is rebuilt, one it cannot is a
+                # decision only the operator can make, and one nobody could classify
+                # goes to a person. Absent (an older caller, or a relpath nothing
+                # classified) leaves the line off rather than inventing a step.
+                step = (bypass_next_step_by_relpath or {}).get(relpath)
+                if step:
+                    lines.append(f"    Next for this file: {step}")
     return "\n".join(lines)
 
 
@@ -1630,6 +1661,32 @@ def check_completion(project_root: str, canonical_id: str) -> CompletionResult:
         if _derived.get("ownership_status") == "resolved" and _derived.get("owning_capability_id"):
             bypass_owning_capability_by_relpath[_relpath] = _derived["owning_capability_id"]
 
+    # The per-file NEXT STEP, rendered from the state->action registry rather than
+    # written here. The project-wide conjunct explanation cannot carry it: whether a
+    # rebuild is even possible depends on what the safety check recorded for that
+    # file, and the static sentence that used to stand in for all of them told a file
+    # no rebuild of ours can rewrite to rebuild itself.
+    #
+    # MESSAGE ENRICHMENT ONLY -- exactly like the ownership lookup above. The block
+    # decision is already made, entirely from `bypass_entries`/`bypass_read_error`,
+    # and nothing below may touch it. A classifier failure for one entry therefore
+    # routes THAT FILE to a person instead of asserting a repair nothing established
+    # applies to; it never changes `projection_failed`, and it never crashes this
+    # read-only gate.
+    bypass_next_step_by_relpath: Dict[str, str] = {}
+    for _relpath in bypass_writer_relpaths:
+        _entry = next(
+            (e for e in bypass_entries if str(e.get("writer_relpath")) == _relpath), None)
+        if _entry is None:
+            continue
+        try:
+            _state = _ext_write_state.classify_bespoke_writer_entry(str(root), _entry)
+            bypass_next_step_by_relpath[_relpath] = state_actions.instruction_for_state(
+                state_actions.writer_state_key(_state), _relpath)
+        except Exception:  # noqa: BLE001 -- fail-closed to a person, never a repair.
+            bypass_next_step_by_relpath[_relpath] = \
+                state_actions.route_for_unclassified_state(_relpath)
+
     core_ok = not core_failed
     projection_ok = not projection_failed
     done = core_ok and projection_ok
@@ -1642,7 +1699,8 @@ def check_completion(project_root: str, canonical_id: str) -> CompletionResult:
             cid, failed_conjuncts,
             bypass_writer_relpaths=bypass_writer_relpaths,
             bypass_read_error=bypass_read_error,
-            bypass_owning_capability_by_relpath=bypass_owning_capability_by_relpath)
+            bypass_owning_capability_by_relpath=bypass_owning_capability_by_relpath,
+            bypass_next_step_by_relpath=bypass_next_step_by_relpath)
     )
 
     return CompletionResult(

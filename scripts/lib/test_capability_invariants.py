@@ -389,6 +389,50 @@ class TestRoutingCheckIndependent(CapabilityInvariantsTestBase):
         )
         self._assert_no_traceback(result)
 
+    def test_the_routing_repair_is_rendered_from_the_state_action_registry(self):
+        """The routing failure used to hand-author its own repair sentence ("have
+        the coding agent rebuild this capability ... never raw run_operation"),
+        which is a second, independently-worded copy of guidance the state->action
+        registry already owns for exactly this condition: a raw write reference is
+        one of the remediable violation kinds, so the writer state it produces is
+        the rebuildable one, and the registry's instruction for that state also
+        names the check that CONFIRMS the rebuild -- which this sentence never did.
+
+        The DIAGNOSIS stays here (it is what was found, and it names the exact
+        primitive and the exact sanctioned call, which the generic instruction
+        cannot). Only the instruction is rendered."""
+        from external_write import state_actions
+        from external_write import writer_state_core
+        from external_write.capability_identity import (
+            CAPABILITIES_DIR_REL, CAPABILITY_FILE_SUFFIX)
+
+        cap_id = "routing_repair_render_cap"
+        self._write_capability(
+            cap_id,
+            _ROUTING_VIOLATION_SOURCE.format(name="Routing Repair Cap",
+                                             op_kind=VALID_OP_KIND),
+        )
+        self._write_descriptor_set([_base_descriptor_entry(cap_id)])
+
+        result = self._check(cap_id)
+
+        routing = [f for f in result.failures if f.startswith("Routing:")]
+        self.assertTrue(routing, result.failures)
+        expected = state_actions.instruction_for_state(
+            state_actions.writer_state_key(
+                writer_state_core.WriterState.BLOCKING_LIVE_ENABLE),
+            "{}/{}{}".format(CAPABILITIES_DIR_REL, cap_id, CAPABILITY_FILE_SUFFIX))
+        self.assertIn(expected, routing[0],
+                      "the routing repair must be the registry's own sentence, "
+                      "not text that merely resembles it")
+        self.assertIn("run_operation", routing[0],
+                      "the diagnosis must still name what it found")
+        self.assertIn("raw_run_operation_reference",
+                      writer_state_core.REMEDIABLE_VIOLATION_KINDS,
+                      "the premise of rendering the rebuildable state's "
+                      "instruction here is that this violation kind is one our "
+                      "own remediator covers")
+
     def test_missing_source_file_fails_routing(self):
         cap_id = "no_source_cap"
         self._write_descriptor_set([_base_descriptor_entry(cap_id)])
