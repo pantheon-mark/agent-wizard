@@ -1805,7 +1805,22 @@ class TestS253ContractDelta(unittest.TestCase):
         # module never physically copied into the package, dying with ModuleNotFoundError on every
         # read-facade build -- exactly the failure this enrollment prevents. See topology.py's own
         # enrollment comment in agent_emitter.py, and test_topology_enrollment.py below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 43)
+        # (Count updated to 44 by Cut 1.9 Task 1 / v0.23.0, which additionally enrolled
+        # trial_eligibility.py -- the trial-eligibility preflight, the first module of the
+        # journaled trial protocol that makes a copy_run_proof producible (and therefore
+        # acceptance reachable) in a real operator project. See that file's own enrollment
+        # comment in agent_emitter.py, and
+        # test_emit_set_lists_the_cut19_trial_eligibility_file below.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 44)
+
+    def test_emit_set_lists_the_cut19_trial_eligibility_file(self):
+        # Cut 1.9 Task 1 / v0.23.0: trial_eligibility.py must be enrolled, or the journaled
+        # trial protocol's gate never physically reaches an operator project -- and the
+        # trial is the only producer of the copy_run_proof acceptance requires, so the
+        # structurally-unreachable acceptance state this cut exists to open would stay
+        # exactly as unreachable as before.
+        import agent_emitter
+        self.assertIn("trial_eligibility.py", agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def test_emit_set_lists_the_cut16_capability_runner_file(self):
         # Cut 1.6 / v0.20.0: capability_runner.py must be enrolled, or an emitted writes-back

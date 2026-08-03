@@ -259,6 +259,18 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # unrepairable writer blocking acceptance forever.
     "capability_runner.py",
     "writer_acknowledgement.py",
+    # Cut 1.9 Task 1 (v0.23.0): the trial-eligibility preflight -- the
+    # fail-closed gate that decides which operations may legally undergo a
+    # journaled apply/verify/undo/verify-restored TRIAL, evaluated before any
+    # external write. The trial protocol is what finally makes a `copy_run_proof`
+    # producible (and therefore acceptance reachable) in a real operator project,
+    # so this module must physically reach that project or the whole path stays
+    # unreachable exactly as it is today. It is the FIRST module of that
+    # protocol; the journal + executor tasks that follow import it, so omitting
+    # it here would ship those modules without the gate they import -- a raw
+    # ModuleNotFoundError at import time, the same regression class this file's
+    # own docstring documents for every prior entry above.
+    "trial_eligibility.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

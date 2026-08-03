@@ -312,6 +312,31 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         # code, and it imports no vendor SDK, constructs no credential, and
         # never calls run_operation.
         "test_capability_runner_topology.py",
+        # trial_eligibility.py (Cut 1.9 Task 1 / v0.23.0): the trial-eligibility
+        # preflight -- the fail-closed gate that decides which operations may
+        # legally undergo a journaled apply/verify/undo/verify-restored TRIAL,
+        # evaluated BEFORE any external write. It imports the sibling kernel
+        # `adapter_registry` (for `get_dispatch` + the canonical declaration
+        # attribute name) and `evidence` (for the canonical required-predicate
+        # set) as ordinary internal kernel wiring -- which is precisely the
+        # CAPABILITY-zone-ONLY bans: scanned as CAPABILITY it reports four
+        # violations (adapter_module_import, adapter_registry_reference x2,
+        # sealed_kernel_import) and zero as SEALED_KERNEL, so this membership is
+        # load-bearing, not decorative (proved by
+        # SealedKernelZoneMembershipTests in
+        # test_external_write_trial_eligibility.py, which asserts BOTH
+        # directions). It is the same class as capability_invariants.py's entry
+        # above, for the identical reason: a READ of the frozen dispatch record.
+        # It imports no vendor SDK, constructs/obtains no write-capable
+        # credential, performs no vendor mutation, writes nothing to disk, and
+        # never calls run_operation -- so it passes every UNIVERSAL bypass check
+        # on its own merits and needs exemption only from the four
+        # CAPABILITY-zone-only rules. SEALED_KERNEL membership does NOT grant a
+        # capability the right to import it (that is the independent
+        # scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES set): the trial
+        # protocol is kernel-driven, and capability code has no business
+        # deciding its own trial eligibility.
+        "trial_eligibility.py",
     }
 )
 
