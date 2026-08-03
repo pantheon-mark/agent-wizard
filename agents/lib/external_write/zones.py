@@ -178,6 +178,37 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
         # so it is exempt ONLY from the four CAPABILITY-zone-only rules; every
         # universal bypass check still binds.
         "writer_acknowledgement.py",
+        # The three writer-state layers (Cut 1.9 Task 7). The machinery formerly in
+        # _ext_write_state.py + writer_acknowledgement.py was split apart because
+        # those two imported each other, both from inside function bodies, in
+        # opposite directions — so neither import ever failed and the cycle went
+        # unnoticed, while making the acknowledgement eligibility rule impossible to
+        # tighten. All three are kernel machinery of exactly the same class as the
+        # two modules they were carved out of, and all three are listed here BY
+        # DECISION rather than left to be inferred:
+        #   writer_commands.py NEEDS the exemption today — it imports two sibling
+        #     kernel submodules, which is precisely the CAPABILITY-zone-only
+        #     sealed_kernel_import ban, and the counterfactual is asserted in
+        #     test_external_write_writer_state_layers.py.
+        #   writer_state_core.py and writer_ack_store.py import NO sibling at all,
+        #     so they need no exemption today and their entries are zone
+        #     DECLARATIONS. That is the point: leaving their classification to be
+        #     inferred from "they happen not to import a sibling right now" would
+        #     make a later, entirely reasonable sibling import silently reclassify
+        #     kernel code as CAPABILITY code — the infer-identity-from-incidental-
+        #     structure mistake this registry exists to prevent.
+        # writer_ack_store.py WRITES project state
+        # (security/bespoke_writer_acknowledgements.json), the same class as
+        # lifecycle_state.py. None of the three imports a vendor SDK, constructs or
+        # obtains a write-capable credential, performs a raw vendor mutation, or
+        # calls run_operation, so each passes every universal bypass check on its own
+        # merits and needs exemption ONLY from the CAPABILITY-zone-ONLY rules.
+        # Membership does NOT grant a capability the right to import any of them
+        # (that allowlist is the independent
+        # scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES set).
+        "writer_ack_store.py",
+        "writer_commands.py",
+        "writer_state_core.py",
         "write_gate.py",
         "zones.py",
         # standing_automation.py (Task 9 / B2 / F-42 — v0.13.0 Slice 2): the safe

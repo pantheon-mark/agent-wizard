@@ -314,6 +314,35 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # blocking state with no performable repair — the dead-end shape this cut
     # exists to remove, recreated by an emit-set omission.
     "trial_recovery.py",
+    # Cut 1.9 Task 7 — the writer-state machinery, split into layers so the
+    # acknowledgement eligibility rule could be tightened at all (it used to sit
+    # behind a two-way, function-scope import cycle between `_ext_write_state.py`
+    # and `writer_acknowledgement.py`). All three are load-bearing at session start
+    # and omitting ANY of them is a raw ModuleNotFoundError rather than a degraded
+    # feature, which is the same regression class this file's own docstring
+    # documents for every prior entry above:
+    #   writer_state_core.py -- the structural state (the WriterState vocabulary,
+    #     the open-bespoke-writer queue reader, and the classification that depends
+    #     on nothing but the queue entry and the writer file). `_ext_write_state.py`
+    #     imports it AT MODULE SCOPE and re-exports its public surface, and both
+    #     `lifecycle_state.py` (the completion gate) and `capability_health.py`
+    #     (`overall_status`/`--overall`) hard-import `_ext_write_state` at module
+    #     scope in turn -- so omitting this file breaks the session-start health
+    #     read and the completion self-check before the operator runs anything.
+    #   writer_ack_store.py -- the acknowledgement records: persistence plus the
+    #     hash-validity rule that voids a record the instant the writer's bytes
+    #     change. `_ext_write_state` imports it lazily and fails closed to "no
+    #     acknowledgements", so omitting THIS one is SILENT: it leaves an
+    #     unrepairable writer blocking acceptance forever with the exit intact in
+    #     source and absent on disk.
+    #   writer_commands.py -- `acknowledge_writer` itself, the ONLY sanctioned exit
+    #     from the needs-a-person writer state. `writer_acknowledgement.py` (already
+    #     enrolled above, now a compatibility facade over these two) imports it at
+    #     module scope, so omitting it makes that long-standing module unimportable
+    #     in an emitted project.
+    "writer_state_core.py",
+    "writer_ack_store.py",
+    "writer_commands.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

@@ -1,94 +1,89 @@
-"""External-write bypass state predicate (Cut 1.5 / bundle v0.19.0, Task A --
-V15-3 false-green keystone).
+"""The writer-state SERVICE: structural state combined with the operator's own
+recorded decisions, plus the reap that clears a resolved entry and the advisory
+owning-capability derivation.
 
-Why this exists
-----------------
-An operator project's pending-migration queue
-(``agents/handoffs/pending_migrations.json``) can carry a "bespoke writer"
-entry: a hand-rolled per-chunk write loop (e.g. the estate's
-``agents/inbox/runner.py`` bulk ``mint_run_envelope`` loop) that bypasses the
-sanctioned, gated bulk write path (``run_sanctioned_bulk``) and was flagged
-non-conformant on upgrade. Such an entry is keyed on a RELPATH-DERIVED
-``mechanism_id`` (via ``upgrade_reconcile._migration_identity``) with NO
-owning-capability field -- so the three id-keyed safety views
-(``capability_health._is_pending_migration`` / ``overall_status`` and
-``lifecycle_state.check_completion``) were structurally BLIND to it: a project
-with an OPEN bypass reported green/done anyway (V15-3, source-verified).
+This module is the public face of the bespoke-writer machinery and has been since
+the coarse fail-closed completion gate was built on it -- ``lifecycle_state``,
+``capability_health``, ``operator_acceptance`` and the build-side upgrade reconcile
+all reach for it by this name, and it is present in every operator project already
+emitted. So it keeps the name and the surface. What changed is where the code
+underneath lives.
 
-This module defines the ONE canonical predicate those views (and later Cut 1.5
-tasks B/C/E) consume to close that hole with a coarse, fail-closed, PROJECT-WIDE
-block: safety must NOT depend on attributing the writer back to a capability
-(that attribution is a separate, advisory-only concern) -- the mere EXISTENCE of
-any open bespoke-writer entry makes the whole project non-green.
+The layering, and why it exists
+-------------------------------
+The bespoke-writer machinery used to be two modules that imported each other, both
+lazily, in opposite directions: this one reached for the active acknowledgement
+records so it could label an entry ``acknowledged_risk``, and the acknowledgement
+writer reached back for the open-entry list so it could refuse to record a decision
+about a file nothing had flagged. Two lazy imports hide a cycle well -- neither
+fails at import time, so nothing in the suite noticed -- but the cycle is what made
+the eligibility rule impossible to tighten: any check the acknowledgement side
+wanted to make about a writer's STATE had to come from the module that was already
+asking it about decisions.
 
-What a "bespoke writer" entry IS
---------------------------------
-An entry in the pending-migrations queue where ``writer_relpath`` is set
-(non-null, non-empty) AND ``status == "pending"``. A canonical-capability
-migration entry has ``writer_relpath is None`` (see
-``upgrade_reconcile._append_migration_request`` / the ``MechanismReport``
-schema) and is NOT a bespoke writer -- it is already covered by the id-keyed
-views and must never trip this block (no over-firing).
+It is now four layers, and they form a DAG:
 
-Fail-closed contract (deliberate)
-----------------------------------
-* A genuinely ABSENT queue file is a NORMAL, non-error input: there is nothing
-  queued, so there is no open bypass -> returns ``[]``. "Absent" and
-  "unreadable" are never conflated (the same distinction every other reader in
-  this package draws).
-* An EXISTING-but-unreadable/malformed queue file (an ``OSError`` other than
-  ``FileNotFoundError``, invalid JSON, or a top-level shape that is not a JSON
-  array) must NEVER silently collapse to "no open entries" and thus a false
-  green -- doing so is exactly the failure mode this predicate exists to close.
-  It RAISES ``ExternalWriteStateReadError``; every caller treats that raise as
-  NON-GREEN (blocking), never as a clean bill of health.
-* A non-dict individual entry is skipped (it cannot carry a ``writer_relpath``
-  to act on) -- per-entry tolerance mirrors ``capability_health.
-  _is_pending_migration``; only the top-level structural failures above raise.
+    writer_state_core   structural state -- the ``WriterState`` vocabulary, the
+                        open bespoke-writer queue, and the classification that
+                        depends on nothing but the queue entry and the writer file.
+                        Imports NO sibling in this package, and consults NO record
+                        of any human decision. That is the load-bearing property of
+                        the whole split.
+    writer_ack_store    the acknowledgement records: persistence, the hash-validity
+                        rule, and the write primitive. Imports NO sibling either.
+    _ext_write_state    this module. COMBINES the two, and keeps the reap and the
+                        advisory owner derivation.
+    writer_commands     the operator-invocable commands: validates via the core,
+                        writes via the store. Does not depend on this module.
 
-Enforcement ceiling (disclosure): this is build-time + operator-as-approver
-enforcement, NOT a runtime/OS sandbox -- the same ceiling every module in this
-package discloses. This predicate reports a state; the gate/health views that
-consume it are what decline to say "done"/"normal".
+The queue predicates, the state vocabulary and the operator-facing entry wording
+are re-exported below from the core rather than re-declared here, so every existing
+consumer keeps working and there is still exactly ONE declaration of each. See
+``test_external_write_writer_state_layers.py``, which asserts the graph is acyclic
+AND, separately, that structural classification consults no acknowledgement state --
+the first does not imply the second, and the second is what a later refactor breaks.
 
-Task B (Cut 1.5 / v0.19.0) -- the reap that CLEARS a resolved bespoke-writer
-entry
-------------------------------------------------------------------------------
-Task A above only DETECTS an open bypass; on its own it would hold a project
-non-green forever, even after the operator genuinely fixes the writer. Task B
-adds ``reap_resolved_writer_migrations`` -- the stateless, attribution-free
-self-heal that REMOVES a bespoke-writer entry from the queue once its writer is
-demonstrably resolved: either the writer file is gone, or its content changed
-since pause-time AND it now passes the real bypass scan. Called from
+What "bespoke writer" means, and the fail-closed queue contract, are documented at
+length in ``writer_state_core`` -- the single home for both.
+
+The reap that CLEARS a resolved bespoke-writer entry
+----------------------------------------------------
+Detection alone would hold a project non-green forever, even after the operator
+genuinely fixes the writer. ``reap_resolved_writer_migrations`` is the stateless,
+attribution-free self-heal that REMOVES a bespoke-writer entry from the queue once
+its writer is demonstrably resolved: either the writer file is gone, or its content
+changed since pause-time AND it now passes the real bypass scan. Called from
 ``lifecycle_state.reconcile_state`` (fail-safe self-heal on read).
 
 The reap consults the SAME AST bypass scanner the build-time gate uses
-(``external_write.scan.scan_paths``), run with the F-3B hash-bound migration
-QUARANTINE DISABLED (``project_root`` deliberately omitted -- see that function's
-docstring: default ``None`` means the quarantine plays no part). This matters
-because a quarantined file is inert, NOT migrated: the quarantine exempts a
-listed-paused + hash-matched file from violations so the build does not deadlock,
-but that same file is still the bespoke writer. The reap must see the file's REAL
-verdict, so it never asks the quarantine and instead pairs the scan with an
-explicit hash-CHANGED check (an unchanged file is never reaped, regardless of any
-scan result).
+(``external_write.scan.scan_paths``), run with the hash-bound migration QUARANTINE
+DISABLED (``project_root`` deliberately omitted -- see that function's docstring:
+default ``None`` means the quarantine plays no part). This matters because a
+quarantined file is inert, NOT migrated: the quarantine exempts a listed-paused +
+hash-matched file from violations so the build does not deadlock, but that same file
+is still the bespoke writer. The reap must see the file's REAL verdict, so it never
+asks the quarantine and instead pairs the scan with an explicit hash-CHANGED check
+(an unchanged file is never reaped, regardless of any scan result).
 
-Zoning note (Task B): adding the state-mutating reap (it REWRITES
-``pending_migrations.json``) and importing a sibling kernel submodule
-(``external_write.scan``) makes this module ordinary internal kernel wiring, the
-same class as ``lifecycle_state.py`` -- so it is now listed in
-``zones.SEALED_KERNEL_MODULE_PATHS`` (a reviewable, one-line allowlist edit).
+Enforcement ceiling (disclosure): build-time + operator-as-approver enforcement,
+NOT a runtime/OS sandbox -- the same ceiling every module in this package discloses.
+This module reports a state; the gate/health views that consume it are what decline
+to say "done"/"normal".
+
+Zoning note: this module is listed in ``zones.SEALED_KERNEL_MODULE_PATHS``. It
+REWRITES ``pending_migrations.json`` and imports sibling kernel submodules, making
+it ordinary internal kernel wiring, the same class as ``lifecycle_state.py``.
 SEALED_KERNEL membership exempts it from the CAPABILITY-zone-only import-boundary
-rule (so the ``scan`` import is legitimate kernel wiring, not a bypass); it grants
+rule (so the sibling imports are legitimate kernel wiring, not a bypass); it grants
 NO capability the right to import this module (that allowlist is the independent
 ``scan._CAPABILITY_ALLOWED_EXTERNAL_WRITE_SUBMODULES`` set), and the module still
 passes every universal bypass check on its own merits (no vendor SDK, no
 write-capable credential, no raw vendor mutation, no raw ``run_operation``).
 
-Stdlib only -- no third-party dependencies (this module ships into the
-operator's own runtime, agents/lib/external_write/). The only non-stdlib import is
-a sibling module of this same trusted package (``external_write.scan``, itself
-stdlib-only); it never imports across the build/runtime boundary.
+Stdlib only -- no third-party dependencies (this module ships into the operator's
+own runtime, agents/lib/external_write/). The only non-stdlib imports are sibling
+modules of this same trusted package, each stdlib-only; it never imports across the
+build/runtime boundary.
 """
 
 from __future__ import annotations
@@ -102,103 +97,33 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from external_write import scan as _scan
+from external_write import writer_state_core as _core
 
-# Duplicated-by-value from lifecycle_state.MIGRATION_QUEUE_REL /
-# capability_health.MIGRATION_QUEUE_REL / upgrade_reconcile.MIGRATION_QUEUE_REL
-# (never imported across the build/runtime boundary -- same discipline as every
-# other path constant in this package).
-MIGRATION_QUEUE_REL = "agents/handoffs/pending_migrations.json"
-
-
-class ExternalWriteStateReadError(Exception):
-    """The pending-migrations queue EXISTS but could not be read/parsed. Raised
-    (never swallowed) so a read failure can never present as "no open bypass"
-    (a false green). Callers treat this as NON-GREEN, exactly like a confirmed
-    open bypass -- fail-closed."""
-
-
-def _read_migration_queue(project_root: str) -> List[Any]:
-    """The full, parsed pending-migrations queue (every entry, whatever its
-    shape) under ``project_root`` -- the single fail-closed reader every consumer
-    in this module goes through.
-
-    Absent queue file -> ``[]`` (nothing queued; a NORMAL non-error input).
-    Existing-but-unreadable/malformed/non-array -> raises
-    ``ExternalWriteStateReadError`` (fail-closed; see module docstring) -- never a
-    misleading empty list on a read failure."""
-    path = Path(project_root) / MIGRATION_QUEUE_REL
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return []
-    except OSError as exc:
-        raise ExternalWriteStateReadError(
-            f"pending-migrations queue {path} exists but could not be read: {exc}") from exc
-    try:
-        data = json.loads(text)
-    except ValueError as exc:
-        raise ExternalWriteStateReadError(
-            f"pending-migrations queue {path} exists but is not valid JSON: {exc}") from exc
-    if not isinstance(data, list):
-        raise ExternalWriteStateReadError(
-            f"pending-migrations queue {path} exists but is not a JSON array")
-    return data
-
-
-def _is_open_bespoke_writer_entry(entry: Any) -> bool:
-    """The ONE canonical per-entry predicate: True iff ``entry`` is an OPEN
-    bespoke-writer entry -- a dict whose ``writer_relpath`` is set (non-null,
-    non-empty) AND whose ``status`` equals ``"pending"``.
-
-    A non-dict individual entry is skipped (it cannot carry a ``writer_relpath``
-    to act on). "set (non-null)" per the contract; an empty string is
-    degenerate/not a real relpath and is treated as unset. Any other non-null
-    value counts (fail-closed: an odd-shaped-but-present ``writer_relpath`` still
-    blocks). A canonical-capability migration entry has ``writer_relpath is None``
-    and is deliberately NOT a bespoke writer (no over-firing)."""
-    if not isinstance(entry, dict):
-        return False
-    writer_relpath = entry.get("writer_relpath")
-    if writer_relpath is None or writer_relpath == "":
-        return False
-    return entry.get("status") == "pending"
-
-
-def open_bespoke_writer_migrations(project_root: str) -> List[Dict[str, Any]]:
-    """Return the list of OPEN bespoke-writer migration entries under
-    ``project_root`` -- every entry in ``agents/handoffs/pending_migrations.json``
-    whose ``writer_relpath`` is set (non-null, non-empty) AND whose ``status``
-    equals ``"pending"`` (see ``_is_open_bespoke_writer_entry``).
-
-    This is the ONE canonical definition of "is there an open external-write
-    bypass in this project" -- attribution-free (it deliberately ignores
-    ``mechanism_id`` / any owning-capability field) and reused by every safety
-    view, never re-implemented per caller.
-
-    Absent queue file -> ``[]`` (nothing queued). Existing-but-unreadable/
-    malformed -> raises ``ExternalWriteStateReadError`` (fail-closed; see module
-    docstring). Never returns a misleading empty list on a read failure."""
-    return [e for e in _read_migration_queue(project_root)
-            if _is_open_bespoke_writer_entry(e)]
-
-
-def open_bespoke_writer_relpaths(project_root: str) -> List[str]:
-    """Convenience projection over ``open_bespoke_writer_migrations``: the sorted,
-    de-duplicated ``writer_relpath`` string(s) of every open bespoke-writer entry
-    -- the plain-language "fix this file" list a gate/health view names to the
-    operator. Raises ``ExternalWriteStateReadError`` on an unreadable queue, same
-    fail-closed contract as the predicate it derives from."""
-    return sorted({
-        str(e.get("writer_relpath"))
-        for e in open_bespoke_writer_migrations(project_root)
-    })
+# Re-exported, NEVER re-declared: the queue predicates, the state vocabulary, the
+# blocking set and the operator-facing entry wording all have exactly one
+# declaration, in `writer_state_core`. Consumers of this module (`lifecycle_state`,
+# `capability_health`, `operator_acceptance`, and the build-side upgrade reconcile,
+# which loads this module by name) reach these through here, so the names must stay
+# bound here -- but they are the SAME OBJECTS, asserted by identity in
+# `test_external_write_writer_state_layers.PublicSurfaceIdentityTests`. A second
+# spelling of any of them is the defect, not a convenience.
+from external_write.writer_state_core import (  # noqa: F401
+    BLOCKING_WRITER_STATES,
+    ExternalWriteStateReadError,
+    MIGRATION_QUEUE_REL,
+    REMEDIABLE_VIOLATION_KINDS,
+    WriterState,
+    describe_blocking_entry,
+    is_bypass_writer_entry,
+    open_bespoke_writer_migrations,
+    open_bespoke_writer_relpaths,
+)
 
 
 # ---------------------------------------------------------------------------
-# Task B (Cut 1.5 / v0.19.0): stateless auto-reap of a RESOLVED bespoke-writer
-# migration entry. See the module docstring's "Task B" section for the full
-# rationale (why the scan runs with the quarantine DISABLED, and why zoning
-# moved to SEALED_KERNEL).
+# The stateless auto-reap of a RESOLVED bespoke-writer migration entry. See the
+# module docstring's reap section for the full rationale (why the scan runs with
+# the quarantine DISABLED).
 # ---------------------------------------------------------------------------
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -239,9 +164,9 @@ def _writer_migration_is_resolved(root: Path, entry: Dict[str, Any], writer_relp
       exists" -- it is unverifiable, so it is kept (distinguished via the read's
       own exception type, never ``os.path.exists``/``is_file`` which conflate the
       two).
-    * No recorded ``paused_content_sha256`` (a pre-F-3B / hand-authored entry) ->
-      no pause-time baseline to prove the file CHANGED, so it is kept (never
-      guessed reaped).
+    * No recorded ``paused_content_sha256`` (a pre-quarantine / hand-authored
+      entry) -> no pause-time baseline to prove the file CHANGED, so it is kept
+      (never guessed reaped).
     * current hash == recorded hash -> the file is UNCHANGED since pause-time: it
       is still the same bespoke writer, so it is kept regardless of any scan
       result (this is the case the quarantine would otherwise exempt as "clean" --
@@ -273,7 +198,7 @@ def _writer_migration_is_resolved(root: Path, entry: Dict[str, Any], writer_relp
         return False  # unchanged since pause-time -> still the bespoke writer -> keep.
 
     # Content changed since pause-time: ask the REAL scanner for its verdict, with the
-    # F-3B migration quarantine DISABLED (project_root deliberately omitted -- default None
+    # migration quarantine DISABLED (project_root deliberately omitted -- default None
     # means the quarantine plays no part; a quarantined file is inert, not migrated). A
     # single-file scan returns only this file's violations; clean => resolved.
     try:
@@ -305,11 +230,11 @@ def reap_resolved_writer_migrations(project_root: str) -> List[str]:
     ``build_capability_index`` state-read-error check still fail-closes a genuinely
     broken queue into a blocking ``ReconcileStateError``."""
     root = Path(project_root)
-    queue = _read_migration_queue(project_root)
+    queue = _core.read_migration_queue(project_root)
     reaped_ids: List[str] = []
     kept: List[Any] = []
     for entry in queue:
-        if _is_open_bespoke_writer_entry(entry):
+        if _core.is_open_bespoke_writer_entry(entry):
             writer_relpath = str(entry.get("writer_relpath"))
             if _writer_migration_is_resolved(root, entry, writer_relpath):
                 reaped_ids.append(str(entry.get("mechanism_id")))
@@ -325,17 +250,18 @@ def reap_resolved_writer_migrations(project_root: str) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# Task E (Cut 1.5 / v0.19.0): ADVISORY owning-capability link. UX ONLY -- NEVER a safety input.
-# See the module docstring's Task A section: the block above fires on the mere EXISTENCE of an
-# open bespoke-writer entry, independent of any owning-capability attribution. This section adds
-# the OPPOSITE-purpose, deliberately-non-authoritative companion: a best-effort, ranked-evidence
-# guess at which capability (if any) a bespoke writer belongs to, so a plain-language view can
-# say "fix `<writer>` (part of `<capability>`)" instead of just naming a path. Nothing in this
-# section may ever be consulted by a safety/block decision -- see
-# ``test_owning_capability_advisory.py``'s dedicated safety-independence assertions.
+# ADVISORY owning-capability link. UX ONLY -- NEVER a safety input.
+# The coarse block fires on the mere EXISTENCE of an open bespoke-writer entry,
+# independent of any owning-capability attribution. This section adds the
+# OPPOSITE-purpose, deliberately-non-authoritative companion: a best-effort,
+# ranked-evidence guess at which capability (if any) a bespoke writer belongs to,
+# so a plain-language view can say "fix `<writer>` (part of `<capability>`)"
+# instead of just naming a path. Nothing in this section may ever be consulted by
+# a safety/block decision -- see ``test_owning_capability_advisory.py``'s
+# dedicated safety-independence assertions.
 # ---------------------------------------------------------------------------
 
-# Duplicated-by-value (same discipline as MIGRATION_QUEUE_REL above and every other module in
+# Duplicated-by-value (same discipline as MIGRATION_QUEUE_REL and every other module in
 # this package -- acceptance_ceremony.py / capability_health.py / capability_identity.py each
 # independently declare the identical two constants rather than importing a shared source).
 CAPABILITIES_DIR_REL = "agents/capabilities"
@@ -424,21 +350,22 @@ def _imports_capability_module(source_text: str, module_stem: str) -> bool:
 
 
 def derive_owning_capability(project_root: str, entry: Dict[str, Any]) -> Dict[str, Any]:
-    """ADVISORY-ONLY (Task E, Cut 1.5 / v0.19.0): the ranked-evidence derivation of which
-    capability, if any, OWNS the bespoke writer named by ``entry["writer_relpath"]`` -- used
-    ONLY to enrich the plain-language "fix this file (part of X)" message a completion/
-    acceptance view shows the operator (see ``lifecycle_state._completion_not_done_message``).
+    """ADVISORY-ONLY: the ranked-evidence derivation of which capability, if any, OWNS
+    the bespoke writer named by ``entry["writer_relpath"]`` -- used ONLY to enrich the
+    plain-language "fix this file (part of X)" message a completion/acceptance view
+    shows the operator (see ``lifecycle_state._completion_not_done_message``).
 
-    THIS IS NEVER A SAFETY INPUT. Task A's project-wide, attribution-free block (the mere
-    EXISTENCE of an open bespoke-writer entry -- see ``open_bespoke_writer_migrations`` above)
-    already covers safety regardless of whether this function resolves an owner; no caller may
-    let its result change any block/refuse/done decision. See ``test_owning_capability_
-    advisory.py``'s dedicated safety-independence assertions, which prove ``open_bespoke_writer_
-    migrations`` / ``lifecycle_state.check_completion`` / ``capability_health.overall_status``
-    fire identically for a resolved, an ambiguous, and an unresolved entry.
+    THIS IS NEVER A SAFETY INPUT. The project-wide, attribution-free block (the mere
+    EXISTENCE of an open bespoke-writer entry -- see ``open_bespoke_writer_migrations``)
+    already covers safety regardless of whether this function resolves an owner; no
+    caller may let its result change any block/refuse/done decision. See
+    ``test_owning_capability_advisory.py``'s dedicated safety-independence assertions,
+    which prove ``open_bespoke_writer_migrations`` / ``lifecycle_state.check_completion``
+    / ``capability_health.overall_status`` fire identically for a resolved, an
+    ambiguous, and an unresolved entry.
 
-    RANKED EVIDENCE -- STRONG signals only; WEAK evidence (a writer's file stem/path merely
-    resembling a capability id) is NEVER authority and is not consulted at all:
+    RANKED EVIDENCE -- STRONG signals only; WEAK evidence (a writer's file stem/path
+    merely resembling a capability id) is NEVER authority and is not consulted at all:
       - the writer's source imports ``<id>_capability`` for some known capability id, OR
       - the writer's source carries a literal ``ENVELOPE_CAPABILITY_ID = "<id>"`` matching a
         known capability id exactly, OR
@@ -512,229 +439,28 @@ def derive_owning_capability(project_root: str, entry: Dict[str, Any]) -> Dict[s
 
 
 # ---------------------------------------------------------------------------
-# Task 1 (Cut 1.6 / v0.20.0): deterministic STATE CLASSES over the open
-# bespoke-writer set.
-#
-# the coarse, attribution-free presence-of-violation gate WORKED and is NOT undone here:
-# ``open_bespoke_writer_migrations`` above is untouched and remains the single
-# attribution-free definition of "is there an open external-write bypass".
-# What the v0.19.0 real-operator validation found (F-VAL19-1 / F-VAL19-5) is
-# that making EVERY open entry block EVERYTHING means one unrepairable writer
-# bricks acceptance project-wide, permanently, with no operator-reachable exit
-# -- the gate's own "never block the REPAIR" principle holding locally and
-# failing globally.
-#
-# THE DECIDABILITY MOVE. "Does a reachable remediation exist?" is undecidable
-# in general -- proving a behaviour-preserving rewrite to scan-clean code
-# exists is exactly the semantic judgement the coarse gate exists to keep out
-# (both cross-vendor advisors independently rejected asking it). So we do not
-# ask it. We ask a question we CAN answer: does OUR OWN deterministic
-# remediator cover every violation recorded on this entry? That is decidable,
-# because we know what our remediator does. It keys on the scanner's recorded
-# violation KINDS, which the reconcile already persists on each entry.
-#
-# DELIBERATE DEVIATION FROM ADVISOR OUTPUT -- DO NOT "SIMPLIFY" BACK.
-# gpt-5.5's proposed table listed ``needs_person`` as NON-blocking. That
-# silently re-opens F-VAL18-1 (acceptance green around an unmigrated LIVE
-# writer, no human in the loop). Here NEEDS_PERSON REMAINS BLOCKING; its only
-# sanctioned exit is an explicit, hash-bound operator acknowledgement (Task 3)
-# -- a recorded human decision, never a classifier's silent judgement.
-# Guarded by test_writer_state_classes.test_needs_person_without_
-# acknowledgement_is_blocking.
+# The COMBINATION: structural state + the operator's recorded decisions.
 # ---------------------------------------------------------------------------
 
-class WriterState:
-    """The five states an open bespoke-writer entry can be in. Plain string
-    constants (not an Enum) so they serialize into health/report JSON directly,
-    matching how every other typed signal in this package is surfaced."""
-
-    BLOCKING_LIVE_ENABLE = "blocking_live_enable"
-    NEEDS_PERSON = "needs_person"
-    NON_LIVE = "non_live"
-    ACKNOWLEDGED_RISK = "acknowledged_risk"
-    RESOLVED = "resolved"   # reserved: emitted by the REAPER, never by classify_bespoke_writer_entry
-
-
-#: Violation kinds OUR OWN remediation covers. The rebuild flow rewrites a
-#: bespoke writer onto the sanctioned bulk path, and Cut 1.6's kernel-runner
-#: injection removes the capability's reason to name a client/adapter at all --
-#: between them these five kinds are mechanically fixable. Verified against all
-#: 7 real estate entries 2026-07-25: agents/inbox/runner.py and
-#: scripts/finish_estate_cleanup.py record only kinds from this set (correctly
-#: BLOCKING -- we can fix them), while agents/upkeep/runner.py additionally
-#: records ``forbidden_import`` (correctly NEEDS_PERSON -- F-VAL19-1's entangled
-#: urllib notification delivery, which no remediator of ours rewrites).
-REMEDIABLE_VIOLATION_KINDS = frozenset({
-    "adapter_module_import",
-    "adapter_registry_reference",
-    "sealed_kernel_import",
-    "raw_run_operation_reference",
-    "credential_provider_reference",
-})
-
-#: Declared invocation surfaces -- the places the running system says what it
-#: actually invokes. Used only to DISQUALIFY a non_live classification, never to
-#: grant one.
-_LIVE_SURFACE_RELPATHS = (
-    "agents/cron/cron_config.md",
-    "agents/roster.md",
-)
-
-#: Directory names that are never operator code and never an invocation
-#: surface: vendored dependencies, VCS internals, and derived caches. Excluded
-#: from the reference scan entirely. (Real estate case 2026-07-25: `.venv`
-#: carried third-party pycparser modules that are INTENTIONALLY unparseable,
-#: and scanning them fail-closed every non_live classification in the project.)
-_NON_PROJECT_DIRS = frozenset({
-    ".venv", "venv", ".git", "__pycache__", "node_modules",
-    ".mypy_cache", ".pytest_cache", "site-packages", "build", "dist",
-})
-
-
-def _recorded_violation_kinds(entry: Dict[str, Any]) -> set:
-    """The set of violation ``kind`` strings recorded on ``entry`` by the
-    reconcile at pause time. Unknown/odd shapes contribute a sentinel that is
-    NOT in ``REMEDIABLE_VIOLATION_KINDS``, so anything unrecognised fails
-    closed toward NEEDS_PERSON rather than toward "we can fix it"."""
-    kinds = set()
-    for v in entry.get("violations") or []:
-        if isinstance(v, dict):
-            kind = v.get("kind") or v.get("rule")
-            kinds.add(str(kind) if kind else "__unrecognised__")
-        else:
-            kinds.add("__unrecognised__")
-    return kinds
-
-
-def _matches_test_naming(writer_relpath: str) -> bool:
-    """Signal 1 of 3 for non_live: unittest discovery naming."""
-    stem = Path(writer_relpath).name
-    return stem.startswith("test_") or stem.endswith("_test.py")
-
-
-def _has_test_structure(source_text: str) -> bool:
-    """Signal 2 of 3 for non_live: the module actually contains test-framework
-    structure -- a ``unittest``/``pytest`` import AND either a TestCase-shaped
-    class or a ``test_*`` function. AST-parsed, never a text grep, so a mere
-    mention in a string or comment does not qualify. Unparseable -> False
-    (fail-closed: an unparseable module is never granted non_live)."""
-    try:
-        tree = ast.parse(source_text)
-    except (SyntaxError, ValueError):
-        return False
-
-    imports_framework = False
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            if any(a.name.split(".")[0] in ("unittest", "pytest") for a in node.names):
-                imports_framework = True
-        elif isinstance(node, ast.ImportFrom):
-            if (node.module or "").split(".")[0] in ("unittest", "pytest"):
-                imports_framework = True
-    if not imports_framework:
-        return False
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            for base in node.bases:
-                name = base.attr if isinstance(base, ast.Attribute) else getattr(base, "id", "")
-                if name == "TestCase":
-                    return True
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name.startswith("test_"):
-                return True
-    return False
-
-
-def _referenced_by_live_surface(root: Path, writer_relpath: str) -> bool:
-    """Signal 3 of 3 for non_live (inverted): is this writer named by anything
-    the running system actually invokes? True DISQUALIFIES non_live.
-
-    Checks the declared invocation surfaces (cron config / roster) and any
-    non-test Python module in the project that names this writer's relpath or
-    module stem. Any read failure returns True (fail-closed: unverifiable means
-    we must not grant the non-blocking classification)."""
-    stem = Path(writer_relpath).stem
-
-    # Declared invocation surfaces are prose/tables, not code -- a textual
-    # match is the only available signal and the right one there.
-    for rel in _LIVE_SURFACE_RELPATHS:
-        p = root / rel
-        try:
-            if not p.is_file():
-                continue
-            text = p.read_text(encoding="utf-8")
-        except OSError:
-            return True
-        if writer_relpath in text or stem in text:
-            return True
-
-    # Python modules are parsed, never grepped. A COMMENT mentioning the module
-    # is NOT an invocation (real estate case: agents/inbox/runner.py carries
-    # `# Header / From parsing (pure -- see test_inbox_runner.py)`), whereas an
-    # import or a string literal naming it IS. The AST gives exactly that
-    # discrimination for free: comments are absent from the tree, string
-    # literals are not. A text grep here would be the same infer-from-
-    # infer-from-incidental-structure defect class.
-    try:
-        candidates = list(root.rglob("*.py"))
-    except OSError:
-        return True
-    for p in candidates:
-        try:
-            rel_posix = p.relative_to(root).as_posix()
-        except ValueError:
-            continue
-        if rel_posix == writer_relpath:
-            continue
-        if _matches_test_naming(rel_posix):
-            continue          # a test referencing a test does not make it live
-        if "/lib/external_write/" in "/" + rel_posix:
-            continue          # the sealed kernel is not an invocation surface
-        parts = set(Path(rel_posix).parts)
-        if parts & _NON_PROJECT_DIRS:
-            continue          # vendored/derived trees are not invocation surfaces.
-        try:
-            text = p.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return True       # unreadable -> cannot verify -> fail closed.
-        # Cheap, over-inclusive PRE-FILTER: a file that never mentions this
-        # writer cannot reference it, so it is irrelevant and is never parsed.
-        # Without this, one unparseable file ANYWHERE would disqualify every
-        # non_live classification -- the same "one bad file bricks everything"
-        # fault this cut exists to fix.
-        if writer_relpath not in text and stem not in text:
-            continue
-        try:
-            tree = ast.parse(text)
-        except (SyntaxError, ValueError):
-            return True       # mentions it but unparseable -> fail closed.
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                if any(a.name.split(".")[-1] == stem for a in node.names):
-                    return True
-            elif isinstance(node, ast.ImportFrom):
-                mod = node.module or ""
-                if mod.split(".")[-1] == stem or any(a.name == stem for a in node.names):
-                    return True
-            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-                if writer_relpath in node.value or node.value.strip() == stem:
-                    return True
-    return False
-
-
 def _active_acknowledgement_relpaths(project_root: str) -> set:
-    """Writer relpaths carrying a VALID, hash-matching operator acknowledgement
-    (Task 3). Delegated to ``writer_acknowledgement`` so this module never owns
-    the acknowledgement record format. Absent module -> empty set (no
-    acknowledgements), which is the fail-closed direction: without it every
-    NEEDS_PERSON entry simply stays blocking."""
+    """Writer relpaths carrying a VALID, hash-matching operator acknowledgement.
+    Delegated to the acknowledgement store so this module never owns the record
+    format. Absent module -> empty set (no acknowledgements), which is the
+    fail-closed direction: without it every NEEDS_PERSON entry simply stays
+    blocking.
+
+    Imported lazily, and that is deliberate even though the cycle is gone: a
+    module-scope import would make THIS module unimportable if the store were
+    physically missing, and this module is hard-imported at module scope by both
+    the completion gate and the health read. An operator project part-way through
+    an upgrade must degrade to "no acknowledgements", not to a raw
+    ModuleNotFoundError at session start."""
     try:
-        from external_write import writer_acknowledgement as _ack
+        from external_write import writer_ack_store as _store
     except ImportError:
         return set()
     try:
-        return set(_ack.active_acknowledgements(project_root))
+        return set(_store.active_acknowledgements(project_root))
     except Exception:
         return set()   # unreadable acknowledgement state -> treat as none -> keep blocking.
 
@@ -742,67 +468,43 @@ def _active_acknowledgement_relpaths(project_root: str) -> set:
 def classify_bespoke_writer_entry(project_root: str,
                                   entry: Dict[str, Any],
                                   acknowledged: Optional[set] = None) -> str:
-    """Classify ONE open bespoke-writer ``entry`` into a ``WriterState``.
+    """Classify ONE open bespoke-writer ``entry`` into a ``WriterState`` -- the
+    structural state from ``writer_state_core``, with a valid operator
+    acknowledgement layered on top.
 
     Deterministic and fail-closed: every path that cannot positively establish a
     non-blocking state returns ``BLOCKING_LIVE_ENABLE``. Precedence:
 
-      1. writer file ABSENT            -> RESOLVED   (agrees with the Cut 1.5
-                                                      reap predicate; never a
-                                                      second conflicting truth)
+      1. writer file ABSENT/unreadable -> BLOCKING_LIVE_ENABLE (deliberately NOT
+                                          RESOLVED: the reaper is the single
+                                          authority on resolution -- see
+                                          ``structural_classification``)
       2. valid acknowledgement present -> ACKNOWLEDGED_RISK
       3. test module, unreferenced     -> NON_LIVE   (3 signals, all required)
       4. any non-remediable violation  -> NEEDS_PERSON  (STILL BLOCKING)
       5. otherwise                     -> BLOCKING_LIVE_ENABLE
 
-    An INACCESSIBLE-but-present writer is never RESOLVED (os.stat-style
-    absent-vs-inaccessible distinction, via the read's own exception type --
-    never ``os.path.exists``/``is_file``, which conflate the two)."""
-    root = Path(project_root)
+    The acknowledgement is applied ONLY when the core actually got to read the
+    writer's source (``source_readable``). That is the precedence this has always
+    had, and it is load-bearing rather than incidental: a file that reads as BYTES
+    but not as UTF-8 TEXT can carry a hash-matching record while being
+    unclassifiable, and such a writer must stay blocking. ``source_readable`` comes
+    back from the core's own single read rather than being re-derived here, so the
+    two can never disagree about a file that changed in between.
+
+    ``acknowledged`` may be supplied by a caller that already has the active set,
+    so a report over N entries reads the store once rather than N times; ``None``
+    means "look it up", and the lookup happens only where it can matter."""
+    structural = _core.structural_classification(project_root, entry)
+    if not structural.source_readable:
+        return structural.state
+
     writer_relpath = str(entry.get("writer_relpath") or "")
-    if not writer_relpath:
-        return WriterState.BLOCKING_LIVE_ENABLE
-
-    writer_path = root / writer_relpath
-    try:
-        source_text = writer_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        # Deliberately NOT "absent -> RESOLVED". ``reap_resolved_writer_migrations`` is the SINGLE
-        # authority on whether a writer is resolved -- it owns the full predicate (absent OR
-        # hash-changed-AND-scan-clean) and it REMOVES the entry. A second, weaker resolution rule
-        # here would be two authorities over one fact: exactly the duplicated-inference defect
-        # class this package guards against, and it would silently un-block an entry the reaper has
-        # not cleared. So an unreadable/absent writer simply falls through to fail-closed BLOCKING;
-        # reconcile-on-read runs the reaper moments later and the entry disappears properly.
-        # (Caught by test_open_bespoke_bypass_refuses_live_enable_with_no_partial_state, whose
-        # fixture has no writer file on disk -- that keystone regression test found this.)
-        return WriterState.BLOCKING_LIVE_ENABLE
-
     if acknowledged is None:
         acknowledged = _active_acknowledgement_relpaths(project_root)
     if writer_relpath in acknowledged:
         return WriterState.ACKNOWLEDGED_RISK
-
-    if (_matches_test_naming(writer_relpath)
-            and _has_test_structure(source_text)
-            and not _referenced_by_live_surface(root, writer_relpath)):
-        return WriterState.NON_LIVE
-
-    kinds = _recorded_violation_kinds(entry)
-    if not kinds:
-        return WriterState.BLOCKING_LIVE_ENABLE   # nothing recorded -> unprovable -> block.
-    if kinds - REMEDIABLE_VIOLATION_KINDS:
-        return WriterState.NEEDS_PERSON
-    return WriterState.BLOCKING_LIVE_ENABLE
-
-
-#: The states that hold back live-enable. NEEDS_PERSON is deliberately here --
-#: see the section header. Only an explicit operator acknowledgement moves an
-#: entry out of it.
-BLOCKING_WRITER_STATES = frozenset({
-    WriterState.BLOCKING_LIVE_ENABLE,
-    WriterState.NEEDS_PERSON,
-})
+    return structural.state
 
 
 def blocking_bespoke_writer_migrations(project_root: str) -> List[Dict[str, Any]]:
@@ -834,59 +536,3 @@ def bespoke_writer_state_report(project_root: str) -> Dict[str, List[Dict[str, A
     for e in open_bespoke_writer_migrations(project_root):
         report[classify_bespoke_writer_entry(project_root, e, acknowledged)].append(e)
     return report
-
-
-#: Entry ``kind`` values that describe a real unrepaired external-write bypass in
-#: an operator-authored writer file -- the ONLY case the "rebuild it so it routes
-#: through the sanctioned bulk path" wording actually fits. The bespoke-writer
-#: bypass entries this package was originally built for carry NO ``kind`` field at
-#: all (see ``upgrade_reconcile._append_migration_request``, build-side); a
-#: missing kind is treated the same as membership here (see
-#: ``is_bypass_writer_entry``), so today's only real bypass entries keep the
-#: wording they have always had. This set exists for a future writer that wants
-#: to opt an explicitly-kinded entry INTO bypass wording on purpose.
-_BYPASS_WRITER_KINDS = frozenset({"external_write_bypass"})
-
-
-def is_bypass_writer_entry(entry: Dict[str, Any]) -> bool:
-    """True iff ``entry`` is a real, unrepaired external-write bypass in an
-    operator-authored writer file -- the only entry shape the rebuild-and-
-    route-through-the-sanctioned-path wording actually describes.
-
-    This queue (``agents/handoffs/pending_migrations.json``) is shared by every
-    remediation this package's siblings record, not only bypass writers -- an
-    entry can equally record a fact that has nothing to do with a hand-rolled
-    write path (for example, that a safety check itself could not finish). Those
-    entries are still real and still block (see ``open_bespoke_writer_migrations``
-    / ``blocking_bespoke_writer_migrations``, both attribution- and kind-free by
-    design), but they must not be DESCRIBED as a bypass writer, because the fix
-    this wording names ("rebuild it so it routes through the sanctioned bulk
-    path") does not apply to them.
-    """
-    kind = entry.get("kind")
-    return kind is None or kind in _BYPASS_WRITER_KINDS
-
-
-def describe_blocking_entry(entry: Dict[str, Any]) -> str:
-    """One plain-language sentence for ONE open blocking entry.
-
-    A bypass entry (``is_bypass_writer_entry``) keeps the rebuild wording it has
-    always had. Every other kind speaks for itself, because this queue carries
-    facts that are not bypasses -- describing those with the bypass sentence
-    tells the operator to do something impossible to a file that was never the
-    problem (rebuilding ``agents/handoffs/pending_migrations.json`` itself "so it
-    routes through the sanctioned bulk path" is meaningless; it is the queue, not
-    a writer).
-
-    Blocking is unaffected by any of this: what an entry BLOCKS is decided
-    without consulting its kind, and only what the operator READS is chosen here.
-    """
-    if is_bypass_writer_entry(entry):
-        relpath = str(entry.get("writer_relpath"))
-        return (f"an external-write bypass is unrepaired: `{relpath}` -- rebuild "
-                "it so it routes through the sanctioned bulk path")
-    next_step = entry.get("suggested_next_step") or entry.get("reason")
-    if not next_step:
-        relpath = str(entry.get("writer_relpath"))
-        next_step = f"this project has an open item to review at `{relpath}`"
-    return str(next_step)

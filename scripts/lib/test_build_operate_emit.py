@@ -1844,7 +1844,19 @@ class TestS253ContractDelta(unittest.TestCase):
         # is the dead-end shape this cut exists to remove. See that file's own
         # enrollment comment in agent_emitter.py, and
         # test_emit_set_lists_the_cut19_trial_recovery_file below.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 48)
+        # (Count updated to 51 by Cut 1.9 Task 7, which split the writer-state
+        # machinery into layers -- writer_state_core.py, writer_ack_store.py and
+        # writer_commands.py -- to break a two-way, function-scope import cycle
+        # between _ext_write_state.py and writer_acknowledgement.py. All three are
+        # newly enrolled: the core is hard-imported at module scope by
+        # _ext_write_state (so its absence breaks the completion gate and the health
+        # read outright), the store is imported lazily and fails closed to "no
+        # acknowledgements" (so its absence is SILENT and leaves an unrepairable
+        # writer blocking acceptance forever), and the commands module carries
+        # acknowledge_writer itself. Enrollment is also enforced structurally by
+        # test_topology_enrollment.test_every_emitted_lib_module_is_listed and
+        # per-module in test_external_write_writer_state_layers.py.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 51)
 
     def test_emit_set_lists_the_cut19_trial_recovery_file(self):
         # Cut 1.9 Task 5: trial_recovery.py must be enrolled, or the operator
