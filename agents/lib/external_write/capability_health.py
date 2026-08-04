@@ -1135,10 +1135,17 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
     fired printed its message into a scheduled job's log file, which is how a real
     project lost nine days of a scheduled job with nobody told. Each active entry
     names the wrapper, when it was first and last stopped, how many invocations were
-    stopped, and which read-only outputs are known (or not known) to have gone dark
-    with it -- plus ``action``, the registry-rendered way out, which is the field to
-    relay. See that key's own comment below for the ``active`` / ``outstanding``
-    distinction and for why this surface never edits those records.
+    stopped, and which read-only outputs the upgrade found reason to think went dark
+    with it (or that it could not establish that either way) -- plus ``action``, the
+    registry-rendered way out, which is the field to relay. See that key's own
+    comment below for the ``active`` / ``outstanding`` distinction and for why this
+    surface never edits those records.
+
+    One thing this key cannot tell you, stated because it is the inference a reader
+    reaches for: an EMPTY ``suppressed_invocations`` does not establish that nothing
+    was suppressed. Recording is best-effort by construction -- the guard must never
+    depend on it -- so a stopped run can go unrecorded. See
+    ``suppressed_invocation``'s own docstring.
     """
     caps = check_capabilities_with_self_heal(project_root)
     red = sorted({c["capability_id"] for c in caps if c.get("health") != "green"})

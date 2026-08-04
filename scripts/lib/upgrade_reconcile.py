@@ -3293,7 +3293,16 @@ def _tripwire_insertion_problem(original: str, candidate: str,
 
 
 def upgrade_paused_entrypoint_guards(operator_project_dir: Path) -> Dict[str, Any]:
-    """Bring the tripwire to EVERY declared paused mechanism's wrapper.
+    """Bring the tripwire to every DECLARED paused mechanism's wrapper whose guard
+    shape can be positively confirmed -- and refuse, visibly, on any that cannot.
+
+    Stated that way rather than as "every wrapper" because the second is not what
+    this does: a wrapper carrying two guard blocks, a guard naming a marker this
+    cannot reconstruct, or a record whose declared id disagrees with its filename is
+    left exactly as it is and reported in ``refused``. A refused wrapper stays
+    paused and stays silent -- that is the disclosed residual, and it is the right
+    side to fail on, because the alternative is editing a guard whose pause
+    semantics are not understood.
 
     This is the reach mechanism. It is driven by the pause-state records rather
     than by the mechanisms flagged in this pass, deliberately: a writer that was
@@ -3399,8 +3408,11 @@ def _record_pause_entanglement(
     separate_readonly_entrypoint: Optional[str] = None,
 ) -> bool:
     """Thread this pass's entangled-read-output determination onto the pause-state
-    record, so the fired guard's recorder can name which of the operator's
-    read-only outputs went dark with the pause.
+    record, so the fired guard's recorder can name which read-only outputs this pass
+    found reason to think went dark with the pause -- or record that it could not
+    establish that either way. The upstream signal is textual, not semantic (see
+    ``_detect_entangled_read_outputs``), and that bound travels with the labels
+    rather than being narrowed here.
 
     It has to be threaded somewhere: the pause state
     ``_safe_pause_entrypoint`` writes carries no entangled labels, and

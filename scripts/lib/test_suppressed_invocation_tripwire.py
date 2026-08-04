@@ -328,6 +328,36 @@ class TestRecorderFailureCannotRunThePayload(unittest.TestCase):
         self.addCleanup(os.chmod, str(events), 0o700)
         self._assert_payload_did_not_run(self.p.run_wrapper())
 
+    def test_a_freshly_paused_wrapper_also_stops_the_payload(self):
+        """Through ``_safe_pause_entrypoint`` -- the OTHER guard-body producer.
+
+        Every other case in this class reaches the guard through the insertion
+        sweep, so without this one the freshly-generated body's own exit is
+        asserted only structurally. Two producers of one guard shape need two
+        behavioural proofs; a mutation removing the generated exit was invisible
+        to this class until this test existed."""
+        self.p.write(WRAPPER_REL, _PAYLOAD, mode=0o755)
+        upgrade_reconcile._safe_pause_entrypoint(
+            self.p.root, MECH, WRITER_REL, WRAPPER_REL, [], "v0.22.0", "v0.23.0")
+        self.assertIn(upgrade_reconcile.SUPPRESSED_INVOCATION_RECORDER_REL,
+                      (self.p.root / WRAPPER_REL).read_text(encoding="utf-8"))
+        # No recorder installed: the recorder call fails and must change nothing.
+        self._assert_payload_did_not_run(self.p.run_wrapper())
+
+    def test_under_sh_dash_e_a_failing_recorder_still_reaches_the_exit(self):
+        """``sh -e`` is the case ``|| :`` exists for: without it, a nonzero
+        recorder aborts the wrapper BEFORE the unconditional exit runs. The
+        payload is still not reached either way -- but the wrapper's own exit
+        status becomes the recorder's, which is a scheduled job reporting a
+        failure for the wrong reason."""
+        self._sweep()
+        # No recorder module installed -> `python3 <missing>` exits nonzero.
+        proc = subprocess.run(["/bin/sh", "-e", str(self.p.root / WRAPPER_REL)],
+                              capture_output=True, text=True, cwd=str(self.p.root))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("paused pending migration", proc.stdout)
+        self.assertFalse((self.p.root / "payload_ran.txt").exists())
+
     def test_the_payload_runs_normally_when_the_marker_is_absent(self):
         """The control. Without this, every assertion above is satisfiable by a
         wrapper that is simply broken."""
@@ -420,6 +450,48 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
                              event["last_suppressed_at"])
         self.assertFalse((self.p.root / "payload_ran.txt").exists())
 
+    def test_the_record_lands_in_the_project_when_invoked_from_another_directory(self):
+        """A scheduler does not run the wrapper from the project root -- cron runs
+        with the home directory as its working directory. Every path the guard
+        hands over is derived from the wrapper's OWN location, so the record must
+        land in the project regardless of where it was invoked from. Asserted from
+        a different cwd, because every other invocation in this file runs from the
+        root and would pass on a cwd-relative path just as well."""
+        upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        self.p.install_recorder()
+        with tempfile.TemporaryDirectory() as elsewhere:
+            proc = subprocess.run(
+                ["/bin/sh", str(self.p.root / WRAPPER_REL)],
+                capture_output=True, text=True, cwd=elsewhere)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(list(Path(elsewhere).iterdir()), [],
+                             "the record was written next to the caller, not the project")
+        self.assertEqual(self.p.event()["suppressed_count"], 1)
+        self.assertEqual(
+            self.p.event()["known_entangled_outputs"]["determination"],
+            suppressed_invocation.ENTANGLEMENT_UNKNOWN,
+            "the pause-state path the guard hands over must also resolve from "
+            "the wrapper's own location")
+
+    def test_the_pause_state_the_guard_points_at_resolves_from_the_wrapper(self):
+        """The labels only reach the record if the ``--pause-state`` path the guard
+        embeds actually resolves. Proven by making the determination one that
+        CANNOT arise by default: `unknown` is what an unresolvable path yields, so
+        a test asserting `unknown` would pass on a broken path."""
+        (self.p.root / PAUSED_DIR_REL / f"{MECH}.json").write_text(
+            json.dumps({"mechanism_id": MECH, "writer_relpath": WRITER_REL,
+                        "entrypoint_relpath": WRAPPER_REL,
+                        "carries_read_outputs": True,
+                        "entangled_read_outputs": ["digest", "backup"]},
+                       indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        self.p.install_recorder()
+        self.assertEqual(self.p.run_wrapper().returncode, 0)
+        entangled = self.p.event()["known_entangled_outputs"]
+        self.assertEqual(entangled["determination"],
+                         suppressed_invocation.ENTANGLEMENT_ENTANGLED)
+        self.assertEqual(entangled["labels"], ["digest", "backup"])
+
     def test_the_sweep_is_idempotent_and_does_not_rewrite_a_current_guard(self):
         upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
         after_first = self._wrapper_text()
@@ -508,6 +580,75 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
             "{not json", encoding="utf-8")
         report = upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
         self.assertTrue(report["refused"])
+
+
+class TestTheInsertionPostCondition(unittest.TestCase):
+    """The whole-file post-condition, tested against its CONTRACT rather than only
+    through the happy path.
+
+    Why it needs its own class. In the ordinary flow the construction genuinely
+    only inserts, so disabling this check changes nothing observable -- a mutation
+    that removed it passed the entire behavioural battery. It is a backstop against
+    a future change to the construction above it, and the only way to falsify a
+    backstop is to hand it the input it exists to reject. What it rejects is
+    precisely the thing that would silently un-pause a live writer."""
+
+    ORIGINAL = (
+        "#!/bin/sh\n"
+        f"{upgrade_reconcile._GUARD_BEGIN}\n"
+        '_RECONCILE_HERE="$(cd "$(dirname "$0")" && pwd)"\n'
+        f'if [ -e "$_RECONCILE_HERE/'
+        f'{upgrade_reconcile._wrapper_guard_marker_ref(WRAPPER_REL, MECH)}" ]; then\n'
+        f"{upgrade_reconcile._GUARD_PAUSED_ECHO_LINE}\n"
+        f"{upgrade_reconcile._GUARD_EXIT_LINE}\n"
+        "fi\n"
+        f"{upgrade_reconcile._GUARD_END}\n"
+        'printf "ran\\n" > payload_ran.txt\n'
+    )
+
+    def _lines(self):
+        return upgrade_reconcile._guard_recorder_lines(MECH, WRAPPER_REL)
+
+    def _problem(self, candidate):
+        return upgrade_reconcile._tripwire_insertion_problem(
+            self.ORIGINAL, candidate, WRAPPER_REL, MECH)
+
+    def _insertion_only(self):
+        anchor = f"{upgrade_reconcile._GUARD_PAUSED_ECHO_LINE}\n"
+        return self.ORIGINAL.replace(anchor, anchor + self._lines())
+
+    def test_the_insertion_only_candidate_is_accepted(self):
+        """The positive control. Without it, a post-condition that refused
+        EVERYTHING would look just as good as one that works."""
+        self.assertIsNone(self._problem(self._insertion_only()))
+
+    def test_a_candidate_that_also_changes_the_payload_is_refused(self):
+        candidate = self._insertion_only().replace(
+            'printf "ran\\n" > payload_ran.txt', 'printf "nope\\n"')
+        self.assertIsNotNone(self._problem(candidate))
+
+    def test_a_candidate_that_also_changes_the_marker_reference_is_refused(self):
+        """THE hazard this whole design is arranged around: a guard that checks a
+        marker path which no longer exists finds nothing, and the writer silently
+        resumes."""
+        candidate = self._insertion_only().replace(
+            upgrade_reconcile._wrapper_guard_marker_ref(WRAPPER_REL, MECH),
+            "../.wizard/paused-mechanisms/moved.pause")
+        self.assertIsNotNone(self._problem(candidate))
+
+    def test_a_candidate_that_also_drops_the_exit_is_refused(self):
+        candidate = self._insertion_only().replace(
+            f"{upgrade_reconcile._GUARD_EXIT_LINE}\n", "")
+        self.assertIsNotNone(self._problem(candidate))
+
+    def test_a_candidate_placing_the_lines_after_the_exit_is_refused(self):
+        anchor = f"{upgrade_reconcile._GUARD_EXIT_LINE}\n"
+        candidate = self.ORIGINAL.replace(anchor, anchor + self._lines())
+        self.assertIsNotNone(self._problem(candidate))
+
+    def test_a_candidate_that_also_adds_a_second_guard_block_is_refused(self):
+        candidate = self._insertion_only() + upgrade_reconcile._GUARD_BEGIN + "\n"
+        self.assertIsNotNone(self._problem(candidate))
 
 
 class TestTheSweepIsOnTheEnforcedPath(unittest.TestCase):
@@ -623,6 +764,26 @@ class TestTheDurableEvent(unittest.TestCase):
         self.addCleanup(os.chmod, str(path), 0o600)
         with self.assertRaises(suppressed_invocation.SuppressedInvocationError):
             self._record()
+
+    def test_a_record_whose_own_stat_fails_is_not_read_as_never_suppressed(self):
+        """Isolates the ``os.stat`` handler, which nothing else reaches.
+
+        The chmod-000 case above is caught one line later by ``open``, so a
+        mutation collapsing ``FileNotFoundError`` into a bare ``except OSError``
+        there survived the whole battery -- a real control that looked
+        unfalsifiable only because no test put it on the only path that reaches
+        it. A self-referential symlink is such a path: ``stat`` raises ELOOP while
+        ``listdir`` still reports the name, so "absent" and "cannot be examined"
+        are genuinely different answers about the same file."""
+        path = Path(suppressed_invocation.event_path(str(self.p.root), MECH))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(path.name, str(path))
+        with self.assertRaises(suppressed_invocation.SuppressedInvocationError):
+            self._record()
+        scan = suppressed_invocation.scan_suppressed_invocation_events(
+            directory=str(path.parent))
+        self.assertEqual(scan["events"], [])
+        self.assertEqual([u["path"] for u in scan["unreadable"]], [str(path)])
 
     def test_the_recorder_waits_for_the_lock_only_briefly(self):
         """A recorder that hangs never runs the payload (safe) but hangs the

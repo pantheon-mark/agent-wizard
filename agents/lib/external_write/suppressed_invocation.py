@@ -17,10 +17,11 @@ operating it learned nothing until someone went looking for an unrelated reason.
 This module is what the guard now calls when it fires, so that the firing survives
 on disk instead of only in a log: one record per paused mechanism under
 ``.wizard/suppressed-invocations/``, carrying when it first happened, when it last
-happened, how many times, and which of your read-only outputs (a digest, an alert,
-a backup) are known to have gone dark with it. The session-start health surface
-reads those records and withholds its "everything is running normally" signal
-while any of them is still live.
+happened, how many times, and which read-only outputs (a digest, an alert, a
+backup) the upgrade found reason to think went dark with it -- or that it could not
+establish that either way. The session-start health surface reads those records and
+withholds its "everything is running normally" signal while any of them is still
+live.
 
 WHAT THIS ESTABLISHES -- and, precisely, what it does not
 ---------------------------------------------------------
@@ -28,10 +29,20 @@ Written out plainly because the value of the count depends entirely on reading i
 in the terms it is recorded in.
 
 ESTABLISHED
-  The wrapper was invoked, and the guard stopped it before the script's own work.
-  An actual invocation is what proves a run was due, which is why this needs no
-  schedule model, no list of expected outputs and no liveness monitor -- and why
-  the guard itself was not moved or changed to make this work.
+  The wrapper was invoked and the guard fired: the record is written from INSIDE
+  the guard, ahead of its exit. An actual invocation is what proves a run was due,
+  which is why this needs no schedule model, no list of expected outputs and no
+  liveness monitor -- and why the guard itself was not moved or changed to make
+  this work.
+
+NOT ESTABLISHED BY THE ABSENCE OF A RECORD
+  Stated first because it is the inference a reader will reach for. No record does
+  NOT mean nothing was suppressed. Recording is best-effort by construction: the
+  guard cannot be allowed to depend on it (see below), so a missing ``python3``, an
+  unwritable directory or a refusal here all leave the run stopped and unrecorded.
+  Separately, the guard's own location arithmetic relies on ``dirname`` being
+  resolvable, so an environment without it does not reach this program at all.
+  A record is positive evidence; its absence is not evidence of the negative.
 
 ``suppressed_count`` IS
   the number of times a wrapper invocation was stopped by the guard. One per
@@ -87,13 +98,16 @@ a deliberate constraint rather than a style choice:
   ``sh -e`` a nonzero exit here would otherwise abort the wrapper before the exit
   ran). Failing here loses a count. It can never let a paused script run.
 
-  IT IS BOUNDED IN TIME. A read-modify-write of a shared counter needs a lock, and
-  a lock held by another invocation must not turn into an indefinite wait: the
-  guard has already stopped the payload by this point, so a hang here would hang
-  the scheduled job rather than endanger anything. The wait is capped at
+  ITS WAIT FOR THE LOCK IS BOUNDED. A read-modify-write of a shared counter needs a
+  lock, and a lock held by another invocation must not turn into an indefinite
+  wait: the guard has already stopped the payload by this point, so a hang here
+  would hang the scheduled job rather than endanger anything. The wait is capped at
   ``LOCK_WAIT_SECONDS`` and exhausting it REFUSES -- an unlocked read-modify-write
-  would lose counts, and under-reporting is the one direction this module exists
-  to prevent.
+  would lose counts, and under-reporting is the one direction this module exists to
+  prevent. Disclosed bound, because "bounded" is a stronger word than what is
+  built: it is the WAIT that is capped, not the program. An individual filesystem
+  call that itself blocks indefinitely -- a stalled network mount under the
+  project -- is not bounded by anything here.
 
 Two states this module refuses rather than guesses
 --------------------------------------------------
@@ -111,10 +125,17 @@ Two states this module refuses rather than guesses
 
 Where the entangled-output labels come from
 -------------------------------------------
-The upgrade already works out whether the paused entrypoint is also the thing that
-produces read-only output you rely on, and names what it found. Those labels are
-recorded on the pause-state record the guard points this program at, and are
+The upgrade already looks for signs that the paused entrypoint is ALSO the thing
+that produces read-only output you rely on, and names what it found. Those labels
+are recorded on the pause-state record the guard points this program at, and are
 carried onto the event here.
+
+Their bound comes with them, and is not narrowed on the way through: the upstream
+signal is TEXTUAL, not semantic -- read/report-shaped words in the paused file's own
+source -- so a label means the upgrade found reason to think that output is affected,
+never that it observed it stop. Deliberately broad in that direction: a false label
+only says "paused too" about something that was fine, while a false silence is a
+continuity promise nobody checked.
 
 Deny-by-default, exactly as the upgrade notice treats it: ``entangled`` and
 ``unknown`` are handled IDENTICALLY, and only a positively-verified separate
