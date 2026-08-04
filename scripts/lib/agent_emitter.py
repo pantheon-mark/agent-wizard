@@ -368,7 +368,7 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # trust file as the only way out. That is the dead-end shape this cut exists to
     # remove, recreated by an emit-set omission.
     "acceptance_repudiation.py",
-    # suppressed_invocation.py (Cut 1.9) — the durable record of an entrypoint pause
+    # suppressed_invocation.py — the durable record of an entrypoint pause
     # guard FIRING. `capability_health.py` (already enrolled above) imports it at
     # MODULE SCOPE for the session-start surface that reports a stopped scheduled
     # run, so omitting it is a raw ModuleNotFoundError on the operator's first

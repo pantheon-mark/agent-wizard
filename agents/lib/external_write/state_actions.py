@@ -409,6 +409,39 @@ _UNIDENTIFIED_RECORD_ROUTE = (
     "be live on your real record. Ask your assistant to look at that file with you "
     "before treating anything as finished")
 
+#: What to say about a scheduled run still being stopped by a pause record that no
+#: open item explains. Names the artifact, the actor, and the condition under which
+#: clearing it is right -- see ``route_for_stale_pause_record`` for what it
+#: deliberately does NOT assert.
+_STALE_PAUSE_RECORD_ROUTE = (
+    "`{subject}` is still switched off and will not run: it is held by the pause "
+    "record at `{record}`, and there is no open item left that explains why. That "
+    "means the scheduled work it does is not happening. Ask your assistant to look "
+    "at that record with you -- once they have confirmed the script it protects now "
+    "passes the safety check, clearing that record is what starts it running again")
+
+#: What to say about an unreadable record of SUPPRESSED SCHEDULED RUNS -- a
+#: separate declared route, not a reuse of the one above.
+#:
+#: WHY IT IS ITS OWN CONSTANT. The trial route above was rendered for this record
+#: kind for one commit, and every word of it was false here: it named "a trial run"
+#: where no trial exists, and it warned that "a change that trial made may still be
+#: live on your real record" when NOTHING WAS WRITTEN -- the whole point of a
+#: suppressed invocation is that work did not happen. The branch that renders it
+#: withholds the all-clear, so the operator was guaranteed to be shown it. Two
+#: callers needing two different true sentences is two declared routes; one string
+#: with a hedge bolted on would have made both of them vaguer instead.
+#:
+#: What it must and must not claim: it cannot say how many runs were stopped (the
+#: record that would say is the unreadable one), and it must not imply anything was
+#: changed. It routes to a person and claims neither.
+_UNREADABLE_SUPPRESSION_RECORD_ROUTE = (
+    "the record at `{subject}` of scheduled runs that were stopped could not be "
+    "read, so it is not possible to tell from it which scheduled work has been "
+    "stopped, or how many times. Nothing was changed by the runs it covers -- they "
+    "did not happen -- but something of yours may not be running. Ask your "
+    "assistant to look at that file with you before treating anything as finished")
+
 
 # ---------------------------------------------------------------------------
 # The index, and the read API
@@ -489,9 +522,64 @@ def route_for_unclassified_state(subject: str) -> str:
 
 
 def route_for_unidentified_record(path: str) -> str:
-    """What to tell the operator about a durable trial record that could not be
-    read, and therefore cannot be identified or acted on by command."""
+    """What to tell the operator about an unreadable durable record of a TRIAL RUN
+    -- one whose trial cannot be identified from it, and which may therefore be
+    holding a live, unreversed change on their real record.
+
+    TRIAL RECORDS ONLY. There is a sibling route for an unreadable record of
+    suppressed scheduled runs (``route_for_unreadable_suppression_record``), because
+    this sentence's two central claims -- that a trial is involved, and that a change
+    may still be live -- are both FALSE for that record kind. Reusing this one there
+    put a guaranteed-to-be-seen false sentence in front of the operator; the fix was
+    a second declared route, not a vaguer shared one. A future caller with a third
+    record kind needs a third route, not this one.
+    """
     return _UNIDENTIFIED_RECORD_ROUTE.format(subject=path)
+
+
+def route_for_stale_pause_record(entrypoint_relpath: str,
+                                 pause_record_location: str) -> str:
+    """What to tell the operator about a scheduled run that is STILL being stopped
+    by a pause record for which no open item exists.
+
+    A DECLARED ROUTE, not the generic "no recorded way out". It is reached when the
+    guard on ``entrypoint_relpath`` is still firing while the writer's
+    migration item has been closed -- which happens for real: the auto-reap closes
+    the item once the file has changed and passes the check, and nothing then clears
+    the pause record for a writer that is not a capability. Rendered generically,
+    the operator was told the state had "no recorded way out", which named neither
+    the thing to change nor anyone who could change it.
+
+    ``pause_record_location`` is passed IN rather than composed here: this module has
+    no business spelling that path, which is already duplicated-by-value at each
+    side of the build/emitted boundary that needs it. The caller has the constant.
+
+    WHAT IT DOES AND DOES NOT ASSERT. It does not say the script is now correct --
+    this state is also reachable for a writer whose item was never opened, so
+    "your script is fixed" would be false in that case. It says what IS established:
+    the run is stopped, no open item explains it, the record that stops it is at a
+    named location, and the named actor can clear it once they have confirmed the
+    script is right. Performing that does clear it.
+
+    DISCLOSED: this hands over an artifact and an actor, not a paste-ready command,
+    because no sanctioned command clears a pause record for a non-capability
+    mechanism today (``lifecycle_state.complete_migration`` covers capabilities and
+    requires a canonical id, an acceptance receipt and a copy-run proof). That gap is
+    recorded rather than papered over with an invented invocation.
+    """
+    return _STALE_PAUSE_RECORD_ROUTE.format(
+        subject=entrypoint_relpath, record=pause_record_location)
+
+
+def route_for_unreadable_suppression_record(path: str) -> str:
+    """What to tell the operator about an unreadable record of SUPPRESSED SCHEDULED
+    RUNS -- one that cannot say which work was stopped, or how many times.
+
+    Claims nothing about anything having been changed, because nothing was: a
+    suppressed run is one that did not happen. See
+    ``_UNREADABLE_SUPPRESSION_RECORD_ROUTE`` for why this is its own constant.
+    """
+    return _UNREADABLE_SUPPRESSION_RECORD_ROUTE.format(subject=path)
 
 
 # ---------------------------------------------------------------------------

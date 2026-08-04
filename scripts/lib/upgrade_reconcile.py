@@ -3163,6 +3163,24 @@ def _wrapper_guard_still_references_legacy_marker(
 # payload stay exactly as they are. That is verified as a POST-CONDITION over the
 # whole file before anything is published, not assumed from the construction.
 
+def _read_wrapper_bytes_exact(wrapper_path: Path) -> str:
+    """A wrapper's content with its line endings EXACTLY as they are on disk.
+
+    ``Path.read_text`` applies universal newlines, so a CRLF wrapper reads back
+    LF-normalised. That silently defeated the whole-file post-condition below: the
+    candidate and the original were both compared post-normalisation, so they
+    matched, and then the write emitted LF -- converting every line ending in the
+    operator's own payload. Measured before this was fixed: a CRLF wrapper went in
+    with 10 CRLF pairs and came out with 0, reported as ``upgraded``, while this
+    module's docstring claimed the payload was byte-identical.
+
+    Decoding the raw bytes keeps ``\\r\\n`` intact, which is what makes the
+    post-condition a statement about the file rather than about a normalisation of
+    it. A non-UTF-8 wrapper raises ``UnicodeDecodeError``, handled by the caller.
+    """
+    return wrapper_path.read_bytes().decode("utf-8")
+
+
 def _insert_tripwire_into_existing_guard(
     operator_project_dir: Path,
     entrypoint_relpath: str,
@@ -3192,7 +3210,7 @@ def _insert_tripwire_into_existing_guard(
     """
     wrapper_path = Path(operator_project_dir) / entrypoint_relpath
     try:
-        original = wrapper_path.read_text(encoding="utf-8")
+        original = _read_wrapper_bytes_exact(wrapper_path)
     except FileNotFoundError:
         return "skipped", f"no wrapper file at {entrypoint_relpath}"
     except OSError as exc:
@@ -3217,8 +3235,27 @@ def _insert_tripwire_into_existing_guard(
     recorder_lines = _guard_recorder_lines(mechanism_id, entrypoint_relpath)
     recorder_ref = (f"{_relative_prefix(entrypoint_relpath)}/"
                     f"{SUPPRESSED_INVOCATION_RECORDER_REL}")
-    if recorder_ref in block:
+    # ALREADY-CURRENT IS JUDGED ON THE DECLARED IDENTITY, NOT ON THE PATH.
+    #
+    # The recorder's path is mechanism-id-independent, so keying on it alone
+    # short-circuits forever a guard whose recorder args name the WRONG id -- and
+    # that is reachable, not hypothetical: `_rewrite_wrapper_guard_marker_id`
+    # rewrites the embedded `.pause` reference when a bespoke writer's stem starts
+    # colliding, and rewrites nothing else. The guard would then pause on the new
+    # marker while the recorder kept passing the legacy id, the record would be
+    # written under an id whose marker no longer exists, the health surface would
+    # find no marker for it, and the all-clear would come back WHILE THE GUARD IS
+    # STILL FIRING -- the exact green-over-a-stopped-wrapper this task exists to
+    # remove, reintroduced by inferring identity from incidental structure.
+    #
+    # Requiring the block to carry the lines for THIS declared id makes a stale id
+    # a repairable difference instead of an invisible one.
+    if recorder_lines in block:
         return "already_current", ""
+    if recorder_ref in block:
+        return _repair_stale_recorder_identity(
+            wrapper_path, original, begin, end, block, recorder_lines,
+            entrypoint_relpath, mechanism_id)
 
     marker_ref = _wrapper_guard_marker_ref(entrypoint_relpath, mechanism_id)
     if marker_ref not in block:
@@ -3229,6 +3266,23 @@ def _insert_tripwire_into_existing_guard(
             "silently resumes)")
     anchor = f"{_GUARD_PAUSED_ECHO_LINE}\n"
     if block.count(anchor) != 1:
+        if f"{_GUARD_PAUSED_ECHO_LINE}\r\n" in block:
+            # NAMED, not folded into the generic refusal below, because the generic
+            # wording ("not where this expects it") would send someone looking at
+            # the guard rather than at the line endings.
+            #
+            # Why this REFUSES rather than adapting: the lines it would insert use
+            # backslash line continuations, and in a CRLF file a backslash escapes
+            # the CR instead of continuing the line -- so an ending-aware insertion
+            # would produce a guard that does not parse as intended, which is far
+            # worse than no tripwire. A CRLF shell script is already hazardous on
+            # this platform for the same underlying reason.
+            return "refused", (
+                f"{entrypoint_relpath} uses Windows-style line endings, and the "
+                "record-keeping lines cannot be added to it safely (they rely on "
+                "line continuations, which those endings break). It keeps the guard "
+                "it had and will not report being stopped; converting the file to "
+                "plain line endings would let it report")
         return "refused", (
             f"{entrypoint_relpath}'s guard does not carry its stopped-run message "
             "exactly once where this expects it, so there is no safe place to "
@@ -3241,38 +3295,133 @@ def _insert_tripwire_into_existing_guard(
     if problem:
         return "refused", problem
 
-    _atomic_write(wrapper_path, candidate)
+    return _publish_guard_change(wrapper_path, original, candidate,
+                                 entrypoint_relpath, "upgraded")
+
+
+def _repair_stale_recorder_identity(
+    wrapper_path: Path, original: str, begin: int, end: int, block: str,
+    recorder_lines: str, entrypoint_relpath: str, mechanism_id: str,
+) -> Tuple[str, str]:
+    """Bring an already-present tripwire's DECLARED IDENTITY up to date.
+
+    Reached only when the guard carries the recorder's path but not the lines for
+    this mechanism's declared id -- i.e. the id went stale, which
+    ``_rewrite_wrapper_guard_marker_id`` can cause and does not itself fix.
+
+    The replaced region is delimited by the guard's own two fixed lines (the
+    stopped-run message and the exit), so the marker the ``-e`` test looks at --
+    which lives ABOVE the message -- is outside it and cannot be touched. The same
+    whole-file post-condition the insertion path uses then verifies that, over the
+    entire file, before anything is published.
+    """
+    anchor = f"{_GUARD_PAUSED_ECHO_LINE}\n"
+    exit_line = f"{_GUARD_EXIT_LINE}\n"
+    if block.count(anchor) != 1 or block.count(exit_line) != 1:
+        return "refused", (
+            f"{entrypoint_relpath}'s guard carries record-keeping lines for a "
+            "different mechanism, and its own message and exit lines are not each "
+            "present exactly once, so the region to replace cannot be delimited")
+    start = block.index(anchor) + len(anchor)
+    stop = block.index(exit_line)
+    if stop < start:
+        return "refused", (
+            f"{entrypoint_relpath}'s guard has its exit before its stopped-run "
+            "message, so the region to replace cannot be delimited")
+    stale_region = block[start:stop]
+    candidate = (original[:begin] + block[:start] + recorder_lines + block[stop:]
+                 + original[end:])
+    problem = _tripwire_insertion_problem(
+        original, candidate, entrypoint_relpath, mechanism_id,
+        replaced_text=stale_region)
+    if problem:
+        return "refused", problem
+    return _publish_guard_change(wrapper_path, original, candidate,
+                                 entrypoint_relpath, "upgraded")
+
+
+def _publish_guard_change(wrapper_path: Path, original: str, candidate: str,
+                          entrypoint_relpath: str,
+                          success: str) -> Tuple[str, str]:
+    """Write ``candidate``, verify it read back, and restore ``original`` if it did
+    not. ONE implementation for both the insertion and the identity repair.
+
+    EVERY write here is inside a handler, including the restores. A read-only
+    wrapper directory, an immutable wrapper, a read-only mount or ENOSPC is an
+    ORDINARY filesystem condition, and this pass runs unconditionally on every
+    reconcile ahead of the impact notice and both durable blocking post-conditions
+    -- so an escaping OSError would turn an upgrade into a raw traceback for a
+    non-technical operator, with pauses already applied, no notice written, and a
+    previously-recorded blocking entry left permanently uncleared. The tripwire is
+    an observability improvement; it has no business being able to take down the
+    upgrade around it.
+
+    Nothing here can un-pause a writer: the write is temp-file + atomic replace, so
+    a failure leaves the guard byte-for-byte intact.
+    """
     try:
-        published = wrapper_path.read_text(encoding="utf-8")
+        _atomic_write(wrapper_path, candidate)
+    except OSError as exc:
+        return "refused", (
+            f"{entrypoint_relpath} could not be written ({exc.strerror or exc!r}), "
+            "so it keeps the guard it had and will not report being stopped")
+    try:
+        published = _read_wrapper_bytes_exact(wrapper_path)
     except (OSError, UnicodeDecodeError) as exc:
-        _atomic_write(wrapper_path, original)
-        return "refused", (f"{entrypoint_relpath} could not be read back after the "
-                           f"change ({exc!r}); the original has been restored")
+        return "refused", _restore_wrapper(
+            wrapper_path, original,
+            f"{entrypoint_relpath} could not be read back after the change "
+            f"({exc!r})")
     if published != candidate:
+        return "refused", _restore_wrapper(
+            wrapper_path, original,
+            f"{entrypoint_relpath} did not read back as written")
+    return success, ""
+
+
+def _restore_wrapper(wrapper_path: Path, original: str, why: str) -> str:
+    """Put ``original`` back after a failed verification, and say honestly whether
+    that succeeded.
+
+    The restore is itself a write and can itself fail. Reporting "the original has
+    been restored" unconditionally -- as this did -- would be a claim about a write
+    whose outcome was never checked, on the one path where the wrapper is in a
+    state nobody verified. The two outcomes read very differently to whoever picks
+    this up, so they are two different sentences.
+    """
+    try:
         _atomic_write(wrapper_path, original)
-        return "refused", (f"{entrypoint_relpath} did not read back as written; the "
-                           "original has been restored")
-    return "upgraded", ""
+    except OSError as exc:
+        return (f"{why}, and putting the original back also failed "
+                f"({exc.strerror or exc!r}) -- this wrapper needs a person to look "
+                "at it before it is relied on again")
+    return f"{why}; the original has been restored"
 
 
 def _tripwire_insertion_problem(original: str, candidate: str,
                                 entrypoint_relpath: str,
-                                mechanism_id: str) -> Optional[str]:
-    """``None`` when ``candidate`` is ``original`` plus the tripwire and nothing
-    else; a plain-language reason otherwise.
+                                mechanism_id: str,
+                                *, replaced_text: str = "") -> Optional[str]:
+    """``None`` when ``candidate`` is ``original`` with ``replaced_text`` swapped for
+    the tripwire and nothing else changed; a plain-language reason otherwise.
 
-    The first check is the strong one and subsumes the rest: removing the inserted
-    lines must reproduce the original EXACTLY. That is what establishes that the
-    operator's payload, the guard's comments and -- critically -- the marker the
-    ``-e`` test looks at are untouched, rather than three separate checks each of
-    which could be the one that was forgotten. The three that follow are stated
-    anyway because they are the properties a reader needs to see asserted, and
-    because a future change to the construction above would break them first.
+    ``replaced_text`` defaults to ``""`` (a pure insertion). The identity-repair path
+    passes the stale region it is replacing, so BOTH guard changes are verified by
+    this one post-condition rather than by two that could diverge.
+
+    The first check is the strong one and subsumes the rest: swapping the tripwire
+    back for what it replaced must reproduce the original EXACTLY. That is what
+    establishes that the operator's payload, the guard's comments and -- critically
+    -- the marker the ``-e`` test looks at are untouched, rather than three separate
+    checks each of which could be the one that was forgotten. The three that follow
+    are stated anyway because they are the properties a reader needs to see
+    asserted, and because a future change to the construction above would break
+    them first.
     """
     recorder_lines = _guard_recorder_lines(mechanism_id, entrypoint_relpath)
-    if candidate.replace(recorder_lines, "", 1) != original:
-        return (f"the change to {entrypoint_relpath} was not confined to inserting "
-                "the record-keeping lines, so it is not being made")
+    if candidate.replace(recorder_lines, replaced_text, 1) != original:
+        return (f"the change to {entrypoint_relpath} was not confined to the "
+                "record-keeping lines, so it is not being made")
     if candidate.count(_GUARD_BEGIN) != 1 or candidate.count(_GUARD_END) != 1:
         return (f"the result for {entrypoint_relpath} would not carry exactly one "
                 "managed pause guard block")
@@ -3292,17 +3441,67 @@ def _tripwire_insertion_problem(original: str, candidate: str,
     return None
 
 
-def upgrade_paused_entrypoint_guards(operator_project_dir: Path) -> Dict[str, Any]:
+def _recordable_mechanism_id_refusal(build_repo_root: Optional[Path],
+                                     mechanism_id: str) -> Optional[str]:
+    """Why ``mechanism_id`` could never keep a record, or ``None``.
+
+    Asks the RECORDER'S OWN rule through this module's existing sanctioned channel
+    for its trusted, stdlib-only operate-time modules (``_external_write_module``,
+    the same one used for ``capability_identity`` and ``lifecycle_state``) -- so the
+    rule has exactly ONE implementation and cannot drift from the program that
+    enforces it. Never a second copy of the charset here: a build-side copy that
+    disagreed with the recorder is precisely how "the tripwire is installed" and
+    "the tripwire can record" came apart in the first place.
+
+    Fail-SAFE, and deliberately in the permissive direction: if the module cannot be
+    resolved at all, this returns ``None`` and the pass behaves exactly as it did
+    before the check existed. A build tree that cannot load its own recorder is a
+    build-side problem, and refusing every operator's tripwire over it would be the
+    check-that-bricks-everything trap.
+    """
+    if build_repo_root is None:
+        return None
+    try:
+        module = _external_write_module(Path(build_repo_root), "suppressed_invocation")
+        refusal = module.mechanism_id_refusal(mechanism_id)
+    except Exception:  # noqa: BLE001 -- see the fail-safe note above.
+        return None
+    return refusal if isinstance(refusal, str) and refusal else None
+
+
+def upgrade_paused_entrypoint_guards(
+    operator_project_dir: Path,
+    build_repo_root: Optional[Path] = None,
+) -> Dict[str, Any]:
     """Bring the tripwire to every DECLARED paused mechanism's wrapper whose guard
     shape can be positively confirmed -- and refuse, visibly, on any that cannot.
 
     Stated that way rather than as "every wrapper" because the second is not what
-    this does: a wrapper carrying two guard blocks, a guard naming a marker this
-    cannot reconstruct, or a record whose declared id disagrees with its filename is
-    left exactly as it is and reported in ``refused``. A refused wrapper stays
-    paused and stays silent -- that is the disclosed residual, and it is the right
-    side to fail on, because the alternative is editing a guard whose pause
-    semantics are not understood.
+    this does. A refused wrapper stays paused and stays SILENT -- it will not report
+    being stopped -- and that is the right side to fail on, because the alternative
+    is editing a guard whose pause semantics are not understood. The full refusal
+    set, so the residual is disclosed rather than discovered:
+
+      * two guard blocks in one wrapper (which one gates this mechanism is
+        unestablished);
+      * a guard that does not name this mechanism's reconstructed pause marker;
+      * a pause record whose declared ``mechanism_id`` disagrees with its filename,
+        or that cannot be read or parsed;
+      * a wrapper that is not readable, or not UTF-8;
+      * **a wrapper with Windows-style (CRLF) line endings.** The inserted lines use
+        backslash continuations, which a CR before the newline breaks, so an
+        ending-aware insertion would emit a guard that does not parse as intended.
+        Refused and named as such rather than adapted.
+      * a wrapper whose write, read-back or restore fails for any filesystem reason.
+
+    ONE MORE THING IT DOES, disclosed because it changes the shape of an operator's
+    own file: if the wrapper is a SYMLINK, the atomic replace makes it a regular
+    file at that path, with the link's target left untouched. The mode is preserved,
+    so it stays executable and still paused. Measured: this happens AT MOST ONCE per
+    wrapper -- the pass that installs the tripwire -- because every later reconcile
+    finds the lines already present and performs no write at all (verified by
+    unchanged mtime across three further passes). A stale declared id is the only
+    other thing that writes again.
 
     This is the reach mechanism. It is driven by the pause-state records rather
     than by the mechanisms flagged in this pass, deliberately: a writer that was
@@ -3325,8 +3524,21 @@ def upgrade_paused_entrypoint_guards(operator_project_dir: Path) -> Dict[str, An
     ``scan_error`` -- nothing can be established about it. ``os.stat``, not
     ``isdir``, because ``isdir`` answers False for both.
 
-    BOUNDED. Its whole input set is one directory's own ``.json`` files, which is
-    what keeps a fail-closed answer here from being able to affect anything else.
+    BOUNDED, AND THAT IS ABOUT ESCAPING FAILURES, NOT JUST ABOUT INPUTS. Its input
+    set is one directory's own ``.json`` files. But an input bound alone does not
+    bound the DAMAGE: this function is called unconditionally on every reconcile,
+    ahead of the impact notice and both durable blocking post-conditions, so an
+    exception escaping it would abort the upgrade around it -- pauses applied, no
+    notice written, a previously-recorded blocking entry left uncleared, and a raw
+    traceback in front of a non-technical operator. An ordinary read-only wrapper
+    directory or ENOSPC is enough to cause that. So NOTHING escapes: every
+    per-mechanism failure, expected or not, becomes a ``refused`` entry. The one
+    thing this pass may cost is a tripwire; it may never cost the upgrade.
+
+    (The docstring here previously claimed the input bound "keeps a fail-closed
+    answer from being able to affect anything else." That was false as written --
+    the wrapper writes were outside every handler -- and it is the reason this
+    paragraph now names the containment it actually has.)
     """
     root = Path(operator_project_dir)
     report: Dict[str, Any] = {"upgraded": [], "already_current": [],
@@ -3389,8 +3601,34 @@ def upgrade_paused_entrypoint_guards(operator_project_dir: Path) -> Dict[str, An
             # no per-mechanism file to gate at that shape, so there is no guard to
             # carry a tripwire either. Not a refusal; there is nothing here.
             continue
-        outcome, reason = _insert_tripwire_into_existing_guard(
-            root, entrypoint, declared)
+        # ASKED BEFORE ANYTHING IS CLAIMED. A mechanism id the recorder will refuse
+        # cannot keep a record, so installing the lines and reporting `upgraded`
+        # would assert reach this does not have -- and the refusal would be visible
+        # only in the scheduled job's log, which is the exact place this whole task
+        # exists because nobody reads. Reported as `refused`, with the recorder's own
+        # reason, so it is visible where the other refusals are.
+        id_refusal = _recordable_mechanism_id_refusal(build_repo_root, declared)
+        if id_refusal:
+            report["refused"].append({
+                "mechanism_id": declared,
+                "reason": (f"{entrypoint} was left as it is because a record could "
+                           f"not be kept for this mechanism: {id_refusal}")})
+            continue
+        try:
+            outcome, reason = _insert_tripwire_into_existing_guard(
+                root, entrypoint, declared)
+        except Exception as exc:  # noqa: BLE001 -- reported, never allowed to escape.
+            # The backstop for anything the handlers inside did not anticipate. It
+            # exists because of WHERE this is called from, not because a specific
+            # failure is expected: see this function's docstring. One wrapper's
+            # unexpected failure must not take the upgrade, nor the other paused
+            # wrappers' tripwires, with it.
+            report["refused"].append({
+                "mechanism_id": declared,
+                "reason": (f"{entrypoint} could not be given the record-keeping "
+                           f"lines ({exc!r}); it keeps the guard it had and will "
+                           "not report being stopped")})
+            continue
         if outcome == "upgraded":
             report["upgraded"].append(declared)
         elif outcome == "already_current":
@@ -3448,9 +3686,17 @@ def _record_pause_entanglement(
            for key, value in desired.items()):
         return False
     state.update(desired)
-    _atomic_write(
-        path,
-        json.dumps(state, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
+    try:
+        _atomic_write(
+            path,
+            json.dumps(state, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
+    except OSError:
+        # A LABEL, on a record whose pause is already in force. An ordinary
+        # filesystem failure here must cost the label and nothing else: this runs
+        # inside the per-mechanism loop, ahead of the queue write, the impact notice
+        # and both durable blocking post-conditions, so an escaping OSError would
+        # abort the upgrade partway through over a naming detail.
+        return False
     return True
 
 
@@ -4565,7 +4811,7 @@ def reconcile_upgrade(
     # above never reaches it -- is exactly the population whose suppressed runs went
     # unreported nine days running. Driven by the declared pause records, not by
     # this pass's findings. See ``upgrade_paused_entrypoint_guards``.
-    upgrade_paused_entrypoint_guards(operator_project_dir)
+    upgrade_paused_entrypoint_guards(operator_project_dir, build_repo_root)
 
     if mechanisms:
         # ONE classification pass, through the SAME classifier the

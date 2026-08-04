@@ -1341,11 +1341,21 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
     # where no guard has ever fired has no directory at all and reports nothing.
     #
     # AND IT IS LEAVABLE, which is the property that makes withholding the all-clear
-    # legitimate rather than a new dead end: `active` is DERIVED from the pause
-    # marker still being present, never persisted. The one act that resumes the
-    # wrapper -- the marker going away, whether by acceptance reconciling it or by
-    # being cleared -- is the same act that clears this, immediately, with nothing to
-    # delete and no record of what happened lost.
+    # legitimate rather than a new dead end: `active` is DERIVED, never persisted.
+    # Clearing the mechanism's pause marker pair -- whether by acceptance reconciling
+    # it or by the sanctioned clear -- is the same act that resumes the wrapper, and
+    # it clears this immediately, with nothing to delete and no record of what
+    # happened lost.
+    #
+    # DERIVED FROM WHAT, EXACTLY, because the narrower wording was wrong: `_is_paused`
+    # answers True on EITHER `<id>.pause` OR `<id>.json`, while the guard's `-e` test
+    # reads `.pause` alone. So this is a SUPERSET of "the guard would fire", not the
+    # same set: a half-removed pair (`.json` left behind) reports active while the
+    # guard no longer fires. That is the over-reporting direction, which withholds an
+    # all-clear rather than granting a false one, and it cannot arise from any
+    # sanctioned path -- every writer of these markers writes both and
+    # `lifecycle_state._clear_paused_marker` removes both. Leavability is unaffected:
+    # clearing the pair clears this.
     suppressed_scan = suppressed_invocation.scan_suppressed_invocation_events(
         directory=os.path.join(
             str(project_root),
@@ -1362,9 +1372,11 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
             "entrypoint_relpath": _ev["entrypoint_relpath"],
             "first_suppressed_at": _ev["first_suppressed_at"],
             "last_suppressed_at": _ev["last_suppressed_at"],
-            # A count of INVOCATIONS the guard stopped -- one per invocation,
-            # including a hand invocation and including each retry of one due run.
-            # Not a count of scheduled runs due; see the recording module.
+            # A count of INVOCATIONS the guard stopped -- one per invocation, a hand
+            # invocation included. NOT a count of scheduled runs due. Whether a
+            # scheduler retrying one due run would count twice is reasoning rather
+            # than something measured; see the recording module, which flags it as
+            # such.
             "suppressed_count": _ev["suppressed_count"],
             "known_entangled_outputs": _ev["known_entangled_outputs"],
             # `unknown` answers True here exactly as `entangled` does -- one
@@ -1381,15 +1393,25 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
         if _still_paused or _marker_read_error:
             # THE WAY OUT, rendered from the state->action registry and keyed on the
             # state the writer is actually in -- the SAME rendering the bypass view
-            # above hands over, reached by the declared mechanism_id. When the writer
-            # has no declared state at all the registry's own refusal-to-characterise
-            # route is used: it routes to a person and claims nothing, which is the
-            # one honest answer about a state nothing classified. No instruction is
-            # composed here.
+            # above hands over, reached by the declared mechanism_id.
+            #
+            # WHEN THERE IS NO OPEN ITEM, this used to fall back to the registry's
+            # generic "in a state this system has no recorded way out of". That is
+            # exactly the state this cut exists to remove, and it is REACHABLE -- and
+            # reachable in the very scenario that justifies blocking here: the
+            # auto-reap closes a writer's item once its bytes change and it passes
+            # the check, and nothing then clears the pause record for a mechanism
+            # that is not a capability. Measured: guard still firing, all-clear
+            # withheld, and the exit said there was none.
+            #
+            # So that case now has its OWN declared route, which names the record
+            # holding the run and the actor who can clear it. Still registry-
+            # rendered; nothing is composed here.
             _entry["action"] = bypass_actions_by_mechanism_id.get(
                 _mech_id,
-                state_actions.route_for_unclassified_state(
-                    str(_ev["entrypoint_relpath"])))
+                state_actions.route_for_stale_pause_record(
+                    str(_ev["entrypoint_relpath"]),
+                    os.path.join(PAUSED_MECHANISMS_DIR_REL, _mech_id)))
             active_suppressions.append(_entry)
         else:
             past_suppressions.append(_entry)
@@ -1400,7 +1422,16 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
             # No command can be rendered: the mechanism cannot be identified from a
             # record that will not parse, and an unreadable record of stopped runs
             # is precisely the thing that cannot establish that none are outstanding.
-            "action": state_actions.route_for_unidentified_record(_u["path"]),
+            #
+            # The SUPPRESSION route, not the trial one. This branch rendered
+            # `route_for_unidentified_record` for one commit, and that sentence
+            # names "a trial run" and warns that "a change that trial made may still
+            # be live on your real record" -- both false here: no trial is involved
+            # and a suppressed run is one that did NOT happen, so nothing was
+            # written. This branch withholds the all-clear, so the operator was
+            # guaranteed to be shown it.
+            "action": state_actions.route_for_unreadable_suppression_record(
+                _u["path"]),
         }
         for _u in suppressed_scan["unreadable"]
     ]

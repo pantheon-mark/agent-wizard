@@ -46,8 +46,16 @@ NOT ESTABLISHED BY THE ABSENCE OF A RECORD
 
 ``suppressed_count`` IS
   the number of times a wrapper invocation was stopped by the guard. One per
-  invocation. A hand invocation counts. A scheduler that retried the same due run
-  would count twice.
+  invocation, and that part is measured: it is what this program does.
+
+  A hand invocation counts -- also measured; nothing here distinguishes who
+  invoked the wrapper.
+
+  REASONING, NOT MEASUREMENT, and flagged as such: a scheduler that re-ran the same
+  due run would presumably count twice, since each attempt is another invocation.
+  No live scheduler retry has been observed for this, so treat it as an expectation
+  rather than an established fact. It is not load-bearing today: the guard's exit
+  status is unchanged (0), so nothing here gives a scheduler a reason to retry.
 
 ``suppressed_count`` IS NOT
   the number of scheduled runs that were due, and it is not a count of anything
@@ -208,9 +216,6 @@ _LOCK_POLL_SECONDS = 0.02
 _TEMP_RECORD_PREFIX = ".suppressed_invocation."
 _LOCK_SUFFIX = ".lock"
 
-#: Characters allowed in a mechanism id beyond letters and digits.
-_ID_EXTRA_CHARS = "-_."
-
 EXIT_RECORDED = 0
 EXIT_BAD_ARGS = 2
 EXIT_NOT_RECORDED = 3
@@ -237,6 +242,29 @@ def _validated_mechanism_id(mechanism_id: Any) -> str:
     VALIDATES, never sanitizes. Rewriting an unsafe id would map two distinct
     mechanisms onto one record, and the second would then overwrite the first's
     count -- from the filesystem's point of view they would be the same mechanism.
+
+    THE RULE IS "ONE ORDINARY, NON-HIDDEN PATH COMPONENT" -- not an alphanumeric
+    allowlist, and the difference was a real reach defect. This originally copied the
+    trial journal's charset (``alnum`` plus ``-_.``), which is right for a
+    machine-GENERATED id and wrong for this one: a mechanism id is DERIVED from the
+    operator's own filename (``_migration_identity`` returns the relpath stem), so
+    ``scripts/Daily Report.py`` yields ``Daily Report`` and an apostrophe yields
+    ``o'brien``. Both are perfectly ordinary filenames, both were refused here, and
+    the refusal was invisible: the upgrade reported the tripwire installed while
+    every invocation recorded nothing. A space in a filename is entirely plausible
+    for the non-technical operator this is built for.
+
+    So what is checked is what actually matters for a filename stem, stated as
+    positive structural properties rather than as a list of characters to fear:
+
+      * it is exactly ONE path component (``basename`` of it is itself), so it can
+        never traverse out of the records directory;
+      * it is not ``.`` or ``..``, which are path components rather than names;
+      * it does not begin with ``.`` -- a durable record is not a hidden file;
+      * it carries no leading or trailing whitespace, which would make two visually
+        identical ids distinct;
+      * it carries no control characters, which no legitimate derived id has and
+        which would corrupt any line-oriented reading of the record.
     """
     if not (isinstance(mechanism_id, str) and mechanism_id):
         raise SuppressedInvocationError(
@@ -248,15 +276,44 @@ def _validated_mechanism_id(mechanism_id: Any) -> str:
         raise SuppressedInvocationError(
             f"the mechanism id {mechanism_id!r} may not begin with '.' -- this is "
             "a durable record, not a hidden file")
-    bad = sorted({ch for ch in mechanism_id
-                  if not (ch.isalnum() or ch in _ID_EXTRA_CHARS)})
-    if bad:
+    if os.path.basename(mechanism_id) != mechanism_id:
         raise SuppressedInvocationError(
-            f"the mechanism id {mechanism_id!r} contains {bad}, which is not "
-            f"allowed. Use letters, digits, and any of {_ID_EXTRA_CHARS!r}. The id "
-            "is NOT rewritten to fit, because rewriting two different ids onto one "
-            "filename would let one mechanism overwrite another's record.")
+            f"the mechanism id {mechanism_id!r} is not a single name -- it contains "
+            "a path separator, so a record keyed on it could be written outside the "
+            "records directory. The id is NOT rewritten to fit.")
+    if mechanism_id != mechanism_id.strip():
+        raise SuppressedInvocationError(
+            f"the mechanism id {mechanism_id!r} has leading or trailing whitespace, "
+            "which would make two ids that look identical distinct. The id is NOT "
+            "trimmed to fit, because trimming two different ids onto one filename "
+            "would let one mechanism overwrite another's record.")
+    control = sorted({ch for ch in mechanism_id
+                      if ord(ch) < 0x20 or ord(ch) == 0x7F})
+    if control:
+        raise SuppressedInvocationError(
+            f"the mechanism id {mechanism_id!r} contains control character(s) "
+            f"{[hex(ord(c)) for c in control]}, which no derived id has and which "
+            "would corrupt any line-oriented reading of the record. The id is NOT "
+            "rewritten to fit.")
     return mechanism_id
+
+
+def mechanism_id_refusal(mechanism_id: Any) -> Optional[str]:
+    """``None`` if a record can be kept for ``mechanism_id``; the plain-language
+    reason it cannot, otherwise.
+
+    THE SAME rule as ``_validated_mechanism_id``, asked as a question instead of
+    enforced -- one implementation, not two. It exists so the pass that installs a
+    tripwire can find out BEFORE claiming success that this mechanism will be able
+    to record: an id this refuses would otherwise be reported as ``upgraded`` while
+    every invocation of that wrapper silently recorded nothing, which is this task's
+    own defect reproduced inside its own fix.
+    """
+    try:
+        _validated_mechanism_id(mechanism_id)
+    except SuppressedInvocationError as exc:
+        return str(exc)
+    return None
 
 
 def events_dir(project_root: Any) -> str:

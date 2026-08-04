@@ -1881,7 +1881,7 @@ class TestS253ContractDelta(unittest.TestCase):
         # is a ModuleNotFoundError on the emitted self-QA battery; and beyond that, a
         # project without it can grant live-write authorization with no sanctioned way
         # to withdraw it.)
-        # (Count updated to 54 by Cut 1.9 Task 14, which additionally enrolled
+        # (Count updated to 54 by the suppressed-invocation tripwire, which enrolled
         # suppressed_invocation.py -- the durable record of an entrypoint pause guard
         # FIRING. `capability_health` hard-imports it at module scope, so omitting it
         # is a ModuleNotFoundError on the operator's first orientation; and the guard
