@@ -618,13 +618,47 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
         self.assertTrue(report["refused"])
         self.assertEqual(self.before, self._wrapper_text())
 
-    def test_a_paused_live_write_state_with_no_entrypoint_is_skipped(self):
+    def test_a_no_entrypoint_state_with_NO_GUARDED_WRAPPER_is_skipped(self):
+        """RETARGETED, not weakened, and the reason is the finding below.
+
+        This asserted that a ``paused_live_write`` record with no
+        ``entrypoint_relpath`` is skipped **while a guarded wrapper for that same
+        mechanism sat in the fixture** -- encoding the premise that such a record means
+        there is no guard to carry a tripwire. On real operator data that premise is
+        false, and it cost this pass its entire reach (see the sibling test below).
+        What is genuinely true, and what this now asserts, is narrower: with no guarded
+        wrapper claiming this mechanism's marker, there is nothing here.
+        """
+        self.p.write(WRAPPER_REL, _PAYLOAD, mode=0o755)  # guard removed
         self.p.pause_state(MECH, entrypoint_relpath=None,
                            state="paused_live_write")
         report = upgrade_paused_entrypoint_guards(self.p.root)
         self.assertEqual(report["upgraded"], [])
         self.assertEqual(report["refused"], [])
-        self.assertEqual(self.before, self._wrapper_text())
+        self.assertEqual(_PAYLOAD, self._wrapper_text())
+
+    def test_a_GUARDED_wrapper_is_reached_though_the_record_names_none(self):
+        """★ THE REAL ESTATE'S SHAPE, and the hole this class exists to close.
+
+        Measured on a copy of a real operator project: both pause records are
+        ``paused_live_write`` with ``entrypoint_relpath: null``, and
+        ``agents/cron/run_estate_upkeep.sh`` carries a live guard, for that same
+        mechanism id, with **no recorder lines at all**. Six fix rounds of green
+        fixtures could not see it, because every fixture set the field the code keyed
+        on. The guard names this mechanism's own pause marker; that is the join.
+        """
+        self.p.pause_state(MECH, entrypoint_relpath=None,
+                           state="paused_live_write")
+        report = upgrade_paused_entrypoint_guards(self.p.root)
+        self.assertEqual(report["upgraded"], [MECH], report)
+        self.assertIn(upgrade_reconcile.SUPPRESSED_INVOCATION_RECORDER_REL,
+                      self._wrapper_text())
+        # The recorder is told the wrapper that was actually invoked, and the marker
+        # the guard pauses on is untouched.
+        self.assertIn(f"--entrypoint '{WRAPPER_REL}'", self._wrapper_text())
+        self.assertEqual([l for l in self.before.splitlines() if "[ -e " in l],
+                         [l for l in self._wrapper_text().splitlines()
+                          if "[ -e " in l])
 
     def test_an_absent_marker_directory_is_not_an_error(self):
         """A project that never paused anything is the overwhelmingly common
@@ -1347,6 +1381,9 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
          "the record carries no mechanism_id at all"),
         ("upgrade_paused_entrypoint_guards", "_REFUSED_ID_NOT_A_NAME", 1,
          "the record declares an id that is not a usable name"),
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_WRAPPER_NOT_ESTABLISHED", 1,
+         "the record names no wrapper and more than one guarded file claims this "
+         "mechanism's marker"),
         ("upgrade_paused_entrypoint_guards", "_REFUSED_ID_DISAGREEMENT", 1,
          "the record's declared id disagrees with its filename"),
         ("upgrade_paused_entrypoint_guards", "_REFUSED_CANNOT_RECORD_ID", 1,
@@ -1633,18 +1670,25 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
 
     def test_the_correction_reaches_a_wrapper_this_pass_just_upgraded(self):
         """The realistic sequence: a wrapper paused by the release that emitted the
-        promise, whose guard this pass gives its record-keeping lines. The insertion
-        is confined to those lines, so the sentence SURVIVES -- which is why the only
-        route to it is the notice saying so."""
-        self.p.historical_wrapper()
+        promise, whose guard this pass gives its record-keeping lines.
+
+        ASSERTS THE BYTES, not only the sentence. The first version of this test built
+        exactly this scenario and checked only that the sentence survived -- so the
+        notice's "Nothing here changes them", about a file the same run had just
+        rewritten, shipped green through the test named for the case that falsifies it.
+        """
+        wrapper = self.p.historical_wrapper()
+        before = wrapper.read_bytes()
         self.p.pause_marker()
         self.p.pause_state()
         result = upgrade_reconcile.reconcile_upgrade(
             self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
         self.assertEqual(result.tripwire_refusals, [])
+        after = wrapper.read_bytes()
+        self.assertNotEqual(before, after,
+                            "this run was expected to add the record-keeping lines")
         self.assertIn(
-            "separate read-only entrypoint is not affected by this guard",
-            (self.p.root / WRAPPER_REL).read_text(encoding="utf-8"),
+            b"separate read-only entrypoint is not affected by this guard", after,
             "the guard comment was expected to survive the insertion")
         self.assertIsNotNone(result.notice_path,
                             "nothing told this operator the sentence in their own "
@@ -1652,6 +1696,96 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
         notice = Path(result.notice_path).read_text(encoding="utf-8")
         self.assertIn(WRAPPER_REL, notice)
         self.assertIn("nothing had checked whether that was true", notice)
+        # The file it names CHANGED on this run, so the notice may not say otherwise.
+        self.assertNotIn("Nothing here changes them", notice)
+        self.assertNotIn("left exactly as they are", notice)
+
+    def test_a_guarded_wrapper_naming_ANOTHER_mechanisms_marker_is_not_claimed(self):
+        """Deny-by-default on the join. The wrapper's path decides nothing; the marker
+        the guard itself tests is the only thing that says which mechanism it gates."""
+        self.p.historical_wrapper(mechanism_id="some_other_job")
+        self.p.pause_marker()
+        self.p.pause_state(entrypoint_relpath=None, state="paused_live_write")
+        report = upgrade_paused_entrypoint_guards(self.p.root)
+        self.assertEqual(report["upgraded"], [])
+        self.assertEqual(report["refused"], [])
+        self.assertNotIn(
+            upgrade_reconcile.SUPPRESSED_INVOCATION_RECORDER_REL,
+            (self.p.root / WRAPPER_REL).read_text(encoding="utf-8"))
+
+    def test_TWO_guarded_wrappers_claiming_one_marker_is_refused_not_guessed(self):
+        """Which one gates the mechanism is not established, so neither is written to
+        and the operator is told there is a reporting gap."""
+        self.p.historical_wrapper()
+        twin = self.p.root / "scripts" / "run_finish_estate_cleanup_copy.sh"
+        twin.write_text((self.p.root / WRAPPER_REL).read_text(encoding="utf-8"),
+                        encoding="utf-8")
+        self.p.pause_marker()
+        self.p.pause_state(entrypoint_relpath=None, state="paused_live_write")
+        report = upgrade_paused_entrypoint_guards(self.p.root)
+        self.assertEqual(report["upgraded"], [])
+        (entry,) = report["refused"]
+        self.assertEqual(entry["outcome"],
+                         upgrade_reconcile._REFUSED_WRAPPER_NOT_ESTABLISHED)
+        for path in (WRAPPER_REL, "scripts/run_finish_estate_cleanup_copy.sh"):
+            self.assertNotIn(
+                upgrade_reconcile.SUPPRESSED_INVOCATION_RECORDER_REL,
+                (self.p.root / path).read_text(encoding="utf-8"))
+
+    def test_the_reachable_label_COUNT_in_the_docstring_is_pinned(self):
+        """The returns docstring states 14-of-24 and four minting sources. That
+        arithmetic has already gone stale twice in this same sentence ("two" when it
+        was four; "ANY member" when it was 14 of 24), and the multiplicity table
+        reddens on a new label SITE without anyone rereading the number."""
+        source = (_WIZARD / "scripts" / "lib" / "upgrade_reconcile.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(source)
+        mints = collections.defaultdict(set)
+        calls = collections.defaultdict(set)
+
+        class Walk(ast.NodeVisitor):
+            def __init__(self):
+                self.fn = None
+
+            def visit_FunctionDef(self, node):
+                prev, self.fn = self.fn, node.name
+                self.generic_visit(node)
+                self.fn = prev
+
+            visit_AsyncFunctionDef = visit_FunctionDef
+
+            def visit_Name(self, node):
+                if (self.fn and isinstance(node.ctx, ast.Load)
+                        and node.id.startswith("_REFUSED")
+                        and node.id != "_REFUSED_OUTCOMES"):
+                    mints[self.fn].add(node.id)
+                self.generic_visit(node)
+
+            def visit_Call(self, node):
+                if self.fn and isinstance(node.func, ast.Name):
+                    calls[self.fn].add(node.func.id)
+                self.generic_visit(node)
+
+        Walk().visit(tree)
+        seed = "_insert_tripwire_into_existing_guard"
+        seen, stack = set(), [seed]
+        while stack:
+            fn = stack.pop()
+            if fn in seen:
+                continue
+            seen.add(fn)
+            stack.extend(c for c in calls.get(fn, ()) if c in mints or c in calls)
+        reachable = set().union(*(mints.get(fn, set()) for fn in seen)) if seen else set()
+        sources = sorted(fn for fn in seen if mints.get(fn))
+        self.assertEqual(len(reachable), 14, sorted(reachable))
+        self.assertEqual(len(upgrade_reconcile._REFUSAL_OUTCOMES), 25)
+        self.assertEqual(sources, ["_insert_tripwire_into_existing_guard",
+                                   "_publish_guard_change",
+                                   "_refuse_unconfined_change",
+                                   "_repair_stale_recorder_identity",
+                                   "_restore_after_failed_check"])
+        self.assertEqual(len(mints["_publish_guard_change"]
+                              | mints["_restore_after_failed_check"]), 4)
 
     def test_a_DIFFERENT_mechanism_id_still_reads_as_a_disagreement(self):
         """The control for the split above: the route that genuinely IS a

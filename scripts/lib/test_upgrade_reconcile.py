@@ -1421,7 +1421,7 @@ class WithdrawnContinuityClaimTests(_Base):
         text = Path(result.notice_path).read_text(encoding="utf-8")
         self.assertIn(rel, text)
         self.assertIn("nothing had checked whether that was true", text)
-        self.assertIn("left exactly as they are", text)
+        self.assertIn("Nothing here rewrites that sentence or removes it", text)
         self.assertEqual(result.withdrawn_continuity_claim_files, [rel])
 
     def test_the_correction_does_not_re_emit_the_promise_it_corrects(self):
@@ -1498,6 +1498,158 @@ class WithdrawnContinuityClaimTests(_Base):
         self.assertNotEqual(out, "")
         self.assertIn("nothing had checked", out)
         self.assertIn(str(result.notice_path), out)
+
+    def _guarded_wrapper(self, root, wrapper_rel, mechanism_id, *, comment=None):
+        """A wrapper carrying a real managed guard, built from the module's own
+        constants and marker-path helper -- never a re-spelled path. Defaults to the
+        FIRST historical comment wrapping, which is the one the real estate carries.
+        """
+        marker = upgrade_reconcile._wrapper_guard_marker_ref(wrapper_rel, mechanism_id)
+        block = (
+            f"{upgrade_reconcile._GUARD_BEGIN}\n"
+            + (comment if comment is not None else self._SHIPPED_GUARD_COMMENTS[0])
+            + '_RECONCILE_HERE="$(cd "$(dirname "$0")" && pwd)"\n'
+            f'if [ -e "$_RECONCILE_HERE/{marker}" ]; then\n'
+            f"{upgrade_reconcile._GUARD_PAUSED_ECHO_LINE}\n"
+            f"{upgrade_reconcile._GUARD_EXIT_LINE}\n"
+            "fi\n"
+            f"{upgrade_reconcile._GUARD_END}\n"
+        )
+        path = root / wrapper_rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\n" + block + '\necho "the digest was sent"\n',
+                        encoding="utf-8")
+        path.chmod(0o755)
+        return path
+
+    def _estate_shaped_pause_record(self, root, mechanism_id="estate_upkeep"):
+        """The pause record shape the REAL estate carries: ``paused_live_write``,
+        ``entrypoint_relpath`` **null**, and a ``writer_relpath`` pointing at a
+        capability module -- from which the guarded cron wrapper's path cannot be
+        derived. Measured on a copy of a real operator project; every fixture written
+        before this one set ``entrypoint_relpath``, which is why no fixture could
+        falsify the assumption the code was built on."""
+        paused = root / PAUSED_MECHANISMS_DIR_REL
+        paused.mkdir(parents=True, exist_ok=True)
+        (paused / f"{mechanism_id}.json").write_text(json.dumps({
+            "canonical_id": mechanism_id,
+            "mechanism_id": mechanism_id,
+            "entrypoint_relpath": None,
+            "state": "paused_live_write",
+            "paused_op_kinds": [f"{mechanism_id}.status_tidy"],
+            "writer_relpath": f"agents/capabilities/{mechanism_id}_capability.py",
+            "migration_status": "pending",
+        }), encoding="utf-8")
+        (paused / f"{mechanism_id}.pause").write_text("", encoding="utf-8")
+
+    def test_a_guarded_wrapper_the_pause_RECORD_DOES_NOT_NAME_is_still_found(self):
+        """★ The real estate's shape, and the one the whole correction exists for.
+
+        Its pause record declares ``entrypoint_relpath: null``, so a candidate set
+        built from that field alone is EMPTY -- while the wrapper whose guard caused
+        the nine-day outage sits on disk carrying the sentence. The population is
+        *guarded wrappers*, and they are found by the guard's own marker, not by a
+        field the real records leave null.
+        """
+        root = self._project()
+        self._estate_shaped_pause_record(root)
+        self._guarded_wrapper(root, "agents/cron/run_estate_upkeep.sh", "estate_upkeep")
+        self.assertIn("agents/cron/run_estate_upkeep.sh",
+                      upgrade_reconcile._withdrawn_continuity_claim_files(root))
+
+    def test_a_copy_inside_the_projects_own_BACKUP_tree_is_not_named(self):
+        """The exclusion this scan always had and never declared. A backup snapshot is
+        a frozen record of past state: naming its ten copies would hand the operator a
+        list of files they must not edit and cannot act on."""
+        root = self._project()
+        snapshot = (root / ".wizard/backups/pre-v0.13.0/.wizard/upgrade-review/"
+                    "v0.10.2-to-v0.11.0/impact-notice.md")
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        snapshot.write_text(self._SHIPPED_NOTICE_LINE + "\n", encoding="utf-8")
+        self._guarded_wrapper(root, ".wizard/backups/pre-v0.13.0/agents/cron/run_x.sh",
+                              "x")
+        self.assertEqual(upgrade_reconcile._withdrawn_continuity_claim_files(root), [])
+
+    def test_the_correction_never_claims_the_file_is_UNCHANGED(self):
+        """It is emitted on the same run that can add record-keeping lines to a paused
+        wrapper's guard. "Nothing here changes them" was false about exactly that file;
+        what is established is narrower and still worth saying -- the SENTENCE is not
+        rewritten or removed."""
+        text = render_impact_notice(
+            [], "v0.22.0", "v0.23.0",
+            withdrawn_continuity_claim_files=["agents/cron/run_estate_upkeep.sh"])
+        self.assertNotIn("Nothing here changes them", text)
+        self.assertNotIn("left exactly as they are", text)
+        self.assertIn("rewrites that sentence", text)
+        self.assertIn("record-keeping lines", text)
+
+    def test_a_file_already_named_is_not_named_AGAIN_on_the_next_reconcile(self):
+        """Bounded by recorded EMISSION -- which is establishable -- rather than by
+        delivery, which is not. Without this the section fires on every future
+        reconcile of any project that ever had one of these pauses, permanently, on a
+        surface whose whole meaning is "something to review"."""
+        root = self._project()
+        rel = self._stored_notice(root, "v0.10.2-to-v0.11.0",
+                                  self._SHIPPED_NOTICE_LINE + "\n")
+        first = self._reconcile(root)
+        self.assertEqual(first.withdrawn_continuity_claim_files, [rel])
+        second = self._reconcile(root)
+        self.assertEqual(second.withdrawn_continuity_claim_files, [])
+        self.assertIsNone(second.notice_path)
+        # ...and the sentence is still there. Nothing was edited to achieve silence.
+        self.assertIn(self._SHIPPED_NOTICE_LINE.strip(),
+                      (root / rel).read_text(encoding="utf-8"))
+
+    def test_a_newly_found_copy_is_still_named_after_an_earlier_correction(self):
+        root = self._project()
+        self._stored_notice(root, "v0.10.2-to-v0.11.0",
+                            self._SHIPPED_NOTICE_LINE + "\n")
+        self._reconcile(root)
+        self._estate_shaped_pause_record(root)
+        self._guarded_wrapper(root, "agents/cron/run_estate_upkeep.sh", "estate_upkeep")
+        again = self._reconcile(root)
+        self.assertEqual(again.withdrawn_continuity_claim_files,
+                         ["agents/cron/run_estate_upkeep.sh"])
+
+    def test_an_unusable_emission_record_makes_the_correction_REPEAT(self):
+        """Fail-safe direction: a record that cannot be read or makes no sense means
+        nothing is known to have been said, so it is said again. The cost of the wrong
+        answer here is a repeated correction, never a suppressed one."""
+        root = self._project()
+        rel = self._stored_notice(root, "v0.10.2-to-v0.11.0",
+                                  self._SHIPPED_NOTICE_LINE + "\n")
+        self._reconcile(root)
+        (root / upgrade_reconcile.WITHDRAWN_CLAIM_CORRECTION_RECORD_REL).write_text(
+            "{not json", encoding="utf-8")
+        self.assertEqual(self._reconcile(root).withdrawn_continuity_claim_files, [rel])
+
+    def test_the_terminal_summary_never_carries_the_withdrawn_sentence_either(self):
+        """The notice is banned from re-emitting it across every shape; the terminal
+        surface added alongside it was not covered."""
+        out = render_reconcile_result(ReconcileResult(
+            operator_project_path="/tmp/x", from_version="v1", to_version="v2",
+            withdrawn_continuity_claim_files=["agents/cron/run_estate_upkeep.sh",
+                                              ".wizard/upgrade-review/x/impact-notice.md"]))
+        for claim in upgrade_reconcile._WITHDRAWN_CONTINUITY_CLAIMS:
+            self.assertNotIn(claim, out)
+        self.assertNotIn("keeps running exactly as before", out)
+
+    def test_a_SYMLINKED_entrypoint_pointing_out_of_the_project_is_not_read(self):
+        """The lexical guard catches ``..`` and an absolute path. A symlink inside the
+        project is neither, and resolves wherever it likes."""
+        root = self._project()
+        outside = self.tmp / "outside_symlink_target.sh"
+        outside.write_text(self._SHIPPED_GUARD_COMMENTS[1], encoding="utf-8")
+        link = root / "agents/cron/run_linked.sh"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(outside)
+        paused = root / PAUSED_MECHANISMS_DIR_REL
+        paused.mkdir(parents=True, exist_ok=True)
+        (paused / "linked.json").write_text(json.dumps({
+            "mechanism_id": "linked",
+            "entrypoint_relpath": "agents/cron/run_linked.sh",
+        }), encoding="utf-8")
+        self.assertEqual(upgrade_reconcile._withdrawn_continuity_claim_files(root), [])
 
     def test_the_section_headline_terminates_the_list_before_it(self):
         """A markdown list runs on until a blank line, so a headline appended straight
