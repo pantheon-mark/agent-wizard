@@ -702,25 +702,37 @@ class TestNothingInTheReachPassCanAbortTheUpgrade(unittest.TestCase):
 
         upgrade_reconcile._atomic_write = refuse
         self.addCleanup(setattr, upgrade_reconcile, "_atomic_write", real)
-        outcome, reason = upgrade_reconcile._restore_wrapper(
+        restored, reason = upgrade_reconcile._restore_wrapper(
             self.p.root / WRAPPER_REL, self.before, "it did not read back as written")
+        self.assertFalse(restored)
         self.assertIn("also failed", reason)
         self.assertIn("needs a person", reason)
         self.assertNotIn("the original has been restored", reason)
-        # And it is the refusal class the operator is told something specific about:
-        # this one needs a person, not "only the record-keeping is missing".
-        self.assertEqual(outcome, upgrade_reconcile._REFUSED_NEEDS_PERSON)
-        self.assertIn("needs a person",
-                      upgrade_reconcile._REFUSAL_OPERATOR_NOTES[outcome])
+        # And the ESCALATION is what the caller derives from it: whichever check
+        # failed, a file that could not be put back is the needs-a-person class.
+        for checked in (upgrade_reconcile._REFUSED_NOT_VERIFIED,
+                        upgrade_reconcile._REFUSED_READBACK_FAILED):
+            outcome, _ = upgrade_reconcile._restore_after_failed_check(
+                self.p.root / WRAPPER_REL, self.before, checked, "why")
+            self.assertEqual(outcome, upgrade_reconcile._REFUSED_NEEDS_PERSON)
+            self.assertIn("needs a person",
+                          upgrade_reconcile._REFUSAL_OPERATOR_NOTES[outcome])
 
     def test_a_restore_that_succeeds_says_that_instead(self):
         """The positive control: without it, a function that always reported failure
         would satisfy the assertion above."""
-        outcome, reason = upgrade_reconcile._restore_wrapper(
+        restored, reason = upgrade_reconcile._restore_wrapper(
             self.p.root / WRAPPER_REL, self.before, "it did not read back as written")
+        self.assertTrue(restored)
         self.assertIn("the original has been restored", reason)
         self.assertNotIn("also failed", reason)
-        self.assertEqual(outcome, upgrade_reconcile._REFUSED_NOT_VERIFIED)
+        # A successful restore keeps WHICH CHECK FAILED as the outcome -- the two
+        # checks are different facts and must not collapse onto one label.
+        for checked in (upgrade_reconcile._REFUSED_NOT_VERIFIED,
+                        upgrade_reconcile._REFUSED_READBACK_FAILED):
+            outcome, _ = upgrade_reconcile._restore_after_failed_check(
+                self.p.root / WRAPPER_REL, self.before, checked, "why")
+            self.assertEqual(outcome, checked)
         self.assertEqual(
             self.before,
             (self.p.root / WRAPPER_REL).read_text(encoding="utf-8"))
@@ -1220,6 +1232,222 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
                           f"{name} is returned by a refusal site but the dispatcher "
                           "would not report it")
 
+    #: References that READ a label rather than mint one. Declared, not filtered by a
+    #: name heuristic, so nothing is silently outside the enumeration below.
+    _NON_MINTING = "reads a label; does not mint one"
+
+    #: EVERY site that MINTS a refusal label, with the fact that site establishes.
+    #: Keyed on (function, label) and NOT on a line number, which drifts on any edit
+    #: above it and is a stale-anchor generator.
+    #:
+    #: THIS TABLE IS THE POINT, not a convenience. Four rounds of defects came from
+    #: one generator: a refusal label shared by sites whose ESTABLISHED FACTS DIFFER,
+    #: so its one sentence was true at one site and false at the others. Fixing the
+    #: sentences one at a time left the generator intact and the next site
+    #: re-created it -- most recently the sharpened "has more than one of our safety
+    #: blocks", true at one of four sites and false at three, which MOVED a false
+    #: claim onto the operator surface in the very change that fixed the previous one.
+    #:
+    #: What the machine checks: the derived set of minting sites equals this table's
+    #: keys exactly, so a new site, a moved one, or a removed one cannot pass
+    #: silently; and any label appearing at more than one site must have the SAME
+    #: declared fact at each. What the author declares: the fact text. That split is
+    #: stated rather than blurred -- no test can read a condition and tell you what it
+    #: established.
+    _MINTING_SITES = {
+        ("_insert_tripwire_into_existing_guard", "_REFUSED_UNREADABLE_WRAPPER"):
+            "the wrapper could not be read at all",
+        ("_insert_tripwire_into_existing_guard", "_REFUSED_NOT_TEXT"):
+            "the wrapper is not decodable text",
+        ("_insert_tripwire_into_existing_guard", "_REFUSED_GUARD_NOT_ONE_BLOCK"):
+            "there is not exactly one complete begin/end guard pair",
+        ("_insert_tripwire_into_existing_guard",
+         "_REFUSED_GUARD_MARKERS_OUT_OF_ORDER"):
+            "the end marker precedes the begin marker",
+        ("_insert_tripwire_into_existing_guard", "_REFUSED_FOREIGN_MARKER"):
+            "the guard does not name this mechanism's reconstructed marker",
+        ("_insert_tripwire_into_existing_guard", "_REFUSED_LINE_ENDINGS"):
+            "the guard's stopped-run message is present with CRLF endings",
+        ("_insert_tripwire_into_existing_guard", "_REFUSED_UNRECOGNISED_GUARD"):
+            "the stopped-run message is not present exactly once in the block",
+        ("_repair_stale_recorder_identity", "_REFUSED_GUARD_REGION_NOT_DELIMITED"):
+            "the block's message and exit lines are not each present exactly once",
+        ("_repair_stale_recorder_identity", "_REFUSED_GUARD_EXIT_BEFORE_MESSAGE"):
+            "the block's exit precedes its stopped-run message",
+        ("_refuse_unconfined_change", "_REFUSED_CHANGE_NOT_CONFINED"):
+            "the whole-file post-condition rejected the prepared change; "
+            "nothing was written",
+        ("_publish_guard_change", "_REFUSED_WRITE_FAILED"):
+            "the write itself raised; the file is unchanged",
+        ("_publish_guard_change", "_REFUSED_READBACK_FAILED"):
+            "the read-back raised, so there was nothing to compare",
+        ("_publish_guard_change", "_REFUSED_NOT_VERIFIED"):
+            "the read-back succeeded and differed from what was written",
+        ("_restore_after_failed_check", "_REFUSED_NEEDS_PERSON"):
+            "a check failed AND the restore failed, so the file's state is unverified",
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_UNREADABLE_PAUSE_RECORD"):
+            "the pause record could not be read or parsed",
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_PAUSE_RECORD_WRONG_SHAPE"):
+            "the pause record parsed but is not a mapping",
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_ID_DISAGREEMENT"):
+            "the record's declared id disagrees with its filename",
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_CANNOT_RECORD_ID"):
+            "no record file can be kept for this id",
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_UNEXPECTED"):
+            "an unanticipated failure; nothing about the file's state is established",
+        ("reconcile_upgrade", "_REFUSED_PASS_NOT_RUN"):
+            "the sweep could not run at all; nothing was examined",
+        # The labels handed to the two helpers that finish those paths. They mint the
+        # same fact as the site that passes them, which is why the helper exists.
+        ("_publish_guard_change", "_REFUSED_READBACK_FAILED"):
+            "the read-back raised, so there was nothing to compare",
+        ("_publish_guard_change", "_REFUSED_NOT_VERIFIED"):
+            "the read-back succeeded and differed from what was written",
+        # --- references that READ a label, minting nothing -----------------------
+        ("_refusal_record", "_REFUSED"): _NON_MINTING,
+        ("_tripwire_refusal_lines", "_REFUSED"): _NON_MINTING,
+        ("_tripwire_refusal_lines", "_REFUSED_PASS_NOT_RUN"): _NON_MINTING,
+        ("render_reconcile_result", "_REFUSED"): _NON_MINTING,
+        ("render_reconcile_result", "_REFUSED_PASS_NOT_RUN"): _NON_MINTING,
+    }
+
+    def _derived_label_references(self):
+        """EVERY ``_REFUSED*`` reference inside a function, by AST.
+
+        Total rather than clever. A first attempt matched only a returned tuple's
+        first element and ``_refusal_record``'s argument, and missed two real minting
+        paths -- a label handed to a helper as an argument, and one returned from
+        inside a conditional expression. A sweep that has to recognise each indirection
+        will keep missing the next one, so this recognises none of them: it collects
+        every reference and the table below says, for each, whether it mints and what
+        it establishes.
+        """
+        source = (_WIZARD / "scripts" / "lib" / "upgrade_reconcile.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(source)
+        found = set()
+
+        class Walk(ast.NodeVisitor):
+            def __init__(self):
+                self.fn = None
+
+            def visit_FunctionDef(self, node):
+                prev, self.fn = self.fn, node.name
+                self.generic_visit(node)
+                self.fn = prev
+
+            visit_AsyncFunctionDef = visit_FunctionDef
+
+            def visit_Name(self, node):
+                if (self.fn and isinstance(node.ctx, ast.Load)
+                        and node.id.startswith("_REFUSED")
+                        and node.id != "_REFUSAL_OUTCOMES"):
+                    found.add((self.fn, node.id))
+                self.generic_visit(node)
+
+        Walk().visit(tree)
+        return found
+
+    def test_every_label_reference_is_declared(self):
+        derived = self._derived_label_references()
+        self.assertTrue(derived, "the AST sweep must find something")
+        declared = set(self._MINTING_SITES)
+        self.assertEqual(
+            sorted(derived - declared), [],
+            "a refusal label is minted at a site this table does not declare -- add "
+            "a row stating what that site establishes, and check the label's sentence "
+            "is true there")
+        self.assertEqual(
+            sorted(declared - derived), [],
+            "this table declares a minting site that no longer exists")
+
+    def test_a_label_shared_by_two_sites_must_establish_THE_SAME_FACT(self):
+        """★ The generator, closed. A label shared by sites whose facts differ has one
+        sentence that is true at one of them; that is what produced four rounds of
+        false operator claims, most recently by sharpening a shared label rather than
+        splitting it."""
+        by_label = {}
+        for (function, label), fact in self._MINTING_SITES.items():
+            if fact == self._NON_MINTING:
+                continue
+            by_label.setdefault(label, set()).add(fact)
+        offenders = {label: sorted(facts) for label, facts in by_label.items()
+                     if len(facts) > 1}
+        self.assertEqual(
+            offenders, {},
+            "these labels are minted at sites establishing DIFFERENT facts, so one "
+            "sentence cannot be true at all of them -- split the label: "
+            + repr(offenders))
+
+    def test_every_declared_fact_is_stated_and_every_label_is_reportable(self):
+        """The table cannot be padded with blanks, and every label in it has to be one
+        the dispatcher reports and the notes map answers for."""
+        for (function, label), fact in sorted(self._MINTING_SITES.items()):
+            self.assertTrue(fact.strip(), f"{function}/{label} declares no fact")
+            if fact == self._NON_MINTING:
+                continue
+            value = getattr(upgrade_reconcile, label)
+            self.assertIn(value, upgrade_reconcile._REFUSAL_OUTCOMES, label)
+            self.assertIn(value, upgrade_reconcile._REFUSAL_OPERATOR_NOTES, label)
+
+    def test_the_not_one_block_sentence_is_true_on_a_MISSING_end_marker(self):
+        """The sentence's content, not just its label. The route fires on "not exactly
+        one complete pair", which includes a wrapper with a begin and NO end -- fewer
+        than one block, not more. The old sentence said "more than one"."""
+        text = self.p.historical_wrapper().read_text(encoding="utf-8").replace(
+            upgrade_reconcile._GUARD_END, "# (end marker removed)")
+        self.p.write(WRAPPER_REL, text, mode=0o755)
+        self.p.pause_marker()
+        self.p.pause_state()
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        (entry,) = result.tripwire_refusals
+        self.assertEqual(entry["outcome"],
+                         upgrade_reconcile._REFUSED_GUARD_NOT_ONE_BLOCK)
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertNotIn("has more than one of our safety blocks", notice,
+                         "this wrapper has FEWER than one complete block")
+        self.assertIn("does not contain exactly one complete safety block", notice)
+
+    def test_the_unexpected_sentence_never_states_the_files_state(self):
+        """An unknown failure is one where nobody knows where it stopped, so the
+        sentence may not say what happened to the file. The old one said "so the file
+        was left as it was"."""
+        note = upgrade_reconcile._REFUSAL_OPERATOR_NOTES[
+            upgrade_reconcile._REFUSED_UNEXPECTED]
+        for claim in ("left as it was", "was left", "unchanged",
+                      "keeps the guard it had"):
+            self.assertNotIn(claim, note, f"an unknown failure claims {claim!r}")
+        self.assertIn("cannot tell from here what state that left it in", note)
+
+    def test_the_section_terminates_the_list_that_precedes_it(self):
+        """A markdown list runs on until a blank line, so without one the section's
+        headline renders INSIDE the preceding bullet. Gating the pending-work bullet
+        removed the blank that had been doing that by accident."""
+        text = upgrade_reconcile.render_impact_notice(
+            [], "v0.22.0", "v0.23.0",
+            tripwire_refusals=[upgrade_reconcile._refusal_record(
+                MECH, WRAPPER_REL, upgrade_reconcile._REFUSED_LINE_ENDINGS, "d")])
+        lines = text.splitlines()
+        idx = next(i for i, l in enumerate(lines)
+                   if l.startswith("**One more thing"))
+        self.assertEqual(
+            lines[idx - 1], "",
+            "the section headline is inside the preceding bullet's paragraph: "
+            f"preceded by {lines[idx - 1]!r}")
+
+    def test_the_label_reference_sweep_is_not_vacuous(self):
+        """The enumeration is only load-bearing if the derivation finds things. A sweep
+        that returned nothing would make the comparison pass by emptiness -- the same
+        vacuous shape as a zero-test selection."""
+        derived = self._derived_label_references()
+        self.assertGreaterEqual(len(derived), 20, sorted(derived))
+        functions = {fn for fn, _ in derived}
+        for expected in ("_insert_tripwire_into_existing_guard",
+                         "_publish_guard_change", "upgrade_paused_entrypoint_guards",
+                         "reconcile_upgrade"):
+            self.assertIn(expected, functions)
+
     def test_the_notice_routes_to_the_thing_that_CAN_answer_it(self):
         self._reach_line_endings()
         notice = self._notice()
@@ -1228,19 +1456,28 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
         self.assertIn("nothing above says whether any of those jobs has "
                       "actually been halted", notice)
 
-    def test_a_pass_wide_failure_is_not_rendered_as_one_job(self):
-        """Nothing was examined. On the CLI this read as a single unnamed job with a
-        reporting gap, with the true sentence only in the file."""
+    def test_a_pass_wide_failure_is_ONE_entry_naming_no_job_end_to_end(self):
+        """The real pass-wide route, driven through ``reconcile_upgrade``.
+
+        RETARGETED: this used to ban the literals ``"a paused scheduled job:"`` and
+        ``"this one"``, both of which this task's own diff had already deleted -- so
+        it could no longer fail, whatever the code did. That is the vacuous-green
+        shape one level up from the thing it was watching. It now asserts what the
+        behaviour IS: exactly one entry for the whole pass, carrying no subject, with
+        its sentence on both surfaces.
+        """
         self._reach_pass_not_run()
         result = upgrade_reconcile.reconcile_upgrade(
             self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        (entry,) = result.tripwire_refusals
+        self.assertEqual(entry["outcome"], upgrade_reconcile._REFUSED_PASS_NOT_RUN)
+        self.assertEqual(entry["mechanism_id"], "")
+        self.assertIsNone(entry["entrypoint_relpath"])
         notice = Path(result.notice_path).read_text(encoding="utf-8")
         cli = upgrade_reconcile.render_reconcile_result(result)
-        for surface in (notice, cli):
+        for surface_name, surface in (("notice", notice), ("CLI", cli)):
             self.assertIn("could not look at your paused scheduled jobs at all",
-                          surface)
-            self.assertNotIn("a paused scheduled job:", surface)
-            self.assertNotIn("this one", surface)
+                          surface, surface_name)
 
     def test_a_pass_wide_failure_named_after_a_job_STILL_is_not_one_job(self):
         """Pins the outcome half of the pass-wide branch.

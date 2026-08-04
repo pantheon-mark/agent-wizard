@@ -571,7 +571,11 @@ OPERATOR_TEXT_RENDERERS_SWEEP_LIMITS = (
     "a template built by a call rather than written as a string literal",
     "a template held inside a collection rather than bound to its own name",
     "a template whose placeholder is not {subject}",
-    "a renderer nested inside a class or another function",
+    "a renderer defined inside a CLASS body",
+    # Nested inside another FUNCTION is NOT an escape: it is caught, but
+    # attributed to the OUTERMOST function's name, so a declaration would have
+    # to list that name rather than the renderer's own. Measured; the previous
+    # wording lumped it in with the class case and was wrong about it.
     "a renderer that writes the whole sentence inline with no named template "
     "(that shape is not a shared template at all, and is what the gate's other "
     "signatures are for)",
@@ -582,7 +586,8 @@ OPERATOR_TEXT_RENDERERS_SWEEP_LIMITS = (
 OPERATOR_TEXT_RENDERERS_SWEEP_COVERS = (
     "plain and annotated assignment, including Final[str]",
     "tuple-unpacking assignment",
-    "def and async def renderers",
+    "def and async def renderers, including one nested in another function "
+    "(attributed to the outermost function's name)",
     ".format, f-string, %-format, + concatenation, and a bare return",
 )
 OPERATOR_TEXT_RENDERERS: Tuple[str, ...] = (

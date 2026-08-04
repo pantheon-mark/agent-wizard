@@ -1924,6 +1924,42 @@ class TheRegistrysDeclaredRendererSetIsCompleteTests(unittest.TestCase):
         self.assertEqual(
             self._functions_formatting_a_route_template(tree, templates), set())
 
+    def test_the_declared_limits_and_coverage_are_MEASURED_not_asserted(self):
+        """The two facts the corrected wording turns on, checked against the sweep.
+
+        The previous wording lumped "nested inside a class or another function" into
+        one limit; measured, nested-in-a-FUNCTION is caught (under the outer
+        function's name) and only the CLASS case escapes. An inaccurate limits list is
+        as much a false claim as an inaccurate guarantee.
+        """
+        in_class = ('_R = "a `{subject}` b, at some length"\n'
+                    'class Holder:\n'
+                    '    def route_for_inner(self, s):\n'
+                    '        return _R.format(subject=s)\n')
+        tree = ast.parse(in_class)
+        templates = self._route_template_names(tree)
+        self.assertEqual(templates, {"_R"})
+        self.assertEqual(
+            self._functions_formatting_a_route_template(tree, templates), set(),
+            "a class-body renderer is declared as an escape; it is not escaping")
+
+        in_function = ('_R = "a `{subject}` b, at some length"\n'
+                       'def outer():\n'
+                       '    def route_for_inner(s):\n'
+                       '        return _R.format(subject=s)\n'
+                       '    return route_for_inner\n')
+        tree = ast.parse(in_function)
+        templates = self._route_template_names(tree)
+        self.assertEqual(
+            self._functions_formatting_a_route_template(tree, templates), {"outer"},
+            "nested-in-a-function is caught, under the OUTER name -- so it is not a "
+            "limit, and the declared coverage has to say which name it attributes to")
+
+        limits = " ".join(state_actions.OPERATOR_TEXT_RENDERERS_SWEEP_LIMITS).lower()
+        covers = " ".join(state_actions.OPERATOR_TEXT_RENDERERS_SWEEP_COVERS).lower()
+        self.assertIn("class", limits)
+        self.assertIn("outermost function", covers)
+
     def test_the_sweeps_disclosed_limits_are_declared_by_the_registry(self):
         """The reach is stated where the declaration is, so a reader of
         `OPERATOR_TEXT_RENDERERS` sees what backs it without coming here."""

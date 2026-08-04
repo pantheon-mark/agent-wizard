@@ -3217,14 +3217,20 @@ def _read_wrapper_bytes_exact(wrapper_path: Path) -> str:
 _REFUSED = "refused"
 _REFUSED_UNREADABLE_WRAPPER = "refused_unreadable_wrapper"
 _REFUSED_NOT_TEXT = "refused_not_text"
-_REFUSED_AMBIGUOUS_GUARD = "refused_ambiguous_guard"
+_REFUSED_GUARD_NOT_ONE_BLOCK = "refused_guard_not_one_block"
+_REFUSED_GUARD_MARKERS_OUT_OF_ORDER = "refused_guard_markers_out_of_order"
+_REFUSED_GUARD_REGION_NOT_DELIMITED = "refused_guard_region_not_delimited"
+_REFUSED_GUARD_EXIT_BEFORE_MESSAGE = "refused_guard_exit_before_message"
 _REFUSED_FOREIGN_MARKER = "refused_foreign_marker"
 _REFUSED_LINE_ENDINGS = "refused_line_endings"
 _REFUSED_UNRECOGNISED_GUARD = "refused_unrecognised_guard"
+_REFUSED_CHANGE_NOT_CONFINED = "refused_change_not_confined"
 _REFUSED_WRITE_FAILED = "refused_write_failed"
+_REFUSED_READBACK_FAILED = "refused_readback_failed"
 _REFUSED_NOT_VERIFIED = "refused_not_verified"
 _REFUSED_NEEDS_PERSON = "refused_needs_person"
 _REFUSED_UNREADABLE_PAUSE_RECORD = "refused_unreadable_pause_record"
+_REFUSED_PAUSE_RECORD_WRONG_SHAPE = "refused_pause_record_wrong_shape"
 _REFUSED_ID_DISAGREEMENT = "refused_id_disagreement"
 _REFUSED_CANNOT_RECORD_ID = "refused_cannot_record_id"
 _REFUSED_UNEXPECTED = "refused_unexpected"
@@ -3236,14 +3242,20 @@ _REFUSAL_OUTCOMES: Tuple[str, ...] = (
     _REFUSED,
     _REFUSED_UNREADABLE_WRAPPER,
     _REFUSED_NOT_TEXT,
-    _REFUSED_AMBIGUOUS_GUARD,
+    _REFUSED_GUARD_NOT_ONE_BLOCK,
+    _REFUSED_GUARD_MARKERS_OUT_OF_ORDER,
+    _REFUSED_GUARD_REGION_NOT_DELIMITED,
+    _REFUSED_GUARD_EXIT_BEFORE_MESSAGE,
     _REFUSED_FOREIGN_MARKER,
     _REFUSED_LINE_ENDINGS,
     _REFUSED_UNRECOGNISED_GUARD,
+    _REFUSED_CHANGE_NOT_CONFINED,
     _REFUSED_WRITE_FAILED,
+    _REFUSED_READBACK_FAILED,
     _REFUSED_NOT_VERIFIED,
     _REFUSED_NEEDS_PERSON,
     _REFUSED_UNREADABLE_PAUSE_RECORD,
+    _REFUSED_PAUSE_RECORD_WRONG_SHAPE,
     _REFUSED_ID_DISAGREEMENT,
     _REFUSED_CANNOT_RECORD_ID,
     _REFUSED_UNEXPECTED,
@@ -3261,9 +3273,28 @@ _REFUSAL_OPERATOR_NOTES: Dict[str, str] = {
     _REFUSED_NOT_TEXT: (
         "the file that starts this job is not plain text we can read, so we could "
         "not add the lines that record a skipped run"),
-    _REFUSED_AMBIGUOUS_GUARD: (
-        "the file that starts this job has more than one of our safety blocks in "
-        "it, so we could not tell which one applies and did not change it"),
+    # FOUR sentences where there was one. The single sentence said "has more than
+    # one of our safety blocks in it", which was true at one of its four return
+    # sites and false at three -- a one-begin/zero-end wrapper has FEWER than one
+    # complete block, and out-of-order markers are one block written wrongly. Those
+    # routes previously rendered a true generic sentence, so sharpening the label
+    # without splitting it MOVED a false claim onto the operator surface.
+    _REFUSED_GUARD_NOT_ONE_BLOCK: (
+        "the file that starts this job does not contain exactly one complete safety "
+        "block of ours -- there is either more than one, or one that is missing its "
+        "start or end -- so we could not tell which part applies and did not change "
+        "it"),
+    _REFUSED_GUARD_MARKERS_OUT_OF_ORDER: (
+        "in the file that starts this job, the start and end markers of our safety "
+        "block are the wrong way round, so we could not tell where the block begins "
+        "and ends, and did not change it"),
+    _REFUSED_GUARD_REGION_NOT_DELIMITED: (
+        "the file that starts this job already has record-keeping lines for a "
+        "different job, and the block's own message and stop lines are not each "
+        "present exactly once, so we could not tell which part to replace"),
+    _REFUSED_GUARD_EXIT_BEFORE_MESSAGE: (
+        "in the file that starts this job, the block's stop line comes before its "
+        "message, so we could not tell which part to replace"),
     _REFUSED_FOREIGN_MARKER: (
         "the safety block in the file that starts this job refers to a different "
         "job's pause record, so we did not change it"),
@@ -3280,6 +3311,15 @@ _REFUSAL_OPERATOR_NOTES: Dict[str, str] = {
     _REFUSED_NOT_VERIFIED: (
         "the change we made to the file that starts this job did not read back the "
         "way we wrote it, so we put the file back as it was"),
+    # SPLIT from the one above: that sentence claims the change "did not read back
+    # the way we wrote it", which is a comparison. When the read-back RAISES there
+    # is nothing to compare, so it was false on that route.
+    _REFUSED_READBACK_FAILED: (
+        "we could not read the file that starts this job back after changing it, so "
+        "we could not check the change and put the file back as it was"),
+    _REFUSED_CHANGE_NOT_CONFINED: (
+        "the change we prepared for the file that starts this job would have "
+        "altered more than our own added lines, so we did not make it"),
     _REFUSED_NEEDS_PERSON: (
         "we could not add the lines that record a skipped run, and putting the file "
         "back the way it was did not succeed either -- this one needs a person to "
@@ -3287,15 +3327,26 @@ _REFUSAL_OPERATOR_NOTES: Dict[str, str] = {
     _REFUSED_UNREADABLE_PAUSE_RECORD: (
         "one of the pause records could not be read, so we could not tell which job "
         "it belongs to or add anything for it"),
+    # SPLIT: a record that reads and parses perfectly but holds the wrong kind of
+    # value was reported as one that "could not be read".
+    _REFUSED_PAUSE_RECORD_WRONG_SHAPE: (
+        "one of the pause records was readable but does not hold the kind of "
+        "contents we expect, so we could not tell which job it belongs to or add "
+        "anything for it"),
     _REFUSED_ID_DISAGREEMENT: (
         "one of the pause records names a different job than its own filename does, "
         "and we did not choose between the two"),
     _REFUSED_CANNOT_RECORD_ID: (
         "this job's name cannot be used for a record file, so there is nowhere to "
         "write down a skipped run for it"),
+    # "so the file was left as it was" is precisely what an UNKNOWN failure cannot
+    # establish -- this handler catches anything the guarded paths inside did not
+    # anticipate, so by construction nobody knows where it stopped. If it cannot
+    # establish what happened to the file, it must not say what happened to the file.
     _REFUSED_UNEXPECTED: (
-        "something unexpected went wrong while adding the lines that record a "
-        "skipped run, so the file was left as it was"),
+        "something unexpected went wrong while working on the file that starts this "
+        "job, and we cannot tell from here what state that left it in -- ask your "
+        "assistant to look at that file itself"),
     _REFUSED_PASS_NOT_RUN: (
         "we could not look at your paused scheduled jobs at all this time, so none "
         "of them can report a skipped run and we cannot say which are affected"),
@@ -3374,14 +3425,15 @@ def _insert_tripwire_into_existing_guard(
     if _GUARD_BEGIN not in original:
         return "skipped", f"{entrypoint_relpath} carries no managed pause guard"
     if original.count(_GUARD_BEGIN) != 1 or original.count(_GUARD_END) != 1:
-        return _REFUSED_AMBIGUOUS_GUARD, (
-            f"{entrypoint_relpath} carries more than one managed "
-                           "pause guard block; which one gates this mechanism "
-                           "cannot be established")
+        return _REFUSED_GUARD_NOT_ONE_BLOCK, (
+            f"{entrypoint_relpath} does not carry exactly one complete managed "
+            "pause guard block (begin/end counts "
+            f"{original.count(_GUARD_BEGIN)}/{original.count(_GUARD_END)}); which "
+            "part gates this mechanism cannot be established")
     begin = original.index(_GUARD_BEGIN)
     end = original.index(_GUARD_END)
     if end < begin:
-        return _REFUSED_AMBIGUOUS_GUARD, (
+        return _REFUSED_GUARD_MARKERS_OUT_OF_ORDER, (
             f"{entrypoint_relpath}'s guard markers are out of "
                            "order, so its block cannot be delimited")
     block = original[begin:end]
@@ -3460,7 +3512,7 @@ def _insert_tripwire_into_existing_guard(
     problem = _tripwire_insertion_problem(
         original, candidate, entrypoint_relpath, mechanism_id)
     if problem:
-        return _REFUSED_UNRECOGNISED_GUARD, problem
+        return _refuse_unconfined_change(problem)
 
     return _publish_guard_change(wrapper_path, original, candidate,
                                  entrypoint_relpath, "upgraded")
@@ -3485,14 +3537,14 @@ def _repair_stale_recorder_identity(
     anchor = f"{_GUARD_PAUSED_ECHO_LINE}\n"
     exit_line = f"{_GUARD_EXIT_LINE}\n"
     if block.count(anchor) != 1 or block.count(exit_line) != 1:
-        return _REFUSED_AMBIGUOUS_GUARD, (
+        return _REFUSED_GUARD_REGION_NOT_DELIMITED, (
             f"{entrypoint_relpath}'s guard carries record-keeping lines for a "
             "different mechanism, and its own message and exit lines are not each "
             "present exactly once, so the region to replace cannot be delimited")
     start = block.index(anchor) + len(anchor)
     stop = block.index(exit_line)
     if stop < start:
-        return _REFUSED_AMBIGUOUS_GUARD, (
+        return _REFUSED_GUARD_EXIT_BEFORE_MESSAGE, (
             f"{entrypoint_relpath}'s guard has its exit before its stopped-run "
             "message, so the region to replace cannot be delimited")
     stale_region = block[start:stop]
@@ -3502,7 +3554,7 @@ def _repair_stale_recorder_identity(
         original, candidate, entrypoint_relpath, mechanism_id,
         replaced_text=stale_region)
     if problem:
-        return _REFUSED_UNRECOGNISED_GUARD, problem
+        return _refuse_unconfined_change(problem)
     return _publish_guard_change(wrapper_path, original, candidate,
                                  entrypoint_relpath, "upgraded")
 
@@ -3535,39 +3587,67 @@ def _publish_guard_change(wrapper_path: Path, original: str, candidate: str,
     try:
         published = _read_wrapper_bytes_exact(wrapper_path)
     except (OSError, UnicodeDecodeError) as exc:
-        return _restore_wrapper(
-            wrapper_path, original,
+        # A read that RAISED establishes a different fact from a read that came back
+        # different: there is nothing to compare. One label said the change "did not
+        # read back the way we wrote it" for both.
+        return _restore_after_failed_check(
+            wrapper_path, original, _REFUSED_READBACK_FAILED,
             f"{entrypoint_relpath} could not be read back after the change "
             f"({exc!r})")
     if published != candidate:
-        return _restore_wrapper(
-            wrapper_path, original,
+        return _restore_after_failed_check(
+            wrapper_path, original, _REFUSED_NOT_VERIFIED,
             f"{entrypoint_relpath} did not read back as written")
     return success, ""
 
 
-def _restore_wrapper(wrapper_path: Path, original: str,
-                     why: str) -> Tuple[str, str]:
-    """Put ``original`` back after a failed verification, and say honestly whether
-    that succeeded.
+def _refuse_unconfined_change(problem: str) -> Tuple[str, str]:
+    """The whole-file post-condition rejected the prepared change.
 
-    Returns ``(outcome, reason)``. The restore is itself a write and can itself
-    fail. Reporting "the original has been restored" unconditionally -- as this did
-    -- would be a claim about a write whose outcome was never checked, on the one
-    path where the wrapper is in a state nobody verified. The two outcomes read very
-    differently to whoever picks this up, so they are two different sentences AND two
-    different refusal outcomes: the double failure is one of the two classes the
-    operator is told something specific about, because it is the one that needs a
-    person rather than only costing a tripwire.
+    ONE return site for what were two identical ones (the insertion path and the
+    identity-repair path), so this label cannot come to mean two things. The
+    established fact is the same at both: nothing was written, and the reason is the
+    post-condition's own.
+    """
+    return _REFUSED_CHANGE_NOT_CONFINED, problem
+
+
+def _restore_after_failed_check(wrapper_path: Path, original: str,
+                                checked_label: str, why: str) -> Tuple[str, str]:
+    """Put ``original`` back after a failed verification, and report which fact holds.
+
+    ``checked_label`` is the label for WHICH check failed -- passed in, because the
+    caller is the only thing that knows, and folding both callers onto one label made
+    that label false for one of them. The restore only decides whether the outcome
+    ESCALATES: if the file could not be put back, no statement about the change is the
+    important one any more, and the escalation replaces it.
+    """
+    restored, reason = _restore_wrapper(wrapper_path, original, why)
+    return (checked_label if restored else _REFUSED_NEEDS_PERSON), reason
+
+
+def _restore_wrapper(wrapper_path: Path, original: str,
+                     why: str) -> Tuple[bool, str]:
+    """Put ``original`` back after a failed verification.
+
+    Returns ``(restored, reason)``. It answers ONLY the restore question and no
+    longer picks a refusal label: the label depends on which check failed, which is
+    the caller's knowledge, and returning one from here is what made a single label
+    stand for two different established facts.
+
+    The restore is itself a write and can itself fail. Reporting "the original has
+    been restored" unconditionally -- as this once did -- would be a claim about a
+    write whose outcome was never checked, on the one path where the wrapper is in a
+    state nobody verified.
     """
     try:
         _atomic_write(wrapper_path, original)
     except OSError as exc:
-        return (_REFUSED_NEEDS_PERSON,
+        return (False,
                 f"{why}, and putting the original back also failed "
                 f"({exc.strerror or exc!r}) -- this wrapper needs a person to look "
                 "at it before it is relied on again")
-    return _REFUSED_NOT_VERIFIED, f"{why}; the original has been restored"
+    return True, f"{why}; the original has been restored"
 
 
 def _tripwire_insertion_problem(original: str, candidate: str,
@@ -3793,8 +3873,9 @@ def upgrade_paused_entrypoint_guards(
             continue
         if not isinstance(state, dict):
             report["refused"].append(_refusal_record(
-                candidate_id, None, _REFUSED_UNREADABLE_PAUSE_RECORD,
-                f"the pause record {name} is not a record"))
+                candidate_id, None, _REFUSED_PAUSE_RECORD_WRONG_SHAPE,
+                f"the pause record {name} parsed but is a "
+                f"{type(state).__name__}, not a record"))
             continue
         declared = state.get("mechanism_id")
         if declared != candidate_id:
@@ -4837,6 +4918,11 @@ def _tripwire_refusal_lines(refusals: Sequence[Dict[str, Any]]) -> List[str]:
     if not entries:
         return []
     out = [
+        # LEADING BLANK, so this section terminates whatever list precedes it rather
+        # than relying on that list's last bullet to leave a trailing one. Gating the
+        # pending-work bullet removed the blank that had been doing that, and the
+        # headline below then rendered INSIDE the preceding bullet's paragraph.
+        "",
         "**One more thing, about being told when something is skipped.**",
         "",
         "When a scheduled job is paused, we add a few lines to it so that each time "
