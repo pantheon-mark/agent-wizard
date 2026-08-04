@@ -1673,6 +1673,74 @@ class WithdrawnContinuityClaimTests(_Base):
         self.assertIn("an earlier update left a sentence",
                       render_reconcile_result(first))
 
+    def test_a_DELETED_carrier_makes_the_correction_COME_BACK(self):
+        """★ The same end state as the overwrite defect, reached by DELETION.
+
+        Measured on a scanner-quiet project: run 1 emits the correction, the notice it
+        was written into is then removed, and runs 2 and 3 write nothing at all --
+        because the trigger is gated on a past-tense record, and if the artifact is gone
+        the trigger never re-fires. Zero carriers on disk, sentence still in the
+        operator's file.
+
+        Freeing the content defeated overwrite; it cannot defeat deletion. So the
+        suppression now asks a FILE-EXISTENCE question about the carrier -- no parsing,
+        no second reader of our own format, and nothing that can false-suppress on
+        wording. If no carrier exists, suppression has nothing to protect anyone from.
+        """
+        root = self._project()
+        rel = self._stored_notice(root, "v0.10.2-to-v0.11.0",
+                                  self._SHIPPED_NOTICE_LINE + "\n")
+        first = self._reconcile(root)
+        carrier = Path(first.notice_path)
+        self.assertIn("**A correction", carrier.read_text(encoding="utf-8"))
+        shutil.rmtree(carrier.parent)
+        second = self._reconcile(root)
+        self.assertEqual(second.withdrawn_continuity_claims_newly_named, [rel],
+                         "the only carrier was deleted, so nothing on disk tells this "
+                         "operator anything -- and the sentence is still in their file")
+        self.assertIsNotNone(second.notice_path)
+        self.assertIn("**A correction",
+                      Path(second.notice_path).read_text(encoding="utf-8"))
+
+    def test_a_LEGACY_record_with_no_carrier_recorded_does_not_suppress(self):
+        """A record written before carriers were recorded cannot establish that any
+        carrier exists, so it does not suppress -- the same fail-safe direction as an
+        unreadable record. It is replaced by a current one on the next emission."""
+        root = self._project()
+        rel = self._stored_notice(root, "v0.10.2-to-v0.11.0",
+                                  self._SHIPPED_NOTICE_LINE + "\n")
+        record = root / upgrade_reconcile.WITHDRAWN_CLAIM_CORRECTION_RECORD_REL
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(json.dumps(
+            {"schema": "withdrawn-continuity-correction-v1", "named": [rel]}),
+            encoding="utf-8")
+        result = self._reconcile(root)
+        self.assertEqual(result.withdrawn_continuity_claims_newly_named, [rel])
+        self.assertEqual(upgrade_reconcile._corrections_already_emitted(root), [rel],
+                         "the re-emission must leave a record that DOES name a carrier")
+
+    def test_the_terminal_COUNT_is_what_the_notice_LISTS(self):
+        """DIVERGENT INPUT, deliberately: two files already named and one new, so the
+        two candidate counts differ. Measured before this fix: the notice listed three
+        and the terminal said "one of your own files".
+
+        The trigger is still the new one -- that is what decides whether anything prints
+        at all -- but the sentence describes what the operator will find in the notice,
+        so it counts that.
+        """
+        root = self._project()
+        for folder in ("v0.10.2-to-v0.11.0", "v0.11.0-to-v0.15.0"):
+            self._stored_notice(root, folder, self._SHIPPED_NOTICE_LINE + "\n")
+        self._reconcile(root)
+        third = self._stored_notice(root, "v0.15.0-to-v0.17.0",
+                                   self._SHIPPED_NOTICE_LINE + "\n")
+        result = self._reconcile(root)
+        self.assertEqual(len(result.withdrawn_continuity_claim_files), 3)
+        self.assertEqual(result.withdrawn_continuity_claims_newly_named, [third])
+        out = render_reconcile_result(result)
+        self.assertIn("3 of your own files", out)
+        self.assertNotIn("one of your own files", out)
+
     def test_an_already_named_correction_prints_NOTHING_at_the_terminal(self):
         """The terminal guard, on its own, with nothing else in the run.
 
@@ -1770,11 +1838,15 @@ class WithdrawnContinuityClaimTests(_Base):
             withdrawn_continuity_claim_files=["a.sh"],
             withdrawn_continuity_claims_newly_named=["a.sh"]))
         self.assertIn("one of your own files", one)
+        # DIVERGENT INPUT on purpose: three named, one of them new. An earlier version
+        # of this test set both fields to the same value, which is what made the
+        # count divergence unobservable in the very change that made the assertion
+        # honest -- a retarget must keep the input that discriminates.
         many = render_reconcile_result(ReconcileResult(
             operator_project_path="/tmp/x", from_version="v1", to_version="v2",
-            withdrawn_continuity_claim_files=["a.sh", "b.md"],
-            withdrawn_continuity_claims_newly_named=["a.sh", "b.md"]))
-        self.assertIn("2 of your own files", many)
+            withdrawn_continuity_claim_files=["a.sh", "b.md", "c.sh"],
+            withdrawn_continuity_claims_newly_named=["c.sh"]))
+        self.assertIn("3 of your own files", many)
 
     def test_an_unreadable_candidate_is_never_reported_as_carrying_it(self):
         """The scan is evidence-gathering: a file it cannot read produces no claim in

@@ -3221,8 +3221,8 @@ def _guarded_wrapper_for_declared_id(
     operator_project_dir: Path,
     guarded_wrappers: Sequence[str],
     mechanism_id: str,
-) -> Tuple[Optional[str], bool]:
-    """``(relpath, ambiguous)`` for the guarded wrapper that gates ``mechanism_id``.
+) -> Tuple[Optional[str], List[str]]:
+    """``(relpath, claimants)`` for the guarded wrapper that gates ``mechanism_id``.
 
     THE JOIN IS THE MARKER THE GUARD ITSELF TESTS, matched in the ANCHORED form the
     guard spells it in (``_wrapper_guard_marker_test``; the unanchored form let one
@@ -3230,10 +3230,12 @@ def _guarded_wrapper_for_declared_id(
     nothing: two of them could be named anything, and inferring a mechanism from a
     filename is how a rename points a pass at another mechanism's wrapper.
 
-    Deny-by-default in both directions. No match → ``(None, False)``: nothing is
-    established, nothing is claimed. TWO OR MORE matches → ``(None, True)``: which one
-    gates the mechanism is not established either, so neither is written to and the
-    caller reports the gap rather than picking one.
+    Deny-by-default in both directions. No match → ``(None, [])``: nothing is
+    established, nothing is claimed. TWO OR MORE matches → ``(None, [both paths])``:
+    which one gates the mechanism is not established either, so neither is written to --
+    and **the claimants are returned rather than discarded**, because the route out of
+    that refusal is a person reading the files and they cannot do that without being
+    told which files.
     """
     matches = []
     for relpath in guarded_wrappers:
@@ -3246,8 +3248,8 @@ def _guarded_wrapper_for_declared_id(
         if _GUARD_BEGIN in text and marker_test in text:
             matches.append(relpath)
     if len(matches) == 1:
-        return matches[0], False
-    return None, len(matches) > 1
+        return matches[0], matches
+    return None, matches
 
 
 def _rewrite_wrapper_guard_marker_id(
@@ -3554,10 +3556,13 @@ _REFUSAL_OPERATOR_NOTES: Dict[str, str] = {
         "one of the pause records does not name a job in a form we can use -- what it "
         "holds is blank, or is not a name at all -- so we could not add anything "
         "for it"),
+    # THE ONLY SENTENCE HERE WITH A DETAIL SLOT, and it earns one: the route out of this
+    # refusal is a person reading the files, which nobody can do without knowing which
+    # ones. The two paths are data the refusal already holds -- see ``_refusal_record``.
     _REFUSED_WRAPPER_NOT_ESTABLISHED: (
         "more than one of your files that start a job carries a safety block for this "
-        "same job, so we could not tell which one is the one being stopped, and we "
-        "changed neither"),
+        "same job ({detail}), so we could not tell which one is the one being stopped, "
+        "and we changed neither"),
     _REFUSED_CANNOT_RECORD_ID: (
         "this job's name cannot be used for a record file, so there is nowhere to "
         "write down a skipped run for it"),
@@ -3581,7 +3586,7 @@ _REFUSAL_OPERATOR_NOTES: Dict[str, str] = {
 
 
 def _refusal_record(mechanism_id: str, entrypoint_relpath: Any, outcome: str,
-                    reason: str) -> Dict[str, Any]:
+                    reason: str, detail: str = "") -> Dict[str, Any]:
     """One refused wrapper: the diagnostic reason, and the plain sentence an operator
     reads.
 
@@ -3589,18 +3594,29 @@ def _refusal_record(mechanism_id: str, entrypoint_relpath: Any, outcome: str,
     test wants, and it carries exception text and internal comparisons that must not
     reach a notice promising plain language. ``operator_note`` is the operator's half.
 
+    ``detail`` IS DATA, NOT PROSE, and it exists because one refusal needed the operator
+    to know WHICH files conflict. A sentence in ``_REFUSAL_OPERATOR_NOTES`` may carry a
+    ``{detail}`` slot; the refusing site supplies only the value. That keeps ONE sentence
+    per cause in the table (a site that composed its own would be a second spelling) and
+    ONE rendering path for both surfaces, which already read ``operator_note``. When a
+    site mints such a label with nothing to fill the slot, the slot and its parentheses
+    are removed rather than left dangling.
+
     There is deliberately NO third field about whether the wrapper is still stopped.
     See this section's header: three attempts at one established themselves as
     unsupportable by the only evidence available here.
     """
+    note = _REFUSAL_OPERATOR_NOTES.get(outcome, _REFUSAL_OPERATOR_NOTES[_REFUSED])
+    if "{detail}" in note:
+        note = (note.format(detail=detail) if detail
+                else note.replace(" ({detail})", ""))
     return {
         "mechanism_id": mechanism_id,
         "entrypoint_relpath": (entrypoint_relpath
                                if isinstance(entrypoint_relpath, str) else None),
         "outcome": outcome,
         "reason": reason,
-        "operator_note": _REFUSAL_OPERATOR_NOTES.get(
-            outcome, _REFUSAL_OPERATOR_NOTES[_REFUSED]),
+        "operator_note": note,
     }
 
 
@@ -4045,8 +4061,11 @@ def upgrade_paused_entrypoint_guards(
         paused and has since been deleted, renamed or quarantined is never re-flagged
         by the scanner, so the per-mechanism loop never reaches it while its wrapper is
         still on disk, still guard-paused, and still the thing a schedule invokes;
-      * every wrapper whose GUARD claims a declared mechanism's pause marker, found by
-        ``_discover_guarded_wrappers`` and joined by ``_guarded_wrapper_for_declared_id``.
+      * every ``.sh`` file whose GUARD claims a declared mechanism's pause marker, found
+        by ``_discover_guarded_wrappers`` (``.sh`` because that is what the pause writer
+        produces -- said here too, because "every wrapper" is the overclaim this
+        paragraph's own sibling had just been corrected for) and joined by
+        ``_guarded_wrapper_for_declared_id``.
         **This half exists because the first one reaches nothing on real operator data:**
         the records there declare ``entrypoint_relpath: null`` (they are
         ``paused_live_write`` records, which gate an op_kind rather than a file) while a
@@ -4209,14 +4228,17 @@ def upgrade_paused_entrypoint_guards(
             # joined on the marker the guard itself names (never on its path). If no
             # guarded wrapper claims this mechanism's marker, there is genuinely
             # nothing here and that sentence is true again.
-            entrypoint, ambiguous = _guarded_wrapper_for_declared_id(
+            entrypoint, claimants = _guarded_wrapper_for_declared_id(
                 root, guarded_wrappers, declared)
-            if ambiguous:
+            if len(claimants) > 1:
                 report["refused"].append(_refusal_record(
                     declared, None, _REFUSED_WRAPPER_NOT_ESTABLISHED,
-                    f"the pause record for {declared} names no wrapper, and more than "
-                    "one file carrying a safety block claims this mechanism's pause "
-                    "marker, so which one gates it is not established"))
+                    f"the pause record for {declared} names no wrapper, and "
+                    f"{len(claimants)} files carrying a safety block claim this "
+                    "mechanism's pause marker "
+                    f"({', '.join(claimants)}), so which one gates it is not "
+                    "established",
+                    detail=_human_join(claimants)))
                 continue
             if not entrypoint:
                 continue
@@ -4937,7 +4959,10 @@ def _pause_notice_lines(m: MechanismReport) -> List[str]:
 #: a notice folder.
 WITHDRAWN_CLAIM_CORRECTION_RECORD_REL = (
     f"{UPGRADE_REVIEW_DIR_REL}/withdrawn-claim-correction.json")
-WITHDRAWN_CLAIM_CORRECTION_SCHEMA = "withdrawn-continuity-correction-v1"
+#: v2 keys each named file to the NOTICE THAT CARRIES IT, so "already said" can be
+#: checked against what is still on disk rather than believed from the past tense. A v1
+#: record (a bare list, no carrier) suppresses nothing.
+WITHDRAWN_CLAIM_CORRECTION_SCHEMA = "withdrawn-continuity-correction-v2"
 
 _WITHDRAWN_CONTINUITY_CLAIMS: Tuple[str, ...] = (
     "Anything that only reads and reports to you was not touched",
@@ -5051,25 +5076,36 @@ def _withdrawn_continuity_claim_files(operator_project_dir: Path) -> List[str]:
 
 
 def _corrections_already_emitted(operator_project_dir: Path) -> List[str]:
-    """The files an emitted correction has ALREADY named, read off disk.
+    """The files a correction has already named **and can still be read about** -- i.e.
+    named in a notice that is still on disk.
 
-    WHY THIS EXISTS. Without it the section renders on every future reconcile of any
+    WHY A BOUND AT ALL. Without one the section renders on every future reconcile of any
     project that ever had one of these pauses, permanently -- and it tells the operator
     there is nothing to repair, so nothing they can do ever clears it. An alert that
     always fires on the surface whose whole meaning is "something to review" trains the
     reader to skip that surface, which is the failure mode this project has recorded
     before.
 
-    IT RECORDS EMISSION, NOT DELIVERY, and the distinction is the whole reason it can
-    exist honestly. Whether the operator READ the correction is not establishable by
-    anything here and is not claimed. That we WROTE it, naming these files, is
-    establishable, and it is enough to say it once.
+    WHY THE BOUND IS NOT "WE EMITTED IT". Emission is a fact about the past; the notice
+    it was emitted into is an ordinary file that can be overwritten (by this same pass,
+    on the fixed ``reconcile`` path) or deleted (by anyone). Both routes reach the same
+    end state -- **no carrier on disk while the sentence is still in the operator's
+    file** -- and a past-tense bound suppresses the re-emission that would fix it. So
+    the record names WHICH notice carried each file, and this asks whether that notice
+    still exists. If nothing carries it, suppression has nothing to protect anyone from.
 
-    Fail-safe direction: absent, unreadable, unparseable or the wrong shape all answer
-    "nothing is known to have been said", so the correction is made again. The cost of
-    being wrong here is a repeat, never a suppression.
+    IT IS A FILE-EXISTENCE QUESTION, deliberately, and that is what makes it safe: no
+    parsing, no second reader of the correction's own wording, and nothing that can
+    false-suppress because a sentence was reworded. It does NOT establish that the
+    operator read it -- nothing here can, and nothing claims it.
+
+    Fail-safe direction throughout: absent, unreadable, unparseable, wrong shape, or a
+    legacy record that names no carrier all answer "nothing is known to be readable", so
+    the correction is made again. The cost of being wrong here is a repeat, never a
+    silence.
     """
-    path = Path(operator_project_dir) / WITHDRAWN_CLAIM_CORRECTION_RECORD_REL
+    root = Path(operator_project_dir)
+    path = root / WITHDRAWN_CLAIM_CORRECTION_RECORD_REL
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
@@ -5077,25 +5113,51 @@ def _corrections_already_emitted(operator_project_dir: Path) -> List[str]:
     if not isinstance(record, dict):
         return []
     named = record.get("named")
-    if not isinstance(named, list):
+    if not isinstance(named, dict):
+        # A legacy record (a bare list, before carriers were recorded) cannot establish
+        # that any carrier exists. It suppresses nothing, and the next emission replaces
+        # it with a record that can be checked.
         return []
-    return [x for x in named if isinstance(x, str) and x.strip()]
+    still_readable = []
+    for relpath, carrier in named.items():
+        if not (isinstance(relpath, str) and relpath.strip()):
+            continue
+        if not (isinstance(carrier, str) and carrier.strip()):
+            continue
+        if os.path.isabs(carrier) or ".." in Path(carrier).parts:
+            continue
+        if (root / carrier).is_file():
+            still_readable.append(relpath)
+    return sorted(still_readable)
 
 
 def _record_corrections_emitted(operator_project_dir: Path,
-                                relpaths: Sequence[str]) -> None:
-    """Add ``relpaths`` to the emitted-correction record. Additive; never prunes.
+                                relpaths: Sequence[str],
+                                carrier_relpath: str) -> None:
+    """Record that ``carrier_relpath`` is the notice naming ``relpaths``.
 
-    Called only after the notice carrying them has actually been written. A failure to
-    record leaves the correction to be made again on the next reconcile, which is the
-    right side to fail on -- so nothing here raises, and a write failure is not allowed
-    to take the upgrade with it.
+    Called only after that notice has actually been written, so the record never claims
+    a carrier that does not exist. Entries for files named in an EARLIER notice are kept
+    with their own carrier, so deleting one notice does not un-record the others.
+
+    A failure to record leaves the correction to be made again on the next reconcile,
+    which is the right side to fail on -- so nothing here raises, and a write failure is
+    not allowed to take the upgrade with it.
     """
-    if not relpaths:
+    if not relpaths or not carrier_relpath:
         return
-    path = Path(operator_project_dir) / WITHDRAWN_CLAIM_CORRECTION_RECORD_REL
-    named = sorted(set(_corrections_already_emitted(operator_project_dir))
-                   | set(relpaths))
+    root = Path(operator_project_dir)
+    path = root / WITHDRAWN_CLAIM_CORRECTION_RECORD_REL
+    named: Dict[str, str] = {}
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(existing, dict) and isinstance(existing.get("named"), dict):
+            named = {k: v for k, v in existing["named"].items()
+                     if isinstance(k, str) and isinstance(v, str)}
+    except (OSError, UnicodeDecodeError, ValueError):
+        named = {}
+    for relpath in relpaths:
+        named[relpath] = carrier_relpath
     try:
         _atomic_write(path, json.dumps(
             {"schema": WITHDRAWN_CLAIM_CORRECTION_SCHEMA,
@@ -5945,10 +6007,15 @@ def reconcile_upgrade(
             tripwire_refusals=tripwire_refusals,
             withdrawn_continuity_claim_files=withdrawn_continuity_claim_files)
         notice_path = write_impact_notice(operator_project_dir, upgrade_id, text)
-        # AFTER the notice exists, never before: the record's only claim is that a
-        # notice naming these files was written.
+        # AFTER the notice exists, never before, and it records WHICH notice: the claim
+        # the record makes is "this file is named in that notice", which stays checkable
+        # if the notice is later deleted.
+        try:
+            _carrier = Path(notice_path).relative_to(operator_project_dir).as_posix()
+        except ValueError:  # pragma: no cover - the notice is written under the project
+            _carrier = ""
         _record_corrections_emitted(operator_project_dir,
-                                    withdrawn_continuity_claim_files)
+                                    withdrawn_continuity_claim_files, _carrier)
 
     return ReconcileResult(
         operator_project_path=str(operator_project_dir),
@@ -6196,7 +6263,12 @@ def render_reconcile_result(result: ReconcileResult) -> str:
         # ONE line, not one per file: the notice lists the files. It says what was
         # established -- the sentence is in their files and nothing had checked it --
         # and asks for nothing, because there is nothing here for them to repair.
-        count = len(result.withdrawn_continuity_claims_newly_named)
+        #
+        # TRIGGERED BY THE NEW ONES, COUNTING WHAT THE NOTICE LISTS. Those differ, and
+        # counting the trigger said "one of your own files" while the notice below it
+        # listed three. The sentence describes what the reader is about to find, so it
+        # counts that; whether it prints at all is still decided by what is new.
+        count = len(result.withdrawn_continuity_claim_files)
         where = "one of your own files" if count == 1 else f"{count} of your own files"
         lines.append(
             f"  - an earlier update left a sentence in {where} saying a part that only "

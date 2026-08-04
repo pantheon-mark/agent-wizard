@@ -1800,8 +1800,49 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
                 upgrade_reconcile.SUPPRESSED_INVOCATION_RECORDER_REL,
                 (self.p.root / path).read_text(encoding="utf-8"))
 
+    def test_the_ambiguity_refusal_NAMES_BOTH_conflicting_files(self):
+        """A person told to go read the files cannot act without knowing which two.
+
+        The refusal was correct to decline a second hand-authored instruction -- the
+        section footer already routes this class to a person -- but the missing thing was
+        never prose. It is the two paths, which the join already holds and threw away.
+        """
+        self.p.historical_wrapper()
+        twin_rel = "run_finish_estate_cleanup.sh"
+        (self.p.root / twin_rel).write_text(
+            (self.p.root / WRAPPER_REL).read_text(encoding="utf-8"), encoding="utf-8")
+        # Both claim the SAME marker at their own depths, so the ambiguity is genuine
+        # rather than the depth artefact the anchored test removed.
+        marker = upgrade_reconcile._wrapper_guard_marker_test(twin_rel, MECH)
+        text = (self.p.root / twin_rel).read_text(encoding="utf-8")
+        self.p.write(twin_rel, text.replace(
+            upgrade_reconcile._wrapper_guard_marker_test(WRAPPER_REL, MECH), marker),
+            mode=0o755)
+        self.p.pause_marker()
+        self.p.pause_state(entrypoint_relpath=None, state="paused_live_write")
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        (entry,) = result.tripwire_refusals
+        self.assertEqual(entry["outcome"],
+                         upgrade_reconcile._REFUSED_WRAPPER_NOT_ESTABLISHED)
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+        terminal = upgrade_reconcile.render_reconcile_result(result)
+        for surface in (notice, terminal, entry["operator_note"]):
+            self.assertIn(WRAPPER_REL, surface)
+            self.assertIn(twin_rel, surface)
+
+    def test_a_refusal_note_carrying_a_detail_slot_is_safe_without_one(self):
+        """The sentence has to stay true and readable if some future site mints that
+        label with nothing to fill the slot -- never a dangling placeholder."""
+        record = upgrade_reconcile._refusal_record(
+            MECH, None, upgrade_reconcile._REFUSED_WRAPPER_NOT_ESTABLISHED, "why")
+        self.assertNotIn("{detail}", record["operator_note"])
+        self.assertNotIn("()", record["operator_note"])
+        self.assertTrue(record["operator_note"].strip().endswith("neither"),
+                        record["operator_note"])
+
     def test_the_reachable_label_COUNT_in_the_docstring_is_pinned(self):
-        """The returns docstring states 14-of-24 and four minting sources. That
+        """The returns docstring states 14-of-25 and four minting sources. That
         arithmetic has already gone stale twice in this same sentence ("two" when it
         was four; "ANY member" when it was 14 of 24), and the multiplicity table
         reddens on a new label SITE without anyone rereading the number."""
@@ -1847,10 +1888,13 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
         sources = sorted(fn for fn in seen if mints.get(fn))
         self.assertEqual(len(reachable), 14, sorted(reachable))
         self.assertEqual(len(upgrade_reconcile._REFUSAL_OUTCOMES), 25)
-        # THE DERIVED COUNT TOO. The docstring states "ten are the caller's to mint";
-        # the pin asserted 14 and 24 and went green while that clause broke on the very
-        # commit that added a label -- the third staleness in one sentence. A number a
-        # docstring carries has to be a number something rereads.
+        # THE DERIVED COUNT, and BE HONEST ABOUT WHAT THIS ONE IS: given the two
+        # assertions above, 25 - 14 == 11 is arithmetically implied, so this line
+        # DOCUMENTS the number the docstring carries rather than independently guarding
+        # it. It is here because the docstring's clause read "ten" while a pin asserting
+        # only the other two numbers stayed green -- the assertion that actually protects
+        # that clause is the wording check below it. Said plainly so the next reader does
+        # not mistake a tautology for a guard.
         self.assertEqual(len(upgrade_reconcile._REFUSAL_OUTCOMES) - len(reachable), 11)
         doc = upgrade_reconcile._insert_tripwire_into_existing_guard.__doc__ or ""
         self.assertIn("eleven", doc.lower())
