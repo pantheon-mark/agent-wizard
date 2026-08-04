@@ -720,7 +720,7 @@ class TestNothingInTheReachPassCanAbortTheUpgrade(unittest.TestCase):
             self.p.root / WRAPPER_REL, self.before, "it did not read back as written")
         self.assertIn("the original has been restored", reason)
         self.assertNotIn("also failed", reason)
-        self.assertEqual(outcome, upgrade_reconcile._REFUSED)
+        self.assertEqual(outcome, upgrade_reconcile._REFUSED_NOT_VERIFIED)
         self.assertEqual(
             self.before,
             (self.p.root / WRAPPER_REL).read_text(encoding="utf-8"))
@@ -1016,6 +1016,16 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
         self.p = _Project(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
 
+    def _fresh_project(self):
+        """A new temp project for the next class in a multi-class loop, each with its
+        OWN registered cleanup. Reassigning `self._tmp` and calling cleanup() by hand
+        left the original registered for a second cleanup and leaked every
+        replacement -- ResourceWarnings on every run."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.p = _Project(tmp.name)
+        return self.p
+
     def _crlf_paused_wrapper(self):
         path = self.p.historical_wrapper()
         path.write_bytes(
@@ -1036,179 +1046,281 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
         self.assertIn(WRAPPER_REL, notice)
         self.assertIn("line endings", notice)
 
-    def test_a_class_where_the_pause_IS_intact_says_so(self):
-        """The distinction an operator has to be able to draw: a refused tripwire is
-        not necessarily an unpaused writer. CRLF is the class where the guard is
-        confirmed in place, so this one may say so -- and only this kind of class may.
+    #: Every refusal class, with a wrapper builder that reaches it. Used to render
+    #: EVERY class and assert the same property of all of them, rather than trusting
+    #: whichever one a spot-check happened to pick -- the blanket reassurance survived
+    #: three rounds partly because each round's test used a class where it was true.
+    def _reach_line_endings(self):
+        path = self.p.historical_wrapper()
+        path.write_bytes(
+            path.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8"))
+        os.chmod(str(path), 0o755)
+        self.p.pause_marker()
+        self.p.pause_state()
 
-        This test previously asserted the BLANKET sentence "still safely paused",
-        which every refusal was rendered under. It was true for this class only,
-        which is why pinning it here left three classes false, one of them with the
-        payload running."""
-        self._crlf_paused_wrapper()
-        notice = self._notice()
-        self.assertIn("This one IS still stopped", notice)
-        self.assertIn("Only the record-keeping is missing", notice)
-        self.assertNotIn("still safely paused", notice,
-                         "the blanket reassurance must not come back")
+    def _reach_foreign_marker(self):
+        text = self.p.historical_wrapper().read_text(encoding="utf-8").replace(
+            upgrade_reconcile._wrapper_guard_marker_ref(WRAPPER_REL, MECH),
+            upgrade_reconcile._wrapper_guard_marker_ref(WRAPPER_REL, "another_job"))
+        self.p.write(WRAPPER_REL, text, mode=0o755)
+        self.p.pause_marker()
+        self.p.pause_state()
 
-    def test_a_notice_is_written_even_when_the_refusal_is_the_ONLY_finding(self):
-        """Gated on `mechanisms` alone, a project whose only finding was a refused
-        tripwire got no notice at all -- the reason computed and then dropped."""
-        self._crlf_paused_wrapper()
-        # No scanner-flagged writer and no adapter edit: the refusal is all there is.
-        self.assertFalse((self.p.root / WRITER_REL).exists())
-        notice = self._notice()
-        self.assertIn(WRAPPER_REL, notice)
+    def _reach_unrecognised_guard(self):
+        """The class C1 came through: an INVERTED marker test, so the guard cannot
+        fire, with the stopped-run message reworded so the anchor is absent."""
+        text = self.p.historical_wrapper().read_text(encoding="utf-8")
+        text = text.replace('if [ -e "', 'if [ ! -e "').replace(
+            upgrade_reconcile._GUARD_PAUSED_ECHO_LINE, '  echo "on hold for now"')
+        self.p.write(WRAPPER_REL, text, mode=0o755)
+        self.p.pause_marker()
+        self.p.pause_state()
 
-    def test_an_ordinary_upgrade_gains_no_such_section(self):
-        """The control. A section that appeared on every upgrade would train exactly
-        the rubber-stamping this cut has a lesson about."""
-        self.p.write(WRITER_REL,
-                     "from external_write.run_envelope import mint_run_envelope\n")
-        self.p.write(WRAPPER_REL, _PAYLOAD, mode=0o755)
-        notice = self._notice()
-        self.assertNotIn("record-keeping", notice)
-        self.assertNotIn("still safely paused", notice)
+    def _reach_unreadable_pause_record(self):
+        self.p.historical_wrapper()
+        self.p.pause_marker()
+        (self.p.root / PAUSED_DIR_REL / f"{MECH}.json").write_text(
+            "{truncated", encoding="utf-8")
 
-    def test_a_scan_error_over_the_whole_pass_is_reported_not_silent(self):
-        """"Nothing was checked" is not the same as "nothing to report", and it must
-        not render as the second."""
+    def _reach_cannot_record_id(self):
+        self.p.historical_wrapper(".hidden")
+        self.p.pause_marker(".hidden")
+        self.p.pause_state(".hidden")
+
+    def _reach_pass_not_run(self):
         self.p.historical_wrapper()
         self.p.pause_marker()
         self.p.pause_state()
         d = self.p.root / PAUSED_DIR_REL
         os.chmod(str(d), 0o000)
         self.addCleanup(os.chmod, str(d), 0o700)
-        notice = self._notice()
-        self.assertIn("could not look at any of your paused scheduled jobs", notice)
-        # Nothing was examined, so nothing may be asserted about any pause.
-        self.assertIn("could not establish whether this one is stopped", notice)
-        self.assertNotIn("IS still stopped", notice)
 
-    def _foreign_marker_paused_wrapper(self):
-        """The class where the guard names a DIFFERENT job's marker -- so the guard
-        does not fire and the payload runs. Measured: `payload_ran.txt` created,
-        "the digest was sent" on stdout."""
-        marker = upgrade_reconcile._wrapper_guard_marker_ref(
-            WRAPPER_REL, "a_different_job")
-        text = self.p.historical_wrapper().read_text(encoding="utf-8").replace(
-            upgrade_reconcile._wrapper_guard_marker_ref(WRAPPER_REL, MECH), marker)
-        self.p.write(WRAPPER_REL, text, mode=0o755)
-        self.p.pause_marker()
-        self.p.pause_state()
+    def _all_reachers(self):
+        return (self._reach_line_endings, self._reach_foreign_marker,
+                self._reach_unrecognised_guard, self._reach_unreadable_pause_record,
+                self._reach_cannot_record_id, self._reach_pass_not_run)
 
-    def test_a_class_where_the_PAYLOAD_RAN_is_never_called_safely_paused(self):
-        """★ The Critical. This section asserted "Each one is still safely paused;
-        what is missing is only the record-keeping" over EVERY refusal. Measured
-        false here with the writer actually running -- a false all-clear over a live
-        external writer, which is the exact direction this cut exists to close.
-        Before the refusals were surfaced this case was SILENT; a blanket
-        reassurance turned silence into affirmative false reassurance, which is
-        worse than the silence it replaced."""
-        self._foreign_marker_paused_wrapper()
+    #: Any wording that asserts, or implies, something about whether a refused
+    #: wrapper is still stopped. Three rounds of these were measured false over a
+    #: wrapper whose payload ran; the surface now says nothing on the subject at all.
+    _PROTECTION_CLAIMS = (
+        "still safely paused", "IS still stopped", "is still stopped",
+        "Only the record-keeping is missing", "only the record-keeping is missing",
+        "the thing that stops it is in place", "Treat it as running",
+        "could NOT confirm this one is stopped",
+        "could not establish whether this one is stopped",
+    )
+
+    def test_NO_operator_surface_claims_anything_about_protection_in_ANY_class(self):
+        """★ The Critical, closed by removing the claim rather than rewording it.
+
+        Substring matching over a shell block cannot establish "this guard will stop
+        this writer" -- a marker reference and an exit line are both present in a
+        block that is inverted, disabled, positioned below the payload, or
+        unparseable by the shell. Three attempts to phrase a true claim on that
+        evidence each ended up false over a live writer, so there is no claim now.
+
+        Asserted over EVERY refusal class, notice and CLI, because a spot-check on a
+        class where such a sentence happened to be true is how the last three
+        survived.
+        """
+        for reach in self._all_reachers():
+            with self.subTest(reach=reach.__name__):
+                self._fresh_project()
+                reach()
+                result = upgrade_reconcile.reconcile_upgrade(
+                    self.p.root, _BUILD_ROOT, from_version="v0.22.0",
+                    to_version="v0.23.0")
+                self.assertTrue(result.tripwire_refusals,
+                                f"{reach.__name__} reached no refusal")
+                notice = Path(result.notice_path).read_text(encoding="utf-8")
+                cli = upgrade_reconcile.render_reconcile_result(result)
+                for claim in self._PROTECTION_CLAIMS:
+                    self.assertNotIn(claim, notice, f"notice: {claim!r}")
+                    self.assertNotIn(claim, cli, f"CLI: {claim!r}")
+
+    def test_the_class_C1_came_through_says_only_what_was_established(self):
+        """The generic-shape class over a guard that CANNOT fire. It said "This one IS
+        still stopped -- we checked"; the payload ran."""
+        self._reach_unrecognised_guard()
         notice = self._notice()
         proc = self.p.run_wrapper()
         self.assertTrue((self.p.root / "payload_ran.txt").exists(),
                         "fixture must actually run the payload")
         self.assertIn("the digest was sent", proc.stdout)
-        # so the notice may not say it is paused, and must say the opposite.
-        self.assertNotIn("still safely paused", notice)
-        self.assertNotIn("IS still stopped", notice)
-        self.assertIn("could NOT confirm this one is stopped", notice)
-        self.assertIn("Treat it as running", notice)
+        self.assertIn("not arranged the way we expect", notice)
+        self.assertIn("nothing above says whether any of those jobs has actually "
+                      "been halted", notice)
 
-    def test_an_unreadable_pause_record_claims_nothing_about_any_pause(self):
-        """Nothing establishes which mechanism it belongs to, so nothing establishes
-        that anything is paused."""
-        self.p.historical_wrapper()
-        self.p.pause_marker()
-        (self.p.root / PAUSED_DIR_REL / f"{MECH}.json").write_text(
-            "{truncated", encoding="utf-8")
+    def test_each_cause_gets_its_OWN_sentence_not_one_generic_note(self):
+        """Five distinct causes previously reached the operator as one identical
+        note, which is what made the marker-absent route's single causal sentence
+        wrong for two different situations."""
+        by_outcome = {}
+        for reach in self._all_reachers():
+            self._fresh_project()
+            reach()
+            result = upgrade_reconcile.reconcile_upgrade(
+                self.p.root, _BUILD_ROOT, from_version="v0.22.0",
+                to_version="v0.23.0")
+            for entry in result.tripwire_refusals:
+                by_outcome.setdefault(entry["outcome"], set()).add(
+                    entry["operator_note"])
+        self.assertGreaterEqual(len(by_outcome), 5, sorted(by_outcome))
+        # ONE note per cause, all distinct, and none of them the generic fallback.
+        # A count threshold was too loose: losing one cause's own sentence still left
+        # enough distinct notes to pass.
+        generic = upgrade_reconcile._REFUSAL_OPERATOR_NOTES[upgrade_reconcile._REFUSED]
+        notes = []
+        for outcome, seen in sorted(by_outcome.items()):
+            self.assertEqual(len(seen), 1, f"{outcome} rendered {len(seen)} notes")
+            note = next(iter(seen))
+            self.assertNotEqual(
+                note, generic,
+                f"{outcome} fell back to the generic sentence, so its cause is no "
+                "longer distinguishable")
+            notes.append(note)
+        self.assertEqual(len(set(notes)), len(notes),
+                         "two causes share one sentence: " + repr(sorted(notes)))
+
+    def test_every_refusal_label_is_reportable_and_has_its_own_sentence(self):
+        """The dispatcher's membership test decides whether a refusal is REPORTED AT
+        ALL, so a label missing from that tuple is a silently dropped refusal -- the
+        invisible-gap class this task exists to close. Nothing bound the vocabulary
+        when it went from one literal to three."""
+        labels = set(upgrade_reconcile._REFUSAL_OUTCOMES)
+        notes = set(upgrade_reconcile._REFUSAL_OPERATOR_NOTES)
+        self.assertEqual(sorted(labels - notes), [],
+                         "reportable labels with no operator sentence")
+        self.assertEqual(sorted(notes - labels), [],
+                         "sentences for labels the dispatcher would drop")
+        for label in sorted(labels):
+            self.assertTrue(
+                upgrade_reconcile._REFUSAL_OPERATOR_NOTES[label].strip())
+
+    def test_every_refusal_label_the_module_can_RETURN_is_reportable(self):
+        """Derived from the source, not from the tuple: a label a refusal site returns
+        that the dispatcher does not recognise is dropped in silence."""
+        source = (_WIZARD / "scripts" / "lib" / "upgrade_reconcile.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(source)
+        returned = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Return) or node.value is None:
+                continue
+            parts = (node.value.elts if isinstance(node.value, ast.Tuple)
+                     else [node.value])
+            for part in parts:
+                if isinstance(part, ast.Name) and part.id.startswith("_REFUSED"):
+                    returned.add(part.id)
+        self.assertTrue(returned, "the AST sweep must find something")
+        for name in sorted(returned):
+            self.assertIn(getattr(upgrade_reconcile, name),
+                          upgrade_reconcile._REFUSAL_OUTCOMES,
+                          f"{name} is returned by a refusal site but the dispatcher "
+                          "would not report it")
+
+    def test_the_notice_routes_to_the_thing_that_CAN_answer_it(self):
+        self._reach_line_endings()
         notice = self._notice()
-        self.assertIn("could not establish whether this one is stopped", notice)
-        self.assertNotIn("IS still stopped", notice)
+        self.assertIn("tell your assistant", notice.lower())
+        self.assertIn("reading the file is what can answer it", notice)
+        self.assertIn("nothing above says whether any of those jobs has "
+                      "actually been halted", notice)
 
-    def test_the_notice_carries_no_exception_text_or_internal_asides(self):
-        """The notice's own contract is plain language, no jargon. The refusal
-        REASONS are diagnostic strings -- they carry exception reprs and internal
-        cost comparisons -- so what reaches the operator is a separate plain note,
-        and the diagnostic stays on the record for a log or a test."""
-        self.p.historical_wrapper()
-        self.p.pause_marker()
-        (self.p.root / PAUSED_DIR_REL / f"{MECH}.json").write_text(
-            "{truncated", encoding="utf-8")
-        notice = self._notice()
-        for jargon in ("JSONDecodeError", "Traceback", "errno", "OSError",
-                       "far cheaper than a writer", "_GUARD_BEGIN"):
-            self.assertNotIn(jargon, notice,
-                             f"the notice renders {jargon!r} to a non-technical "
-                             f"operator")
-
-    def test_a_guard_whose_named_marker_is_GONE_is_not_called_stopped(self):
-        """The guard names this mechanism's marker correctly, but the file it points
-        at is absent -- so its `[ -e ]` finds nothing and it does not fire. Measured:
-        the payload runs. The marker reference matching is not sufficient on its own,
-        which is why the determination also stats the file."""
-        self.p.historical_wrapper()
-        self.p.pause_state()          # the .json exists, so the sweep reaches it
-        # ...but the .pause the guard actually reads does not.
-        self.assertFalse((self.p.root / PAUSED_DIR_REL / f"{MECH}.pause").exists())
-        # Make it refuse for an unrelated reason so it reaches the notice at all.
-        path = self.p.root / WRAPPER_REL
-        path.write_bytes(path.read_text(encoding="utf-8")
-                         .replace("\n", "\r\n").encode("utf-8"))
-        os.chmod(str(path), 0o755)
-        notice = self._notice()
-        self.assertIn("could NOT confirm this one is stopped", notice)
-        self.assertNotIn("IS still stopped", notice)
-        self.assertTrue((self.p.root / "payload_ran.txt").exists()
-                        or self.p.run_wrapper() is not None)
-
-    def test_an_unreadable_wrapper_claims_nothing_about_its_pause(self):
-        """The determination reads the wrapper itself. If it cannot, "confirmed" is
-        not available to it -- an unreadable file is not a verified pause."""
-        self.p.historical_wrapper()
-        self.p.pause_marker()
-        self.p.pause_state()
-        wrapper = self.p.root / WRAPPER_REL
-        os.chmod(str(wrapper), 0o000)
-        self.addCleanup(os.chmod, str(wrapper), 0o755)
-        self.assertEqual(
-            upgrade_reconcile._pause_protection_state(
-                self.p.root, WRAPPER_REL, MECH),
-            upgrade_reconcile.PAUSE_UNKNOWN)
-        notice = self._notice()
-        self.assertIn("could not establish whether this one is stopped", notice)
-        self.assertNotIn("IS still stopped", notice)
-
-    def test_a_confirmed_pause_requires_all_three_facts(self):
-        """The positive control for the determination, stated as the conjunction it
-        is: without it, a predicate that answered UNKNOWN for everything would
-        satisfy the three tests above."""
-        self.p.historical_wrapper()
-        self.p.pause_marker()
-        self.p.pause_state()
-        self.assertEqual(
-            upgrade_reconcile._pause_protection_state(
-                self.p.root, WRAPPER_REL, MECH),
-            upgrade_reconcile.PAUSE_CONFIRMED)
-
-    def test_every_refusal_carries_a_declared_determination(self):
-        """No refusal may reach the notice without one of the three declared
-        determinations -- a missing one would fall back to a sentence about a state
-        nobody established."""
-        self._foreign_marker_paused_wrapper()
+    def test_a_pass_wide_failure_is_not_rendered_as_one_job(self):
+        """Nothing was examined. On the CLI this read as a single unnamed job with a
+        reporting gap, with the true sentence only in the file."""
+        self._reach_pass_not_run()
         result = upgrade_reconcile.reconcile_upgrade(
             self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
-        self.assertTrue(result.tripwire_refusals)
-        declared = {upgrade_reconcile.PAUSE_CONFIRMED,
-                    upgrade_reconcile.PAUSE_NOT_CONFIRMED,
-                    upgrade_reconcile.PAUSE_UNKNOWN}
-        for entry in result.tripwire_refusals:
-            self.assertIn(entry["pause_confirmed"], declared)
-            self.assertTrue(entry["operator_note"].strip())
-            self.assertTrue(entry["reason"].strip())
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+        cli = upgrade_reconcile.render_reconcile_result(result)
+        for surface in (notice, cli):
+            self.assertIn("could not look at your paused scheduled jobs at all",
+                          surface)
+            self.assertNotIn("a paused scheduled job:", surface)
+            self.assertNotIn("this one", surface)
+
+    def test_a_pass_wide_failure_named_after_a_job_STILL_is_not_one_job(self):
+        """Pins the outcome half of the pass-wide branch.
+
+        Today the pass-wide record's subject is empty, so the `not subject` half
+        catches it on its own and the `outcome ==` half is redundant -- a mutation
+        removing it stayed green. That is a second guard covering the case, not a weak
+        test; the leg is what would keep a pass-wide record that DID carry a mechanism
+        id from rendering as a single job with a reporting gap. Pinned by giving it
+        one, so the leg is load-bearing rather than decorative.
+        """
+        entry = upgrade_reconcile._refusal_record(
+            "estate_upkeep", "agents/cron/run_estate_upkeep.sh",
+            upgrade_reconcile._REFUSED_PASS_NOT_RUN, "diagnostic")
+        # Asserted on the EXACT rendered prefix each surface would emit. An earlier
+        # version checked for "estate_upkeep:", which is not a substring of
+        # "run_estate_upkeep.sh: ...", so the CLI half of this passed while the CLI
+        # was in fact naming the job -- the same substring-overlap trap as a fixture
+        # whose two ids share a prefix.
+        subject_prefixes = (f"{entry['entrypoint_relpath']}:",
+                            f"{entry['mechanism_id']}:")
+        rendered = "\n".join(upgrade_reconcile._tripwire_refusal_lines([entry]))
+        result = upgrade_reconcile.ReconcileResult(
+            operator_project_path=str(self.p.root), from_version="a", to_version="b",
+            tripwire_refusals=[entry])
+        cli = upgrade_reconcile.render_reconcile_result(result)
+        for surface_name, surface in (("notice", rendered), ("CLI", cli)):
+            self.assertIn("could not look at your paused scheduled jobs at all",
+                          surface, surface_name)
+            for prefix in subject_prefixes:
+                self.assertNotIn(prefix, surface,
+                                 f"{surface_name} names a single job for a pass-wide "
+                                 f"failure: {prefix!r}")
+
+    def test_the_notice_says_WHEN_it_was_worked_out(self):
+        """The reconcile entry point overwrites one fixed file, so without this a
+        reader cannot tell a fresh statement from one left days ago."""
+        self._reach_line_endings()
+        notice = self._notice()
+        self.assertIn("Worked out at ", notice)
+        self.assertRegex(notice, r"Worked out at \d{4}-\d{2}-\d{2}T")
+
+    def test_a_refusal_only_notice_does_not_name_a_file_that_does_not_exist(self):
+        """The unconditional pending-work-list bullet, two lines from the branch this
+        round audited: on a refusal-only notice that file is not written."""
+        self._reach_line_endings()
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertIsNone(result.migration_queue_path)
+        self.assertFalse((self.p.root / upgrade_reconcile.MIGRATION_QUEUE_REL).exists())
+        self.assertNotIn("pending-work list", notice)
+
+    def test_the_CLI_carries_the_SAME_sentence_as_the_notice(self):
+        """The CLI dropped `operator_note` and kept a reassurance, so the terminal's
+        only substantive sentence was the one thing that was not established, and the
+        classes that exist BECAUSE they have something specific to say were
+        indistinguishable there."""
+        self._reach_line_endings()
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        cli = upgrade_reconcile.render_reconcile_result(result)
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+        (entry,) = result.tripwire_refusals
+        self.assertIn(entry["operator_note"], cli)
+        self.assertIn(entry["operator_note"], notice)
+
+    def test_the_needs_a_person_class_is_distinguishable_on_the_CLI(self):
+        """It exists because it has something specific to say, and on the terminal
+        that has to survive."""
+        note = upgrade_reconcile._REFUSAL_OPERATOR_NOTES[
+            upgrade_reconcile._REFUSED_NEEDS_PERSON]
+        self.assertIn("needs a person", note)
+        self.assertNotIn("record-keeping is missing", note)
+        result = upgrade_reconcile.ReconcileResult(
+            operator_project_path=str(self.p.root), from_version="a", to_version="b",
+            tripwire_refusals=[upgrade_reconcile._refusal_record(
+                MECH, WRAPPER_REL, upgrade_reconcile._REFUSED_NEEDS_PERSON, "x")])
+        self.assertIn("needs a person",
+                      upgrade_reconcile.render_reconcile_result(result))
 
     def test_the_CLI_summary_names_the_refusal_and_points_at_the_notice(self):
         """★ New-1. The notice was written and `render_reconcile_result` returned ""
@@ -1221,22 +1333,9 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
         out = upgrade_reconcile.render_reconcile_result(result)
         self.assertTrue(out.strip(), "the CLI summary was empty")
         self.assertIn(WRAPPER_REL, out)
-        self.assertIn("cannot tell you when it is skipped", out)
+        self.assertIn("Windows-style line endings", out)
         self.assertIn(str(result.notice_path), out,
                       "nothing pointed the operator at the notice")
-
-    def test_the_CLI_and_the_notice_cannot_disagree_about_the_determination(self):
-        """Two surfaces, one mapping. A per-surface sentence is how the terminal and
-        the file came to say different things about the same file once already."""
-        self._foreign_marker_paused_wrapper()
-        result = upgrade_reconcile.reconcile_upgrade(
-            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
-        out = upgrade_reconcile.render_reconcile_result(result)
-        notice = Path(result.notice_path).read_text(encoding="utf-8")
-        sentence = upgrade_reconcile._PAUSE_STATE_SENTENCES[
-            upgrade_reconcile.PAUSE_NOT_CONFIRMED]
-        self.assertIn(sentence, out)
-        self.assertIn(sentence, notice)
 
     def test_a_refusal_only_notice_makes_no_claim_about_an_undo_step(self):
         """The `if not mechanisms:` branch describes an outstanding undo-step answer

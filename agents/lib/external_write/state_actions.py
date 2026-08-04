@@ -563,15 +563,27 @@ def route_for_unclassified_state(subject: str) -> str:
 #: it renders with. All four previously-escaping shapes are covered, and pinned by
 #: ``test_the_sweep_sees_every_shape_a_route_could_take``.
 #:
-#: STILL OUTSIDE IT, so nobody reads the sweep as total: a template built by a CALL
-#: rather than written as a literal, one held inside a collection, one using a
-#: placeholder other than ``{subject}``, and a renderer nested inside a class or
-#: another function. A route taking one of those forms must add itself here by hand.
+#: STILL OUTSIDE IT. Declared as KNOWN escapes rather than as an enumeration -- the
+#: previous list read as exhaustive and was not, which is the same overclaim in
+#: miniature. Each of these was measured against the sweep, not assumed. A route
+#: taking one of these forms must add itself to the tuple above by hand.
 OPERATOR_TEXT_RENDERERS_SWEEP_LIMITS = (
     "a template built by a call rather than written as a string literal",
     "a template held inside a collection rather than bound to its own name",
     "a template whose placeholder is not {subject}",
     "a renderer nested inside a class or another function",
+    "a renderer that writes the whole sentence inline with no named template "
+    "(that shape is not a shared template at all, and is what the gate's other "
+    "signatures are for)",
+)
+#: NOT limits, though a review reported them as such: `+`-concatenation, implicit
+#: concatenation, `Final[str]`, tuple-unpacking assignment and `async def` renderers
+#: are all caught. Recorded so the list above is not padded with escapes that are not.
+OPERATOR_TEXT_RENDERERS_SWEEP_COVERS = (
+    "plain and annotated assignment, including Final[str]",
+    "tuple-unpacking assignment",
+    "def and async def renderers",
+    ".format, f-string, %-format, + concatenation, and a bare return",
 )
 OPERATOR_TEXT_RENDERERS: Tuple[str, ...] = (
     "instruction_for_state",

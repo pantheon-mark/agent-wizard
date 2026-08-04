@@ -1799,14 +1799,23 @@ class TheRegistrysDeclaredRendererSetIsCompleteTests(unittest.TestCase):
                 targets = [node.target]
             else:
                 continue
-            value = node.value
-            if not (isinstance(value, ast.Constant)
-                    and isinstance(value.value, str)
-                    and self._TEMPLATE_PLACEHOLDER in value.value):
-                continue
+            # PAIRS, not just whole values. `a, b = "...", "..."` has a Tuple target
+            # AND a Tuple value, so a whole-value string test never matched it and the
+            # name escaped -- measured. Each name is checked against the value that
+            # actually binds to it.
             for target in targets:
-                if isinstance(target, ast.Name):
-                    found.add(target.id)
+                if isinstance(target, ast.Tuple) and isinstance(node.value, ast.Tuple):
+                    pairs = list(zip(target.elts, node.value.elts))
+                else:
+                    pairs = [(t, node.value) for t in (
+                        target.elts if isinstance(target, ast.Tuple) else [target])]
+                for name, value in pairs:
+                    if not isinstance(name, ast.Name):
+                        continue
+                    if (isinstance(value, ast.Constant)
+                            and isinstance(value.value, str)
+                            and self._TEMPLATE_PLACEHOLDER in value.value):
+                        found.add(name.id)
         return found
 
     def _functions_formatting_a_route_template(self, tree, templates):
@@ -1819,7 +1828,9 @@ class TheRegistrysDeclaredRendererSetIsCompleteTests(unittest.TestCase):
         """
         found = set()
         for node in tree.body:
-            if not isinstance(node, ast.FunctionDef):
+            # `async def` too: a renderer declared async escaped a FunctionDef-only
+            # sweep silently, and nothing stops a future one being written that way.
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             for inner in ast.walk(node):
                 if isinstance(inner, ast.Name) and inner.id in templates:
@@ -1872,6 +1883,16 @@ class TheRegistrysDeclaredRendererSetIsCompleteTests(unittest.TestCase):
         "percent-format render": (
             '_FIFTH_ROUTE = "hello `{subject}` there, at some length"\n'
             'def route_for_fifth(s):\n    return _FIFTH_ROUTE % s\n'),
+        "async def renderer": (
+            '_FIFTH_ROUTE = "hello `{subject}` there, at some length"\n'
+            'async def route_for_fifth(s):\n'
+            '    return _FIFTH_ROUTE.format(subject=s)\n'),
+        "tuple-unpacking assignment": (
+            '_FIFTH_ROUTE, _OTHER = "hello `{subject}` there, at length", "x"\n'
+            'def route_for_fifth(s):\n    return _FIFTH_ROUTE.format(subject=s)\n'),
+        "plus-concatenation render": (
+            '_FIFTH_ROUTE = "hello `{subject}` there, at some length"\n'
+            'def route_for_fifth(s):\n    return _FIFTH_ROUTE + s\n'),
         "template not named *_ROUTE": (
             '_FIFTH_SENTENCE = "hello `{subject}` there, at some length"\n'
             'def route_for_fifth(s):\n'
