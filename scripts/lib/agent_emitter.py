@@ -35,6 +35,15 @@ QA_TEMPLATE = "wizard/agents/qa_agent_prompt.md"
 INVOCATION_TEMPLATE = "wizard/scripts/agent_invocation_template.sh"
 CRON_TEMPLATE = "wizard/templates/agents/cron_config.md"
 
+# Build-repo-relative home of the external-write lib SOURCE tree — the directory a bundle
+# cut copies the files listed in _EXTERNAL_WRITE_LIB_FILES FROM, into
+# <bundle>/templates/<_BUNDLE_EXTERNAL_WRITE_LIB_REL>/. Declared here, alongside the other
+# build-repo-relative template locations, so that a check comparing a bundle copy against
+# its source joins the two halves on declared values instead of a hardcoded directory.
+# Distinct from _EXTERNAL_WRITE_LIB_REL below, which is the EMITTED-tree relpath (no
+# `wizard/` prefix) — same leaf layout, different role, different value.
+EXTERNAL_WRITE_LIB_SOURCE_DIR = "wizard/agents/lib/external_write"
+
 # Bundle-relative subpaths (inside <bundle>/templates/) for the agent-layer templates.
 _BUNDLE_ORCHESTRATOR_REL = "agents/orchestrator_prompt.md"
 _BUNDLE_SPECIALIST_REL = "agents/agent_prompt_template.md"
