@@ -99,6 +99,19 @@ SEALED_KERNEL_MODULE_PATHS: FrozenSet[str] = frozenset(
     {
         "__init__.py",
         "acceptance_ceremony.py",
+        # acceptance_repudiation.py: the operator's entrypoint to taking an
+        # approval BACK -- the inverse of the acceptance CLI, and kernel-side
+        # for the same reasons. It imports `lifecycle_state` (the sanctioned
+        # revocation transition) and `capability_identity`, which is ordinary
+        # internal kernel wiring of the SAME class as `operator_acceptance.py`
+        # and `lifecycle_state.py` themselves; scanned as CAPABILITY those
+        # imports would trip the sealed-kernel module boundary. It imports no
+        # vendor SDK, constructs or obtains no write-capable credential, and
+        # never calls `run_operation` -- so it stays held to every bypass check
+        # SEALED_KERNEL membership does NOT exempt, and is exempt only from the
+        # four CAPABILITY-zone-only rules, exactly as the two modules it wires
+        # to already are.
+        "acceptance_repudiation.py",
         "adapter_registry.py",
         "adapters.py",
         "boundary.py",

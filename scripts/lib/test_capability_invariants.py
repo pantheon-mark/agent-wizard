@@ -285,14 +285,33 @@ class CapabilityInvariantsTestBase(unittest.TestCase):
         # this fixture defaults to a WELL-FORMED record shape so it exercises this test suite's
         # own "real, complete audit record" cases; a caller can still override either field via
         # `**extra` to build a deliberately-junk record for a negative test.
+        #
+        # (Cut 1.9 / B2') It also carries an `operator_receipt_ref` that RESOLVES, and the
+        # fixture writes that receipt file. A real ceremony append always records this field
+        # (the ceremony refuses without a validated receipt), and check 5b now reads it: a
+        # record whose ref names nothing is exactly the "an approval with no traceable evidence
+        # reads as genuine" case that check exists to catch. Leaving it out of this shared
+        # fixture would have made every positive case here depend on the check not looking.
         path = self.project_root / DEFAULT_AUDIT_LOG_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_rel = f"security/acceptance_receipts/{capability_id}.{phase_id}.json"
+        receipt_path = self.project_root / receipt_rel
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text(
+            json.dumps({
+                "schema": "operator_acceptance_receipt-v1",
+                "capability_id": capability_id,
+                "phase_id": phase_id,
+                "operator_confirmation": "yes, switch it on",
+            }),
+            encoding="utf-8")
         record = {
             "schema": "capability_acceptance_record-v1",
             "capability_id": capability_id,
             "phase_id": phase_id,
             "implementation_hash": "test-fixture-implementation-hash",
             "op_kind": VALID_OP_KIND,
+            "operator_receipt_ref": receipt_rel,
         }
         record.update(extra)
         with open(path, "a", encoding="utf-8") as f:

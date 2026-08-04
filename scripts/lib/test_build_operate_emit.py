@@ -1875,7 +1875,22 @@ class TestS253ContractDelta(unittest.TestCase):
         # is a ModuleNotFoundError on the operator's first orientation -- and, if it
         # somehow were not, would put both blocking states back exactly as they
         # were: a real, working repair no surface the operator reads ever names.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 52)
+        # (Count updated to 53 by Cut 1.9 Task 13, which additionally enrolled
+        # acceptance_repudiation.py -- the operator's entrypoint to taking an approval
+        # BACK. `capability_invariants` hard-imports it at module scope, so omitting it
+        # is a ModuleNotFoundError on the emitted self-QA battery; and beyond that, a
+        # project without it can grant live-write authorization with no sanctioned way
+        # to withdraw it.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 53)
+
+    def test_emit_set_lists_the_cut19_acceptance_repudiation_entrypoint(self):
+        # Cut 1.9 Task 13: acceptance_repudiation.py must be enrolled, or the operator
+        # project can approve a capability for live external writes and has no
+        # sanctioned way to un-approve it -- and `capability_invariants` imports it at
+        # module scope, so its absence breaks the self-QA battery outright.
+        import agent_emitter
+        self.assertIn("acceptance_repudiation.py",
+                      agent_emitter._EXTERNAL_WRITE_LIB_FILES)
 
     def test_emit_set_lists_the_cut19_state_action_registry(self):
         # Cut 1.9 Task 9: state_actions.py must be enrolled, or the operator project

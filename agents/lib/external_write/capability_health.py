@@ -486,7 +486,16 @@ def _has_acceptance_audit_record(project_root: Path, capability_id: str) -> Tupl
     a whole-file read error -- mirrors ``lifecycle_state._read_latest_acceptance_record``'s own
     per-line tolerance (this module reads the file independently rather than importing that
     private helper -- every emitted-runtime reader here is self-contained, see the module's own
-    "Stdlib only" convention)."""
+    "Stdlib only" convention).
+
+    DELIBERATELY NOT REPUDIATION-AWARE, and that is a decision rather than an oversight. The
+    acceptance log also carries repudiation events now, and every reader whose question is "is
+    this acceptance CURRENT" routes through ``acceptance_ceremony.reduce_acceptance_log``, so a
+    withdrawal changes those readers' answers. This one asks a DIFFERENT question -- "did this id
+    ever carry real acceptance history" -- and a repudiated acceptance is still real history: the
+    twin genuinely did hold live authorization once. Reducing here would answer False for such a
+    twin and make it look safely tombstone-eligible, which is the opposite of true. The answer
+    stays "yes, there is history", and a test pins that it does."""
     path = project_root / ACCEPTANCE_LOG_REL
     try:
         text = path.read_text(encoding="utf-8")

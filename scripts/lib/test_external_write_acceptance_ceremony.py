@@ -702,7 +702,14 @@ class AcceptanceCeremonyTest(unittest.TestCase):
         self.assertFalse(c.audit_path.exists())
         res = c.call()
         self.assertTrue(res.accepted, res.reason)
-        self.assertIn("backfilled", (res.warning or "").lower())
+        # (Cut 1.9 / B2' retarget) The warning used to say "backfilled the missing
+        # acceptance record". It no longer says "missing", because the predicate behind it
+        # does not distinguish an ABSENT record from one the operator has REPUDIATED --
+        # and in the repudiated case the record is right there in the log, so "missing"
+        # was a claim the mechanism did not establish. Retargeted at the corrected
+        # sentence; the substantive assertion is the record count below, not the wording.
+        self.assertIn("no current acceptance record was on file",
+                      (res.warning or "").lower())
         recs = self._accepted_records(c)
         self.assertEqual(len(recs), 1)
         rec = recs[0]
@@ -773,7 +780,14 @@ class AcceptanceCeremonyTest(unittest.TestCase):
 
         res = c.call(phase_id=PHASE)
         self.assertTrue(res.accepted, res.reason)
-        self.assertIn("backfilled", (res.warning or "").lower())
+        # (Cut 1.9 / B2' retarget) The warning used to say "backfilled the missing
+        # acceptance record". It no longer says "missing", because the predicate behind it
+        # does not distinguish an ABSENT record from one the operator has REPUDIATED --
+        # and in the repudiated case the record is right there in the log, so "missing"
+        # was a claim the mechanism did not establish. Retargeted at the corrected
+        # sentence; the substantive assertion is the record count below, not the wording.
+        self.assertIn("no current acceptance record was on file",
+                      (res.warning or "").lower())
         recs = self._accepted_records(c)
         self.assertEqual(len(recs), 2)
 
@@ -865,7 +879,14 @@ class AcceptanceCeremonyTest(unittest.TestCase):
 
         res = c.call()
         self.assertTrue(res.accepted, res.reason)
-        self.assertIn("backfilled", (res.warning or "").lower())
+        # (Cut 1.9 / B2' retarget) The warning used to say "backfilled the missing
+        # acceptance record". It no longer says "missing", because the predicate behind it
+        # does not distinguish an ABSENT record from one the operator has REPUDIATED --
+        # and in the repudiated case the record is right there in the log, so "missing"
+        # was a claim the mechanism did not establish. Retargeted at the corrected
+        # sentence; the substantive assertion is the record count below, not the wording.
+        self.assertIn("no current acceptance record was on file",
+                      (res.warning or "").lower())
         recs = self._accepted_records(c)
         self.assertEqual(
             len(recs), 2, f"expected the junk line PLUS a real backfilled record, got: {recs}")

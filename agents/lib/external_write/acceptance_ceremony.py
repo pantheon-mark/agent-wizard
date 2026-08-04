@@ -113,6 +113,27 @@ steps produce these inputs):
                           add-capability cascade MUST populate ``phase_id`` on each emitted descriptor entry, or
                           no capability can ever be accepted (fail-safe).
 
+The audit log is an EVENT log, and one function reduces it
+-----------------------------------------------------------------------------
+``DEFAULT_AUDIT_LOG_PATH`` is append-only and now carries TWO typed event shapes: the acceptance
+record this ceremony writes (``ACCEPTANCE_RECORD_SCHEMA``), and a repudiation
+(``REPUDIATION_RECORD_SCHEMA``) — the operator taking an approval back. A repudiation is
+APPENDED; it never edits or removes the acceptance record it takes back, so the audit trail keeps
+both the approval and the withdrawal.
+
+Because a later event can change what an earlier one meant, "is this capability's acceptance
+current?" is no longer answerable by looking for a matching line. ``reduce_acceptance_log`` is
+the ONE function that answers it — LAST matching event wins — and every reader whose question is
+that routes through it rather than scanning the file itself. Adding a repudiation without the
+reducer would have produced a control that writes a row and changes nothing, which at a
+write-authorizing boundary is worse than no control at all.
+
+Reducing is NOT revoking. This module reports what the log says; flipping the descriptor's
+``accepted`` back to ``false`` is a state transition on the live-write authorization flag, and it
+belongs to the one function that already owns that transition
+(``lifecycle_state``'s revocation path, which also queues the re-trial and reconciles the pause
+marker / migration queue). Nothing here writes ``accepted``.
+
 Emission: this module runs at OPERATOR-SIDE acceptance time (next-phase Step-6, in the operator's
 project), so it must be emitted into operator systems. A later step must add it to
 ``_EXTERNAL_WRITE_LIB_FILES`` + the foundation bundle (NOT wired here — CANONICAL-ONLY).
@@ -158,8 +179,60 @@ OPERATOR_ACCEPTANCE_RECEIPT_SCHEMA = "operator_acceptance_receipt-v1"
 # The durable acceptance-record schema written to the audit log on a successful flip.
 ACCEPTANCE_RECORD_SCHEMA = "capability_acceptance_record-v1"
 
+# The durable REPUDIATION-event schema: the operator taking an approval back. Appended to the
+# same append-only log the acceptance records live in, never written over one of them -- see the
+# "The audit log is an EVENT log" section of the module docstring.
+REPUDIATION_RECORD_SCHEMA = "capability_acceptance_repudiation-v1"
+
 # The default append-only audit log for acceptance records (disk-first + audit convention).
 DEFAULT_AUDIT_LOG_PATH = "security/capability_acceptance_log.jsonl"
+
+# ---------------------------------------------------------------------------
+# The reduced answer ``reduce_acceptance_log`` returns for one (capability, phase) pair.
+# Four values, deliberately not a boolean: "no record was ever written", "the log could not be
+# read", and "a record exists and the operator took it back" are three different facts, and a
+# surface that renders them with one sentence tells the operator something untrue about two of
+# them.
+# ---------------------------------------------------------------------------
+
+#: No event for this pair is on file (including: the log does not exist yet).
+ACCEPTANCE_STATUS_ABSENT = "absent"
+#: The latest event for this pair is a well-formed acceptance record.
+ACCEPTANCE_STATUS_ACTIVE = "active"
+#: The latest event for this pair is a well-formed repudiation -- the operator took it back.
+ACCEPTANCE_STATUS_REPUDIATED = "repudiated"
+#: The log file EXISTS but could not be opened at all, so no event could be read from it. Never
+#: conflated with ABSENT: "nothing was recorded" and "we could not look" are opposite evidence.
+ACCEPTANCE_STATUS_UNREADABLE = "unreadable"
+
+ACCEPTANCE_STATUSES = frozenset({
+    ACCEPTANCE_STATUS_ABSENT, ACCEPTANCE_STATUS_ACTIVE,
+    ACCEPTANCE_STATUS_REPUDIATED, ACCEPTANCE_STATUS_UNREADABLE,
+})
+
+# ---------------------------------------------------------------------------
+# The outcome vocabulary for ``resolve_operator_receipt_ref``. Read the function's docstring
+# before consuming any of these: every one of them is a statement about a PATH, never about
+# whether the receipt is genuine.
+# ---------------------------------------------------------------------------
+
+#: The ref names a path that exists and parses as a JSON object.
+RECEIPT_STATUS_RESOLVED = "resolved"
+#: The record carries no usable ref at all (absent key, non-string, or blank).
+RECEIPT_STATUS_NO_REF = "no_ref"
+#: The ref names a path that is not there (the dangling case).
+RECEIPT_STATUS_ABSENT = "absent"
+#: The path exists but could not be opened (a permissions or I/O error) -- distinct from absent.
+RECEIPT_STATUS_UNREADABLE = "unreadable"
+#: The path was read but is not valid JSON.
+RECEIPT_STATUS_UNPARSABLE = "unparsable"
+#: The path parsed as JSON but is not a JSON object, so it cannot be a receipt.
+RECEIPT_STATUS_NOT_AN_OBJECT = "not_an_object"
+
+RECEIPT_STATUSES = frozenset({
+    RECEIPT_STATUS_RESOLVED, RECEIPT_STATUS_NO_REF, RECEIPT_STATUS_ABSENT,
+    RECEIPT_STATUS_UNREADABLE, RECEIPT_STATUS_UNPARSABLE, RECEIPT_STATUS_NOT_AN_OBJECT,
+})
 
 # The additive per-entry phase-binding key this ceremony introduces (see module docstring).
 PHASE_ID_KEY = "phase_id"
@@ -289,13 +362,33 @@ def _compute_capability_module_hash(path: str) -> Optional[str]:
     return hashlib.sha256(data).hexdigest()
 
 
-def _append_acceptance_record(audit_path: str, record: Dict[str, Any]) -> None:
-    """Append one acceptance record as a single JSONL line (audit trail). Best-effort: the caller
-    surfaces a failure as a warning AFTER the authoritative flip has already succeeded."""
+def _append_audit_log_record(audit_path: str, record: Dict[str, Any]) -> None:
+    """Append ONE event to the append-only audit log as a single JSONL line.
+
+    The one writer of a line in this file, used by both event shapes it carries (an acceptance
+    record and a repudiation) so neither can drift into a different framing/newline/encoding
+    convention from the other. It appends; it never rewrites or removes an existing line."""
     directory = os.path.dirname(os.path.abspath(audit_path))
     os.makedirs(directory, exist_ok=True)
     with open(audit_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _has_acceptance_record_shape(rec: Any) -> bool:
+    """True IFF ``rec`` carries the load-bearing fields a real ceremony append always writes --
+    a non-empty string ``implementation_hash`` and a non-empty string ``op_kind``.
+
+    The IDENTITY join (``capability_id`` / ``phase_id``) is deliberately NOT checked here: this
+    is the shape half only, so ``is_valid_acceptance_record`` (single id) and the reducer
+    (a set of aliases, optional phase) can share exactly one definition of "looks like a real
+    acceptance record" instead of spelling it twice."""
+    if not isinstance(rec, dict):
+        return False
+    impl_hash = rec.get("implementation_hash")
+    if not (isinstance(impl_hash, str) and impl_hash):
+        return False
+    op_kind = rec.get("op_kind")
+    return isinstance(op_kind, str) and bool(op_kind)
 
 
 def is_valid_acceptance_record(rec: Any, capability_id: str, phase_id: str) -> bool:
@@ -311,52 +404,124 @@ def is_valid_acceptance_record(rec: Any, capability_id: str, phase_id: str) -> b
     ``check_completion``'s audit-appended conjunct read OK against junk. This does not touch
     ``capability_module_hash`` (legitimately ``None`` on a real record when the module file could
     not be hashed -- see ``_compute_capability_module_hash``), only the two fields that are never
-    legitimately absent from a real append."""
+    legitimately absent from a real append.
+
+    SHAPE PLUS THE PAIR, AND NOTHING MORE. This says the line is a well-formed acceptance record
+    for this pair. It does NOT say that acceptance is still current -- a later repudiation for
+    the same pair leaves this record exactly as well-formed as it was. "Is it current?" is
+    ``reduce_acceptance_log``'s question, and that is the only function that answers it."""
     if not isinstance(rec, dict):
         return False
     if rec.get("capability_id") != capability_id or rec.get("phase_id") != phase_id:
         return False
-    impl_hash = rec.get("implementation_hash")
-    if not (isinstance(impl_hash, str) and impl_hash):
+    return _has_acceptance_record_shape(rec)
+
+
+def is_valid_repudiation_record(rec: Any, capability_ids: Any, phase_id: Optional[str]) -> bool:
+    """True IFF ``rec`` is a well-formed REPUDIATION event for a capability named by any id in
+    ``capability_ids`` and (when ``phase_id`` is given) for that exact phase.
+
+    Every clause is a POSITIVE declaration, because both directions of this predicate's error
+    are costly: a false positive takes a live approval down, and a false negative leaves one
+    standing that the operator has disowned. A row counts as a repudiation only if it declares
+    ALL of:
+
+      * ``schema`` exactly ``REPUDIATION_RECORD_SCHEMA`` -- never inferred from the mere absence
+        of the acceptance fields;
+      * ``capability_id`` among ``capability_ids`` -- the DECLARED id, joined on the same value
+        every other reader of this log joins on, never a filename, stem, or line position;
+      * ``phase_id`` equal to ``phase_id`` when one was given (see ``reduce_acceptance_log`` for
+        what ``None`` means);
+      * a non-blank string ``repudiated_at``;
+      * a non-blank string ``operator_confirmation`` -- the operator's own words. A repudiation
+        is the operator's act, so a row recording no words records no act: SILENCE MEANS NO
+        REPUDIATION, never "repudiated". Nothing in this package writes this field from a
+        default, and no machine-supplied value would make the row mean anything it does not.
+
+    Structurally disjoint from an acceptance record: a repudiation carries no
+    ``implementation_hash`` / ``op_kind``, so it can never satisfy
+    ``is_valid_acceptance_record``; an acceptance record carries a different ``schema``, so it
+    can never satisfy this. Pinned by test rather than left as an observation."""
+    if not isinstance(rec, dict):
         return False
-    op_kind = rec.get("op_kind")
-    if not (isinstance(op_kind, str) and op_kind):
+    if rec.get("schema") != REPUDIATION_RECORD_SCHEMA:
         return False
-    return True
+    try:
+        if rec.get("capability_id") not in capability_ids:
+            return False
+    except TypeError:  # pragma: no cover - a non-container was passed
+        return False
+    if phase_id is not None and rec.get("phase_id") != phase_id:
+        return False
+    at = rec.get("repudiated_at")
+    if not (isinstance(at, str) and at.strip()):
+        return False
+    confirmation = rec.get("operator_confirmation")
+    return isinstance(confirmation, str) and bool(confirmation.strip())
 
 
-def _acceptance_record_exists(audit_log_path: str, capability_id: str, phase_id: str) -> bool:
-    """(Task B4, F-59; strictness fix, cross-vendor review) Fail-safe presence check: True IFF a
-    WELL-FORMED acceptance record (``is_valid_acceptance_record``) for THIS EXACT
-    ``(capability_id, phase_id)`` pair is already durably recorded in the JSONL audit log.
+@dataclass(frozen=True)
+class ReducedAcceptance:
+    """What the acceptance log currently says about ONE (capability, phase) pair.
 
-    This is the dedup key the B4 idempotent-backfill path uses: an already-``accepted: true``
-    descriptor is legitimately idempotent (no duplicate record) ONLY when a COMPLETE record for
-    its own ``(capability_id, phase_id)`` pair already exists -- never merely because ``accepted
-    is True`` (the F-59 defect: a descriptor can be ``accepted: true`` with NO audit record at
-    all), and never merely because SOME dict with a matching id/phase pair happens to be present
-    (a junk line with no ``implementation_hash`` / ``op_kind`` must not be mistaken for a real
-    record and silently suppress the backfill).
-
-    Fail-safe on every branch, never raises:
-      * Log file does not exist yet -> by construction there are no records at all -> False (the
-        caller correctly proceeds to append).
-      * Log file exists but cannot be opened at all (e.g. a permissions error) -> the question is
-        unanswerable from here; per this module's OVERRIDING fail-safe property (refuse a doubtful
-        state) and this task's binding constraint, prefer the safer outcome for AN AUDIT TRAIL,
-        which is an extra record over a silently missing one -> return False so the caller appends
-        (never raises up into a refusal -- the acceptance itself already happened; only the
-        audit-completeness question is at stake here).
-      * An individual line is malformed (not valid JSON, not a dict, or a well-formed-looking
-        dict that is not actually a complete acceptance record) -> skip that one line and keep
-        scanning the rest of the file; one bad or junk line must never abort the whole scan, and
-        must never itself count as "already recorded".
+    status:      one of ``ACCEPTANCE_STATUSES``. The whole answer -- read this; never infer the
+                 state from whether ``record`` happens to be None.
+    record:      the acceptance record, and ONLY when ``status`` is ACTIVE. A repudiated pair
+                 deliberately hands back ``None`` even though the record is still on disk: that
+                 record carries the hashes that say "this approval is current", and handing them
+                 to a caller is precisely how a repudiation would end up changing nothing.
+    repudiation: the repudiation event, and only when ``status`` is REPUDIATED -- so a surface
+                 can quote the operator's own words back to them.
     """
+
+    status: str
+    record: Optional[Dict[str, Any]] = None
+    repudiation: Optional[Dict[str, Any]] = None
+
+
+def reduce_acceptance_log(
+    audit_log_path: str, capability_ids: Any, phase_id: Optional[str],
+) -> ReducedAcceptance:
+    """THE answer to "is this capability's acceptance current?" -- reduced over the append-only
+    audit log, LAST matching event wins. Every reader whose question is that one calls this;
+    none of them scans the file itself.
+
+    Why a reducer and not a presence check: the log is append-only, so taking an approval back
+    means appending a repudiation, not editing the acceptance record. A reader that stopped at
+    the first (or kept the latest) ACCEPTANCE record would go on answering "accepted" forever,
+    and the repudiation would be a control that produces a record and no effect. Order is what
+    decides: accept -> repudiate reduces to REPUDIATED, and accept -> repudiate -> accept
+    reduces to ACTIVE again (an operator who re-trialled and re-approved IS approved).
+
+    ``capability_ids`` is any container of DECLARED ids -- typically a capability's alias set --
+    and a line matches only when its own ``capability_id`` value is one of them. The join is on
+    the declared value, never on a filename, a module stem, or a line's position in the file.
+
+    ``phase_id``: when given, ONLY events carrying that exact phase count -- deliberately no
+    cross-phase fallback, mirroring the pre-existing reader contract this replaces. When
+    ``None`` (which happens only when the descriptor itself carries no phase binding), any phase
+    counts and the latest event of either kind decides; a repudiation from another phase can
+    therefore reduce a phase-less read to REPUDIATED, which is the fail-safe direction -- it
+    forces a re-trial rather than trusting an approval the operator disowned.
+
+    Fail-safe, and never raises. A file that does not exist is ABSENT (nothing recorded yet --
+    normal). A file that EXISTS but cannot be opened at all is UNREADABLE, never conflated with
+    ABSENT. An individual malformed line is skipped rather than treated as a whole-file failure:
+    an append-only log that survived a partial write on one line must not lose every other
+    line's evidence."""
     try:
         with open(audit_log_path, encoding="utf-8") as f:
             lines = f.readlines()
+    except FileNotFoundError:
+        return ReducedAcceptance(status=ACCEPTANCE_STATUS_ABSENT)
     except OSError:
-        return False
+        return ReducedAcceptance(status=ACCEPTANCE_STATUS_UNREADABLE)
+    except UnicodeDecodeError:
+        return ReducedAcceptance(status=ACCEPTANCE_STATUS_UNREADABLE)
+
+    status = ACCEPTANCE_STATUS_ABSENT
+    record: Optional[Dict[str, Any]] = None
+    repudiation: Optional[Dict[str, Any]] = None
     for line in lines:
         line = line.strip()
         if not line:
@@ -365,9 +530,188 @@ def _acceptance_record_exists(audit_log_path: str, capability_id: str, phase_id:
             rec = json.loads(line)
         except Exception:
             continue
-        if is_valid_acceptance_record(rec, capability_id, phase_id):
-            return True
-    return False
+        if not isinstance(rec, dict):
+            continue
+        if is_valid_repudiation_record(rec, capability_ids, phase_id):
+            status, record, repudiation = ACCEPTANCE_STATUS_REPUDIATED, None, rec
+            continue
+        if rec.get("capability_id") not in capability_ids:
+            continue
+        if phase_id is not None and rec.get("phase_id") != phase_id:
+            continue
+        if _has_acceptance_record_shape(rec):
+            status, record, repudiation = ACCEPTANCE_STATUS_ACTIVE, rec, None
+    return ReducedAcceptance(status=status, record=record, repudiation=repudiation)
+
+
+def build_repudiation_record(
+    capability_id: str, phase_id: Optional[str], operator_confirmation: str, *,
+    repudiated_at: str, repudiated_implementation_hash: Optional[str] = None,
+) -> Dict[str, Any]:
+    """The one builder of a repudiation event, so its shape is declared in exactly one place.
+
+    ``capability_id`` / ``phase_id`` MUST be copied from the acceptance record being taken back,
+    not from whatever spelling the caller happened to be invoked with -- that is what makes the
+    reducer's join find the event that answers for that record.
+
+    ``repudiated_implementation_hash`` is recorded for the audit trail (WHICH approval was taken
+    back) and is NOT a join key: the reducer joins on (capability_id, phase_id), the same pair
+    every other reader of this log joins on. Recorded as an explicit ``null`` when unknown rather
+    than omitted, so a reader can tell "not recorded" from "key absent because an older writer
+    produced this line".
+
+    Refuses a blank ``operator_confirmation``: the operator's own words are the entire content of
+    this event, and a machine has nothing to put there."""
+    if not (isinstance(capability_id, str) and capability_id.strip()):
+        raise ValueError("a repudiation must name the capability it takes back")
+    if not (isinstance(operator_confirmation, str) and operator_confirmation.strip()):
+        raise ValueError(
+            "a repudiation must carry the operator's own words; there is no default")
+    if not (isinstance(repudiated_at, str) and repudiated_at.strip()):
+        raise ValueError("a repudiation must carry the time it was recorded")
+    return {
+        "schema": REPUDIATION_RECORD_SCHEMA,
+        "capability_id": capability_id,
+        "phase_id": phase_id,
+        "repudiated_at": repudiated_at,
+        "operator_confirmation": operator_confirmation,
+        "repudiated_implementation_hash": repudiated_implementation_hash,
+    }
+
+
+def append_repudiation_record(audit_log_path: str, record: Dict[str, Any]) -> None:
+    """Append one repudiation event to the append-only audit log.
+
+    Refuses a record this module's own validator does not recognize as a well-formed repudiation
+    for its own declared pair, rather than writing a line the reducer would silently skip: a
+    repudiation that lands as an unreadable line is indistinguishable from one that was never
+    written, and the operator would be told their approval had been taken back when it had not."""
+    declared_ids = (record.get("capability_id"),) if isinstance(record, dict) else ()
+    declared_phase = record.get("phase_id") if isinstance(record, dict) else None
+    if not is_valid_repudiation_record(record, declared_ids, declared_phase):
+        raise ValueError(
+            "refusing to append a malformed repudiation event -- build it with "
+            "build_repudiation_record")
+    _append_audit_log_record(audit_log_path, record)
+
+
+@dataclass(frozen=True)
+class ReceiptResolution:
+    """The outcome of asking whether an acceptance record's ``operator_receipt_ref`` resolves.
+
+    status: one of ``RECEIPT_STATUSES``.
+    ref:    the ref exactly as it was recorded, when it was a usable string; else None.
+
+    ``resolved`` is a computed property, never a stored field -- the same reasoning
+    ``command_manifest.is_allowlist_eligible`` documents: a stored boolean can be set to disagree
+    with the status it is supposed to summarize, and this one is read at a trust surface.
+    """
+
+    status: str
+    ref: Optional[str] = None
+
+    @property
+    def resolved(self) -> bool:
+        return self.status == RECEIPT_STATUS_RESOLVED
+
+
+def resolve_operator_receipt_ref(
+    record: Any, *, project_root: Optional[str] = None,
+) -> ReceiptResolution:
+    """Does this acceptance record's ``operator_receipt_ref`` point at a file that is there and
+    parses as a JSON object?
+
+    WHAT A ``resolved`` RESULT ESTABLISHES, EXACTLY: a path was recorded; something exists at
+    that path; it could be read; its bytes parse as a JSON object. That is the whole claim.
+
+    WHAT IT DOES NOT ESTABLISH -- disclosed residual, stated here because over-reading this is
+    the very failure it was built to catch. It does NOT establish that the receipt is genuine,
+    that its contents bind to this acceptance, that its ``capability_id`` / ``phase_id`` /
+    ``copy_run_proof_ref`` match anything, or that the operator ever said the words inside it. A
+    file an agent wrote a minute ago resolves exactly as well as one the operator's own
+    confirmation produced. This is a RESOLUTION check, not an authenticity check, and no caller
+    may render it as "this approval is genuine". The checks that DO validate a receipt's contents
+    are ``accept_capability_for_live_use``'s Invariant 5, and they run at acceptance time against
+    a receipt supplied then -- they cannot be re-run from a record alone, which is exactly why
+    this weaker check has a job at all.
+
+    Why it exists: before it, a record whose receipt had been deleted or moved was
+    indistinguishable from one whose receipt is right there. Both read as genuine consent.
+
+    ``project_root``, when given, resolves a RELATIVE ref against the project root rather than
+    against the process working directory -- recorded refs in a real project are
+    project-relative, and a reader is not guaranteed to be running from the project's top folder.
+
+    Absent is distinguished from inaccessible via ``os.stat`` rather than an existence predicate:
+    a path inside a directory the reader cannot traverse is NOT evidence that the receipt is
+    gone, and reporting it gone would send an operator hunting for a file that is exactly where
+    they left it. Never raises."""
+    ref = record.get("operator_receipt_ref") if isinstance(record, dict) else None
+    if not (isinstance(ref, str) and ref.strip()):
+        return ReceiptResolution(status=RECEIPT_STATUS_NO_REF)
+
+    path = Path(ref)
+    if project_root is not None and not path.is_absolute():
+        path = Path(project_root) / path
+
+    try:
+        os.stat(str(path))
+    except FileNotFoundError:
+        return ReceiptResolution(status=RECEIPT_STATUS_ABSENT, ref=ref)
+    except OSError:
+        return ReceiptResolution(status=RECEIPT_STATUS_UNREADABLE, ref=ref)
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return ReceiptResolution(status=RECEIPT_STATUS_UNPARSABLE, ref=ref)
+    except OSError:
+        return ReceiptResolution(status=RECEIPT_STATUS_UNREADABLE, ref=ref)
+
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return ReceiptResolution(status=RECEIPT_STATUS_UNPARSABLE, ref=ref)
+    if not isinstance(data, dict):
+        return ReceiptResolution(status=RECEIPT_STATUS_NOT_AN_OBJECT, ref=ref)
+    return ReceiptResolution(status=RECEIPT_STATUS_RESOLVED, ref=ref)
+
+
+def _acceptance_record_exists(audit_log_path: str, capability_id: str, phase_id: str) -> bool:
+    """(Task B4, F-59; strictness fix, cross-vendor review) Fail-safe presence check: True IFF the
+    log's CURRENT answer for THIS EXACT ``(capability_id, phase_id)`` pair is an active,
+    un-repudiated acceptance -- i.e. ``reduce_acceptance_log`` reduces to
+    ``ACCEPTANCE_STATUS_ACTIVE``.
+
+    A thin boolean over the reducer, never a second scan of the file: this predicate and the
+    reducer must give the same answer, so only one of them is allowed to decide.
+
+    This is the dedup key the B4 idempotent-backfill path uses: an already-``accepted: true``
+    descriptor is legitimately idempotent (no duplicate record) ONLY when a COMPLETE record for
+    its own ``(capability_id, phase_id)`` pair is currently on file -- never merely because
+    ``accepted is True`` (the F-59 defect: a descriptor can be ``accepted: true`` with NO audit
+    record at all), and never merely because SOME dict with a matching id/phase pair happens to
+    be present (a junk line with no ``implementation_hash`` / ``op_kind`` must not be mistaken
+    for a real record and silently suppress the backfill).
+
+    A REPUDIATED pair reads False here, and that is deliberate rather than incidental: the record
+    on disk is still well-formed, but the operator took that approval back, so it is no longer
+    evidence of a current one. For the caller (the backfill branch) that means an acceptance
+    that has re-passed every invariant appends a fresh record, which is what re-approval after a
+    withdrawal should leave behind.
+
+    Fail-safe on every branch, never raises:
+      * Log file does not exist yet -> no events at all -> False (the caller correctly appends).
+      * Log file exists but cannot be opened at all (e.g. a permissions error) -> the reducer
+        reports UNREADABLE, which is not ACTIVE -> False. Per this module's OVERRIDING fail-safe
+        property, that is the safer outcome for AN AUDIT TRAIL: an extra record beats a silently
+        missing one, and it never raises up into a refusal (the acceptance itself already
+        happened; only audit completeness is at stake here).
+      * An individual malformed line is skipped by the reducer, never fatal, and never itself
+        counted as "already recorded".
+    """
+    return reduce_acceptance_log(
+        audit_log_path, (capability_id,), phase_id).status == ACCEPTANCE_STATUS_ACTIVE
 
 
 def accept_capability_for_live_use(
@@ -682,26 +1026,33 @@ def accept_capability_for_live_use(
         # Already accepted: nothing to flip. This is EITHER (a) a legitimate idempotent
         # re-acceptance whose audit record for this exact (capability_id, phase_id) already
         # exists -- report success, no duplicate -- OR (b) the F-59 residual: the descriptor is
-        # accepted:true but NO record exists for this pair (a pre-B4 early-return that never
-        # audited at all, or a prior best-effort append that failed after the real flip). An
-        # acceptance event must never be silently un-audited, so (b) backfills the record now,
-        # keyed on the pair (not merely on `accepted is True`).
+        # accepted:true but NO CURRENT record for this pair (a pre-B4 early-return that never
+        # audited at all, a prior best-effort append that failed after the real flip, or a
+        # record the operator has since REPUDIATED). An acceptance event must never be silently
+        # un-audited, so (b) records it now, keyed on the pair (not merely on `accepted is
+        # True`).
+        #
+        # The wording below says "no current record was on file" rather than "the record was
+        # missing", because the predicate does not distinguish those two and the repudiated case
+        # is a real one: the record IS on disk, it is simply no longer the current answer. A
+        # warning that said "missing" would send someone looking for a line that is right there.
         if _acceptance_record_exists(audit_log_path, capability_id, phase_id):
             return AcceptanceResult(accepted=True, reason=None, capability_id=capability_id,
                                     phase_id=phase_id, record_ref=None,
                                     warning="descriptor was already accepted; no change written")
         try:
-            _append_acceptance_record(audit_log_path, record)
+            _append_audit_log_record(audit_log_path, record)
         except Exception as e:
             return AcceptanceResult(
                 accepted=True, reason=None, capability_id=capability_id, phase_id=phase_id,
                 record_ref=None,
-                warning=("descriptor was already accepted, and the missing acceptance record "
-                          f"could not be backfilled: {e}"))
+                warning=("descriptor was already accepted, and no current acceptance record was "
+                         f"on file for this phase; recording one failed: {e}"))
         return AcceptanceResult(
             accepted=True, reason=None, capability_id=capability_id, phase_id=phase_id,
             record_ref=audit_log_path,
-            warning="descriptor was already accepted; backfilled the missing acceptance record")
+            warning=("descriptor was already accepted, and no current acceptance record was on "
+                     "file for this phase; recorded one"))
 
     # Build the new entry list, flipping ONLY the target entry's `accepted` (its other keys and
     # every other entry stay byte-identical after re-dump).
@@ -726,7 +1077,7 @@ def accept_capability_for_live_use(
     # Authoritative act succeeded. Append the durable acceptance record (best-effort — a log
     # failure does NOT undo a legitimate acceptance; it is surfaced as a warning).
     try:
-        _append_acceptance_record(audit_log_path, record)
+        _append_audit_log_record(audit_log_path, record)
     except Exception as e:
         return AcceptanceResult(
             accepted=True, reason=None, capability_id=capability_id, phase_id=phase_id,

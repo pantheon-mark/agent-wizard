@@ -356,6 +356,18 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # them without it would have both blocking states back exactly as they were —
     # a real, working repair that no surface the operator reads ever names.
     "state_actions.py",
+    # acceptance_repudiation.py (Cut 1.9) — the operator's entrypoint to taking an
+    # approval BACK. `capability_invariants.py` imports it at MODULE SCOPE (its
+    # dangling-receipt failure renders the take-it-back command from this module's
+    # single renderer rather than spelling the invocation again), so omitting it is
+    # a raw ModuleNotFoundError on the emitted self-QA battery, not a degraded
+    # feature. And the feature it carries is the one this entry exists for: without
+    # it an emitted project can grant a capability live-write authorization and has
+    # no sanctioned way to withdraw it — an approval the operator does not
+    # recognise, or has changed their mind about, stays live with a hand edit of a
+    # trust file as the only way out. That is the dead-end shape this cut exists to
+    # remove, recreated by an emit-set omission.
+    "acceptance_repudiation.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

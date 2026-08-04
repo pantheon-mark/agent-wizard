@@ -220,6 +220,19 @@ def is_allowlist_eligible(entry) -> bool:
 # over-stating RISK is the safe direction here (it costs a prompt), where
 # understating it would cost the operator's authority.
 #
+# `repudiate-acceptance` is the operator taking an approval BACK
+# (`acceptance_repudiation.py`'s CLI): it switches a capability off, puts their withdrawal on
+# record in the acceptance log, and queues a fresh trial. LIVE_WRITE / writes_external=True.
+#
+# Same two reasons as `acknowledge-writer` above, and they are worth stating rather than
+# inheriting. Taken literally the command performs no external write -- it edits a local
+# descriptor file and appends a local log line. It is classified live-write because it acts on
+# the AUTHORIZATION path (it is the inverse of `operator-acceptance`, which is enrolled here for
+# exactly that reason), and because what it records IS the operator's decision, in their own
+# words. An allow-eligible entry would let an agent record a withdrawal the operator never made
+# -- and, symmetrically, the same surface an agent could use to record one they did not want.
+# Over-stating risk here costs a prompt; understating it costs the operator's authority.
+#
 # `trial-run` is the operator's way IN to the trial protocol (`trial_executor.py`'s
 # CLI): it carries one change a capability proposes through on the operator's real
 # record, checks it landed, puts it back, checks it came back, and writes what it
@@ -315,6 +328,13 @@ BASELINE_COMMANDS: Tuple[CommandEntry, ...] = (
     CommandEntry(
         name="acknowledge-writer",
         command_prefix="python3 agents/lib/external_write/writer_acknowledgement.py",
+        command_class=LIVE_WRITE,
+        writes_external=True,
+        allowed_outputs=(),
+    ),
+    CommandEntry(
+        name="repudiate-acceptance",
+        command_prefix="python3 agents/lib/external_write/acceptance_repudiation.py",
         command_class=LIVE_WRITE,
         writes_external=True,
         allowed_outputs=(),

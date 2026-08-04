@@ -219,12 +219,21 @@ from external_write.proof_hash import (  # noqa: E402
 # directly (never operator_acceptance.record_operator_acceptance, which mints a FRESH receipt
 # from raw operator-confirmation text; complete_migration's caller already has a minted receipt
 # ref). See this module's own "sanctioned resume/complete-migration tool" docstring section above.
-# (Task B5) ``_acceptance_record_exists`` is reused (not reimplemented) for the completion gate's
-# audit-record-exists conjunct -- see the "Task B5" section near the end of this module.
+# (Task B5) ``reduce_acceptance_log`` is reused (not reimplemented) for the completion gate's
+# audit conjunct -- see the "Task B5" section near the end of this module -- and for this
+# module's own ``_read_latest_acceptance_record``. It is the ONE function that answers "is this
+# capability's acceptance current"; nothing here scans the log itself. The repudiation
+# builder/appender come from the same module because that is where the log's event vocabulary is
+# declared; the state TRANSITION those events drive lives here, in ``repudiate_acceptance``.
 from external_write.acceptance_ceremony import (  # noqa: E402
     accept_capability_for_live_use,
     AcceptanceResult,
-    _acceptance_record_exists,
+    ACCEPTANCE_STATUS_ACTIVE,
+    ACCEPTANCE_STATUS_REPUDIATED,
+    ACCEPTANCE_STATUS_UNREADABLE,
+    append_repudiation_record,
+    build_repudiation_record,
+    reduce_acceptance_log,
 )
 
 # ---------------------------------------------------------------------------
@@ -648,6 +657,13 @@ def _read_latest_acceptance_record(
     were current. Only when NO ``phase_id`` is given at all (the descriptor carries none) does
     the latest record for the capability, regardless of phase, apply.
 
+    (Cut 1.9 / B2') A REPUDIATED acceptance returns ``(None, False)`` -- the same shape as "no
+    record", and for the same reason it produces the same downstream outcome. The record is still
+    on disk and still well-formed, but the operator took that approval back, so the hashes it
+    carries must never be handed to ``acceptance_hash_is_stale`` as evidence that the current
+    approval is fresh. Handing them over is exactly how a repudiation would end up recording the
+    operator's decision and changing nothing.
+
     Returns ``(record_or_None, read_error)``. ``read_error`` is True ONLY when the log file EXISTS
     but could not be opened at all (a present-but-unreadable file) -- distinct from a normal,
     non-error ABSENT file (``FileNotFoundError`` -> ``(None, False)``, mirroring every other
@@ -655,36 +671,19 @@ def _read_latest_acceptance_record(
     whole-file read error -- an append-only log surviving a partial write on one line must not lose
     every other, otherwise-good, line's evidence.
 
+    This function does NOT scan the log itself: ``acceptance_ceremony.reduce_acceptance_log`` is
+    the ONE reader of that file's event order, and this is a thin adapter onto the
+    ``(record, read_error)`` shape this module's own callers already take. A second scan here
+    would be a second answer to the same question.
+
     Never raises."""
     path = Path(audit_log_path) if audit_log_path else (root / ACCEPTANCE_LOG_REL)
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return None, False
-    except OSError:
-        return None, True
-
-    latest_any: Optional[Dict[str, Any]] = None
-    latest_phase_matched: Optional[Dict[str, Any]] = None
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rec = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(rec, dict) or rec.get("capability_id") not in aliases:
-            continue
-        latest_any = rec
-        if phase_id is not None and rec.get("phase_id") == phase_id:
-            latest_phase_matched = rec
-    # (xvendor R-2 fix) A phase was specified: ONLY a phase-matched record counts, never a
-    # cross-phase fallback (the caller's phase_id is None here iff the descriptor itself carries
-    # no phase_id, in which case ANY record for the capability is the best available signal).
-    if phase_id is not None:
-        return latest_phase_matched, False
-    return latest_any, False
+    reduced = reduce_acceptance_log(str(path), aliases, phase_id)
+    if reduced.status == ACCEPTANCE_STATUS_ACTIVE:
+        return reduced.record, False
+    # UNREADABLE is the only read_error; ABSENT and REPUDIATED are both "no current record",
+    # which every caller already treats fail-safe (stale -> revoke).
+    return None, reduced.status == ACCEPTANCE_STATUS_UNREADABLE
 
 
 def acceptance_hash_is_stale(
@@ -814,12 +813,32 @@ def _revoke_accepted_entries(
     return changed
 
 
-def _queue_staleness_retrial_migration(root: Path, canonical_id: str) -> None:
+#: The re-trial entry's own words for the STALENESS cause (the code moved under an approval).
+STALENESS_RETRIAL_REASON = (
+    "this capability's implementation changed since it was approved for live use; "
+    "acceptance was automatically switched off pending a fresh trial"
+)
+STALENESS_RETRIAL_NEXT_STEP = (
+    "Re-run this capability's copy-run trial and approve it again through the normal "
+    "accept flow."
+)
+
+
+def _queue_retrial_migration(
+    root: Path, canonical_id: str, *, reason: str, suggested_next_step: str,
+) -> None:
     """Land (or refresh) a durable, disk-first re-trial request in the pending-migration queue --
     the SAME queue ``wizard/skills/add-capability.md`` checks at its Step A, and the SAME
     idempotent replace-by-``mechanism_id`` convention ``upgrade_reconcile._append_migration_
     request`` uses (re-running a check for the same capability replaces its existing entry rather
-    than duplicating it)."""
+    than duplicating it).
+
+    ``reason`` / ``suggested_next_step`` are supplied by the caller rather than written here
+    because the two revocation causes are not the same fact: staleness means the code moved under
+    an approval, repudiation means the operator took the approval back with the code untouched.
+    One sentence covering both would be false for one of them. The QUEUE WRITE itself stays a
+    single implementation -- there is exactly one function that puts a re-trial on the queue, and
+    both causes go through it."""
     path = root / MIGRATION_QUEUE_REL
     try:
         existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
@@ -834,18 +853,42 @@ def _queue_staleness_retrial_migration(root: Path, canonical_id: str) -> None:
     existing.append({
         "mechanism_id": canonical_id,
         "requested_at": _utcnow_iso(),
-        "reason": (
-            "this capability's implementation changed since it was approved for live use; "
-            "acceptance was automatically switched off pending a fresh trial"
-        ),
-        "suggested_next_step": (
-            "Re-run this capability's copy-run trial and approve it again through the normal "
-            "accept flow."
-        ),
+        "reason": reason,
+        "suggested_next_step": suggested_next_step,
         "status": "pending",
     })
     _atomic_write(
         path, json.dumps(existing, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _revoke_and_queue_retrial(
+    root: Path, aliases: FrozenSet[str], canonical_id: str, *,
+    reason: str, suggested_next_step: str,
+) -> bool:
+    """THE sanctioned acceptance-revocation transition: force ``accepted`` back to ``False`` for
+    this capability's descriptor entries and put a named re-trial on the pending-migration queue,
+    in that order.
+
+    Every cause that revokes an acceptance goes through this one function -- staleness
+    (``revoke_stale_acceptance``) and operator repudiation (``repudiate_acceptance``) -- so there
+    is exactly ONE implementation of the transition on the flag that authorizes live writes. A
+    second copy of "flip it and queue a re-trial" is the shape this package's worst defects have
+    taken.
+
+    Two things it deliberately does NOT do. It does not decide WHETHER to revoke -- each caller
+    owns its own cause and has already decided by the time it gets here. And it does not call
+    ``reconcile_state``: both callers do that themselves, unconditionally, because they must
+    reconcile the materialized views (pause marker / migration queue) even on the call where no
+    revocation happened.
+
+    Returns whether any descriptor entry was actually flipped from True to False by this call.
+    False means nothing was accepted to begin with -- NOT that the revocation failed; the
+    descriptor writer raises on a write failure rather than reporting one quietly."""
+    descriptor_set = _load_descriptor_set(root)
+    changed = _revoke_accepted_entries(root, descriptor_set, aliases)
+    _queue_retrial_migration(
+        root, canonical_id, reason=reason, suggested_next_step=suggested_next_step)
+    return changed
 
 
 @dataclass(frozen=True)
@@ -905,9 +948,10 @@ def revoke_stale_acceptance(
     if stale:
         index = build_capability_index(str(root))
         identity: CapabilityIdentity = index.resolve(canonical_id, "module_stem")
-        descriptor_set = _load_descriptor_set(root)
-        _revoke_accepted_entries(root, descriptor_set, identity.aliases)
-        _queue_staleness_retrial_migration(root, identity.canonical_id)
+        _revoke_and_queue_retrial(
+            root, identity.aliases, identity.canonical_id,
+            reason=STALENESS_RETRIAL_REASON,
+            suggested_next_step=STALENESS_RETRIAL_NEXT_STEP)
         note = STALE_ACCEPTANCE_NOTE
 
     reconcile = reconcile_state(str(root), canonical_id)
@@ -915,6 +959,212 @@ def revoke_stale_acceptance(
         canonical_id=reconcile.canonical_id, stale=stale, revoked=stale,
         note=note, reconcile=reconcile,
     )
+
+
+# ---------------------------------------------------------------------------
+# Operator repudiation: taking an approval back.
+#
+# Until this existed an operator could approve a capability for live use and had no way to
+# un-approve it. That gap is worse than it sounds: it also meant a record of consent the operator
+# does NOT recognise -- one whose receipt is gone, or that they never gave -- had no sanctioned
+# way to be marked as such, so it read as genuine to every future consumer of the log.
+#
+# The rule this section exists to satisfy: REPUDIATING AN ACTIVE ACCEPTANCE MUST REVOKE
+# ``accepted: true`` AND QUEUE A RE-TRIAL. A repudiation that appended a row while live
+# authorization stayed standing would be worse than none -- a control that produces a record and
+# no effect, at the boundary that authorizes real external writes. So the event and the
+# transition are one operation here, and the transition is the SAME one staleness revocation
+# uses (``_revoke_and_queue_retrial``), never a second copy of it.
+# ---------------------------------------------------------------------------
+
+#: The plain-language note surfaced to the operator on a successful repudiation. Deliberately
+#: NOT the staleness note: that one says the capability's code changed, which is false here --
+#: nothing changed except the operator's mind, and telling them their code moved would send them
+#: looking for an edit nobody made.
+REPUDIATION_NOTE = (
+    "Your approval for this capability is now on record as taken back, and it is switched off. "
+    "It will not run live again until you try it again and approve it again."
+)
+
+#: The note when the flag did NOT end up off. Only reachable if the descriptor was re-accepted
+#: between the revocation and the re-read, or the flip did not land -- but the note must never
+#: claim an off state the mechanism did not reach, so there is a sentence for that case rather
+#: than one sentence that is true most of the time.
+REPUDIATION_NOTE_STILL_ON = (
+    "Your decision to take this approval back is on record. This capability is STILL marked "
+    "approved for live use, which should not happen -- treat it as not approved and ask your "
+    "assistant to look at security/capability_descriptors.json with you."
+)
+
+#: The re-trial entry's own words for the REPUDIATION cause.
+REPUDIATION_RETRIAL_REASON = (
+    "you took your approval for this capability back, so it was switched off pending a fresh "
+    "trial; nothing about its code changed"
+)
+REPUDIATION_RETRIAL_NEXT_STEP = (
+    "If you want this capability back, run its trial again "
+    "(python3 agents/lib/external_write/trial_executor.py) and then approve it again "
+    "(python3 agents/lib/external_write/operator_acceptance.py). If you do not want it back, "
+    "leave it as it is -- it stays off."
+)
+
+
+@dataclass(frozen=True)
+class RepudiationResult:
+    """Outcome of one ``repudiate_acceptance`` call.
+
+    canonical_id: the resolved canonical capability id this call acted on.
+    repudiated:   True IFF this call appended a typed repudiation event to the acceptance log.
+                  False on every refusal, and a refusal writes nothing at all.
+    revoked:      True IFF this call flipped at least one descriptor entry's ``accepted`` from
+                  True to False. It is False both when the capability was already not accepted
+                  and when this call refused -- so it is NOT a statement that live authorization
+                  is now off. For the post-state read ``reconcile.accepted``.
+    reason:       plain-language refusal text; None when ``repudiated`` is True.
+    note:         the operator-facing note; None on refusal.
+    record:       the repudiation event that was appended; None on refusal.
+    reconcile:    the ``ReconcileResult`` from the ``reconcile_state`` call made after the
+                  transition, so the pause marker and pending-migration queue are coherent with
+                  the just-revoked SSOT. None on refusal (nothing changed, nothing to reconcile).
+    """
+
+    canonical_id: str
+    repudiated: bool
+    revoked: bool
+    reason: Optional[str] = None
+    note: Optional[str] = None
+    record: Optional[Dict[str, Any]] = None
+    reconcile: Optional[ReconcileResult] = None
+
+
+def repudiate_acceptance(
+    project_root: str, canonical_id: str, *,
+    operator_confirmation: Optional[str],
+    audit_log_path: Optional[str] = None,
+) -> RepudiationResult:
+    """The operator takes an approval back: append a typed repudiation event to the acceptance
+    log AND revoke ``accepted: true`` AND queue a re-trial, as one operation.
+
+    ``operator_confirmation`` is the operator's own words and has NO DEFAULT. A blank, whitespace
+    -only, or absent value refuses: a repudiation is the operator's act, so silence must mean no
+    repudiation, never "repudiated". Nothing in this package synthesizes this value, and a value
+    a machine invented would record a decision nobody made -- the same class as a machine-written
+    acceptance.
+
+    WHAT IT REFUSES, and why each one is a refusal rather than a no-op:
+      * no operator words (above);
+      * the log's reduced answer for this capability is not ACTIVE -- there is no live approval
+        on record to take back. Repudiating nothing would append consent about a state that is
+        not there, and would re-queue a re-trial for a capability the operator already took back.
+        This is the guard that makes "repudiation applies to an ACTIVE acceptance" true;
+      * the active record carries no usable ``phase_id`` -- the event has to name the same
+        (capability_id, phase_id) pair the record does, or the reducer's join will not find it
+        and the repudiation would land as a line nothing reads.
+    A refusal writes NOTHING: no event, no flag change, no queue entry.
+
+    ORDER MATTERS, and it is: revoke first, append second. The failure this rule exists to
+    prevent is a recorded repudiation sitting next to live authorization. If the append fails
+    after a successful revocation, the capability is off with the withdrawal unrecorded -- the
+    safe direction, and a re-run finds the log still ACTIVE and simply retries the append.
+
+    Repudiating a capability whose descriptor is ALREADY ``accepted: false`` is allowed and is
+    the field case this was built for: a record that reads as genuine consent with no live
+    authorization behind it. There is nothing to switch off, so ``revoked`` is False, and the
+    event is still recorded.
+
+    Resolves ``canonical_id`` through the canonical-id resolver, so it raises
+    ``IdentityResolutionError`` for an id that names no capability on disk and
+    ``ReconcileStateError`` when the descriptor set / migration queue exists but cannot be read
+    -- the same fail-closed convention as ``revoke_stale_acceptance``, reused rather than
+    re-worded.
+
+    CEILING (disclosed): build-time + operator-as-approver, like everything else in this package.
+    Recording a withdrawal and clearing the flag is the sanctioned path; it is not a claim that
+    nothing can set that flag again by hand.
+    """
+    root = Path(project_root).resolve()
+
+    if not (isinstance(operator_confirmation, str) and operator_confirmation.strip()):
+        return RepudiationResult(
+            canonical_id=canonical_id, repudiated=False, revoked=False,
+            reason=("nothing was recorded -- taking an approval back needs your own words, and "
+                    "none were given. Nothing was changed and this capability's approval is "
+                    "exactly as it was."))
+
+    index = build_capability_index(str(root))
+    if index.state_read_error:
+        raise ReconcileStateError(
+            "Could not safely take this capability's approval back because the capability "
+            "descriptor list (security/capability_descriptors.json) or the pending-migrations "
+            "queue (agents/handoffs/pending_migrations.json) exists but could not be read or is "
+            "corrupted. Nothing was changed. This is NOT confirmation that nothing is wrong -- "
+            "repair or restore that file, then try again."
+        )
+
+    identity: CapabilityIdentity = index.resolve(canonical_id, "module_stem")
+    descriptor_set = _load_descriptor_set(root)
+    entry = _find_descriptor_entry(descriptor_set, identity.aliases)
+
+    descriptor_phase = entry.get(PHASE_ID_KEY) if entry else None
+    if not isinstance(descriptor_phase, str):
+        descriptor_phase = None
+
+    log_path = audit_log_path if audit_log_path else str(root / ACCEPTANCE_LOG_REL)
+    reduced = reduce_acceptance_log(log_path, identity.aliases, descriptor_phase)
+    if reduced.status != ACCEPTANCE_STATUS_ACTIVE:
+        return RepudiationResult(
+            canonical_id=identity.canonical_id, repudiated=False, revoked=False,
+            reason=_no_active_acceptance_reason(identity.canonical_id, reduced.status))
+
+    # The event must name the pair the RECORD declares, not the spelling this call was invoked
+    # with -- that is what makes the reducer's join find it.
+    record_capability_id = reduced.record.get("capability_id")
+    record_phase_id = reduced.record.get("phase_id")
+    if not (isinstance(record_phase_id, str) and record_phase_id.strip()):
+        return RepudiationResult(
+            canonical_id=identity.canonical_id, repudiated=False, revoked=False,
+            reason=("nothing was recorded -- this capability's approval record does not say "
+                    "which phase it belongs to, so a withdrawal could not be tied to it. "
+                    "Nothing was changed. Ask your assistant to look at "
+                    f"{ACCEPTANCE_LOG_REL} with you."))
+
+    # Revoke FIRST: never leave live authorization standing behind a recorded withdrawal.
+    revoked = _revoke_and_queue_retrial(
+        root, identity.aliases, identity.canonical_id,
+        reason=REPUDIATION_RETRIAL_REASON,
+        suggested_next_step=REPUDIATION_RETRIAL_NEXT_STEP)
+
+    event = build_repudiation_record(
+        record_capability_id, record_phase_id, operator_confirmation,
+        repudiated_at=_utcnow_iso(),
+        repudiated_implementation_hash=reduced.record.get("implementation_hash"),
+    )
+    append_repudiation_record(log_path, event)
+
+    reconcile = reconcile_state(str(root), identity.canonical_id)
+    return RepudiationResult(
+        canonical_id=reconcile.canonical_id, repudiated=True, revoked=revoked,
+        note=(REPUDIATION_NOTE_STILL_ON if reconcile.accepted else REPUDIATION_NOTE),
+        record=event, reconcile=reconcile,
+    )
+
+
+def _no_active_acceptance_reason(canonical_id: str, status: str) -> str:
+    """The refusal text for "there is no live approval on record to take back", worded to the
+    SPECIFIC thing the log said. One sentence for all three would be wrong for two of them:
+    "nothing was ever approved", "you already took this back", and "the approval log could not
+    be read" call for three different next moves."""
+    if status == ACCEPTANCE_STATUS_REPUDIATED:
+        return ("nothing was recorded -- you have already taken this capability's approval "
+                "back, so there is nothing live to take back again. It stays off until you "
+                "trial it and approve it again.")
+    if status == ACCEPTANCE_STATUS_UNREADABLE:
+        return (f"nothing was recorded -- the approval log ({ACCEPTANCE_LOG_REL}) is there but "
+                "could not be read, so it is not possible to tell what this capability's "
+                "approval currently is. Nothing was changed. Ask your assistant to look at that "
+                "file with you, then try again.")
+    return ("nothing was recorded -- there is no approval on file for this capability to take "
+            "back. Nothing was changed.")
 
 
 # ---------------------------------------------------------------------------
@@ -1387,6 +1637,15 @@ _CONJUNCT_EXPLANATIONS: Dict[str, Tuple[str, str]] = {
         "its code changed since it was approved, so that approval is no longer current.",
         "Re-run its copy-run trial and approve it again, then run this check again.",
     ),
+    # Distinct from "audit-appended" on purpose. The record IS on file here -- what changed is
+    # that the operator took it back. Reporting that as a missing record would be untrue, and
+    # would point them at repairing an audit trail that is intact.
+    "acceptance-not-repudiated": (
+        "you took your approval for this capability back, so it is not approved for live use "
+        "-- even though it is still marked approved here.",
+        "Re-run its trial and approve it again if you want it back, then run this check again. "
+        "If you do not want it back, leave it off.",
+    ),
     "projection-coherent": (
         "its internal state is not fully settled yet (a leftover pause marker or an open "
         "pending-migration entry remains for it).",
@@ -1603,13 +1862,21 @@ def check_completion(project_root: str, canonical_id: str) -> CompletionResult:
         entry.get("id") if entry and isinstance(entry.get("id"), str) else cid
     )
     audit_log_path = str(root / ACCEPTANCE_LOG_REL)
-    audit_ok = (
-        accepted
-        and isinstance(phase_id, str) and bool(phase_id)
-        and _acceptance_record_exists(audit_log_path, raw_capability_id, phase_id)
+    # (Cut 1.9 / B2') Read the log's CURRENT answer, not merely whether a matching line exists:
+    # an acceptance the operator has since taken back is still a well-formed line, and counting
+    # it would let a repudiated approval satisfy this gate. Two distinct conjuncts come out of
+    # the one read, because "no record was ever written" and "you took that approval back" need
+    # different sentences -- telling an operator no record was found when their own withdrawal is
+    # sitting in the log would be a false claim with a wrong next step attached.
+    audit_status = (
+        reduce_acceptance_log(audit_log_path, (raw_capability_id,), phase_id).status
+        if (accepted and isinstance(phase_id, str) and bool(phase_id)) else None
     )
+    audit_ok = audit_status == ACCEPTANCE_STATUS_ACTIVE
     if not audit_ok:
-        core_failed.append("audit-appended")
+        core_failed.append(
+            "acceptance-not-repudiated" if audit_status == ACCEPTANCE_STATUS_REPUDIATED
+            else "audit-appended")
 
     # (Cut 1.5 / v0.19.0, Task A -- V15-3 keystone) PROJECT-WIDE, attribution-free fail-closed
     # block: ANY open bespoke-writer external-write bypass in this project (a hand-rolled write

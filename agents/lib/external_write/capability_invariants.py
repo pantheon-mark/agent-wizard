@@ -158,9 +158,17 @@ from external_write.capability_identity import (  # noqa: E402
 )
 from external_write.contracts import get_contract  # noqa: E402
 from external_write.acceptance_ceremony import (  # noqa: E402
-    _acceptance_record_exists,
+    ACCEPTANCE_STATUS_ACTIVE,
+    ACCEPTANCE_STATUS_REPUDIATED,
     DEFAULT_AUDIT_LOG_PATH,
+    reduce_acceptance_log,
+    resolve_operator_receipt_ref,
 )
+# The ONE renderer of the take-an-approval-back command. Check 5b names that way out, and it
+# names it FROM here rather than spelling the invocation again -- a second copy is how a named
+# repair comes to name a path that no longer exists. No cycle: that module reaches
+# lifecycle_state and capability_identity, neither of which reaches this one.
+from external_write.acceptance_repudiation import repudiation_command  # noqa: E402
 # (Task B1, F-74) The adapter registry's dispatch lookup + the ONE canonical
 # source of the required evidence-predicate NAMES -- see evidence.py's
 # REQUIRED_EVIDENCE_PREDICATES docstring for why this module must reference
@@ -496,7 +504,22 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
             )
         else:
             audit_log_path = str(root / DEFAULT_AUDIT_LOG_PATH)
-            if not _acceptance_record_exists(audit_log_path, canonical_id, phase_id):
+            # (Cut 1.9 / B2') Ask the log's CURRENT answer, not merely whether a matching line
+            # exists. Three outcomes need three different sentences: no record at all, a record
+            # the operator TOOK BACK (the line is right there -- calling it missing would be
+            # false and would point at repairing an intact audit trail), and a live record whose
+            # own receipt no longer resolves.
+            reduced = reduce_acceptance_log(audit_log_path, (canonical_id,), phase_id)
+            if reduced.status == ACCEPTANCE_STATUS_REPUDIATED:
+                failures.append(
+                    f'Audit record: capability "{canonical_id}" is marked accepted for phase '
+                    f'"{phase_id}", but you took that approval back -- the acceptance log '
+                    f"carries your withdrawal after it. Treat this capability as unapproved. "
+                    "Its descriptor entry should not still be marked accepted, so have your "
+                    "assistant reconcile this capability's state with you. If you do want it "
+                    "back, run its trial and approve it again."
+                )
+            elif reduced.status != ACCEPTANCE_STATUS_ACTIVE:
                 failures.append(
                     f'Audit record: capability "{canonical_id}" is marked accepted for phase '
                     f'"{phase_id}", but no matching acceptance audit record was found in '
@@ -504,6 +527,31 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
                     "from the audit trail; treat it as unaccepted until the audit trail is "
                     "repaired."
                 )
+            else:
+                # --- Check 5b: the approval's own receipt still resolves ------------------
+                # A record whose operator_receipt_ref names a path that is not there reads
+                # EXACTLY like one whose receipt is right where it was written -- so an approval
+                # whose evidence has been deleted or moved passes silently. This says the path
+                # does not resolve; it says NOTHING about whether a resolvable receipt is
+                # genuine (see resolve_operator_receipt_ref's own disclosed residual), and this
+                # message must not be read as a verdict on authenticity either way.
+                #
+                # Both ways out are named, because a check that blocks with no exit is the dead
+                # end this package has already paid for: put the receipt back, or take the
+                # approval back on record.
+                resolution = resolve_operator_receipt_ref(
+                    reduced.record, project_root=str(root))
+                if not resolution.resolved:
+                    failures.append(
+                        f'Acceptance receipt: capability "{canonical_id}" is marked accepted for '
+                        f'phase "{phase_id}", and its approval record points at a receipt file '
+                        f"that could not be read ({resolution.ref!r}: {resolution.status}). "
+                        "Until that is settled this approval cannot be traced back to anything "
+                        "you signed off. Two ways out: restore that receipt file if you still "
+                        "have it, or -- if this approval is not one you recognise -- take it "
+                        "back on record by running, from your project's top folder, "
+                        f"{repudiation_command(canonical_id)}"
+                    )
 
     # --- Check 6: no residual paused_live_write marker, post-acceptance only ---------------
     # (Task A2, F-70 crash-safety half) An accepted capability should carry NO pause marker for
