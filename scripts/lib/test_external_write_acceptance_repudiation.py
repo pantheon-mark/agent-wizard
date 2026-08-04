@@ -760,5 +760,279 @@ class RepudiationEntrypointTests(unittest.TestCase):
             self.assertNotIn("Traceback", proc.stderr)
 
 
+# ---------------------------------------------------------------------------
+# 6. Fix round 1 -- claims that outran what the mechanism established
+# ---------------------------------------------------------------------------
+
+class ReceiptFailureSaysWhatIsActuallyWrongTests(unittest.TestCase):
+    """The receipt check covers several distinct causes, and one sentence for all of them is
+    false for most. A record carrying NO reference does not "point at a receipt file", there is
+    no file to "restore", and an internal status token is not something a non-technical operator
+    can act on."""
+
+    def _failures_for(self, tmp, record_overrides):
+        root = _two_capability_project(tmp)
+        record = _acceptance_record("acme_ledger_poster", _PHASE)
+        record.update(record_overrides)
+        _append(_log_path(root), record)
+        return capability_invariants.check_capability_invariants(
+            str(root), "acme_ledger_poster").failures
+
+    def _receipt_failure(self, failures):
+        hits = [f for f in failures if f.startswith("Acceptance receipt:")]
+        self.assertEqual(len(hits), 1, f"expected exactly one receipt failure in {failures!r}")
+        return hits[0]
+
+    def test_a_record_with_no_reference_at_all_is_not_described_as_pointing_at_a_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            message = self._receipt_failure(
+                self._failures_for(tmp, {"operator_receipt_ref": None}))
+            self.assertNotIn("points at a receipt file", message)
+            self.assertNotIn("restore that receipt file", message)
+            self.assertIn("no reference to a receipt", message)
+            # The only honest exit for this one: there is no file to put back.
+            self.assertIn(acceptance_repudiation.REPUDIATION_ENTRYPOINT_REL, message)
+
+    def test_a_dangling_reference_still_offers_the_restore_exit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            message = self._receipt_failure(self._failures_for(
+                tmp, {"operator_receipt_ref": "security/acceptance_receipts/gone.json"}))
+            # The intent is that the put-it-back exit is offered, not that a particular verb is
+            # used -- the message deliberately says "put that file back" rather than "restore",
+            # which is the plainer wording for a non-technical reader.
+            self.assertIn("put that file back", message)
+            self.assertIn("security/acceptance_receipts/gone.json", message)
+            self.assertIn(acceptance_repudiation.REPUDIATION_ENTRYPOINT_REL, message)
+
+    def test_no_internal_token_or_python_none_reaches_the_operator(self):
+        for overrides in ({"operator_receipt_ref": None},
+                          {"operator_receipt_ref": "security/acceptance_receipts/gone.json"}):
+            with tempfile.TemporaryDirectory() as tmp:  # a fresh project per case
+                message = self._receipt_failure(self._failures_for(tmp, overrides))
+                for leak in ("None", "no_ref", "not_an_object", "unparsable",
+                             "RECEIPT_STATUS"):
+                    self.assertNotIn(leak, message,
+                                     f"{leak!r} leaked into an operator-facing line: {message!r}")
+
+
+class AnUnreadableLogIsNotReportedAsAnAbsentRecordTests(unittest.TestCase):
+    """"No record was ever written" and "the log is there and we could not read it" are opposite
+    evidence, and they call for opposite repairs: re-run the approval step, versus fix a file you
+    cannot read. Reporting the second as the first attaches the wrong next step to a permissions
+    problem."""
+
+    def _unreadable_log_project(self, tmp):
+        root = _two_capability_project(tmp)
+        log = _log_path(root)
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text("", encoding="utf-8")
+        log.chmod(0o000)
+        return root, log
+
+    @unittest.skipIf(hasattr(os, "getuid") and os.getuid() == 0,
+                     "running as root ignores permission bits")
+    def test_the_self_qa_battery_says_it_could_not_read_the_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, log = self._unreadable_log_project(tmp)
+            try:
+                failures = capability_invariants.check_capability_invariants(
+                    str(root), "acme_ledger_poster").failures
+            finally:
+                log.chmod(0o644)
+            audit = [f for f in failures if f.startswith("Audit record:")]
+            self.assertEqual(len(audit), 1, f"expected one audit failure in {failures!r}")
+            self.assertNotIn("no matching acceptance audit record was found", audit[0])
+            self.assertIn("could not be read", audit[0])
+
+    @unittest.skipIf(hasattr(os, "getuid") and os.getuid() == 0,
+                     "running as root ignores permission bits")
+    def test_the_completion_gate_reports_it_as_its_own_conjunct(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, log = self._unreadable_log_project(tmp)
+            try:
+                result = lifecycle_state.check_completion(str(root), "acme_ledger_poster")
+            finally:
+                log.chmod(0o644)
+            self.assertFalse(result.done)
+            self.assertIn("audit-log-readable", result.failed_conjuncts)
+            self.assertNotIn(
+                "audit-appended", result.failed_conjuncts,
+                "an unreadable log is not evidence that no entry exists")
+            self.assertIn("could not be read", result.operator_message)
+
+    def test_a_genuinely_absent_record_still_reports_audit_appended(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _two_capability_project(tmp)
+            result = lifecycle_state.check_completion(str(root), "acme_ledger_poster")
+            self.assertIn("audit-appended", result.failed_conjuncts)
+            self.assertNotIn("audit-log-readable", result.failed_conjuncts)
+
+
+class TheAcceptanceShapePredicateStaysOnTheEnforcedPathTests(unittest.TestCase):
+    """``is_valid_acceptance_record`` and the reducer's ACTIVE branch must not be two
+    implementations of "is this line a real acceptance record for this pair" with nothing forcing
+    them to agree. The reducer DELEGATES; these pin that it still does."""
+
+    def test_the_reducer_calls_the_predicate(self):
+        import ast
+        src = (_AGENTS_LIB / "external_write" / "acceptance_ceremony.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(src)
+        fn = next(n for n in tree.body
+                  if isinstance(n, ast.FunctionDef) and n.name == "reduce_acceptance_log")
+        called = {n.func.id for n in ast.walk(fn)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        self.assertIn(
+            "is_valid_acceptance_record", called,
+            "the reducer must decide 'is this a real acceptance record for this pair' through "
+            "the one predicate that owns that question, not by re-spelling it inline")
+
+    def test_the_reducer_and_the_predicate_agree_line_for_line(self):
+        good = _acceptance_record("acme_ledger_poster", _PHASE)
+        cases = [good]
+        for field in ("implementation_hash", "op_kind"):
+            absent = dict(good)
+            absent.pop(field)
+            blank = dict(good)
+            blank[field] = ""
+            wrong_type = dict(good)
+            wrong_type[field] = 7
+            cases += [absent, blank, wrong_type]
+        wrong_phase = dict(good)
+        wrong_phase["phase_id"] = "phase-other"
+        cases.append(wrong_phase)
+        with tempfile.TemporaryDirectory() as tmp:
+            for i, rec in enumerate(cases):
+                log = Path(tmp) / f"log{i}.jsonl"
+                _append(log, rec)
+                reduced_active = (
+                    reduce_acceptance_log(str(log), ("acme_ledger_poster",), _PHASE).status
+                    == ACCEPTANCE_STATUS_ACTIVE)
+                predicate = acceptance_ceremony.is_valid_acceptance_record(
+                    rec, "acme_ledger_poster", _PHASE)
+                self.assertEqual(reduced_active, predicate,
+                                 f"reducer and predicate disagree on {rec!r}")
+
+
+class NoFalseAbsolutesTests(unittest.TestCase):
+
+    def test_the_cli_does_not_claim_it_never_prints_a_traceback(self):
+        """It catches two named exceptions. An I/O failure from the descriptor write or the log
+        append is not one of them, so the absolute was a claim the except tuple did not make."""
+        src = (_AGENTS_LIB / "external_write" / "acceptance_repudiation.py").read_text(
+            encoding="utf-8")
+        self.assertNotIn("Never prints a traceback", src)
+
+    def test_the_usage_does_not_claim_a_refusal_always_changed_nothing(self):
+        """One path exits refused after the change already landed: the state check that runs
+        AFTER the revoke and the append can fail on its own."""
+        usage = acceptance_repudiation.USAGE
+        self.assertNotIn("nothing was changed (it says why)", usage)
+        self.assertIn("after", usage.lower())
+
+    def test_the_result_docstring_discloses_the_unresolved_id_case(self):
+        doc = (lifecycle_state.RepudiationResult.__doc__ or "").lower()
+        self.assertIn("as given", doc)
+        self.assertIn("blank-confirmation refusal", doc)
+
+    def test_a_blank_confirmation_refuses_before_identity_resolution_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _two_capability_project(tmp)
+            result = lifecycle_state.repudiate_acceptance(
+                str(root), "no_such_capability_anywhere", operator_confirmation="   ")
+            self.assertFalse(result.repudiated)
+            self.assertEqual(result.canonical_id, "no_such_capability_anywhere")
+
+    def test_the_appender_enforces_the_disjointness_the_docstring_claims(self):
+        """The two event shapes being disjoint was asserted as "can never", but nothing stopped a
+        hand-built hybrid from being appended. The appender now enforces it."""
+        event = acceptance_ceremony.build_repudiation_record(
+            "acme_ledger_poster", _PHASE, "take it back",
+            repudiated_at="2026-02-02T00:00:00Z")
+        hybrid = dict(event)
+        hybrid["implementation_hash"] = "a" * 64
+        hybrid["op_kind"] = _OP_KIND
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "log.jsonl"
+            with self.assertRaises(ValueError):
+                acceptance_ceremony.append_repudiation_record(str(log), hybrid)
+            self.assertFalse(log.exists(), "a refused append must write nothing")
+
+    def test_a_hand_written_hybrid_line_still_reduces_to_repudiated(self):
+        """Belt and braces on the resolved direction: even a line the appender would refuse, if
+        someone wrote it by hand, is read as the repudiation it declares itself to be."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "log.jsonl"
+            _append(log, _acceptance_record("acme_ledger_poster", _PHASE))
+            hybrid = {
+                "schema": REPUDIATION_RECORD_SCHEMA,
+                "capability_id": "acme_ledger_poster", "phase_id": _PHASE,
+                "repudiated_at": "2026-02-02T00:00:00Z",
+                "operator_confirmation": "take it back",
+                "implementation_hash": "a" * 64, "op_kind": _OP_KIND,
+            }
+            _append(log, hybrid)
+            self.assertEqual(
+                reduce_acceptance_log(str(log), ("acme_ledger_poster",), _PHASE).status,
+                ACCEPTANCE_STATUS_REPUDIATED)
+
+
+class ThePlaceholderIsNotTheOperatorsWordsTests(unittest.TestCase):
+    """The rendered command carries a blank for the operator to replace. Pasted unedited, it
+    would write the machine's placeholder into the log as their verbatim consent -- the field
+    whose whole content is supposed to be what THEY said."""
+
+    def test_the_placeholder_pasted_unedited_is_refused(self):
+        options, error = acceptance_repudiation.parse_repudiation_args(
+            ["--capability-id", "acme_ledger_poster",
+             "--operator-confirmation", acceptance_repudiation.CONFIRMATION_PLACEHOLDER])
+        self.assertIsNone(options)
+        self.assertTrue(error)
+
+    def test_the_placeholder_with_surrounding_space_is_also_refused(self):
+        options, error = acceptance_repudiation.parse_repudiation_args(
+            ["--capability-id", "acme_ledger_poster",
+             "--operator-confirmation",
+             f"  {acceptance_repudiation.CONFIRMATION_PLACEHOLDER}  "])
+        self.assertIsNone(options)
+        self.assertTrue(error)
+
+    def test_real_words_that_merely_mention_the_shape_are_still_accepted(self):
+        options, error = acceptance_repudiation.parse_repudiation_args(
+            ["--capability-id", "acme_ledger_poster",
+             "--operator-confirmation",
+             "I never said what you said, word for word, so take it back"])
+        self.assertIsNone(error, error)
+        self.assertIsNotNone(options)
+
+
+class TheAddCapabilitySkillDescribesTheNewEntryKindTests(unittest.TestCase):
+    """The pending-migration queue now carries an entry kind whose cause is the operator's own
+    withdrawal, with nothing changed about the capability's code. The skill's prose asserted the
+    opposite for every entry."""
+
+    SKILL = Path(__file__).resolve().parents[2] / "skills" / "add-capability.md"
+
+    def test_the_skill_does_not_claim_every_entry_came_from_an_upgrade(self):
+        text = self.SKILL.read_text(encoding="utf-8")
+        self.assertNotIn(
+            "an upgrade previously found an existing mechanism that no longer follows a safety "
+            "rule (see `operating_discipline.md`) and safe-paused it rather than leaving it "
+            "running unsafely or breaking it outright — each entry names the paused mechanism",
+            text)
+
+    def test_the_skill_does_not_claim_only_technical_wiring_changes(self):
+        text = self.SKILL.read_text(encoding="utf-8")
+        self.assertNotIn("Its business purpose does not change — only its technical wiring does",
+                         text)
+
+    def test_the_skill_names_the_withdrawal_kind_and_reads_the_entrys_own_words(self):
+        text = self.SKILL.read_text(encoding="utf-8")
+        self.assertIn("suggested_next_step", text)
+        low = text.lower()
+        self.assertTrue("took" in low or "taken back" in low or "withdrew" in low,
+                        "the skill must name the operator-withdrawal entry kind")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -160,7 +160,11 @@ from external_write.contracts import get_contract  # noqa: E402
 from external_write.acceptance_ceremony import (  # noqa: E402
     ACCEPTANCE_STATUS_ACTIVE,
     ACCEPTANCE_STATUS_REPUDIATED,
+    ACCEPTANCE_STATUS_UNREADABLE,
     DEFAULT_AUDIT_LOG_PATH,
+    RECEIPT_STATUS_ABSENT,
+    RECEIPT_STATUS_NO_REF,
+    RECEIPT_STATUS_UNREADABLE,
     reduce_acceptance_log,
     resolve_operator_receipt_ref,
 )
@@ -519,6 +523,20 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
                     "assistant reconcile this capability's state with you. If you do want it "
                     "back, run its trial and approve it again."
                 )
+            elif reduced.status == ACCEPTANCE_STATUS_UNREADABLE:
+                # "Nothing was recorded" and "the log is there and we could not read it" are
+                # opposite evidence, and they call for opposite repairs. Reporting this as a
+                # missing record would send the operator to re-run their approval step over what
+                # is a permissions or I/O problem, and would tell them a record is absent when
+                # nothing here established that.
+                failures.append(
+                    f'Audit record: capability "{canonical_id}" is marked accepted for phase '
+                    f'"{phase_id}", and the approval log ({DEFAULT_AUDIT_LOG_PATH}) is there but '
+                    "could not be read -- so whether its approval is recorded could not be "
+                    "determined. This is NOT confirmation that the record is missing. Treat this "
+                    "capability as unverified until that file can be read; repair or restore it, "
+                    "then re-run this check."
+                )
             elif reduced.status != ACCEPTANCE_STATUS_ACTIVE:
                 failures.append(
                     f'Audit record: capability "{canonical_id}" is marked accepted for phase '
@@ -536,20 +554,37 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
                 # genuine (see resolve_operator_receipt_ref's own disclosed residual), and this
                 # message must not be read as a verdict on authenticity either way.
                 #
-                # Both ways out are named, because a check that blocks with no exit is the dead
-                # end this package has already paid for: put the receipt back, or take the
-                # approval back on record.
+                # The ways out are named, because a check that blocks with no exit is the dead
+                # end this package has already paid for. WHICH ways out are named depends on the
+                # cause, and so does the sentence describing it -- one line for every cause was
+                # false for most of them. A record with NO reference does not "point at a receipt
+                # file", there is no file to "restore", and the internal status token is not
+                # something a non-technical operator can act on, so none of those reach them.
                 resolution = resolve_operator_receipt_ref(
                     reduced.record, project_root=str(root))
                 if not resolution.resolved:
+                    if resolution.status == RECEIPT_STATUS_NO_REF:
+                        what = ("its approval record carries no reference to a receipt at all, "
+                                "so there is no record of what you signed off")
+                        restore = ""
+                    elif resolution.status == RECEIPT_STATUS_ABSENT:
+                        what = ("its approval record names a receipt file that is not there "
+                                f"({resolution.ref})")
+                        restore = "put that file back if you still have it, or -- "
+                    elif resolution.status == RECEIPT_STATUS_UNREADABLE:
+                        what = ("its approval record names a receipt file that is there but "
+                                f"could not be opened ({resolution.ref})")
+                        restore = ("make that file readable again if you can, or -- ")
+                    else:
+                        what = ("its approval record names a file that could not be read as a "
+                                f"receipt ({resolution.ref})")
+                        restore = "replace that file with the real receipt if you have it, or -- "
                     failures.append(
                         f'Acceptance receipt: capability "{canonical_id}" is marked accepted for '
-                        f'phase "{phase_id}", and its approval record points at a receipt file '
-                        f"that could not be read ({resolution.ref!r}: {resolution.status}). "
-                        "Until that is settled this approval cannot be traced back to anything "
-                        "you signed off. Two ways out: restore that receipt file if you still "
-                        "have it, or -- if this approval is not one you recognise -- take it "
-                        "back on record by running, from your project's top folder, "
+                        f'phase "{phase_id}", and {what}. Until that is settled this approval '
+                        "cannot be traced back to anything you signed off. What to do: "
+                        f"{restore}if this approval is not one you recognise, take it back on "
+                        "record by running, from your project's top folder, "
                         f"{repudiation_command(canonical_id)}"
                     )
 

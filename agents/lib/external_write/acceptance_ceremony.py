@@ -398,10 +398,18 @@ def is_valid_acceptance_record(rec: Any, capability_id: str, phase_id: str) -> b
     ``implementation_hash`` and a non-empty string ``op_kind`` (see the ``record`` dict this
     module builds just above ``accept_capability_for_live_use``'s flip/backfill branches).
 
+    WHERE IT IS ENFORCED. ``reduce_acceptance_log``'s ACTIVE branch calls this -- it is how a
+    line becomes "the current acceptance" -- so every consumer of the reducer
+    (``_acceptance_record_exists``, ``lifecycle_state``'s staleness reader and completion gate,
+    ``capability_invariants``' audit check) reaches the shape rules below through this one
+    function. That delegation is asserted structurally by test; without it this predicate and
+    the reducer would be two implementations of the same question with nothing forcing them to
+    agree.
+
     Without this check, ANY dict with a merely-matching ``capability_id`` / ``phase_id`` -- e.g.
     a hand-crafted or partially-written junk line -- counted as "already recorded", which could
     (a) make the B4 idempotent-backfill path skip writing the real missing record, and (b) make
-    ``check_completion``'s audit-appended conjunct read OK against junk. This does not touch
+    ``check_completion``'s audit conjunct read OK against junk. This does not touch
     ``capability_module_hash`` (legitimately ``None`` on a real record when the module file could
     not be hashed -- see ``_compute_capability_module_hash``), only the two fields that are never
     legitimately absent from a real append.
@@ -438,10 +446,21 @@ def is_valid_repudiation_record(rec: Any, capability_ids: Any, phase_id: Optiona
         REPUDIATION, never "repudiated". Nothing in this package writes this field from a
         default, and no machine-supplied value would make the row mean anything it does not.
 
-    Structurally disjoint from an acceptance record: a repudiation carries no
-    ``implementation_hash`` / ``op_kind``, so it can never satisfy
-    ``is_valid_acceptance_record``; an acceptance record carries a different ``schema``, so it
-    can never satisfy this. Pinned by test rather than left as an observation."""
+    DISJOINT FROM AN ACCEPTANCE RECORD -- and here is exactly what enforces that, because the
+    clauses below are NOT what does it. This predicate does not forbid ``implementation_hash`` /
+    ``op_kind``, so a hand-built hybrid row carrying both a repudiation ``schema`` and those two
+    fields would satisfy this AND ``is_valid_acceptance_record``. Three things keep that from
+    mattering, in order of what they actually cover:
+
+      * ``build_repudiation_record`` never emits those keys;
+      * ``append_repudiation_record`` REFUSES a record carrying either, so nothing this module
+        writes can be a hybrid;
+      * and if a hybrid reached the log by some other route, ``reduce_acceptance_log`` tests for
+        a repudiation FIRST, so it resolves as a repudiation -- the fail-safe direction.
+
+    So the honest statement is "nothing this module can write is a hybrid, and a hybrid that
+    arrived some other way is read as a repudiation", not "the two predicates are mutually
+    exclusive by construction." All three are pinned by test."""
     if not isinstance(rec, dict):
         return False
     if rec.get("schema") != REPUDIATION_RECORD_SCHEMA:
@@ -535,11 +554,24 @@ def reduce_acceptance_log(
         if is_valid_repudiation_record(rec, capability_ids, phase_id):
             status, record, repudiation = ACCEPTANCE_STATUS_REPUDIATED, None, rec
             continue
-        if rec.get("capability_id") not in capability_ids:
+        cap_id = rec.get("capability_id")
+        if cap_id not in capability_ids:
             continue
-        if phase_id is not None and rec.get("phase_id") != phase_id:
-            continue
-        if _has_acceptance_record_shape(rec):
+        # DELEGATE the pair+shape decision to the one predicate that owns it, rather than
+        # re-spelling it here: two implementations of "is this line a real acceptance record for
+        # this pair" with nothing forcing them to agree is the defect shape this package's worst
+        # bugs have taken, and it would also have left that predicate with no caller on any
+        # enforced path.
+        #
+        # The alias MEMBERSHIP just above is the only part that cannot go through it -- the
+        # predicate takes a single declared id and this reducer reads over an alias set -- so the
+        # id handed to it is the one that line already matched. When no phase was requested, the
+        # record's own phase is passed, which makes the predicate's phase clause a self-comparison
+        # and is exactly this reducer's documented ``phase_id=None`` semantics ("any phase
+        # counts"), not a weakening of the predicate. Everything else -- the shape clauses -- is
+        # decided there and only there.
+        if is_valid_acceptance_record(
+                rec, cap_id, phase_id if phase_id is not None else rec.get("phase_id")):
             status, record, repudiation = ACCEPTANCE_STATUS_ACTIVE, rec, None
     return ReducedAcceptance(status=status, record=record, repudiation=repudiation)
 
@@ -585,13 +617,25 @@ def append_repudiation_record(audit_log_path: str, record: Dict[str, Any]) -> No
     Refuses a record this module's own validator does not recognize as a well-formed repudiation
     for its own declared pair, rather than writing a line the reducer would silently skip: a
     repudiation that lands as an unreadable line is indistinguishable from one that was never
-    written, and the operator would be told their approval had been taken back when it had not."""
+    written, and the operator would be told their approval had been taken back when it had not.
+
+    ALSO refuses a HYBRID -- a row carrying a repudiation ``schema`` together with the acceptance
+    record's own ``implementation_hash`` / ``op_kind``. This is the check that makes the
+    two-shapes-are-disjoint property true of everything this module writes; the validators alone
+    do not establish it (see ``is_valid_repudiation_record``'s own note). Enforced here rather
+    than in the validator so that a hybrid which somehow reached the log by another route is
+    still READ as a repudiation -- refusing it on read would let a malformed line resurrect a
+    withdrawn approval, which is the fail-open direction."""
     declared_ids = (record.get("capability_id"),) if isinstance(record, dict) else ()
     declared_phase = record.get("phase_id") if isinstance(record, dict) else None
     if not is_valid_repudiation_record(record, declared_ids, declared_phase):
         raise ValueError(
             "refusing to append a malformed repudiation event -- build it with "
             "build_repudiation_record")
+    if _has_acceptance_record_shape(record):
+        raise ValueError(
+            "refusing to append a repudiation event that also carries an acceptance record's "
+            "implementation_hash / op_kind -- one line must be one event")
     _append_audit_log_record(audit_log_path, record)
 
 

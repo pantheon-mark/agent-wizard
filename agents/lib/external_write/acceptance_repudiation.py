@@ -123,8 +123,9 @@ USAGE = (
     "The original approval record is kept -- nothing is erased, a withdrawal is added.\n"
     "Run it from your project's top folder.\n"
     f"Exit codes: {EXIT_RECORDED} = taken back; "
-    f"{EXIT_REFUSED} = nothing was changed (it says why); "
-    f"{EXIT_BAD_ARGS} = the command was not understood."
+    f"{EXIT_REFUSED} = it did not finish -- read the message, which says whether anything "
+    "changed (almost always nothing did, but the state check that runs AFTER the change can "
+    f"fail on its own); {EXIT_BAD_ARGS} = the command was not understood."
 )
 
 
@@ -174,6 +175,14 @@ def parse_repudiation_args(
     A blank or whitespace-only confirmation is refused HERE as well as by the transition itself:
     what the operator said is the whole content of the record, and an empty one would be a
     silent withdrawal recorded against nobody's words.
+
+    The rendered ``CONFIRMATION_PLACEHOLDER`` is refused for the same reason, and it is not a
+    cosmetic check. The command is rendered with that blank BEFORE the operator has said
+    anything; pasted unedited it would write the machine's own placeholder into the audit log as
+    their verbatim consent. The act would still be theirs, but the field's entire content is
+    supposed to be THEIR words -- a machine-supplied stand-in sitting in it is the forged-consent
+    shape, in the one field that exists to prevent it. Only the placeholder itself is refused
+    (trimmed), so words that merely happen to quote the phrase still pass.
     """
     args = list(argv or ())
     options: Dict[str, Optional[str]] = {FLAG_CAPABILITY: None, FLAG_CONFIRMATION: None}
@@ -190,16 +199,27 @@ def parse_repudiation_args(
         return None, f"missing required {FLAG_CAPABILITY}.\n\n{USAGE}"
     if not (options[FLAG_CONFIRMATION] or "").strip():
         return None, f"missing required {FLAG_CONFIRMATION}.\n\n{USAGE}"
+    if (options[FLAG_CONFIRMATION] or "").strip() == CONFIRMATION_PLACEHOLDER:
+        return None, (
+            f"the {FLAG_CONFIRMATION} is still the blank the command was printed with "
+            f"({CONFIRMATION_PLACEHOLDER}). Replace it with your own words -- what goes on "
+            "record has to be what you said, not what was printed for you to fill in."
+            f"\n\n{USAGE}")
     return options, None
 
 
 # ---------------------------------------------------------------------------
 # CLI -- the operator-invocable way to take an approval back.
 #
-# Kernel-side, like every other operator entrypoint in this package. Never prints a traceback --
-# a non-technical operator reads this output -- and never claims more than the transition
-# actually reached: the note it prints comes from the transition itself, which picks its wording
-# from the state it observed AFTER reconciling, not from what it intended to do.
+# Kernel-side, like every other operator entrypoint in this package. It never claims more than
+# the transition actually reached: the note it prints comes from the transition itself, which
+# picks its wording from the state it observed AFTER reconciling, not from what it intended to do.
+#
+# On error output, stated to what the except tuple below actually establishes rather than as an
+# absolute: the two failures this command can produce by its OWN logic -- an id that names no
+# capability, and project state that cannot be read -- are caught and printed in plain language.
+# An I/O failure underneath (the descriptor write, the log append) is NOT caught and would reach
+# the operator as a traceback. That is a real residual, not a claim to have covered everything.
 #
 # Run from the project root, which is where the descriptor set and the acceptance log both
 # resolve from. There is deliberately no --project-root flag: every operator-facing command this

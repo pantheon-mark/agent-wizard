@@ -1013,7 +1013,11 @@ REPUDIATION_RETRIAL_NEXT_STEP = (
 class RepudiationResult:
     """Outcome of one ``repudiate_acceptance`` call.
 
-    canonical_id: the resolved canonical capability id this call acted on.
+    canonical_id: the resolved canonical capability id this call acted on -- EXCEPT on the
+                  blank-confirmation refusal, which returns the id exactly AS GIVEN, because that
+                  refusal happens before identity resolution runs. Deliberate ordering: a caller
+                  who supplied no operator words should get that plain refusal, not an
+                  identity-resolution error about a name they may have typed correctly.
     repudiated:   True IFF this call appended a typed repudiation event to the acceptance log.
                   False on every refusal, and a refusal writes nothing at all.
     revoked:      True IFF this call flipped at least one descriptor entry's ``accepted`` from
@@ -1637,6 +1641,18 @@ _CONJUNCT_EXPLANATIONS: Dict[str, Tuple[str, str]] = {
         "its code changed since it was approved, so that approval is no longer current.",
         "Re-run its copy-run trial and approve it again, then run this check again.",
     ),
+    # Also distinct from "audit-appended", and for the mirror-image reason: nothing here
+    # established that a record is absent -- the file could not be read at all. Saying "carries
+    # no entry" would be a claim from evidence nobody has, with a repair attached (re-run the
+    # approval) that does not address a file the project cannot open.
+    "audit-log-readable": (
+        "its approval log is there but could not be read, so whether its approval was recorded "
+        "could not be determined. This is not confirmation that anything is missing.",
+        # ACCEPTANCE_LOG_REL, not a fourth literal spelling of it: the three deliberate,
+        # test-pinned copies of this path are pinned to each other, and a fourth with nothing
+        # forcing agreement would be the defect that idiom exists to avoid.
+        f"Repair or restore {ACCEPTANCE_LOG_REL} so it can be read, then run this check again.",
+    ),
     # Distinct from "audit-appended" on purpose. The record IS on file here -- what changed is
     # that the operator took it back. Reporting that as a missing record would be untrue, and
     # would point them at repairing an audit trail that is intact.
@@ -1874,9 +1890,14 @@ def check_completion(project_root: str, canonical_id: str) -> CompletionResult:
     )
     audit_ok = audit_status == ACCEPTANCE_STATUS_ACTIVE
     if not audit_ok:
-        core_failed.append(
-            "acceptance-not-repudiated" if audit_status == ACCEPTANCE_STATUS_REPUDIATED
-            else "audit-appended")
+        if audit_status == ACCEPTANCE_STATUS_REPUDIATED:
+            core_failed.append("acceptance-not-repudiated")
+        elif audit_status == ACCEPTANCE_STATUS_UNREADABLE:
+            # A log that exists and cannot be read is not evidence that no entry exists, and
+            # "re-run your acceptance step" is the wrong repair for a permissions/IO problem.
+            core_failed.append("audit-log-readable")
+        else:
+            core_failed.append("audit-appended")
 
     # (Cut 1.5 / v0.19.0, Task A -- V15-3 keystone) PROJECT-WIDE, attribution-free fail-closed
     # block: ANY open bespoke-writer external-write bypass in this project (a hand-rolled write
