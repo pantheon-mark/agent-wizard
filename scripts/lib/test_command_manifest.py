@@ -280,6 +280,13 @@ class TestEveryOperatorInvocableEntrypointIsAccountedFor(unittest.TestCase):
         "coverage_gate.py",
         "dependency_enrollment.py",
         "lifecycle_state.py",
+        # suppressed_invocation.py is MACHINE-invoked and deliberately not
+        # classified: the only caller is the pause guard inside an entrypoint
+        # wrapper, which runs it as a subprocess when it fires. Enrolling it would
+        # advertise -- and allowlist -- a command no operator should ever run, on a
+        # manifest whose consumers are the allowlist build and the PreToolUse hook.
+        # It writes nothing outside the project's own record of stopped runs.
+        "suppressed_invocation.py",
     })
 
     def _modules_with_a_main_block(self):

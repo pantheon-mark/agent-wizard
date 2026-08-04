@@ -93,6 +93,7 @@ import importlib
 import json
 import os
 import re
+import stat
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -274,6 +275,30 @@ _READONLY_COMPANION_SUFFIXES: Tuple[str, ...] = (
 
 _GUARD_BEGIN = "# --- BEGIN upgrade-reconcile safe-pause (managed; do not edit by hand) ---"
 _GUARD_END = "# --- END upgrade-reconcile safe-pause ---"
+
+# The two executable lines of the guard body that other code has to be able to
+# find, named once here rather than re-spelled at each site. The echo line is the
+# ANCHOR the tripwire is inserted after (see ``_insert_tripwire_into_existing_
+# guard``) and the exit line is the statement that must stay unconditional.
+#
+# Both have been byte-identical in every guard this toolkit has ever generated:
+# the shell body was introduced once and only its comment wording has changed
+# since (verified against this file's own history). That is what makes the
+# tripwire insertion below reach EVERY already-paused wrapper rather than only
+# the ones paused from now on.
+_GUARD_PAUSED_ECHO_LINE = '  echo "paused pending migration"'
+_GUARD_EXIT_LINE = "  exit 0"
+
+# Project-relative path of the emitted module the guard calls when it fires.
+# Duplicated-by-value from ``agent_emitter._EXTERNAL_WRITE_LIB_REL`` +
+# ``suppressed_invocation.py`` and pinned equal to it by
+# ``test_suppressed_invocation_tripwire.TestStructuralDiscipline`` -- the same
+# anti-drift discipline every other value crossing the build/emitted boundary in
+# this module carries (see ``PAUSED_MECHANISMS_DIR_REL`` and the note at the Task
+# E section header). Never imported: this module is build-side toolkit and that
+# module is emitted runtime code copied into the operator's own project.
+SUPPRESSED_INVOCATION_RECORDER_REL = (
+    "agents/lib/external_write/suppressed_invocation.py")
 
 
 @dataclass
@@ -2928,8 +2953,60 @@ def _pause_state_path(operator_project_dir: Path, mechanism_id: str) -> Path:
     return Path(operator_project_dir) / PAUSED_MECHANISMS_DIR_REL / f"{mechanism_id}.json"
 
 
+def _sh_single_quote(value: str) -> str:
+    """``value`` as one POSIX single-quoted shell word.
+
+    ESCAPES rather than validating-and-skipping. A relpath or an id carrying an
+    apostrophe is legal on every filesystem this runs on, and the alternative --
+    omitting the tripwire for such a wrapper -- would silently exempt exactly the
+    mechanism nobody would think to check.
+    """
+    return "'" + str(value).replace("'", "'\\''") + "'"
+
+
+def _guard_recorder_lines(mechanism_id: str, entrypoint_relpath: str) -> str:
+    """The lines the fired guard runs to make its own firing survive on disk.
+
+    ONE producer, two consumers: ``_guard_block`` (a wrapper being paused now) and
+    ``_insert_tripwire_into_existing_guard`` (a wrapper paused before this existed).
+    A second copy of these lines is how the two populations come to be recorded
+    differently.
+
+    Three properties are load-bearing and each is here on purpose:
+
+      * THE EXIT IS NOT PART OF THIS. These lines end at the recorder call. The
+        guard's ``exit 0`` is its own statement, after them, unconditional -- any
+        shape like ``recorder && exit 0`` falls through to the payload when the
+        recorder fails, which is a paused writer running live against the
+        operator's real external surface.
+      * ``|| :`` NEUTRALISES THE RECORDER'S STATUS. Not cosmetic: a wrapper invoked
+        as ``sh -e wrapper.sh`` would otherwise abort on a nonzero recorder before
+        reaching the exit. The recorder still reports honestly (a nonzero exit and
+        a structured stderr line); it is this layer that refuses to act on it.
+      * STDOUT IS THE WRAPPER'S. The recorder is redirected to ``/dev/null`` on
+        stdout so it can never be mistaken for the paused script's own output;
+        stderr is deliberately NOT redirected, so its one structured line lands in
+        whatever log the scheduler already collects.
+    """
+    prefix = _relative_prefix(entrypoint_relpath)
+    recorder = f"{prefix}/{SUPPRESSED_INVOCATION_RECORDER_REL}"
+    pause_state = _wrapper_guard_pause_state_ref(entrypoint_relpath, mechanism_id)
+    return (
+        "  # Records that this run was stopped, so it survives somewhere other than\n"
+        "  # this log file. Failing to record it can never let the paused work run:\n"
+        "  # the exit below is a separate, unconditional statement, and `|| :` stops a\n"
+        "  # nonzero status here from pre-empting it under `sh -e`.\n"
+        f'  python3 "$_RECONCILE_HERE/{recorder}" record \\\n'
+        f"    --mechanism-id {_sh_single_quote(mechanism_id)} \\\n"
+        f"    --entrypoint {_sh_single_quote(entrypoint_relpath)} \\\n"
+        f'    --project-root "$_RECONCILE_HERE/{prefix}" \\\n'
+        f'    --pause-state "$_RECONCILE_HERE/{pause_state}" >/dev/null || :\n'
+    )
+
+
 def _guard_block(mechanism_id: str, writer_relpath: str, marker_from_wrapper: str,
-                 from_version: str, to_version: str) -> str:
+                 from_version: str, to_version: str,
+                 entrypoint_relpath: str) -> str:
     return (
         f"{_GUARD_BEGIN}\n"
         f"# This entrypoint was safe-paused by the upgrade to {to_version} (from "
@@ -2940,8 +3017,9 @@ def _guard_block(mechanism_id: str, writer_relpath: str, marker_from_wrapper: st
         "# A genuinely separate read-only entrypoint is not affected by this guard.\n"
         '_RECONCILE_HERE="$(cd "$(dirname "$0")" && pwd)"\n'
         f'if [ -e "$_RECONCILE_HERE/{marker_from_wrapper}" ]; then\n'
-        '  echo "paused pending migration"\n'
-        "  exit 0\n"
+        f"{_GUARD_PAUSED_ECHO_LINE}\n"
+        f"{_guard_recorder_lines(mechanism_id, entrypoint_relpath)}"
+        f"{_GUARD_EXIT_LINE}\n"
         "fi\n"
         f"{_GUARD_END}\n"
         "\n"
@@ -2972,6 +3050,23 @@ def _wrapper_guard_marker_ref(entrypoint_relpath: str, mechanism_id: str) -> str
     construction; no I/O."""
     prefix = _relative_prefix(entrypoint_relpath)
     return f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{mechanism_id}.pause"
+
+
+def _wrapper_guard_pause_state_ref(entrypoint_relpath: str,
+                                   mechanism_id: str) -> str:
+    """The pause-STATE record's path as seen from ``entrypoint_relpath``'s own
+    wrapper location -- the companion of ``_wrapper_guard_marker_ref``, built the
+    same way from the same constant.
+
+    The fired guard hands this to the recorder so the recorder can read the
+    entangled-read-output determination this module derived at pause time. Passing
+    the path (rather than letting the recorder compose it) is what keeps
+    ``PAUSED_MECHANISMS_DIR_REL`` from acquiring one more spelling: it is already
+    duplicated-by-value at each side of the build/emitted boundary that needs it,
+    and the recorder is on neither side of that -- it is handed the answer.
+    """
+    prefix = _relative_prefix(entrypoint_relpath)
+    return f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{mechanism_id}.json"
 
 
 def _rewrite_wrapper_guard_marker_id(
@@ -3044,6 +3139,309 @@ def _wrapper_guard_still_references_legacy_marker(
     return old_marker_ref in content
 
 
+# ===== The suppressed-invocation tripwire, and its reach ======================
+#
+# THE PROBLEM THIS SOLVES, AND WHY IT NEEDED ITS OWN MECHANISM
+#
+# ``_safe_pause_entrypoint`` inserts a guard ONLY when the wrapper does not already
+# carry one (``if _GUARD_BEGIN not in original``), and nothing else rewrites a
+# guard's BODY -- ``_rewrite_wrapper_guard_marker_id`` rewrites exactly one embedded
+# marker path and says so.
+#
+# So a tripwire added only to newly-generated guard bodies would reach none of the
+# wrappers that already carry a guard -- which is the entire population that has
+# ever exhibited the problem. On a real operator estate a wrapper paused before any
+# of this existed fired NINE TIMES OVER NINE DAYS with nobody told. A mechanism
+# whose consuming branch never executes on the only population that has the problem
+# is not a fix.
+#
+# WHY THE CHANGE IS AN INSERTION AND NOT A REGENERATION. Replacing an existing
+# guard body would be a rewrite on the fail-closed pause-safety path: a rewrite
+# that goes wrong un-pauses a live writer, which is far worse than a missing count.
+# So one anchored insertion is made and NOTHING else is touched -- the marker the
+# guard pauses on, the comment lines, the exit, and every byte of the operator's own
+# payload stay exactly as they are. That is verified as a POST-CONDITION over the
+# whole file before anything is published, not assumed from the construction.
+
+def _insert_tripwire_into_existing_guard(
+    operator_project_dir: Path,
+    entrypoint_relpath: str,
+    mechanism_id: str,
+) -> Tuple[str, str]:
+    """Insert the tripwire into ``entrypoint_relpath``'s ALREADY-PRESENT guard.
+
+    Returns ``(outcome, reason)`` where outcome is one of ``"upgraded"``,
+    ``"already_current"``, ``"skipped"`` (there is no managed guard here to add it
+    to) or ``"refused"``.
+
+    Every refusal leaves the wrapper byte-for-byte as it was. The bar for touching
+    it at all is deliberately high, because the failure this is guarding against is
+    silently un-pausing a writer:
+
+      * exactly one guard block, its markers in order;
+      * the guard must literally name THIS mechanism's pause marker, reconstructed
+        from the same single helper every other guard-reference site uses. A guard
+        naming something else is one whose pause semantics this cannot confirm;
+      * the anchor line must appear exactly once inside the block;
+      * and after construction, the candidate must differ from the original by
+        NOTHING except the inserted lines -- checked over the entire file, so the
+        payload, the marker check and the exit are all covered by one assertion
+        rather than three hopeful ones;
+      * and the published bytes are read back and compared, with a restore of the
+        original if they disagree.
+    """
+    wrapper_path = Path(operator_project_dir) / entrypoint_relpath
+    try:
+        original = wrapper_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "skipped", f"no wrapper file at {entrypoint_relpath}"
+    except OSError as exc:
+        return "refused", (f"the wrapper {entrypoint_relpath} could not be read "
+                           f"({exc.strerror or exc!r})")
+    except UnicodeDecodeError:
+        return "refused", (f"the wrapper {entrypoint_relpath} is not text this can "
+                           "read, so it is left untouched")
+    if _GUARD_BEGIN not in original:
+        return "skipped", f"{entrypoint_relpath} carries no managed pause guard"
+    if original.count(_GUARD_BEGIN) != 1 or original.count(_GUARD_END) != 1:
+        return "refused", (f"{entrypoint_relpath} carries more than one managed "
+                           "pause guard block; which one gates this mechanism "
+                           "cannot be established")
+    begin = original.index(_GUARD_BEGIN)
+    end = original.index(_GUARD_END)
+    if end < begin:
+        return "refused", (f"{entrypoint_relpath}'s guard markers are out of "
+                           "order, so its block cannot be delimited")
+    block = original[begin:end]
+
+    recorder_lines = _guard_recorder_lines(mechanism_id, entrypoint_relpath)
+    recorder_ref = (f"{_relative_prefix(entrypoint_relpath)}/"
+                    f"{SUPPRESSED_INVOCATION_RECORDER_REL}")
+    if recorder_ref in block:
+        return "already_current", ""
+
+    marker_ref = _wrapper_guard_marker_ref(entrypoint_relpath, mechanism_id)
+    if marker_ref not in block:
+        return "refused", (
+            f"{entrypoint_relpath}'s guard does not name this mechanism's pause "
+            "marker, so what it actually pauses on cannot be confirmed; it is left "
+            "exactly as it is (a missing count is far cheaper than a writer that "
+            "silently resumes)")
+    anchor = f"{_GUARD_PAUSED_ECHO_LINE}\n"
+    if block.count(anchor) != 1:
+        return "refused", (
+            f"{entrypoint_relpath}'s guard does not carry its stopped-run message "
+            "exactly once where this expects it, so there is no safe place to "
+            "anchor the insertion")
+
+    candidate = original[:begin] + block.replace(anchor, anchor + recorder_lines) \
+        + original[end:]
+    problem = _tripwire_insertion_problem(
+        original, candidate, entrypoint_relpath, mechanism_id)
+    if problem:
+        return "refused", problem
+
+    _atomic_write(wrapper_path, candidate)
+    try:
+        published = wrapper_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        _atomic_write(wrapper_path, original)
+        return "refused", (f"{entrypoint_relpath} could not be read back after the "
+                           f"change ({exc!r}); the original has been restored")
+    if published != candidate:
+        _atomic_write(wrapper_path, original)
+        return "refused", (f"{entrypoint_relpath} did not read back as written; the "
+                           "original has been restored")
+    return "upgraded", ""
+
+
+def _tripwire_insertion_problem(original: str, candidate: str,
+                                entrypoint_relpath: str,
+                                mechanism_id: str) -> Optional[str]:
+    """``None`` when ``candidate`` is ``original`` plus the tripwire and nothing
+    else; a plain-language reason otherwise.
+
+    The first check is the strong one and subsumes the rest: removing the inserted
+    lines must reproduce the original EXACTLY. That is what establishes that the
+    operator's payload, the guard's comments and -- critically -- the marker the
+    ``-e`` test looks at are untouched, rather than three separate checks each of
+    which could be the one that was forgotten. The three that follow are stated
+    anyway because they are the properties a reader needs to see asserted, and
+    because a future change to the construction above would break them first.
+    """
+    recorder_lines = _guard_recorder_lines(mechanism_id, entrypoint_relpath)
+    if candidate.replace(recorder_lines, "", 1) != original:
+        return (f"the change to {entrypoint_relpath} was not confined to inserting "
+                "the record-keeping lines, so it is not being made")
+    if candidate.count(_GUARD_BEGIN) != 1 or candidate.count(_GUARD_END) != 1:
+        return (f"the result for {entrypoint_relpath} would not carry exactly one "
+                "managed pause guard block")
+    marker_ref = _wrapper_guard_marker_ref(entrypoint_relpath, mechanism_id)
+    if candidate.count(marker_ref) != original.count(marker_ref):
+        return (f"the result for {entrypoint_relpath} would not check the same "
+                "pause marker")
+    new_block = candidate[candidate.index(_GUARD_BEGIN):
+                          candidate.index(_GUARD_END)]
+    exit_line = f"{_GUARD_EXIT_LINE}\n"
+    if recorder_lines not in new_block or exit_line not in new_block:
+        return (f"the result for {entrypoint_relpath} would not carry both the "
+                "record-keeping lines and the unconditional exit inside the guard")
+    if new_block.index(recorder_lines) > new_block.index(exit_line):
+        return (f"the result for {entrypoint_relpath} would place the "
+                "record-keeping lines after the exit, where they can never run")
+    return None
+
+
+def upgrade_paused_entrypoint_guards(operator_project_dir: Path) -> Dict[str, Any]:
+    """Bring the tripwire to EVERY declared paused mechanism's wrapper.
+
+    This is the reach mechanism. It is driven by the pause-state records rather
+    than by the mechanisms flagged in this pass, deliberately: a writer that was
+    paused and has since been deleted, renamed or quarantined is never re-flagged
+    by the scanner, so the per-mechanism loop never reaches it -- while its wrapper
+    is still on disk, still guard-paused, and still the thing a schedule invokes.
+    That is precisely the estate's shape.
+
+    Returns ``{"upgraded": [ids], "already_current": [ids],
+    "refused": [{"mechanism_id", "reason"}], "scan_error": None or reason}``.
+
+    IDENTITY IS THE DECLARED VALUE. A filename is a candidate id; the record's own
+    ``mechanism_id`` is the identity, and a disagreement between the two is
+    reported rather than resolved by picking one -- keying on the filename would let
+    a renamed record point this at another mechanism's wrapper.
+
+    ABSENT IS NOT INACCESSIBLE. A project that has never paused anything has no
+    marker directory, which is the overwhelmingly common case including every fresh
+    build: it reports nothing. A directory that exists and cannot be read sets
+    ``scan_error`` -- nothing can be established about it. ``os.stat``, not
+    ``isdir``, because ``isdir`` answers False for both.
+
+    BOUNDED. Its whole input set is one directory's own ``.json`` files, which is
+    what keeps a fail-closed answer here from being able to affect anything else.
+    """
+    root = Path(operator_project_dir)
+    report: Dict[str, Any] = {"upgraded": [], "already_current": [],
+                              "refused": [], "scan_error": None}
+    directory = root / PAUSED_MECHANISMS_DIR_REL
+    try:
+        mode = os.stat(str(directory)).st_mode
+    except FileNotFoundError:
+        return report
+    except OSError as exc:
+        report["scan_error"] = (
+            f"the record of paused mechanisms at {PAUSED_MECHANISMS_DIR_REL} could "
+            f"not be examined ({exc.strerror or exc!r}), so it is not possible to "
+            "tell which paused entrypoints can report being stopped")
+        return report
+    if not stat.S_ISDIR(mode):
+        report["scan_error"] = (
+            f"{PAUSED_MECHANISMS_DIR_REL} is where the record of paused mechanisms "
+            "belongs, but it is not a folder")
+        return report
+    try:
+        names = sorted(os.listdir(str(directory)))
+    except OSError as exc:
+        report["scan_error"] = (
+            f"the record of paused mechanisms at {PAUSED_MECHANISMS_DIR_REL} could "
+            f"not be listed ({exc.strerror or exc!r}), so it is not possible to "
+            "tell which paused entrypoints can report being stopped")
+        return report
+
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        candidate_id = name[: -len(".json")]
+        path = directory / name
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError) as exc:
+            report["refused"].append({
+                "mechanism_id": candidate_id,
+                "reason": (f"the pause record {name} could not be read or parsed "
+                           f"({exc!r}), so the mechanism it belongs to cannot be "
+                           "established")})
+            continue
+        if not isinstance(state, dict):
+            report["refused"].append({
+                "mechanism_id": candidate_id,
+                "reason": f"the pause record {name} is not a record"})
+            continue
+        declared = state.get("mechanism_id")
+        if declared != candidate_id:
+            report["refused"].append({
+                "mechanism_id": candidate_id,
+                "reason": (f"the pause record {name} declares mechanism_id "
+                           f"{declared!r}; the two disagree and this does not "
+                           "choose between them")})
+            continue
+        entrypoint = state.get("entrypoint_relpath")
+        if not (isinstance(entrypoint, str) and entrypoint.strip()):
+            # A `paused_live_write` record names no wrapper on purpose -- there is
+            # no per-mechanism file to gate at that shape, so there is no guard to
+            # carry a tripwire either. Not a refusal; there is nothing here.
+            continue
+        outcome, reason = _insert_tripwire_into_existing_guard(
+            root, entrypoint, declared)
+        if outcome == "upgraded":
+            report["upgraded"].append(declared)
+        elif outcome == "already_current":
+            report["already_current"].append(declared)
+        elif outcome == "refused":
+            report["refused"].append({"mechanism_id": declared, "reason": reason})
+    return report
+
+
+def _record_pause_entanglement(
+    operator_project_dir: Path,
+    mechanism_id: str,
+    carries_read_outputs: Optional[bool],
+    entangled_read_outputs: Sequence[str],
+    separate_readonly_entrypoint: Optional[str] = None,
+) -> bool:
+    """Thread this pass's entangled-read-output determination onto the pause-state
+    record, so the fired guard's recorder can name which of the operator's
+    read-only outputs went dark with the pause.
+
+    It has to be threaded somewhere: the pause state
+    ``_safe_pause_entrypoint`` writes carries no entangled labels, and
+    ``_guard_block`` is not passed them either. The pause-state record is where it
+    goes because entanglement is a property OF THE PAUSE -- what this pause
+    darkened -- and because that record is the one file the fired guard can already
+    be pointed at without any new path crossing the boundary. The new
+    suppressed-invocation fact keeps its own schema and its own file; nothing here
+    overloads the migration queue or a run envelope.
+
+    ADDITIVE and idempotent: every field the record already carried survives, and a
+    second call with the same determination performs no write. NEVER CREATES the
+    record -- a mechanism that was not paused gets nothing fabricated for it, and a
+    record that cannot be read or parsed is left exactly as it is (the pause itself
+    is already in force; this is a label, and losing a label must never risk the
+    record that holds the pause).
+
+    Returns True iff the record was rewritten.
+    """
+    path = _pause_state_path(Path(operator_project_dir), mechanism_id)
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    if not isinstance(state, dict):
+        return False
+    desired: Dict[str, Any] = {
+        "carries_read_outputs": carries_read_outputs,
+        "separate_readonly_entrypoint": separate_readonly_entrypoint,
+        "entangled_read_outputs": list(entangled_read_outputs or ()),
+    }
+    if all(key in state and state[key] == value
+           for key, value in desired.items()):
+        return False
+    state.update(desired)
+    _atomic_write(
+        path,
+        json.dumps(state, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
+    return True
+
+
 def _safe_pause_entrypoint(
     operator_project_dir: Path,
     mechanism_id: str,
@@ -3064,7 +3462,7 @@ def _safe_pause_entrypoint(
         prefix = _relative_prefix(entrypoint_relpath)
         marker_from_wrapper = f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{mechanism_id}.pause"
         guard = _guard_block(mechanism_id, writer_relpath, marker_from_wrapper,
-                             from_version, to_version)
+                             from_version, to_version, entrypoint_relpath)
         lines = original.splitlines(keepends=True)
         if lines and lines[0].startswith("#!"):
             new_content = lines[0] + guard + "".join(lines[1:])
@@ -3994,6 +4392,15 @@ def reconcile_upgrade(
                 _classify_read_output_entanglement(
                     operator_project_dir, relpath, flagged_relpaths)
             )
+            # Threaded onto the pause-state record the fired guard's recorder
+            # reads, so a suppressed run can name which of the operator's read-only
+            # outputs went dark with it. Runs AFTER the classification (which is
+            # itself after the pause, unchanged: the classifier inspects whether a
+            # COMPANION wrapper is already gated, and reordering it around the
+            # pause would change an input it reads).
+            _record_pause_entanglement(
+                operator_project_dir, migration_id, carries_read_outputs,
+                entangled_read_outputs, separate_readonly_entrypoint)
         else:
             orchestrator_entry = _orchestrator_routed_entrypoint(
                 operator_project_dir, mechanism_id)
@@ -4139,6 +4546,14 @@ def reconcile_upgrade(
             state=state,
             paused_op_kinds=paused_op_kinds,
         ))
+
+    # THE REACH PASS, and it runs on EVERY reconcile rather than only when
+    # something was flagged. A wrapper paused by an earlier version -- including
+    # one whose writer has since been deleted or quarantined, so the scanner loop
+    # above never reaches it -- is exactly the population whose suppressed runs went
+    # unreported nine days running. Driven by the declared pause records, not by
+    # this pass's findings. See ``upgrade_paused_entrypoint_guards``.
+    upgrade_paused_entrypoint_guards(operator_project_dir)
 
     if mechanisms:
         # ONE classification pass, through the SAME classifier the

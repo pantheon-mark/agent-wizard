@@ -368,6 +368,17 @@ _EXTERNAL_WRITE_LIB_FILES = (
     # trust file as the only way out. That is the dead-end shape this cut exists to
     # remove, recreated by an emit-set omission.
     "acceptance_repudiation.py",
+    # suppressed_invocation.py (Cut 1.9) — the durable record of an entrypoint pause
+    # guard FIRING. `capability_health.py` (already enrolled above) imports it at
+    # MODULE SCOPE for the session-start surface that reports a stopped scheduled
+    # run, so omitting it is a raw ModuleNotFoundError on the operator's first
+    # orientation, not a degraded feature. And there is a second, worse omission
+    # shape unique to this entry: the guard the upgrade inserts into a paused
+    # wrapper invokes this file BY PATH as a subprocess. Ship the guard without the
+    # module and every suppressed run is silently not recorded — which is exactly the
+    # state a real project sat in for nine days, nine scheduled jobs deep, with
+    # nobody told.
+    "suppressed_invocation.py",
 )
 _EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"
 _BUNDLE_EXTERNAL_WRITE_LIB_REL = "agents/lib/external_write"

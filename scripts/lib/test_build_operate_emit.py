@@ -1881,7 +1881,14 @@ class TestS253ContractDelta(unittest.TestCase):
         # is a ModuleNotFoundError on the emitted self-QA battery; and beyond that, a
         # project without it can grant live-write authorization with no sanctioned way
         # to withdraw it.)
-        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 53)
+        # (Count updated to 54 by Cut 1.9 Task 14, which additionally enrolled
+        # suppressed_invocation.py -- the durable record of an entrypoint pause guard
+        # FIRING. `capability_health` hard-imports it at module scope, so omitting it
+        # is a ModuleNotFoundError on the operator's first orientation; and the guard
+        # the upgrade inserts into a paused wrapper invokes this file BY PATH as a
+        # subprocess, so omitting it means every suppressed run is silently not
+        # recorded -- the exact state a real project sat in for nine days.)
+        self.assertEqual(len(agent_emitter._EXTERNAL_WRITE_LIB_FILES), 54)
 
     def test_emit_set_lists_the_cut19_acceptance_repudiation_entrypoint(self):
         # Cut 1.9 Task 13: acceptance_repudiation.py must be enrolled, or the operator

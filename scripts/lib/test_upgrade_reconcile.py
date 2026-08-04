@@ -885,7 +885,8 @@ class BespokeWriterRelpathKeyingTests(_Base):
         prefix = _relative_prefix(entrypoint_relpath)
         marker_from_wrapper = f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{legacy_id}.pause"
         guard = _guard_block(
-            legacy_id, writer_relpath, marker_from_wrapper, "v0.15.0", "v0.16.0")
+            legacy_id, writer_relpath, marker_from_wrapper, "v0.15.0", "v0.16.0",
+            entrypoint_relpath)
         lines = original.splitlines(keepends=True)
         gated = lines[0] + guard + "".join(lines[1:])
         wrapper_path.write_text(gated, encoding="utf-8")
@@ -975,7 +976,8 @@ class BespokeWriterRelpathKeyingTests(_Base):
         prefix = _relative_prefix(entrypoint_relpath)
         marker_from_wrapper = f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{legacy_id}.pause"
         guard = _guard_block(
-            legacy_id, writer_relpath, marker_from_wrapper, "v0.15.0", "v0.16.0")
+            legacy_id, writer_relpath, marker_from_wrapper, "v0.15.0", "v0.16.0",
+            entrypoint_relpath)
         lines = original.splitlines(keepends=True)
         gated = lines[0] + guard + "".join(lines[1:])
         wrapper_path.write_text(gated, encoding="utf-8")

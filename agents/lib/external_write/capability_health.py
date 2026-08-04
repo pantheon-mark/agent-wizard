@@ -235,6 +235,13 @@ from external_write import run_envelope  # noqa: E402
 # recorded finding in this package, and this surface held one of them.
 from external_write import state_actions  # noqa: E402
 from external_write import trial_journal  # noqa: E402
+# The durable record of an entrypoint pause guard FIRING -- a scheduled run that was
+# stopped, in a project where the guard's own message goes to a log nobody reads.
+# This surface is the delivery; the record is what makes the delivery possible. The
+# scan it exposes is strictly READ-ONLY, which matters here specifically: this
+# module's read path self-heals other state, and if it healed THIS the act of
+# looking would destroy the evidence of the harm.
+from external_write import suppressed_invocation  # noqa: E402
 # (Cut 1.5 / v0.19.0, Task A -- V15-3 keystone) the ONE canonical open-bespoke-writer-bypass
 # predicate, consumed by overall_status below to forbid normal status PROJECT-WIDE on any open
 # bespoke-writer entry. Stdlib-only, imports nothing from this package -- no import cycle.
@@ -1083,8 +1090,9 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
 
     ``normal_status_allowed`` is True ONLY when every capability is green AND
     no run envelope is non-finalized AND (Cut 1.5 / v0.19.0, Task A) there is no
-    OPEN bespoke-writer external-write bypass anywhere in this project. The agent
-    may not report "everything is running normally" unless this is True
+    OPEN bespoke-writer external-write bypass anywhere in this project AND no trial
+    is interrupted AND nothing is outstanding under ``suppressed_invocations``. The
+    agent may not report "everything is running normally" unless this is True
     (relay-verbatim convention).
 
     The open-bespoke-writer block is PROJECT-WIDE and attribution-free: any open
@@ -1121,6 +1129,16 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
     that does. One object carried a right answer and a wrong one.
 
     ``interrupted_trial`` is a separate discovery: see its own key below.
+
+    ``suppressed_invocations`` is another, and it is the one thing in this object
+    that reports work which is NOT HAPPENING. An entrypoint whose pause guard has
+    fired printed its message into a scheduled job's log file, which is how a real
+    project lost nine days of a scheduled job with nobody told. Each active entry
+    names the wrapper, when it was first and last stopped, how many invocations were
+    stopped, and which read-only outputs are known (or not known) to have gone dark
+    with it -- plus ``action``, the registry-rendered way out, which is the field to
+    relay. See that key's own comment below for the ``active`` / ``outstanding``
+    distinction and for why this surface never edits those records.
     """
     caps = check_capabilities_with_self_heal(project_root)
     red = sorted({c["capability_id"] for c in caps if c.get("health") != "green"})
@@ -1146,6 +1164,13 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
     bypass_writer_states: Dict[str, str] = {}
     bypass_descriptions: Dict[str, str] = {}
     bypass_actions: Dict[str, str] = {}
+    # The same registry-rendered instruction, reachable by the DECLARED
+    # mechanism_id -- the key a pause record and a suppressed-invocation record are
+    # both stamped with. Populated alongside the relpath-keyed map below rather than
+    # rendered a second time: one render, two keys onto it, so the suppression
+    # surface and the bypass surface cannot disagree about the way out of the same
+    # writer's state.
+    bypass_actions_by_mechanism_id: Dict[str, str] = {}
     bypass_read_error = False
     try:
         bypass_writer_relpaths = _ext_write_state.open_bespoke_writer_relpaths(str(project_root))
@@ -1189,6 +1214,9 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
                     bypass_actions[_relpath]
                     if _ext_write_state.is_bypass_writer_entry(_e)
                     else _ext_write_state.describe_blocking_entry(_e))
+                _mech = _e.get("mechanism_id")
+                if isinstance(_mech, str) and _mech:
+                    bypass_actions_by_mechanism_id[_mech] = bypass_actions[_relpath]
         bypass_blocking_relpaths = sorted({
             str(e.get("writer_relpath"))
             for e in _ext_write_state.blocking_bespoke_writer_migrations(str(project_root))})
@@ -1277,8 +1305,104 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
     trial_outstanding = bool(interrupted_trials or unreadable_trials
                              or trial_scan["scan_error"])
 
+    # ---------------------------------------------------------------------
+    # A SCHEDULED RUN THAT WAS STOPPED, AND NOBODY WAS TOLD
+    #
+    # The entrypoint pause guard works: it stops the paused script before any of
+    # its own work. What did not work is that its message goes to a log file behind
+    # a `>> ...log 2>&1` redirect. On a real project that happened nine times over
+    # nine days -- nine scheduled jobs that silently did not happen -- and nothing
+    # the operator or their assistant read said so.
+    #
+    # This is where it now says so, and this surface is the DELIVERY: the structured
+    # line the guard also emits lands in the same log that swallowed it before, so
+    # it is a convenience for someone already looking, never the delivery.
+    #
+    # THE ALL-CLEAR IS WITHHELD WHILE SUPPRESSION IS ACTIVE, and that is a decision
+    # rather than a default. `normal_status_allowed` is what authorizes an agent to
+    # tell the operator everything is running normally; while a guard is firing, a
+    # scheduled job is not running, so that sentence is false. It is also not
+    # already covered: a bespoke writer's pause marker is keyed on a relpath-derived
+    # mechanism_id, so it is invisible to the per-capability `paused` view above, and
+    # once the auto-reap closes its queue entry (the writer's file changed and now
+    # passes the scan) `any_open_bypass` goes quiet -- while the marker, and
+    # therefore the guard, is still in force. That is a green status over a wrapper
+    # that is still being stopped.
+    #
+    # IT CANNOT FIRE ON A FRESH BUILD. Quantified over the DECLARED set -- the
+    # records a guard actually wrote -- never over everything registered. A project
+    # where no guard has ever fired has no directory at all and reports nothing.
+    #
+    # AND IT IS LEAVABLE, which is the property that makes withholding the all-clear
+    # legitimate rather than a new dead end: `active` is DERIVED from the pause
+    # marker still being present, never persisted. The one act that resumes the
+    # wrapper -- the marker going away, whether by acceptance reconciling it or by
+    # being cleared -- is the same act that clears this, immediately, with nothing to
+    # delete and no record of what happened lost.
+    suppressed_scan = suppressed_invocation.scan_suppressed_invocation_events(
+        directory=os.path.join(
+            str(project_root),
+            suppressed_invocation.SUPPRESSED_INVOCATIONS_DIR_REL))
+    _health_root = Path(str(project_root))
+    active_suppressions: List[Dict[str, Any]] = []
+    past_suppressions: List[Dict[str, Any]] = []
+    for _ev in suppressed_scan["events"]:
+        _mech_id = str(_ev["mechanism_id"])
+        _determination = (_ev.get("known_entangled_outputs") or {}).get(
+            "determination")
+        _entry = {
+            "mechanism_id": _mech_id,
+            "entrypoint_relpath": _ev["entrypoint_relpath"],
+            "first_suppressed_at": _ev["first_suppressed_at"],
+            "last_suppressed_at": _ev["last_suppressed_at"],
+            # A count of INVOCATIONS the guard stopped -- one per invocation,
+            # including a hand invocation and including each retry of one due run.
+            # Not a count of scheduled runs due; see the recording module.
+            "suppressed_count": _ev["suppressed_count"],
+            "known_entangled_outputs": _ev["known_entangled_outputs"],
+            # `unknown` answers True here exactly as `entangled` does -- one
+            # classifier, in the module that owns the determination. An unverified
+            # entanglement must never render as "no read-only outputs affected".
+            "read_outputs_may_be_suppressed":
+                suppressed_invocation.read_outputs_may_be_suppressed(_determination),
+            "path": _ev["path"],
+        }
+        # Still paused == the guard would still fire. Fail-closed: a marker that
+        # exists and cannot be examined is not "no longer paused".
+        _still_paused, _marker_read_error = _is_paused(_health_root, _mech_id)
+        _entry["marker_read_error"] = _marker_read_error
+        if _still_paused or _marker_read_error:
+            # THE WAY OUT, rendered from the state->action registry and keyed on the
+            # state the writer is actually in -- the SAME rendering the bypass view
+            # above hands over, reached by the declared mechanism_id. When the writer
+            # has no declared state at all the registry's own refusal-to-characterise
+            # route is used: it routes to a person and claims nothing, which is the
+            # one honest answer about a state nothing classified. No instruction is
+            # composed here.
+            _entry["action"] = bypass_actions_by_mechanism_id.get(
+                _mech_id,
+                state_actions.route_for_unclassified_state(
+                    str(_ev["entrypoint_relpath"])))
+            active_suppressions.append(_entry)
+        else:
+            past_suppressions.append(_entry)
+    unreadable_suppressions = [
+        {
+            "path": _u["path"],
+            "reason": _u["reason"],
+            # No command can be rendered: the mechanism cannot be identified from a
+            # record that will not parse, and an unreadable record of stopped runs
+            # is precisely the thing that cannot establish that none are outstanding.
+            "action": state_actions.route_for_unidentified_record(_u["path"]),
+        }
+        for _u in suppressed_scan["unreadable"]
+    ]
+    suppression_active = bool(active_suppressions)
+    suppression_outstanding = bool(active_suppressions or unreadable_suppressions
+                                   or suppressed_scan["scan_error"])
+
     normal_ok = ((not red) and (not orphaned) and (not any_open_bypass)
-                 and (not trial_outstanding))
+                 and (not trial_outstanding) and (not suppression_outstanding))
     return {
         "overall": "green" if normal_ok else "red",
         "normal_status_allowed": normal_ok,
@@ -1322,6 +1446,34 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
             "trials": interrupted_trials,
             "unreadable": unreadable_trials,
             "scan_error": trial_scan["scan_error"],
+        },
+        # A SCHEDULED RUN THAT WAS STOPPED AND WENT UNREPORTED -- discovered by
+        # READING THE DURABLE RECORDS the fired guard writes, because the guard's own
+        # message goes into a log behind a redirect.
+        #
+        # `active` True means at least one entrypoint is STILL paused and has been
+        # stopped at least once: work the operator expects is not happening.
+        # `outstanding` is the wider question -- that, or a record about it that
+        # could not be read at all -- and it is `outstanding`, not `active`, that
+        # forbids normal status above.
+        #
+        # `previously_suppressed` is history: the guard fired, and the mechanism is
+        # no longer paused, so it is no longer firing. It holds nothing back. It is
+        # reported rather than deleted because this surface is read-only about these
+        # records: the command an agent runs at session start must never be the thing
+        # that erases the evidence of what was suppressed.
+        #
+        # Each active entry carries `action`: the declared way out, rendered from the
+        # state->action registry, keyed on the state the writer is actually in. THAT
+        # is the field to relay -- the same convention `open_external_write_bypass`
+        # documents for itself.
+        "suppressed_invocations": {
+            "active": suppression_active,
+            "outstanding": suppression_outstanding,
+            "mechanisms": active_suppressions,
+            "previously_suppressed": past_suppressions,
+            "unreadable": unreadable_suppressions,
+            "scan_error": suppressed_scan["scan_error"],
         },
     }
 
