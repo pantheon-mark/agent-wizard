@@ -688,6 +688,32 @@ class RepudiationEntrypointTests(unittest.TestCase):
         self.assertEqual(acceptance_repudiation.FLAG_CONFIRMATION,
                          OPERATOR_CONFIRMATION_FLAG)
 
+    def test_the_retrial_next_step_names_commands_that_actually_exist(self):
+        """The post-revocation state's declared exit is the re-trial queue entry, and its
+        next-step text names two commands by path. Those paths are hand-spelled there rather
+        than imported (importing `trial_executor` into `lifecycle_state` for a string would pull
+        the whole trial stack into the completion gate's import graph -- the same reasoning
+        `command_manifest` records for its own prefixes). Hand-spelled is only acceptable when
+        something fails on drift, which is what this is: an exit that names a path no longer on
+        disk is a dead end wearing a next step."""
+        text = lifecycle_state.REPUDIATION_RETRIAL_NEXT_STEP
+        project = _AGENTS_LIB.parent.parent
+        for rel in ("agents/lib/external_write/trial_executor.py",
+                    "agents/lib/external_write/operator_acceptance.py"):
+            self.assertIn(rel, text, f"the exit must name {rel}")
+            self.assertTrue((project / rel).is_file(), f"{rel} is named but not on disk")
+            self.assertTrue(
+                any(e.command_prefix.endswith("/" + Path(rel).name)
+                    for e in command_manifest.BASELINE_COMMANDS),
+                f"{rel} is named as an exit but is not an enrolled operator command")
+        from external_write.trial_executor import TRIAL_ENTRYPOINT_REL
+        self.assertIn(TRIAL_ENTRYPOINT_REL, text)
+
+    def test_the_entrypoint_constant_agrees_with_the_enrolled_prefix(self):
+        entry = command_manifest.find_command("repudiate-acceptance")
+        self.assertEqual(entry.command_prefix,
+                         f"python3 {acceptance_repudiation.REPUDIATION_ENTRYPOINT_REL}")
+
     def test_the_command_is_enrolled_as_a_live_write(self):
         entry = command_manifest.find_command("repudiate-acceptance")
         self.assertIsNotNone(entry, "an operator-invocable command must be classified")
