@@ -701,9 +701,15 @@ def _is_paused(project_root: Path, capability_id: str,
         except OSError:
             read_error = True
             continue
-        if suffix == ".pause":
+        if suffix in GUARD_READ_MARKER_SUFFIXES:
             # Any EXISTING path counts as paused, regardless of shape (see
             # docstring) — mirrors the wrapper's own `[ -e ]` check.
+            #
+            # Bound to the constant, not re-spelled. The literal ".pause" sat here
+            # eight lines under a comment claiming "ONE spelling ... every reader
+            # below takes them from here", and it is load-bearing: changing the
+            # constant's spelling would have silently routed every existing marker
+            # into the `.json` branch below, which applies a different shape rule.
             return True, read_error
         if stat.S_ISREG(st.st_mode):
             return True, read_error

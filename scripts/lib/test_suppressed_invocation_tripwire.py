@@ -67,6 +67,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 _WIZARD = Path(__file__).resolve().parents[2]
@@ -701,19 +702,25 @@ class TestNothingInTheReachPassCanAbortTheUpgrade(unittest.TestCase):
 
         upgrade_reconcile._atomic_write = refuse
         self.addCleanup(setattr, upgrade_reconcile, "_atomic_write", real)
-        reason = upgrade_reconcile._restore_wrapper(
+        outcome, reason = upgrade_reconcile._restore_wrapper(
             self.p.root / WRAPPER_REL, self.before, "it did not read back as written")
         self.assertIn("also failed", reason)
         self.assertIn("needs a person", reason)
         self.assertNotIn("the original has been restored", reason)
+        # And it is the refusal class the operator is told something specific about:
+        # this one needs a person, not "only the record-keeping is missing".
+        self.assertEqual(outcome, upgrade_reconcile._REFUSED_NEEDS_PERSON)
+        self.assertIn("needs a person",
+                      upgrade_reconcile._REFUSAL_OPERATOR_NOTES[outcome])
 
     def test_a_restore_that_succeeds_says_that_instead(self):
         """The positive control: without it, a function that always reported failure
         would satisfy the assertion above."""
-        reason = upgrade_reconcile._restore_wrapper(
+        outcome, reason = upgrade_reconcile._restore_wrapper(
             self.p.root / WRAPPER_REL, self.before, "it did not read back as written")
         self.assertIn("the original has been restored", reason)
         self.assertNotIn("also failed", reason)
+        self.assertEqual(outcome, upgrade_reconcile._REFUSED)
         self.assertEqual(
             self.before,
             (self.p.root / WRAPPER_REL).read_text(encoding="utf-8"))
@@ -1029,14 +1036,21 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
         self.assertIn(WRAPPER_REL, notice)
         self.assertIn("line endings", notice)
 
-    def test_the_notice_says_the_pause_still_holds_and_only_reporting_is_missing(self):
+    def test_a_class_where_the_pause_IS_intact_says_so(self):
         """The distinction an operator has to be able to draw: a refused tripwire is
-        not an unpaused writer. Claiming or implying otherwise would be a false alarm
-        about a safety property that is in fact intact."""
+        not necessarily an unpaused writer. CRLF is the class where the guard is
+        confirmed in place, so this one may say so -- and only this kind of class may.
+
+        This test previously asserted the BLANKET sentence "still safely paused",
+        which every refusal was rendered under. It was true for this class only,
+        which is why pinning it here left three classes false, one of them with the
+        payload running."""
         self._crlf_paused_wrapper()
         notice = self._notice()
-        self.assertIn("still safely paused", notice)
-        self.assertIn("record-keeping", notice)
+        self.assertIn("This one IS still stopped", notice)
+        self.assertIn("Only the record-keeping is missing", notice)
+        self.assertNotIn("still safely paused", notice,
+                         "the blanket reassurance must not come back")
 
     def test_a_notice_is_written_even_when_the_refusal_is_the_ONLY_finding(self):
         """Gated on `mechanisms` alone, a project whose only finding was a refused
@@ -1067,7 +1081,173 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
         os.chmod(str(d), 0o000)
         self.addCleanup(os.chmod, str(d), 0o700)
         notice = self._notice()
-        self.assertIn("could not check any of your paused scheduled jobs", notice)
+        self.assertIn("could not look at any of your paused scheduled jobs", notice)
+        # Nothing was examined, so nothing may be asserted about any pause.
+        self.assertIn("could not establish whether this one is stopped", notice)
+        self.assertNotIn("IS still stopped", notice)
+
+    def _foreign_marker_paused_wrapper(self):
+        """The class where the guard names a DIFFERENT job's marker -- so the guard
+        does not fire and the payload runs. Measured: `payload_ran.txt` created,
+        "the digest was sent" on stdout."""
+        marker = upgrade_reconcile._wrapper_guard_marker_ref(
+            WRAPPER_REL, "a_different_job")
+        text = self.p.historical_wrapper().read_text(encoding="utf-8").replace(
+            upgrade_reconcile._wrapper_guard_marker_ref(WRAPPER_REL, MECH), marker)
+        self.p.write(WRAPPER_REL, text, mode=0o755)
+        self.p.pause_marker()
+        self.p.pause_state()
+
+    def test_a_class_where_the_PAYLOAD_RAN_is_never_called_safely_paused(self):
+        """★ The Critical. This section asserted "Each one is still safely paused;
+        what is missing is only the record-keeping" over EVERY refusal. Measured
+        false here with the writer actually running -- a false all-clear over a live
+        external writer, which is the exact direction this cut exists to close.
+        Before the refusals were surfaced this case was SILENT; a blanket
+        reassurance turned silence into affirmative false reassurance, which is
+        worse than the silence it replaced."""
+        self._foreign_marker_paused_wrapper()
+        notice = self._notice()
+        proc = self.p.run_wrapper()
+        self.assertTrue((self.p.root / "payload_ran.txt").exists(),
+                        "fixture must actually run the payload")
+        self.assertIn("the digest was sent", proc.stdout)
+        # so the notice may not say it is paused, and must say the opposite.
+        self.assertNotIn("still safely paused", notice)
+        self.assertNotIn("IS still stopped", notice)
+        self.assertIn("could NOT confirm this one is stopped", notice)
+        self.assertIn("Treat it as running", notice)
+
+    def test_an_unreadable_pause_record_claims_nothing_about_any_pause(self):
+        """Nothing establishes which mechanism it belongs to, so nothing establishes
+        that anything is paused."""
+        self.p.historical_wrapper()
+        self.p.pause_marker()
+        (self.p.root / PAUSED_DIR_REL / f"{MECH}.json").write_text(
+            "{truncated", encoding="utf-8")
+        notice = self._notice()
+        self.assertIn("could not establish whether this one is stopped", notice)
+        self.assertNotIn("IS still stopped", notice)
+
+    def test_the_notice_carries_no_exception_text_or_internal_asides(self):
+        """The notice's own contract is plain language, no jargon. The refusal
+        REASONS are diagnostic strings -- they carry exception reprs and internal
+        cost comparisons -- so what reaches the operator is a separate plain note,
+        and the diagnostic stays on the record for a log or a test."""
+        self.p.historical_wrapper()
+        self.p.pause_marker()
+        (self.p.root / PAUSED_DIR_REL / f"{MECH}.json").write_text(
+            "{truncated", encoding="utf-8")
+        notice = self._notice()
+        for jargon in ("JSONDecodeError", "Traceback", "errno", "OSError",
+                       "far cheaper than a writer", "_GUARD_BEGIN"):
+            self.assertNotIn(jargon, notice,
+                             f"the notice renders {jargon!r} to a non-technical "
+                             f"operator")
+
+    def test_a_guard_whose_named_marker_is_GONE_is_not_called_stopped(self):
+        """The guard names this mechanism's marker correctly, but the file it points
+        at is absent -- so its `[ -e ]` finds nothing and it does not fire. Measured:
+        the payload runs. The marker reference matching is not sufficient on its own,
+        which is why the determination also stats the file."""
+        self.p.historical_wrapper()
+        self.p.pause_state()          # the .json exists, so the sweep reaches it
+        # ...but the .pause the guard actually reads does not.
+        self.assertFalse((self.p.root / PAUSED_DIR_REL / f"{MECH}.pause").exists())
+        # Make it refuse for an unrelated reason so it reaches the notice at all.
+        path = self.p.root / WRAPPER_REL
+        path.write_bytes(path.read_text(encoding="utf-8")
+                         .replace("\n", "\r\n").encode("utf-8"))
+        os.chmod(str(path), 0o755)
+        notice = self._notice()
+        self.assertIn("could NOT confirm this one is stopped", notice)
+        self.assertNotIn("IS still stopped", notice)
+        self.assertTrue((self.p.root / "payload_ran.txt").exists()
+                        or self.p.run_wrapper() is not None)
+
+    def test_an_unreadable_wrapper_claims_nothing_about_its_pause(self):
+        """The determination reads the wrapper itself. If it cannot, "confirmed" is
+        not available to it -- an unreadable file is not a verified pause."""
+        self.p.historical_wrapper()
+        self.p.pause_marker()
+        self.p.pause_state()
+        wrapper = self.p.root / WRAPPER_REL
+        os.chmod(str(wrapper), 0o000)
+        self.addCleanup(os.chmod, str(wrapper), 0o755)
+        self.assertEqual(
+            upgrade_reconcile._pause_protection_state(
+                self.p.root, WRAPPER_REL, MECH),
+            upgrade_reconcile.PAUSE_UNKNOWN)
+        notice = self._notice()
+        self.assertIn("could not establish whether this one is stopped", notice)
+        self.assertNotIn("IS still stopped", notice)
+
+    def test_a_confirmed_pause_requires_all_three_facts(self):
+        """The positive control for the determination, stated as the conjunction it
+        is: without it, a predicate that answered UNKNOWN for everything would
+        satisfy the three tests above."""
+        self.p.historical_wrapper()
+        self.p.pause_marker()
+        self.p.pause_state()
+        self.assertEqual(
+            upgrade_reconcile._pause_protection_state(
+                self.p.root, WRAPPER_REL, MECH),
+            upgrade_reconcile.PAUSE_CONFIRMED)
+
+    def test_every_refusal_carries_a_declared_determination(self):
+        """No refusal may reach the notice without one of the three declared
+        determinations -- a missing one would fall back to a sentence about a state
+        nobody established."""
+        self._foreign_marker_paused_wrapper()
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        self.assertTrue(result.tripwire_refusals)
+        declared = {upgrade_reconcile.PAUSE_CONFIRMED,
+                    upgrade_reconcile.PAUSE_NOT_CONFIRMED,
+                    upgrade_reconcile.PAUSE_UNKNOWN}
+        for entry in result.tripwire_refusals:
+            self.assertIn(entry["pause_confirmed"], declared)
+            self.assertTrue(entry["operator_note"].strip())
+            self.assertTrue(entry["reason"].strip())
+
+    def test_the_CLI_summary_names_the_refusal_and_points_at_the_notice(self):
+        """★ New-1. The notice was written and `render_reconcile_result` returned ""
+        in the refusal-only case, so the CLI printed nothing and the record on disk
+        was named by no surface -- the invisible-durable-record defect this task
+        exists to close, inside the fix for it."""
+        self._crlf_paused_wrapper()
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        out = upgrade_reconcile.render_reconcile_result(result)
+        self.assertTrue(out.strip(), "the CLI summary was empty")
+        self.assertIn(WRAPPER_REL, out)
+        self.assertIn("cannot tell you when it is skipped", out)
+        self.assertIn(str(result.notice_path), out,
+                      "nothing pointed the operator at the notice")
+
+    def test_the_CLI_and_the_notice_cannot_disagree_about_the_determination(self):
+        """Two surfaces, one mapping. A per-surface sentence is how the terminal and
+        the file came to say different things about the same file once already."""
+        self._foreign_marker_paused_wrapper()
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        out = upgrade_reconcile.render_reconcile_result(result)
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+        sentence = upgrade_reconcile._PAUSE_STATE_SENTENCES[
+            upgrade_reconcile.PAUSE_NOT_CONFIRMED]
+        self.assertIn(sentence, out)
+        self.assertIn(sentence, notice)
+
+    def test_a_refusal_only_notice_makes_no_claim_about_an_undo_step(self):
+        """The `if not mechanisms:` branch describes an outstanding undo-step answer
+        for an adapter this pass rewrote. A refusal-only notice reaches it with no
+        adapter edited, no undo step and no capability awaiting approval, so every
+        clause of it would be about something that did not happen."""
+        self._crlf_paused_wrapper()
+        notice = self._notice()
+        self.assertNotIn("undo step", notice)
+        self.assertNotIn("tried out and approved again", notice)
+        self.assertIn("Nothing in your project was paused by this upgrade", notice)
 
     def test_the_renderer_emits_nothing_for_an_empty_refusal_set(self):
         self.assertEqual(upgrade_reconcile._tripwire_refusal_lines([]), [])
@@ -1129,6 +1309,38 @@ class TestTheStalePauseRouteNamesRealFiles(unittest.TestCase):
         status, sup = self._entry()
         self.assertFalse(sup["active"])
         self.assertTrue(status["normal_status_allowed"], status)
+
+    def test_the_any_shape_rule_follows_the_CONSTANT_not_a_re_spelled_literal(self):
+        """The branch discriminator was `if suffix == ".pause"`, eight lines under a
+        comment claiming one spelling. Load-bearing rather than tidy: the guard-read
+        half applies an ANY-SHAPE rule (matching the wrapper's own `[ -e ]`, which
+        pauses on a directory too), and the other half applies a regular-file rule.
+        A re-spelled literal would silently route the whole guard-read family into
+        the wrong rule the moment the constant changed.
+
+        Asserted through the constant, and with a NON-regular path, because that is
+        the only case where the two rules differ observably.
+        """
+        for name in (f"{MECH}.pause", f"{MECH}.json"):
+            path = self.p.root / PAUSED_DIR_REL / name
+            if path.exists():
+                path.unlink()
+        # A suffix the module constant does NOT ship, patched in for the duration.
+        # Substituting the constant for its own literal value cannot change
+        # behaviour, so a probe that did that was a no-op rather than a weak test;
+        # changing what the constant HOLDS is what discriminates the binding from a
+        # re-spelled literal.
+        other = ".halted"
+        (self.p.root / PAUSED_DIR_REL / f"{MECH}{other}").mkdir()
+        with mock.patch.object(capability_health,
+                               "GUARD_READ_MARKER_SUFFIXES", (other,)):
+            self.assertEqual(
+                capability_health._is_paused(self.p.root, MECH, (other,)),
+                (True, False),
+                "a guard-read marker of any shape must read as paused, because the "
+                "wrapper's own `[ -e ]` test does -- with a re-spelled literal this "
+                "falls into the regular-file branch and reports a read error "
+                "instead")
 
     def test_per_capability_health_still_keys_on_the_PAIR(self):
         """The narrowing is scoped to the suppression surface. For "is this

@@ -1774,22 +1774,57 @@ class TheRegistrysDeclaredRendererSetIsCompleteTests(unittest.TestCase):
 
     _SOURCE = _EMITTED_LIB / "state_actions.py"
 
+    #: What makes a module-level string constant an operator-text TEMPLATE: it
+    #: carries the placeholder every declared route renders. Derived from the
+    #: contract, not from a name.
+    _TEMPLATE_PLACEHOLDER = "{subject}"
+
     def _route_template_names(self, tree):
-        return {t.id for node in ast.walk(tree)
-                if isinstance(node, ast.Assign)
-                for t in node.targets
-                if isinstance(t, ast.Name) and t.id.endswith("_ROUTE")}
+        """Every module-level string constant that is an operator-text template.
+
+        Keyed on CONTENT (it carries `{subject}`), and accepting BOTH `x = ...` and
+        `x: str = ...`. The first version keyed on a `_ROUTE` name suffix and on
+        `ast.Assign` alone, and four shapes escaped it silently -- an annotated
+        assignment (a form this very module uses for five of its own constants,
+        including the declaration this gate reads), an f-string render, a
+        `%`-format, and a template named anything else. A gate that only sees the
+        shape already shipped is the green-and-blind pattern it exists to prevent.
+        """
+        found = set()
+        for node in ast.walk(tree):
+            targets = []
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, ast.AnnAssign):
+                targets = [node.target]
+            else:
+                continue
+            value = node.value
+            if not (isinstance(value, ast.Constant)
+                    and isinstance(value.value, str)
+                    and self._TEMPLATE_PLACEHOLDER in value.value):
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    found.add(target.id)
+        return found
 
     def _functions_formatting_a_route_template(self, tree, templates):
+        """Every module-level function that RENDERS one of those templates.
+
+        "Mentions it at all", deliberately: matching only `template.format(...)`
+        missed an f-string, a `%`-format and a direct return. A function that names
+        an operator-text template is rendering it, whatever mechanism it uses, and
+        that is the question this gate needs answered.
+        """
         found = set()
         for node in tree.body:
             if not isinstance(node, ast.FunctionDef):
                 continue
             for inner in ast.walk(node):
-                if (isinstance(inner, ast.Attribute) and inner.attr == "format"
-                        and isinstance(inner.value, ast.Name)
-                        and inner.value.id in templates):
+                if isinstance(inner, ast.Name) and inner.id in templates:
                     found.add(node.name)
+                    break
         return found
 
     def test_the_source_carries_route_templates_to_find(self):
@@ -1818,6 +1853,63 @@ class TheRegistrysDeclaredRendererSetIsCompleteTests(unittest.TestCase):
             self.assertTrue(callable(getattr(state_actions, name, None)),
                             f"OPERATOR_TEXT_RENDERERS names {name!r}, which is not a "
                             "callable on the registry")
+
+    #: Every form a fifth route could plausibly take, with the mechanism it renders
+    #: by. Four of these escaped the first version of the sweep SILENTLY -- including
+    #: the annotated assignment, which is the form `state_actions` already uses for
+    #: five of its own module constants, so it was the likeliest shape for the next
+    #: route to take. Pinned as a table so narrowing the sweep fails here.
+    _ROUTE_SHAPES = {
+        "plain assign, .format": (
+            '_FIFTH_ROUTE = "hello `{subject}` there, at some length"\n'
+            'def route_for_fifth(s):\n    return _FIFTH_ROUTE.format(subject=s)\n'),
+        "ANNOTATED assign, .format": (
+            '_FIFTH_ROUTE: str = "hello `{subject}` there, at some length"\n'
+            'def route_for_fifth(s):\n    return _FIFTH_ROUTE.format(subject=s)\n'),
+        "f-string render": (
+            '_FIFTH_ROUTE = "hello `{subject}` there, at some length"\n'
+            'def route_for_fifth(s):\n    return f"{_FIFTH_ROUTE}"\n'),
+        "percent-format render": (
+            '_FIFTH_ROUTE = "hello `{subject}` there, at some length"\n'
+            'def route_for_fifth(s):\n    return _FIFTH_ROUTE % s\n'),
+        "template not named *_ROUTE": (
+            '_FIFTH_SENTENCE = "hello `{subject}` there, at some length"\n'
+            'def route_for_fifth(s):\n'
+            '    return _FIFTH_SENTENCE.format(subject=s)\n'),
+    }
+
+    def test_the_sweep_sees_every_shape_a_route_could_take(self):
+        missed = []
+        for label, source in self._ROUTE_SHAPES.items():
+            tree = ast.parse(source)
+            templates = self._route_template_names(tree)
+            rendering = self._functions_formatting_a_route_template(tree, templates)
+            if "route_for_fifth" not in rendering:
+                missed.append(label)
+        self.assertEqual(
+            missed, [],
+            "an undeclared fifth route in these shapes would be invisible to this "
+            "gate, which would report PASS while a surface rendering only it went "
+            "unchecked: " + ", ".join(missed))
+
+    def test_the_sweep_does_not_flag_a_function_touching_no_template(self):
+        """The negative control. A sweep that answered "yes" for everything would
+        pass the test above and mean nothing."""
+        tree = ast.parse(
+            '_FIFTH_ROUTE = "hello `{subject}` there, at some length"\n'
+            'def unrelated(s):\n    return s.upper()\n')
+        templates = self._route_template_names(tree)
+        self.assertEqual(templates, {"_FIFTH_ROUTE"})
+        self.assertEqual(
+            self._functions_formatting_a_route_template(tree, templates), set())
+
+    def test_the_sweeps_disclosed_limits_are_declared_by_the_registry(self):
+        """The reach is stated where the declaration is, so a reader of
+        `OPERATOR_TEXT_RENDERERS` sees what backs it without coming here."""
+        self.assertTrue(state_actions.OPERATOR_TEXT_RENDERERS_SWEEP_LIMITS)
+        for limit in state_actions.OPERATOR_TEXT_RENDERERS_SWEEP_LIMITS:
+            self.assertIsInstance(limit, str)
+            self.assertTrue(limit.strip())
 
     def test_the_two_routes_added_for_the_suppression_surface_are_covered(self):
         """Named explicitly, because these two are the ones that were missing and the

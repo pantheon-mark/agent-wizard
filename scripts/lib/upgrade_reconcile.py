@@ -578,6 +578,7 @@ class ReconcileResult:
     undo_declaration_violations: List["UndoDeclarationViolation"] = field(
         default_factory=list)
     adapter_source_edits: List[str] = field(default_factory=list)
+    tripwire_refusals: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def any_affected(self) -> bool:
@@ -3181,6 +3182,126 @@ def _read_wrapper_bytes_exact(wrapper_path: Path) -> str:
     return wrapper_path.read_bytes().decode("utf-8")
 
 
+# ----- What is ESTABLISHED about a refused wrapper's pause ---------------------
+#
+# The reason a refusal needs this at all. When these refusals began reaching the
+# operator, they went out under one blanket sentence -- "each one is still safely
+# paused; what is missing is only the record-keeping." That was measured FALSE in
+# three classes, one of them with the writer actually running (`payload_ran.txt`
+# created, "the digest was sent" on stdout) because the guard named a marker that
+# does not exist. Before the refusals were surfaced those cases were SILENT; a
+# blanket reassurance converted silence into an affirmative false all-clear over a
+# live external writer, which is strictly worse than the silence it replaced.
+#
+# So the notice states, per entry, what is actually established -- and these three
+# values are that determination. Nothing renders a reassurance that is not one of
+# them.
+
+#: The guard names THIS mechanism's marker, that marker is on disk, and the block
+#: carries the unconditional exit. The run really is stopped; only the reporting is
+#: missing.
+PAUSE_CONFIRMED = "confirmed"
+#: Positively established that the guard does NOT stop this mechanism -- it names a
+#: different marker, or the marker it names is absent, so an invocation runs the
+#: payload. The opposite of reassuring.
+PAUSE_NOT_CONFIRMED = "not_confirmed"
+#: Could not be established either way. Says so, and claims nothing.
+PAUSE_UNKNOWN = "unknown"
+
+#: Refusal outcomes. Two are distinguished from the generic one ONLY because they
+#: are the two classes with something the operator can act on: a line-ending
+#: conversion they can perform, and a wrapper that needs a person looked at. Every
+#: other refusal is generic here and gets its truth from the determination above,
+#: not from its outcome label.
+_REFUSED = "refused"
+_REFUSED_LINE_ENDINGS = "refused_line_endings"
+_REFUSED_NEEDS_PERSON = "refused_needs_person"
+_REFUSAL_OUTCOMES: Tuple[str, ...] = (
+    _REFUSED, _REFUSED_LINE_ENDINGS, _REFUSED_NEEDS_PERSON)
+
+
+def _pause_protection_state(operator_project_dir: Path, entrypoint_relpath: Any,
+                            mechanism_id: str) -> str:
+    """Whether ``entrypoint_relpath``'s guard is established to stop this mechanism.
+
+    Re-derived from the file rather than inferred from why the tripwire was refused:
+    the two questions are independent, and it is this one the operator-facing text
+    depends on. Requires all three of: the guard names the marker this module
+    reconstructs for ``mechanism_id``; that marker exists on disk; and the block
+    carries the unconditional exit. Anything unreadable, or a guard whose shape
+    defeats the check, is ``PAUSE_UNKNOWN`` -- never optimistically confirmed.
+    """
+    if not (isinstance(entrypoint_relpath, str) and entrypoint_relpath.strip()):
+        return PAUSE_UNKNOWN
+    wrapper_path = Path(operator_project_dir) / entrypoint_relpath
+    try:
+        content = _read_wrapper_bytes_exact(wrapper_path)
+    except (OSError, UnicodeDecodeError):
+        return PAUSE_UNKNOWN
+    if content.count(_GUARD_BEGIN) != 1 or content.count(_GUARD_END) != 1:
+        return PAUSE_UNKNOWN
+    begin, end = content.index(_GUARD_BEGIN), content.index(_GUARD_END)
+    if end < begin:
+        return PAUSE_UNKNOWN
+    block = content[begin:end]
+    marker_ref = _wrapper_guard_marker_ref(entrypoint_relpath, mechanism_id)
+    if marker_ref not in block:
+        # The guard gates something else, so an invocation of THIS wrapper is not
+        # stopped by it. Measured: the payload runs.
+        return PAUSE_NOT_CONFIRMED
+    if _GUARD_EXIT_LINE not in block:
+        return PAUSE_UNKNOWN
+    try:
+        os.stat(str((wrapper_path.parent / marker_ref)))
+    except FileNotFoundError:
+        # The guard's own `[ -e ]` will find nothing, so it will not fire.
+        return PAUSE_NOT_CONFIRMED
+    except OSError:
+        return PAUSE_UNKNOWN
+    return PAUSE_CONFIRMED
+
+
+#: Plain-language, per-outcome sentence about what could not be done. NO jargon, no
+#: exception text, and no internal cost-tradeoff asides -- this reaches a
+#: non-technical operator in a notice that promises plain language, and the
+#: diagnostic ``reason`` beside it is what keeps the detail for a log or a test.
+_REFUSAL_OPERATOR_NOTES: Dict[str, str] = {
+    _REFUSED: "we could not add the lines that record a skipped run",
+    _REFUSED_LINE_ENDINGS: (
+        "we could not add the lines that record a skipped run, because this file "
+        "uses Windows-style line endings that those lines cannot work with -- "
+        "converting it to plain line endings would let it report"),
+    _REFUSED_NEEDS_PERSON: (
+        "we could not add the lines that record a skipped run, and putting the file "
+        "back the way it was did not succeed either, so this one needs a person to "
+        "look at it before it is relied on again"),
+}
+
+
+def _refusal_record(operator_project_dir: Path, mechanism_id: str,
+                    entrypoint_relpath: Any, outcome: str,
+                    reason: str) -> Dict[str, Any]:
+    """One refused wrapper, carrying BOTH the diagnostic reason and the plain
+    operator-facing halves the notice needs.
+
+    ``reason`` stays exactly as the refusing site wrote it -- it is what a test or a
+    log wants. ``operator_note`` and ``pause_confirmed`` are what an operator reads,
+    and they are separate precisely because the diagnostic strings contain things a
+    notice promising plain language must not carry (an exception repr, an internal
+    cost comparison).
+    """
+    return {
+        "mechanism_id": mechanism_id,
+        "entrypoint_relpath": (entrypoint_relpath
+                               if isinstance(entrypoint_relpath, str) else None),
+        "reason": reason,
+        "operator_note": _REFUSAL_OPERATOR_NOTES.get(
+            outcome, _REFUSAL_OPERATOR_NOTES[_REFUSED]),
+        "pause_confirmed": _pause_protection_state(
+            operator_project_dir, entrypoint_relpath, mechanism_id),
+    }
+
+
 def _insert_tripwire_into_existing_guard(
     operator_project_dir: Path,
     entrypoint_relpath: str,
@@ -3290,7 +3411,7 @@ def _insert_tripwire_into_existing_guard(
             # would produce a guard that does not parse as intended, which is far
             # worse than no tripwire. A CRLF shell script is already hazardous on
             # this platform for the same underlying reason.
-            return "refused", (
+            return _REFUSED_LINE_ENDINGS, (
                 f"{entrypoint_relpath} uses Windows-style line endings, and the "
                 "record-keeping lines cannot be added to it safely (they rely on "
                 "line continuations, which those endings break). It keeps the guard "
@@ -3381,34 +3502,39 @@ def _publish_guard_change(wrapper_path: Path, original: str, candidate: str,
     try:
         published = _read_wrapper_bytes_exact(wrapper_path)
     except (OSError, UnicodeDecodeError) as exc:
-        return "refused", _restore_wrapper(
+        return _restore_wrapper(
             wrapper_path, original,
             f"{entrypoint_relpath} could not be read back after the change "
             f"({exc!r})")
     if published != candidate:
-        return "refused", _restore_wrapper(
+        return _restore_wrapper(
             wrapper_path, original,
             f"{entrypoint_relpath} did not read back as written")
     return success, ""
 
 
-def _restore_wrapper(wrapper_path: Path, original: str, why: str) -> str:
+def _restore_wrapper(wrapper_path: Path, original: str,
+                     why: str) -> Tuple[str, str]:
     """Put ``original`` back after a failed verification, and say honestly whether
     that succeeded.
 
-    The restore is itself a write and can itself fail. Reporting "the original has
-    been restored" unconditionally -- as this did -- would be a claim about a write
-    whose outcome was never checked, on the one path where the wrapper is in a
-    state nobody verified. The two outcomes read very differently to whoever picks
-    this up, so they are two different sentences.
+    Returns ``(outcome, reason)``. The restore is itself a write and can itself
+    fail. Reporting "the original has been restored" unconditionally -- as this did
+    -- would be a claim about a write whose outcome was never checked, on the one
+    path where the wrapper is in a state nobody verified. The two outcomes read very
+    differently to whoever picks this up, so they are two different sentences AND two
+    different refusal outcomes: the double failure is one of the two classes the
+    operator is told something specific about, because it is the one that needs a
+    person rather than only costing a tripwire.
     """
     try:
         _atomic_write(wrapper_path, original)
     except OSError as exc:
-        return (f"{why}, and putting the original back also failed "
+        return (_REFUSED_NEEDS_PERSON,
+                f"{why}, and putting the original back also failed "
                 f"({exc.strerror or exc!r}) -- this wrapper needs a person to look "
                 "at it before it is relied on again")
-    return f"{why}; the original has been restored"
+    return _REFUSED, f"{why}; the original has been restored"
 
 
 def _tripwire_insertion_problem(original: str, candidate: str,
@@ -3626,24 +3752,24 @@ def upgrade_paused_entrypoint_guards(
         try:
             state = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, UnicodeDecodeError) as exc:
-            report["refused"].append({
-                "mechanism_id": candidate_id,
-                "reason": (f"the pause record {name} could not be read or parsed "
-                           f"({exc!r}), so the mechanism it belongs to cannot be "
-                           "established")})
+            report["refused"].append(_refusal_record(
+                root, candidate_id, None, _REFUSED,
+                f"the pause record {name} could not be read or parsed "
+                f"({exc!r}), so the mechanism it belongs to cannot be "
+                "established"))
             continue
         if not isinstance(state, dict):
-            report["refused"].append({
-                "mechanism_id": candidate_id,
-                "reason": f"the pause record {name} is not a record"})
+            report["refused"].append(_refusal_record(
+                root, candidate_id, None, _REFUSED,
+                f"the pause record {name} is not a record"))
             continue
         declared = state.get("mechanism_id")
         if declared != candidate_id:
-            report["refused"].append({
-                "mechanism_id": candidate_id,
-                "reason": (f"the pause record {name} declares mechanism_id "
-                           f"{declared!r}; the two disagree and this does not "
-                           "choose between them")})
+            report["refused"].append(_refusal_record(
+                root, candidate_id, None, _REFUSED,
+                f"the pause record {name} declares mechanism_id "
+                f"{declared!r}; the two disagree and this does not "
+                "choose between them"))
             continue
         entrypoint = state.get("entrypoint_relpath")
         if not (isinstance(entrypoint, str) and entrypoint.strip()):
@@ -3666,10 +3792,10 @@ def upgrade_paused_entrypoint_guards(
         # the wording was softened.)
         id_refusal = _recordable_mechanism_id_refusal(build_repo_root, declared)
         if id_refusal:
-            report["refused"].append({
-                "mechanism_id": declared,
-                "reason": (f"{entrypoint} was left as it is because a record could "
-                           f"not be kept for this mechanism: {id_refusal}")})
+            report["refused"].append(_refusal_record(
+                root, declared, entrypoint, _REFUSED,
+                f"{entrypoint} was left as it is because a record could "
+                f"not be kept for this mechanism: {id_refusal}"))
             continue
         try:
             outcome, reason = _insert_tripwire_into_existing_guard(
@@ -3680,18 +3806,19 @@ def upgrade_paused_entrypoint_guards(
             # failure is expected: see this function's docstring. One wrapper's
             # unexpected failure must not take the upgrade, nor the other paused
             # wrappers' tripwires, with it.
-            report["refused"].append({
-                "mechanism_id": declared,
-                "reason": (f"{entrypoint} could not be given the record-keeping "
-                           f"lines ({exc!r}); it keeps the guard it had and will "
-                           "not report being stopped")})
+            report["refused"].append(_refusal_record(
+                root, declared, entrypoint, _REFUSED,
+                f"{entrypoint} could not be given the record-keeping "
+                f"lines ({exc!r}); it keeps the guard it had and will "
+                "not report being stopped"))
             continue
         if outcome == "upgraded":
             report["upgraded"].append(declared)
         elif outcome == "already_current":
             report["already_current"].append(declared)
-        elif outcome == "refused":
-            report["refused"].append({"mechanism_id": declared, "reason": reason})
+        elif outcome in _REFUSAL_OUTCOMES:
+            report["refused"].append(_refusal_record(
+                root, declared, entrypoint, outcome, reason))
     return report
 
 
@@ -4575,16 +4702,27 @@ def render_impact_notice(
     rebuildable = [m for m in mechanisms
                    if _writer_state_of(m) == _WRITER_STATE_BLOCKING_LIVE_ENABLE]
     lines += ["", "## What happens next", ""]
-    if not mechanisms:
+    if not mechanisms and adapter_source_edits:
         # Adapter-edit-only notice. The "only the part that changes things was
         # switched off" line below is about a scanner-flagged writer being paused,
         # and nothing was paused here -- claiming it was would be a false alarm on
         # the surface that exists to prevent them.
+        #
+        # GATED ON THE ADAPTER EDIT, not merely on there being no mechanisms. This
+        # branch describes an outstanding undo-step answer, and a notice written
+        # ONLY because a paused wrapper could not be given its record-keeping lines
+        # reaches here with no adapter edited, no undo step and no capability
+        # awaiting approval -- so every clause of it would be about something that
+        # did not happen. The refusal section says what actually happened.
         lines.append(
             "- Nothing was paused and nothing was deleted. What is outstanding is "
             "the answer described above, recorded in the file by someone who can "
             "read that undo step -- and only after that can the capability be "
             "tried out and approved again.")
+    elif not mechanisms:
+        lines.append(
+            "- Nothing in your project was paused by this upgrade, and nothing was "
+            "deleted.")
     elif len(non_live) == len(mechanisms):
         # Nothing was switched off, so the reassurance below would be describing
         # something that never happened.
@@ -4656,13 +4794,16 @@ def _tripwire_refusal_lines(refusals: Sequence[Dict[str, Any]]) -> List[str]:
         "",
         "When a scheduled job is paused, we add a few lines to it so that each time "
         "it is skipped, that gets written down where you can see it -- otherwise a "
-        "job can quietly not happen for days. For the following, we could not add "
-        "those lines. Each one is still safely paused; what is missing is only the "
-        "record-keeping, so if one of these is skipped you will not be told:",
+        "job can quietly not happen for days. We could not add those lines to the "
+        "following, so if one of these is skipped you will not be told. What we do "
+        "and do not know about each one is said with it:",
         "",
     ]
     for entry in entries:
-        out.append(f"  - {entry['reason']}")
+        subject = entry.get("entrypoint_relpath") or entry.get("mechanism_id") or ""
+        note = entry.get("operator_note") or _REFUSAL_OPERATOR_NOTES[_REFUSED]
+        out.append(f"  - {subject}: {note}." if subject else f"  - {note}.")
+        out.append(f"    {_PAUSE_STATE_SENTENCES.get(entry.get('pause_confirmed'), _PAUSE_STATE_SENTENCES[PAUSE_UNKNOWN])}")
     out += [
         "",
         "If any of those matter to you, tell your assistant you want to go through "
@@ -4670,6 +4811,27 @@ def _tripwire_refusal_lines(refusals: Sequence[Dict[str, Any]]) -> List[str]:
         "",
     ]
     return out
+
+
+#: What the notice is allowed to say about each determination, and nothing more.
+#:
+#: These three replace ONE blanket sentence -- "each one is still safely paused; what
+#: is missing is only the record-keeping" -- which was measured false in three
+#: classes, including one where the payload ran. The middle sentence is the reason
+#: this mapping exists at all: there is a real case where the honest thing to tell an
+#: operator is that a job they think is stopped may not be.
+_PAUSE_STATE_SENTENCES: Dict[str, str] = {
+    PAUSE_CONFIRMED: (
+        "This one IS still stopped -- we checked, and the thing that stops it is in "
+        "place. Only the record-keeping is missing."),
+    PAUSE_NOT_CONFIRMED: (
+        "We could NOT confirm this one is stopped: the safety block in it does not "
+        "point at this job's own pause record, so it may still be running. Treat it "
+        "as running until someone has looked."),
+    PAUSE_UNKNOWN: (
+        "We could not establish whether this one is stopped, so nothing here says it "
+        "is. Ask your assistant to check this one with you."),
+}
 
 
 def write_impact_notice(operator_project_dir: Path, upgrade_id: str, text: str) -> Path:
@@ -4931,9 +5093,17 @@ def reconcile_upgrade(
         # said about whether any paused wrapper can report being skipped.
         tripwire_refusals.append({
             "mechanism_id": "",
+            "entrypoint_relpath": None,
             "reason": (
                 "we could not check any of your paused scheduled jobs for this: "
-                f"{tripwire_sweep['scan_error']}")})
+                f"{tripwire_sweep['scan_error']}"),
+            "operator_note": (
+                "we could not look at any of your paused scheduled jobs at all, so "
+                "none of them can report a skipped run and we cannot say which are "
+                "affected"),
+            # Nothing was examined, so nothing is established about any pause. This
+            # entry used to sit under a header asserting every one was safely paused.
+            "pause_confirmed": PAUSE_UNKNOWN})
 
     if mechanisms:
         # ONE classification pass, through the SAME classifier the
@@ -5060,6 +5230,7 @@ def reconcile_upgrade(
         adapter_enrolment_blocking_reason=adapter_targets_blocking_reason,
         undo_declaration_violations=undo_declaration_violations,
         adapter_source_edits=adapter_source_edits,
+        tripwire_refusals=tripwire_refusals,
     )
 
 
@@ -5085,16 +5256,29 @@ def render_reconcile_result(result: ReconcileResult) -> str:
     rather than naming a subset of them: ``mechanisms``, ``stale_acceptance_reset``,
     ``predicate_stubs_scaffolded``, ``read_provisioner_violations``,
     ``same_id_twins_healed``, ``adapter_enrolment_blocking_reason``,
-    ``undo_declaration_violations``, and ``adapter_source_edits``. If a
-    future field is added to ``ReconcileResult`` that a caller can observe, add
-    it here too, in both the guard and the render loop below -- not just one."""
+    ``undo_declaration_violations``, ``adapter_source_edits``, and
+    ``tripwire_refusals``. If a future field is added to ``ReconcileResult`` that a
+    caller can observe, add it here too, in both the guard and the render loop below
+    -- not just one.
+
+    ``tripwire_refusals`` is the fourth field to arrive by way of this exact defect:
+    it was written to a notice, and in the refusal-only case this function returned
+    "" so nothing named the file. A durable record no surface points at is the
+    defect the mechanism producing that record exists to close."""
     if not (result.mechanisms or result.stale_acceptance_reset
             or result.predicate_stubs_scaffolded
             or result.read_provisioner_violations
             or result.same_id_twins_healed
             or result.adapter_enrolment_blocking_reason
             or result.undo_declaration_violations
-            or result.adapter_source_edits):
+            or result.adapter_source_edits
+            # A refused tripwire is observable and durable, so it belongs in this
+            # guard. Without it the refusal-only case wrote a notice and returned
+            # "" -- the CLI printed nothing, and the record on disk was named by no
+            # surface. That is the same invisible-durable-record defect this task
+            # exists to close, recurring inside the fix for it, and the FOURTH
+            # instance of the class this docstring already enumerates.
+            or result.tripwire_refusals):
         return ""
     lines = ["", "Upgrade safety check found something to review:"]
     for m in result.mechanisms:
@@ -5233,6 +5417,17 @@ def render_reconcile_result(result: ReconcileResult) -> str:
             f"  - the list of adapters you have added "
             f"({_OPERATOR_ADAPTER_MANIFEST_REL}) could not be used this time: "
             f"{result.adapter_enrolment_blocking_reason}")
+    for _refusal in result.tripwire_refusals:
+        # ONE line per refused wrapper on the surface the operator reads FIRST, so
+        # the notice is not the only place this exists. The determination is carried
+        # verbatim from the notice's own mapping -- the two surfaces must not be able
+        # to say different things about whether a job is stopped.
+        _subject = (_refusal.get("entrypoint_relpath")
+                    or _refusal.get("mechanism_id") or "a paused scheduled job")
+        lines.append(
+            f"  - {_subject}: it cannot tell you when it is skipped. "
+            + _PAUSE_STATE_SENTENCES.get(_refusal.get("pause_confirmed"),
+                                         _PAUSE_STATE_SENTENCES[PAUSE_UNKNOWN]))
     if result.notice_path:
         lines.append(f"  See {result.notice_path} for what this means and what happens next.")
     elif result.migration_queue_path:

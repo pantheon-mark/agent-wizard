@@ -548,10 +548,31 @@ def route_for_unclassified_state(subject: str) -> str:
 #:
 #: Membership is not left to a name convention either (a ``route_for_*`` prefix is
 #: incidental structure, and this package's standing rule is not to infer identity
-#: from that). It is an explicit positive declaration, and it cannot silently fall
-#: behind: the gate asserts that every module-level function here which formats one
-#: of this module's ``_..._ROUTE`` templates appears in this tuple, so a fifth route
-#: added without listing itself fails the gate rather than becoming invisible to it.
+#: from that). It is an explicit positive declaration, backed by a build-time sweep
+#: over this module's own source.
+#:
+#: WHAT THAT SWEEP CATCHES, stated as its reach rather than as a guarantee, because
+#: the flat claim "it cannot silently fall behind" was measured false: the first
+#: version saw only the one shape already shipped here, and an annotated assignment
+#: -- the form five of this module's own constants use -- escaped it silently, along
+#: with an f-string render, a ``%``-format and a template not named ``*_ROUTE``.
+#:
+#: It now catches a renderer when BOTH hold: the template is a module-level string
+#: constant carrying ``{subject}`` (assigned plainly or with an annotation), and a
+#: module-level function mentions that constant by name at all -- whatever mechanism
+#: it renders with. All four previously-escaping shapes are covered, and pinned by
+#: ``test_the_sweep_sees_every_shape_a_route_could_take``.
+#:
+#: STILL OUTSIDE IT, so nobody reads the sweep as total: a template built by a CALL
+#: rather than written as a literal, one held inside a collection, one using a
+#: placeholder other than ``{subject}``, and a renderer nested inside a class or
+#: another function. A route taking one of those forms must add itself here by hand.
+OPERATOR_TEXT_RENDERERS_SWEEP_LIMITS = (
+    "a template built by a call rather than written as a string literal",
+    "a template held inside a collection rather than bound to its own name",
+    "a template whose placeholder is not {subject}",
+    "a renderer nested inside a class or another function",
+)
 OPERATOR_TEXT_RENDERERS: Tuple[str, ...] = (
     "instruction_for_state",
     "render_action",
