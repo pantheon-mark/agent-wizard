@@ -1034,5 +1034,294 @@ class TheAddCapabilitySkillDescribesTheNewEntryKindTests(unittest.TestCase):
                         "the skill must name the operator-withdrawal entry kind")
 
 
+# ---------------------------------------------------------------------------
+# 7. Fix round 2
+# ---------------------------------------------------------------------------
+
+class TheQueueEntryDeclaresWhatItIsTests(unittest.TestCase):
+    """The rebuild flow dispatches on an entry's ``kind``. A retrial entry that carries none
+    lands in the branch for "no kind field", which is a decision made from a field's ABSENCE --
+    inferring identity from incidental structure, in the one place whose output is a code rewrite
+    of the operator's own file. The writer declares what it wrote; the reader joins on that."""
+
+    def test_a_repudiation_entry_declares_its_own_kind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _two_capability_project(tmp)
+            _append(_log_path(root), _acceptance_record("acme_ledger_poster", _PHASE))
+            lifecycle_state.repudiate_acceptance(
+                str(root), "acme_ledger_poster", operator_confirmation="take it back")
+            entry = next(e for e in _queue(root) if e["mechanism_id"] == "acme_ledger_poster")
+            self.assertEqual(entry["kind"], lifecycle_state.RETRIAL_KIND_REPUDIATED)
+
+    def test_the_two_retrial_causes_declare_DIFFERENT_kinds(self):
+        """A reader that cannot tell them apart is back to guessing: one means the code moved,
+        the other means the operator changed their mind and the code is untouched."""
+        self.assertNotEqual(lifecycle_state.RETRIAL_KIND_REPUDIATED,
+                            lifecycle_state.RETRIAL_KIND_STALE)
+
+    def test_a_staleness_entry_declares_its_own_kind_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _two_capability_project(tmp)
+            lifecycle_state._queue_retrial_migration(
+                root, "acme_ledger_poster",
+                kind=lifecycle_state.RETRIAL_KIND_STALE,
+                reason=lifecycle_state.STALENESS_RETRIAL_REASON,
+                suggested_next_step=lifecycle_state.STALENESS_RETRIAL_NEXT_STEP)
+            entry = next(e for e in _queue(root) if e["mechanism_id"] == "acme_ledger_poster")
+            self.assertEqual(entry["kind"], lifecycle_state.RETRIAL_KIND_STALE)
+
+    def test_the_rebuild_skill_dispatches_on_both_declared_kinds(self):
+        text = (Path(__file__).resolve().parents[2] / "skills"
+                / "rebuild-paused-capability.md").read_text(encoding="utf-8")
+        for kind in (lifecycle_state.RETRIAL_KIND_REPUDIATED,
+                     lifecycle_state.RETRIAL_KIND_STALE):
+            self.assertIn(kind, text,
+                          f"the rebuild flow must name the {kind!r} entry kind it will receive")
+
+    def test_the_rebuild_skill_kindless_branch_no_longer_assumes_a_writer_rewrite(self):
+        """The kind-less branch used to say, unconditionally, that a kind-less entry IS a
+        direct-write violation. That is a claim from a field not being there."""
+        text = (Path(__file__).resolve().parents[2] / "skills"
+                / "rebuild-paused-capability.md").read_text(encoding="utf-8")
+        self.assertNotIn(
+            "**If the entry has no `kind` field** (a direct-write violation an upgrade caught, "
+            "not a missing-predicate gap):", text)
+        self.assertIn("external_write_gate_violation", text)
+
+    def test_the_rebuild_skill_does_not_frame_every_arrival_as_an_upgrade(self):
+        text = (Path(__file__).resolve().parents[2] / "skills"
+                / "rebuild-paused-capability.md").read_text(encoding="utf-8")
+        self.assertNotIn(
+            "An upgrade found that one of the operator's existing capabilities no longer matches "
+            "a safety rule the system now enforces, and safe-paused it rather than leave it "
+            "running unsafely or break it outright. This skill is the one, guided path back "
+            "from that:", text)
+
+    def test_add_capability_exclusion_is_not_scoped_to_upgrades_only(self):
+        text = (Path(__file__).resolve().parents[2] / "skills"
+                / "add-capability.md").read_text(encoding="utf-8")
+        self.assertNotIn(
+            "It also does not rebuild an existing capability that a contract-changing upgrade "
+            "paused", text)
+
+    def test_add_capability_does_not_say_two_fields_after_naming_three(self):
+        text = (Path(__file__).resolve().parents[2] / "skills"
+                / "add-capability.md").read_text(encoding="utf-8")
+        self.assertNotIn("Read those two fields", text)
+
+
+class EveryConfirmationEntrypointRefusesItsOwnPlaceholderTests(unittest.TestCase):
+    """F6 closed this in one module. Its twin renders a byte-identical blank and accepted it
+    verbatim, which is the same hazard one module over -- the body-without-target-hooks shape.
+
+    Written as a POPULATION rather than as two cases: the declared set below must equal the set
+    of modules that actually render a confirmation blank, so a third entrypoint added later fails
+    here until it is enrolled with its own refusal, rather than shipping the hazard again."""
+
+    #: module attribute name -> the parser that must refuse that module's own placeholder.
+    #: Declared, not derived from a name pattern: which function guards a module is not something
+    #: to infer from spelling.
+    _ENROLLED = {
+        "acceptance_repudiation": "parse_repudiation_args",
+        "writer_acknowledgement": "parse_acknowledgement_args",
+    }
+
+    def _modules_rendering_a_confirmation_blank(self):
+        import ast
+        found = set()
+        d = _AGENTS_LIB / "external_write"
+        for path in sorted(d.glob("*.py")):
+            if path.name.startswith("test_"):
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in tree.body:
+                targets = ([node.target] if isinstance(node, ast.AnnAssign)
+                           else getattr(node, "targets", []))
+                for t in targets:
+                    if isinstance(t, ast.Name) and t.id == "CONFIRMATION_PLACEHOLDER":
+                        found.add(path.stem)
+        return found
+
+    def test_the_enrolled_set_is_the_whole_population(self):
+        self.assertEqual(
+            self._modules_rendering_a_confirmation_blank(), set(self._ENROLLED),
+            "a module that renders an operator-confirmation blank must have a parser that "
+            "refuses that blank pasted unedited, and be enrolled here")
+
+    def test_each_one_refuses_its_own_placeholder_pasted_unedited(self):
+        import importlib
+        for mod_name, parser_name in self._ENROLLED.items():
+            mod = importlib.import_module(f"external_write.{mod_name}")
+            parser = getattr(mod, parser_name)
+            argv = []
+            for flag in (a for a in dir(mod) if a.startswith("FLAG_")):
+                value = (mod.CONFIRMATION_PLACEHOLDER
+                         if getattr(mod, flag) == mod.FLAG_CONFIRMATION else "some_subject")
+                argv += [getattr(mod, flag), value]
+            options, error = parser(argv)
+            self.assertIsNone(options, f"{mod_name} accepted its own printed blank")
+            self.assertTrue(error)
+
+    def test_each_refusal_routes_the_operator_onward(self):
+        """A refusal that names nothing to do instead is a dead end, and the surfaces that
+        render these commands hand them over with the blank still in. Caught for real: the
+        round-trip test that drives the rendered acknowledgement command end-to-end failed the
+        moment this refusal existed without a route -- before the refusal, that same paste
+        SUCCEEDED and recorded the placeholder as consent."""
+        import importlib
+        for mod_name, parser_name in self._ENROLLED.items():
+            mod = importlib.import_module(f"external_write.{mod_name}")
+            parser = getattr(mod, parser_name)
+            argv = []
+            for flag in (a for a in dir(mod) if a.startswith("FLAG_")):
+                value = (mod.CONFIRMATION_PLACEHOLDER
+                         if getattr(mod, flag) == mod.FLAG_CONFIRMATION else "some_subject")
+                argv += [getattr(mod, flag), value]
+            _options, error = parser(argv)
+            low = (error or "").lower()
+            self.assertIn("replace it with your own words", low, mod_name)
+            self.assertIn("ask your assistant", low,
+                          f"{mod_name}: a refusal must route someone who does not know what to "
+                          "type, not just tell them they are wrong")
+
+    def test_each_one_still_accepts_real_words(self):
+        import importlib
+        for mod_name, parser_name in self._ENROLLED.items():
+            mod = importlib.import_module(f"external_write.{mod_name}")
+            parser = getattr(mod, parser_name)
+            argv = []
+            for flag in (a for a in dir(mod) if a.startswith("FLAG_")):
+                value = ("yes, I really mean it"
+                         if getattr(mod, flag) == mod.FLAG_CONFIRMATION else "some_subject")
+                argv += [getattr(mod, flag), value]
+            options, error = parser(argv)
+            self.assertIsNone(error, f"{mod_name}: {error}")
+            self.assertIsNotNone(options)
+
+
+class ClaimsMatchTheirMechanismRoundTwoTests(unittest.TestCase):
+
+    def test_the_no_ref_arm_does_not_deny_the_record_of_what_was_said(self):
+        """A real ceremony append writes the operator's own words into that same record. What is
+        missing is the receipt it points at, not every trace of what they said."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _two_capability_project(tmp)
+            record = _acceptance_record("acme_ledger_poster", _PHASE)
+            record["operator_receipt_ref"] = None
+            _append(_log_path(root), record)
+            failures = capability_invariants.check_capability_invariants(
+                str(root), "acme_ledger_poster").failures
+            message = next(f for f in failures if f.startswith("Acceptance receipt:"))
+            self.assertNotIn("no record of what you signed off", message)
+            self.assertIn("cannot be traced back", message)
+
+    @unittest.skipIf(hasattr(os, "getuid") and os.getuid() == 0,
+                     "running as root ignores permission bits")
+    def test_an_unreachable_receipt_is_not_asserted_to_exist(self):
+        """The UNREADABLE arm is reached whenever os.stat raises something other than
+        FileNotFoundError -- including a parent directory the reader cannot traverse, where
+        whether the file exists is UNKNOWN. Saying "it is there" inverts the very asymmetry the
+        resolver's own docstring is careful about."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _two_capability_project(tmp)
+            locked = Path(root) / "security" / "locked"
+            locked.mkdir(parents=True, exist_ok=True)
+            (locked / "r.json").write_text("{}", encoding="utf-8")
+            _append(_log_path(root), _acceptance_record(
+                "acme_ledger_poster", _PHASE,
+                operator_receipt_ref="security/locked/r.json"))
+            locked.chmod(0o000)
+            try:
+                failures = capability_invariants.check_capability_invariants(
+                    str(root), "acme_ledger_poster").failures
+            finally:
+                locked.chmod(0o755)
+            message = next(f for f in failures if f.startswith("Acceptance receipt:"))
+            self.assertNotIn("is there but", message)
+            self.assertIn("could not be reached", message)
+
+    @unittest.skipIf(hasattr(os, "getuid") and os.getuid() == 0,
+                     "running as root ignores permission bits")
+    def test_an_unreadable_acceptance_log_is_not_asserted_to_exist_either(self):
+        """Same correction, the audit-log half. NOTE on coverage, so the next reader does not
+        assume more than this proves: the parent-directory variant (existence genuinely unknown)
+        is NOT reachable through this entrypoint for the acceptance log, because its parent
+        folder also holds the descriptor set -- locking it degrades the check before check 5 ever
+        runs. The receipt half of this correction IS reachable that way and is tested above. Here
+        the sentence is pinned on the reachable file-level failure, and what it must not do is
+        assert existence in either case."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _two_capability_project(tmp)
+            log = _log_path(root)
+            _append(log, _acceptance_record("acme_ledger_poster", _PHASE))
+            log.chmod(0o000)
+            try:
+                failures = capability_invariants.check_capability_invariants(
+                    str(root), "acme_ledger_poster").failures
+            finally:
+                log.chmod(0o644)
+            audit = [f for f in failures if f.startswith("Audit record:")]
+            self.assertEqual(len(audit), 1, f"expected one audit failure in {failures!r}")
+            self.assertNotIn("is there but", audit[0])
+            self.assertIn("could not be read", audit[0])
+            self.assertIn("not confirmation the file is gone", audit[0])
+
+    def test_the_hybrid_refusal_is_not_described_as_either_field(self):
+        """The guard requires BOTH a non-empty implementation_hash AND a non-empty op_kind, so
+        "either" names a refusal that does not happen."""
+        for doc in (acceptance_ceremony.is_valid_repudiation_record.__doc__ or "",
+                    acceptance_ceremony.append_repudiation_record.__doc__ or ""):
+            self.assertNotIn("either", doc)
+
+    def test_a_one_field_row_is_appended_and_the_docstring_does_not_deny_it(self):
+        """The guard requires BOTH fields, so a one-field row is written. The substantive
+        property still holds -- the reducer reads it as a repudiation -- but the sentence must
+        not claim a refusal that does not happen."""
+        event = acceptance_ceremony.build_repudiation_record(
+            "acme_ledger_poster", _PHASE, "take it back",
+            repudiated_at="2026-02-02T00:00:00Z")
+        one_field = dict(event)
+        one_field["op_kind"] = _OP_KIND
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "log.jsonl"
+            acceptance_ceremony.append_repudiation_record(str(log), one_field)
+            self.assertTrue(log.exists())
+            self.assertEqual(
+                reduce_acceptance_log(str(log), ("acme_ledger_poster",), _PHASE).status,
+                ACCEPTANCE_STATUS_REPUDIATED)
+
+    def test_the_usage_does_not_promise_the_message_says_what_changed(self):
+        usage = acceptance_repudiation.USAGE
+        self.assertNotIn("says whether anything changed", usage)
+        self.assertIn("after", usage.lower())
+
+    def test_the_reducer_consumer_list_is_complete(self):
+        """A list that enumerates its consumers has to enumerate all of them, or the next reader
+        trusts it and misses one."""
+        import ast
+        src = (_AGENTS_LIB / "external_write" / "acceptance_ceremony.py").read_text(
+            encoding="utf-8")
+        doc = ast.get_docstring(next(
+            n for n in ast.parse(src).body
+            if isinstance(n, ast.FunctionDef) and n.name == "is_valid_acceptance_record")) or ""
+        self.assertIn("repudiate_acceptance", doc)
+
+    def test_every_named_reducer_consumer_really_calls_it(self):
+        """And the list must not name a consumer that does not exist -- the mirror-image error."""
+        import ast
+        callers = set()
+        for name in ("acceptance_ceremony.py", "lifecycle_state.py", "capability_invariants.py"):
+            tree = ast.parse((_AGENTS_LIB / "external_write" / name).read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.FunctionDef):
+                    continue
+                for call in ast.walk(node):
+                    if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                            and call.func.id == "reduce_acceptance_log"):
+                        callers.add(node.name)
+        self.assertIn("repudiate_acceptance", callers)
+        self.assertIn("_acceptance_record_exists", callers)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

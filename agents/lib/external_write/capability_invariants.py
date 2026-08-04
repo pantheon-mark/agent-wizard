@@ -531,10 +531,13 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
                 # nothing here established that.
                 failures.append(
                     f'Audit record: capability "{canonical_id}" is marked accepted for phase '
-                    f'"{phase_id}", and the approval log ({DEFAULT_AUDIT_LOG_PATH}) is there but '
-                    "could not be read -- so whether its approval is recorded could not be "
-                    "determined. This is NOT confirmation that the record is missing. Treat this "
-                    "capability as unverified until that file can be read; repair or restore it, "
+                    f'"{phase_id}", and the approval log ({DEFAULT_AUDIT_LOG_PATH}) could not '
+                    "be read -- so whether its approval is recorded could not be determined. "
+                    "This is NOT confirmation that the record is missing, and it is not "
+                    "confirmation the file is gone either: the read failed for a reason other "
+                    "than the file being absent, which can also mean a folder above it could "
+                    "not be opened. Treat this capability as unverified until that file can be "
+                    "read; check that folder and the file, repair or restore what is wrong, "
                     "then re-run this check."
                 )
             elif reduced.status != ACCEPTANCE_STATUS_ACTIVE:
@@ -564,17 +567,28 @@ def check_capability_invariants(project_root: str, canonical_id: str) -> Invaria
                     reduced.record, project_root=str(root))
                 if not resolution.resolved:
                     if resolution.status == RECEIPT_STATUS_NO_REF:
-                        what = ("its approval record carries no reference to a receipt at all, "
-                                "so there is no record of what you signed off")
+                        # NOT "so there is no record of what you said": a real ceremony append
+                        # writes the operator's own words into this same record. What is missing
+                        # is the receipt it should point at, and the sentence below already says
+                        # exactly that.
+                        what = "its approval record carries no reference to a receipt at all"
                         restore = ""
                     elif resolution.status == RECEIPT_STATUS_ABSENT:
                         what = ("its approval record names a receipt file that is not there "
                                 f"({resolution.ref})")
                         restore = "put that file back if you still have it, or -- "
                     elif resolution.status == RECEIPT_STATUS_UNREADABLE:
-                        what = ("its approval record names a receipt file that is there but "
-                                f"could not be opened ({resolution.ref})")
-                        restore = ("make that file readable again if you can, or -- ")
+                        # Deliberately does NOT say the file is there. This arm is reached
+                        # whenever the check failed for a reason other than the file being
+                        # absent -- including a folder above it that could not be opened, where
+                        # whether the receipt exists is simply unknown from here. Asserting it
+                        # exists inverts the very absent/inaccessible distinction the resolver
+                        # is careful to preserve.
+                        what = ("its approval record names a receipt file that could not be "
+                                f"reached ({resolution.ref}) -- it may be there and unreadable, "
+                                "or a folder above it may be closed to us")
+                        restore = ("make that file and the folders above it readable again if "
+                                   "you can, or -- ")
                     else:
                         what = ("its approval record names a file that could not be read as a "
                                 f"receipt ({resolution.ref})")

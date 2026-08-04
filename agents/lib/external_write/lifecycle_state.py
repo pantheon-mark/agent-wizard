@@ -813,6 +813,29 @@ def _revoke_accepted_entries(
     return changed
 
 
+# ---------------------------------------------------------------------------
+# What a re-trial queue entry DECLARES itself to be.
+#
+# The rebuild flow dispatches on an entry's ``kind``. Before these existed, a re-trial entry
+# carried none, so it landed in that flow's "no kind field" branch -- a decision made from a
+# field's ABSENCE, which is inferring identity from incidental structure in the one place whose
+# output is a code rewrite of the operator's own file. A capability whose entry says "nothing
+# about its code changed" would have been routed to rewrite its writer.
+#
+# The writer declares what it wrote; the reader joins on the declared value. Two kinds, because
+# the two causes are genuinely different facts and a reader that cannot tell them apart is back
+# to guessing: one means the code moved under a live approval, the other means the operator
+# changed their mind and the code is untouched. Neither is in any set ``upgrade_reconcile``
+# reaps by kind, so its own families leave these alone -- and, unlike an un-kinded entry, they
+# are no longer swept by that module's gate-violation recorder, whose replace clause matches
+# ``kind in (its own kind, None)`` on the same ``mechanism_id``.
+# ---------------------------------------------------------------------------
+
+#: The capability's implementation changed after it was approved for live use.
+RETRIAL_KIND_STALE = "acceptance_stale"
+#: The operator took their approval back. Nothing about the capability's code changed.
+RETRIAL_KIND_REPUDIATED = "acceptance_repudiated"
+
 #: The re-trial entry's own words for the STALENESS cause (the code moved under an approval).
 STALENESS_RETRIAL_REASON = (
     "this capability's implementation changed since it was approved for live use; "
@@ -825,7 +848,7 @@ STALENESS_RETRIAL_NEXT_STEP = (
 
 
 def _queue_retrial_migration(
-    root: Path, canonical_id: str, *, reason: str, suggested_next_step: str,
+    root: Path, canonical_id: str, *, kind: str, reason: str, suggested_next_step: str,
 ) -> None:
     """Land (or refresh) a durable, disk-first re-trial request in the pending-migration queue --
     the SAME queue ``wizard/skills/add-capability.md`` checks at its Step A, and the SAME
@@ -833,12 +856,17 @@ def _queue_retrial_migration(
     request`` uses (re-running a check for the same capability replaces its existing entry rather
     than duplicating it).
 
-    ``reason`` / ``suggested_next_step`` are supplied by the caller rather than written here
-    because the two revocation causes are not the same fact: staleness means the code moved under
-    an approval, repudiation means the operator took the approval back with the code untouched.
-    One sentence covering both would be false for one of them. The QUEUE WRITE itself stays a
-    single implementation -- there is exactly one function that puts a re-trial on the queue, and
-    both causes go through it."""
+    ``kind`` / ``reason`` / ``suggested_next_step`` are supplied by the caller rather than written
+    here because the two revocation causes are not the same fact: staleness means the code moved
+    under an approval, repudiation means the operator took the approval back with the code
+    untouched. One sentence covering both would be false for one of them, and -- more than
+    cosmetically -- the rebuild flow DISPATCHES on ``kind``, so an entry that declared none was
+    read there as a direct-write violation needing a code rewrite. The QUEUE WRITE itself stays a
+    single implementation: exactly one function puts a re-trial on the queue, and both causes go
+    through it."""
+    if kind not in (RETRIAL_KIND_STALE, RETRIAL_KIND_REPUDIATED):
+        raise ValueError(
+            f"a re-trial entry must declare one of this module's own kinds; got {kind!r}")
     path = root / MIGRATION_QUEUE_REL
     try:
         existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
@@ -853,6 +881,7 @@ def _queue_retrial_migration(
     existing.append({
         "mechanism_id": canonical_id,
         "requested_at": _utcnow_iso(),
+        "kind": kind,
         "reason": reason,
         "suggested_next_step": suggested_next_step,
         "status": "pending",
@@ -863,7 +892,7 @@ def _queue_retrial_migration(
 
 def _revoke_and_queue_retrial(
     root: Path, aliases: FrozenSet[str], canonical_id: str, *,
-    reason: str, suggested_next_step: str,
+    kind: str, reason: str, suggested_next_step: str,
 ) -> bool:
     """THE sanctioned acceptance-revocation transition: force ``accepted`` back to ``False`` for
     this capability's descriptor entries and put a named re-trial on the pending-migration queue,
@@ -887,7 +916,8 @@ def _revoke_and_queue_retrial(
     descriptor_set = _load_descriptor_set(root)
     changed = _revoke_accepted_entries(root, descriptor_set, aliases)
     _queue_retrial_migration(
-        root, canonical_id, reason=reason, suggested_next_step=suggested_next_step)
+        root, canonical_id, kind=kind, reason=reason,
+        suggested_next_step=suggested_next_step)
     return changed
 
 
@@ -950,6 +980,7 @@ def revoke_stale_acceptance(
         identity: CapabilityIdentity = index.resolve(canonical_id, "module_stem")
         _revoke_and_queue_retrial(
             root, identity.aliases, identity.canonical_id,
+            kind=RETRIAL_KIND_STALE,
             reason=STALENESS_RETRIAL_REASON,
             suggested_next_step=STALENESS_RETRIAL_NEXT_STEP)
         note = STALE_ACCEPTANCE_NOTE
@@ -1135,6 +1166,7 @@ def repudiate_acceptance(
     # Revoke FIRST: never leave live authorization standing behind a recorded withdrawal.
     revoked = _revoke_and_queue_retrial(
         root, identity.aliases, identity.canonical_id,
+        kind=RETRIAL_KIND_REPUDIATED,
         reason=REPUDIATION_RETRIAL_REASON,
         suggested_next_step=REPUDIATION_RETRIAL_NEXT_STEP)
 

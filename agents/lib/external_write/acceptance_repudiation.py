@@ -123,9 +123,10 @@ USAGE = (
     "The original approval record is kept -- nothing is erased, a withdrawal is added.\n"
     "Run it from your project's top folder.\n"
     f"Exit codes: {EXIT_RECORDED} = taken back; "
-    f"{EXIT_REFUSED} = it did not finish -- read the message, which says whether anything "
-    "changed (almost always nothing did, but the state check that runs AFTER the change can "
-    f"fail on its own); {EXIT_BAD_ARGS} = the command was not understood."
+    f"{EXIT_REFUSED} = it did not finish. Almost every cause changes nothing, but one -- the "
+    "state check that runs AFTER the approval is withdrawn -- can fail once the change is "
+    "already made, so this code on its own does not tell you which happened; "
+    f"{EXIT_BAD_ARGS} = the command was not understood."
 )
 
 
@@ -203,7 +204,9 @@ def parse_repudiation_args(
         return None, (
             f"the {FLAG_CONFIRMATION} is still the blank the command was printed with "
             f"({CONFIRMATION_PLACEHOLDER}). Replace it with your own words -- what goes on "
-            "record has to be what you said, not what was printed for you to fill in."
+            "record has to be what you said, not what was printed for you to fill in -- then "
+            "run it again. If you are not sure what to put there, ask your assistant to show "
+            "you the command with your own wording already in it."
             f"\n\n{USAGE}")
     return options, None
 

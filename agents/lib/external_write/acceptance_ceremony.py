@@ -399,12 +399,15 @@ def is_valid_acceptance_record(rec: Any, capability_id: str, phase_id: str) -> b
     module builds just above ``accept_capability_for_live_use``'s flip/backfill branches).
 
     WHERE IT IS ENFORCED. ``reduce_acceptance_log``'s ACTIVE branch calls this -- it is how a
-    line becomes "the current acceptance" -- so every consumer of the reducer
-    (``_acceptance_record_exists``, ``lifecycle_state``'s staleness reader and completion gate,
-    ``capability_invariants``' audit check) reaches the shape rules below through this one
-    function. That delegation is asserted structurally by test; without it this predicate and
-    the reducer would be two implementations of the same question with nothing forcing them to
-    agree.
+    line becomes "the current acceptance" -- so every consumer of the reducer reaches the shape
+    rules below through this one function. Those consumers, in full, because a list that
+    enumerates is trusted to be complete: ``_acceptance_record_exists`` (this module),
+    ``lifecycle_state._read_latest_acceptance_record`` (the staleness reader),
+    ``lifecycle_state.check_completion`` (the audit conjunct),
+    ``lifecycle_state.repudiate_acceptance`` (the is-there-anything-live-to-take-back guard),
+    and ``capability_invariants``' audit check. That delegation is asserted structurally by
+    test, and so is the completeness of this list; without it this predicate and the reducer
+    would be two implementations of the same question with nothing forcing them to agree.
 
     Without this check, ANY dict with a merely-matching ``capability_id`` / ``phase_id`` -- e.g.
     a hand-crafted or partially-written junk line -- counted as "already recorded", which could
@@ -453,8 +456,12 @@ def is_valid_repudiation_record(rec: Any, capability_ids: Any, phase_id: Optiona
     mattering, in order of what they actually cover:
 
       * ``build_repudiation_record`` never emits those keys;
-      * ``append_repudiation_record`` REFUSES a record carrying either, so nothing this module
-        writes can be a hybrid;
+      * ``append_repudiation_record`` REFUSES a record carrying BOTH a non-empty
+        ``implementation_hash`` AND a non-empty ``op_kind`` -- i.e. exactly the rows that would
+        also satisfy ``is_valid_acceptance_record``. A row carrying only ONE of the two is
+        appended, deliberately: it is not a hybrid (nothing reads it as an acceptance record),
+        and refusing it would be a second, stricter shape rule living somewhere the shape rules
+        do not otherwise live;
       * and if a hybrid reached the log by some other route, ``reduce_acceptance_log`` tests for
         a repudiation FIRST, so it resolves as a repudiation -- the fail-safe direction.
 
@@ -619,8 +626,9 @@ def append_repudiation_record(audit_log_path: str, record: Dict[str, Any]) -> No
     repudiation that lands as an unreadable line is indistinguishable from one that was never
     written, and the operator would be told their approval had been taken back when it had not.
 
-    ALSO refuses a HYBRID -- a row carrying a repudiation ``schema`` together with the acceptance
-    record's own ``implementation_hash`` / ``op_kind``. This is the check that makes the
+    ALSO refuses a HYBRID -- a row carrying a repudiation ``schema`` together with BOTH of the
+    acceptance record's own load-bearing fields (``implementation_hash`` AND ``op_kind``), which
+    is precisely the shape that would satisfy ``is_valid_acceptance_record`` as well. This is the check that makes the
     two-shapes-are-disjoint property true of everything this module writes; the validators alone
     do not establish it (see ``is_valid_repudiation_record``'s own note). Enforced here rather
     than in the validator so that a hybrid which somehow reached the log by another route is

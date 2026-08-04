@@ -200,6 +200,15 @@ def parse_acknowledgement_args(
     A blank or whitespace-only confirmation is refused HERE as well as by the
     command itself: what the operator said is the whole content of the record, and
     an empty one would be a silent acknowledgement.
+
+    The rendered ``CONFIRMATION_PLACEHOLDER`` is refused for the same reason. This
+    command is printed with that blank BEFORE the operator has said anything;
+    pasted unedited it would write this module's own placeholder into the record as
+    their verbatim decision. The act would still be theirs, but the field's entire
+    content is supposed to be THEIR words, and a machine-supplied stand-in sitting
+    in it is the forged-consent shape in the one field that exists to prevent it.
+    Only the placeholder itself is refused (trimmed), so words that merely happen to
+    quote the phrase still pass.
     """
     args = list(argv or ())
     options: Dict[str, Optional[str]] = {FLAG_WRITER: None,
@@ -217,6 +226,14 @@ def parse_acknowledgement_args(
         return None, f"missing required {FLAG_WRITER}.\n\n{USAGE}"
     if not (options[FLAG_CONFIRMATION] or "").strip():
         return None, f"missing required {FLAG_CONFIRMATION}.\n\n{USAGE}"
+    if (options[FLAG_CONFIRMATION] or "").strip() == CONFIRMATION_PLACEHOLDER:
+        return None, (
+            f"the {FLAG_CONFIRMATION} is still the blank the command was printed with "
+            f"({CONFIRMATION_PLACEHOLDER}). Replace it with your own words -- what goes on "
+            "record has to be what you said, not what was printed for you to fill in -- then "
+            "run it again. If you are not sure what to put there, ask your assistant to show "
+            "you the command with your own wording already in it."
+            f"\n\n{USAGE}")
     return options, None
 
 
