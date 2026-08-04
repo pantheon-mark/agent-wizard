@@ -59,6 +59,7 @@ Run:  python3 -m unittest discover -s wizard/scripts/lib \\
 """
 
 import ast
+import collections
 import json
 import os
 import re
@@ -1232,100 +1233,119 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
                           f"{name} is returned by a refusal site but the dispatcher "
                           "would not report it")
 
-    #: References that READ a label rather than mint one. Declared, not filtered by a
-    #: name heuristic, so nothing is silently outside the enumeration below.
+    #: A reference that READS a label rather than minting one. Declared per row, not
+    #: filtered by a name heuristic, so nothing sits silently outside the enumeration.
+    #:
+    #: DISCLOSED, because it is author-declared like the fact text: whether a row is
+    #: minting or reading is a claim by whoever wrote the row, and a `_NON_MINTING`
+    #: row skips BOTH the same-fact check and the fact-is-stated check. The machine
+    #: enforces the multiset of references and the same-fact property over the rows
+    #: that declare a fact; it cannot tell you that a row lied about being a reader.
     _NON_MINTING = "reads a label; does not mint one"
 
-    #: EVERY site that MINTS a refusal label, with the fact that site establishes.
-    #: Keyed on (function, label) and NOT on a line number, which drifts on any edit
-    #: above it and is a stale-anchor generator.
+    #: EVERY reference to a refusal label, as ROWS -- ``(function, label, count,
+    #: fact)`` -- with the fact that site establishes.
     #:
-    #: THIS TABLE IS THE POINT, not a convenience. Four rounds of defects came from
-    #: one generator: a refusal label shared by sites whose ESTABLISHED FACTS DIFFER,
-    #: so its one sentence was true at one site and false at the others. Fixing the
-    #: sentences one at a time left the generator intact and the next site
-    #: re-created it -- most recently the sharpened "has more than one of our safety
-    #: blocks", true at one of four sites and false at three, which MOVED a false
-    #: claim onto the operator surface in the very change that fixed the previous one.
+    #: WHY ROWS WITH A COUNT AND NOT A DICT. The first version was a dict keyed on
+    #: ``(function, label)`` compared against a SET, so multiplicity was lost twice
+    #: over: two minting sites inside ONE function sharing a label were invisible, and
+    #: two literal rows that duplicated a key were silently dead. Both were measured.
     #:
-    #: What the machine checks: the derived set of minting sites equals this table's
-    #: keys exactly, so a new site, a moved one, or a removed one cannot pass
-    #: silently; and any label appearing at more than one site must have the SAME
-    #: declared fact at each. What the author declares: the fact text. That split is
-    #: stated rather than blurred -- no test can read a condition and tell you what it
-    #: established.
-    _MINTING_SITES = {
-        ("_insert_tripwire_into_existing_guard", "_REFUSED_UNREADABLE_WRAPPER"):
-            "the wrapper could not be read at all",
-        ("_insert_tripwire_into_existing_guard", "_REFUSED_NOT_TEXT"):
-            "the wrapper is not decodable text",
-        ("_insert_tripwire_into_existing_guard", "_REFUSED_GUARD_NOT_ONE_BLOCK"):
-            "there is not exactly one complete begin/end guard pair",
+    #: That blindness was not academic. TWO of the four original
+    #: ``_REFUSED_AMBIGUOUS_GUARD`` sites were in the SAME function -- so the
+    #: mechanism built to close the shared-label class would have caught only half of
+    #: the defect it was built for. A dict also cannot express "two sites here", which
+    #: is the shape the class needs to be able to see.
+    #:
+    #: Counts are compared as a MULTISET against the AST sweep, so adding a second
+    #: site in a function that already has one fails here.
+    #:
+    #: WHAT IS MACHINE-CHECKED AND WHAT IS NOT, stated in full because a partial
+    #: version of this understated it by a step. The machine checks: the multiset of
+    #: references matches the source exactly; no row is a dead duplicate; every label
+    #: is reportable and has a sentence; and no label that DECLARES A FACT has two
+    #: different ones. Author-declared, and unenforceable by any test here: the fact
+    #: TEXT (no test can read a condition and tell you what it established), and
+    #: WHETHER A ROW MINTS AT ALL -- a ``_NON_MINTING`` row skips both the same-fact
+    #: check and the fact-is-stated check, so mislabelling a minting site as a reader
+    #: would hide it from exactly the property this table exists to enforce.
+    _LABEL_REFERENCES = (
+        ("_insert_tripwire_into_existing_guard", "_REFUSED_UNREADABLE_WRAPPER", 1,
+         "the wrapper could not be read at all"),
+        ("_insert_tripwire_into_existing_guard", "_REFUSED_NOT_TEXT", 1,
+         "the wrapper is not decodable text"),
+        ("_insert_tripwire_into_existing_guard", "_REFUSED_GUARD_NOT_ONE_BLOCK", 1,
+         "there is not exactly one complete begin/end guard pair"),
         ("_insert_tripwire_into_existing_guard",
-         "_REFUSED_GUARD_MARKERS_OUT_OF_ORDER"):
-            "the end marker precedes the begin marker",
-        ("_insert_tripwire_into_existing_guard", "_REFUSED_FOREIGN_MARKER"):
-            "the guard does not name this mechanism's reconstructed marker",
-        ("_insert_tripwire_into_existing_guard", "_REFUSED_LINE_ENDINGS"):
-            "the guard's stopped-run message is present with CRLF endings",
-        ("_insert_tripwire_into_existing_guard", "_REFUSED_UNRECOGNISED_GUARD"):
-            "the stopped-run message is not present exactly once in the block",
-        ("_repair_stale_recorder_identity", "_REFUSED_GUARD_REGION_NOT_DELIMITED"):
-            "the block's message and exit lines are not each present exactly once",
-        ("_repair_stale_recorder_identity", "_REFUSED_GUARD_EXIT_BEFORE_MESSAGE"):
-            "the block's exit precedes its stopped-run message",
-        ("_refuse_unconfined_change", "_REFUSED_CHANGE_NOT_CONFINED"):
-            "the whole-file post-condition rejected the prepared change; "
-            "nothing was written",
-        ("_publish_guard_change", "_REFUSED_WRITE_FAILED"):
-            "the write itself raised; the file is unchanged",
-        ("_publish_guard_change", "_REFUSED_READBACK_FAILED"):
-            "the read-back raised, so there was nothing to compare",
-        ("_publish_guard_change", "_REFUSED_NOT_VERIFIED"):
-            "the read-back succeeded and differed from what was written",
-        ("_restore_after_failed_check", "_REFUSED_NEEDS_PERSON"):
-            "a check failed AND the restore failed, so the file's state is unverified",
-        ("upgrade_paused_entrypoint_guards", "_REFUSED_UNREADABLE_PAUSE_RECORD"):
-            "the pause record could not be read or parsed",
-        ("upgrade_paused_entrypoint_guards", "_REFUSED_PAUSE_RECORD_WRONG_SHAPE"):
-            "the pause record parsed but is not a mapping",
-        ("upgrade_paused_entrypoint_guards", "_REFUSED_ID_DISAGREEMENT"):
-            "the record's declared id disagrees with its filename",
-        ("upgrade_paused_entrypoint_guards", "_REFUSED_CANNOT_RECORD_ID"):
-            "no record file can be kept for this id",
-        ("upgrade_paused_entrypoint_guards", "_REFUSED_UNEXPECTED"):
-            "an unanticipated failure; nothing about the file's state is established",
-        ("reconcile_upgrade", "_REFUSED_PASS_NOT_RUN"):
-            "the sweep could not run at all; nothing was examined",
-        # The labels handed to the two helpers that finish those paths. They mint the
-        # same fact as the site that passes them, which is why the helper exists.
-        ("_publish_guard_change", "_REFUSED_READBACK_FAILED"):
-            "the read-back raised, so there was nothing to compare",
-        ("_publish_guard_change", "_REFUSED_NOT_VERIFIED"):
-            "the read-back succeeded and differed from what was written",
-        # --- references that READ a label, minting nothing -----------------------
-        ("_refusal_record", "_REFUSED"): _NON_MINTING,
-        ("_tripwire_refusal_lines", "_REFUSED"): _NON_MINTING,
-        ("_tripwire_refusal_lines", "_REFUSED_PASS_NOT_RUN"): _NON_MINTING,
-        ("render_reconcile_result", "_REFUSED"): _NON_MINTING,
-        ("render_reconcile_result", "_REFUSED_PASS_NOT_RUN"): _NON_MINTING,
-    }
+         "_REFUSED_GUARD_MARKERS_OUT_OF_ORDER", 1,
+         "the end marker precedes the begin marker"),
+        ("_insert_tripwire_into_existing_guard", "_REFUSED_FOREIGN_MARKER", 1,
+         "the guard does not name this mechanism's reconstructed marker"),
+        ("_insert_tripwire_into_existing_guard", "_REFUSED_LINE_ENDINGS", 1,
+         "the guard's stopped-run message is present with CRLF endings"),
+        ("_insert_tripwire_into_existing_guard", "_REFUSED_UNRECOGNISED_GUARD", 1,
+         "the stopped-run message is not present exactly once in the block"),
+        ("_repair_stale_recorder_identity", "_REFUSED_GUARD_REGION_NOT_DELIMITED", 1,
+         "the block's message and exit lines are not each present exactly once"),
+        ("_repair_stale_recorder_identity", "_REFUSED_GUARD_EXIT_BEFORE_MESSAGE", 1,
+         "the block's exit precedes its stopped-run message"),
+        ("_refuse_unconfined_change", "_REFUSED_CHANGE_NOT_CONFINED", 1,
+         "the whole-file post-condition rejected the prepared change; "
+         "nothing was written"),
+        ("_publish_guard_change", "_REFUSED_WRITE_FAILED", 1,
+         "the write itself raised; the file is unchanged"),
+        ("_publish_guard_change", "_REFUSED_READBACK_FAILED", 1,
+         "the read-back raised, so there was nothing to compare"),
+        ("_publish_guard_change", "_REFUSED_NOT_VERIFIED", 1,
+         "the read-back succeeded and differed from what was written"),
+        ("_restore_after_failed_check", "_REFUSED_NEEDS_PERSON", 1,
+         "a check failed AND the restore failed, so the file's state is unverified"),
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_UNREADABLE_PAUSE_RECORD", 1,
+         "the pause record could not be read"),
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_UNPARSEABLE_PAUSE_RECORD", 1,
+         "the pause record was read but would not parse"),
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_PAUSE_RECORD_WRONG_SHAPE", 1,
+         "the pause record parsed but is not a mapping"),
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_ID_ABSENT", 1,
+         "the record carries no mechanism_id at all"),
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_ID_DISAGREEMENT", 1,
+         "the record's declared id disagrees with its filename"),
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_CANNOT_RECORD_ID", 1,
+         "no record file can be kept for this id"),
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_UNEXPECTED", 1,
+         "an unanticipated failure; nothing about the file's state is established"),
+        ("reconcile_upgrade", "_REFUSED_PASS_NOT_RUN", 1,
+         "the sweep could not run at all; nothing was examined"),
+        # --- references that READ a label, minting nothing ----------------------
+        ("_refusal_record", "_REFUSED", 1, _NON_MINTING),
+        ("_tripwire_refusal_lines", "_REFUSED", 1, _NON_MINTING),
+        ("_tripwire_refusal_lines", "_REFUSED_PASS_NOT_RUN", 1, _NON_MINTING),
+        ("render_reconcile_result", "_REFUSED", 1, _NON_MINTING),
+        ("render_reconcile_result", "_REFUSED_PASS_NOT_RUN", 1, _NON_MINTING),
+    )
 
     def _derived_label_references(self):
-        """EVERY ``_REFUSED*`` reference inside a function, by AST.
+        """Every ``_REFUSED*`` reference inside a FUNCTION BODY, by AST.
 
-        Total rather than clever. A first attempt matched only a returned tuple's
-        first element and ``_refusal_record``'s argument, and missed two real minting
-        paths -- a label handed to a helper as an argument, and one returned from
-        inside a conditional expression. A sweep that has to recognise each indirection
-        will keep missing the next one, so this recognises none of them: it collects
-        every reference and the table below says, for each, whether it mints and what
-        it establishes.
+        Indirection-agnostic rather than clever: a first attempt matched only a
+        returned tuple's first element and ``_refusal_record``'s argument, and missed
+        two real minting paths -- a label handed to a helper as an argument, and one
+        returned from inside a conditional expression. A sweep that has to recognise
+        each indirection keeps missing the next one, so this recognises none of them
+        and the table says which references mint.
+
+        NOT TOTAL AS A MATCHER, and the earlier wording claiming that was too strong.
+        MODULE-SCOPE references are excluded by construction (``self.fn`` is None
+        there), so a label held in a module-level table and returned from a function
+        that reads that table would be invisible in both halves -- verified. The
+        module has no such path today, which makes this sweep COMPLETE FOR THE CURRENT
+        STATE, not complete for any state. A future table-driven refusal needs its own
+        row here by hand.
         """
         source = (_WIZARD / "scripts" / "lib" / "upgrade_reconcile.py").read_text(
             encoding="utf-8")
         tree = ast.parse(source)
-        found = set()
+        found = collections.Counter()
 
         class Walk(ast.NodeVisitor):
             def __init__(self):
@@ -1340,52 +1360,109 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
 
             def visit_Name(self, node):
                 if (self.fn and isinstance(node.ctx, ast.Load)
-                        and node.id.startswith("_REFUSED")
-                        and node.id != "_REFUSAL_OUTCOMES"):
-                    found.add((self.fn, node.id))
+                        and node.id.startswith("_REFUSED")):
+                    # A COUNTER, not a set. A set lost multiplicity, so two minting
+                    # sites inside one function sharing a label were invisible -- and
+                    # two of the four sites the shared-label class was built for were
+                    # in the same function, so it would have caught half of it.
+                    found[(self.fn, node.id)] += 1
                 self.generic_visit(node)
 
         Walk().visit(tree)
         return found
 
-    def test_every_label_reference_is_declared(self):
+    def _declared_counter(self):
+        counter = collections.Counter()
+        for function, label, count, _fact in self._LABEL_REFERENCES:
+            counter[(function, label)] += count
+        return counter
+
+    def test_every_label_reference_is_declared_WITH_ITS_MULTIPLICITY(self):
         derived = self._derived_label_references()
         self.assertTrue(derived, "the AST sweep must find something")
-        declared = set(self._MINTING_SITES)
+        declared = self._declared_counter()
         self.assertEqual(
-            sorted(derived - declared), [],
-            "a refusal label is minted at a site this table does not declare -- add "
-            "a row stating what that site establishes, and check the label's sentence "
-            "is true there")
+            dict(derived - declared), {},
+            "a refusal label is referenced more times than this table declares -- if "
+            "that is a new minting site, add a row stating what it establishes and "
+            "check the label's sentence is true there")
         self.assertEqual(
-            sorted(declared - derived), [],
-            "this table declares a minting site that no longer exists")
+            dict(declared - derived), {},
+            "this table declares references that no longer exist")
 
-    def test_a_label_shared_by_two_sites_must_establish_THE_SAME_FACT(self):
-        """★ The generator, closed. A label shared by sites whose facts differ has one
-        sentence that is true at one of them; that is what produced four rounds of
-        false operator claims, most recently by sharpening a shared label rather than
-        splitting it."""
+    def test_no_row_is_a_dead_duplicate(self):
+        """Two literal rows duplicating a key were silently dead in the dict form --
+        the later one won and the earlier one described nothing. As rows they would
+        instead inflate a count, so this asserts each (function, label) appears once
+        with its own count rather than twice."""
+        keys = [(f, l) for f, l, _c, _fact in self._LABEL_REFERENCES]
+        dupes = sorted(k for k, n in collections.Counter(keys).items() if n > 1)
+        self.assertEqual(dupes, [],
+                         "duplicated rows -- merge them into one row with a count: "
+                         + repr(dupes))
+
+    def _labels_with_conflicting_facts(self, rows):
+        """The property, as a function over ROWS so it can be exercised on a fixture.
+
+        Extracted precisely because the real table can no longer make it fail: every
+        label is minted at one site today, so run against production this predicate is
+        unexercised. A test that cannot fail is the shape this task has removed twice.
+        """
         by_label = {}
-        for (function, label), fact in self._MINTING_SITES.items():
+        for _function, label, _count, fact in rows:
             if fact == self._NON_MINTING:
                 continue
             by_label.setdefault(label, set()).add(fact)
-        offenders = {label: sorted(facts) for label, facts in by_label.items()
-                     if len(facts) > 1}
+        return {label: sorted(facts) for label, facts in by_label.items()
+                if len(facts) > 1}
+
+    def test_the_same_fact_property_DETECTS_a_conflict_when_there_is_one(self):
+        """★ F9: the property observed RED, on a fixture.
+
+        Against production this predicate returns empty because no label is minted
+        twice -- which is the goal, and also means production alone can never
+        demonstrate the check works. So it is exercised here on the exact shape it
+        exists to catch, INCLUDING the configuration that made the old gate blind:
+        two sites in the SAME function.
+        """
+        conflict_across_functions = (
+            ("fn_a", "_REFUSED_X", 1, "fact one"),
+            ("fn_b", "_REFUSED_X", 1, "a different fact"),
+        )
         self.assertEqual(
-            offenders, {},
+            self._labels_with_conflicting_facts(conflict_across_functions),
+            {"_REFUSED_X": ["a different fact", "fact one"]})
+
+        conflict_within_one_function = (
+            ("fn_a", "_REFUSED_X", 1, "fact one"),
+            ("fn_a", "_REFUSED_X", 1, "a different fact"),
+        )
+        self.assertTrue(
+            self._labels_with_conflicting_facts(conflict_within_one_function),
+            "two sites in ONE function with different facts is the configuration the "
+            "previous gate could not see at all")
+
+        agreeing = (("fn_a", "_REFUSED_X", 2, "one fact"),
+                    ("fn_b", "_REFUSED_X", 1, "one fact"))
+        self.assertEqual(self._labels_with_conflicting_facts(agreeing), {})
+        self.assertEqual(
+            self._labels_with_conflicting_facts(
+                (("fn_a", "_REFUSED_X", 1, self._NON_MINTING),
+                 ("fn_b", "_REFUSED_X", 1, "a fact"))),
+            {}, "a reader row must not count as a conflicting fact")
+
+    def test_no_label_in_the_REAL_table_has_conflicting_facts(self):
+        self.assertEqual(
+            self._labels_with_conflicting_facts(self._LABEL_REFERENCES), {},
             "these labels are minted at sites establishing DIFFERENT facts, so one "
-            "sentence cannot be true at all of them -- split the label: "
-            + repr(offenders))
+            "sentence cannot be true at all of them -- split the label")
 
     def test_every_declared_fact_is_stated_and_every_label_is_reportable(self):
         """The table cannot be padded with blanks, and every label in it has to be one
         the dispatcher reports and the notes map answers for."""
-        for (function, label), fact in sorted(self._MINTING_SITES.items()):
+        for function, label, count, fact in self._LABEL_REFERENCES:
             self.assertTrue(fact.strip(), f"{function}/{label} declares no fact")
-            if fact == self._NON_MINTING:
-                continue
+            self.assertGreaterEqual(count, 1, f"{function}/{label} declares no count")
             value = getattr(upgrade_reconcile, label)
             self.assertIn(value, upgrade_reconcile._REFUSAL_OUTCOMES, label)
             self.assertIn(value, upgrade_reconcile._REFUSAL_OPERATOR_NOTES, label)
@@ -1408,6 +1485,104 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
         self.assertNotIn("has more than one of our safety blocks", notice,
                          "this wrapper has FEWER than one complete block")
         self.assertIn("does not contain exactly one complete safety block", notice)
+
+    def test_a_malformed_pause_record_is_not_called_UNREADABLE(self):
+        """F4's sibling: the file read perfectly and would not parse. Read and
+        understood are different facts and only the second one failed."""
+        self.p.historical_wrapper()
+        self.p.pause_marker()
+        (self.p.root / PAUSED_DIR_REL / f"{MECH}.json").write_text(
+            "{not json at all", encoding="utf-8")
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        (entry,) = result.tripwire_refusals
+        self.assertEqual(entry["outcome"],
+                         upgrade_reconcile._REFUSED_UNPARSEABLE_PAUSE_RECORD)
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertIn("was read but its contents could not be made sense of", notice)
+        self.assertNotIn("could not be read, so we could not tell", notice)
+
+    def test_an_ABSENT_mechanism_id_is_not_called_a_DIFFERENT_one(self):
+        """F5. Absent and different are not the same fact, and the remedy differs."""
+        self.p.historical_wrapper()
+        self.p.pause_marker()
+        (self.p.root / PAUSED_DIR_REL / f"{MECH}.json").write_text(
+            json.dumps({"writer_relpath": WRITER_REL,
+                        "entrypoint_relpath": WRAPPER_REL}) + "\n",
+            encoding="utf-8")
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        (entry,) = result.tripwire_refusals
+        self.assertEqual(entry["outcome"], upgrade_reconcile._REFUSED_ID_ABSENT)
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertIn("does not say which job it belongs to", notice)
+        self.assertNotIn("names a different job", notice)
+
+    def test_a_DIFFERENT_mechanism_id_still_reads_as_a_disagreement(self):
+        """The control for the split above: the route that genuinely IS a
+        disagreement must keep saying so."""
+        self.p.historical_wrapper()
+        self.p.pause_marker()
+        (self.p.root / PAUSED_DIR_REL / f"{MECH}.json").write_text(
+            json.dumps({"mechanism_id": "some_other_job",
+                        "writer_relpath": WRITER_REL,
+                        "entrypoint_relpath": WRAPPER_REL}) + "\n",
+            encoding="utf-8")
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        (entry,) = result.tripwire_refusals
+        self.assertEqual(entry["outcome"],
+                         upgrade_reconcile._REFUSED_ID_DISAGREEMENT)
+        self.assertIn("names a different job",
+                      Path(result.notice_path).read_text(encoding="utf-8"))
+
+    def test_the_region_sentence_does_not_claim_the_lines_belong_to_another_job(self):
+        """F3: this route fires whenever the block's record-keeping lines are not the
+        ones we would write now, which includes reformatted lines for THIS job. What
+        is established is that they do not match, not whose they are."""
+        note = upgrade_reconcile._REFUSAL_OPERATOR_NOTES[
+            upgrade_reconcile._REFUSED_GUARD_REGION_NOT_DELIMITED]
+        self.assertNotIn("for a different job", note)
+        self.assertIn("not the ones we would write", note)
+
+    def test_the_unexpected_DIAGNOSTIC_agrees_with_its_declared_fact(self):
+        """F6: the operator sentence refuses to state the file's state, and the
+        diagnostic on the same event used to assert it. One event, two channels, and
+        the table now declares the opposite of what the diagnostic said."""
+        # AST, not a text window. The first attempt scanned forward from a phrase and
+        # matched the COMMENT that quotes the old wording in order to explain it --
+        # the same reason the monopoly gate is AST-based rather than textual: prose
+        # discussing a banned sentence is not the sentence.
+        source = (_WIZARD / "scripts" / "lib" / "upgrade_reconcile.py").read_text(
+            encoding="utf-8")
+        reasons = []
+        for node in ast.walk(ast.parse(source)):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "_refusal_record"):
+                continue
+            labels = [a.id for a in node.args
+                      if isinstance(a, ast.Name) and a.id.startswith("_REFUSED")]
+            if "_REFUSED_UNEXPECTED" not in labels:
+                continue
+            reasons.append("".join(
+                part.value for arg in node.args for part in ast.walk(arg)
+                if isinstance(part, ast.Constant) and isinstance(part.value, str)))
+        self.assertEqual(len(reasons), 1, reasons)
+        for claim in ("keeps the guard it had", "not report being stopped"):
+            self.assertNotIn(claim, reasons[0],
+                             "the diagnostic asserts a file state its own declared "
+                             f"fact says is not established: {claim!r}")
+        self.assertIn("not established here", reasons[0])
+
+    def test_the_byte_for_byte_claim_names_its_ONE_exception(self):
+        """F8: "every refusal leaves the wrapper byte-for-byte as it was" is a
+        universally-quantified claim with a known exception -- the needs-a-person
+        branch is exactly the case where a write happened and the restore failed."""
+        doc = upgrade_reconcile._insert_tripwire_into_existing_guard.__doc__ or ""
+        self.assertIn("byte-for-byte", doc)
+        self.assertIn("WITH ONE EXCEPTION", doc)
+        self.assertIn("_REFUSED_NEEDS_PERSON", doc)
 
     def test_the_unexpected_sentence_never_states_the_files_state(self):
         """An unknown failure is one where nobody knows where it stopped, so the

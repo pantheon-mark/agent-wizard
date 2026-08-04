@@ -3230,8 +3230,10 @@ _REFUSED_READBACK_FAILED = "refused_readback_failed"
 _REFUSED_NOT_VERIFIED = "refused_not_verified"
 _REFUSED_NEEDS_PERSON = "refused_needs_person"
 _REFUSED_UNREADABLE_PAUSE_RECORD = "refused_unreadable_pause_record"
+_REFUSED_UNPARSEABLE_PAUSE_RECORD = "refused_unparseable_pause_record"
 _REFUSED_PAUSE_RECORD_WRONG_SHAPE = "refused_pause_record_wrong_shape"
 _REFUSED_ID_DISAGREEMENT = "refused_id_disagreement"
+_REFUSED_ID_ABSENT = "refused_id_absent"
 _REFUSED_CANNOT_RECORD_ID = "refused_cannot_record_id"
 _REFUSED_UNEXPECTED = "refused_unexpected"
 #: Not a wrapper at all -- the whole pass could not run. Rendered as a pass-wide
@@ -3255,8 +3257,10 @@ _REFUSAL_OUTCOMES: Tuple[str, ...] = (
     _REFUSED_NOT_VERIFIED,
     _REFUSED_NEEDS_PERSON,
     _REFUSED_UNREADABLE_PAUSE_RECORD,
+    _REFUSED_UNPARSEABLE_PAUSE_RECORD,
     _REFUSED_PAUSE_RECORD_WRONG_SHAPE,
     _REFUSED_ID_DISAGREEMENT,
+    _REFUSED_ID_ABSENT,
     _REFUSED_CANNOT_RECORD_ID,
     _REFUSED_UNEXPECTED,
     _REFUSED_PASS_NOT_RUN,
@@ -3288,10 +3292,14 @@ _REFUSAL_OPERATOR_NOTES: Dict[str, str] = {
         "in the file that starts this job, the start and end markers of our safety "
         "block are the wrong way round, so we could not tell where the block begins "
         "and ends, and did not change it"),
+    # "for a DIFFERENT job" was false: this route is reached whenever the block
+    # carries record-keeping lines that are not the ones we would write now, which
+    # includes lines for THIS job that have been reformatted. What is established is
+    # that they do not match, not whose they are.
     _REFUSED_GUARD_REGION_NOT_DELIMITED: (
-        "the file that starts this job already has record-keeping lines for a "
-        "different job, and the block's own message and stop lines are not each "
-        "present exactly once, so we could not tell which part to replace"),
+        "the file that starts this job already has record-keeping lines that are not "
+        "the ones we would write, and the block's own message and stop lines are not "
+        "each present exactly once, so we could not tell which part to replace"),
     _REFUSED_GUARD_EXIT_BEFORE_MESSAGE: (
         "in the file that starts this job, the block's stop line comes before its "
         "message, so we could not tell which part to replace"),
@@ -3327,6 +3335,12 @@ _REFUSAL_OPERATOR_NOTES: Dict[str, str] = {
     _REFUSED_UNREADABLE_PAUSE_RECORD: (
         "one of the pause records could not be read, so we could not tell which job "
         "it belongs to or add anything for it"),
+    # SPLIT: a record that was READ perfectly and then would not parse was reported
+    # as one that "could not be read". Read and understood are different facts, and
+    # only the second one failed here.
+    _REFUSED_UNPARSEABLE_PAUSE_RECORD: (
+        "one of the pause records was read but its contents could not be made sense "
+        "of, so we could not tell which job it belongs to or add anything for it"),
     # SPLIT: a record that reads and parses perfectly but holds the wrong kind of
     # value was reported as one that "could not be read".
     _REFUSED_PAUSE_RECORD_WRONG_SHAPE: (
@@ -3336,6 +3350,12 @@ _REFUSAL_OPERATOR_NOTES: Dict[str, str] = {
     _REFUSED_ID_DISAGREEMENT: (
         "one of the pause records names a different job than its own filename does, "
         "and we did not choose between the two"),
+    # SPLIT: a record with NO job name in it was reported as one that "names a
+    # different job". Absent and different are not the same fact -- the distinction
+    # this pass enforces everywhere else.
+    _REFUSED_ID_ABSENT: (
+        "one of the pause records does not say which job it belongs to, so we could "
+        "not add anything for it"),
     _REFUSED_CANNOT_RECORD_ID: (
         "this job's name cannot be used for a record file, so there is nowhere to "
         "write down a skipped run for it"),
@@ -3343,6 +3363,11 @@ _REFUSAL_OPERATOR_NOTES: Dict[str, str] = {
     # establish -- this handler catches anything the guarded paths inside did not
     # anticipate, so by construction nobody knows where it stopped. If it cannot
     # establish what happened to the file, it must not say what happened to the file.
+    #
+    # THE DIAGNOSTIC `reason` AT THAT SITE SAYS THE SAME THING. It used to end "it
+    # keeps the guard it had and will not report being stopped", which asserted the
+    # state this note refuses to assert -- the two channels contradicting each other
+    # about one event, with the declared fact siding against the diagnostic.
     _REFUSED_UNEXPECTED: (
         "something unexpected went wrong while working on the file that starts this "
         "job, and we cannot tell from here what state that left it in -- ask your "
@@ -3387,15 +3412,21 @@ def _insert_tripwire_into_existing_guard(
     Returns ``(outcome, reason)``. ``outcome`` is ``"upgraded"``,
     ``"already_current"``, ``"skipped"`` (there is no managed guard here to add it
     to), or ANY member of ``_REFUSAL_OUTCOMES`` -- one label per cause, including the
-    two this function returns straight out of ``_publish_guard_change`` /
-    ``_restore_wrapper``. The enumeration used to read ``"refused"`` alone, which was
+    two it returns straight out of ``_publish_guard_change`` (which now chooses the
+    label itself; ``_restore_wrapper`` no longer returns one). The enumeration used to read ``"refused"`` alone, which was
     the contract the dispatcher's membership test has to stay in sync with; the
     membership test is now over that tuple and pinned by a test, so the two cannot
     drift apart silently.
 
-    Every refusal leaves the wrapper byte-for-byte as it was. The bar for touching
-    it at all is deliberately high, because the failure this is guarding against is
-    silently un-pausing a writer:
+    Every refusal leaves the wrapper byte-for-byte as it was, WITH ONE EXCEPTION
+    named rather than glossed: ``_REFUSED_NEEDS_PERSON`` is precisely the case where
+    a write happened and putting the original back ALSO failed, so the file is in a
+    state nobody verified. That is why it is the one refusal whose sentence sends the
+    operator to the file itself. Every other refusal path either wrote nothing or
+    restored what was there.
+
+    The bar for touching it at all is deliberately high, because the failure this is
+    guarding against is silently un-pausing a writer:
 
       * exactly one guard block, its markers in order;
       * the guard must literally name THIS mechanism's pause marker, reconstructed
@@ -3818,8 +3849,9 @@ def upgrade_paused_entrypoint_guards(
     each becomes a ``refused`` entry, and the caller renders those into the notice.
 
     WHAT IT MAY COST, stated without rounding down. Usually a tripwire and nothing
-    else. The one exception is ``_restore_wrapper``'s double-failure branch (a
-    verification failure whose restore ALSO fails), which can leave a wrapper in a
+    else. The one exception is the double-failure branch reached through
+    ``_restore_after_failed_check`` (a verification failure whose restore ALSO
+    fails), which can leave a wrapper in a
     state its own reported reason says needs a person to look at before it is relied
     on again -- still paused, since the guard write is atomic, but not a state to
     describe as "only a tripwire".
@@ -3863,11 +3895,21 @@ def upgrade_paused_entrypoint_guards(
         candidate_id = name[: -len(".json")]
         path = directory / name
         try:
-            state = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, UnicodeDecodeError) as exc:
+            raw_state = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
             report["refused"].append(_refusal_record(
                 candidate_id, None, _REFUSED_UNREADABLE_PAUSE_RECORD,
-                f"the pause record {name} could not be read or parsed "
+                f"the pause record {name} could not be read ({exc!r}), so the "
+                "mechanism it belongs to cannot be established"))
+            continue
+        try:
+            state = json.loads(raw_state)
+        except ValueError as exc:
+            # READ fine, would not PARSE. Reported as "could not be read" until this
+            # split, which is a different fact about a different failure.
+            report["refused"].append(_refusal_record(
+                candidate_id, None, _REFUSED_UNPARSEABLE_PAUSE_RECORD,
+                f"the pause record {name} was read but could not be parsed "
                 f"({exc!r}), so the mechanism it belongs to cannot be "
                 "established"))
             continue
@@ -3878,6 +3920,15 @@ def upgrade_paused_entrypoint_guards(
                 f"{type(state).__name__}, not a record"))
             continue
         declared = state.get("mechanism_id")
+        if declared is None:
+            # ABSENT, not different. Reported as "names a different job" until this
+            # split -- the same absent-vs-other distinction this pass enforces for a
+            # missing file, a missing marker and a missing declaration.
+            report["refused"].append(_refusal_record(
+                candidate_id, None, _REFUSED_ID_ABSENT,
+                f"the pause record {name} carries no mechanism_id at all, so the "
+                "mechanism it belongs to cannot be established"))
+            continue
         if declared != candidate_id:
             report["refused"].append(_refusal_record(
                 candidate_id, None, _REFUSED_ID_DISAGREEMENT,
@@ -3923,8 +3974,8 @@ def upgrade_paused_entrypoint_guards(
             report["refused"].append(_refusal_record(
                 declared, entrypoint, _REFUSED_UNEXPECTED,
                 f"{entrypoint} could not be given the record-keeping "
-                f"lines ({exc!r}); it keeps the guard it had and will "
-                "not report being stopped"))
+                f"lines ({exc!r}); what state that left the file in is not "
+                "established here"))
             continue
         if outcome == "upgraded":
             report["upgraded"].append(declared)
