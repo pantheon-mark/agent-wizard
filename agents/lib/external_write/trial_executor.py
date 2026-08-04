@@ -402,6 +402,19 @@ def parse_trial_args(argv: Any) -> Tuple[Optional[Dict[str, Optional[str]]],
             f"missing required {FLAG_APPROVAL} -- a trial makes a real change to "
             "your own record and puts it back, so it runs only on your own "
             f"words.\n\n{USAGE}")
+    if (options[FLAG_APPROVAL] or "").strip() == APPROVAL_PLACEHOLDER:
+        # The blank a surface renders BEFORE the operator has said anything. Pasted
+        # unedited it would carry this module's own placeholder into a real bounded
+        # live write as the words authorizing it -- a machine supplying the approval
+        # the whole gate rests on. Only the placeholder itself is refused (trimmed),
+        # so words that merely quote the phrase still pass.
+        return None, (
+            f"the {FLAG_APPROVAL} is still the blank the command was printed with "
+            f"({APPROVAL_PLACEHOLDER}). Replace it with your own words -- a trial "
+            "makes a real change to your own record, so what authorizes it has to "
+            "be what you said, not what was printed for you to fill in -- then run "
+            "it again. If you are not sure what to put there, ask your assistant to "
+            f"show you the command with your own wording already in it.\n\n{USAGE}")
     return options, None
 
 

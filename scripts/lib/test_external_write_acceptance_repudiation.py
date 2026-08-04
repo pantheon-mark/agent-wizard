@@ -1118,66 +1118,88 @@ class EveryConfirmationEntrypointRefusesItsOwnPlaceholderTests(unittest.TestCase
     of modules that actually render a confirmation blank, so a third entrypoint added later fails
     here until it is enrolled with its own refusal, rather than shipping the hazard again."""
 
-    #: module attribute name -> the parser that must refuse that module's own placeholder.
-    #: Declared, not derived from a name pattern: which function guards a module is not something
-    #: to infer from spelling.
+    #: module -> (the constant holding its rendered blank, the parser that must refuse it).
+    #: Declared, not derived from a name pattern: which function guards a module, and which
+    #: constant it renders, are not things to infer from spelling.
     _ENROLLED = {
-        "acceptance_repudiation": "parse_repudiation_args",
-        "writer_acknowledgement": "parse_acknowledgement_args",
+        "acceptance_repudiation": ("CONFIRMATION_PLACEHOLDER", "parse_repudiation_args"),
+        "writer_acknowledgement": ("CONFIRMATION_PLACEHOLDER", "parse_acknowledgement_args"),
+        "trial_executor": ("APPROVAL_PLACEHOLDER", "parse_trial_args"),
     }
 
-    def _modules_rendering_a_confirmation_blank(self):
+    def _modules_rendering_a_blank(self):
+        """Discovered on the constant's VALUE -- a ``<...>`` fill-in-the-blank -- never on its
+        symbol name. Keying on the name `CONFIRMATION_PLACEHOLDER` is what let this population
+        miss `trial_executor.APPROVAL_PLACEHOLDER`, at the surface that authorizes a real
+        bounded live write: a name is incidental structure, and the enrolled set then equalled
+        the discovered set only because the discovery was looking for the wrong thing."""
         import ast
-        found = set()
+        found = {}
         d = _AGENTS_LIB / "external_write"
         for path in sorted(d.glob("*.py")):
             if path.name.startswith("test_"):
                 continue
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in tree.body:
+            for node in ast.parse(path.read_text(encoding="utf-8")).body:
                 targets = ([node.target] if isinstance(node, ast.AnnAssign)
                            else getattr(node, "targets", []))
+                value = getattr(node, "value", None)
+                if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+                    continue
+                if not (value.value.startswith("<") and value.value.endswith(">")):
+                    continue
                 for t in targets:
-                    if isinstance(t, ast.Name) and t.id == "CONFIRMATION_PLACEHOLDER":
-                        found.add(path.stem)
+                    if isinstance(t, ast.Name):
+                        found[path.stem] = t.id
         return found
 
     def test_the_enrolled_set_is_the_whole_population(self):
+        discovered = self._modules_rendering_a_blank()
         self.assertEqual(
-            self._modules_rendering_a_confirmation_blank(), set(self._ENROLLED),
-            "a module that renders an operator-confirmation blank must have a parser that "
-            "refuses that blank pasted unedited, and be enrolled here")
+            set(discovered), set(self._ENROLLED),
+            "a module that renders an operator's own words as a fill-in blank must have a "
+            "parser that refuses that blank pasted unedited, and be enrolled here")
+        for mod_name, const_name in discovered.items():
+            self.assertEqual(self._ENROLLED[mod_name][0], const_name,
+                             f"{mod_name} renders a different constant than enrolled")
+
+    def _argv_with(self, mod, const_name, filler):
+        """Every declared FLAG_ on the module, with the words-flag carrying ``filler``. The
+        words-flag is the one whose value the module interpolates its blank into."""
+        blank = getattr(mod, const_name)
+        argv = []
+        for attr in sorted(a for a in dir(mod) if a.startswith("FLAG_")):
+            flag = getattr(mod, attr)
+            argv += [flag, filler if attr in ("FLAG_CONFIRMATION", "FLAG_APPROVAL")
+                     else "some_subject"]
+        return argv, blank
 
     def test_each_one_refuses_its_own_placeholder_pasted_unedited(self):
         import importlib
-        for mod_name, parser_name in self._ENROLLED.items():
+        for mod_name, (const_name, parser_name) in self._ENROLLED.items():
             mod = importlib.import_module(f"external_write.{mod_name}")
-            parser = getattr(mod, parser_name)
-            argv = []
-            for flag in (a for a in dir(mod) if a.startswith("FLAG_")):
-                value = (mod.CONFIRMATION_PLACEHOLDER
-                         if getattr(mod, flag) == mod.FLAG_CONFIRMATION else "some_subject")
-                argv += [getattr(mod, flag), value]
-            options, error = parser(argv)
-            self.assertIsNone(options, f"{mod_name} accepted its own printed blank")
+            argv, blank = self._argv_with(mod, const_name, getattr(mod, const_name))
+            options, error = getattr(mod, parser_name)(argv)
+            self.assertIsNone(options, f"{mod_name} accepted its own printed blank {blank!r}")
             self.assertTrue(error)
 
     def test_each_refusal_routes_the_operator_onward(self):
         """A refusal that names nothing to do instead is a dead end, and the surfaces that
-        render these commands hand them over with the blank still in. Caught for real: the
-        round-trip test that drives the rendered acknowledgement command end-to-end failed the
-        moment this refusal existed without a route -- before the refusal, that same paste
-        SUCCEEDED and recorded the placeholder as consent."""
+        render these commands hand them over with the blank still in.
+
+        CORRECTED READING (an earlier version of this docstring asserted the opposite, and it
+        was wrong): the round-trip test that drives the rendered acknowledgement command did go
+        red the moment this refusal existed without a route -- but NOT because a success became
+        a failure. In that fixture two entries name one file, so pre-refusal the placeholder
+        parsed and the command then failed on the AMBIGUITY refusal, exit 1, recording nothing.
+        The test was already on its non-zero branch; what changed was the MESSAGE, which stopped
+        carrying the repair constant that branch accepts. The forged-consent hazard this refusal
+        closes is real -- nothing between the parser and the record checks the blank -- but that
+        test is not evidence of it."""
         import importlib
-        for mod_name, parser_name in self._ENROLLED.items():
+        for mod_name, (const_name, parser_name) in self._ENROLLED.items():
             mod = importlib.import_module(f"external_write.{mod_name}")
-            parser = getattr(mod, parser_name)
-            argv = []
-            for flag in (a for a in dir(mod) if a.startswith("FLAG_")):
-                value = (mod.CONFIRMATION_PLACEHOLDER
-                         if getattr(mod, flag) == mod.FLAG_CONFIRMATION else "some_subject")
-                argv += [getattr(mod, flag), value]
-            _options, error = parser(argv)
+            argv, _blank = self._argv_with(mod, const_name, getattr(mod, const_name))
+            _options, error = getattr(mod, parser_name)(argv)
             low = (error or "").lower()
             self.assertIn("replace it with your own words", low, mod_name)
             self.assertIn("ask your assistant", low,
@@ -1186,15 +1208,10 @@ class EveryConfirmationEntrypointRefusesItsOwnPlaceholderTests(unittest.TestCase
 
     def test_each_one_still_accepts_real_words(self):
         import importlib
-        for mod_name, parser_name in self._ENROLLED.items():
+        for mod_name, (const_name, parser_name) in self._ENROLLED.items():
             mod = importlib.import_module(f"external_write.{mod_name}")
-            parser = getattr(mod, parser_name)
-            argv = []
-            for flag in (a for a in dir(mod) if a.startswith("FLAG_")):
-                value = ("yes, I really mean it"
-                         if getattr(mod, flag) == mod.FLAG_CONFIRMATION else "some_subject")
-                argv += [getattr(mod, flag), value]
-            options, error = parser(argv)
+            argv, _blank = self._argv_with(mod, const_name, "yes, I really mean it")
+            options, error = getattr(mod, parser_name)(argv)
             self.assertIsNone(error, f"{mod_name}: {error}")
             self.assertIsNotNone(options)
 
@@ -1321,6 +1338,107 @@ class ClaimsMatchTheirMechanismRoundTwoTests(unittest.TestCase):
                         callers.add(node.name)
         self.assertIn("repudiate_acceptance", callers)
         self.assertIn("_acceptance_record_exists", callers)
+
+
+class RoundThreeTests(unittest.TestCase):
+
+    def test_F12_the_consumer_list_completeness_is_actually_compared(self):
+        """The docstring claims a test keeps its consumer list complete. Assert the claim by
+        BUILDING the comparison it names: the set the doc enumerates must equal the set the AST
+        finds, in BOTH directions. Checking that two known names are present cannot notice a
+        sixth consumer, which is exactly what the sentence promised."""
+        import ast, re
+        d = _AGENTS_LIB / "external_write"
+        src = (d / "acceptance_ceremony.py").read_text(encoding="utf-8")
+        doc = ast.get_docstring(next(
+            n for n in ast.parse(src).body
+            if isinstance(n, ast.FunctionDef) and n.name == "is_valid_acceptance_record")) or ""
+        named = set(re.findall(r"``(?:[a-z_]+\.)?([a-z_][a-z_0-9]*)``", doc))
+
+        found = set()
+        for name in ("acceptance_ceremony.py", "lifecycle_state.py", "capability_invariants.py"):
+            for node in ast.walk(ast.parse((d / name).read_text(encoding="utf-8"))):
+                if not isinstance(node, ast.FunctionDef):
+                    continue
+                for call in ast.walk(node):
+                    if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                            and call.func.id == "reduce_acceptance_log"):
+                        found.add(node.name)
+        self.assertTrue(found, "the AST sweep must find something")
+        self.assertEqual(
+            found - named, set(),
+            "a consumer of the reducer is not named in the list that claims to enumerate them")
+        self.assertEqual(
+            {n for n in named if n in found or n.startswith(("_read_", "check_", "repudiate_",
+                                                             "_acceptance_"))} - found, set(),
+            "the list names a consumer that does not call the reducer")
+
+    def test_F13_a_bad_kind_never_leaves_authorization_revoked_with_no_exit(self):
+        """The guard must sit BEFORE the irreversible half. Called with an undeclared kind, the
+        transition must refuse having changed nothing -- not revoke the approval, fail to queue
+        the exit, and strand the capability in the state this cut exists to close."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _two_capability_project(tmp)
+            with self.assertRaises(ValueError):
+                lifecycle_state._revoke_and_queue_retrial(
+                    root, frozenset({"acme_ledger_poster"}), "acme_ledger_poster",
+                    kind="not_a_declared_kind", reason="r", suggested_next_step="s")
+            self.assertIs(_entry(root, "acme_ledger_poster")["accepted"], True,
+                          "authorization was revoked by a call that then refused")
+            self.assertEqual(_queue(root), [],
+                             "no exit was queued, so the revocation above would have stranded it")
+
+    def test_F14_queuing_a_retrial_does_not_destroy_a_safety_entry_for_the_same_id(self):
+        """The replace clause is idempotency for THIS writer's own entries. Dropping every entry
+        sharing the mechanism_id also drops a live safety record written by someone else -- and
+        that direction destroys evidence rather than a duplicate."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _two_capability_project(tmp)
+            (Path(root) / "agents" / "handoffs").mkdir(parents=True, exist_ok=True)
+            (Path(root) / lifecycle_state.MIGRATION_QUEUE_REL).write_text(json.dumps([{
+                "mechanism_id": "acme_ledger_poster",
+                "writer_relpath": "agents/acme_writer.py",
+                "kind": "external_write_gate_violation",
+                "reason": "flagged non-conformant with the external-write gate on upgrade",
+                "status": "pending",
+            }]), encoding="utf-8")
+
+            lifecycle_state._queue_retrial_migration(
+                root, "acme_ledger_poster",
+                kind=lifecycle_state.RETRIAL_KIND_REPUDIATED,
+                reason="r", suggested_next_step="s")
+
+            kinds = [e.get("kind") for e in _queue(root)]
+            self.assertIn("external_write_gate_violation", kinds,
+                          "a live safety entry was destroyed by a retrial queue write")
+            self.assertIn(lifecycle_state.RETRIAL_KIND_REPUDIATED, kinds)
+
+    def test_F14b_a_second_retrial_still_replaces_its_own_prior_entry(self):
+        """And the idempotency it was written for must survive: same id, same kind, one entry."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _two_capability_project(tmp)
+            for _ in range(2):
+                lifecycle_state._queue_retrial_migration(
+                    root, "acme_ledger_poster",
+                    kind=lifecycle_state.RETRIAL_KIND_REPUDIATED,
+                    reason="r", suggested_next_step="s")
+            mine = [e for e in _queue(root)
+                    if e.get("kind") == lifecycle_state.RETRIAL_KIND_REPUDIATED]
+            self.assertEqual(len(mine), 1)
+
+    def test_F14c_the_other_retrial_kind_for_the_same_id_is_also_replaced(self):
+        """The two retrial kinds are this writer's own family: a capability that went stale and
+        was then repudiated must not accumulate two competing exits."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _two_capability_project(tmp)
+            lifecycle_state._queue_retrial_migration(
+                root, "acme_ledger_poster", kind=lifecycle_state.RETRIAL_KIND_STALE,
+                reason="r", suggested_next_step="s")
+            lifecycle_state._queue_retrial_migration(
+                root, "acme_ledger_poster", kind=lifecycle_state.RETRIAL_KIND_REPUDIATED,
+                reason="r", suggested_next_step="s")
+            self.assertEqual(len(_queue(root)), 1)
+            self.assertEqual(_queue(root)[0]["kind"], lifecycle_state.RETRIAL_KIND_REPUDIATED)
 
 
 if __name__ == "__main__":  # pragma: no cover

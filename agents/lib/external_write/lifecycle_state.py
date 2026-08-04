@@ -828,7 +828,11 @@ def _revoke_accepted_entries(
 # changed their mind and the code is untouched. Neither is in any set ``upgrade_reconcile``
 # reaps by kind, so its own families leave these alone -- and, unlike an un-kinded entry, they
 # are no longer swept by that module's gate-violation recorder, whose replace clause matches
-# ``kind in (its own kind, None)`` on the same ``mechanism_id``.
+# ``kind in (its own kind, None)`` on the same ``mechanism_id``. That is the mirror-image
+# direction only, and naming it alone would read as though the whole class were handled: the
+# direction that mattered more -- THIS writer's replace clause destroying somebody else's live
+# SAFETY entry for the same capability -- is closed separately, in `_queue_retrial_migration`,
+# by scoping its replace to these two kinds.
 # ---------------------------------------------------------------------------
 
 #: The capability's implementation changed after it was approved for live use.
@@ -864,9 +868,6 @@ def _queue_retrial_migration(
     read there as a direct-write violation needing a code rewrite. The QUEUE WRITE itself stays a
     single implementation: exactly one function puts a re-trial on the queue, and both causes go
     through it."""
-    if kind not in (RETRIAL_KIND_STALE, RETRIAL_KIND_REPUDIATED):
-        raise ValueError(
-            f"a re-trial entry must declare one of this module's own kinds; got {kind!r}")
     path = root / MIGRATION_QUEUE_REL
     try:
         existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
@@ -874,9 +875,18 @@ def _queue_retrial_migration(
             existing = []
     except (json.JSONDecodeError, OSError):
         existing = []
+    # Replace only THIS writer's OWN family. Dropping every entry sharing the mechanism_id also
+    # drops a live safety record somebody else wrote for the same capability -- an open
+    # gate-violation or missing-predicate entry -- and that direction destroys evidence rather
+    # than a duplicate. Scoped by kind, it stays idempotent for the entries this function owns
+    # (a capability that went stale and was then repudiated gets one exit, not two competing
+    # ones) and inert for everyone else's, which is the same single-authority discipline
+    # `upgrade_reconcile`'s own reapers already apply to their kinds.
+    _own_kinds = (RETRIAL_KIND_STALE, RETRIAL_KIND_REPUDIATED)
     existing = [
         e for e in existing
-        if not (isinstance(e, dict) and e.get("mechanism_id") == canonical_id)
+        if not (isinstance(e, dict) and e.get("mechanism_id") == canonical_id
+                and e.get("kind") in _own_kinds)
     ]
     existing.append({
         "mechanism_id": canonical_id,
@@ -913,6 +923,15 @@ def _revoke_and_queue_retrial(
     Returns whether any descriptor entry was actually flipped from True to False by this call.
     False means nothing was accepted to begin with -- NOT that the revocation failed; the
     descriptor writer raises on a write failure rather than reporting one quietly."""
+    # BEFORE the irreversible half, deliberately. This guard used to live in the queue writer,
+    # which runs AFTER the descriptor has already been written -- so a caller with an undeclared
+    # kind would have had authorization revoked, no exit queued, and nothing naming a way back:
+    # exactly the stranded state this package exists to prevent, manufactured by a guard added to
+    # prevent one. A refusal here changes nothing at all.
+    if kind not in (RETRIAL_KIND_STALE, RETRIAL_KIND_REPUDIATED):
+        raise ValueError(
+            f"a re-trial entry must declare one of this module's own kinds; got {kind!r}. "
+            "Nothing was changed.")
     descriptor_set = _load_descriptor_set(root)
     changed = _revoke_accepted_entries(root, descriptor_set, aliases)
     _queue_retrial_migration(

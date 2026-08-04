@@ -400,14 +400,21 @@ def is_valid_acceptance_record(rec: Any, capability_id: str, phase_id: str) -> b
 
     WHERE IT IS ENFORCED. ``reduce_acceptance_log``'s ACTIVE branch calls this -- it is how a
     line becomes "the current acceptance" -- so every consumer of the reducer reaches the shape
-    rules below through this one function. Those consumers, in full, because a list that
-    enumerates is trusted to be complete: ``_acceptance_record_exists`` (this module),
-    ``lifecycle_state._read_latest_acceptance_record`` (the staleness reader),
-    ``lifecycle_state.check_completion`` (the audit conjunct),
-    ``lifecycle_state.repudiate_acceptance`` (the is-there-anything-live-to-take-back guard),
-    and ``capability_invariants``' audit check. That delegation is asserted structurally by
-    test, and so is the completeness of this list; without it this predicate and the reducer
-    would be two implementations of the same question with nothing forcing them to agree.
+    rules below through this one function. Those consumers, in full -- a list that enumerates is
+    trusted to be complete, so this one is compared against the real call graph by test, in BOTH
+    directions (a consumer missing from it fails, and a name in it that does not call the reducer
+    fails too):
+
+      * ``_acceptance_record_exists`` -- this module's own presence predicate;
+      * ``_read_latest_acceptance_record`` -- ``lifecycle_state``'s staleness reader;
+      * ``check_completion`` -- ``lifecycle_state``'s audit conjunct;
+      * ``repudiate_acceptance`` -- ``lifecycle_state``'s is-there-anything-live-to-take-back
+        guard;
+      * ``check_capability_invariants`` -- the emitted self-QA battery's audit check.
+
+    The delegation itself is asserted structurally by test as well. Without it this predicate
+    and the reducer would be two implementations of the same question with nothing forcing them
+    to agree.
 
     Without this check, ANY dict with a merely-matching ``capability_id`` / ``phase_id`` -- e.g.
     a hand-crafted or partially-written junk line -- counted as "already recorded", which could
