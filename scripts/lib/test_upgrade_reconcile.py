@@ -1594,11 +1594,104 @@ class WithdrawnContinuityClaimTests(_Base):
         first = self._reconcile(root)
         self.assertEqual(first.withdrawn_continuity_claim_files, [rel])
         second = self._reconcile(root)
-        self.assertEqual(second.withdrawn_continuity_claim_files, [])
-        self.assertIsNone(second.notice_path)
+        self.assertEqual(second.withdrawn_continuity_claims_newly_named, [])
+        self.assertIsNone(second.notice_path,
+                          "an already-corrected file must not trigger a notice of its "
+                          "own -- and the run-1 notice survives, still carrying it")
         # ...and the sentence is still there. Nothing was edited to achieve silence.
         self.assertIn(self._SHIPPED_NOTICE_LINE.strip(),
                       (root / rel).read_text(encoding="utf-8"))
+
+    def _project_that_writes_a_notice_every_run(self, root):
+        """A finding that persists, so a notice is written on EVERY reconcile: a paused
+        wrapper with Windows line endings, which the tripwire pass refuses every time.
+        Its guard carries the withdrawn sentence too, so this is also the estate's own
+        shape -- a file that keeps the sentence and keeps causing a notice."""
+        wrapper_rel = "agents/cron/run_estate_upkeep.sh"
+        path = self._guarded_wrapper(root, wrapper_rel, "estate_upkeep")
+        path.write_bytes(path.read_text(encoding="utf-8")
+                         .replace("\n", "\r\n").encode("utf-8"))
+        paused = root / PAUSED_MECHANISMS_DIR_REL
+        paused.mkdir(parents=True, exist_ok=True)
+        (paused / "estate_upkeep.json").write_text(json.dumps({
+            "mechanism_id": "estate_upkeep",
+            "entrypoint_relpath": wrapper_rel,
+        }), encoding="utf-8")
+        (paused / "estate_upkeep.pause").write_text("", encoding="utf-8")
+        return wrapper_rel
+
+    def test_EVERY_notice_this_pass_writes_CARRIES_the_correction(self):
+        """★ The correction must survive an OVERWRITE, and on the standalone
+        ``reconcile`` route every run overwrites one fixed notice path.
+
+        Bounding re-emission is not the same as the content being present: the artifact
+        emitted INTO is overwritable, by this same code. Measured on a copy of a real
+        operator project: run 1 emitted the correction, run 2 rewrote that one notice
+        without it, and NO surviving notice carried it -- the correction erased by the
+        mechanism that made it, with nothing to recover it from.
+
+        So the content is unconditional: whenever a notice is written, it names every
+        file that still holds the sentence. What the emission record bounds is only
+        whether the correction can TRIGGER a notice by itself.
+        """
+        root = self._project()
+        self._project_that_writes_a_notice_every_run(root)
+        self._stored_notice(root, "v0.10.2-to-v0.11.0",
+                            self._SHIPPED_NOTICE_LINE + "\n")
+        first = self._reconcile(root)
+        self.assertIn("**A correction",
+                      Path(first.notice_path).read_text(encoding="utf-8"))
+        second = self._reconcile(root)
+        self.assertEqual(first.notice_path, second.notice_path,
+                         "this route was expected to overwrite one fixed path")
+        self.assertIn(
+            "**A correction",
+            Path(second.notice_path).read_text(encoding="utf-8"),
+            "the only notice on disk no longer carries the correction -- emitting it "
+            "once does not make it present")
+        # ...and it still names the files, not just the headline.
+        text = Path(second.notice_path).read_text(encoding="utf-8")
+        for relpath in second.withdrawn_continuity_claim_files:
+            self.assertIn(relpath, text)
+
+    def test_the_TRIGGER_is_bounded_even_though_the_content_is_not(self):
+        """The two halves are separate questions with separate answers. Content: always
+        complete. Trigger (write a notice at all, print the terminal line): only for a
+        file not already named in an emitted correction."""
+        root = self._project()
+        self._project_that_writes_a_notice_every_run(root)
+        rel = self._stored_notice(root, "v0.10.2-to-v0.11.0",
+                                  self._SHIPPED_NOTICE_LINE + "\n")
+        first = self._reconcile(root)
+        self.assertIn(rel, first.withdrawn_continuity_claims_newly_named)
+        second = self._reconcile(root)
+        self.assertEqual(second.withdrawn_continuity_claims_newly_named, [])
+        self.assertIn(rel, second.withdrawn_continuity_claim_files)
+        # The terminal line is the "something to review" surface: it does not repeat.
+        self.assertNotIn("an earlier update left a sentence",
+                         render_reconcile_result(second))
+        self.assertIn("an earlier update left a sentence",
+                      render_reconcile_result(first))
+
+    def test_an_already_named_correction_prints_NOTHING_at_the_terminal(self):
+        """The terminal guard, on its own, with nothing else in the run.
+
+        Added because a mutation keying that guard on the wider field SURVIVED: the
+        sibling test's fixture carries a persistent refusal, which satisfies the guard
+        by itself and masked the mutation (a second guard covering the same case, not a
+        weak assertion). This is the case where only the correction is present, so the
+        guard clause is the only thing that can decide.
+        """
+        root = self._project()
+        self._stored_notice(root, "v0.10.2-to-v0.11.0",
+                            self._SHIPPED_NOTICE_LINE + "\n")
+        first = self._reconcile(root)
+        self.assertNotEqual(render_reconcile_result(first), "")
+        second = self._reconcile(root)
+        self.assertEqual(
+            render_reconcile_result(second), "",
+            'an already-corrected file must not print "something to review" again -- '
+            "nothing the operator can do would ever clear it")
 
     def test_a_newly_found_copy_is_still_named_after_an_earlier_correction(self):
         root = self._project()
@@ -1608,8 +1701,11 @@ class WithdrawnContinuityClaimTests(_Base):
         self._estate_shaped_pause_record(root)
         self._guarded_wrapper(root, "agents/cron/run_estate_upkeep.sh", "estate_upkeep")
         again = self._reconcile(root)
-        self.assertEqual(again.withdrawn_continuity_claim_files,
+        self.assertEqual(again.withdrawn_continuity_claims_newly_named,
                          ["agents/cron/run_estate_upkeep.sh"])
+        # The notice it triggers names BOTH -- the new copy and the one already
+        # corrected -- because what it says is what is on disk now.
+        self.assertEqual(len(again.withdrawn_continuity_claim_files), 2)
 
     def test_an_unusable_emission_record_makes_the_correction_REPEAT(self):
         """Fail-safe direction: a record that cannot be read or makes no sense means
@@ -1621,7 +1717,8 @@ class WithdrawnContinuityClaimTests(_Base):
         self._reconcile(root)
         (root / upgrade_reconcile.WITHDRAWN_CLAIM_CORRECTION_RECORD_REL).write_text(
             "{not json", encoding="utf-8")
-        self.assertEqual(self._reconcile(root).withdrawn_continuity_claim_files, [rel])
+        self.assertEqual(
+            self._reconcile(root).withdrawn_continuity_claims_newly_named, [rel])
 
     def test_the_terminal_summary_never_carries_the_withdrawn_sentence_either(self):
         """The notice is banned from re-emitting it across every shape; the terminal
@@ -1666,14 +1763,17 @@ class WithdrawnContinuityClaimTests(_Base):
 
     def test_one_file_and_many_files_both_read_as_english(self):
         """The terminal line is the surface the operator reads FIRST, and it carries a
-        count."""
+        count. It renders from the NEWLY-NAMED half -- the trigger -- so the count is of
+        what is new, not of every copy that still exists."""
         one = render_reconcile_result(ReconcileResult(
             operator_project_path="/tmp/x", from_version="v1", to_version="v2",
-            withdrawn_continuity_claim_files=["a.sh"]))
+            withdrawn_continuity_claim_files=["a.sh"],
+            withdrawn_continuity_claims_newly_named=["a.sh"]))
         self.assertIn("one of your own files", one)
         many = render_reconcile_result(ReconcileResult(
             operator_project_path="/tmp/x", from_version="v1", to_version="v2",
-            withdrawn_continuity_claim_files=["a.sh", "b.md"]))
+            withdrawn_continuity_claim_files=["a.sh", "b.md"],
+            withdrawn_continuity_claims_newly_named=["a.sh", "b.md"]))
         self.assertIn("2 of your own files", many)
 
     def test_an_unreadable_candidate_is_never_reported_as_carrying_it(self):

@@ -311,6 +311,24 @@ class TestTheGeneratedGuardBody(unittest.TestCase):
         self.assertIn("was found to change something outside this project", block)
         self.assertIn("rebuild-paused-capability", block)
 
+    def test_the_generated_marker_test_matches_the_HISTORICAL_form(self):
+        """BYTE PIN over the extraction of ``$_RECONCILE_HERE`` into a constant.
+
+        The variable had three spellings in this module and the anchored marker join
+        needed a fourth, so it is named once. The historical guard fixture in this file
+        spells the existence-test line independently, byte-for-byte as the first release
+        emitted it -- so comparing the generated line against the fixture's is what
+        establishes that routing four sites through a constant changed no emitted byte.
+        """
+        marker = upgrade_reconcile._wrapper_guard_marker_ref(WRAPPER_REL, MECH)
+        generated = [l for l in self._block().splitlines() if "[ -e " in l]
+        historical = [l for l in _historical_guard_block(MECH, WRITER_REL, marker)
+                      .splitlines() if "[ -e " in l]
+        self.assertEqual(generated, historical)
+        # ...and the anchored needle the join uses is a substring of that same line.
+        self.assertIn(upgrade_reconcile._wrapper_guard_marker_test(WRAPPER_REL, MECH),
+                      generated[0])
+
     def test_the_withdrawn_promise_key_matches_the_HISTORICAL_body(self):
         """The population that matters is the wrappers already paused. The first
         release wrapped that sentence across two comment lines, so a key spelled from
@@ -463,6 +481,56 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
     def test_a_wrapper_carrying_the_historical_guard_gains_the_tripwire(self):
         report = upgrade_paused_entrypoint_guards(self.p.root)
         self.assertEqual(report["upgraded"], [MECH], report)
+        self.assertIn(upgrade_reconcile.SUPPRESSED_INVOCATION_RECORDER_REL,
+                      self._wrapper_text())
+
+    def test_the_correction_is_honest_about_the_bytes_ON_THE_DISCOVERY_PATH(self):
+        """★ The same property as its record-named sibling, asserted on the path REAL
+        DATA TAKES.
+
+        The byte-honesty test written for that sentence runs on a fixture that populates
+        ``entrypoint_relpath``; every real record leaves it null, so the property was
+        pinned nowhere on the discovery-reached path -- the fixture and the assumption
+        agreeing with each other again, one level up from the miss they were built to
+        fix. Here the wrapper is found by its guard, rewritten by this same run, and the
+        notice may not claim it was left alone.
+        """
+        self.p.pause_state(MECH, entrypoint_relpath=None, state="paused_live_write")
+        wrapper = self.p.root / WRAPPER_REL
+        before = wrapper.read_bytes()
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        after = wrapper.read_bytes()
+        self.assertNotEqual(before, after,
+                            "this run was expected to reach the wrapper by discovery")
+        self.assertIn(b"separate read-only entrypoint is not affected by this guard",
+                      after)
+        self.assertIsNotNone(result.notice_path)
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertIn(WRAPPER_REL, notice)
+        self.assertNotIn("Nothing here changes them", notice)
+        self.assertNotIn("left exactly as they are", notice)
+        self.assertIn("Nothing here rewrites that sentence or removes it", notice)
+
+    def test_a_COPY_AT_ANOTHER_DEPTH_does_not_make_the_join_ambiguous(self):
+        """The marker reference is a depth-relative path, so an unanchored substring
+        test lets ``../<marker>`` match inside ``../../<marker>``: a copy of the wrapper
+        one directory deeper looked like a second claimant, the join went ambiguous, and
+        the live wrapper kept its original bytes with no tripwire. The test is anchored
+        on the guard's own ``$_RECONCILE_HERE/`` prefix and the closing quote, so only
+        the reference AT THIS WRAPPER'S OWN DEPTH counts.
+        """
+        # SHALLOWER, which is the direction that bites: this wrapper's own reference is
+        # `../<marker>`, and a copy sitting one level up reconstructs `./<marker>` --
+        # which is a SUBSTRING of `../<marker>`. (The real estate's wrapper is two deep,
+        # so any shallower copy reproduces this.) Verified red before the anchor landed.
+        shallower = self.p.root / "run_finish_estate_cleanup.sh"
+        shallower.write_text((self.p.root / WRAPPER_REL).read_text(encoding="utf-8"),
+                             encoding="utf-8")
+        self.p.pause_state(MECH, entrypoint_relpath=None, state="paused_live_write")
+        report = upgrade_paused_entrypoint_guards(self.p.root)
+        self.assertEqual(report["upgraded"], [MECH], report)
+        self.assertEqual(report["refused"], [], report)
         self.assertIn(upgrade_reconcile.SUPPRESSED_INVOCATION_RECORDER_REL,
                       self._wrapper_text())
 
@@ -1779,6 +1847,13 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
         sources = sorted(fn for fn in seen if mints.get(fn))
         self.assertEqual(len(reachable), 14, sorted(reachable))
         self.assertEqual(len(upgrade_reconcile._REFUSAL_OUTCOMES), 25)
+        # THE DERIVED COUNT TOO. The docstring states "ten are the caller's to mint";
+        # the pin asserted 14 and 24 and went green while that clause broke on the very
+        # commit that added a label -- the third staleness in one sentence. A number a
+        # docstring carries has to be a number something rereads.
+        self.assertEqual(len(upgrade_reconcile._REFUSAL_OUTCOMES) - len(reachable), 11)
+        doc = upgrade_reconcile._insert_tripwire_into_existing_guard.__doc__ or ""
+        self.assertIn("eleven", doc.lower())
         self.assertEqual(sources, ["_insert_tripwire_into_existing_guard",
                                    "_publish_guard_change",
                                    "_refuse_unconfined_change",

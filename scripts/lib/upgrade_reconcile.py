@@ -305,6 +305,13 @@ _GUARD_END = "# --- END upgrade-reconcile safe-pause ---"
 _GUARD_PAUSED_ECHO_LINE = '  echo "paused pending migration"'
 _GUARD_EXIT_LINE = "  exit 0"
 
+#: The shell variable the guard resolves its own directory into, and against which every
+#: path it references is written. Named once because a THIRD site now needs it (the
+#: marker test below anchors on it), and a re-spelled shell variable is the same defect
+#: class as a re-spelled path. Byte-identity of the generated guard across this
+#: extraction is pinned by ``test_the_generated_marker_test_matches_the_HISTORICAL_form``.
+_GUARD_HERE_VAR = "$_RECONCILE_HERE"
+
 # Project-relative path of the emitted module the guard calls when it fires.
 # Duplicated-by-value from ``agent_emitter._EXTERNAL_WRITE_LIB_REL`` +
 # ``suppressed_invocation.py`` and pinned equal to it by
@@ -582,10 +589,15 @@ class ReconcileResult:
     withdrawn_continuity_claim_files: project-relative paths of the operator's OWN files
         that still carry one of the two already-delivered spellings of a continuity promise
         this product withdrew (see ``_WITHDRAWN_CONTINUITY_CLAIMS``). READ-ONLY -- nothing
-        edits them; the correction is emitted into this pass's own notice instead. Must be
-        surfaced by ``render_reconcile_result`` for the same reason as the fields above: on
-        a project whose only finding is this one, it is the only thing that would name the
-        notice at all.
+        edits them; the correction is emitted into this pass's own notice instead. EVERY
+        notice this pass writes names all of them, because the notice is overwritable and
+        "already said once" is not "still on disk".
+
+    withdrawn_continuity_claims_newly_named: the subset of the above not already named in
+        an emitted correction. This is the TRIGGER half -- the only one that may cause a
+        notice to be written, or the terminal line to print, on its own. Split from the
+        field above after the single-field form erased the correction from the one notice
+        path the standalone ``reconcile`` route overwrites every run.
     """
     operator_project_path: str
     from_version: str
@@ -604,6 +616,7 @@ class ReconcileResult:
     adapter_source_edits: List[str] = field(default_factory=list)
     tripwire_refusals: List[Dict[str, Any]] = field(default_factory=list)
     withdrawn_continuity_claim_files: List[str] = field(default_factory=list)
+    withdrawn_continuity_claims_newly_named: List[str] = field(default_factory=list)
 
     @property
     def any_affected(self) -> bool:
@@ -3022,11 +3035,11 @@ def _guard_recorder_lines(mechanism_id: str, entrypoint_relpath: str) -> str:
         "  # this log file. Failing to record it can never let the paused work run:\n"
         "  # the exit below is a separate, unconditional statement, and `|| :` stops a\n"
         "  # nonzero status here from pre-empting it under `sh -e`.\n"
-        f'  python3 "$_RECONCILE_HERE/{recorder}" record \\\n'
+        f'  python3 "{_GUARD_HERE_VAR}/{recorder}" record \\\n'
         f"    --mechanism-id {_sh_single_quote(mechanism_id)} \\\n"
         f"    --entrypoint {_sh_single_quote(entrypoint_relpath)} \\\n"
-        f'    --project-root "$_RECONCILE_HERE/{prefix}" \\\n'
-        f'    --pause-state "$_RECONCILE_HERE/{pause_state}" >/dev/null || :\n'
+        f'    --project-root "{_GUARD_HERE_VAR}/{prefix}" \\\n'
+        f'    --pause-state "{_GUARD_HERE_VAR}/{pause_state}" >/dev/null || :\n'
     )
 
 
@@ -3064,7 +3077,7 @@ def _guard_block(mechanism_id: str, writer_relpath: str, marker_from_wrapper: st
         "# It stays paused -- and its saved access (credentials) stays untouched -- until\n"
         "# the fix is reviewed and approved through the rebuild-paused-capability flow.\n"
         '_RECONCILE_HERE="$(cd "$(dirname "$0")" && pwd)"\n'
-        f'if [ -e "$_RECONCILE_HERE/{marker_from_wrapper}" ]; then\n'
+        f'if [ -e "{_GUARD_HERE_VAR}/{marker_from_wrapper}" ]; then\n'
         f"{_GUARD_PAUSED_ECHO_LINE}\n"
         f"{_guard_recorder_lines(mechanism_id, entrypoint_relpath)}"
         f"{_GUARD_EXIT_LINE}\n"
@@ -3098,6 +3111,25 @@ def _wrapper_guard_marker_ref(entrypoint_relpath: str, mechanism_id: str) -> str
     construction; no I/O."""
     prefix = _relative_prefix(entrypoint_relpath)
     return f"{prefix}/{PAUSED_MECHANISMS_DIR_REL}/{mechanism_id}.pause"
+
+
+def _wrapper_guard_marker_test(entrypoint_relpath: str, mechanism_id: str) -> str:
+    """The marker reference AS THE GUARD'S OWN EXISTENCE TEST SPELLS IT -- quoted, and
+    prefixed by the variable the guard resolves its directory into.
+
+    WHY THE ANCHORS MATTER. The reference is a DEPTH-RELATIVE path, so an unanchored
+    substring test lets one depth match another: ``../<marker>`` occurs inside
+    ``../../<marker>``, and ``./<marker>`` inside ``../<marker>``. Measured: a copy of a
+    paused wrapper one directory shallower looked like a second claimant of the same
+    mechanism, the join went ambiguous, and the live wrapper kept its original bytes with
+    no tripwire -- a fail-closed outcome, but caused by a false positive rather than by a
+    real ambiguity. Anchored on both sides, only the reference at THIS wrapper's own
+    depth counts.
+
+    Built from the same single helper as every other guard-reference site, so the two can
+    never diverge.
+    """
+    return f'"{_GUARD_HERE_VAR}/{_wrapper_guard_marker_ref(entrypoint_relpath, mechanism_id)}"'
 
 
 def _wrapper_guard_pause_state_ref(entrypoint_relpath: str,
@@ -3192,10 +3224,11 @@ def _guarded_wrapper_for_declared_id(
 ) -> Tuple[Optional[str], bool]:
     """``(relpath, ambiguous)`` for the guarded wrapper that gates ``mechanism_id``.
 
-    THE JOIN IS THE MARKER THE GUARD ITSELF TESTS, reconstructed through the one
-    helper every other guard-reference site uses. A wrapper's path, directory and stem
-    decide nothing: two of them could be named anything, and inferring a mechanism from
-    a filename is how a rename points a pass at another mechanism's wrapper.
+    THE JOIN IS THE MARKER THE GUARD ITSELF TESTS, matched in the ANCHORED form the
+    guard spells it in (``_wrapper_guard_marker_test``; the unanchored form let one
+    depth's reference match another's). A wrapper's path, directory and stem decide
+    nothing: two of them could be named anything, and inferring a mechanism from a
+    filename is how a rename points a pass at another mechanism's wrapper.
 
     Deny-by-default in both directions. No match → ``(None, False)``: nothing is
     established, nothing is claimed. TWO OR MORE matches → ``(None, True)``: which one
@@ -3204,13 +3237,13 @@ def _guarded_wrapper_for_declared_id(
     """
     matches = []
     for relpath in guarded_wrappers:
-        marker_ref = _wrapper_guard_marker_ref(relpath, mechanism_id)
+        marker_test = _wrapper_guard_marker_test(relpath, mechanism_id)
         path = Path(operator_project_dir) / relpath
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError, ValueError):
             continue
-        if _GUARD_BEGIN in text and marker_ref in text:
+        if _GUARD_BEGIN in text and marker_test in text:
             matches.append(relpath)
     if len(matches) == 1:
         return matches[0], False
@@ -3581,10 +3614,15 @@ def _insert_tripwire_into_existing_guard(
     Returns ``(outcome, reason)``. ``outcome`` is ``"upgraded"``,
     ``"already_current"``, ``"skipped"`` (there is no managed guard here to add it
     to), or one refusal label -- one per cause. NOT any member of
-    ``_REFUSAL_OUTCOMES``: that tuple is the full set the DISPATCHER reports, and ten
-    of its members are the caller's to mint (every pause-record class, the
-    cannot-record-id class, the unexpected backstop, the pass-not-run class and the
-    bare fallback), none of which can come back from here. Measured: 14 are reachable,
+    ``_REFUSAL_OUTCOMES``: that tuple is the full set the DISPATCHER reports, and
+    ELEVEN of its members are the caller's to mint (every pause-record class, the
+    wrapper-not-established class, the cannot-record-id class, the unexpected backstop,
+    the pass-not-run class and the bare fallback), none of which can come back from
+    here. Every number in this paragraph is asserted by
+    ``test_the_reachable_label_COUNT_in_the_docstring_is_pinned``, including this derived
+    one -- it read "two", then "ANY member", then "ten", and the third staleness landed
+    on the very commit that added a label while a pin asserting only the other two
+    numbers stayed green. Measured: 14 are reachable,
     from four places -- this function's own seven checks, ``_refuse_unconfined_change``
     (one), ``_repair_stale_recorder_identity`` (two of its own, plus whatever it
     propagates from the other two), and ``_publish_guard_change`` (FOUR, not two: the
@@ -3985,6 +4023,11 @@ def upgrade_paused_entrypoint_guards(
         ending-aware insertion would emit a guard that does not parse as intended.
         Refused and named as such rather than adapted.
       * a wrapper whose write, read-back or restore fails for any filesystem reason.
+      * **a record that names no wrapper while MORE THAN ONE guarded file claims this
+        mechanism's pause marker** (``_REFUSED_WRAPPER_NOT_ESTABLISHED``) -- which one
+        gates it is unestablished, so neither is written to. The route to an answer is
+        the one every refusal in this list shares and the notice's own section states:
+        a person reads the files.
 
     ONE MORE THING IT DOES, disclosed because it changes the shape of an operator's
     own file: if the wrapper is a SYMLINK, the atomic replace makes it a regular
@@ -3995,12 +4038,22 @@ def upgrade_paused_entrypoint_guards(
     unchanged mtime across three further passes). A stale declared id is the only
     other thing that writes again.
 
-    This is the reach mechanism. It is driven by the pause-state records rather
-    than by the mechanisms flagged in this pass, deliberately: a writer that was
-    paused and has since been deleted, renamed or quarantined is never re-flagged
-    by the scanner, so the per-mechanism loop never reaches it -- while its wrapper
-    is still on disk, still guard-paused, and still the thing a schedule invokes.
-    That is precisely the estate's shape.
+    This is the reach mechanism, and it reaches TWO populations rather than one:
+
+      * every wrapper a pause record NAMES -- deliberately driven by the records
+        rather than by the mechanisms flagged in this pass, because a writer that was
+        paused and has since been deleted, renamed or quarantined is never re-flagged
+        by the scanner, so the per-mechanism loop never reaches it while its wrapper is
+        still on disk, still guard-paused, and still the thing a schedule invokes;
+      * every wrapper whose GUARD claims a declared mechanism's pause marker, found by
+        ``_discover_guarded_wrappers`` and joined by ``_guarded_wrapper_for_declared_id``.
+        **This half exists because the first one reaches nothing on real operator data:**
+        the records there declare ``entrypoint_relpath: null`` (they are
+        ``paused_live_write`` records, which gate an op_kind rather than a file) while a
+        wrapper carrying a live guard for the same mechanism sits on disk with no
+        recorder lines. Measured on a copy of a real project — that is precisely the
+        estate's shape, and the earlier sentence claiming otherwise was written from a
+        fixture.
 
     Returns ``{"upgraded": [ids], "already_current": [ids],
     "refused": [{"mechanism_id", "reason"}], "scan_error": None or reason}``.
@@ -4899,12 +4952,14 @@ def _withdrawn_continuity_claim_files(operator_project_dir: Path) -> List[str]:
     The candidate set is bounded and declared, and has THREE parts:
 
       * every impact notice this project was given by an earlier upgrade;
-      * **every file carrying a managed pause guard** (``_discover_guarded_wrappers``)
-        — the part that actually reaches the real population. Measured on a copy of a
-        real operator project: the pause records there declare
-        ``entrypoint_relpath: null``, so the third part alone finds NOTHING, while the
-        wrapper whose guard caused a nine-day outage carries the sentence in the
-        two-line historical wrapping;
+      * **every ``.sh`` file carrying a managed pause guard** (``_discover_guarded_wrappers``
+        — ``.sh`` because that is the extension the pause writer produces; the limit is
+        stated here too rather than only at the producer, so the two surfaces cannot
+        disagree about what "every guarded file" means) — the part that actually reaches
+        the real population. Measured on a copy of a real operator project: the pause
+        records there declare ``entrypoint_relpath: null``, so the third part alone finds
+        NOTHING, while the wrapper whose guard caused a nine-day outage carries the
+        sentence in the two-line historical wrapping;
       * the wrapper each pause record does name, when it names one.
 
     IT MAKES NO JUDGEMENT ABOUT A PAUSE RECORD. It takes one field and refuses to
@@ -5848,12 +5903,25 @@ def reconcile_upgrade(
     # today's guard comment (which makes no such promise), and any wrapper the reach
     # pass rewrote still carries the sentence it was written with, because that
     # rewrite is confined to the record-keeping lines.
-    # NEWLY FOUND ONLY. A file already named in an emitted correction is not named
-    # again -- see ``_corrections_already_emitted`` for why that bound is recorded
-    # emission rather than delivery.
+    # TWO QUESTIONS, TWO ANSWERS, and conflating them erased a correction.
+    #
+    #   CONTENT is unconditional: any notice this pass writes names every file that
+    #   still holds the sentence. On the standalone `reconcile` entry point the notice
+    #   is ONE FIXED PATH that every run overwrites -- so filtering the content by
+    #   "already emitted" meant run 2 rewrote the only carrier without it. Measured on
+    #   a copy of a real operator project: after run 2, NO notice on disk carried the
+    #   correction, the record does not prune, and nothing recovers it. "We emitted it
+    #   once" is not "it is present", because the artifact emitted into is overwritable
+    #   by this same code.
+    #
+    #   TRIGGER is bounded: only a file not already named may cause a notice to be
+    #   written, or the terminal line to print, ON ITS OWN. That is what keeps an
+    #   already-corrected project from reporting "something to review" forever.
+    withdrawn_continuity_claim_files = _withdrawn_continuity_claim_files(
+        operator_project_dir)
     _already_corrected = set(_corrections_already_emitted(operator_project_dir))
-    withdrawn_continuity_claim_files = [
-        relpath for relpath in _withdrawn_continuity_claim_files(operator_project_dir)
+    withdrawn_continuity_claims_newly_named = [
+        relpath for relpath in withdrawn_continuity_claim_files
         if relpath not in _already_corrected]
 
     notice_path: Optional[Path] = None
@@ -5863,12 +5931,14 @@ def reconcile_upgrade(
     # project whose only finding this pass was a refused tripwire with no notice at
     # all -- the refusal reason computed and then dropped, which is what this fixes.
     #
-    # `withdrawn_continuity_claim_files` joins it for the same reason again, and it is
-    # the case that matters most: a project whose scheduled job was paused years ago
-    # and has been scanner-quiet ever since has NOTHING else in this condition, and
-    # that is exactly the project still holding the false sentence.
+    # A NEWLY-NAMED withdrawn claim joins it for the same reason again, and it is the
+    # case that matters most: a project whose scheduled job was paused years ago and
+    # has been scanner-quiet ever since has NOTHING else in this condition, and that is
+    # exactly the project still holding the false sentence. The already-named ones
+    # deliberately do NOT join it -- they ride along in whatever notice gets written,
+    # and when none does, the notice that already carries them is the one still on disk.
     if (mechanisms or adapter_source_edits or tripwire_refusals
-            or withdrawn_continuity_claim_files):
+            or withdrawn_continuity_claims_newly_named):
         text = render_impact_notice(
             mechanisms, from_version, to_version,
             adapter_source_edits=adapter_source_edits,
@@ -5906,6 +5976,7 @@ def reconcile_upgrade(
         adapter_source_edits=adapter_source_edits,
         tripwire_refusals=tripwire_refusals,
         withdrawn_continuity_claim_files=withdrawn_continuity_claim_files,
+        withdrawn_continuity_claims_newly_named=withdrawn_continuity_claims_newly_named,
     )
 
 
@@ -5958,7 +6029,16 @@ def render_reconcile_result(result: ReconcileResult) -> str:
             # hardest to notice: on a long-paused, scanner-quiet project this is the
             # ONLY field carrying anything, so without it here the notice would be
             # written and the terminal would print nothing at all.
-            or result.withdrawn_continuity_claim_files):
+            #
+            # THE NEWLY-NAMED HALF, deliberately, and this is the one documented
+            # exception to the enumerate-every-field rule above:
+            # `withdrawn_continuity_claim_files` can be non-empty while this returns ""
+            # -- that means a correction naming those files was already emitted and
+            # nothing else happened this run, so there is nothing new to report and the
+            # notice that names them is still on disk. Keying the guard on the wider
+            # field instead would print "something to review" on every future reconcile,
+            # forever, with nothing the operator can do to clear it.
+            or result.withdrawn_continuity_claims_newly_named):
         return ""
     lines = ["", "Upgrade safety check found something to review:"]
     for m in result.mechanisms:
@@ -6112,11 +6192,11 @@ def render_reconcile_result(result: ReconcileResult) -> str:
             lines.append(f"  - {_note}")
         else:
             lines.append(f"  - {_subject}: {_note}")
-    if result.withdrawn_continuity_claim_files:
+    if result.withdrawn_continuity_claims_newly_named:
         # ONE line, not one per file: the notice lists the files. It says what was
         # established -- the sentence is in their files and nothing had checked it --
         # and asks for nothing, because there is nothing here for them to repair.
-        count = len(result.withdrawn_continuity_claim_files)
+        count = len(result.withdrawn_continuity_claims_newly_named)
         where = "one of your own files" if count == 1 else f"{count} of your own files"
         lines.append(
             f"  - an earlier update left a sentence in {where} saying a part that only "
