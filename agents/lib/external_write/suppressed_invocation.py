@@ -215,6 +215,25 @@ _LOCK_POLL_SECONDS = 0.02
 
 _TEMP_RECORD_PREFIX = ".suppressed_invocation."
 _LOCK_SUFFIX = ".lock"
+_RECORD_SUFFIX = ".json"
+
+#: The most bytes a mechanism id may have before a record for it cannot be written.
+#:
+#: Derived, not guessed: the longest filename this module builds from an id is
+#: ``<id>`` plus the longer of its two suffixes, and POSIX ``NAME_MAX`` is 255 bytes
+#: on every filesystem this runs on. Measured before this bound existed: an id of 250
+#: recorded normally, and 251 raised ``OSError: File name too long`` from the record
+#: write while the refusal check answered "fine" -- so the sweep would have reported a
+#: tripwire installed for a mechanism that records nothing. That is the same
+#: installed-but-cannot-record gap the id rule exists to close, at its far end.
+#:
+#: Reachable from an ordinary filename (``NAME_MAX`` minus ``.py`` is 252 characters
+#: of stem), though vanishingly unlikely for the operator this is built for. Bounded
+#: rather than left as a disclosed residual because the check is two lines and a
+#: refusal that disagrees with the actual failure is worse than no check.
+_ASSUMED_NAME_MAX_BYTES = 255
+MAX_MECHANISM_ID_BYTES = _ASSUMED_NAME_MAX_BYTES - max(
+    len(_RECORD_SUFFIX), len(_LOCK_SUFFIX))
 
 EXIT_RECORDED = 0
 EXIT_BAD_ARGS = 2
@@ -287,6 +306,14 @@ def _validated_mechanism_id(mechanism_id: Any) -> str:
             "which would make two ids that look identical distinct. The id is NOT "
             "trimmed to fit, because trimming two different ids onto one filename "
             "would let one mechanism overwrite another's record.")
+    if len(mechanism_id.encode("utf-8")) > MAX_MECHANISM_ID_BYTES:
+        raise SuppressedInvocationError(
+            f"the mechanism id {mechanism_id[:40]!r}... is "
+            f"{len(mechanism_id.encode('utf-8'))} bytes, and a record for it would "
+            f"need a filename longer than this filesystem allows "
+            f"(the limit here leaves {MAX_MECHANISM_ID_BYTES} bytes for the id). "
+            "Refused rather than shortened: two ids trimmed to the same length would "
+            "share one record.")
     control = sorted({ch for ch in mechanism_id
                       if ord(ch) < 0x20 or ord(ch) == 0x7F})
     if control:
@@ -322,7 +349,7 @@ def events_dir(project_root: Any) -> str:
 
 def event_path(project_root: Any, mechanism_id: str) -> str:
     return os.path.join(events_dir(project_root),
-                        f"{_validated_mechanism_id(mechanism_id)}.json")
+                        f"{_validated_mechanism_id(mechanism_id)}{_RECORD_SUFFIX}")
 
 
 def lock_path(project_root: Any, mechanism_id: str) -> str:
@@ -695,10 +722,10 @@ def scan_suppressed_invocation_events(*, directory: Optional[str] = None
     for name in names:
         if name.startswith(_TEMP_RECORD_PREFIX) or name.endswith(_LOCK_SUFFIX):
             continue
-        if not name.endswith(".json"):
+        if not name.endswith(_RECORD_SUFFIX):
             continue
         path = os.path.join(target, name)
-        candidate_id = name[: -len(".json")]
+        candidate_id = name[: -len(_RECORD_SUFFIX)]
         # Everything derived from this record is inside the try: a record whose
         # shape defeats any step is reported UNREADABLE and the sweep continues,
         # so one malformed file cannot take every other mechanism's

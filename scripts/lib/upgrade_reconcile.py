@@ -3250,13 +3250,19 @@ def _insert_tripwire_into_existing_guard(
     #
     # Requiring the block to carry the lines for THIS declared id makes a stale id
     # a repairable difference instead of an invisible one.
-    if recorder_lines in block:
-        return "already_current", ""
-    if recorder_ref in block:
-        return _repair_stale_recorder_identity(
-            wrapper_path, original, begin, end, block, recorder_lines,
-            entrypoint_relpath, mechanism_id)
-
+    # THE BAR FOR TOUCHING THE FILE AT ALL, AND IT GOES FIRST.
+    #
+    # This check used to sit BELOW the two branches beneath it, which meant the
+    # identity-repair path wrote to a guard whose pause semantics this had just
+    # declared it could not confirm -- and reported `upgraded`. Measured: a guard
+    # naming `SOMETHING_ELSE.pause`, with recorder lines for a stale id, was
+    # rewritten to declare the new id while still pausing on the foreign marker. The
+    # write stayed contained (the post-condition held, the marker line and payload
+    # were untouched), but it bypassed a refusal class this function's own docstring
+    # and the sweep's disclosed-refusal list both enumerate -- so the code and its
+    # freshly-corrected comment disagreed again, one round later. Ordering it first
+    # is the whole fix, and it applies to every branch by construction rather than
+    # by each branch remembering.
     marker_ref = _wrapper_guard_marker_ref(entrypoint_relpath, mechanism_id)
     if marker_ref not in block:
         return "refused", (
@@ -3264,6 +3270,13 @@ def _insert_tripwire_into_existing_guard(
             "marker, so what it actually pauses on cannot be confirmed; it is left "
             "exactly as it is (a missing count is far cheaper than a writer that "
             "silently resumes)")
+
+    if recorder_lines in block:
+        return "already_current", ""
+    if recorder_ref in block:
+        return _repair_stale_recorder_identity(
+            wrapper_path, original, begin, end, block, recorder_lines,
+            entrypoint_relpath, mechanism_id)
     anchor = f"{_GUARD_PAUSED_ECHO_LINE}\n"
     if block.count(anchor) != 1:
         if f"{_GUARD_PAUSED_ECHO_LINE}\r\n" in block:
@@ -3441,37 +3454,61 @@ def _tripwire_insertion_problem(original: str, candidate: str,
     return None
 
 
-def _recordable_mechanism_id_refusal(build_repo_root: Optional[Path],
+def _recordable_mechanism_id_refusal(build_repo_root: Path,
                                      mechanism_id: str) -> Optional[str]:
     """Why ``mechanism_id`` could never keep a record, or ``None``.
 
-    Asks the RECORDER'S OWN rule through this module's existing sanctioned channel
-    for its trusted, stdlib-only operate-time modules (``_external_write_module``,
-    the same one used for ``capability_identity`` and ``lifecycle_state``) -- so the
-    rule has exactly ONE implementation and cannot drift from the program that
-    enforces it. Never a second copy of the charset here: a build-side copy that
-    disagreed with the recorder is precisely how "the tripwire is installed" and
-    "the tripwire can record" came apart in the first place.
+    Asks the recorder module's OWN rule (``mechanism_id_refusal``) through this
+    module's existing sanctioned channel for its trusted, stdlib-only operate-time
+    modules (``_external_write_module``, the same one used for
+    ``capability_identity`` and ``lifecycle_state``) -- so this module carries no
+    copy of the rule. A build-side copy that disagreed with the recorder is precisely
+    how "the tripwire is installed" and "the tripwire can record" came apart in the
+    first place.
 
-    Fail-SAFE, and deliberately in the permissive direction: if the module cannot be
-    resolved at all, this returns ``None`` and the pass behaves exactly as it did
-    before the check existed. A build tree that cannot load its own recorder is a
-    build-side problem, and refusing every operator's tripwire over it would be the
-    check-that-bricks-everything trap.
+    WHAT THAT ESTABLISHES, EXACTLY -- because the obvious stronger claim is false in
+    two different ways:
+
+      * It asks the copy of the recorder in the tree this TOOLKIT runs from, which is
+        the copy this same upgrade delivers and whose lines the guard is about to
+        embed. It is NOT the copy already sitting in the operator's project, which
+        during a reconcile can be from an older version. So the guarantee is "the rule
+        asked here is the rule this upgrade ships", never "the rule the operator's
+        current on-disk recorder enforces".
+      * ``_external_write_module`` resolves through ``importlib.import_module``, so
+        once anything in the process has imported the recorder the module comes from
+        the import cache and ``build_repo_root`` no longer decides which file
+        answers. In the real flow that first import IS this channel, from this root,
+        so the answer is the shipped rule -- but the argument is not a per-call
+        guarantee, and a test that pointed it at a bogus root passed for that reason
+        rather than for the one it claimed.
+
+    The earlier phrasing here -- "cannot drift from the program that enforces it" --
+    claimed both of those away, and was wrong on both counts.
+
+    NO SILENT PASS. A build root is required, and a failure to resolve or ask the
+    rule REFUSES rather than shrugging -- silence must not mean "fine" on a check
+    whose absence is the defect it exists to prevent. The refusal is a plain reason
+    the caller surfaces, not an exception, so one unresolvable module cannot abort
+    the upgrade (see ``upgrade_paused_entrypoint_guards``' own containment note).
     """
-    if build_repo_root is None:
-        return None
     try:
         module = _external_write_module(Path(build_repo_root), "suppressed_invocation")
         refusal = module.mechanism_id_refusal(mechanism_id)
-    except Exception:  # noqa: BLE001 -- see the fail-safe note above.
+    except Exception as exc:  # noqa: BLE001 -- becomes a refusal, never an escape.
+        return ("whether a record can be kept for it could not be established "
+                f"({exc!r}), and it is not assumed that one can")
+    if isinstance(refusal, str) and refusal:
+        return refusal
+    if refusal is None:
         return None
-    return refusal if isinstance(refusal, str) and refusal else None
+    return (f"the check on whether a record can be kept answered {refusal!r}, which "
+            "is neither a reason nor a clean result, so it is not treated as one")
 
 
 def upgrade_paused_entrypoint_guards(
     operator_project_dir: Path,
-    build_repo_root: Optional[Path] = None,
+    build_repo_root: Path,
 ) -> Dict[str, Any]:
     """Bring the tripwire to every DECLARED paused mechanism's wrapper whose guard
     shape can be positively confirmed -- and refuse, visibly, on any that cannot.
@@ -3524,6 +3561,12 @@ def upgrade_paused_entrypoint_guards(
     ``scan_error`` -- nothing can be established about it. ``os.stat``, not
     ``isdir``, because ``isdir`` answers False for both.
 
+    ``build_repo_root`` IS REQUIRED, with no default. It is what the recorder's own
+    id rule is asked through, and a default of ``None`` used to SKIP that check
+    silently -- a pass-by-default on a check whose absence is exactly the defect it
+    exists to prevent. Silence has to refuse here, so there is no value of this
+    argument that means "do not check".
+
     BOUNDED, AND THAT IS ABOUT ESCAPING FAILURES, NOT JUST ABOUT INPUTS. Its input
     set is one directory's own ``.json`` files. But an input bound alone does not
     bound the DAMAGE: this function is called unconditionally on every reconcile,
@@ -3531,9 +3574,16 @@ def upgrade_paused_entrypoint_guards(
     exception escaping it would abort the upgrade around it -- pauses applied, no
     notice written, a previously-recorded blocking entry left uncleared, and a raw
     traceback in front of a non-technical operator. An ordinary read-only wrapper
-    directory or ENOSPC is enough to cause that. So NOTHING escapes: every
-    per-mechanism failure, expected or not, becomes a ``refused`` entry. The one
-    thing this pass may cost is a tripwire; it may never cost the upgrade.
+    directory or ENOSPC is enough to cause that. So NOTHING escapes: no failure
+    reachable per mechanism, expected or not, leaves this function as an exception --
+    each becomes a ``refused`` entry, and the caller renders those into the notice.
+
+    WHAT IT MAY COST, stated without rounding down. Usually a tripwire and nothing
+    else. The one exception is ``_restore_wrapper``'s double-failure branch (a
+    verification failure whose restore ALSO fails), which can leave a wrapper in a
+    state its own reported reason says needs a person to look at before it is relied
+    on again -- still paused, since the guard write is atomic, but not a state to
+    describe as "only a tripwire".
 
     (The docstring here previously claimed the input bound "keeps a fail-closed
     answer from being able to affect anything else." That was false as written --
@@ -3603,10 +3653,17 @@ def upgrade_paused_entrypoint_guards(
             continue
         # ASKED BEFORE ANYTHING IS CLAIMED. A mechanism id the recorder will refuse
         # cannot keep a record, so installing the lines and reporting `upgraded`
-        # would assert reach this does not have -- and the refusal would be visible
-        # only in the scheduled job's log, which is the exact place this whole task
-        # exists because nobody reads. Reported as `refused`, with the recorder's own
-        # reason, so it is visible where the other refusals are.
+        # would assert reach this does not have -- and the recorder's own refusal
+        # would land only in the scheduled job's log, which is the exact place this
+        # whole task exists because nobody reads. Reported as `refused` with the
+        # recorder's own reason, and `reconcile_upgrade` renders every refusal into
+        # the impact notice.
+        #
+        # (This comment previously ended "so it is visible where the other refusals
+        # are." Nothing surfaced any of them at the time -- the caller discarded the
+        # report -- so the sentence asserted a visibility improvement the mechanism
+        # did not deliver. It is true now because the rendering exists, not because
+        # the wording was softened.)
         id_refusal = _recordable_mechanism_id_refusal(build_repo_root, declared)
         if id_refusal:
             report["refused"].append({
@@ -4280,6 +4337,7 @@ def render_impact_notice(
     mechanisms: List[MechanismReport], from_version: str, to_version: str,
     *,
     adapter_source_edits: Sequence[str] = (),
+    tripwire_refusals: Sequence[Dict[str, Any]] = (),
 ) -> str:
     """A plain-language, non-technical impact notice: what changed, which
     capability is affected, what happens next. No jargon.
@@ -4563,7 +4621,55 @@ def render_impact_notice(
         f"(`{MIGRATION_QUEUE_REL}`) so it isn't forgotten.",
         "",
     ]
+    lines += _tripwire_refusal_lines(tripwire_refusals)
     return "\n".join(lines) + "\n"
+
+
+def _tripwire_refusal_lines(refusals: Sequence[Dict[str, Any]]) -> List[str]:
+    """The paused wrappers that will NOT be able to tell the operator when they skip
+    a run, and why -- in the notice, because that is the only surface an operator
+    reads.
+
+    WHY THIS IS IN THE NOTICE AT ALL. The reach pass computes a reason for every
+    wrapper it refuses, and those reasons were returned to a caller that discarded
+    them. That is not merely a missing feature: a comment in this module claimed the
+    id refusal was "visible where the other refusals are", which was false, and the
+    round that added it also routed ORDINARY conditions into the same discarded
+    channel with operator-addressed sentences no operator could receive -- including
+    one saying a wrapper "needs a person to look at it before it is relied on again".
+    Operator-addressed prose written into a channel with no reader is worse than
+    silence, because it reads as delivered.
+
+    And the mechanism reason: "the suppressed-run tripwire reaches every paused
+    wrapper" is untrue for a refused one. If nobody can learn WHICH wrappers were
+    refused, the operator cannot know their tripwire has a hole -- which is the same
+    class of invisible gap this whole mechanism exists to close, one level up.
+
+    Empty for the overwhelmingly common case (nothing refused), so this adds no
+    section to an ordinary upgrade's notice.
+    """
+    entries = [r for r in (refusals or ()) if isinstance(r, dict) and r.get("reason")]
+    if not entries:
+        return []
+    out = [
+        "**One more thing, about being told when something is skipped.**",
+        "",
+        "When a scheduled job is paused, we add a few lines to it so that each time "
+        "it is skipped, that gets written down where you can see it -- otherwise a "
+        "job can quietly not happen for days. For the following, we could not add "
+        "those lines. Each one is still safely paused; what is missing is only the "
+        "record-keeping, so if one of these is skipped you will not be told:",
+        "",
+    ]
+    for entry in entries:
+        out.append(f"  - {entry['reason']}")
+    out += [
+        "",
+        "If any of those matter to you, tell your assistant you want to go through "
+        "them together.",
+        "",
+    ]
+    return out
 
 
 def write_impact_notice(operator_project_dir: Path, upgrade_id: str, text: str) -> Path:
@@ -4811,7 +4917,23 @@ def reconcile_upgrade(
     # above never reaches it -- is exactly the population whose suppressed runs went
     # unreported nine days running. Driven by the declared pause records, not by
     # this pass's findings. See ``upgrade_paused_entrypoint_guards``.
-    upgrade_paused_entrypoint_guards(operator_project_dir, build_repo_root)
+    #
+    # The REPORT IS KEPT, not discarded. Every wrapper this pass refuses is one that
+    # will not report being skipped, and the reason was previously computed and
+    # thrown away -- so nobody could learn their tripwire had a hole. It is rendered
+    # into the impact notice below.
+    tripwire_sweep = upgrade_paused_entrypoint_guards(
+        operator_project_dir, build_repo_root)
+    tripwire_refusals = list(tripwire_sweep["refused"])
+    if tripwire_sweep["scan_error"]:
+        # The whole pass could not run. That is not a per-wrapper refusal, and it
+        # must not be silent either: it means NOTHING was checked, so nothing can be
+        # said about whether any paused wrapper can report being skipped.
+        tripwire_refusals.append({
+            "mechanism_id": "",
+            "reason": (
+                "we could not check any of your paused scheduled jobs for this: "
+                f"{tripwire_sweep['scan_error']}")})
 
     if mechanisms:
         # ONE classification pass, through the SAME classifier the
@@ -4903,9 +5025,15 @@ def reconcile_upgrade(
     # leave no notice at all. `writer_state` was already stamped above, against
     # the queue state the classifier is meant to read.
     notice_path: Optional[Path] = None
-    if mechanisms or adapter_source_edits:
+    # `tripwire_refusals` joins the condition, for the same reason
+    # `adapter_source_edits` already did: a paused wrapper that cannot report being
+    # skipped is something to say, and gating on `mechanisms` alone would leave a
+    # project whose only finding this pass was a refused tripwire with no notice at
+    # all -- the refusal reason computed and then dropped, which is what this fixes.
+    if mechanisms or adapter_source_edits or tripwire_refusals:
         text = render_impact_notice(mechanisms, from_version, to_version,
-                                    adapter_source_edits=adapter_source_edits)
+                                    adapter_source_edits=adapter_source_edits,
+                                    tripwire_refusals=tripwire_refusals)
         notice_path = write_impact_notice(operator_project_dir, upgrade_id, text)
 
     return ReconcileResult(

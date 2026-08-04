@@ -61,6 +61,7 @@ Run:  python3 -m unittest discover -s wizard/scripts/lib \\
 import ast
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -83,7 +84,22 @@ import upgrade_reconcile                              # noqa: E402
 
 _RECORDER_SOURCE = (_AGENTS_LIB / "external_write" / "suppressed_invocation.py")
 
-upgrade_paused_entrypoint_guards = upgrade_reconcile.upgrade_paused_entrypoint_guards
+#: The build root the reach pass asks the recorder's id rule through. REQUIRED by
+#: the production signature -- there is no value of it that means "skip the check" --
+#: so this helper supplies the real one rather than a default existing anywhere.
+_BUILD_ROOT = _WIZARD.parent
+
+
+def upgrade_paused_entrypoint_guards(project_dir, build_root=_BUILD_ROOT):
+    """Test-local wrapper over the real pass, defaulting the build root.
+
+    The default lives HERE and not in the production signature on purpose: a
+    default there silently skipped the id pre-check, which is a pass-by-default on a
+    check whose absence is the defect it exists to prevent.
+    ``test_the_production_signature_requires_a_build_root`` pins that.
+    """
+    return upgrade_reconcile.upgrade_paused_entrypoint_guards(
+        project_dir, build_root)
 
 PAUSED_DIR_REL = capability_health.PAUSED_MECHANISMS_DIR_REL
 EVENTS_DIR_REL = suppressed_invocation.SUPPRESSED_INVOCATIONS_DIR_REL
@@ -135,6 +151,14 @@ MECH = "finish_estate_cleanup"
 #: new name's own substring and passed while proving nothing. Caught exactly
 #: that way on the first run of these tests.
 NEW_ID = "rekeyed_bespoke_writer"
+
+
+def _pause_record_paths(mechanism_id):
+    """Every file the stale-pause route must name, built the way the surface builds
+    it -- from the health module's own directory constant and suffix tuple, never a
+    re-spelled path."""
+    return [os.path.join(PAUSED_DIR_REL, f"{mechanism_id}{suffix}")
+            for suffix in capability_health.PAUSE_MARKER_SUFFIXES]
 WRITER_REL = "scripts/finish_estate_cleanup.py"
 WRAPPER_REL = "scripts/run_finish_estate_cleanup.sh"
 
@@ -281,13 +305,13 @@ class TestRecorderFailureCannotRunThePayload(unittest.TestCase):
         self.p = _Project(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
         self.p.historical_wrapper()
-        upgrade_reconcile.upgrade_paused_entrypoint_guards  # API presence
+        upgrade_paused_entrypoint_guards  # API presence
         self.p.pause_marker()
         self.p.pause_state()
         self.p.write(WRITER_REL, "# flagged writer\n")
 
     def _sweep(self):
-        return upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        return upgrade_paused_entrypoint_guards(self.p.root)
 
     def _assert_payload_did_not_run(self, proc):
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -404,13 +428,13 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
         return head, tail
 
     def test_a_wrapper_carrying_the_historical_guard_gains_the_tripwire(self):
-        report = upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        report = upgrade_paused_entrypoint_guards(self.p.root)
         self.assertEqual(report["upgraded"], [MECH], report)
         self.assertIn(upgrade_reconcile.SUPPRESSED_INVOCATION_RECORDER_REL,
                       self._wrapper_text())
 
     def test_the_operators_own_payload_is_byte_identical_afterwards(self):
-        upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        upgrade_paused_entrypoint_guards(self.p.root)
         self.assertEqual(self._outside_the_guard(self.before),
                          self._outside_the_guard(self._wrapper_text()))
 
@@ -418,13 +442,13 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
         """The whole risk of touching an existing guard: a rewrite that changes
         what the `-e` test looks at silently UN-PAUSES a live writer."""
         marker_line = [l for l in self.before.splitlines() if "[ -e " in l]
-        upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        upgrade_paused_entrypoint_guards(self.p.root)
         self.assertEqual(
             marker_line,
             [l for l in self._wrapper_text().splitlines() if "[ -e " in l])
 
     def test_the_upgraded_guard_still_stops_the_payload(self):
-        upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        upgrade_paused_entrypoint_guards(self.p.root)
         self.p.install_recorder()
         proc = self.p.run_wrapper()
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -435,7 +459,7 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
         fail-closed pause-safety path: one line inserted, nothing rewritten. It
         also means this sweep does not quietly overwrite the historical notice
         wording a separate correction pass owns."""
-        upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        upgrade_paused_entrypoint_guards(self.p.root)
         for line in self.before.splitlines():
             if line.startswith("# ") and "safe-paused" in line:
                 self.assertIn(line, self._wrapper_text().splitlines())
@@ -446,7 +470,7 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
         real ``/bin/sh`` invocations, never from nine direct recorder calls --
         a fixture that called the recorder directly would prove the arithmetic
         and say nothing about reach."""
-        upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        upgrade_paused_entrypoint_guards(self.p.root)
         self.p.install_recorder()
         for _ in range(9):
             proc = self.p.run_wrapper()
@@ -466,7 +490,7 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
         land in the project regardless of where it was invoked from. Asserted from
         a different cwd, because every other invocation in this file runs from the
         root and would pass on a cwd-relative path just as well."""
-        upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        upgrade_paused_entrypoint_guards(self.p.root)
         self.p.install_recorder()
         with tempfile.TemporaryDirectory() as elsewhere:
             proc = subprocess.run(
@@ -493,7 +517,7 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
                         "carries_read_outputs": True,
                         "entangled_read_outputs": ["digest", "backup"]},
                        indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        upgrade_paused_entrypoint_guards(self.p.root)
         self.p.install_recorder()
         self.assertEqual(self.p.run_wrapper().returncode, 0)
         entangled = self.p.event()["known_entangled_outputs"]
@@ -502,10 +526,10 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
         self.assertEqual(entangled["labels"], ["digest", "backup"])
 
     def test_the_sweep_is_idempotent_and_does_not_rewrite_a_current_guard(self):
-        upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        upgrade_paused_entrypoint_guards(self.p.root)
         after_first = self._wrapper_text()
         stat_before = os.stat(str(self.p.root / WRAPPER_REL))
-        report = upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        report = upgrade_paused_entrypoint_guards(self.p.root)
         self.assertEqual(report["already_current"], [MECH], report)
         self.assertEqual(report["upgraded"], [])
         self.assertEqual(after_first, self._wrapper_text())
@@ -513,7 +537,7 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
                          os.stat(str(self.p.root / WRAPPER_REL)).st_mtime_ns)
 
     def test_the_wrappers_executable_bit_survives(self):
-        upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        upgrade_paused_entrypoint_guards(self.p.root)
         self.assertTrue(os.access(str(self.p.root / WRAPPER_REL), os.X_OK))
 
     def test_a_guard_naming_a_different_marker_is_refused_untouched(self):
@@ -524,7 +548,7 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
             upgrade_reconcile._wrapper_guard_marker_ref(WRAPPER_REL, MECH),
             "../.wizard/paused-mechanisms/some_other_id.pause")
         self.p.write(WRAPPER_REL, text, mode=0o755)
-        report = upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        report = upgrade_paused_entrypoint_guards(self.p.root)
         self.assertEqual(report["upgraded"], [])
         self.assertEqual([r["mechanism_id"] for r in report["refused"]], [MECH])
         self.assertEqual(text, self._wrapper_text())
@@ -533,7 +557,7 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
         text = self._wrapper_text()
         doubled = text + "\n" + text
         self.p.write(WRAPPER_REL, doubled, mode=0o755)
-        report = upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        report = upgrade_paused_entrypoint_guards(self.p.root)
         self.assertEqual(report["upgraded"], [])
         self.assertEqual([r["mechanism_id"] for r in report["refused"]], [MECH])
         self.assertEqual(doubled, self._wrapper_text())
@@ -542,13 +566,13 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
         text = self._wrapper_text().replace(
             upgrade_reconcile._GUARD_PAUSED_ECHO_LINE, '  echo "halted"')
         self.p.write(WRAPPER_REL, text, mode=0o755)
-        report = upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        report = upgrade_paused_entrypoint_guards(self.p.root)
         self.assertEqual(report["upgraded"], [])
         self.assertEqual(text, self._wrapper_text())
 
     def test_a_wrapper_with_no_guard_at_all_is_skipped_not_gated(self):
         self.p.write(WRAPPER_REL, _PAYLOAD, mode=0o755)
-        report = upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        report = upgrade_paused_entrypoint_guards(self.p.root)
         self.assertEqual(report["upgraded"], [])
         self.assertEqual(_PAYLOAD, self._wrapper_text())
 
@@ -556,7 +580,7 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
         """Identity is the DECLARED value. A filename is a candidate, and a
         disagreement is reported rather than resolved by picking one."""
         self.p.pause_state(MECH, mechanism_id="something_else")
-        report = upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        report = upgrade_paused_entrypoint_guards(self.p.root)
         self.assertEqual(report["upgraded"], [])
         self.assertTrue(report["refused"])
         self.assertEqual(self.before, self._wrapper_text())
@@ -564,7 +588,7 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
     def test_a_paused_live_write_state_with_no_entrypoint_is_skipped(self):
         self.p.pause_state(MECH, entrypoint_relpath=None,
                            state="paused_live_write")
-        report = upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        report = upgrade_paused_entrypoint_guards(self.p.root)
         self.assertEqual(report["upgraded"], [])
         self.assertEqual(report["refused"], [])
         self.assertEqual(self.before, self._wrapper_text())
@@ -573,7 +597,7 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
         """A project that never paused anything is the overwhelmingly common
         case -- including every fresh build. It must report nothing."""
         with tempfile.TemporaryDirectory() as t:
-            report = upgrade_reconcile.upgrade_paused_entrypoint_guards(Path(t))
+            report = upgrade_paused_entrypoint_guards(Path(t))
             self.assertEqual(report["upgraded"], [])
             self.assertIsNone(report["scan_error"])
 
@@ -581,13 +605,13 @@ class TestReachIntoTheAlreadyPausedPopulation(unittest.TestCase):
         d = self.p.root / PAUSED_DIR_REL
         os.chmod(str(d), 0o000)
         self.addCleanup(os.chmod, str(d), 0o700)
-        report = upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        report = upgrade_paused_entrypoint_guards(self.p.root)
         self.assertIsNotNone(report["scan_error"])
 
     def test_an_unparseable_state_record_is_reported_not_skipped_silently(self):
         (self.p.root / PAUSED_DIR_REL / f"{MECH}.json").write_text(
             "{not json", encoding="utf-8")
-        report = upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p.root)
+        report = upgrade_paused_entrypoint_guards(self.p.root)
         self.assertTrue(report["refused"])
 
 
@@ -867,7 +891,7 @@ class TestAnIdThatCouldNeverRecordIsNotReportedUpgraded(unittest.TestCase):
     def test_a_space_in_the_id_records_end_to_end(self):
         p = self._project_with_id("Daily Report")
         self.assertEqual(
-            upgrade_paused_entrypoint_guards(p.root, _WIZARD.parent)["upgraded"],
+            upgrade_paused_entrypoint_guards(p.root)["upgraded"],
             ["Daily Report"])
         self.assertEqual(p.run_wrapper().returncode, 0)
         self.assertEqual(p.event("Daily Report")["suppressed_count"], 1)
@@ -877,7 +901,7 @@ class TestAnIdThatCouldNeverRecordIsNotReportedUpgraded(unittest.TestCase):
         shell text was escaped and never that the recorder accepted it."""
         p = self._project_with_id("o'brien")
         self.assertEqual(
-            upgrade_paused_entrypoint_guards(p.root, _WIZARD.parent)["upgraded"],
+            upgrade_paused_entrypoint_guards(p.root)["upgraded"],
             ["o'brien"])
         self.assertEqual(p.run_wrapper().returncode, 0)
         self.assertEqual(p.event("o'brien")["suppressed_count"], 1)
@@ -887,7 +911,7 @@ class TestAnIdThatCouldNeverRecordIsNotReportedUpgraded(unittest.TestCase):
         record must not be claimed as reached. The refusal reason is the RECORDER's
         own, asked through one implementation of the rule."""
         p = self._project_with_id(".hidden")
-        report = upgrade_paused_entrypoint_guards(p.root, _WIZARD.parent)
+        report = upgrade_paused_entrypoint_guards(p.root)
         self.assertEqual(report["upgraded"], [])
         self.assertEqual([r["mechanism_id"] for r in report["refused"]], [".hidden"])
         self.assertIn("record could not be kept", report["refused"][0]["reason"])
@@ -907,18 +931,229 @@ class TestAnIdThatCouldNeverRecordIsNotReportedUpgraded(unittest.TestCase):
             self.assertNotIn(shape, toolkit,
                              "the toolkit must not re-implement the id rule")
 
-    def test_the_check_degrades_permissively_when_the_rule_cannot_be_loaded(self):
-        """A build tree that cannot load its own recorder is a build-side problem;
-        refusing every operator's tripwire over it would be the
-        check-that-bricks-everything trap."""
+    def test_a_rule_that_cannot_be_ASKED_refuses_rather_than_passing(self):
+        """Nothing may pass by default; silence must REFUSE.
+
+        This previously asserted the opposite -- that an unresolvable rule returned
+        ``None`` and the pass "behaves exactly as it did before the check existed".
+        That is a pass-by-default on the one check standing between "the tripwire is
+        installed" and "the tripwire can record", so silence there meant "fine" for
+        precisely the property whose absence is the defect. The refusal is a plain
+        reason rather than an exception, so an unresolvable module still cannot abort
+        the upgrade.
+        """
         p = self._project_with_id(MECH)
-        self.assertIsNone(upgrade_reconcile._recordable_mechanism_id_refusal(
-            None, MECH))
-        self.assertIsNone(upgrade_reconcile._recordable_mechanism_id_refusal(
-            Path("/nonexistent-build-root"), MECH))
+        real = upgrade_reconcile._external_write_module
+
+        def unavailable(*_a, **_k):
+            raise ImportError("the recorder module could not be resolved")
+
+        # Patched rather than pointed at a bogus build root: `_external_write_module`
+        # goes through `importlib.import_module`, so once ANY caller in the process
+        # has imported the recorder, the module is served from the import cache and
+        # the root argument no longer decides anything. A test using a bad root would
+        # therefore pass for the wrong reason -- it did, before this was measured.
+        upgrade_reconcile._external_write_module = unavailable
+        self.addCleanup(setattr, upgrade_reconcile, "_external_write_module", real)
+
+        refusal = upgrade_reconcile._recordable_mechanism_id_refusal(
+            _BUILD_ROOT, MECH)
+        self.assertIsNotNone(refusal)
+        self.assertIn("not assumed", refusal)
+        report = upgrade_paused_entrypoint_guards(p.root)
+        self.assertEqual(report["upgraded"], [])
+        self.assertEqual([r["mechanism_id"] for r in report["refused"]], [MECH])
+        self.assertNotIn(
+            upgrade_reconcile.SUPPRESSED_INVOCATION_RECORDER_REL,
+            (p.root / WRAPPER_REL).read_text(encoding="utf-8"))
+
+    def test_a_rule_answering_something_other_than_a_reason_refuses(self):
+        """The third outcome. `mechanism_id_refusal` contracts to a reason or None;
+        anything else is a rule this cannot interpret, and interpreting it as "fine"
+        is the same default-pass by another route."""
+        real = upgrade_reconcile._external_write_module
+
+        class Nonsense:
+            @staticmethod
+            def mechanism_id_refusal(_id):
+                return 0   # falsy, and not None
+
+        upgrade_reconcile._external_write_module = lambda *_a, **_k: Nonsense
+        self.addCleanup(setattr, upgrade_reconcile, "_external_write_module", real)
+        refusal = upgrade_reconcile._recordable_mechanism_id_refusal(
+            _BUILD_ROOT, MECH)
+        self.assertIsNotNone(refusal)
+        self.assertIn("neither a reason nor a clean result", refusal)
+
+    def test_the_production_signature_requires_a_build_root(self):
+        """There must be no value of the argument that means "skip the check" -- so
+        there is no default. The permissive default lived in the production signature
+        for one round."""
+        with self.assertRaises(TypeError):
+            upgrade_reconcile.upgrade_paused_entrypoint_guards(self.p_root_for_sig())
+
+    def p_root_for_sig(self):
+        return self._project_with_id(MECH).root
+
+
+class TestTheRefusalsReachTheOperator(unittest.TestCase):
+    """A wrapper this pass refuses is one that will not report being skipped. Its
+    reason was computed and handed to a caller that threw it away, so nobody could
+    learn their tripwire had a hole -- the same invisible-gap class this mechanism
+    exists to close, one level up. Worse, the round that added the refusal reasons
+    wrote OPERATOR-ADDRESSED sentences into that channel ("needs a person to look at
+    it before it is relied on again"), which reads as delivered and was not."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.p = _Project(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def _crlf_paused_wrapper(self):
+        path = self.p.historical_wrapper()
+        path.write_bytes(
+            path.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8"))
+        os.chmod(str(path), 0o755)
+        self.p.pause_marker()
+        self.p.pause_state()
+
+    def _notice(self):
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        self.assertIsNotNone(result.notice_path, "no notice was written at all")
+        return Path(result.notice_path).read_text(encoding="utf-8")
+
+    def test_a_refused_wrapper_is_named_in_the_impact_notice(self):
+        self._crlf_paused_wrapper()
+        notice = self._notice()
+        self.assertIn(WRAPPER_REL, notice)
+        self.assertIn("line endings", notice)
+
+    def test_the_notice_says_the_pause_still_holds_and_only_reporting_is_missing(self):
+        """The distinction an operator has to be able to draw: a refused tripwire is
+        not an unpaused writer. Claiming or implying otherwise would be a false alarm
+        about a safety property that is in fact intact."""
+        self._crlf_paused_wrapper()
+        notice = self._notice()
+        self.assertIn("still safely paused", notice)
+        self.assertIn("record-keeping", notice)
+
+    def test_a_notice_is_written_even_when_the_refusal_is_the_ONLY_finding(self):
+        """Gated on `mechanisms` alone, a project whose only finding was a refused
+        tripwire got no notice at all -- the reason computed and then dropped."""
+        self._crlf_paused_wrapper()
+        # No scanner-flagged writer and no adapter edit: the refusal is all there is.
+        self.assertFalse((self.p.root / WRITER_REL).exists())
+        notice = self._notice()
+        self.assertIn(WRAPPER_REL, notice)
+
+    def test_an_ordinary_upgrade_gains_no_such_section(self):
+        """The control. A section that appeared on every upgrade would train exactly
+        the rubber-stamping this cut has a lesson about."""
+        self.p.write(WRITER_REL,
+                     "from external_write.run_envelope import mint_run_envelope\n")
+        self.p.write(WRAPPER_REL, _PAYLOAD, mode=0o755)
+        notice = self._notice()
+        self.assertNotIn("record-keeping", notice)
+        self.assertNotIn("still safely paused", notice)
+
+    def test_a_scan_error_over_the_whole_pass_is_reported_not_silent(self):
+        """"Nothing was checked" is not the same as "nothing to report", and it must
+        not render as the second."""
+        self.p.historical_wrapper()
+        self.p.pause_marker()
+        self.p.pause_state()
+        d = self.p.root / PAUSED_DIR_REL
+        os.chmod(str(d), 0o000)
+        self.addCleanup(os.chmod, str(d), 0o700)
+        notice = self._notice()
+        self.assertIn("could not check any of your paused scheduled jobs", notice)
+
+    def test_the_renderer_emits_nothing_for_an_empty_refusal_set(self):
+        self.assertEqual(upgrade_reconcile._tripwire_refusal_lines([]), [])
+        self.assertEqual(upgrade_reconcile._tripwire_refusal_lines(
+            [{"mechanism_id": "x", "reason": ""}]), [])
+
+
+class TestTheStalePauseRouteNamesRealFiles(unittest.TestCase):
+    """The route named a STEM (`.wizard/paused-mechanisms/<id>`), which does not
+    exist on disk, and said "that record" for a two-file pair whose wrong branch left
+    the block in place under a now-false sentence."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.p = _Project(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.p.pause_marker()
+        self.p.pause_state()
+        suppressed_invocation.record_suppressed_invocation(
+            project_root=str(self.p.root), mechanism_id=MECH,
+            entrypoint_relpath=WRAPPER_REL)
+
+    def _entry(self):
+        status = capability_health.overall_status(str(self.p.root))
+        return status, status["suppressed_invocations"]
+
+    def test_every_path_the_route_names_exists_on_disk(self):
+        _status, sup = self._entry()
+        (entry,) = sup["mechanisms"]
+        named = re.findall(r"`([^`]*paused-mechanisms[^`]*)`", entry["action"])
+        self.assertTrue(named, entry["action"])
+        for relpath in named:
+            self.assertTrue((self.p.root / relpath).exists(),
+                            f"the route names {relpath!r}, which does not exist")
+
+    def test_it_names_the_whole_pair_not_the_stem(self):
+        _status, sup = self._entry()
+        (entry,) = sup["mechanisms"]
+        for suffix in capability_health.PAUSE_MARKER_SUFFIXES:
+            self.assertIn(f"{MECH}{suffix}", entry["action"])
+        self.assertNotIn(f"`{PAUSED_DIR_REL}/{MECH}`", entry["action"])
+
+    def test_removing_the_half_the_guard_READS_stops_the_false_claim(self):
+        """Measured before the fix: deleting only `.pause` resumed the wrapper while
+        the surface kept saying it was "still switched off and will not run", kept
+        withholding the all-clear, and offered no further instruction. The operator
+        reached that by doing exactly what the sentence said."""
+        (self.p.root / PAUSED_DIR_REL / f"{MECH}.pause").unlink()
+        status, sup = self._entry()
+        self.assertFalse(sup["active"])
+        self.assertTrue(status["normal_status_allowed"], status)
+        self.assertEqual(sup["mechanisms"], [])
+        self.assertEqual(len(sup["previously_suppressed"]), 1)
+
+    def test_removing_the_whole_pair_also_clears_it(self):
+        """The instruction says delete them all, so that has to work too."""
+        for suffix in capability_health.PAUSE_MARKER_SUFFIXES:
+            (self.p.root / PAUSED_DIR_REL / f"{MECH}{suffix}").unlink()
+        status, sup = self._entry()
+        self.assertFalse(sup["active"])
+        self.assertTrue(status["normal_status_allowed"], status)
+
+    def test_per_capability_health_still_keys_on_the_PAIR(self):
+        """The narrowing is scoped to the suppression surface. For "is this
+        capability in a clean state", either file existing still means no."""
         self.assertEqual(
-            upgrade_paused_entrypoint_guards(
-                p.root, Path("/nonexistent-build-root"))["upgraded"], [MECH])
+            capability_health._is_paused(self.p.root, MECH), (True, False))
+        (self.p.root / PAUSED_DIR_REL / f"{MECH}.pause").unlink()
+        self.assertEqual(
+            capability_health._is_paused(self.p.root, MECH), (True, False),
+            "a leftover .json still means the capability is not clean")
+        self.assertEqual(
+            capability_health._is_paused(
+                self.p.root, MECH, capability_health.GUARD_READ_MARKER_SUFFIXES),
+            (False, False),
+            "but the guard would no longer fire")
+
+    def test_the_route_refuses_a_bare_string_instead_of_rendering_characters(self):
+        """A bare string is iterable, so it rendered one backtick-quoted CHARACTER
+        per "path"."""
+        with self.assertRaises(state_actions.StateActionError):
+            state_actions.route_for_stale_pause_record(WRAPPER_REL, "some/path")
+
+    def test_the_route_refuses_naming_no_file_at_all(self):
+        with self.assertRaises(state_actions.StateActionError):
+            state_actions.route_for_stale_pause_record(WRAPPER_REL, [])
 
 
 class TestTheInsertionPostCondition(unittest.TestCase):
@@ -1154,6 +1389,33 @@ class TestTheDurableEvent(unittest.TestCase):
         }) + "\n", encoding="utf-8")
         with self.assertRaises(suppressed_invocation.SuppressedInvocationError):
             self._record()
+
+    def test_the_refusal_and_the_actual_write_failure_AGREE_at_the_length_limit(self):
+        """A refusal that says "fine" for an id the write then rejects is the
+        installed-but-cannot-record gap at its far end.
+
+        Measured before the bound existed: a 250-byte id recorded, 251 raised
+        ``OSError: File name too long``, and the refusal answered ``None`` for both --
+        so the sweep would have reported a tripwire installed for a mechanism that
+        records nothing. Asserted as AGREEMENT rather than as a number: the id the
+        refusal permits must record, and the one it refuses must be the one the
+        filesystem would have rejected.
+        """
+        limit = suppressed_invocation.MAX_MECHANISM_ID_BYTES
+        permitted, refused = "a" * limit, "a" * (limit + 1)
+
+        self.assertIsNone(suppressed_invocation.mechanism_id_refusal(permitted))
+        self.assertEqual(self._record(mechanism_id=permitted)["suppressed_count"], 1)
+
+        reason = suppressed_invocation.mechanism_id_refusal(refused)
+        self.assertIsNotNone(reason)
+        self.assertIn("longer than this filesystem allows", reason)
+        # and the refusal is not merely cautious -- the write genuinely fails.
+        with self.assertRaises(suppressed_invocation.SuppressedInvocationError):
+            self._record(mechanism_id=refused)
+        with self.assertRaises(OSError):
+            (Path(suppressed_invocation.events_dir(str(self.p.root)))
+             / f"{refused}.json").write_text("x", encoding="utf-8")
 
     def test_an_unusable_mechanism_id_is_validated_never_rewritten(self):
         for bad in ("../escape", "a/b", ".hidden", "", "."):
@@ -1484,14 +1746,14 @@ class TestTheHealthSurface(unittest.TestCase):
         self.assertEqual(
             entry["action"],
             state_actions.route_for_stale_pause_record(
-                WRAPPER_REL, os.path.join(PAUSED_DIR_REL, MECH)))
+                WRAPPER_REL, _pause_record_paths(MECH)))
 
     def test_the_stale_pause_route_does_not_claim_the_script_is_fixed(self):
         """This state is ALSO reachable for a writer whose item was never opened, so
         "your script now passes the check" would be false in that case. The route
         states the condition instead of asserting it."""
         route = state_actions.route_for_stale_pause_record(
-            WRAPPER_REL, os.path.join(PAUSED_DIR_REL, MECH))
+            WRAPPER_REL, _pause_record_paths(MECH))
         self.assertIn("once they have confirmed", route)
         for false_claim in ("now passes the safety check and its item is closed",
                             "no action is needed"):

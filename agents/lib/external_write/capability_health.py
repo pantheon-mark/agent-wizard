@@ -633,7 +633,24 @@ def _capability_source_files(project_root: Path) -> Dict[str, Path]:
     return found
 
 
-def _is_paused(project_root: Path, capability_id: str) -> Tuple[bool, bool]:
+#: The pause marker pair, and which half of it means what. ONE spelling of these two
+#: suffixes; every reader below takes them from here.
+#:
+#: ``.pause`` is the half the inserted entrypoint guard's own ``[ -e ]`` test reads,
+#: so it alone decides whether an invocation is actually stopped. ``.json`` is the
+#: state record other surfaces parse. The distinction is load-bearing for the
+#: suppression surface: keyed on the pair, that surface kept asserting a run was
+#: "still switched off" after the ``.pause`` had been removed and the wrapper had in
+#: fact resumed -- a false operator-facing claim produced by following its own
+#: instruction. Per-capability health still keys on the PAIR, because for that
+#: question either file existing means the mechanism is not in a clean state.
+PAUSE_MARKER_SUFFIXES: Tuple[str, ...] = (".pause", ".json")
+GUARD_READ_MARKER_SUFFIXES: Tuple[str, ...] = (".pause",)
+
+
+def _is_paused(project_root: Path, capability_id: str,
+               suffixes: Tuple[str, ...] = PAUSE_MARKER_SUFFIXES,
+               ) -> Tuple[bool, bool]:
     """Returns ``(paused, read_error)``. ``paused`` is True iff an
     upgrade-reconcile safe-pause marker exists for ``capability_id`` —
     either the bare ``.pause`` sentinel or the ``.json`` pause-state record
@@ -675,7 +692,7 @@ def _is_paused(project_root: Path, capability_id: str) -> Tuple[bool, bool]:
         silently treated as absent."""
     paused_dir = project_root / PAUSED_MECHANISMS_DIR_REL
     read_error = False
-    for suffix in (".pause", ".json"):
+    for suffix in suffixes:
         marker = paused_dir / f"{capability_id}{suffix}"
         try:
             st = os.stat(str(marker))
@@ -1386,9 +1403,15 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
                 suppressed_invocation.read_outputs_may_be_suppressed(_determination),
             "path": _ev["path"],
         }
-        # Still paused == the guard would still fire. Fail-closed: a marker that
-        # exists and cannot be examined is not "no longer paused".
-        _still_paused, _marker_read_error = _is_paused(_health_root, _mech_id)
+        # Still paused == THE GUARD WOULD STILL FIRE, which is the `.pause` half and
+        # only that half. Keyed on the pair, this surface kept reporting a run
+        # "switched off" after the `.pause` was removed and the wrapper had actually
+        # resumed -- and it kept withholding the all-clear with no further
+        # instruction, which is a false claim reachable by following its own advice.
+        # Fail-closed is preserved: a marker that exists and cannot be examined is
+        # not "no longer paused".
+        _still_paused, _marker_read_error = _is_paused(
+            _health_root, _mech_id, GUARD_READ_MARKER_SUFFIXES)
         _entry["marker_read_error"] = _marker_read_error
         if _still_paused or _marker_read_error:
             # THE WAY OUT, rendered from the state->action registry and keyed on the
@@ -1407,11 +1430,17 @@ def overall_status(project_root: Any = ".") -> Dict[str, Any]:
             # So that case now has its OWN declared route, which names the record
             # holding the run and the actor who can clear it. Still registry-
             # rendered; nothing is composed here.
+            # EVERY file that has to go, not the stem. The stem
+            # (`.wizard/paused-mechanisms/<id>`) does not exist on disk, and naming
+            # one half of the pair meant an operator who did exactly what it said
+            # was left with the block still in place.
             _entry["action"] = bypass_actions_by_mechanism_id.get(
                 _mech_id,
                 state_actions.route_for_stale_pause_record(
                     str(_ev["entrypoint_relpath"]),
-                    os.path.join(PAUSED_MECHANISMS_DIR_REL, _mech_id)))
+                    [os.path.join(PAUSED_MECHANISMS_DIR_REL,
+                                  f"{_mech_id}{_suffix}")
+                     for _suffix in PAUSE_MARKER_SUFFIXES]))
             active_suppressions.append(_entry)
         else:
             past_suppressions.append(_entry)

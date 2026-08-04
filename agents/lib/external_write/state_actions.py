@@ -79,7 +79,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Callable, Dict, Mapping, Tuple
+from typing import Any, Callable, Dict, Mapping, Sequence, Tuple
 
 # Spelled `import external_write.<submodule> as _x` rather than the
 # `from external_write import <submodule>` form: both mean the same thing to
@@ -413,12 +413,26 @@ _UNIDENTIFIED_RECORD_ROUTE = (
 #: open item explains. Names the artifact, the actor, and the condition under which
 #: clearing it is right -- see ``route_for_stale_pause_record`` for what it
 #: deliberately does NOT assert.
+#: NAMES EVERY FILE, AND SAYS THE WHOLE SET MUST GO. Both halves of that are
+#: corrections, and both were measured:
+#:
+#:  * it named a STEM (`.wizard/paused-mechanisms/estate_upkeep`), which does not
+#:    exist on disk -- the artifacts are `<id>.pause` and `<id>.json`. An
+#:    instruction that names a path the operator cannot find is not an instruction.
+#:  * it said "that record", singular, for a PAIR with two different roles. Removing
+#:    only `.pause` -- the file the guard's own `[ -e ]` reads, and the one "held by"
+#:    most naturally denotes -- resumes the wrapper while the `.json` keeps other
+#:    surfaces reporting the mechanism paused. Following the instruction exactly has
+#:    to clear the state, so the instruction has to say both.
 _STALE_PAUSE_RECORD_ROUTE = (
-    "`{subject}` is still switched off and will not run: it is held by the pause "
-    "record at `{record}`, and there is no open item left that explains why. That "
-    "means the scheduled work it does is not happening. Ask your assistant to look "
-    "at that record with you -- once they have confirmed the script it protects now "
-    "passes the safety check, clearing that record is what starts it running again")
+    "`{subject}` is not running: it is held back by the pause records at "
+    "{records}, and there is no open item left that explains why. That means the "
+    "scheduled work it does is not happening. Ask your assistant to look at those "
+    "files with you -- once they have confirmed the script they protect now passes "
+    "the safety check, deleting ALL of them is what starts it running again. They "
+    "work as a set: delete every one, because a leftover keeps this mechanism "
+    "recorded as paused in the project's safety records even after the run itself "
+    "has restarted")
 
 #: What to say about an unreadable record of SUPPRESSED SCHEDULED RUNS -- a
 #: separate declared route, not a reuse of the one above.
@@ -521,6 +535,33 @@ def route_for_unclassified_state(subject: str) -> str:
     return _UNCLASSIFIED_ROUTE.format(subject=subject)
 
 
+#: THIS MODULE'S OPERATOR-FACING TEXT RENDERERS, declared here so the build-time
+#: monopoly gate does not have to carry a copy of the list.
+#:
+#: Why it is declared rather than left to the gate. The gate's job is to catch a
+#: surface that renders an instruction WITHOUT coming through this module -- and to do
+#: that it has to know which functions here count as coming through. It used to
+#: hardcode four names, in two places sharing one literal, so the two routes added
+#: for this task were invisible to it: a surface rendering ONLY a new route would have
+#: passed a gate that simply was not looking. That is the green-and-blind shape this
+#: cut family has shipped repeatedly.
+#:
+#: Membership is not left to a name convention either (a ``route_for_*`` prefix is
+#: incidental structure, and this package's standing rule is not to infer identity
+#: from that). It is an explicit positive declaration, and it cannot silently fall
+#: behind: the gate asserts that every module-level function here which formats one
+#: of this module's ``_..._ROUTE`` templates appears in this tuple, so a fifth route
+#: added without listing itself fails the gate rather than becoming invisible to it.
+OPERATOR_TEXT_RENDERERS: Tuple[str, ...] = (
+    "instruction_for_state",
+    "render_action",
+    "route_for_unclassified_state",
+    "route_for_unidentified_record",
+    "route_for_unreadable_suppression_record",
+    "route_for_stale_pause_record",
+)
+
+
 def route_for_unidentified_record(path: str) -> str:
     """What to tell the operator about an unreadable durable record of a TRIAL RUN
     -- one whose trial cannot be identified from it, and which may therefore be
@@ -538,7 +579,7 @@ def route_for_unidentified_record(path: str) -> str:
 
 
 def route_for_stale_pause_record(entrypoint_relpath: str,
-                                 pause_record_location: str) -> str:
+                                 pause_record_paths: Sequence[str]) -> str:
     """What to tell the operator about a scheduled run that is STILL being stopped
     by a pause record for which no open item exists.
 
@@ -550,25 +591,52 @@ def route_for_stale_pause_record(entrypoint_relpath: str,
     the operator was told the state had "no recorded way out", which named neither
     the thing to change nor anyone who could change it.
 
-    ``pause_record_location`` is passed IN rather than composed here: this module has
-    no business spelling that path, which is already duplicated-by-value at each
-    side of the build/emitted boundary that needs it. The caller has the constant.
+    ``pause_record_paths`` is EVERY file that has to go, passed IN rather than
+    composed here: this module has no business spelling that directory, which is
+    already duplicated-by-value at each side of the build/emitted boundary that needs
+    it. The caller has the constant and the suffixes. It is a sequence rather than a
+    pre-joined string so the caller never authors any of this sentence.
+
+    WHY EVERY FILE AND NOT "the record". Measured: deleting only the ``.pause`` half
+    resumes the wrapper but leaves the mechanism reported paused via the ``.json``,
+    so an operator who did exactly what a singular instruction said would be left
+    with the block still in place and nothing further to do. An instruction that does
+    not clear the state when followed exactly is not a repair.
 
     WHAT IT DOES AND DOES NOT ASSERT. It does not say the script is now correct --
     this state is also reachable for a writer whose item was never opened, so
     "your script is fixed" would be false in that case. It says what IS established:
-    the run is stopped, no open item explains it, the record that stops it is at a
-    named location, and the named actor can clear it once they have confirmed the
-    script is right. Performing that does clear it.
+    the run is not happening, no open item explains it, the files that hold it are
+    named, and the named actor can delete them once they have confirmed the script is
+    right. Performing that does clear it.
 
-    DISCLOSED: this hands over an artifact and an actor, not a paste-ready command,
+    DISCLOSED: this hands over artifacts and an actor, not a paste-ready command,
     because no sanctioned command clears a pause record for a non-capability
     mechanism today (``lifecycle_state.complete_migration`` covers capabilities and
     requires a canonical id, an acceptance receipt and a copy-run proof). That gap is
     recorded rather than papered over with an invented invocation.
+
+    Refuses an empty set rather than rendering "the pause records at " with nothing
+    after it -- a sentence naming no file is the defect this replaced.
     """
+    if isinstance(pause_record_paths, str):
+        # A bare string is iterable, so this silently rendered one backtick-quoted
+        # CHARACTER per path -- "`.` and `w` and `i` and `z` …". Caught by a test that
+        # had been passing the old single-path argument. Refusing is the only safe
+        # reading: a caller handing one path meant one path, and guessing which is
+        # how a sentence comes to name something that is not a file.
+        raise StateActionError(
+            "route_for_stale_pause_record takes a SEQUENCE of paths, not one string; "
+            f"got {pause_record_paths!r}. Pass [path] for a single file -- a bare "
+            "string renders one character per path.")
+    paths = [str(p) for p in (pause_record_paths or ()) if str(p).strip()]
+    if not paths:
+        raise StateActionError(
+            "route_for_stale_pause_record needs the path of every file holding the "
+            "run: a sentence that names none is what this route exists to replace")
+    rendered = " and ".join(f"`{p}`" for p in paths)
     return _STALE_PAUSE_RECORD_ROUTE.format(
-        subject=entrypoint_relpath, record=pause_record_location)
+        subject=entrypoint_relpath, records=rendered)
 
 
 def route_for_unreadable_suppression_record(path: str) -> str:

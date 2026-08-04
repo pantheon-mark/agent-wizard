@@ -349,6 +349,10 @@ def registry_declared_texts() -> Tuple[str, ...]:
     texts.extend(state_actions.INTENTIONAL_DISPOSITIONS.values())
     texts.append(state_actions.route_for_unclassified_state(_PLACEHOLDER_SUBJECT))
     texts.append(state_actions.route_for_unidentified_record(_PLACEHOLDER_SUBJECT))
+    texts.append(
+        state_actions.route_for_unreadable_suppression_record(_PLACEHOLDER_SUBJECT))
+    texts.append(state_actions.route_for_stale_pause_record(
+        _PLACEHOLDER_SUBJECT, [_PLACEHOLDER_SUBJECT]))
     return tuple(_normalise(t) for t in texts)
 
 
@@ -770,6 +774,20 @@ def entrypoint_declaring_modules() -> Mapping[str, frozenset]:
 _DECLARING_CACHE = None
 
 
+def registry_renderer_names() -> frozenset:
+    """The registry's own declared operator-facing renderers.
+
+    READ FROM THE REGISTRY, not listed here. This set was hardcoded in two places
+    that shared one literal, so two routes added to the registry were invisible to
+    BOTH -- including the "computed a second way" test whose whole job is to catch
+    the first one being narrowed. A surface rendering only a new route would have
+    passed a gate that was not looking, which is the green-and-blind shape this
+    family has shipped repeatedly. ``test_the_registrys_declared_renderer_set_is_
+    complete`` is what keeps the registry's declaration honest in turn.
+    """
+    return frozenset(state_actions.OPERATOR_TEXT_RENDERERS)
+
+
 def registry_rendering_surfaces() -> frozenset:
     """Every module in the scanned set that RENDERS from the registry -- it imports
     the registry and calls one of its renderers.
@@ -779,8 +797,7 @@ def registry_rendering_surfaces() -> frozenset:
     A hardcoded sample would keep proving the property for the two surfaces least
     likely to regress.
     """
-    renderers = {"instruction_for_state", "route_for_unclassified_state",
-                 "route_for_unidentified_record", "render_action"}
+    renderers = set(registry_renderer_names())
     found = set()
     for path in _scanned_files():
         if path.stem == "state_actions":
@@ -1639,8 +1656,7 @@ class ASurfaceThatRendersFromTheRegistryPassesTests(unittest.TestCase):
         same question independently and compares. It is also what would catch the
         sample being narrowed back to a hardcoded pair -- the population grew by two in
         the very task that derived it."""
-        renderers = {"instruction_for_state", "route_for_unclassified_state",
-                     "route_for_unidentified_record", "render_action"}
+        renderers = set(registry_renderer_names())
         independently = set()
         for path in _scanned_files():
             if path.stem == "state_actions":
@@ -1735,6 +1751,80 @@ class TheExemptionSurfaceIsPinnedTests(unittest.TestCase):
                          "an exemption marker that exempts nothing -- remove it "
                          "rather than leaving it to cover a future shape: "
                          + ", ".join(dead))
+
+
+class TheRegistrysDeclaredRendererSetIsCompleteTests(unittest.TestCase):
+    """The declaration this gate now reads has to stay honest, or deriving from it is
+    just a slower way of being blind.
+
+    The failure this closes: the renderer set was hardcoded here, in two places
+    sharing one literal, and two routes added to the registry appeared in neither --
+    so a surface rendering ONLY a new route was invisible to a gate reporting PASS.
+    Deriving from the registry fixes that only if the registry's own list cannot
+    silently fall behind either. So this asks the registry's SOURCE, by AST, which
+    functions render one of its declared route templates, and requires each to be
+    declared. A fifth route added without listing itself fails here.
+
+    Membership is deliberately not inferred from a ``route_for_*`` name prefix: a
+    naming convention is incidental structure, and this package's standing rule is
+    not to infer identity from that. The structural fact used instead is "this
+    function formats one of this module's own ``_..._ROUTE`` templates", which is
+    what actually makes something a renderer of registry-declared text.
+    """
+
+    _SOURCE = _EMITTED_LIB / "state_actions.py"
+
+    def _route_template_names(self, tree):
+        return {t.id for node in ast.walk(tree)
+                if isinstance(node, ast.Assign)
+                for t in node.targets
+                if isinstance(t, ast.Name) and t.id.endswith("_ROUTE")}
+
+    def _functions_formatting_a_route_template(self, tree, templates):
+        found = set()
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            for inner in ast.walk(node):
+                if (isinstance(inner, ast.Attribute) and inner.attr == "format"
+                        and isinstance(inner.value, ast.Name)
+                        and inner.value.id in templates):
+                    found.add(node.name)
+        return found
+
+    def test_the_source_carries_route_templates_to_find(self):
+        """Guards the sweep below against passing vacuously if the templates are ever
+        renamed out from under it."""
+        tree = ast.parse(self._SOURCE.read_text(encoding="utf-8"))
+        templates = self._route_template_names(tree)
+        self.assertGreaterEqual(len(templates), 3, sorted(templates))
+
+    def test_every_route_renderer_in_the_registry_is_declared(self):
+        tree = ast.parse(self._SOURCE.read_text(encoding="utf-8"))
+        templates = self._route_template_names(tree)
+        rendering = self._functions_formatting_a_route_template(tree, templates)
+        self.assertTrue(rendering, "the AST sweep must find something")
+        undeclared = sorted(rendering - registry_renderer_names())
+        self.assertEqual(
+            undeclared, [],
+            "state_actions renders operator-facing text from these functions and "
+            "does not declare them in OPERATOR_TEXT_RENDERERS, so this gate cannot "
+            "see a surface that renders only them: " + ", ".join(undeclared))
+
+    def test_every_declared_renderer_exists_and_is_callable(self):
+        """The other direction: a declaration naming something that is gone would
+        make the derived set quietly wrong in the permissive direction."""
+        for name in sorted(registry_renderer_names()):
+            self.assertTrue(callable(getattr(state_actions, name, None)),
+                            f"OPERATOR_TEXT_RENDERERS names {name!r}, which is not a "
+                            "callable on the registry")
+
+    def test_the_two_routes_added_for_the_suppression_surface_are_covered(self):
+        """Named explicitly, because these two are the ones that were missing and the
+        reason this class exists."""
+        for name in ("route_for_unreadable_suppression_record",
+                     "route_for_stale_pause_record"):
+            self.assertIn(name, registry_renderer_names())
 
 
 if __name__ == "__main__":
