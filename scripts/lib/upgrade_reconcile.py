@@ -53,9 +53,18 @@ Python file at ``<dir>/<stem>.py`` has its scheduling/invocation wrapper at
 idempotent guard block (after the shebang, so the script stays runnable) that
 checks a per-mechanism marker file and, if present, prints
 ``paused pending migration`` and exits 0 WITHOUT invoking anything — the flagged
-Python file is never touched, never re-imported, never re-run. Any OTHER
-mechanism's wrapper (a genuinely separate read-only reporting entrypoint) is left
-completely untouched, so it keeps running exactly as before.
+Python file is never touched, never re-imported, never re-run.
+
+A wrapper this module holds no pause record for is never written to at all. A
+wrapper that IS recorded paused can be written to once more, by
+``upgrade_paused_entrypoint_guards``, which adds record-keeping lines inside the
+guard it already carries and nothing else. WHAT NEITHER OF THOSE ESTABLISHES is
+that some other entrypoint of the operator's keeps producing what it used to: that
+depends on whether reading and writing share one entrypoint, which is decided
+per-mechanism (see ``_classify_read_output_entanglement``) and stated per-mechanism
+in the notice (``_pause_notice_lines``). This module makes no continuity claim
+anywhere else, and the two already-delivered spellings of one are named in
+``_WITHDRAWN_CONTINUITY_CLAIMS``.
 
 Where a mechanism entangles read and write behavior in the SAME file/entrypoint
 (the real ``estate_upkeep.py`` does this — a single script that both writes a
@@ -562,6 +571,14 @@ class ReconcileResult:
         (``effects_manifest.resolve_dependency_files``), so an edit here moves that capability's
         ``implementation_hash`` and stales any prior acceptance -- correct for a contract change,
         and something the operator must be TOLD rather than left to discover.
+
+    withdrawn_continuity_claim_files: project-relative paths of the operator's OWN files
+        that still carry one of the two already-delivered spellings of a continuity promise
+        this product withdrew (see ``_WITHDRAWN_CONTINUITY_CLAIMS``). READ-ONLY -- nothing
+        edits them; the correction is emitted into this pass's own notice instead. Must be
+        surfaced by ``render_reconcile_result`` for the same reason as the fields above: on
+        a project whose only finding is this one, it is the only thing that would name the
+        notice at all.
     """
     operator_project_path: str
     from_version: str
@@ -579,6 +596,7 @@ class ReconcileResult:
         default_factory=list)
     adapter_source_edits: List[str] = field(default_factory=list)
     tripwire_refusals: List[Dict[str, Any]] = field(default_factory=list)
+    withdrawn_continuity_claim_files: List[str] = field(default_factory=list)
 
     @property
     def any_affected(self) -> bool:
@@ -3008,6 +3026,22 @@ def _guard_recorder_lines(mechanism_id: str, entrypoint_relpath: str) -> str:
 def _guard_block(mechanism_id: str, writer_relpath: str, marker_from_wrapper: str,
                  from_version: str, to_version: str,
                  entrypoint_relpath: str) -> str:
+    """The guard, comments included, as it is written into the operator's own file.
+
+    ITS COMMENTS SAY ONLY WHAT THIS FUNCTION CAN ESTABLISH: which upgrade paused
+    this entrypoint, which file was found writing outside the project, and what
+    clears it. It used to close with an unconditional promise that a genuinely
+    separate read-only entrypoint was unaffected -- the same claim class the impact
+    notice REFUSES to make unless such an entrypoint was positively verified to
+    survive the pause. Nothing here is passed that determination, and a promise on a
+    per-mechanism fact this function does not have is not made truer by hedging it,
+    so it is not made at all. ``_pause_notice_lines`` is where that fact exists and
+    where the operator is told it, one way or the other.
+
+    The promise reached operator wrappers for as long as this guard has existed;
+    ``_WITHDRAWN_CONTINUITY_CLAIMS`` is how those already-written copies are found
+    and corrected, since this toolkit never edits an operator's own record.
+    """
     return (
         f"{_GUARD_BEGIN}\n"
         f"# This entrypoint was safe-paused by the upgrade to {to_version} (from "
@@ -3015,7 +3049,6 @@ def _guard_block(mechanism_id: str, writer_relpath: str, marker_from_wrapper: st
         "outside this project directly, bypassing the external-write safety check.\n"
         "# It stays paused -- and its saved access (credentials) stays untouched -- until\n"
         "# the fix is reviewed and approved through the rebuild-paused-capability flow.\n"
-        "# A genuinely separate read-only entrypoint is not affected by this guard.\n"
         '_RECONCILE_HERE="$(cd "$(dirname "$0")" && pwd)"\n'
         f'if [ -e "$_RECONCILE_HERE/{marker_from_wrapper}" ]; then\n'
         f"{_GUARD_PAUSED_ECHO_LINE}\n"
@@ -3234,6 +3267,12 @@ _REFUSED_UNPARSEABLE_PAUSE_RECORD = "refused_unparseable_pause_record"
 _REFUSED_PAUSE_RECORD_WRONG_SHAPE = "refused_pause_record_wrong_shape"
 _REFUSED_ID_DISAGREEMENT = "refused_id_disagreement"
 _REFUSED_ID_ABSENT = "refused_id_absent"
+#: DECLARED, but not as a name anything could use: ``""``, whitespace, a number, a
+#: boolean, a list, an object. The absent-vs-different split keyed on ``is None``, so
+#: every one of those was reported as naming a DIFFERENT job than its filename --
+#: three facts collapsed into the one that is repaired by choosing between two names,
+#: which is not the repair any of them needs.
+_REFUSED_ID_NOT_A_NAME = "refused_id_not_a_name"
 _REFUSED_CANNOT_RECORD_ID = "refused_cannot_record_id"
 _REFUSED_UNEXPECTED = "refused_unexpected"
 #: Not a wrapper at all -- the whole pass could not run. Rendered as a pass-wide
@@ -3261,6 +3300,7 @@ _REFUSAL_OUTCOMES: Tuple[str, ...] = (
     _REFUSED_PAUSE_RECORD_WRONG_SHAPE,
     _REFUSED_ID_DISAGREEMENT,
     _REFUSED_ID_ABSENT,
+    _REFUSED_ID_NOT_A_NAME,
     _REFUSED_CANNOT_RECORD_ID,
     _REFUSED_UNEXPECTED,
     _REFUSED_PASS_NOT_RUN,
@@ -3356,6 +3396,13 @@ _REFUSAL_OPERATOR_NOTES: Dict[str, str] = {
     _REFUSED_ID_ABSENT: (
         "one of the pause records does not say which job it belongs to, so we could "
         "not add anything for it"),
+    # SPLIT again: a record that DOES say which job it belongs to, but says it with
+    # something no job could be called, was also reported as naming a different job.
+    # Empty and wrong are not the same fact either.
+    _REFUSED_ID_NOT_A_NAME: (
+        "one of the pause records does not name a job in a form we can use -- what it "
+        "holds is blank, or is not a name at all -- so we could not add anything "
+        "for it"),
     _REFUSED_CANNOT_RECORD_ID: (
         "this job's name cannot be used for a record file, so there is nowhere to "
         "write down a skipped run for it"),
@@ -3411,9 +3458,19 @@ def _insert_tripwire_into_existing_guard(
 
     Returns ``(outcome, reason)``. ``outcome`` is ``"upgraded"``,
     ``"already_current"``, ``"skipped"`` (there is no managed guard here to add it
-    to), or ANY member of ``_REFUSAL_OUTCOMES`` -- one label per cause, including the
-    two it returns straight out of ``_publish_guard_change`` (which now chooses the
-    label itself; ``_restore_wrapper`` no longer returns one). The enumeration used to read ``"refused"`` alone, which was
+    to), or one refusal label -- one per cause. NOT any member of
+    ``_REFUSAL_OUTCOMES``: that tuple is the full set the DISPATCHER reports, and ten
+    of its members are the caller's to mint (every pause-record class, the
+    cannot-record-id class, the unexpected backstop, the pass-not-run class and the
+    bare fallback), none of which can come back from here. Measured: 14 are reachable,
+    from four places -- this function's own seven checks, ``_refuse_unconfined_change``
+    (one), ``_repair_stale_recorder_identity`` (two of its own, plus whatever it
+    propagates from the other two), and ``_publish_guard_change`` (FOUR, not two: the
+    three it chooses itself plus the ``_REFUSED_NEEDS_PERSON`` escalation
+    ``_restore_after_failed_check`` substitutes when the restore also fails).
+    ``_restore_wrapper`` returns none -- it answers only the restore question, because
+    one label standing for two different established facts is what made that split
+    necessary. The enumeration used to read ``"refused"`` alone, which was
     the contract the dispatcher's membership test has to stay in sync with; the
     membership test is now over that tuple and pinned by a test, so the two cannot
     drift apart silently.
@@ -3569,8 +3626,12 @@ def _repair_stale_recorder_identity(
     exit_line = f"{_GUARD_EXIT_LINE}\n"
     if block.count(anchor) != 1 or block.count(exit_line) != 1:
         return _REFUSED_GUARD_REGION_NOT_DELIMITED, (
-            f"{entrypoint_relpath}'s guard carries record-keeping lines for a "
-            "different mechanism, and its own message and exit lines are not each "
+            # NOT "for a different mechanism". This route fires whenever the lines are
+            # not the ones we would write now, which includes reformatted lines for
+            # THIS mechanism -- whose they are is not established, and the operator
+            # sentence for this label already says only that.
+            f"{entrypoint_relpath}'s guard carries record-keeping lines that are not "
+            "the ones we would write, and its own message and exit lines are not each "
             "present exactly once, so the region to replace cannot be delimited")
     start = block.index(anchor) + len(anchor)
     stop = block.index(exit_line)
@@ -3793,7 +3854,9 @@ def upgrade_paused_entrypoint_guards(
         unestablished);
       * a guard that does not name this mechanism's reconstructed pause marker;
       * a pause record whose declared ``mechanism_id`` disagrees with its filename,
-        or that cannot be read or parsed;
+        is missing, is not a usable name, or that cannot be read or parsed -- four
+        distinct facts, four labels, because only the first is repaired by choosing
+        between two names;
       * a wrapper that is not readable, or not UTF-8;
       * **a wrapper with Windows-style (CRLF) line endings.** The inserted lines use
         backslash continuations, which a CR before the newline breaks, so an
@@ -3928,6 +3991,19 @@ def upgrade_paused_entrypoint_guards(
                 candidate_id, None, _REFUSED_ID_ABSENT,
                 f"the pause record {name} carries no mechanism_id at all, so the "
                 "mechanism it belongs to cannot be established"))
+            continue
+        if not (isinstance(declared, str) and declared.strip()):
+            # DECLARED, AND UNUSABLE -- a third fact, and the split above only got two
+            # of them. Keying the absent branch on `is None` left `""`, whitespace and
+            # every non-string JSON value falling through to the disagreement branch,
+            # where each was reported as naming a DIFFERENT job than its own filename.
+            # Measured on all of them. The shape of this test is the one the
+            # `entrypoint_relpath` check one branch below already used.
+            report["refused"].append(_refusal_record(
+                candidate_id, None, _REFUSED_ID_NOT_A_NAME,
+                f"the pause record {name} declares mechanism_id {declared!r}, which is "
+                "not a usable name, so the mechanism it belongs to cannot be "
+                "established"))
             continue
         if declared != candidate_id:
             report["refused"].append(_refusal_record(
@@ -4625,11 +4701,166 @@ def _pause_notice_lines(m: MechanismReport) -> List[str]:
     ]
 
 
+# ----- A PROMISE THIS PRODUCT WITHDREW, AND THE COPIES ALREADY DELIVERED -------
+#
+# Two spellings of one unconditional continuity promise were emitted before the
+# promise was made conditional: the impact-notice line (rendered for EVERY paused
+# mechanism) and the comment written into the operator's own entrypoint wrapper. The
+# notice half told a real operator that anything which only reads and reports to them
+# was untouched while the pause was in fact stopping their daily summary, their phone
+# alert and their backup -- for nine days, discovered by accident.
+#
+# The generator was fixed for the notice first and for the wrapper comment later
+# (see ``_guard_block``). NEITHER FIX REACHES A COPY ALREADY ON DISK. Both live in the operator's own
+# files -- their record of what they were told, and a managed block this toolkit
+# writes into but does not rewrite -- so the correction cannot be an edit:
+#
+#   * a released bundle is never retro-edited, and
+#   * silently rewriting an operator's own record of a false claim destroys the
+#     evidence that they were misled, which is worse than the original error.
+#
+# So the correction is EMITTED. The next upgrade's notice names the files that still
+# carry the sentence and says plainly that nothing had checked it. That is all it
+# does; it changes nothing and asks for nothing.
+#
+# THE KEYS BELOW ARE SEARCH KEYS ONLY. Nothing emits either of them, and each is the
+# longest fragment contiguous in EVERY historical spelling: the first release wrapped
+# the wrapper comment across two comment lines after "A genuinely", so a key spelled
+# from the one-line form would match none of those wrappers -- a false negative that
+# reads exactly like "no operator was ever told this". Verified against this file's
+# own history: one notice spelling and two wrapper wrappings have ever existed.
+_WITHDRAWN_CONTINUITY_CLAIMS: Tuple[str, ...] = (
+    "Anything that only reads and reports to you was not touched",
+    "separate read-only entrypoint is not affected by this guard",
+)
+
+
+def _withdrawn_continuity_claim_files(operator_project_dir: Path) -> List[str]:
+    """Project-relative paths of the operator's OWN files that still carry one of
+    those sentences. Read-only; nothing here writes anything.
+
+    The candidate set is bounded and declared: every impact notice this project was
+    given by an earlier upgrade, and the wrapper each pause record names.
+
+    IT MAKES NO JUDGEMENT ABOUT A PAUSE RECORD. It takes one field and refuses to
+    have an opinion on the rest, so it is not a second implementation of the pause
+    record's contract (``upgrade_paused_entrypoint_guards`` owns that, and refuses a
+    record whose declared id disagrees with its filename -- whose WRAPPER can still be
+    carrying the sentence, which is why the two traversals are separate rather than
+    shared). A path that is absolute, or that climbs out of the project, is skipped:
+    an operator's own notice must never name a file outside their project.
+
+    WHAT A NEGATIVE ANSWER MEANS, exactly: nothing was FOUND. A file that cannot be
+    read or decoded is skipped, so an empty result is never a statement that no copy
+    exists -- and that is the safe direction, because the cost is a correction not
+    made, not a false all-clear. Nothing here can raise: it runs on the ordinary
+    upgrade path, ahead of the notice, and an escaping error would replace an
+    operator's upgrade with a traceback over a sentence in a comment.
+
+    It reports the same files on every later reconcile, for as long as they carry the
+    sentence. Nothing records the correction as delivered, because nothing here can
+    establish that anyone read it.
+    """
+    root = Path(operator_project_dir)
+    candidates: List[Path] = []
+
+    review_dir = root / UPGRADE_REVIEW_DIR_REL
+    try:
+        folders = sorted(os.listdir(str(review_dir)))
+    except OSError:
+        folders = []
+    for folder in folders:
+        candidates.append(review_dir / folder / IMPACT_NOTICE_BASENAME)
+
+    paused_dir = root / PAUSED_MECHANISMS_DIR_REL
+    try:
+        records = sorted(os.listdir(str(paused_dir)))
+    except OSError:
+        records = []
+    for name in records:
+        if not name.endswith(".json"):
+            continue
+        try:
+            state = json.loads((paused_dir / name).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+        if not isinstance(state, dict):
+            continue
+        entrypoint = state.get("entrypoint_relpath")
+        if not (isinstance(entrypoint, str) and entrypoint.strip()):
+            continue
+        if os.path.isabs(entrypoint) or ".." in Path(entrypoint).parts:
+            continue
+        candidates.append(root / entrypoint)
+
+    found: List[str] = []
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+        if not any(claim in text for claim in _WITHDRAWN_CONTINUITY_CLAIMS):
+            continue
+        try:
+            relpath = Path(path).relative_to(root).as_posix()
+        except ValueError:  # pragma: no cover - candidates are built under root
+            continue
+        if relpath not in found:
+            found.append(relpath)
+    return sorted(found)
+
+
+def _withdrawn_continuity_correction_lines(relpaths: Sequence[str]) -> List[str]:
+    """The correction, as an operator reads it. Empty when nothing carries the
+    sentence, so an ordinary upgrade's notice gains no section.
+
+    It states four things, and each is what was established rather than what would
+    be reassuring: the sentence is in these named files of theirs; it was written
+    every time a job was paused and nothing checked it; pausing one entrypoint stops
+    everything that entrypoint did; and this product now says nothing of the kind
+    without a verified separate read-only path. It asks the operator to do nothing --
+    there is nothing here for them to repair.
+
+    It deliberately does NOT quote the sentence. The notice it is written into lands
+    inside the very tree the scan above reads, so a quotation would make every later
+    upgrade correct its own output. The files are left in place for anyone who wants
+    to read the original.
+    """
+    if not relpaths:
+        return []
+    out = [
+        # LEADING BLANK: a markdown list runs on until one, so without it this
+        # headline renders inside the preceding bullet's paragraph.
+        "",
+        "**A correction to something an earlier update told you.**",
+        "",
+        "These files of your own still hold a sentence this system used to write, "
+        "telling you that a part which only reads and reports to you -- a summary, an "
+        "alert, a backup -- was not affected when a job was paused:",
+        "",
+    ]
+    out += [f"  - {relpath}" for relpath in relpaths]
+    out += [
+        "",
+        "It was written every time a job was paused, and nothing had checked whether "
+        "that was true. When one job both changes something outside your project and "
+        "produces something you read, pausing that job stops both of them. This "
+        "system no longer says anything of that kind unless a separate part that only "
+        "reads has been checked and confirmed untouched by the pause.",
+        "",
+        "Those files are left exactly as they are, so you can still see what you were "
+        "told. Nothing here changes them.",
+        "",
+    ]
+    return out
+
+
 def render_impact_notice(
     mechanisms: List[MechanismReport], from_version: str, to_version: str,
     *,
     adapter_source_edits: Sequence[str] = (),
     tripwire_refusals: Sequence[Dict[str, Any]] = (),
+    withdrawn_continuity_claim_files: Sequence[str] = (),
 ) -> str:
     """A plain-language, non-technical impact notice: what changed, which
     capability is affected, what happens next. No jargon.
@@ -4931,6 +5162,11 @@ def render_impact_notice(
             "",
         ]
     lines += _tripwire_refusal_lines(tripwire_refusals)
+    # The correction to an already-delivered promise this product withdrew. Passed in
+    # rather than derived here, like every other input: this function does no
+    # filesystem work (see its docstring), and the scan that finds those files is
+    # ``reconcile_upgrade``'s, run against the end state.
+    lines += _withdrawn_continuity_correction_lines(withdrawn_continuity_claim_files)
     # WHEN THIS WAS WORKED OUT. The notice carried no date anywhere, and on the
     # standalone `reconcile` entry point `upgrade_id` is "" -- so the artifact is a
     # single fixed path that each run OVERWRITES. Everything above is a statement
@@ -5356,16 +5592,31 @@ def reconcile_upgrade(
     # upgrade could rewrite an operator's adapter, stale their acceptance, and
     # leave no notice at all. `writer_state` was already stamped above, against
     # the queue state the classifier is meant to read.
+    # RUN LAST, so it reads the END STATE: any wrapper this pass paused carries
+    # today's guard comment (which makes no such promise), and any wrapper the reach
+    # pass rewrote still carries the sentence it was written with, because that
+    # rewrite is confined to the record-keeping lines.
+    withdrawn_continuity_claim_files = _withdrawn_continuity_claim_files(
+        operator_project_dir)
+
     notice_path: Optional[Path] = None
     # `tripwire_refusals` joins the condition, for the same reason
     # `adapter_source_edits` already did: a paused wrapper that cannot report being
     # skipped is something to say, and gating on `mechanisms` alone would leave a
     # project whose only finding this pass was a refused tripwire with no notice at
     # all -- the refusal reason computed and then dropped, which is what this fixes.
-    if mechanisms or adapter_source_edits or tripwire_refusals:
-        text = render_impact_notice(mechanisms, from_version, to_version,
-                                    adapter_source_edits=adapter_source_edits,
-                                    tripwire_refusals=tripwire_refusals)
+    #
+    # `withdrawn_continuity_claim_files` joins it for the same reason again, and it is
+    # the case that matters most: a project whose scheduled job was paused years ago
+    # and has been scanner-quiet ever since has NOTHING else in this condition, and
+    # that is exactly the project still holding the false sentence.
+    if (mechanisms or adapter_source_edits or tripwire_refusals
+            or withdrawn_continuity_claim_files):
+        text = render_impact_notice(
+            mechanisms, from_version, to_version,
+            adapter_source_edits=adapter_source_edits,
+            tripwire_refusals=tripwire_refusals,
+            withdrawn_continuity_claim_files=withdrawn_continuity_claim_files)
         notice_path = write_impact_notice(operator_project_dir, upgrade_id, text)
 
     return ReconcileResult(
@@ -5393,6 +5644,7 @@ def reconcile_upgrade(
         undo_declaration_violations=undo_declaration_violations,
         adapter_source_edits=adapter_source_edits,
         tripwire_refusals=tripwire_refusals,
+        withdrawn_continuity_claim_files=withdrawn_continuity_claim_files,
     )
 
 
@@ -5418,10 +5670,10 @@ def render_reconcile_result(result: ReconcileResult) -> str:
     rather than naming a subset of them: ``mechanisms``, ``stale_acceptance_reset``,
     ``predicate_stubs_scaffolded``, ``read_provisioner_violations``,
     ``same_id_twins_healed``, ``adapter_enrolment_blocking_reason``,
-    ``undo_declaration_violations``, ``adapter_source_edits``, and
-    ``tripwire_refusals``. If a future field is added to ``ReconcileResult`` that a
-    caller can observe, add it here too, in both the guard and the render loop below
-    -- not just one.
+    ``undo_declaration_violations``, ``adapter_source_edits``,
+    ``tripwire_refusals``, and ``withdrawn_continuity_claim_files``. If a future field
+    is added to ``ReconcileResult`` that a caller can observe, add it here too, in
+    both the guard and the render loop below -- not just one.
 
     ``tripwire_refusals`` is the fourth field to arrive by way of this exact defect:
     it was written to a notice, and in the refusal-only case this function returned
@@ -5440,7 +5692,12 @@ def render_reconcile_result(result: ReconcileResult) -> str:
             # surface. That is the same invisible-durable-record defect this task
             # exists to close, recurring inside the fix for it, and the FOURTH
             # instance of the class this docstring already enumerates.
-            or result.tripwire_refusals):
+            or result.tripwire_refusals
+            # FIFTH instance of the same class, and the one where it would have been
+            # hardest to notice: on a long-paused, scanner-quiet project this is the
+            # ONLY field carrying anything, so without it here the notice would be
+            # written and the terminal would print nothing at all.
+            or result.withdrawn_continuity_claim_files):
         return ""
     lines = ["", "Upgrade safety check found something to review:"]
     for m in result.mechanisms:
@@ -5594,6 +5851,16 @@ def render_reconcile_result(result: ReconcileResult) -> str:
             lines.append(f"  - {_note}")
         else:
             lines.append(f"  - {_subject}: {_note}")
+    if result.withdrawn_continuity_claim_files:
+        # ONE line, not one per file: the notice lists the files. It says what was
+        # established -- the sentence is in their files and nothing had checked it --
+        # and asks for nothing, because there is nothing here for them to repair.
+        count = len(result.withdrawn_continuity_claim_files)
+        where = "one of your own files" if count == 1 else f"{count} of your own files"
+        lines.append(
+            f"  - an earlier update left a sentence in {where} saying a part that only "
+            "reads and reports to you was not affected when a job was paused; nothing "
+            "had checked that, and the notice says where the sentence still is")
     if result.notice_path:
         lines.append(f"  See {result.notice_path} for what this means and what happens next.")
     elif result.migration_queue_path:

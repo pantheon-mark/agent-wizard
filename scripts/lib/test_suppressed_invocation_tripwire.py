@@ -293,6 +293,37 @@ class TestTheGeneratedGuardBody(unittest.TestCase):
         self.assertIn("""'o'\\''brien'""", block)
         self.assertIn("""'scripts/run_o'\\''brien.sh'""", block)
 
+    def test_the_block_makes_no_unconditional_continuity_promise(self):
+        """The comment written into the operator's OWN file used to promise, for every
+        pause, that a genuinely separate read-only entrypoint was unaffected.
+
+        That is the same unconditional claim class the impact notice REFUSES to make
+        unless a separate read-only entrypoint was positively verified to survive --
+        and this function is not passed that determination, so it cannot establish it
+        for any particular pause. It therefore says nothing about it: the honest
+        alternative to a promise nothing checked is silence, not a softer promise.
+        """
+        block = self._block()
+        self.assertNotIn("not affected by this guard", block)
+        for claim in upgrade_reconcile._WITHDRAWN_CONTINUITY_CLAIMS:
+            self.assertNotIn(claim, block)
+        # ...and it still says everything it CAN establish.
+        self.assertIn("was found to change something outside this project", block)
+        self.assertIn("rebuild-paused-capability", block)
+
+    def test_the_withdrawn_promise_key_matches_the_HISTORICAL_body(self):
+        """The population that matters is the wrappers already paused. The first
+        release wrapped that sentence across two comment lines, so a key spelled from
+        today's one-line form would match none of them -- a false negative that reads
+        exactly like "no operator was ever told this"."""
+        body = _historical_guard_block(
+            MECH, WRITER_REL,
+            upgrade_reconcile._wrapper_guard_marker_ref(WRAPPER_REL, MECH))
+        self.assertTrue(
+            any(claim in body
+                for claim in upgrade_reconcile._WITHDRAWN_CONTINUITY_CLAIMS),
+            "the search key misses the wrapping the first release emitted")
+
 
 # ===========================================================================
 # 2. Recorder failure PROVABLY cannot run the payload
@@ -1238,9 +1269,12 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
     #:
     #: DISCLOSED, because it is author-declared like the fact text: whether a row is
     #: minting or reading is a claim by whoever wrote the row, and a `_NON_MINTING`
-    #: row skips BOTH the same-fact check and the fact-is-stated check. The machine
-    #: enforces the multiset of references and the same-fact property over the rows
-    #: that declare a fact; it cannot tell you that a row lied about being a reader.
+    #: row is exempt from the SAME-FACT check -- only that one. It is still checked
+    #: for a non-blank fact, a count, a reportable label and a sentence (the sentinel
+    #: text satisfies the non-blank part), so a reader row cannot be a blank row. The
+    #: machine enforces the multiset of references and the same-fact property over the
+    #: rows that declare a fact; it cannot tell you that a row lied about being a
+    #: reader.
     _NON_MINTING = "reads a label; does not mint one"
 
     #: EVERY reference to a refusal label, as ROWS -- ``(function, label, count,
@@ -1266,9 +1300,12 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
     #: is reportable and has a sentence; and no label that DECLARES A FACT has two
     #: different ones. Author-declared, and unenforceable by any test here: the fact
     #: TEXT (no test can read a condition and tell you what it established), and
-    #: WHETHER A ROW MINTS AT ALL -- a ``_NON_MINTING`` row skips both the same-fact
-    #: check and the fact-is-stated check, so mislabelling a minting site as a reader
-    #: would hide it from exactly the property this table exists to enforce.
+    #: WHETHER A ROW MINTS AT ALL -- a ``_NON_MINTING`` row is skipped by the same-fact
+    #: check, so mislabelling a minting site as a reader would hide it from exactly the
+    #: property this table exists to enforce. (It is NOT skipped by the
+    #: fact-is-stated/reportable check, which an earlier wording claimed: that check
+    #: runs over every row, and the ``continue`` that used to exempt reader rows is
+    #: gone. The description was stricter about what goes unchecked than the code is.)
     _LABEL_REFERENCES = (
         ("_insert_tripwire_into_existing_guard", "_REFUSED_UNREADABLE_WRAPPER", 1,
          "the wrapper could not be read at all"),
@@ -1308,6 +1345,8 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
          "the pause record parsed but is not a mapping"),
         ("upgrade_paused_entrypoint_guards", "_REFUSED_ID_ABSENT", 1,
          "the record carries no mechanism_id at all"),
+        ("upgrade_paused_entrypoint_guards", "_REFUSED_ID_NOT_A_NAME", 1,
+         "the record declares an id that is not a usable name"),
         ("upgrade_paused_entrypoint_guards", "_REFUSED_ID_DISAGREEMENT", 1,
          "the record's declared id disagrees with its filename"),
         ("upgrade_paused_entrypoint_guards", "_REFUSED_CANNOT_RECORD_ID", 1,
@@ -1517,6 +1556,102 @@ class TestTheRefusalsReachTheOperator(unittest.TestCase):
         notice = Path(result.notice_path).read_text(encoding="utf-8")
         self.assertIn("does not say which job it belongs to", notice)
         self.assertNotIn("names a different job", notice)
+
+    def test_a_BLANK_mechanism_id_is_not_called_a_DIFFERENT_one(self):
+        """The other half of the absent-vs-different split, and it was still wrong:
+        the branch keys on ``is None``, so a record declaring ``""`` was reported as
+        naming a DIFFERENT job than its filename. Absent, unusable and different are
+        three facts; only the third is a disagreement, and only it is repaired by
+        choosing between two names."""
+        self.p.historical_wrapper()
+        self.p.pause_marker()
+        (self.p.root / PAUSED_DIR_REL / f"{MECH}.json").write_text(
+            json.dumps({"mechanism_id": "   ",
+                        "writer_relpath": WRITER_REL,
+                        "entrypoint_relpath": WRAPPER_REL}) + "\n",
+            encoding="utf-8")
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        (entry,) = result.tripwire_refusals
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertNotIn("names a different job", notice)
+        self.assertEqual(entry["outcome"], upgrade_reconcile._REFUSED_ID_NOT_A_NAME)
+        self.assertIn("does not name a job", notice)
+
+    def test_a_NON_STRING_mechanism_id_is_not_called_a_DIFFERENT_one(self):
+        """Same branch, every other shape a JSON record can legally hold. Each was
+        measured rendering "names a different job than its own filename does"."""
+        for value in (0, False, [], {}, 123):
+            with self.subTest(value=value):
+                p = self._fresh_project()
+                p.historical_wrapper()
+                p.pause_marker()
+                (p.root / PAUSED_DIR_REL / f"{MECH}.json").write_text(
+                    json.dumps({"mechanism_id": value,
+                                "writer_relpath": WRITER_REL,
+                                "entrypoint_relpath": WRAPPER_REL}) + "\n",
+                    encoding="utf-8")
+                result = upgrade_reconcile.reconcile_upgrade(
+                    p.root, _BUILD_ROOT, from_version="v0.22.0",
+                    to_version="v0.23.0")
+                (entry,) = result.tripwire_refusals
+                self.assertNotIn(
+                    "names a different job",
+                    Path(result.notice_path).read_text(encoding="utf-8"))
+                self.assertEqual(entry["outcome"],
+                                 upgrade_reconcile._REFUSED_ID_NOT_A_NAME)
+
+    def test_the_region_DIAGNOSTIC_agrees_with_its_declared_fact(self):
+        """The operator sentence at this site was corrected to "record-keeping lines
+        that are not the ones we would write"; the diagnostic on the same event still
+        said the lines were "for a different mechanism". The route fires whenever the
+        block's lines are not the ones we would write now -- which includes
+        reformatted lines for THIS job -- so whose they are is not established.
+
+        AST at the site rather than a text window: prose discussing the old wording in
+        order to explain it is not the wording (the same reason the sibling
+        diagnostic test above is AST-based).
+        """
+        source = (_WIZARD / "scripts" / "lib" / "upgrade_reconcile.py").read_text(
+            encoding="utf-8")
+        reasons = []
+        for node in ast.walk(ast.parse(source)):
+            if not (isinstance(node, ast.Return)
+                    and isinstance(node.value, ast.Tuple)
+                    and node.value.elts):
+                continue
+            first = node.value.elts[0]
+            if not (isinstance(first, ast.Name)
+                    and first.id == "_REFUSED_GUARD_REGION_NOT_DELIMITED"):
+                continue
+            reasons.append("".join(
+                part.value for part in ast.walk(node.value)
+                if isinstance(part, ast.Constant) and isinstance(part.value, str)))
+        self.assertEqual(len(reasons), 1, reasons)
+        self.assertNotIn("for a different mechanism", reasons[0])
+        self.assertIn("not the ones we would write", reasons[0])
+
+    def test_the_correction_reaches_a_wrapper_this_pass_just_upgraded(self):
+        """The realistic sequence: a wrapper paused by the release that emitted the
+        promise, whose guard this pass gives its record-keeping lines. The insertion
+        is confined to those lines, so the sentence SURVIVES -- which is why the only
+        route to it is the notice saying so."""
+        self.p.historical_wrapper()
+        self.p.pause_marker()
+        self.p.pause_state()
+        result = upgrade_reconcile.reconcile_upgrade(
+            self.p.root, _BUILD_ROOT, from_version="v0.22.0", to_version="v0.23.0")
+        self.assertEqual(result.tripwire_refusals, [])
+        self.assertIn(
+            "separate read-only entrypoint is not affected by this guard",
+            (self.p.root / WRAPPER_REL).read_text(encoding="utf-8"),
+            "the guard comment was expected to survive the insertion")
+        self.assertIsNotNone(result.notice_path,
+                            "nothing told this operator the sentence in their own "
+                            "file was never checked")
+        notice = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertIn(WRAPPER_REL, notice)
+        self.assertIn("nothing had checked whether that was true", notice)
 
     def test_a_DIFFERENT_mechanism_id_still_reads_as_a_disagreement(self):
         """The control for the split above: the route that genuinely IS a

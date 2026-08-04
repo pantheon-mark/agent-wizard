@@ -64,10 +64,19 @@ DEFAULT_NOTICE_RELPATH = "wizard/scripts/lib/upgrade_reconcile.py"
 # reason as the two above: this is the sentence a summarizing agent would soften
 # or drop first, and softening it would let a non-technical operator assume their
 # approval still stands when it does not.
+#
+# The FOURTH entry is the correction to a continuity promise this product withdrew.
+# Two spellings of it were already delivered -- one in an impact notice, one in the
+# comment written into an operator's own wrapper -- and the notice half is what let a
+# real operator believe their summary, alert and backup were still running while a
+# pause had stopped all three. The correction exists to be RELAYED, so it is exactly
+# the sentence an agent summarizing this notice would drop first, and dropping it
+# reproduces the original harm rather than merely losing detail.
 REQUIRED_CAVEAT_SUBSTRINGS: Sequence[str] = (
     "do not rely on it being blocked until it is rebuilt",
     "do not rely on it being blocked until it is fixed",
     "it will be switched off again the next time this check runs",
+    "nothing had checked whether that was true",
 )
 
 

@@ -1289,14 +1289,264 @@ class RenderImpactNoticeTests(unittest.TestCase):
         text = render_impact_notice([m], "v0.11.0", "v0.12.0")
         self.assertIn("upgraded from v0.11.0 to v0.12.0", text)
 
-    def test_no_unconditional_continuity_line_remains_in_source(self):
-        # Guard against regression at the source level -- the OLD unconditional
-        # line must not exist anywhere in the module, under ANY MechanismReport
-        # shape (paused, unpaused, orchestrator-routed, entangled, separate).
+    def test_no_MechanismReport_shape_renders_the_old_unconditional_line(self):
+        """The property the old source-level ban was a proxy for, measured directly.
+
+        That ban read the module's raw text, which stopped being the right instrument
+        the moment the module had to NAME the withdrawn sentence in order to find the
+        copies already on operator disks. Retargeted rather than relaxed: every
+        MechanismReport shape is rendered and the sentence must appear in none of
+        them -- including a render carrying the correction section, since a correction
+        that quoted the sentence would put it back in front of an operator.
+        """
+        shapes = [
+            self._paused(),
+            self._paused(carries_read_outputs=True,
+                         entangled_read_outputs=["digest"]),
+            self._paused(carries_read_outputs=None),
+            self._paused(carries_read_outputs=False),
+            self._paused(carries_read_outputs=False,
+                         separate_readonly_entrypoint="agents/cron/run_d.sh"),
+            self._paused(carries_read_outputs=None,
+                         separate_readonly_entrypoint="agents/cron/run_d.sh"),
+            self._paused(paused=False, entrypoint_relpath=None),
+            self._paused(paused=False, entrypoint_relpath=None,
+                         orchestrator_routed=True),
+            self._paused(paused=False, entrypoint_relpath=None,
+                         state="broken_requires_migration"),
+            self._paused(paused=False, entrypoint_relpath=None,
+                         state="paused_live_write",
+                         paused_op_kinds=["acme.widget.delete"]),
+        ]
+        banned = upgrade_reconcile._WITHDRAWN_CONTINUITY_CLAIMS[0]
+        for m in shapes:
+            for extra in ({}, {"withdrawn_continuity_claim_files":
+                               [".wizard/upgrade-review/x/impact-notice.md"]}):
+                with self.subTest(state=m.state, paused=m.paused,
+                                  carries=m.carries_read_outputs, extra=bool(extra)):
+                    self.assertNotIn(
+                        banned,
+                        render_impact_notice([m], "v0.11.0", "v0.12.0", **extra))
+
+    def test_the_old_unconditional_line_is_in_source_only_as_a_SEARCH_KEY(self):
+        """It is in the module exactly once, as the key that finds already-delivered
+        copies of it -- never as text anything renders. A second occurrence is either
+        a re-spelling or a re-emission, and both are the defect."""
         import upgrade_reconcile
         src = Path(upgrade_reconcile.__file__).read_text(encoding="utf-8")
-        self.assertNotIn(
-            "Anything that only reads and reports to you was not touched", src)
+        key = "Anything that only reads and reports to you was not touched"
+        self.assertEqual(src.count(key), 1)
+        self.assertIn(key, upgrade_reconcile._WITHDRAWN_CONTINUITY_CLAIMS)
+
+
+class WithdrawnContinuityClaimTests(_Base):
+    """The continuity promise this product WITHDREW, and the copies of it already
+    delivered to operator disks.
+
+    Two spellings of it were emitted before the promise was made conditional: one in
+    the impact notice (rendered for EVERY paused mechanism, unconditionally) and one
+    in the comment written into the operator's own entrypoint wrapper. Both are on
+    operator disks today, in files this toolkit is read-only about, and the notice
+    half cost a real operator nine days of silently suppressed output.
+
+    Nothing here edits either file. The correction is EMITTED -- the next upgrade's
+    own notice names the files that still carry the sentence and says plainly that
+    nothing had checked it -- because rewriting an operator's own record of what they
+    were told destroys the evidence that they were misled.
+    """
+
+    #: The notice line exactly as the pre-conditional generator rendered it. ONE
+    #: spelling ever shipped (verified against this file's own history: unchanged
+    #: from the engine's introduction until the line was removed). Spelled as a
+    #: literal here rather than imported, because it is a reproduction of a
+    #: HISTORICAL artifact and the test below is that the search key matches what
+    #: actually reached an operator.
+    _SHIPPED_NOTICE_LINE = (
+        "  - It has been paused (`agents/cron/run_estate_upkeep.sh` will not make "
+        "that change until this is fixed). Anything that only reads and reports to "
+        "you was not touched — that keeps running exactly as before."
+    )
+
+    #: BOTH historical wrappings of the wrapper comment. The first release split the
+    #: sentence across two comment lines after "A genuinely"; the later one puts it
+    #: on a line of its own. A key matching only one of them would miss every
+    #: wrapper paused by the other. The byte-faithful whole-body fixture lives in
+    #: ``test_suppressed_invocation_tripwire`` (``_historical_guard_block``), and is
+    #: bound to the same keys there.
+    _SHIPPED_GUARD_COMMENTS = (
+        "# the fix is reviewed and approved through the add-capability flow. A genuinely\n"
+        "# separate read-only entrypoint is not affected by this guard.\n",
+        "# A genuinely separate read-only entrypoint is not affected by this guard.\n",
+    )
+
+    def _project(self):
+        root = self.tmp / "operator_estate"
+        (root / ".wizard").mkdir(parents=True, exist_ok=True)
+        return root
+
+    def _stored_notice(self, root, folder, text):
+        """A notice this project was given by an EARLIER upgrade, where the upgrade
+        flow actually leaves them."""
+        rel = (f"{upgrade_reconcile.UPGRADE_REVIEW_DIR_REL}/{folder}/"
+               f"{upgrade_reconcile.IMPACT_NOTICE_BASENAME}")
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return rel
+
+    def _reconcile(self, root):
+        return reconcile_upgrade(root, _REAL_REPO,
+                                 from_version="v0.22.0", to_version="v0.23.0")
+
+    def test_the_search_keys_match_the_text_that_actually_shipped(self):
+        """A key that does not match the delivered bytes corrects nothing. Both
+        wrapper wrappings and the one notice spelling are checked, because a negative
+        result here is indistinguishable from "no operator was ever told this"."""
+        for shipped in (self._SHIPPED_NOTICE_LINE,) + self._SHIPPED_GUARD_COMMENTS:
+            self.assertTrue(
+                any(claim in shipped
+                    for claim in upgrade_reconcile._WITHDRAWN_CONTINUITY_CLAIMS),
+                f"no search key matches text that was delivered: {shipped!r}")
+
+    def test_a_stored_notice_that_still_carries_it_is_named_in_the_new_notice(self):
+        root = self._project()
+        rel = self._stored_notice(root, "v0.10.2-to-v0.11.0",
+                                  "# Upgrade safety notice\n\n"
+                                  + self._SHIPPED_NOTICE_LINE + "\n")
+        result = self._reconcile(root)
+        self.assertIsNotNone(
+            result.notice_path,
+            "a project whose only finding is an already-delivered false promise got "
+            "no notice at all, so the correction reaches nobody")
+        text = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertIn(rel, text)
+        self.assertIn("nothing had checked whether that was true", text)
+        self.assertIn("left exactly as they are", text)
+        self.assertEqual(result.withdrawn_continuity_claim_files, [rel])
+
+    def test_the_correction_does_not_re_emit_the_promise_it_corrects(self):
+        """The correction lands in the same tree it scans. Quoting the sentence would
+        make every later upgrade correct its own output, forever."""
+        root = self._project()
+        rel = self._stored_notice(root, "v0.10.2-to-v0.11.0",
+                                  self._SHIPPED_NOTICE_LINE + "\n")
+        result = self._reconcile(root)
+        text = Path(result.notice_path).read_text(encoding="utf-8")
+        for claim in upgrade_reconcile._WITHDRAWN_CONTINUITY_CLAIMS:
+            self.assertNotIn(claim, text)
+        self.assertNotIn("keeps running exactly as before", text)
+        self.assertEqual(
+            upgrade_reconcile._withdrawn_continuity_claim_files(root), [rel],
+            "the notice this pass just wrote is inside the scanned tree, so a "
+            "correction that quoted the sentence would detect itself")
+
+    def test_a_paused_wrappers_own_comment_is_found_too(self):
+        """The other delivered spelling. It sits in a managed block in the operator's
+        own file, which this never edits -- so the only route to it is saying so."""
+        root = self._project()
+        wrapper_rel = "agents/cron/run_estate_upkeep.sh"
+        wrapper = root / wrapper_rel
+        wrapper.parent.mkdir(parents=True, exist_ok=True)
+        wrapper.write_text("#!/bin/sh\n" + self._SHIPPED_GUARD_COMMENTS[1]
+                           + 'echo "the digest was sent"\n', encoding="utf-8")
+        paused = root / PAUSED_MECHANISMS_DIR_REL
+        paused.mkdir(parents=True, exist_ok=True)
+        (paused / "estate_upkeep.json").write_text(json.dumps({
+            "mechanism_id": "estate_upkeep",
+            "entrypoint_relpath": wrapper_rel,
+        }), encoding="utf-8")
+        result = self._reconcile(root)
+        self.assertIsNotNone(result.notice_path)
+        text = Path(result.notice_path).read_text(encoding="utf-8")
+        self.assertIn(wrapper_rel, text)
+        self.assertIn("nothing had checked whether that was true", text)
+
+    def test_the_promise_the_product_STILL_makes_is_not_corrected(self):
+        """The discriminating case. A verified separate read-only entrypoint still
+        earns a continuity promise, and that promise is TRUE. A key loose enough to
+        catch it would tell an operator a true sentence was wrong -- the same defect
+        in the opposite direction."""
+        current = render_impact_notice(
+            [MechanismReport(
+                mechanism_id="estate_upkeep",
+                writer_relpath="agents/cron/estate_upkeep.py",
+                violation_summaries=["direct_api_call:10"],
+                entrypoint_relpath="agents/cron/run_estate_upkeep.sh",
+                paused=True,
+                carries_read_outputs=False,
+                separate_readonly_entrypoint="agents/cron/run_estate_digest.sh")],
+            "v0.21.0", "v0.22.0")
+        self.assertIn("keeps running exactly as before", current,
+                      "control: the conditional promise must be in the fixture")
+        root = self._project()
+        self._stored_notice(root, "v0.21.0-to-v0.22.0", current)
+        result = self._reconcile(root)
+        self.assertEqual(upgrade_reconcile._withdrawn_continuity_claim_files(root), [])
+        self.assertIsNone(result.notice_path,
+                          "nothing was found and nothing was done, so there is "
+                          "nothing to say")
+
+    def test_the_terminal_summary_names_it_when_it_is_the_only_finding(self):
+        """The notice is a file the operator opens afterwards; this prints first. A
+        field that writes a notice and renders nothing here is a notice nothing points
+        at."""
+        root = self._project()
+        self._stored_notice(root, "v0.10.2-to-v0.11.0",
+                            self._SHIPPED_NOTICE_LINE + "\n")
+        result = self._reconcile(root)
+        out = render_reconcile_result(result)
+        self.assertNotEqual(out, "")
+        self.assertIn("nothing had checked", out)
+        self.assertIn(str(result.notice_path), out)
+
+    def test_the_section_headline_terminates_the_list_before_it(self):
+        """A markdown list runs on until a blank line, so a headline appended straight
+        onto a bullet list renders INSIDE the last bullet's paragraph. That has already
+        happened once to the section this one sits next to."""
+        text = render_impact_notice(
+            [], "v0.22.0", "v0.23.0",
+            withdrawn_continuity_claim_files=["agents/cron/run_estate_upkeep.sh"])
+        lines = text.splitlines()
+        idx = next(i for i, line in enumerate(lines)
+                   if line.startswith("**A correction"))
+        self.assertEqual(lines[idx - 1], "",
+                         f"headline preceded by {lines[idx - 1]!r}")
+
+    def test_one_file_and_many_files_both_read_as_english(self):
+        """The terminal line is the surface the operator reads FIRST, and it carries a
+        count."""
+        one = render_reconcile_result(ReconcileResult(
+            operator_project_path="/tmp/x", from_version="v1", to_version="v2",
+            withdrawn_continuity_claim_files=["a.sh"]))
+        self.assertIn("one of your own files", one)
+        many = render_reconcile_result(ReconcileResult(
+            operator_project_path="/tmp/x", from_version="v1", to_version="v2",
+            withdrawn_continuity_claim_files=["a.sh", "b.md"]))
+        self.assertIn("2 of your own files", many)
+
+    def test_an_unreadable_candidate_is_never_reported_as_carrying_it(self):
+        """The scan is evidence-gathering: a file it cannot read produces no claim in
+        either direction. Silence here means "not found", never "not present"."""
+        root = self._project()
+        rel = self._stored_notice(root, "v0.10.2-to-v0.11.0",
+                                  self._SHIPPED_NOTICE_LINE + "\n")
+        (root / rel).chmod(0o000)
+        self.addCleanup((root / rel).chmod, 0o644)
+        self.assertEqual(upgrade_reconcile._withdrawn_continuity_claim_files(root), [])
+
+    def test_a_pause_record_naming_a_path_outside_the_project_is_not_read(self):
+        """An ``entrypoint_relpath`` is supposed to be inside the project. One that
+        escapes it must not end up named in an operator's own notice."""
+        root = self._project()
+        outside = self.tmp / "outside.sh"
+        outside.write_text(self._SHIPPED_GUARD_COMMENTS[1], encoding="utf-8")
+        paused = root / PAUSED_MECHANISMS_DIR_REL
+        paused.mkdir(parents=True, exist_ok=True)
+        (paused / "escapee.json").write_text(json.dumps({
+            "mechanism_id": "escapee",
+            "entrypoint_relpath": "../outside.sh",
+        }), encoding="utf-8")
+        self.assertEqual(upgrade_reconcile._withdrawn_continuity_claim_files(root), [])
 
 
 class RenderReconcileResultTests(unittest.TestCase):
