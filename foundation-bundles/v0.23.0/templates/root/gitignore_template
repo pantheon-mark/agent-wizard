@@ -1,0 +1,44 @@
+# Secrets — never committed
+.env
+
+# Logs — operational data, stays local (permanent exclusion per security policy)
+/logs/
+
+# Session cookies — ephemeral credentials, never committed
+/security/session_cookies/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor artifacts
+.DS_Store
+*.swp
+*~
+
+# Node.js
+node_modules/
+
+# Replay capsule — holds your setup answers so the wizard can preview upgrades.
+# Stays local by default. Remove this line only if you want it committed.
+.wizard/replay-capsule.json
+
+# Consent/runtime artifacts — written automatically when the system performs
+# external-write actions (acceptance receipts, run envelopes, invocation
+# ledgers, trial run records, the capability acceptance log). Local operational
+# records, not something you need to decide about committing.
+/security/acceptance_receipts/
+/security/run_envelopes/
+/security/invocation_ledgers/
+/security/trial_runs/
+/security/capability_acceptance_log.jsonl
+
+# Trial proof records — written when a new capability is tested against your live
+# account. Each one holds the real identifiers and the before/after state of the
+# records the test touched, so it stays local. Only these two patterns are
+# excluded: everything else the system keeps in agents/handoffs/ is ordinary
+# system state and is still committed as usual.
+/agents/handoffs/*.copy_run_proof.json
+/agents/handoffs/.copy_run_proof.*.tmp
+
+{{ADDITIONAL_GITIGNORE_ENTRIES}}

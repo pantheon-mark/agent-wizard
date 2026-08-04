@@ -1,0 +1,122 @@
+# Foundation bundle v0.23.0 manifest
+# Minor-additive release over v0.22.0.
+# This bundle carries the emitted-lib half of one theme: a state the system could enter
+# and the operator could not leave. Two such states are closed here; a third class is
+# disclosed below rather than claimed closed.
+# NEW FILES (11), all in agents/lib/external_write/:
+#   write_authorization.py -- the single implementation of "may this operation run": one
+#     authorize step, one carrier object, one consumer. Splitting authorize from execute is
+#     what lets a trial and a normal run share identical enforcement instead of having two
+#     paths that must agree.
+#   trial_eligibility.py -- the preflight that decides whether one operation may be trialled
+#     at all. Everything it cannot establish from the adapter's own declarations is refused;
+#     nothing passes because it was not mentioned.
+#   trial_journal.py -- a write-ahead journal. The record of what a trial is about to do is
+#     written and flushed to disk (contents and containing directory both) BEFORE the write
+#     is attempted, so a run killed at any moment leaves a record that can be found again.
+#   trial_executor.py -- runs the trial and produces the validated proof. This is the piece
+#     an operator can invoke; before it, the proof that switching a capability on requires
+#     had no operator-runnable producer, so a capability could be accepted-in-principle and
+#     never actually switchable.
+#   trial_recovery.py -- the one place a unit left needing recovery can be cleared, and only
+#     after the system has observed the state it was left in.
+#   state_actions.py -- a state-to-action registry. Every state that holds something up is
+#     declared here with the exact instruction and command that clears it, or is declared, in
+#     plain language, as needing no action. A state that is in neither list fails the build.
+#   writer_state_core.py / writer_ack_store.py / writer_commands.py -- the writer-state
+#     cluster split into layers that do not import each other in a circle. No behaviour
+#     change of its own; it is what makes the registry above buildable.
+#   acceptance_repudiation.py -- a sanctioned way to mark a recorded acceptance repudiated.
+#     Repudiating an active acceptance switches the capability back off and queues a retrial;
+#     a repudiation that left live authorization standing would be worse than none.
+#   suppressed_invocation.py -- records the moment a paused wrapper's guard stops a scheduled
+#     run, so a job that has silently stopped producing output is visible rather than quiet.
+# MODIFIED (18): _ext_write_state.py, acceptance_ceremony.py, adapter_registry.py,
+#   adapters.py, adapters_gmail.py, capability_health.py, capability_invariants.py,
+#   capability_runner.py, command_manifest.py, copy_run_proof.py, evidence.py,
+#   lifecycle_state.py, operator_acceptance.py, run_envelope.py, scan.py, write_gate.py,
+#   writer_acknowledgement.py, zones.py.
+#   Of note: eligibility for acknowledging a risk is now an explicit list of the states that
+#   qualify rather than a list of the ones that do not, so a state added later does not become
+#   acknowledgeable by default; scan.py gains two build-time checks -- one that a remediation
+#   instruction shown to an operator is never hand-written at the surface that shows it, and
+#   one that flags a script hard-coding the operator's own confirmation; and the trial command
+#   is enrolled as a live-write command, never eligible for automatic approval.
+# ALSO IN THIS BUNDLE: the operator-facing skills for adding and rebuilding a capability, the
+#   project instructions, the commit-hygiene helper, the gitignore template and its manifest,
+#   and the orchestrator prompt, all updated to match the above.
+# DECLARED, NOT PROVEN -- stated in these words on purpose: an adapter's undo being safe to
+#   repeat is a declaration the build reads, not a property it can verify; recovery may issue
+#   a write that changes nothing (restoring a prior value is still a real API call); and the
+#   upgrade-time step that adds the new undo declaration to an operator-authored adapter
+#   writes it set to the SAFE value, never to "yes" -- only a person, or an agent that has
+#   read the code, may set it.
+# STILL OPEN, disclosed rather than implied closed: a retrial entry's next step exists on disk
+#   and in the skills but is not rendered by any surface; a paused hand-rolled writer's pair of
+#   marker files has a written route out but no single command; and the wrapper guard is
+#   recognised by what it looks like, which does not establish that it will fire.
+# The other half of this release -- the upgrade-time migration that adds the new undo
+# declaration, the reconcile changes, and the build-side source-to-bundle parity gate -- ships
+# with the toolkit (`wizard self-update`), not this bundle.
+# system-artifacts.json goes from 144 to 155 artifacts (the eleven added files).
+# Foundation docs are BYTE-IDENTICAL to v0.22.0 (managed_files hashes unchanged;
+# foundation_schema_version unchanged).
+_note: JSON sidecar for manifest.yaml. The wizard runtime CLI consumes JSON; YAML is the human-facing
+  companion. Both files MUST stay in sync.
+agent_contract_version: v0-pre-rebuild
+bundle_manifest_schema_version: v2
+foundation_bundle_version: v0.23.0
+foundation_schema_version: v0.3
+included_templates:
+  foundation_docs:
+  - vision.md
+  - approach.md
+  - technical_architecture.md
+  - execution_plan.md
+  - test_cases.md
+  - audit_framework.md
+managed_files:
+  foundation/approach.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/audit_framework.md:
+    local_modifications: not_recommended
+    managed_by: wizard
+    merge_strategy: warn_on_drift
+  foundation/execution_plan.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/prd.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/technical_architecture.md:
+    local_modifications: allowed
+    managed_by: shared
+    merge_strategy: three_way
+  foundation/test_cases.md:
+    local_modifications: expected
+    managed_by: operator
+    merge_strategy: operator_review
+  foundation/vision.md:
+    local_modifications: expected
+    managed_by: shared
+    merge_strategy: three_way
+min_engine_version: v1.0.0
+public_api:
+  required_files:
+  - foundation/vision.md
+  - foundation/prd.md
+  - foundation/approach.md
+  - foundation/execution_plan.md
+  - foundation/technical_architecture.md
+  - foundation/test_cases.md
+  - foundation/audit_framework.md
+  required_frontmatter_fields_per_file: see the canonical foundation-versioning specification § 1.1
+  required_sections_per_doc_type: see schemas/section-schema.yaml in this bundle
+  section_schema: schemas/section-schema.yaml
+release_date: '2026-08-04'
+source_commit: PENDING
+status: prerelease

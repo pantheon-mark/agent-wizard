@@ -12,6 +12,32 @@ Entries appear newest-first.
 
 ---
 
+## 2026-08-04 — you can now produce the proof that switching a capability on requires, and every state that holds something up names its own way out (v0.23.0)
+
+**Public-facing change:** A reliability release that closes the one situation with no way out. Switching a capability on has always required a proof that it can make its change on the real system and put it back. Until now nothing you could run produced that proof — so a capability could be set up correctly and never become switchable. You can now run a single trial that produces it.
+
+- **A trial run.** You can now run one operation, once, as a trial. It goes through exactly the same safety gates a live run goes through: the same limit on how much it may touch, the same record of what it did, and your approval still required. What the trial is about to do is written and flushed to disk *before* the change is attempted, so a run interrupted at any moment leaves a record that can be found again. A trial that completes produces the proof acceptance asks for.
+- **Every state that holds something up now names its own way out, in one place.** Each such state is paired with the exact instruction and the exact command that clears it — or is written down, in plain language, as deliberately needing no action. A state that is in neither list now fails the build instead of shipping silently. And a unit left needing recovery can be cleared, once the system has looked at the state that unit was actually left in rather than assuming it.
+- **Acknowledging a risk is now limited to an explicit list of the states that qualify**, instead of a list of the ones that do not. A state added later therefore cannot become acknowledgeable just by not being excluded.
+- **You can now mark a recorded acceptance repudiated.** If a consent record was written that you do not stand behind, saying so switches that capability back off and queues it for a fresh trial — rather than leaving live permission standing behind a record you no longer trust.
+- **A job that has quietly stopped producing output becomes visible.** When a paused wrapper's guard stops a scheduled run, that moment is now recorded. (This records the guard *stopping* a run. It does not detect a guard that fails to stop one.)
+- **Two new build-time checks.** One flags a file that hard-codes your own confirmation instead of asking you. The other flags a repair instruction hand-written into the surface that displays it, rather than coming from the single place those instructions are defined — which is how two surfaces came to tell you different things about the same problem.
+- No breaking changes: everything your system could already do continues to work exactly as before, and every previously released version still installs and runs correctly.
+
+**Stated as declared, not proven — deliberately, because the difference matters:**
+
+- Whether an adapter's undo is safe to repeat is a **declaration the system reads**, not a property it can verify.
+- Recovery may issue a write that changes nothing. Restoring a value to what it already is remains a real call to the outside service, and it is the safer outcome than leaving a change that may or may not have landed.
+- The upgrade step that adds the new undo declaration to an adapter you or your assistant wrote sets it to the **safe** value, never to "yes." Only a person — or an assistant that has read the code — may change it.
+
+**Still open, named here rather than implied fixed:** a retrial item's next step exists on disk and in the skills but is not printed by any surface; a paused hand-rolled writer's pair of marker files has a written route out but no single command that performs it; and a wrapper's guard is recognised by what it looks like, which does not establish that it will fire.
+
+This is a reliability fix (`v0.23.0`, minor-additive, operator-explicit as always). Foundation documents are byte-identical to `v0.22.0`. Enforcement ceiling unchanged.
+
+`Source-Meta-Commit:` `PENDING` (private build repo; merge `PENDING`) · public repo commit `PENDING` — the build-repo SHA and merge SHA are filled at merge, and the public repo commit after the subtree publish; the bundle registry entry's `source_commit` is stamped at the same moment.
+
+---
+
 ## 2026-07-27 — a project named before today's rules now works, an upgrade never blames the wrong file, and its notices always name the exact file involved (v0.22.0)
 
 **Public-facing change:** A reliability release. Your capabilities' safe, read-only access is now found by what a file actually provides instead of by what it's called, and an upgrade's own notices — what changed, which file, and what you already decided about it — are more accurate and more specific.

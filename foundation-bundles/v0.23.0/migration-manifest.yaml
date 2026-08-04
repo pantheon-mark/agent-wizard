@@ -1,0 +1,1047 @@
+_note: JSON sidecar for migration-manifest.yaml. The wizard runtime CLI consumes JSON; YAML
+  is the human-facing companion. Both files MUST stay in sync.
+artifact_notes:
+  agents/lib/external_write/acceptance_repudiation.py:
+    benefit: 'New file. Gives you a sanctioned way to mark a recorded acceptance repudiated.
+      Doing so switches that capability back off and queues it for a fresh trial: a repudiation
+      that left live permission standing would be worse than none at all.'
+  agents/lib/external_write/adapters_gmail.py:
+    benefit: 'Records, for each kind of operation this adapter performs, whether its undo
+      puts things back to an exact earlier state. Two kinds are declared and one is deliberately
+      left undeclared, with the reason written next to it: leaving it undeclared means it
+      is refused a trial, which is the safe outcome, and declaring it falsely would be a false
+      statement at the point that authorises a real write.'
+  agents/lib/external_write/capability_health.py:
+    benefit: The health view now takes account of a wrapper whose guard has stopped a scheduled
+      run, and continues to withhold the all-clear while anything at all is outstanding.
+  agents/lib/external_write/command_manifest.py:
+    benefit: Registers the new trial command as one that writes to your outside system, so
+      it is never eligible for automatic approval and always requires you.
+  agents/lib/external_write/copy_run_proof.py:
+    benefit: The location of a capability's proof file is now built in one place and used
+      by both the side that writes it and the side that reads it, so a proof cannot be written
+      somewhere acceptance does not look.
+  agents/lib/external_write/operator_acceptance.py:
+    benefit: Which states allow you to acknowledge a risk is now an explicit list of the states
+      that qualify, instead of a list of the ones that do not. A state added later therefore
+      cannot become acknowledgeable just by not being excluded.
+  agents/lib/external_write/scan.py:
+    benefit: Adds two build-time checks. One flags a file that hard-codes your own confirmation
+      instead of asking you. The other flags a repair instruction written by hand into the
+      surface that displays it, rather than coming from the single place those instructions
+      are defined -- which is how two surfaces came to tell you different things about the
+      same problem.
+  agents/lib/external_write/state_actions.py:
+    benefit: New file. A single list pairing every state that holds something up with the
+      exact instruction and command that clears it, plus a companion list naming, in plain
+      language, the states that deliberately need no action. A state in neither list fails
+      the build, so 'nothing to do here' has to be a written decision rather than an omission.
+  agents/lib/external_write/suppressed_invocation.py:
+    benefit: New file. Records the moment a paused wrapper's guard stops a scheduled run,
+      so a job that has quietly stopped producing output becomes visible. This records the
+      guard STOPPING a run; it does not detect a guard that fails to stop one.
+  agents/lib/external_write/trial_eligibility.py:
+    benefit: 'New file. Decides whether one operation may be trialled at all, from what its
+      adapter declares about itself. Anything it cannot establish is refused rather than allowed:
+      an operation that says nothing about whether its undo restores an exact earlier state
+      does not become eligible by staying silent.'
+  agents/lib/external_write/trial_executor.py:
+    benefit: New file. Runs the trial and produces the proof that switching a capability on
+      asks for. This is the piece you can invoke. Before it existed, that proof had no producer
+      you could run, which is why a capability could be set up correctly and never become
+      switchable.
+  agents/lib/external_write/trial_journal.py:
+    benefit: New file. Writes down what a trial is about to do and flushes it to disk -- the
+      file and the folder holding it -- before the change is attempted. If the run is interrupted
+      at any moment, the record of what was in flight is on disk and can be found again.
+  agents/lib/external_write/trial_recovery.py:
+    benefit: New file. The one place a unit left needing recovery can be cleared, and only
+      after the system has looked at the state the unit was actually left in rather than assuming
+      it.
+  agents/lib/external_write/write_authorization.py:
+    benefit: New file. Holds the single decision about whether an operation is allowed to
+      run, so a trial run and an ordinary run are checked by the same code rather than by
+      two copies that have to agree with each other. Nothing about what is allowed was relaxed
+      to make the trial possible.
+  agents/lib/external_write/write_gate.py:
+    benefit: Adds a read-only accessor so a caller that needs to know which route an operation
+      will actually take asks the gate rather than working it out a second way. Nothing about
+      what the gate permits changed.
+  agents/lib/external_write/writer_ack_store.py:
+    benefit: New file. The store for your recorded risk acknowledgements, separated out as
+      part of the same layering. No change on its own to what your system does.
+  agents/lib/external_write/writer_commands.py:
+    benefit: New file. The commands offered for writer states, separated out as part of the
+      same layering. No change on its own to what your system does.
+  agents/lib/external_write/writer_state_core.py:
+    benefit: New file. Part of splitting the writer-state code into layers that no longer
+      import each other in a circle. No change on its own to what your system does; it is
+      what makes the state-to-action list above possible to build.
+  agents/lib/external_write/zones.py:
+    benefit: Records the new files above in the list of files that are part of the safe-write
+      core itself, rather than capability code. No change to what any capability may do.
+migrations:
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.22.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.22.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.22.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.21.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.21.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.21.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.20.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.20.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.20.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.19.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.19.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.19.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.18.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.18.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.18.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.17.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.17.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.17.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.16.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.16.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.16.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.15.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.15.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.15.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.14.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.14.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.14.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.13.1
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.13.1 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.13.1.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.13.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.13.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.13.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.12.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.12.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.12.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.11.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.11.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.11.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.10.2
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.10.2 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.10.2.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.10.1
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.10.1 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.10.1.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.10.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.10.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.10.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.9.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.9.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.9.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.8.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.8.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.8.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.7.0
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.7.0 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.7.0.
+  stop_condition: not_applicable
+  supported: true
+- breaking_changes_summary: ''
+  class: minor_additive
+  from: v0.6.9
+  migration_steps: 1. Run the update check (it reports what's new + the recommendation). 2.
+    On the operator's yes, the assistant applies it ("${{WIZARD_HOME:-$HOME/agent-wizard}}/scripts/wizard"
+    self-upgrade --to v0.23.0 --apply). 3. A backup is taken first; the operator's own data,
+    rules, credentials, and logs are never touched.
+  notes: 'Minor-additive release to v0.23.0. This release closes two situations in which your
+    system could reach a state it could describe to you but you had no way to leave. FIRST:
+    switching a capability on has always required a proof that it can make its change on the
+    real system and put it back. Until now nothing you could run produced that proof, so a
+    capability could be set up correctly and still never become switchable. You can now run
+    a single trial of one operation. It goes through exactly the same safety gates a live
+    run goes through -- the same limit on how much it may touch, the same record of what it
+    did -- and what it is about to do is written and flushed to disk before the change is
+    attempted, so a run that is interrupted at any moment leaves a record that can be found
+    again. A trial that completes produces the proof that acceptance asks for. SECOND: every
+    state that holds something up now names, in one place, the exact instruction and command
+    that clears it, or is written down in plain language as needing no action; a state that
+    is in neither list now fails the build instead of shipping silently. A unit left needing
+    recovery can be cleared, and only after the system has looked at the state it was actually
+    left in. ALSO IN THIS RELEASE: acknowledging a risk is now limited to an explicit list
+    of the states that qualify, so a state added later cannot become acknowledgeable simply
+    by not being excluded. You can now mark a recorded acceptance repudiated -- that switches
+    the capability back off and queues it for a fresh trial, rather than leaving live permission
+    standing behind a record you no longer trust. A paused wrapper now records the moment
+    its guard stops a scheduled run, so a job that has quietly stopped producing output becomes
+    visible instead of staying silent. And two new build-time checks were added: one flags
+    a script that hard-codes your own confirmation, and one flags a repair instruction hand-written
+    into the surface that displays it instead of coming from the single place those instructions
+    are defined. DECLARED, NOT PROVEN -- said in these words on purpose: whether an adapter''s
+    undo is safe to repeat is a declaration the system reads, not a property it can verify;
+    recovery may issue a write that changes nothing, because restoring a value to what it
+    already is remains a real call to the outside service; and the upgrade step that adds
+    the new undo declaration to an adapter you or your assistant wrote sets it to the SAFE
+    value, never to yes -- only a person, or an assistant that has read the code, may change
+    it. STILL OPEN, named rather than implied fixed: a retrial item''s next step exists on
+    disk and in the skills but is not printed by any surface; a paused hand-rolled writer''s
+    pair of marker files has a written route out but no single command that performs it; and
+    a wrapper''s guard is recognised by what it looks like, which does not establish that
+    it will fire. No breaking changes; all existing capabilities and files are unaffected.'
+  preflight: Verify the operator project carries a .wizard/manifest.json whose foundation_bundle_version
+    is v0.6.9 (or any version in the supported range). A backup is taken automatically.
+  requires_operator_approval: true
+  rollback: Restore from .wizard/backups/pre-v0.23.0/ and set foundation_bundle_version back
+    to v0.6.9.
+  stop_condition: not_applicable
+  supported: true
+release_classification: minor_additive_prerelease
+release_date: '2026-08-04'
+schema_version: v1
+target_version: v0.23.0
