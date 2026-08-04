@@ -1111,12 +1111,21 @@ class TheQueueEntryDeclaresWhatItIsTests(unittest.TestCase):
 
 
 class EveryConfirmationEntrypointRefusesItsOwnPlaceholderTests(unittest.TestCase):
-    """F6 closed this in one module. Its twin renders a byte-identical blank and accepted it
-    verbatim, which is the same hazard one module over -- the body-without-target-hooks shape.
+    """Three entrypoints render the operator's own words as a fill-in blank, and each must refuse
+    that blank pasted back unedited.
 
-    Written as a POPULATION rather than as two cases: the declared set below must equal the set
-    of modules that actually render a confirmation blank, so a third entrypoint added later fails
-    here until it is enrolled with its own refusal, rather than shipping the hazard again."""
+    Written as a POPULATION rather than as N cases -- but the first version of this population
+    was itself an enumeration, and it is worth stating rather than quietly fixing: it discovered
+    on the identifier ``CONFIRMATION_PLACEHOLDER``, so the third entrypoint that already existed
+    (``trial_executor.APPROVAL_PLACEHOLDER``, at the surface authorizing a real bounded live
+    write) was not caught by this class -- it was INVISIBLE to it, and the enrolled set matched
+    the discovered set only because the discovery was looking for the wrong thing. Discovery now
+    keys on the constant's VALUE being a ``<...>`` blank; see ``_modules_rendering_a_blank``.
+
+    What this class establishes today: every module whose value-shape says it renders a blank is
+    enrolled, and each one's own parser refuses its own blank and routes the operator onward. A
+    blank spelled some other way (``[your words]``) would still escape -- that is a disclosed
+    limit of the shape rule, not a property this class proves."""
 
     #: module -> (the constant holding its rendered blank, the parser that must refuse it).
     #: Declared, not derived from a name pattern: which function guards a module, and which
@@ -1312,66 +1321,67 @@ class ClaimsMatchTheirMechanismRoundTwoTests(unittest.TestCase):
         self.assertNotIn("says whether anything changed", usage)
         self.assertIn("after", usage.lower())
 
-    def test_the_reducer_consumer_list_is_complete(self):
-        """A list that enumerates its consumers has to enumerate all of them, or the next reader
-        trusts it and misses one."""
-        import ast
-        src = (_AGENTS_LIB / "external_write" / "acceptance_ceremony.py").read_text(
-            encoding="utf-8")
-        doc = ast.get_docstring(next(
-            n for n in ast.parse(src).body
-            if isinstance(n, ast.FunctionDef) and n.name == "is_valid_acceptance_record")) or ""
-        self.assertIn("repudiate_acceptance", doc)
+    def test_the_reducer_consumer_list_names_the_repudiation_guard(self):
+        """The specific omission this started as. The general property is asserted by
+        RoundThreeTests.test_F12_... over the bullet set; this keeps the concrete case named."""
+        self.assertIn("repudiate_acceptance", RoundThreeTests()._enumerating_bullets())
 
     def test_every_named_reducer_consumer_really_calls_it(self):
-        """And the list must not name a consumer that does not exist -- the mirror-image error."""
-        import ast
-        callers = set()
-        for name in ("acceptance_ceremony.py", "lifecycle_state.py", "capability_invariants.py"):
-            tree = ast.parse((_AGENTS_LIB / "external_write" / name).read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.FunctionDef):
-                    continue
-                for call in ast.walk(node):
-                    if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
-                            and call.func.id == "reduce_acceptance_log"):
-                        callers.add(node.name)
+        """The mirror-image error, kept as a concrete case alongside the set comparison."""
+        callers = RoundThreeTests()._reducer_consumers_from_ast()
         self.assertIn("repudiate_acceptance", callers)
         self.assertIn("_acceptance_record_exists", callers)
 
 
 class RoundThreeTests(unittest.TestCase):
 
-    def test_F12_the_consumer_list_completeness_is_actually_compared(self):
-        """The docstring claims a test keeps its consumer list complete. Assert the claim by
-        BUILDING the comparison it names: the set the doc enumerates must equal the set the AST
-        finds, in BOTH directions. Checking that two known names are present cannot notice a
-        sixth consumer, which is exactly what the sentence promised."""
-        import ast, re
-        d = _AGENTS_LIB / "external_write"
-        src = (d / "acceptance_ceremony.py").read_text(encoding="utf-8")
-        doc = ast.get_docstring(next(
-            n for n in ast.parse(src).body
-            if isinstance(n, ast.FunctionDef) and n.name == "is_valid_acceptance_record")) or ""
-        named = set(re.findall(r"``(?:[a-z_]+\.)?([a-z_][a-z_0-9]*)``", doc))
-
+    def _reducer_consumers_from_ast(self):
+        """Every function anywhere in the emitted package that calls the reducer. Swept over the
+        whole directory rather than a hardcoded file list -- a hardcoded list is the same
+        enumeration defect one layer out."""
+        import ast
         found = set()
-        for name in ("acceptance_ceremony.py", "lifecycle_state.py", "capability_invariants.py"):
-            for node in ast.walk(ast.parse((d / name).read_text(encoding="utf-8"))):
+        for path in sorted((_AGENTS_LIB / "external_write").glob("*.py")):
+            if path.name.startswith("test_"):
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
                 if not isinstance(node, ast.FunctionDef):
                     continue
                 for call in ast.walk(node):
                     if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
                             and call.func.id == "reduce_acceptance_log"):
                         found.add(node.name)
+        return found
+
+    def _enumerating_bullets(self):
+        """ONLY the names in the enumerating bullet list -- not every ``name`` anywhere in the
+        docstring. That distinction is the whole point: an earlier version of this test scanned
+        the entire docstring, so deleting a bullet left it GREEN whenever that same name also
+        appeared in the surrounding prose. The probe that 'proved' it happened to delete the one
+        name mentioned exactly once. A probe has to delete the thing the claim is about."""
+        import ast, re
+        src = (_AGENTS_LIB / "external_write" / "acceptance_ceremony.py").read_text(
+            encoding="utf-8")
+        doc = ast.get_docstring(next(
+            n for n in ast.parse(src).body
+            if isinstance(n, ast.FunctionDef) and n.name == "is_valid_acceptance_record")) or ""
+        return {m.group(1) for m in
+                (re.match(r"\s*\*\s+``([A-Za-z_][A-Za-z_0-9]*)``", line)
+                 for line in doc.splitlines()) if m}
+
+    def test_F12_the_consumer_list_completeness_is_actually_compared(self):
+        """The docstring claims "a consumer missing from it fails, and a name in it that does not
+        call the reducer fails too". Assert exactly that, as set equality in both directions, over
+        the bullet list alone -- with no prefix filter, because a prefix allowlist is a disguised
+        enumeration of today's names and a sixth bullet spelled otherwise would slip through."""
+        bullets = self._enumerating_bullets()
+        found = self._reducer_consumers_from_ast()
+        self.assertTrue(bullets, "the enumerating list must be findable as bullets")
         self.assertTrue(found, "the AST sweep must find something")
-        self.assertEqual(
-            found - named, set(),
-            "a consumer of the reducer is not named in the list that claims to enumerate them")
-        self.assertEqual(
-            {n for n in named if n in found or n.startswith(("_read_", "check_", "repudiate_",
-                                                             "_acceptance_"))} - found, set(),
-            "the list names a consumer that does not call the reducer")
+        self.assertEqual(found - bullets, set(),
+                         "a consumer of the reducer is not named in the list that enumerates them")
+        self.assertEqual(bullets - found, set(),
+                         "the list names a consumer that does not call the reducer")
 
     def test_F13_a_bad_kind_never_leaves_authorization_revoked_with_no_exit(self):
         """The guard must sit BEFORE the irreversible half. Called with an undeclared kind, the
@@ -1412,6 +1422,66 @@ class RoundThreeTests(unittest.TestCase):
             self.assertIn("external_write_gate_violation", kinds,
                           "a live safety entry was destroyed by a retrial queue write")
             self.assertIn(lifecycle_state.RETRIAL_KIND_REPUDIATED, kinds)
+
+    def test_F16_a_LEGACY_kindless_retrial_entry_is_replaced(self):
+        """Shaped like the RELEASED bundle's output, not like today's writer. Nine released
+        bundles (v0.14.0-v0.22.0) ship `_queue_staleness_retrial_migration`, which writes a
+        retrial entry with NO `kind` under a mechanism_id-only replace clause. After the
+        kind-scoped fix, `None not in _own_kinds`, so that legacy entry SURVIVES alongside the
+        new one -- and the kindless one lands in the rebuild flow's no-kind branch, which reads
+        it as a direct-write violation needing a code rewrite. That is the exact mis-dispatch
+        `kind` was added to prevent, handed back to any project upgrading with a live staleness
+        retrial queued."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _two_capability_project(tmp)
+            (Path(root) / "agents" / "handoffs").mkdir(parents=True, exist_ok=True)
+            # Verbatim key set of the released writer: no kind, no writer_relpath.
+            (Path(root) / lifecycle_state.MIGRATION_QUEUE_REL).write_text(json.dumps([{
+                "mechanism_id": "acme_ledger_poster",
+                "requested_at": "2026-01-01T00:00:00Z",
+                "reason": ("this capability's implementation changed since it was approved for "
+                           "live use; acceptance was automatically switched off pending a fresh "
+                           "trial"),
+                "suggested_next_step": ("Re-run this capability's copy-run trial and approve it "
+                                        "again through the normal accept flow."),
+                "status": "pending",
+            }]), encoding="utf-8")
+
+            lifecycle_state._queue_retrial_migration(
+                root, "acme_ledger_poster",
+                kind=lifecycle_state.RETRIAL_KIND_REPUDIATED,
+                reason="r", suggested_next_step="s")
+
+            mine = [e for e in _queue(root) if e.get("mechanism_id") == "acme_ledger_poster"]
+            self.assertEqual(
+                len(mine), 1,
+                f"the legacy kindless retrial entry survived alongside the new one: {mine!r}")
+            self.assertEqual(mine[0]["kind"], lifecycle_state.RETRIAL_KIND_REPUDIATED)
+
+    def test_F16b_a_LEGACY_kindless_SAFETY_entry_still_survives(self):
+        """The other direction, and the one that destroys evidence if it goes wrong. A pre-kind
+        gate-violation entry is also kindless -- it is told apart by carrying a `writer_relpath`,
+        the same declared field this package's canonical bespoke-writer predicate joins on."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _two_capability_project(tmp)
+            (Path(root) / "agents" / "handoffs").mkdir(parents=True, exist_ok=True)
+            (Path(root) / lifecycle_state.MIGRATION_QUEUE_REL).write_text(json.dumps([{
+                "mechanism_id": "acme_ledger_poster",
+                "writer_relpath": "agents/acme_writer.py",
+                "violations": [{"path": "agents/acme_writer.py", "line": 2, "kind": "x"}],
+                "reason": "flagged non-conformant with the external-write gate on upgrade",
+                "status": "pending",
+            }]), encoding="utf-8")
+
+            lifecycle_state._queue_retrial_migration(
+                root, "acme_ledger_poster",
+                kind=lifecycle_state.RETRIAL_KIND_REPUDIATED,
+                reason="r", suggested_next_step="s")
+
+            relpaths = [e.get("writer_relpath") for e in _queue(root)]
+            self.assertIn("agents/acme_writer.py", relpaths,
+                          "a pre-kind SAFETY entry was destroyed by a retrial queue write")
+            self.assertEqual(len(_queue(root)), 2)
 
     def test_F14b_a_second_retrial_still_replaces_its_own_prior_entry(self):
         """And the idempotency it was written for must survive: same id, same kind, one entry."""

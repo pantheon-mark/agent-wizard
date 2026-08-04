@@ -883,11 +883,41 @@ def _queue_retrial_migration(
     # ones) and inert for everyone else's, which is the same single-authority discipline
     # `upgrade_reconcile`'s own reapers already apply to their kinds.
     _own_kinds = (RETRIAL_KIND_STALE, RETRIAL_KIND_REPUDIATED)
-    existing = [
-        e for e in existing
-        if not (isinstance(e, dict) and e.get("mechanism_id") == canonical_id
-                and e.get("kind") in _own_kinds)
-    ]
+
+    def _is_this_writers_own(e: Any) -> bool:
+        """Is this entry one THIS function wrote for THIS capability?
+
+        Two shapes count, and the second is not optional. Nine released bundles (v0.14.0 through
+        v0.22.0) ship this function's predecessor, which wrote a retrial entry with NO ``kind``
+        at all -- so an operator project upgrading with a live staleness retrial queued holds a
+        kindless entry of this family. Matching only the declared kinds would leave it in place
+        beside the new one, and a kindless entry is exactly what the rebuild flow reads as a
+        direct-write violation needing a code rewrite. Replacing only the modern shape would
+        therefore hand back the mis-dispatch the kind was added to prevent.
+
+        Telling a legacy entry of OUR family apart from a legacy entry of somebody else's: the
+        pre-kind entries that are not ours are gate-violation records, and they carry a
+        ``writer_relpath``. That is not a guess about shape -- it is the same declared field this
+        package's canonical bespoke-writer predicate joins on, and whose own contract states that
+        a canonical-capability migration entry (which is what this function writes) has
+        ``writer_relpath is None`` and is deliberately NOT a bespoke writer. This function has
+        never written that key in any released version, so a kindless entry without one is ours
+        and a kindless entry with one is not.
+
+        Deliberately conservative in the direction that matters: anything carrying a kind we do
+        not own, or any writer_relpath at all, survives untouched. Destroying somebody else's
+        live safety record is the failure worth avoiding here; leaving one duplicate behind is
+        not."""
+        if not isinstance(e, dict) or e.get("mechanism_id") != canonical_id:
+            return False
+        kind_value = e.get("kind")
+        if kind_value in _own_kinds:
+            return True
+        if kind_value is not None:
+            return False
+        return e.get("writer_relpath") in (None, "")
+
+    existing = [e for e in existing if not _is_this_writers_own(e)]
     existing.append({
         "mechanism_id": canonical_id,
         "requested_at": _utcnow_iso(),
