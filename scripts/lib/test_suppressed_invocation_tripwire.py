@@ -656,6 +656,85 @@ class TestTheSweepIsOnTheEnforcedPath(unittest.TestCase):
     it must reach a mechanism this pass did NOT re-flag (a writer whose file is
     gone or quarantined still has a live, guard-paused wrapper)."""
 
+    WRITER = "agents/cron/estate_upkeep.py"
+    WRAPPER = "agents/cron/run_estate_upkeep.sh"
+    MECHANISM = "estate_upkeep"
+
+    def test_the_whole_thing_end_to_end_through_the_real_upgrade_entrypoint(self):
+        """One assertion chain, driven ONLY by ``reconcile_upgrade`` and ``/bin/sh``.
+
+        Nothing here calls the pause helper, the sweep, the recorder or the health
+        surface's inputs directly: the upgrade runs, the operator's own wrapper is
+        invoked twice, and the session-start surface is asked what it sees. That is
+        the whole mechanism, verified through the producer's real entrypoint rather
+        than through a hand-built stand-in of it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            p = _Project(tmp)
+            # A scanner-RED writer that is ALSO the thing producing a digest -- the
+            # estate's actual shape, and what makes the entanglement labels real.
+            p.write(self.WRITER,
+                    '"""Nightly estate upkeep: sends the digest, then writes back."""\n'
+                    "from external_write.run_envelope import mint_run_envelope\n")
+            p.write(self.WRAPPER,
+                    "#!/bin/sh\n"
+                    'cd "$(dirname "$0")/../.." || exit 1\n'
+                    'printf "ran\\n" > payload_ran.txt\n',
+                    mode=0o755)
+            p.install_recorder()
+
+            upgrade_reconcile.reconcile_upgrade(
+                p.root, _WIZARD.parent, from_version="v0.22.0",
+                to_version="v0.23.0")
+
+            # 1. It was paused, and the wrapper carries the tripwire.
+            wrapper_text = (p.root / self.WRAPPER).read_text(encoding="utf-8")
+            self.assertIn(upgrade_reconcile._GUARD_BEGIN, wrapper_text)
+            self.assertIn(upgrade_reconcile.SUPPRESSED_INVOCATION_RECORDER_REL,
+                          wrapper_text)
+
+            # 2. Two invocations, as a schedule would make them.
+            for _ in range(2):
+                proc = p.run_wrapper(relpath=self.WRAPPER)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertIn("paused pending migration", proc.stdout)
+            self.assertFalse((p.root / "payload_ran.txt").exists())
+
+            # 3. The record, with the labels reconcile derived.
+            event = p.event(self.MECHANISM)
+            self.assertEqual(event["suppressed_count"], 2)
+            self.assertEqual(event["entrypoint_relpath"], self.WRAPPER)
+            self.assertEqual(
+                event["known_entangled_outputs"]["determination"],
+                suppressed_invocation.ENTANGLEMENT_ENTANGLED)
+            self.assertIn("digest", event["known_entangled_outputs"]["labels"])
+
+            # 4. What the operator's assistant sees at session start.
+            status = capability_health.overall_status(str(p.root))
+            self.assertFalse(status["normal_status_allowed"], status)
+            surfaced = status["suppressed_invocations"]
+            self.assertTrue(surfaced["active"])
+            (entry,) = surfaced["mechanisms"]
+            self.assertEqual(entry["mechanism_id"], self.MECHANISM)
+            self.assertEqual(entry["suppressed_count"], 2)
+            self.assertTrue(entry["read_outputs_may_be_suppressed"])
+            # A REAL way out, byte-equal to the registry's own rendering for the
+            # state this writer is actually in -- not merely a non-empty string, and
+            # not the registry's route-to-a-person fallback. An active suppression
+            # with no performable exit is the dead-end shape this cut exists to
+            # remove; asserting only "non-empty" would pass on that fallback.
+            writer_state = status["open_external_write_bypass"]["writer_states"][
+                self.WRITER]
+            self.assertEqual(
+                entry["action"],
+                state_actions.instruction_for_state(
+                    state_actions.writer_state_key(writer_state), self.WRITER))
+            self.assertNotEqual(
+                entry["action"],
+                state_actions.route_for_unclassified_state(self.WRAPPER))
+            self.assertEqual(writer_state,
+                             writer_state_core.WriterState.BLOCKING_LIVE_ENABLE)
+
     def test_reconcile_upgrade_upgrades_a_guard_it_did_not_pause_this_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = _Project(tmp)
