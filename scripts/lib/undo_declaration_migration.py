@@ -19,7 +19,7 @@ Why a migration exists at all
 Measurement during the Task 1 review found that ZERO adapters anywhere declared
 the clause, so every operation kind -- including both live estate ones -- was
 trial-ineligible and no acceptance could complete. A new contract clause with no
-migration is exactly the F-VAL20-1 shape the declared-migration-set decision
+migration is exactly the zero-caller shape the declared-migration-set decision
 closed (a correct, tested remediation nothing invoked), and that decision's
 standing rule is that a remediation mechanism must be a DECLARED MEMBER of a set
 some real flow iterates, never a function a caller has to remember to call. So

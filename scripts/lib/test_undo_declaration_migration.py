@@ -7,8 +7,8 @@ Cut 1.9 Task 1 added a NEW adapter contract clause -- an adapter must DECLARE
 that its ``undo_one`` restores absolute prior state before its operation kind
 may undergo a journaled trial. Measurement during the Task 1 review found that
 ZERO adapters anywhere declared it, so every operation kind was
-trial-INELIGIBLE. A new contract clause with no migration is the F-VAL20-1
-zero-caller shape exactly (a remediation nothing invokes), so the clause is
+trial-INELIGIBLE. A new contract clause with no migration is the zero-caller
+shape exactly (a remediation nothing invokes), so the clause is
 delivered through three channels that must agree:
 
   * the SHIPPED reference adapter declares it where it is provable from source
