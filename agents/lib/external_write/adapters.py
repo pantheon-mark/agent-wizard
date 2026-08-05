@@ -570,7 +570,12 @@ def run_operation(op: Operation, receipt: Any, client: Any,
     # reaches the shared live-enforcement funnel through the gate's own existing
     # live-bounded branch; its only relaxation is the one that branch already
     # grants every caller (acceptance not required pre-acceptance, a DECLARATION
-    # still is). See write_authorization.py's docstring.
+    # still is). GATED OPERATIONS ONLY: `evaluate_write_gate` permits an ungated
+    # op BEFORE target resolution, the cap and the ledger, so for the five of
+    # ten shipped `op_kind`s whose contract is `reversible_external` without
+    # `requires_accepted_phase` the live-bounded branch is never reached and a
+    # trial of one enforces no limit at all. See write_authorization.py's
+    # docstring.
     authorization = authorize_operation(
         op, receipt, intent=EXECUTION_INTENT_ORDINARY, target=target,
         descriptor_set=descriptor_set, cap_ledger=cap_ledger, clock=clock)

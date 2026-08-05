@@ -1251,6 +1251,13 @@ def run_trial(op: Operation, receipt: Any, *,
     # write runs (recovery floor, mandatory blast-radius cap, invocation ledger,
     # irreversibility audit), then receipt validation. Nothing here relaxes any
     # of it and there is no trial-mode flag that could.
+    #
+    # GATED OPERATIONS ONLY. `evaluate_write_gate` permits an ungated op BEFORE
+    # target resolution, the cap and the ledger, so for the five of ten shipped
+    # `op_kind`s whose contract is `reversible_external` without
+    # `requires_accepted_phase` the live-bounded branch is never reached and a
+    # trial of one enforces no limit at all. See write_authorization.py's
+    # module docstring.
     authorization = authorize_operation(
         op, receipt, intent=EXECUTION_INTENT_TRIAL, target=TRIAL_TARGET,
         descriptor_set=descriptor_set, cap_ledger=cap_ledger, clock=clock,
@@ -1489,7 +1496,18 @@ def run_trial_for_capability(capability_id: str, *,
         unchanged: the trial-eligibility preflight, the mandatory blast-radius
         cap, the invocation ledger, the recovery floor, the declared-test-target
         requirement and receipt validation. Nothing here relaxes any of them and
-        there is no flag that could.
+        there is no flag that could. READ "EVERY" NARROWLY: it ranges over every
+        step this entrypoint could have relaxed and did not. It is NOT a claim
+        that every step runs for every operation.
+      * GATED OPERATIONS ONLY. `evaluate_write_gate` permits an ungated op
+        BEFORE target resolution, the cap and the ledger, so for the five of ten
+        shipped `op_kind`s whose contract is `reversible_external` without
+        `requires_accepted_phase` the live-bounded branch is never reached and a
+        trial of one enforces no limit at all. A trial of one of those is still
+        apply-then-undo with the round trip verified before any proof is
+        written, so the harm is bounded by reversibility -- but reversibility
+        there is a DECLARATION by whoever wrote the contract, not something this
+        entrypoint establishes. See write_authorization.py's module docstring.
 
     Parameters
     ----------

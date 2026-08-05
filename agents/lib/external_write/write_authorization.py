@@ -39,6 +39,20 @@ as an accepted live write: the recovery floor, the mandatory blast-radius cap, t
 invocation ledger, and the irreversibility audit. No cap is re-implemented here.
 No second ledger exists. Nothing is counted twice and nothing is counted less.
 
+GATED OPERATIONS ONLY. `evaluate_write_gate` permits an ungated op BEFORE target
+resolution, the cap and the ledger, so for the five of ten shipped `op_kind`s
+whose contract is `reversible_external` without `requires_accepted_phase` the
+live-bounded branch is never reached and a trial of one enforces no limit at all.
+That qualifier is load-bearing, not pedantic: the five are the seeded status
+writes built by `contracts._status_contract` (`add_note`, `complete_tasks`,
+`set_priority`, `set_status`, `update_due_date`), `reversible_external` is also
+what an unset `risk_class` resolves to on a hand-written contract, and a
+`blast_radius_cap` declared on such a contract is silently inert -- it reads
+identically to an enforced one in the source. The operator-facing changelog
+states the same bound in plain language; these two surfaces must agree, and the
+bound is stated here rather than widened because widening it is engine work at a
+write-authorizing surface.
+
 The ONE relaxation is the one that branch already grants — and it grants it to
 every caller, not specially to a trial: `accepted: true` is not required, because
 a DECLARED capability whose `declared_test_target` exactly matches the requested
@@ -734,6 +748,12 @@ def authorize_operation(op: Operation, receipt: Any, *,
     # mandatory blast-radius cap + invocation ledger + irreversibility audit)
     # through the gate's EXISTING live-bounded branch. Nothing here duplicates
     # or weakens any of it.
+    #
+    # GATED OPERATIONS ONLY. `evaluate_write_gate` permits an ungated op BEFORE
+    # target resolution, the cap and the ledger, so for the five of ten shipped
+    # `op_kind`s whose contract is `reversible_external` without
+    # `requires_accepted_phase` the live-bounded branch is never reached and a
+    # trial of one enforces no limit at all. See this module's docstring.
     decision = evaluate_write_gate(
         op, target=target, descriptor_set=descriptor_set,
         cap_ledger=cap_ledger, clock=clock, n_units=n_units,
