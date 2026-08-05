@@ -85,7 +85,7 @@
       "path": "templates/agents/lib/external_write/adapter_registry.py"
     },
     {
-      "hash": "sha256:ded7ccec7d1d3f1f054290766d235d5aeaf8ed7f25db37c6a7ea48fc49aebaba",
+      "hash": "sha256:95ccf499bf01170d8a0c7e5270aef8a0fa5fadff093672bab5c9f45fcdae707c",
       "path": "templates/agents/lib/external_write/adapters.py"
     },
     {
@@ -237,7 +237,7 @@
       "path": "templates/agents/lib/external_write/trial_eligibility.py"
     },
     {
-      "hash": "sha256:753afc74b84464c6eb9983cd27344940b8fc60092d0b7870b3293be409c5259e",
+      "hash": "sha256:17fc80f9e69b9d82fbaf8e4aa3b5a47bfb58a82206a9f5227821fed1dc5ef794",
       "path": "templates/agents/lib/external_write/trial_executor.py"
     },
     {
@@ -257,7 +257,7 @@
       "path": "templates/agents/lib/external_write/verifiers.py"
     },
     {
-      "hash": "sha256:d66145a714feabe4ae3d63c8f9742e763bab9821db594337407bac8e02c133bd",
+      "hash": "sha256:30bb72f89dbc0539a32972d52fc649628aae1d2fc5777f5e680f858dc1175647",
       "path": "templates/agents/lib/external_write/write_authorization.py"
     },
     {
@@ -618,12 +618,12 @@
     }
   ],
   "canonicalization_version": "v1",
-  "generated_at": "2026-08-04T19:56:31Z",
-  "generator_version": "58a02d0d110d1919dd960cf895154abb67ccda62",
+  "generated_at": "2026-08-05T00:51:07Z",
+  "generator_version": "99078f1c66f5a8aec7516a9be21559b52312df3e",
   "hash_algorithm": "sha256-lf",
   "schema_version": "v1",
   "source_bundle_version": "v0.23.0",
-  "source_registry_entry_hash": "sha256:b05f328ee498ba6a8d3816cac6a2423307a24be2d9eb3dc866f346d4a5835c53",
+  "source_registry_entry_hash": "sha256:b9663d5a2857c9bf066882cc50e59ae64bb1080bc54ae4cbe01b9da2f39ede05",
   "strict_mode": false,
   "strict_mode_source": "cli_flag",
   "template_tree_hash": "sha256:6d4cb5453cf12ce44b7198c50346a5445882f081ef1043987e3dd8b21c7cbdaa",
