@@ -420,7 +420,7 @@
       "recommendation_reason": "This release closes two situations you could get into and not get out of. A capability that was set up correctly could never be switched on, because the proof acceptance requires had no producer you could run; there is now a trial command that produces it. And every state that holds something up now names its own way out in one place. It also gives you a sanctioned way to repudiate an acceptance record you no longer trust, which switches the capability back off rather than leaving permission standing, and makes a scheduled job that has quietly stopped producing output visible. Read the two cautions in the change notes before applying: a risk-acceptance you recorded against a file that CAN be rebuilt automatically stops counting after this upgrade, so that file becomes blocked again with no notice that your record went inert; and a capability whose outside system is named differently from the capability itself can still be switched on and have every live write refused -- that one is named, not fixed. Most operators should take it.",
       "release_date": "2026-08-04",
       "safety_class": "reliability_fix",
-      "source_commit": "PENDING",
+      "source_commit": "e4bdd7cdb40c1e7a80c16a7659141fe9db19954a",
       "status": "prerelease"
     }
   ],
