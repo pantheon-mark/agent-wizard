@@ -35,7 +35,7 @@ Entries appear newest-first.
 
 This is a reliability fix (`v0.23.0`, minor-additive, operator-explicit as always). Foundation documents are byte-identical to `v0.22.0`. Enforcement ceiling unchanged.
 
-`Source-Meta-Commit:` `PENDING` (private build repo; merge `PENDING`) · public repo commit `PENDING` — the build-repo SHA and merge SHA are filled at merge, and the public repo commit after the subtree publish; the bundle registry entry's `source_commit` is stamped at the same moment.
+`Source-Meta-Commit:` `6736e6a` (private build repo; merge `e4bdd7c`) · public repo commit `4a0bcab`
 
 ---
 
